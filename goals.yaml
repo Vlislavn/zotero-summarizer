@@ -1,0 +1,177 @@
+research_goals:
+- Multiagent systems in clinical and scientific research
+- Agent autonomy, determinism, and glassboxing
+- Multimodal AI for clinics
+- Autonomous software development pipelines
+- Policy enforcement in AI systems
+- Agentic AI in bioinformatics
+triage_criteria:
+- Presence of robust evaluation protocol (external validation, ablation, confidence
+  intervals).
+- Relevance to multiagent systems, agent autonomy, multimodal AI, autonomous dev pipelines,
+  policy enforcement, or agentic AI in bioinformatics.
+- Clear methodology details (dataset provenance, preprocessing, model architecture,
+  training setup).
+- Access to an open-source dataset for agentic AI benchmark in scientific research/clinical
+  applications/bioinformatics.
+- 'Keywords: multiagent, autonomy, determinism, glassboxing, multimodal, clinical
+  AI, foundation model, policy enforcement, software development, bioinformatics.'
+relevance_scale:
+  1: Tangential topic, weak methods, and low practical utility for current goals.
+  2: Some overlap with goals but limited methodological rigor or novelty.
+  3: Moderately relevant, useful signals, but incomplete evidence for direct adoption.
+  4: Highly relevant with strong methods and likely impact on near-term research.
+  5: Critical relevance, excellent rigor, and immediate applicability to active priorities.
+reading_priority_scale:
+  must_read: "Score 5. Critical paper \u2014 read immediately and thoroughly."
+  should_read: "Score 4. Highly relevant \u2014 schedule focused reading session."
+  could_read: "Score 3. Useful reference \u2014 skim key sections when time allows."
+  dont_read: "Score 1-2. Low relevance \u2014 skip unless referenced elsewhere."
+summary_structure:
+- Executive Summary
+- Should I Deep Read This?
+- Key Sections to Read
+- Relevance to My Research
+- Controversial Points
+- Industry & Academy Impact
+- Unknown Unknowns
+- Implementation Quickstart
+- Key Findings
+- Methods
+- Limitations
+output_language: English
+llm:
+  draft_model: GPT-OSS-120B
+  refine_model: GPT-OSS-120B
+  api_base: ${OPENAI_API_BASE}
+  api_key_env: OPENAI_API_KEY
+prompts:
+  map: 'You are analyzing one chunk of an academic article.
+
+
+    Extract concise evidence for the following dimensions:
+
+    - Main claims and contributions
+
+    - Study design and methodology
+
+    - Quantitative results and metrics
+
+    - Limitations, caveats, and open questions
+
+    - Practical implementation details
+
+
+    Chunk:
+
+    {docs}
+
+
+    Return a concise chunk summary in bullet points.
+
+    '
+  reduce: 'You are consolidating chunk-level notes into one coherent academic summary.
+
+
+    Input notes:
+
+    {docs}
+
+
+    Produce a structured synthesis covering:
+
+    1) Executive Summary (what is this paper about, what is the main contribution)
+
+    2) Methods (how they did it)
+
+    3) Key Findings (what they found, with numbers)
+
+    4) Limitations (what is missing or weak)
+
+    5) Practical takeaways (what can be implemented)
+
+
+    Keep wording factual and avoid speculation.
+
+    '
+  refine: "You are a senior research analyst producing a practical research note.\n\
+    The note must be immediately useful months later \u2014 actionable insight.\n\n\
+    Output language: {output_language}\n\nArticle metadata:\n- Title: {title}\n- DOI:\
+    \ {doi}\n- Abstract: {abstract}\n\nFull paper text:\n{paper_text}\n\nMy current\
+    \ research goals:\n{research_goals}\n\nOutput strict JSON only with these keys:\n\
+    \n\"executive_summary\" (string): What is this article about? What is the main\
+    \ contribution? What adds value? Write 3-5 sentences that will make sense months\
+    \ later.\n\n\"should_deep_read\" (string): Should I read this paper deeply myself?\
+    \ Yes or No, and explain WHY in 2-3 sentences.\n\n\"key_sections_to_read\" (array\
+    \ of strings): If I should read it \u2014 which exact parts/sections do I need\
+    \ to focus on? Be specific (e.g. \"Section 3.2 \u2014 ablation study\", \"Table\
+    \ 4 \u2014 performance comparison\").\n\n\"relevance_to_research\" (string): How\
+    \ is this relevant to my research goals listed above? Be specific about connections\
+    \ to each relevant goal.\n\n\"controversial_points\" (string): What is controversial\
+    \ in this article? Why? What claims are debatable or insufficiently supported?\n\
+    \n\"industry_academy_impact\" (string): How can this article affect industry and\
+    \ academia? What are the practical implications?\n\n\"unknown_unknowns\" (string):\
+    \ What did I not consider that you can highlight from this article? Surprising\
+    \ findings, overlooked connections, or implications I might miss.\n\n\"implementation_quickstart\"\
+    \ (string): Quickstart guide for implementing the methods from this paper in my\
+    \ projects. Include key libraries, frameworks, steps, and gotchas.\n\n\"key_findings\"\
+    \ (array of strings): Top 3-7 findings with specific numbers/metrics where available.\n\
+    \n\"methods\" (string): Brief description of methodology.\n\n\"limitations\" (string):\
+    \ Key limitations and caveats.\n\nCRITICAL: Your ENTIRE response must be a single\
+    \ valid JSON object. No markdown, no explanation, no code fences. Start with {{\
+    \ and end with }}.\n"
+  triage: "You are assigning a relevance score and reading priority to an academic\
+    \ article.\nBe critical and conservative. Start from score=1 and only move up\
+    \ when evidence is explicit.\n\nOutput language: {output_language}\n\nResearch\
+    \ goals:\n{research_goals}\n\nTriage criteria:\n{triage_criteria}\n\nRelevance\
+    \ rubric:\n{relevance_scale}\n\nReading priority scale:\n{reading_priority_scale}\n\
+    \nArticle metadata:\n- Title: {title}\n- DOI: {doi}\n\nCorpus relevance context:\n\
+    {corpus_context}\n\nSummary:\n{summary}\n\nScoring anchors:\n- Score 1: Tangential/off-topic\
+    \ OR weak methodology with no direct fit to research goals.\n- Score 2: Partial\
+    \ overlap but mostly indirect relevance or weak evidence.\n- Score 3: Moderate\
+    \ relevance with useful signals but not a clear near-term priority.\n- Score 4:\
+    \ Strong direct relevance and solid methodology; likely valuable soon.\n- Score\
+    \ 5: Critical direct relevance, strong rigor, and immediate applicability.\n\n\
+    Goal-specific calibration examples:\n- Score 5 example: A paper on multiagent\
+    \ systems in clinical or scientific workflows with ablations, external validation,\
+    \ and a contribution you can directly reuse.\n- Score 4 example: A paper on agent\
+    \ autonomy, determinism, policy enforcement, or multimodal clinical AI with solid\
+    \ experiments and clear near-term relevance to one active goal.\n- Score 2 example:\
+    \ A paper that mentions agents, multimodal AI, or bioinformatics keywords but\
+    \ offers only indirect overlap or weak evaluation.\n- Score 1 example: A generic\
+    \ foundation-model paper with no clear connection to the listed goals or no rigorous\
+    \ evidence.\n\nDimension checkpoints:\n- goal_alignment: add evidence for direct\
+    \ goal match, centrality of the contribution, and immediate applicability; weak\
+    \ keyword overlap alone should stay at 1-2.\n- novelty_for_goals: reward genuinely\
+    \ new mechanisms, datasets, or findings for these goals; incremental applications\
+    \ stay low.\n- methodological_rigor: reward explicit datasets, baselines, ablations,\
+    \ external validation, and statistical detail.\n- actionability: reward concrete\
+    \ implementation details, reproducible steps, or benchmark artifacts you could\
+    \ use quickly.\n- evidence_strength: reward strong quantitative evidence, not\
+    \ aspirational claims.\n\nDisqualifiers (force score <= 2):\n- No concrete evaluation\
+    \ protocol or no meaningful quantitative evidence.\n- Keyword overlap only without\
+    \ direct contribution to listed research goals.\n- Method details too vague to\
+    \ assess rigor.\n\nTag quality guidance:\n- Good tags: agent-communication-protocol,\
+    \ clinical-multimodal-triage, policy-constrained-agents, ablation-study.\n- Bad\
+    \ tags: ai, multimodal, agents, evaluation.\n\nRequired process:\n1) ADVERSARIAL\
+    \ CHECK: explicitly list all reasons to reject the paper against the disqualifiers\
+    \ above.\n2) Use corpus context actively: strong similarity to engaged papers\
+    \ can support higher alignment/actionability; strong negative similarity should\
+    \ reduce score or confidence.\n3) Then score dimensions based only on explicit\
+    \ evidence.\n4) Use specific tags (topic/method/problem), not generic labels.\n\
+    \nOutput strict JSON with keys:\n\"score\" (integer 1-5): relevance score per\
+    \ rubric above.\n\"reading_priority\" (string): one of \"must_read\", \"should_read\"\
+    , \"could_read\", \"dont_read\".\n\"tags\" (array of strings): 3-7 topic tags\
+    \ for categorization.\n\"rationale\" (string): 2-4 sentence explanation of the\
+    \ score and reading priority. Include one sentence that references corpus context.\n\
+    \"dimensions\" (object):\n  - \"goal_alignment\" (integer 1-5)\n  - \"novelty_for_goals\"\
+    \ (integer 1-5)\n  - \"methodological_rigor\" (integer 1-5)\n  - \"actionability\"\
+    \ (integer 1-5)\n  - \"evidence_strength\" (integer 1-5)\n\"confidence\" (number\
+    \ 0-1): confidence in this triage decision.\n\nCRITICAL: Your ENTIRE response\
+    \ must be a single valid JSON object. No markdown, no explanation, no code fences.\
+    \ Start with {{ and end with }}.\n"
+corpus:
+  enabled: true
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+  similarity_threshold: -0.3
+  stale_days_for_weak_negative: 30

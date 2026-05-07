@@ -1,0 +1,2404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zotero Control Center</title>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<style>
+  [x-cloak] { display: none !important; }
+  :root {
+    --brand-ink: #0f172a;
+    --brand-sea: #0f766e;
+    --brand-amber: #b45309;
+    --brand-moss: #166534;
+    --brand-paper: #f8fafc;
+  }
+  body {
+    font-family: "Avenir Next", "Avenir", "Segoe UI", sans-serif;
+    background: radial-gradient(circle at 20% 20%, #dbeafe 0%, #f8fafc 45%, #e2e8f0 100%);
+    color: var(--brand-ink);
+  }
+  .glass {
+    background: rgba(255, 255, 255, 0.88);
+    backdrop-filter: blur(8px);
+  }
+  .table-row:hover {
+    background: rgba(15, 118, 110, 0.06);
+  }
+  .table-row {
+    transition: background 0.15s ease;
+  }
+  .mono {
+    font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  }
+  /* Slim scrollbars */
+  .slim-scroll::-webkit-scrollbar { width: 5px; }
+  .slim-scroll::-webkit-scrollbar-track { background: transparent; }
+  .slim-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+  .slim-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  /* PDF dot indicator */
+  .pdf-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .pdf-dot.has { background: #10b981; }
+  .pdf-dot.none { background: #e2e8f0; }
+  /* Loading spinner */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { width: 20px; height: 20px; border: 2px solid #e2e8f0; border-top-color: #0f766e; border-radius: 50%; animation: spin 0.6s linear infinite; display: inline-block; }
+  /* Change type badges */
+  .change-badge { font-size: 0.65rem; letter-spacing: 0.03em; padding: 2px 8px; border-radius: 9999px; font-weight: 600; text-transform: uppercase; }
+  .change-badge.tag { background: #dbeafe; color: #1e40af; }
+  .change-badge.note { background: #fef3c7; color: #92400e; }
+  .change-badge.collection { background: #d1fae5; color: #065f46; }
+  .change-badge.priority { background: #ede9fe; color: #5b21b6; }
+  .change-badge.default { background: #f1f5f9; color: #475569; }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+</style>
+</head>
+<body class="min-h-screen">
+<div x-data="zoteroUI()" x-init="initialize()" x-cloak class="max-w-7xl mx-auto px-4 py-6">
+  <div class="glass border border-slate-200 rounded-2xl shadow-lg p-4 mb-5">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h1 class="text-2xl font-bold text-slate-900">Zotero Control Center</h1>
+        <p class="text-sm text-slate-600">Library browse, triage run, change review, and preferences in one UI.</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 text-xs">
+        <span class="px-2 py-1 rounded-full" :class="statusClass(zoteroStatus.available)">
+          <span x-text="zoteroStatus.available ? 'Library connected' : 'Library unavailable'"></span>
+        </span>
+        <span class="px-2 py-1 rounded-full bg-slate-100 text-slate-600">
+          Pending: <strong class="text-slate-800" x-text="pendingCount"></strong>
+        </span>
+        <button @click="refreshAll()" class="px-3 py-1.5 rounded-lg bg-slate-900 text-white hover:bg-slate-700">Refresh</button>
+      </div>
+    </div>
+    <div class="mt-3 text-xs text-slate-600" x-show="zoteroStatus.stats">
+      Items: <span class="mono" x-text="zoteroStatus.stats?.total_items || 0"></span>
+      · Collections: <span class="mono" x-text="zoteroStatus.stats?.total_collections || 0"></span>
+      · Tags: <span class="mono" x-text="zoteroStatus.stats?.total_tags || 0"></span>
+      · PDFs: <span class="mono" x-text="zoteroStatus.stats?.items_with_pdf || 0"></span>
+    </div>
+    <div class="mt-2 text-xs text-red-600" x-show="zoteroStatus.error" x-text="zoteroStatus.error"></div>
+  </div>
+
+  <div class="flex flex-wrap gap-2 mb-4">
+    <template x-for="tab in tabs" :key="tab.key">
+      <button
+        @click="switchTab(tab.key)"
+        :class="activeTab === tab.key ? 'bg-teal-700 text-white' : 'bg-white text-slate-700 hover:bg-slate-100'"
+        class="px-4 py-2 rounded-xl border border-slate-200 text-sm font-semibold transition-colors"
+      >
+        <span x-text="tab.label"></span>
+      </button>
+    </template>
+  </div>
+
+  <div x-show="activeTab === 'library'" class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+    <div class="glass rounded-2xl border border-slate-200 p-3 lg:col-span-1">
+      <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Collections</h2>
+      <div class="max-h-72 overflow-auto pr-1 slim-scroll">
+        <button
+          @click="selectedCollection = ''; currentOffset = 0; fetchItems()"
+          :class="selectedCollection === '' ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'"
+          class="w-full text-left text-xs px-2 py-1 rounded mb-1"
+        >All items</button>
+        <template x-for="entry in flatCollections" :key="entry.key">
+          <button
+            @click="selectedCollection = entry.key; currentOffset = 0; fetchItems()"
+            :class="selectedCollection === entry.key ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'"
+            class="w-full text-left text-xs px-2 py-1 rounded mb-1"
+            :style="'padding-left:' + (8 + entry.depth * 14) + 'px'"
+          >
+            <span x-text="entry.name"></span>
+            <span class="mono opacity-70" x-text="' (' + entry.item_count + ')' "></span>
+          </button>
+        </template>
+      </div>
+
+      <h2 class="text-xs font-bold uppercase tracking-wider text-slate-500 mt-4 mb-2">Top Tags</h2>
+      <div class="max-h-64 overflow-auto pr-1 slim-scroll">
+        <button
+          @click="selectedTag = ''; currentOffset = 0; fetchItems()"
+          :class="selectedTag === '' ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-800 hover:bg-amber-100'"
+          class="w-full text-left text-xs px-2 py-1 rounded mb-1"
+        >All tags</button>
+        <template x-for="tagEntry in tags.slice(0, 100)" :key="tagEntry.tag">
+          <button
+            @click="selectedTag = tagEntry.tag; currentOffset = 0; fetchItems()"
+            :class="selectedTag === tagEntry.tag ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-800 hover:bg-amber-100'"
+            class="w-full text-left text-xs px-2 py-1 rounded mb-1"
+          >
+            <span x-text="tagEntry.tag"></span>
+            <span class="mono opacity-70" x-text="' (' + tagEntry.item_count + ')' "></span>
+          </button>
+        </template>
+      </div>
+    </div>
+
+    <div class="glass rounded-2xl border border-slate-200 p-3 lg:col-span-3">
+      <div class="flex flex-wrap gap-2 items-center mb-3">
+        <input
+          x-model="searchQuery"
+          @keyup.enter="currentOffset = 0; fetchItems()"
+          type="text"
+          placeholder="Search title, abstract, tags"
+          class="flex-1 min-w-0 px-3 py-2 rounded-lg border border-slate-300 text-sm"
+        >
+        <button @click="currentOffset = 0; fetchItems()" data-testid="library-search-button" class="px-3 py-2 rounded-lg bg-slate-900 text-white text-sm">Search</button>
+        <button @click="clearLibraryFilters()" class="px-3 py-2 rounded-lg bg-slate-200 text-slate-700 text-sm">Clear</button>
+      </div>
+
+      <div x-show="selectedItems.size === 0" class="mb-3 rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-900">
+        <span class="font-semibold">Triage workflow:</span>
+        <span>1) select papers with checkboxes, 2) click Run triage, 3) review queued changes in Pending, 4) apply approved changes to Zotero.</span>
+      </div>
+
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-2 text-sm">
+        <div>
+          <strong x-text="selectedItems.size"></strong> selected
+          <span class="text-slate-500">of <span x-text="items.length"></span> shown</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button @click="toggleSelectPage(true)" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200">Select page</button>
+          <button @click="toggleSelectPage(false)" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200">Clear page</button>
+          <button @click="startTriage()" :disabled="selectedItems.size === 0 || hasRunningJob()" data-testid="run-triage-button" class="px-3 py-1.5 rounded bg-teal-700 text-white hover:bg-teal-800 disabled:bg-slate-300 disabled:text-slate-500">Run triage</button>
+        </div>
+      </div>
+
+      <div x-show="selectedItems.size === 0" class="mb-2 text-xs text-amber-700">
+        Select at least one paper to enable Run triage.
+      </div>
+      <div x-show="hasRunningJob()" class="mb-2 text-xs text-amber-700">
+        Another triage job is running. Cancel it first before starting a new one.
+      </div>
+
+      <div class="overflow-auto border border-slate-200 rounded-xl">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 sticky top-0">
+            <tr>
+              <th class="px-2 py-2 text-left w-10"><input type="checkbox" data-testid="select-page-checkbox" @change="toggleSelectPage($event.target.checked)" :checked="isPageFullySelected()"></th>
+              <th class="px-2 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Title</th>
+              <th class="px-2 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Authors</th>
+              <th class="px-2 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Date</th>
+              <th class="px-2 py-2 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Priority</th>
+              <th class="px-2 py-2 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider w-12">PDF</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="item in items" :key="item.item_key">
+              <tr class="border-t border-slate-100 table-row">
+                <td class="px-2 py-1.5"><input type="checkbox" data-testid="item-select-checkbox" :checked="selectedItems.has(item.item_key)" @change="toggleSelectItem(item.item_key)"></td>
+                <td class="px-2 py-1.5">
+                  <button @click="openItem(item.item_key)" data-testid="open-item-button" class="text-left hover:underline text-teal-800 font-medium text-sm" x-text="item.title"></button>
+                  <div class="flex flex-wrap gap-1 mt-0.5">
+                    <template x-for="tag in item.tags.slice(0, 3)" :key="tag">
+                      <span class="inline-block px-1.5 py-0 bg-slate-100 text-slate-500 rounded text-xs" x-text="tag"></span>
+                    </template>
+                  </div>
+                </td>
+                <td class="px-2 py-1.5 text-xs text-slate-600 max-w-xs truncate" :title="item.authors || ''" x-text="truncateAuthors(item.authors)"></td>
+                <td class="px-2 py-1.5 text-xs text-slate-500" x-text="formatShortDate(item.publication_date)"></td>
+                <td class="px-2 py-1.5 text-xs">
+                  <span class="px-2 py-0.5 rounded-full font-medium" :class="priorityBadge(item.reading_priority)" x-text="priorityLabel(item.reading_priority)"></span>
+                </td>
+                <td class="px-2 py-1.5 text-center"><span class="pdf-dot" :class="item.has_pdf ? 'has' : 'none'" :title="item.has_pdf ? 'PDF attached' : 'No PDF'"></span></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="flex items-center justify-between mt-3 text-sm">
+        <div class="text-slate-500">
+          Showing <span class="mono font-medium text-slate-700" x-text="items.length"></span> of <span class="mono font-medium text-slate-700" x-text="itemsTotal"></span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button @click="prevPage()" :disabled="currentOffset === 0" class="px-3 py-1 rounded bg-slate-100 disabled:opacity-40">Prev</button>
+          <button @click="nextPage()" :disabled="currentOffset + pageLimit >= itemsTotal" class="px-3 py-1 rounded bg-slate-100 disabled:opacity-40">Next</button>
+        </div>
+      </div>
+
+      <div x-show="activeItemDetail" id="active-item-panel" class="mt-4 border border-slate-200 rounded-xl p-3 bg-white">
+        <div class="flex items-start justify-between gap-2">
+          <h3 class="text-lg font-semibold" x-text="activeItemDetail?.title"></h3>
+          <div class="flex items-center gap-2">
+            <button
+              @click="startItemTriage()"
+              :disabled="itemTriageJobId !== '' || !(activeItemDetail?.has_pdf) || hasRunningJob()"
+              class="px-3 py-1.5 rounded bg-teal-700 text-white text-sm hover:bg-teal-800 disabled:bg-slate-300 disabled:text-slate-500"
+            >
+              <span x-text="itemTriageJobId ? 'Triage running...' : 'Triage this article'"></span>
+            </button>
+            <button @click="closeItem()" class="text-slate-500 hover:text-slate-800">Close</button>
+          </div>
+        </div>
+
+        <div x-show="itemActionMessage" class="mt-2 text-xs" :class="itemActionIsError ? 'text-red-700' : 'text-emerald-700'" x-text="itemActionMessage"></div>
+
+        <div x-show="itemTriageJob" class="mt-3 p-3 rounded-lg border border-slate-200 bg-slate-50">
+          <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div>
+              Inline job <span class="mono" x-text="itemTriageJob?.job_id"></span>
+              · Status: <strong x-text="itemTriageJob?.status"></strong>
+            </div>
+            <div class="flex items-center gap-2">
+              <span>
+                <span x-text="itemTriageJob?.completed || 0"></span>/<span x-text="itemTriageJob?.total || 0"></span>
+              </span>
+              <button
+                x-show="itemTriageJob?.status === 'running'"
+                @click="cancelJob(itemTriageJob?.job_id)"
+                :disabled="jobCancelingId === itemTriageJob?.job_id"
+                class="px-2 py-1 rounded bg-rose-600 text-white disabled:opacity-50"
+              >
+                <span x-text="jobCancelingId === itemTriageJob?.job_id ? 'Cancelling...' : 'Cancel'"></span>
+              </button>
+            </div>
+          </div>
+          <div class="w-full bg-slate-200 rounded-full h-2 mt-2 overflow-hidden">
+            <div class="h-2 bg-teal-600" :style="'width:' + progressPercent(itemTriageJob) + '%' "></div>
+          </div>
+          <div class="text-xs text-slate-500 mt-1" x-text="itemTriageJob?.current_title || itemTriageJob?.current_item_key || ''"></div>
+        </div>
+
+        <div class="grid md:grid-cols-5 gap-4 mt-3">
+          <div class="md:col-span-3 space-y-3">
+            <div class="rounded border border-slate-200 bg-slate-50 p-3">
+              <p class="text-sm text-slate-700" x-text="activeItemDetail?.abstract || 'No abstract'"></p>
+              <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <span class="px-2 py-0.5 rounded-full" :class="priorityBadge(activeItemDetail?.reading_priority)" x-text="'Current: ' + priorityLabel(activeItemDetail?.reading_priority)"></span>
+                <span x-show="!(activeItemDetail?.has_pdf)" class="text-red-600">No local PDF attached. Triage requires a PDF.</span>
+              </div>
+            </div>
+
+            <div class="border border-slate-200 rounded-xl p-3 bg-slate-50">
+              <div class="flex items-center justify-between gap-2">
+                <div class="font-semibold text-slate-700">Triage Results</div>
+                <button @click="fetchItemTriageResult(activeItemDetail?.item_key)" class="text-xs px-2 py-1 rounded bg-slate-200 hover:bg-slate-300">Refresh</button>
+              </div>
+
+              <div x-show="itemTriageLoading" class="text-xs text-slate-500 mt-2">Loading triage result...</div>
+              <div x-show="itemTriageError" class="text-xs text-red-600 mt-2" x-text="itemTriageError"></div>
+              <div x-show="!itemTriageLoading && !itemTriageError && !itemTriageResult" class="text-xs text-slate-500 mt-2">
+                No triage result yet. Run triage for this item to see score breakdown and corpus influence.
+              </div>
+
+              <div x-show="itemTriageResult" class="mt-3 space-y-3">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="text-2xl font-bold mono" x-text="Number(itemTriageResult?.composite_score || 0).toFixed(2)"></span>
+                  <span class="px-2 py-0.5 rounded-full text-sm" :class="priorityBadge(itemTriageResult?.reading_priority)" x-text="priorityLabel(itemTriageResult?.reading_priority)"></span>
+                  <span x-show="itemTriageResult?.triage_confidence !== null" class="text-xs text-slate-600" x-text="'Confidence: ' + Math.round((itemTriageResult?.triage_confidence || 0) * 100) + '%'"></span>
+                </div>
+
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    @click.stop.prevent="submitResultFeedback(activeItemDetail?.item_key, 'approve', activeItemDetail?.title)"
+                    :disabled="feedbackSubmitting[activeItemDetail?.item_key]"
+                    class="px-3 py-1.5 rounded text-xs border"
+                    :class="feedbackButtonClass(activeItemDetail?.item_key, 'approve')"
+                  >
+                    <span x-text="feedbackSubmitting[activeItemDetail?.item_key] ? 'Saving...' : 'Approve'"></span>
+                  </button>
+                  <button
+                    type="button"
+                    @click.stop.prevent="submitResultFeedback(activeItemDetail?.item_key, 'reject', activeItemDetail?.title)"
+                    :disabled="feedbackSubmitting[activeItemDetail?.item_key]"
+                    class="px-3 py-1.5 rounded text-xs border"
+                    :class="feedbackButtonClass(activeItemDetail?.item_key, 'reject')"
+                  >
+                    <span x-text="feedbackSubmitting[activeItemDetail?.item_key] ? 'Saving...' : 'Reject'"></span>
+                  </button>
+                  <span
+                    x-show="feedbackState[activeItemDetail?.item_key]"
+                    class="text-xs"
+                    :class="feedbackState[activeItemDetail?.item_key] === 'approve' ? 'text-emerald-700' : 'text-rose-700'"
+                    x-text="feedbackState[activeItemDetail?.item_key] === 'approve' ? 'Approved by you' : 'Rejected by you'"
+                  ></span>
+                </div>
+
+                <div>
+                  <div class="text-xs font-semibold text-slate-700 mb-1">Dimension breakdown (editable 1-5)</div>
+                  <div class="space-y-2">
+                    <template x-for="dimension in triageDimensionRows(itemTriageResult)" :key="dimension.key">
+                      <div class="text-xs">
+                        <div class="flex items-center justify-between gap-2">
+                          <span x-text="dimension.label"></span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="5"
+                            step="1"
+                            :value="dimensionDraftValue(dimension.key, dimension.value)"
+                            @input="updateDimensionDraft(dimension.key, $event.target.value)"
+                            class="w-16 px-2 py-0.5 border border-slate-300 rounded text-right"
+                          >
+                        </div>
+                        <div class="w-full bg-slate-200 rounded-full h-2 mt-1 overflow-hidden">
+                          <div class="h-2 bg-cyan-600" :style="'width:' + Math.round((dimensionDraftValue(dimension.key, dimension.value) / 5) * 100) + '%' "></div>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                  <button
+                    type="button"
+                    @click="applyDimensionOverrides()"
+                    :disabled="itemWriteBusy || !hasDimensionDraftChanges()"
+                    class="mt-2 px-3 py-1.5 rounded bg-slate-900 text-white text-xs hover:bg-slate-700 disabled:bg-slate-300 disabled:text-slate-500"
+                  >
+                    <span x-text="itemWriteBusy ? 'Saving...' : 'Override & Recalculate'"></span>
+                  </button>
+                </div>
+
+                <div class="grid md:grid-cols-2 gap-3 text-xs">
+                  <div class="p-2 rounded border border-slate-200 bg-white">
+                    <div class="font-semibold text-slate-700 mb-1">Corpus influence</div>
+                    <div>Affinity: <span class="mono" x-text="itemTriageResult?.corpus_affinity_score === null ? 'n/a' : Number(itemTriageResult?.corpus_affinity_score).toFixed(3)"></span></div>
+                    <div>Positive similarity: <span class="mono" x-text="itemTriageResult?.corpus_positive_similarity === null ? 'n/a' : Number(itemTriageResult?.corpus_positive_similarity).toFixed(3)"></span></div>
+                    <div>Negative similarity: <span class="mono" x-text="itemTriageResult?.corpus_negative_similarity === null ? 'n/a' : Number(itemTriageResult?.corpus_negative_similarity).toFixed(3)"></span></div>
+                  </div>
+                  <div class="p-2 rounded border border-slate-200 bg-white">
+                    <div class="font-semibold text-slate-700 mb-1">Goal match</div>
+                    <div class="break-words" x-text="itemTriageResult?.matched_goal || 'n/a'"></div>
+                    <div class="mt-1">Goal similarity: <span class="mono" x-text="itemTriageResult?.matched_goal_similarity === null ? 'n/a' : Number(itemTriageResult?.matched_goal_similarity).toFixed(3)"></span></div>
+                  </div>
+                </div>
+
+                <div>
+                  <div class="text-xs font-semibold text-slate-700">Triage rationale</div>
+                  <p class="text-sm text-slate-700 mt-1" x-text="itemTriageResult?.triage_rationale || 'No rationale available.'"></p>
+                </div>
+
+                <details open class="rounded border border-slate-200 bg-white p-2">
+                  <summary class="cursor-pointer text-xs font-semibold text-slate-700">Executive Summary</summary>
+                  <p class="text-sm text-slate-700 mt-2" x-text="itemTriageResult?.executive_summary || 'No executive summary.'"></p>
+                </details>
+
+                <details class="rounded border border-slate-200 bg-white p-2">
+                  <summary class="cursor-pointer text-xs font-semibold text-slate-700">Should I Deep Read?</summary>
+                  <p class="text-sm text-slate-700 mt-2" x-text="itemTriageResult?.should_deep_read || 'n/a'"></p>
+                </details>
+
+                <details class="rounded border border-slate-200 bg-white p-2">
+                  <summary class="cursor-pointer text-xs font-semibold text-slate-700">Key Sections to Read</summary>
+                  <ul class="list-disc pl-5 mt-2 text-sm text-slate-700">
+                    <template x-for="section in (itemTriageResult?.key_sections_to_read || [])" :key="section">
+                      <li x-text="section"></li>
+                    </template>
+                  </ul>
+                  <div x-show="!(itemTriageResult?.key_sections_to_read || []).length" class="text-xs text-slate-500 mt-2">No sections listed.</div>
+                </details>
+
+                <details class="rounded border border-slate-200 bg-white p-2">
+                  <summary class="cursor-pointer text-xs font-semibold text-slate-700">Key Findings</summary>
+                  <ul class="list-disc pl-5 mt-2 text-sm text-slate-700">
+                    <template x-for="finding in (itemTriageResult?.key_findings || [])" :key="finding">
+                      <li x-text="finding"></li>
+                    </template>
+                  </ul>
+                  <div x-show="!(itemTriageResult?.key_findings || []).length" class="text-xs text-slate-500 mt-2">No findings listed.</div>
+                </details>
+
+                <details class="rounded border border-slate-200 bg-white p-2">
+                  <summary class="cursor-pointer text-xs font-semibold text-slate-700">Methods & Limitations</summary>
+                  <div class="mt-2 text-sm text-slate-700">
+                    <div class="font-semibold text-xs text-slate-600">Methods</div>
+                    <p x-text="itemTriageResult?.methods || 'n/a'"></p>
+                    <div class="font-semibold text-xs text-slate-600 mt-2">Limitations</div>
+                    <p x-text="itemTriageResult?.limitations || 'n/a'"></p>
+                  </div>
+                </details>
+
+                <details class="rounded border border-slate-200 bg-white p-2">
+                  <summary class="cursor-pointer text-xs font-semibold text-slate-700">Implementation & Open Questions</summary>
+                  <div class="mt-2 text-sm text-slate-700 space-y-2">
+                    <div>
+                      <div class="font-semibold text-xs text-slate-600">Implementation quickstart</div>
+                      <p x-text="itemTriageResult?.implementation_quickstart || 'n/a'"></p>
+                    </div>
+                    <div>
+                      <div class="font-semibold text-xs text-slate-600">Relevance to research</div>
+                      <p x-text="itemTriageResult?.relevance_to_research || 'n/a'"></p>
+                    </div>
+                    <div>
+                      <div class="font-semibold text-xs text-slate-600">Controversial points</div>
+                      <p x-text="itemTriageResult?.controversial_points || 'n/a'"></p>
+                    </div>
+                    <div>
+                      <div class="font-semibold text-xs text-slate-600">Unknown unknowns</div>
+                      <p x-text="itemTriageResult?.unknown_unknowns || 'n/a'"></p>
+                    </div>
+                  </div>
+                </details>
+
+                <div class="grid md:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <div class="font-semibold text-slate-700">Top similar items</div>
+                    <ul class="list-disc pl-5 mt-1 space-y-0.5">
+                      <template x-for="title in (itemTriageResult?.top_similar_items || [])" :key="title">
+                        <li x-text="title"></li>
+                      </template>
+                    </ul>
+                    <div x-show="!(itemTriageResult?.top_similar_items || []).length" class="text-slate-500 mt-1">No similar items recorded.</div>
+                  </div>
+                  <div>
+                    <div class="font-semibold text-slate-700">Suggested collections</div>
+                    <ul class="list-disc pl-5 mt-1 space-y-0.5">
+                      <template x-for="collection in (itemTriageResult?.suggested_collections || [])" :key="collection">
+                        <li x-text="collection"></li>
+                      </template>
+                    </ul>
+                    <div x-show="!(itemTriageResult?.suggested_collections || []).length" class="text-slate-500 mt-1">No collection suggestions.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="md:col-span-2 space-y-3">
+            <div class="rounded border border-slate-200 bg-white p-2 text-xs text-slate-600">
+              Item key:
+              <span class="mono text-slate-800" x-text="activeItemDetail?.item_key || 'n/a'"></span>
+            </div>
+
+            <div class="rounded border border-slate-200 bg-slate-50 p-3">
+              <label class="text-xs text-slate-600">Set reading priority</label>
+              <select x-model="itemOverridePriority" class="block mt-1 w-full px-2 py-1.5 border border-slate-300 rounded text-sm">
+                <option value="must_read">must_read</option>
+                <option value="should_read">should_read</option>
+                <option value="could_read">could_read</option>
+                <option value="dont_read">dont_read</option>
+              </select>
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  @click="setItemPriorityNow()"
+                  :disabled="itemWriteBusy"
+                  class="px-3 py-1.5 rounded bg-teal-700 text-white text-xs hover:bg-teal-800 disabled:bg-slate-300 disabled:text-slate-500"
+                >
+                  <span x-text="itemWriteBusy ? 'Saving...' : 'Set now'"></span>
+                </button>
+                <button @click="queuePriorityOverride()" :disabled="itemWriteBusy" class="px-3 py-1.5 rounded bg-slate-900 text-white text-xs hover:bg-slate-700 disabled:bg-slate-300 disabled:text-slate-500">Queue for review</button>
+              </div>
+              <div class="text-[11px] text-slate-500 mt-1">Set now applies immediately. Queue for review routes to Pending.</div>
+            </div>
+
+            <div class="rounded border border-slate-200 bg-slate-50 p-3">
+              <div class="font-semibold text-slate-700 text-xs">Collections</div>
+              <div class="space-y-1 mt-2">
+                <template x-for="collection in (activeItemDetail?.collections || [])" :key="collection.key + ':' + (collection.path || collection.name)">
+                  <div class="flex items-center justify-between gap-2 rounded border border-slate-200 bg-white px-2 py-1">
+                    <span class="text-xs text-slate-700 break-words" x-text="collection.path || collection.name"></span>
+                    <button
+                      type="button"
+                      @click="removeCollectionFromItem(collection)"
+                      :disabled="itemWriteBusy"
+                      class="text-[11px] px-2 py-0.5 rounded bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:bg-slate-200 disabled:text-slate-500"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </template>
+                <div x-show="!(activeItemDetail?.collections || []).length" class="text-xs text-slate-500">(no collections)</div>
+              </div>
+              <div class="mt-2 flex items-center gap-2">
+                <select x-model="itemCollectionDraftKey" class="flex-1 min-w-0 px-2 py-1.5 border border-slate-300 rounded text-xs">
+                  <option value="">Select collection</option>
+                  <template x-for="entry in flatCollections" :key="entry.key">
+                    <option :value="entry.key" x-text="collectionOptionLabel(entry)"></option>
+                  </template>
+                </select>
+                <button
+                  @click="addCollectionToItem()"
+                  :disabled="itemWriteBusy || !itemCollectionDraftKey"
+                  class="px-2 py-1.5 rounded bg-slate-900 text-white text-xs hover:bg-slate-700 disabled:bg-slate-300 disabled:text-slate-500"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+
+            <div class="rounded border border-slate-200 bg-slate-50 p-3">
+              <div class="font-semibold text-slate-700 text-xs">Corpus profile for this item</div>
+              <div x-show="itemCorpusMeta" class="mt-2 text-xs text-slate-700 space-y-1">
+                <div>Engagement weight: <span class="mono" x-text="Number(itemCorpusMeta?.engagement_weight || 0).toFixed(2)"></span></div>
+                <div class="flex flex-wrap gap-1">
+                  <span x-show="itemCorpusMeta?.signals?.explicit_approve" class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">approved</span>
+                  <span x-show="itemCorpusMeta?.signals?.explicit_reject" class="px-2 py-0.5 rounded bg-rose-100 text-rose-800">rejected</span>
+                  <span x-show="itemCorpusMeta?.signals?.brain" class="px-2 py-0.5 rounded bg-cyan-100 text-cyan-800">brain</span>
+                  <span x-show="itemCorpusMeta?.signals?.eyes" class="px-2 py-0.5 rounded bg-blue-100 text-blue-800">eyes</span>
+                  <span x-show="itemCorpusMeta?.signals?.thumbs_down" class="px-2 py-0.5 rounded bg-rose-100 text-rose-800">thumbs down</span>
+                  <span x-show="itemCorpusMeta?.signals?.stale_weak_negative" class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">stale weak negative</span>
+                </div>
+                <div>Annotations: <span class="mono" x-text="itemCorpusMeta?.signals?.annotations ?? 0"></span></div>
+                <div>Manual notes: <span class="mono" x-text="itemCorpusMeta?.signals?.manual_notes ?? 0"></span></div>
+              </div>
+              <div x-show="!itemCorpusMeta" class="mt-2 text-xs text-slate-500">No corpus metadata for this item yet.</div>
+            </div>
+
+            <div class="rounded border border-slate-200 bg-slate-50 p-3">
+              <div class="font-semibold text-slate-700 text-xs">Tags</div>
+              <div class="flex flex-wrap gap-1 mt-2">
+                <template x-for="tag in (activeItemDetail?.tags || [])" :key="tag">
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-xs">
+                    <span x-text="tag"></span>
+                    <button
+                      @click="removeTagFromItem(tag)"
+                      :disabled="itemWriteBusy"
+                      class="text-slate-500 hover:text-rose-700 disabled:text-slate-400"
+                      title="Remove tag"
+                    >
+                      x
+                    </button>
+                  </span>
+                </template>
+              </div>
+              <div x-show="!(activeItemDetail?.tags || []).length" class="text-xs text-slate-500 mt-1">(no tags)</div>
+              <div class="mt-2 flex items-center gap-2">
+                <input
+                  x-model="itemTagDraft"
+                  @keyup.enter="addTagToItem()"
+                  type="text"
+                  placeholder="Add tag"
+                  class="flex-1 min-w-0 px-2 py-1.5 border border-slate-300 rounded text-xs"
+                >
+                <button
+                  @click="addTagToItem()"
+                  :disabled="itemWriteBusy || !itemTagDraft.trim()"
+                  class="px-2 py-1.5 rounded bg-slate-900 text-white text-xs hover:bg-slate-700 disabled:bg-slate-300 disabled:text-slate-500"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+
+            <div class="rounded border border-slate-200 bg-slate-50 p-3">
+              <div class="font-semibold text-slate-700 text-xs">Notes</div>
+              <template x-for="note in (activeItemDetail?.notes || [])" :key="note.note_key">
+                <div class="mt-2 p-2 rounded border border-slate-200 bg-white text-xs">
+                  <div class="mono text-slate-500" x-text="note.note_key"></div>
+                  <div class="text-slate-700" x-text="stripHtml(note.note).slice(0, 300) || '(empty note)'"></div>
+                </div>
+              </template>
+              <div x-show="(activeItemDetail?.notes || []).length === 0" class="text-xs text-slate-500 mt-1">No child notes.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div x-show="activeTab === 'triage'" class="glass rounded-2xl border border-slate-200 p-4">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <h2 class="text-lg font-bold">Triage Monitor</h2>
+        <p class="text-sm text-slate-600">Run selected papers through the pipeline and track progress live.</p>
+      </div>
+      <div class="rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-700">
+        <div><span class="font-semibold mono" x-text="selectedItems.size"></span> selected in Library</div>
+        <div class="text-slate-500">Start triage from the Library tab after selecting papers.</div>
+      </div>
+    </div>
+
+    <div x-show="activeJob" class="mt-4 border border-slate-200 rounded-xl p-3 bg-white">
+      <div class="flex flex-wrap items-center justify-between gap-2 text-sm">
+        <div>
+          Job <span class="mono" x-text="activeJob?.job_id"></span>
+          · Status: <strong x-text="activeJob?.status"></strong>
+        </div>
+        <div class="flex items-center gap-2">
+          <span>
+            <span x-text="activeJob?.completed || 0"></span>/<span x-text="activeJob?.total || 0"></span>
+          </span>
+          <button
+            x-show="activeJob?.status === 'running'"
+            @click="cancelJob(activeJob?.job_id)"
+            :disabled="jobCancelingId === activeJob?.job_id"
+            class="px-2 py-1 rounded bg-rose-600 text-white disabled:opacity-50"
+          >
+            <span x-text="jobCancelingId === activeJob?.job_id ? 'Cancelling...' : 'Cancel'"></span>
+          </button>
+        </div>
+      </div>
+      <div class="w-full bg-slate-200 rounded-full h-3 mt-2 overflow-hidden">
+        <div class="h-3 bg-teal-600" :style="'width:' + progressPercent(activeJob) + '%' "></div>
+      </div>
+      <div class="text-xs text-slate-500 mt-1" x-text="activeJob?.current_title || activeJob?.current_item_key || ''"></div>
+      <div x-show="triageActionMessage" class="mt-2 text-xs" :class="triageActionIsError ? 'text-red-700' : 'text-emerald-700'" x-text="triageActionMessage"></div>
+
+      <div class="grid md:grid-cols-2 gap-3 mt-4">
+        <div>
+          <h3 class="font-semibold text-slate-700 mb-2">Completed Results</h3>
+          <div class="max-h-72 overflow-auto space-y-2">
+            <template x-for="result in (activeJob?.results || [])" :key="result.item_key">
+              <div class="p-2 border border-slate-200 rounded bg-slate-50 text-sm">
+                <div class="font-medium" x-text="result.title"></div>
+                <div class="text-xs text-slate-600">
+                  Score: <span class="mono" x-text="Number(result.composite_relevance_score || 0).toFixed(2)"></span>
+                  · Priority: <span x-text="result.reading_priority"></span>
+                  · Queued: <span x-text="result.queued_change_count || 0"></span>
+                </div>
+                <div class="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    @click.stop.prevent="submitResultFeedback(result.item_key, 'approve', result.title)"
+                    :disabled="feedbackSubmitting[result.item_key]"
+                    class="px-3 py-1.5 rounded text-xs border"
+                    :class="feedbackButtonClass(result.item_key, 'approve')"
+                  >
+                    <span x-text="feedbackSubmitting[result.item_key] ? 'Saving...' : 'Approve'"></span>
+                  </button>
+                  <button
+                    type="button"
+                    @click.stop.prevent="submitResultFeedback(result.item_key, 'reject', result.title)"
+                    :disabled="feedbackSubmitting[result.item_key]"
+                    class="px-3 py-1.5 rounded text-xs border"
+                    :class="feedbackButtonClass(result.item_key, 'reject')"
+                  >
+                    <span x-text="feedbackSubmitting[result.item_key] ? 'Saving...' : 'Reject'"></span>
+                  </button>
+                  <span
+                    x-show="feedbackState[result.item_key]"
+                    class="text-xs"
+                    :class="feedbackState[result.item_key] === 'approve' ? 'text-emerald-700' : 'text-rose-700'"
+                    x-text="feedbackState[result.item_key] === 'approve' ? 'Approved by you' : 'Rejected by you'"
+                  ></span>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+        <div>
+          <h3 class="font-semibold text-slate-700 mb-2">Errors</h3>
+          <div class="max-h-72 overflow-auto space-y-2">
+            <template x-for="error in (activeJob?.errors || [])" :key="error.item_key + error.error">
+              <div class="p-2 border border-red-200 rounded bg-red-50 text-sm">
+                <div class="font-medium" x-text="error.item_key"></div>
+                <div class="text-xs text-red-700" x-text="error.error"></div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-4">
+      <h3 class="font-semibold text-slate-700 mb-2">Recent Jobs</h3>
+      <div class="space-y-2">
+        <template x-for="job in jobs" :key="job.job_id">
+          <button @click="openJob(job.job_id)" class="w-full text-left p-2 rounded border border-slate-200 bg-white hover:bg-slate-50 text-sm">
+            <div class="flex items-center justify-between gap-2">
+              <span class="mono" x-text="job.job_id"></span>
+              <span x-text="job.status"></span>
+            </div>
+            <div class="text-xs text-slate-600" x-text="(job.completed || 0) + '/' + (job.total || 0)"></div>
+          </button>
+        </template>
+      </div>
+    </div>
+
+    <div class="mt-4 border border-slate-200 rounded-xl p-3 bg-white">
+      <div class="flex items-center justify-between gap-2">
+        <h3 class="font-semibold text-slate-700">Calibration</h3>
+        <button @click="fetchCalibrationMetrics()" class="text-xs px-2 py-1 rounded bg-slate-100 hover:bg-slate-200">Refresh</button>
+      </div>
+      <div x-show="calibrationLoading" class="text-xs text-slate-500 mt-2">Loading calibration metrics...</div>
+      <div x-show="!calibrationLoading && !calibrationMetrics" class="text-xs text-slate-500 mt-2">
+        No calibration data yet. Approve/reject triaged items to start learning.
+      </div>
+      <div x-show="!calibrationLoading && calibrationMetrics" class="mt-3 grid md:grid-cols-3 gap-3 text-xs">
+        <template x-for="periodKey in ['last_7d', 'last_30d', 'all_time']" :key="periodKey">
+          <div class="border border-slate-200 rounded-lg p-2 bg-slate-50">
+            <div class="font-semibold text-slate-700" x-text="periodKey === 'last_7d' ? 'Last 7 days' : (periodKey === 'last_30d' ? 'Last 30 days' : 'All time')"></div>
+            <div class="mt-1">Feedback: <span class="mono" x-text="calibrationMetrics?.periods?.[periodKey]?.total_feedback ?? 0"></span></div>
+            <div>Approved: <span class="mono" x-text="calibrationMetrics?.periods?.[periodKey]?.approved_count ?? 0"></span></div>
+            <div>Rejected: <span class="mono" x-text="calibrationMetrics?.periods?.[periodKey]?.rejected_count ?? 0"></span></div>
+            <div>Agreement: <span class="mono" x-text="formatPercent(calibrationMetrics?.periods?.[periodKey]?.agreement_rate)"></span></div>
+            <div>Precision: <span class="mono" x-text="formatPercent(calibrationMetrics?.periods?.[periodKey]?.precision)"></span></div>
+            <div>Recall: <span class="mono" x-text="formatPercent(calibrationMetrics?.periods?.[periodKey]?.recall)"></span></div>
+            <div>False positive: <span class="mono" x-text="calibrationMetrics?.periods?.[periodKey]?.false_positive_count ?? 0"></span></div>
+            <div>False negative: <span class="mono" x-text="calibrationMetrics?.periods?.[periodKey]?.false_negative_count ?? 0"></span></div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <div x-show="activeTab === 'pending'" class="glass rounded-2xl border border-slate-200 p-4">
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+      <div>
+        <h2 class="text-lg font-bold">Pending Changes</h2>
+        <p class="text-xs text-slate-500">Review, edit, and apply queued updates to Zotero.</p>
+      </div>
+      <div class="flex items-center gap-2 text-sm">
+        <button @click="selectAllPending(true)" class="px-2 py-1 rounded bg-slate-100">Select all</button>
+        <button @click="selectAllPending(false)" class="px-2 py-1 rounded bg-slate-100">Clear</button>
+        <button @click="applyPending()" :disabled="pendingSelected.size === 0 || pendingStatus !== 'pending'" class="px-3 py-1.5 rounded bg-green-700 text-white hover:bg-green-800 disabled:bg-slate-300 disabled:text-slate-500">Apply selected</button>
+        <button @click="rejectPending()" :disabled="pendingSelected.size === 0 || pendingStatus !== 'pending'" class="px-3 py-1.5 rounded bg-amber-600 text-white hover:bg-amber-700 disabled:bg-slate-300 disabled:text-slate-500">Reject selected</button>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap gap-2 mb-3">
+      <template x-for="status in pendingStatusTabs" :key="status.value">
+        <button
+          @click="setPendingStatus(status.value)"
+          :class="pendingStatus === status.value ? 'bg-teal-700 text-white border-teal-700' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'"
+          class="px-3 py-1.5 rounded-lg border text-xs font-semibold"
+        >
+          <span x-text="status.label"></span>
+        </button>
+      </template>
+    </div>
+
+    <div x-show="pendingActionMessage" class="mb-3 text-xs" :class="pendingActionIsError ? 'text-red-700' : 'text-emerald-700'" x-text="pendingActionMessage"></div>
+    <div x-show="pendingStatus !== 'pending'" class="mb-3 text-xs text-slate-500">Switch to Pending status to apply/reject or edit changes.</div>
+
+    <template x-for="group in groupedPending" :key="group.item_key">
+      <div class="mb-3 border border-slate-200 rounded-xl bg-white overflow-hidden">
+        <div class="px-3 py-2 bg-slate-50 border-b border-slate-200">
+          <div class="font-semibold" x-text="group.item_title || group.item_key"></div>
+          <div class="text-xs text-slate-500 mono" x-text="group.item_key"></div>
+        </div>
+        <div class="p-3 space-y-2">
+          <template x-for="change in group.changes" :key="change.id">
+            <div class="border border-slate-100 rounded-lg p-2">
+              <label class="flex items-start gap-2 text-sm rounded-lg hover:bg-slate-50 transition-colors cursor-pointer">
+                <input type="checkbox" class="mt-0.5" :disabled="pendingStatus !== 'pending'" :checked="pendingSelected.has(change.id)" @change="togglePending(change.id)">
+                <div class="flex-1 min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="change-badge" :class="changeBadgeClass(change.change_type)" x-text="changeTypeLabel(change.change_type)"></span>
+                    <span class="text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-600" x-text="'status: ' + (change.status || 'pending')"></span>
+                  </div>
+                  <div class="text-xs text-slate-600 mt-1 break-words" x-text="previewChange(change)"></div>
+                  <div x-show="change.applied_at" class="text-[11px] text-slate-500 mt-1" x-text="'Applied at: ' + change.applied_at"></div>
+                  <div x-show="change.error_message" class="text-[11px] text-rose-700 mt-1" x-text="change.error_message"></div>
+                </div>
+              </label>
+
+              <div x-show="pendingStatus === 'pending' && change.change_type === 'tag_changes'" class="ml-6 mt-2 grid md:grid-cols-2 gap-2 text-xs">
+                <div>
+                  <label class="text-slate-500">Add tags (comma-separated)</label>
+                  <input
+                    type="text"
+                    :value="getPendingDraftField(change.id, 'add_tags_text', change)"
+                    @input="setPendingDraftField(change.id, 'add_tags_text', $event.target.value, change)"
+                    class="mt-1 w-full px-2 py-1.5 border border-slate-300 rounded"
+                  >
+                </div>
+                <div>
+                  <label class="text-slate-500">Remove tags (comma-separated)</label>
+                  <input
+                    type="text"
+                    :value="getPendingDraftField(change.id, 'remove_tags_text', change)"
+                    @input="setPendingDraftField(change.id, 'remove_tags_text', $event.target.value, change)"
+                    class="mt-1 w-full px-2 py-1.5 border border-slate-300 rounded"
+                  >
+                </div>
+                <div class="md:col-span-2">
+                  <button
+                    type="button"
+                    @click="savePendingChangeEdit(change)"
+                    :disabled="pendingSaving[change.id]"
+                    class="px-3 py-1.5 rounded bg-slate-900 text-white hover:bg-slate-700 disabled:bg-slate-300 disabled:text-slate-500"
+                  >
+                    <span x-text="pendingSaving[change.id] ? 'Saving...' : 'Save edit'"></span>
+                  </button>
+                </div>
+              </div>
+
+              <div x-show="pendingStatus === 'pending' && (change.change_type === 'add_to_collection' || change.change_type === 'remove_from_collection')" class="ml-6 mt-2 grid gap-2 text-xs">
+                <div>
+                  <label class="text-slate-500">Target collection</label>
+                  <select
+                    :value="getPendingDraftField(change.id, 'collection_key', change)"
+                    @change="setPendingDraftField(change.id, 'collection_key', $event.target.value, change)"
+                    class="mt-1 w-full px-2 py-1.5 border border-slate-300 rounded"
+                  >
+                    <option value="">Select collection</option>
+                    <template x-for="entry in flatCollections" :key="entry.key">
+                      <option :value="entry.key" x-text="collectionOptionLabel(entry)"></option>
+                    </template>
+                  </select>
+                  <div class="mt-1 text-[11px] text-slate-500" x-show="getPendingDraftField(change.id, 'collection_path', change)">
+                    Current path: <span x-text="getPendingDraftField(change.id, 'collection_path', change)"></span>
+                  </div>
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    @click="savePendingChangeEdit(change)"
+                    :disabled="pendingSaving[change.id]"
+                    class="px-3 py-1.5 rounded bg-slate-900 text-white hover:bg-slate-700 disabled:bg-slate-300 disabled:text-slate-500"
+                  >
+                    <span x-text="pendingSaving[change.id] ? 'Saving...' : 'Save edit'"></span>
+                  </button>
+                </div>
+              </div>
+
+              <div x-show="pendingStatus === 'pending' && change.change_type === 'add_note'" class="ml-6 mt-2 grid gap-2 text-xs">
+                <div>
+                  <label class="text-slate-500">Note title</label>
+                  <input
+                    type="text"
+                    :value="getPendingDraftField(change.id, 'note_title', change)"
+                    @input="setPendingDraftField(change.id, 'note_title', $event.target.value, change)"
+                    class="mt-1 w-full px-2 py-1.5 border border-slate-300 rounded"
+                  >
+                </div>
+                <div>
+                  <label class="text-slate-500">Note HTML</label>
+                  <textarea
+                    rows="5"
+                    :value="getPendingDraftField(change.id, 'note_html', change)"
+                    @input="setPendingDraftField(change.id, 'note_html', $event.target.value, change)"
+                    class="mt-1 w-full px-2 py-1.5 border border-slate-300 rounded font-mono"
+                  ></textarea>
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    @click="savePendingChangeEdit(change)"
+                    :disabled="pendingSaving[change.id]"
+                    class="px-3 py-1.5 rounded bg-slate-900 text-white hover:bg-slate-700 disabled:bg-slate-300 disabled:text-slate-500"
+                  >
+                    <span x-text="pendingSaving[change.id] ? 'Saving...' : 'Save edit'"></span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+
+    <div x-show="pendingLoading" class="text-sm text-slate-500">Loading changes...</div>
+    <div x-show="!pendingLoading && pending.length === 0" class="text-sm text-slate-500" x-text="'No ' + selectedPendingStatusLabel + ' changes.'"></div>
+  </div>
+
+  <div x-show="activeTab === 'settings'" class="glass rounded-2xl border border-slate-200 p-4">
+    <h2 class="text-lg font-bold mb-3">Triage Preferences</h2>
+    <div class="grid md:grid-cols-2 gap-4">
+      <div>
+        <label class="text-sm font-semibold text-slate-700">Research goals (one per line)</label>
+        <textarea x-model="settingsDraft.research_goals_text" rows="8" class="w-full mt-1 p-2 border border-slate-300 rounded-lg text-sm"></textarea>
+      </div>
+      <div>
+        <label class="text-sm font-semibold text-slate-700">Triage criteria (one per line)</label>
+        <textarea x-model="settingsDraft.triage_criteria_text" rows="8" class="w-full mt-1 p-2 border border-slate-300 rounded-lg text-sm"></textarea>
+      </div>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-4 mt-4">
+      <div>
+        <label class="text-sm font-semibold text-slate-700">Similarity threshold</label>
+        <input type="range" min="-1" max="1" step="0.01" x-model.number="settingsDraft.similarity_threshold" class="w-full mt-1">
+        <div class="text-xs text-slate-600 mono" x-text="Number(settingsDraft.similarity_threshold || 0).toFixed(2)"></div>
+      </div>
+      <div>
+        <label class="text-sm font-semibold text-slate-700">Output language</label>
+        <input type="text" x-model="settingsDraft.output_language" class="w-full mt-1 p-2 border border-slate-300 rounded-lg text-sm">
+      </div>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-4 mt-4">
+      <div>
+        <label class="text-sm font-semibold text-slate-700">Refine model</label>
+        <input type="text" x-model="settingsDraft.refine_model" class="w-full mt-1 p-2 border border-slate-300 rounded-lg text-sm">
+      </div>
+      <div>
+        <label class="text-sm font-semibold text-slate-700">API base</label>
+        <input type="text" x-model="settingsDraft.api_base" class="w-full mt-1 p-2 border border-slate-300 rounded-lg text-sm">
+      </div>
+    </div>
+
+    <div class="mt-4 flex items-center gap-2">
+      <button @click="saveSettings()" class="px-4 py-2 rounded-lg bg-slate-900 text-white">Save settings</button>
+      <span class="text-sm text-slate-600" x-text="settingsMessage"></span>
+    </div>
+  </div>
+
+  <div x-show="activeTab === 'dashboard'" class="glass rounded-2xl border border-slate-200 p-2">
+    <iframe :src="dashboardSrc" class="w-full h-screen rounded-xl border border-slate-200"></iframe>
+  </div>
+</div>
+
+<script>
+function zoteroUI() {
+  return {
+    tabs: [
+      { key: 'library', label: 'Library' },
+      { key: 'triage', label: 'Triage' },
+      { key: 'pending', label: 'Pending' },
+      { key: 'settings', label: 'Settings' },
+      { key: 'dashboard', label: 'Results Dashboard' },
+    ],
+    activeTab: 'library',
+    zoteroStatus: { available: false, stats: null, error: '' },
+    collections: [],
+    flatCollections: [],
+    tags: [],
+    items: [],
+    itemsTotal: 0,
+    pageLimit: 50,
+    currentOffset: 0,
+    searchQuery: '',
+    selectedCollection: '',
+    selectedTag: '',
+    selectedItems: new Set(),
+    activeItemDetail: null,
+    jobs: [],
+    activeJobId: '',
+    activeJob: null,
+    pollTimer: null,
+    pendingStatusTabs: [
+      { value: 'pending', label: 'Pending' },
+      { value: 'applied', label: 'Applied' },
+      { value: 'rejected', label: 'Rejected' },
+      { value: 'failed', label: 'Failed' },
+      { value: 'all', label: 'All' },
+    ],
+    pendingStatus: 'pending',
+    pending: [],
+    pendingLoading: false,
+    pendingSelected: new Set(),
+    pendingEditDrafts: {},
+    pendingSaving: {},
+    pendingActionMessage: '',
+    pendingActionIsError: false,
+    pendingCount: 0,
+    config: null,
+    settingsDraft: {
+      research_goals_text: '',
+      triage_criteria_text: '',
+      similarity_threshold: -0.3,
+      output_language: 'English',
+      refine_model: '',
+      api_base: '',
+    },
+    settingsMessage: '',
+    itemTriageResult: null,
+    itemTriageLoading: false,
+    itemTriageError: '',
+    itemTriageJobId: '',
+    itemTriageJob: null,
+    itemOverridePriority: 'could_read',
+    itemCollectionDraftKey: '',
+    itemTagDraft: '',
+    itemCorpusMeta: null,
+    itemDimensionDrafts: {},
+    itemWriteBusy: false,
+    itemActionMessage: '',
+    itemActionIsError: false,
+    triageActionMessage: '',
+    triageActionIsError: false,
+    jobCancelingId: '',
+    feedbackState: {},
+    feedbackSubmitting: {},
+    feedbackRequestToken: 0,
+    pendingRequestToken: 0,
+    calibrationMetrics: null,
+    calibrationLoading: false,
+    dashboardSrc: '/results',
+    dashboardNeedsRefresh: false,
+
+    async initialize() {
+      await this.refreshAll();
+      this.pollTimer = setInterval(() => {
+        if (this.hasActiveMutation()) {
+          return;
+        }
+        this.fetchJobs();
+        if (this.activeJobId) {
+          this.fetchJob(this.activeJobId);
+        }
+        if (this.itemTriageJobId) {
+          this.fetchItemTriageJob(this.itemTriageJobId);
+        }
+        this.fetchPendingCount();
+        if (this.activeTab === 'pending') {
+          this.fetchPending();
+        }
+      }, 2000);
+    },
+
+    async refreshAll() {
+      await Promise.all([
+        this.fetchZoteroStatus(),
+        this.fetchCollections(),
+        this.fetchTags(),
+        this.fetchItems(),
+        this.fetchJobs(),
+        this.fetchPending(),
+        this.loadConfig(),
+        this.fetchCalibrationMetrics(),
+      ]);
+    },
+
+    hasActiveMutation() {
+      return Boolean(
+        this.itemWriteBusy
+        || this.jobCancelingId
+        || Object.values(this.feedbackSubmitting || {}).some(Boolean)
+        || Object.values(this.pendingSaving || {}).some(Boolean)
+      );
+    },
+
+    switchTab(tabKey) {
+      this.activeTab = tabKey;
+      if (tabKey === 'dashboard') {
+        this.refreshDashboard(true);
+        this.dashboardNeedsRefresh = false;
+      }
+      if (tabKey === 'pending') {
+        this.fetchPending();
+      }
+    },
+
+    refreshDashboard(force = false) {
+      if (!force && this.activeTab !== 'dashboard') {
+        this.dashboardNeedsRefresh = true;
+        return;
+      }
+      this.dashboardSrc = '/results?ts=' + Date.now();
+    },
+
+    async fetchZoteroStatus() {
+      const res = await fetch('/api/zotero/status');
+      this.zoteroStatus = await res.json();
+    },
+
+    async fetchCollections() {
+      const res = await fetch('/api/zotero/collections');
+      const data = await res.json();
+      this.collections = data.items || [];
+      this.flatCollections = this.flattenCollections(this.collections);
+    },
+
+    flattenCollections(nodes, depth = 0) {
+      const flat = [];
+      for (const node of nodes || []) {
+        flat.push({ key: node.key, name: node.name, item_count: node.item_count || 0, depth });
+        flat.push(...this.flattenCollections(node.children || [], depth + 1));
+      }
+      return flat;
+    },
+
+    async fetchTags() {
+      const res = await fetch('/api/zotero/tags?limit=300');
+      const data = await res.json();
+      this.tags = data.items || [];
+    },
+
+    async fetchItems() {
+      const params = new URLSearchParams({ limit: String(this.pageLimit), offset: String(this.currentOffset) });
+      if (this.selectedCollection) params.set('collection', this.selectedCollection);
+      if (this.selectedTag) params.set('tag', this.selectedTag);
+      if (this.searchQuery.trim()) params.set('search', this.searchQuery.trim());
+
+      const res = await fetch('/api/zotero/items?' + params.toString());
+      const data = await res.json();
+      this.items = data.items || [];
+      this.itemsTotal = data.total || 0;
+
+      const availableKeys = new Set(this.items.map(item => item.item_key));
+      this.selectedItems = new Set([...this.selectedItems].filter(key => availableKeys.has(key)));
+    },
+
+    clearLibraryFilters() {
+      this.selectedCollection = '';
+      this.selectedTag = '';
+      this.searchQuery = '';
+      this.currentOffset = 0;
+      this.fetchItems();
+    },
+
+    toggleSelectItem(itemKey) {
+      if (this.selectedItems.has(itemKey)) {
+        this.selectedItems.delete(itemKey);
+      } else {
+        this.selectedItems.add(itemKey);
+      }
+      this.selectedItems = new Set(this.selectedItems);
+    },
+
+    toggleSelectPage(selectAll) {
+      if (selectAll) {
+        for (const item of this.items) {
+          this.selectedItems.add(item.item_key);
+        }
+      } else {
+        for (const item of this.items) {
+          this.selectedItems.delete(item.item_key);
+        }
+      }
+      this.selectedItems = new Set(this.selectedItems);
+    },
+
+    isPageFullySelected() {
+      if (!this.items.length) return false;
+      return this.items.every(item => this.selectedItems.has(item.item_key));
+    },
+
+    async openItem(itemKey) {
+      const res = await fetch('/api/zotero/items/' + encodeURIComponent(itemKey));
+      if (!res.ok) return;
+      this.activeItemDetail = await res.json();
+      this.itemTriageResult = null;
+      this.itemTriageError = '';
+      this.itemActionMessage = '';
+      this.itemActionIsError = false;
+      this.itemTriageJobId = '';
+      this.itemTriageJob = null;
+      this.itemOverridePriority = this.activeItemDetail.reading_priority || 'could_read';
+      this.itemCollectionDraftKey = '';
+      this.itemTagDraft = '';
+      this.itemCorpusMeta = null;
+      this.itemDimensionDrafts = {};
+      this.itemWriteBusy = false;
+      this.triageActionMessage = '';
+      this.triageActionIsError = false;
+      await Promise.all([
+        this.fetchItemTriageResult(itemKey),
+        this.fetchItemCorpusMeta(itemKey),
+      ]);
+      this.$nextTick(() => {
+        const panel = document.getElementById('active-item-panel');
+        if (panel) {
+          panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+    },
+
+    closeItem() {
+      this.activeItemDetail = null;
+      this.itemTriageResult = null;
+      this.itemTriageLoading = false;
+      this.itemTriageError = '';
+      this.itemTriageJobId = '';
+      this.itemTriageJob = null;
+      this.itemActionMessage = '';
+      this.itemActionIsError = false;
+      this.itemCollectionDraftKey = '';
+      this.itemTagDraft = '';
+      this.itemCorpusMeta = null;
+      this.itemDimensionDrafts = {};
+      this.itemWriteBusy = false;
+    },
+
+    async refreshActiveItemDetail() {
+      if (!this.activeItemDetail?.item_key) return;
+      const itemKey = this.activeItemDetail.item_key;
+      const res = await fetch('/api/zotero/items/' + encodeURIComponent(itemKey));
+      if (!res.ok) return;
+      this.activeItemDetail = await res.json();
+      if (!this.itemOverridePriority) {
+        this.itemOverridePriority = this.activeItemDetail.reading_priority || 'could_read';
+      }
+    },
+
+    async fetchItemTriageResult(itemKey) {
+      if (!itemKey) return;
+      this.itemTriageLoading = true;
+      this.itemTriageError = '';
+      this.itemTriageResult = null;
+
+      try {
+        const res = await fetch('/api/results/' + encodeURIComponent(itemKey));
+        if (res.status === 404) {
+          return;
+        }
+
+        const data = await res.json();
+        if (!res.ok) {
+          this.itemTriageError = data.message || 'Failed to load triage result.';
+          return;
+        }
+
+        let responseJson = data.response_json || {};
+        if (typeof responseJson === 'string') {
+          try {
+            responseJson = JSON.parse(responseJson);
+          } catch {
+            responseJson = {};
+          }
+        }
+
+        const confidenceRaw = data.confidence ?? responseJson.triage_confidence;
+        const confidence = confidenceRaw === null || confidenceRaw === undefined ? null : Number(confidenceRaw);
+
+        this.itemTriageResult = {
+          item_id: data.item_id || itemKey,
+          composite_score: Number(data.composite_score ?? responseJson.composite_relevance_score ?? 0),
+          reading_priority: data.reading_priority || responseJson.reading_priority || null,
+          relevance_score: data.relevance_score ?? responseJson.relevance_score ?? null,
+          executive_summary: responseJson.executive_summary || '',
+          should_deep_read: responseJson.should_deep_read || '',
+          key_sections_to_read: responseJson.key_sections_to_read || [],
+          relevance_to_research: responseJson.relevance_to_research || '',
+          controversial_points: responseJson.controversial_points || '',
+          industry_academy_impact: responseJson.industry_academy_impact || '',
+          unknown_unknowns: responseJson.unknown_unknowns || '',
+          implementation_quickstart: responseJson.implementation_quickstart || '',
+          key_findings: responseJson.key_findings || [],
+          methods: responseJson.methods || '',
+          limitations: responseJson.limitations || '',
+          triage_rationale: responseJson.triage_rationale || '',
+          triage_confidence: Number.isFinite(confidence) ? confidence : null,
+          dimensions: responseJson.triage_dimensions || {},
+          corpus_affinity_score: responseJson.corpus_affinity_score ?? null,
+          corpus_positive_similarity: responseJson.corpus_positive_similarity ?? null,
+          corpus_negative_similarity: responseJson.corpus_negative_similarity ?? null,
+          matched_goal: responseJson.matched_goal || '',
+          matched_goal_similarity: responseJson.matched_goal_similarity ?? null,
+          top_similar_items: responseJson.top_similar_items || [],
+          suggested_collections: responseJson.suggested_collections || [],
+        };
+
+        this.initItemDimensionDrafts();
+
+        await this.fetchFeedbackStateByItem(itemKey);
+
+        if (!this.activeItemDetail?.reading_priority && this.itemTriageResult.reading_priority) {
+          this.itemOverridePriority = this.itemTriageResult.reading_priority;
+        }
+      } catch {
+        this.itemTriageError = 'Failed to load triage result.';
+      } finally {
+        this.itemTriageLoading = false;
+      }
+    },
+
+    async fetchItemCorpusMeta(itemKey) {
+      const safeItemKey = String(itemKey || this.activeItemDetail?.item_key || '').trim();
+      if (!safeItemKey) return;
+      try {
+        const res = await fetch('/api/corpus/item/' + encodeURIComponent(safeItemKey));
+        if (!res.ok) {
+          this.itemCorpusMeta = null;
+          return;
+        }
+        const data = await res.json();
+        this.itemCorpusMeta = data.exists ? (data.item || null) : null;
+      } catch {
+        this.itemCorpusMeta = null;
+      }
+    },
+
+    initItemDimensionDrafts() {
+      if (!this.itemTriageResult) {
+        this.itemDimensionDrafts = {};
+        return;
+      }
+
+      const nextDrafts = {};
+      for (const row of this.triageDimensionRows(this.itemTriageResult)) {
+        const numeric = Number(row.value);
+        const safeValue = Number.isFinite(numeric) ? numeric : 3;
+        nextDrafts[row.key] = Math.max(1, Math.min(5, Math.round(safeValue)));
+      }
+      this.itemDimensionDrafts = nextDrafts;
+    },
+
+    dimensionDraftValue(dimensionKey, fallbackValue = 3) {
+      const raw = Number(this.itemDimensionDrafts?.[dimensionKey]);
+      const fallback = Number(fallbackValue);
+      const base = Number.isFinite(raw) ? raw : (Number.isFinite(fallback) ? fallback : 3);
+      return Math.max(1, Math.min(5, Math.round(base)));
+    },
+
+    updateDimensionDraft(dimensionKey, value) {
+      const numeric = Number(value);
+      const safe = Number.isFinite(numeric) ? Math.max(1, Math.min(5, Math.round(numeric))) : 3;
+      this.itemDimensionDrafts = {
+        ...this.itemDimensionDrafts,
+        [dimensionKey]: safe,
+      };
+    },
+
+    hasDimensionDraftChanges() {
+      if (!this.itemTriageResult) return false;
+      const current = this.itemTriageResult.dimensions || {};
+      const keys = ['goal_alignment', 'novelty_for_goals', 'methodological_rigor', 'actionability', 'evidence_strength'];
+      return keys.some((key) => {
+        const original = Number(current[key] ?? 3);
+        const draft = Number(this.dimensionDraftValue(key, original));
+        return Math.round(original) !== Math.round(draft);
+      });
+    },
+
+    async applyDimensionOverrides() {
+      if (!this.activeItemDetail?.item_key || !this.itemTriageResult || this.itemWriteBusy) {
+        return;
+      }
+      if (!this.hasDimensionDraftChanges()) {
+        this.itemActionMessage = 'No dimension changes to apply.';
+        this.itemActionIsError = true;
+        return;
+      }
+
+      const payload = {
+        goal_alignment: this.dimensionDraftValue('goal_alignment', this.itemTriageResult?.dimensions?.goal_alignment ?? 3),
+        novelty_for_goals: this.dimensionDraftValue('novelty_for_goals', this.itemTriageResult?.dimensions?.novelty_for_goals ?? 3),
+        methodological_rigor: this.dimensionDraftValue('methodological_rigor', this.itemTriageResult?.dimensions?.methodological_rigor ?? 3),
+        actionability: this.dimensionDraftValue('actionability', this.itemTriageResult?.dimensions?.actionability ?? 3),
+        evidence_strength: this.dimensionDraftValue('evidence_strength', this.itemTriageResult?.dimensions?.evidence_strength ?? 3),
+      };
+
+      this.itemWriteBusy = true;
+      try {
+        const res = await fetch('/api/triage/results/' + encodeURIComponent(this.activeItemDetail.item_key) + '/override-dimensions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          this.itemActionMessage = data.message || 'Failed to apply dimension overrides.';
+          this.itemActionIsError = true;
+          return;
+        }
+
+        this.itemTriageResult = {
+          ...this.itemTriageResult,
+          composite_score: Number(data.new_composite_score ?? this.itemTriageResult.composite_score ?? 0),
+          reading_priority: data.new_priority || this.itemTriageResult.reading_priority,
+          dimensions: data.merged_dimensions || this.itemTriageResult.dimensions,
+        };
+        this.itemActionMessage = 'Dimension override applied and logged.';
+        this.itemActionIsError = false;
+        this.initItemDimensionDrafts();
+        await Promise.all([
+          this.fetchItems(),
+          this.fetchCalibrationMetrics(),
+          this.refreshActiveItemDetail(),
+          this.fetchItemTriageResult(this.activeItemDetail.item_key),
+        ]);
+      } finally {
+        this.itemWriteBusy = false;
+      }
+    },
+
+    collectionOptionLabel(entry) {
+      const depth = Number(entry?.depth || 0);
+      const prefix = depth > 0 ? ('\u2014 '.repeat(depth)) : '';
+      const count = Number(entry?.item_count || 0);
+      return `${prefix}${entry?.name || ''} (${count})`;
+    },
+
+    collectionRefFromDraftKey(collectionKey) {
+      const safeKey = String(collectionKey || '').trim();
+      if (!safeKey) return null;
+      const entry = (this.flatCollections || []).find(node => String(node.key || '') === safeKey);
+      if (!entry) {
+        return { collection_key: safeKey };
+      }
+      return {
+        collection_key: safeKey,
+        collection_path: String(entry.name || '').trim(),
+      };
+    },
+
+    async updateItemCollections(addRefs, removeRefs, force = false) {
+      if (!this.activeItemDetail?.item_key) return false;
+
+      const payload = {
+        add: Array.isArray(addRefs) ? addRefs : [],
+        remove: Array.isArray(removeRefs) ? removeRefs : [],
+        force,
+      };
+      const res = await fetch('/api/zotero/items/' + encodeURIComponent(this.activeItemDetail.item_key) + '/collections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+
+      if (data.error === 'zotero_running' && !force) {
+        const proceed = confirm('Zotero appears to be running. Apply anyway?');
+        if (proceed) {
+          return await this.updateItemCollections(addRefs, removeRefs, true);
+        }
+        return false;
+      }
+
+      if (!res.ok) {
+        this.itemActionMessage = data.message || 'Failed to update collections.';
+        this.itemActionIsError = true;
+        return false;
+      }
+
+      this.activeItemDetail = data.item || this.activeItemDetail;
+      this.itemActionMessage = 'Collections updated.';
+      this.itemActionIsError = false;
+      await Promise.all([this.fetchItems(), this.fetchCollections(), this.fetchItemCorpusMeta()]);
+      return true;
+    },
+
+    async addCollectionToItem() {
+      if (this.itemWriteBusy) return;
+      const ref = this.collectionRefFromDraftKey(this.itemCollectionDraftKey);
+      if (!ref) {
+        this.itemActionMessage = 'Select a target collection first.';
+        this.itemActionIsError = true;
+        return;
+      }
+
+      this.itemWriteBusy = true;
+      try {
+        const ok = await this.updateItemCollections([ref], []);
+        if (ok) {
+          this.itemCollectionDraftKey = '';
+        }
+      } finally {
+        this.itemWriteBusy = false;
+      }
+    },
+
+    async removeCollectionFromItem(collection) {
+      if (this.itemWriteBusy) return;
+      const collectionKey = String(collection?.key || '').trim();
+      const collectionPath = String(collection?.path || collection?.name || '').trim();
+      if (!collectionKey && !collectionPath) {
+        return;
+      }
+
+      this.itemWriteBusy = true;
+      try {
+        await this.updateItemCollections([], [{
+          collection_key: collectionKey,
+          collection_path: collectionPath,
+        }]);
+      } finally {
+        this.itemWriteBusy = false;
+      }
+    },
+
+    async startItemTriage() {
+      if (!this.activeItemDetail?.item_key) {
+        return;
+      }
+      if (this.hasRunningJob()) {
+        this.itemActionMessage = 'Another triage job is already running. Cancel it first.';
+        this.itemActionIsError = true;
+        return;
+      }
+      if (!this.activeItemDetail.has_pdf) {
+        this.itemActionMessage = 'No local PDF attachment available for this item.';
+        this.itemActionIsError = true;
+        return;
+      }
+
+      const payload = { item_keys: [this.activeItemDetail.item_key], queue_changes: true };
+      const res = await fetch('/api/triage/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        this.itemActionMessage = data.message || 'Failed to start triage.';
+        this.itemActionIsError = true;
+        return;
+      }
+
+      this.itemActionMessage = 'Triage started.';
+      this.itemActionIsError = false;
+      this.activeJobId = data.job_id;
+      this.itemTriageJobId = data.job_id;
+      this.itemTriageJob = {
+        job_id: data.job_id,
+        status: data.status || 'running',
+        total: data.total || 1,
+        completed: 0,
+      };
+
+      await this.fetchItemTriageJob(data.job_id);
+      await this.fetchJobs();
+    },
+
+    async fetchItemTriageJob(jobId) {
+      if (!jobId) return;
+      const res = await fetch('/api/triage/jobs/' + encodeURIComponent(jobId));
+      if (!res.ok) return;
+      const data = await res.json();
+
+      if (this.itemTriageJobId !== jobId && this.itemTriageJob?.job_id !== jobId) {
+        return;
+      }
+
+      this.itemTriageJob = data;
+
+      if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+        this.itemTriageJobId = '';
+        await Promise.all([this.fetchItems(), this.fetchPending(), this.fetchPendingCount()]);
+        await this.refreshActiveItemDetail();
+        if (this.activeItemDetail?.item_key) {
+          await this.fetchItemTriageResult(this.activeItemDetail.item_key);
+        }
+
+        if (data.status === 'completed') {
+          this.itemActionMessage = 'Triage finished. Review queued changes in Pending.';
+          this.itemActionIsError = false;
+        } else if (data.status === 'cancelled') {
+          this.itemActionMessage = 'Triage cancelled.';
+          this.itemActionIsError = false;
+        } else {
+          const firstError = data.errors && data.errors.length ? String(data.errors[0].error || 'Triage failed') : 'Triage failed';
+          this.itemActionMessage = firstError;
+          this.itemActionIsError = true;
+        }
+        this.refreshDashboard();
+      }
+    },
+
+    parseCommaTags(text) {
+      return (text || '')
+        .split(',')
+        .map(tag => tag.trim())
+        .filter(Boolean)
+        .filter((tag, index, arr) => arr.findIndex(other => other.toLowerCase() === tag.toLowerCase()) === index);
+    },
+
+    async applyItemTagChanges(addTags, removeTags, force = false) {
+      if (!this.activeItemDetail?.item_key) return false;
+
+      const payload = {
+        add_tags: addTags,
+        remove_tags: removeTags,
+        force,
+      };
+      const res = await fetch('/api/zotero/items/' + encodeURIComponent(this.activeItemDetail.item_key) + '/tags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+
+      if (data.error === 'zotero_running' && !force) {
+        const proceed = confirm('Zotero appears to be running. Apply anyway?');
+        if (proceed) {
+          return await this.applyItemTagChanges(addTags, removeTags, true);
+        }
+        return false;
+      }
+
+      if (!res.ok) {
+        this.itemActionMessage = data.message || 'Failed to update tags.';
+        this.itemActionIsError = true;
+        return false;
+      }
+
+      this.activeItemDetail = data.item || this.activeItemDetail;
+      this.itemActionMessage = 'Tags updated.';
+      this.itemActionIsError = false;
+      await Promise.all([this.fetchItems(), this.fetchTags(), this.fetchItemCorpusMeta()]);
+      return true;
+    },
+
+    async setItemPriorityNow(force = false) {
+      if (!this.activeItemDetail?.item_key || this.itemWriteBusy) {
+        return;
+      }
+
+      const allowed = ['must_read', 'should_read', 'could_read', 'dont_read'];
+      if (!allowed.includes(this.itemOverridePriority)) {
+        this.itemActionMessage = 'Select a valid priority.';
+        this.itemActionIsError = true;
+        return;
+      }
+
+      this.itemWriteBusy = true;
+      try {
+        const res = await fetch('/api/zotero/items/' + encodeURIComponent(this.activeItemDetail.item_key) + '/priority', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ priority: this.itemOverridePriority, force }),
+        });
+        const data = await res.json();
+
+        if (data.error === 'zotero_running' && !force) {
+          const proceed = confirm('Zotero appears to be running. Apply anyway?');
+          if (proceed) {
+            this.itemWriteBusy = false;
+            await this.setItemPriorityNow(true);
+          }
+          return;
+        }
+
+        if (!res.ok) {
+          this.itemActionMessage = data.message || 'Failed to update priority.';
+          this.itemActionIsError = true;
+          return;
+        }
+
+        this.activeItemDetail = data.item || this.activeItemDetail;
+        this.itemOverridePriority = this.activeItemDetail?.reading_priority || this.itemOverridePriority;
+        this.itemActionMessage = data.updated ? 'Priority updated immediately.' : (data.message || 'Priority already set.');
+        this.itemActionIsError = false;
+        await Promise.all([this.fetchItems(), this.fetchTags(), this.fetchItemCorpusMeta()]);
+      } finally {
+        this.itemWriteBusy = false;
+      }
+    },
+
+    async addTagToItem() {
+      if (this.itemWriteBusy) return;
+      const tag = String(this.itemTagDraft || '').trim();
+      if (!tag) {
+        this.itemActionMessage = 'Enter a tag before adding.';
+        this.itemActionIsError = true;
+        return;
+      }
+
+      this.itemWriteBusy = true;
+      try {
+        const ok = await this.applyItemTagChanges([tag], []);
+        if (ok) {
+          this.itemTagDraft = '';
+        }
+      } finally {
+        this.itemWriteBusy = false;
+      }
+    },
+
+    async removeTagFromItem(tag) {
+      if (this.itemWriteBusy || !tag) return;
+      this.itemWriteBusy = true;
+      try {
+        await this.applyItemTagChanges([], [String(tag)]);
+      } finally {
+        this.itemWriteBusy = false;
+      }
+    },
+
+    async queuePriorityOverride() {
+      if (!this.activeItemDetail?.item_key || this.itemWriteBusy) {
+        return;
+      }
+
+      const allowed = ['must_read', 'should_read', 'could_read', 'dont_read'];
+      if (!allowed.includes(this.itemOverridePriority)) {
+        this.itemActionMessage = 'Select a valid priority before queuing override.';
+        this.itemActionIsError = true;
+        return;
+      }
+
+      const payload = {
+        item_key: this.activeItemDetail.item_key,
+        item_title: this.activeItemDetail.title || this.activeItemDetail.item_key,
+        new_priority: this.itemOverridePriority,
+      };
+      const res = await fetch('/api/pending/override-priority', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        this.itemActionMessage = data.message || 'Failed to queue priority override.';
+        this.itemActionIsError = true;
+        return;
+      }
+
+      if (Number(data.queued || 0) > 0) {
+        this.itemActionMessage = 'Priority override queued. Apply it from the Pending tab.';
+      } else {
+        this.itemActionMessage = data.message || 'Priority already set. Nothing queued.';
+      }
+      this.itemActionIsError = false;
+      await this.fetchPending();
+      await this.fetchPendingCount();
+    },
+
+    prevPage() {
+      this.currentOffset = Math.max(0, this.currentOffset - this.pageLimit);
+      this.fetchItems();
+    },
+
+    nextPage() {
+      if (this.currentOffset + this.pageLimit >= this.itemsTotal) return;
+      this.currentOffset += this.pageLimit;
+      this.fetchItems();
+    },
+
+    async startTriage() {
+      if (this.selectedItems.size === 0) {
+        return;
+      }
+      if (this.hasRunningJob()) {
+        alert('Another triage job is already running. Cancel it first.');
+        return;
+      }
+      const payload = { item_keys: [...this.selectedItems], queue_changes: true };
+      const res = await fetch('/api/triage/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.message || 'Failed to start triage');
+        return;
+      }
+      this.activeJobId = data.job_id;
+      this.switchTab('triage');
+      await this.fetchJob(this.activeJobId);
+      await this.fetchJobs();
+    },
+
+    async fetchJobs() {
+      const res = await fetch('/api/triage/jobs');
+      const data = await res.json();
+      this.jobs = data.items || [];
+      if (!this.activeJobId && this.jobs.length) {
+        this.activeJobId = this.jobs[0].job_id;
+      }
+    },
+
+    async fetchJob(jobId) {
+      if (!jobId) return;
+      const res = await fetch('/api/triage/jobs/' + encodeURIComponent(jobId));
+      if (!res.ok) return;
+      const data = await res.json();
+      this.activeJob = data;
+      await this.fetchFeedbackStateForResults(data.results || []);
+      if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
+        this.fetchPending();
+        this.fetchItems();
+        this.refreshDashboard();
+      }
+    },
+
+    feedbackButtonClass(itemKey, verdict) {
+      const current = this.feedbackState[itemKey];
+      const isActive = current === verdict;
+      if (verdict === 'approve') {
+        return isActive
+          ? 'bg-emerald-600 text-white border-emerald-600'
+          : 'bg-white text-emerald-700 border-emerald-300 hover:bg-emerald-50';
+      }
+      return isActive
+        ? 'bg-rose-600 text-white border-rose-600'
+        : 'bg-white text-rose-700 border-rose-300 hover:bg-rose-50';
+    },
+
+    async submitResultFeedback(itemKey, verdict, itemTitle = '') {
+      if (!itemKey || !['approve', 'reject'].includes(verdict)) return;
+      if (this.feedbackSubmitting[itemKey]) return;
+
+      this.feedbackSubmitting = { ...this.feedbackSubmitting, [itemKey]: true };
+      try {
+        const res = await fetch('/api/triage/results/' + encodeURIComponent(itemKey) + '/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ verdict }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          const errorMessage = data.message || 'Failed to save feedback.';
+          this.triageActionMessage = errorMessage;
+          this.triageActionIsError = true;
+          if (this.activeItemDetail?.item_key === itemKey) {
+            this.itemActionMessage = errorMessage;
+            this.itemActionIsError = true;
+          }
+          return;
+        }
+
+        this.feedbackState = { ...this.feedbackState, [itemKey]: verdict };
+        const successMessage = (itemTitle || itemKey) + ': feedback saved, pending Zotero tag change queued.';
+        this.triageActionMessage = successMessage;
+        this.triageActionIsError = false;
+        if (this.activeItemDetail?.item_key === itemKey) {
+          this.itemActionMessage = successMessage;
+          this.itemActionIsError = false;
+        }
+
+        await Promise.all([
+          this.fetchCalibrationMetrics(),
+          this.fetchPendingCount(),
+          this.fetchPending(),
+        ]);
+      } finally {
+        this.feedbackSubmitting = { ...this.feedbackSubmitting, [itemKey]: false };
+      }
+    },
+
+    async fetchFeedbackStateForResults(results) {
+      const requestToken = ++this.feedbackRequestToken;
+      const keys = (results || [])
+        .map(row => String(row.item_key || '').trim())
+        .filter(Boolean);
+      if (!keys.length) return;
+
+      const uniqueKeys = [...new Set(keys)];
+      const merged = { ...this.feedbackState };
+      for (const key of uniqueKeys) {
+        delete merged[key];
+      }
+
+      const chunkSize = 100;
+      for (let i = 0; i < uniqueKeys.length; i += chunkSize) {
+        if (requestToken !== this.feedbackRequestToken) {
+          return;
+        }
+        const chunk = uniqueKeys.slice(i, i + chunkSize);
+        try {
+          const res = await fetch('/api/triage/feedback/latest?item_keys=' + encodeURIComponent(chunk.join(',')));
+          if (!res.ok) {
+            continue;
+          }
+          const data = await res.json();
+          for (const row of (data.items || [])) {
+            const key = String(row.item_id || '').trim();
+            const verdict = String(row.verdict || '').trim();
+            if (key && (verdict === 'approve' || verdict === 'reject')) {
+              merged[key] = verdict;
+            }
+          }
+        } catch {
+          // Ignore polling-time fetch errors.
+        }
+      }
+
+      if (requestToken !== this.feedbackRequestToken) {
+        return;
+      }
+      this.feedbackState = merged;
+    },
+
+    async fetchFeedbackStateByItem(itemKey) {
+      if (!itemKey) return;
+      try {
+        const res = await fetch('/api/triage/feedback/latest?item_keys=' + encodeURIComponent(itemKey));
+        if (!res.ok) return;
+        const data = await res.json();
+        const first = (data.items || [])[0];
+        if (!first) return;
+        const verdict = String(first.verdict || '').trim();
+        if (verdict === 'approve' || verdict === 'reject') {
+          this.feedbackState = { ...this.feedbackState, [itemKey]: verdict };
+        }
+      } catch {
+        // Ignore background polling errors.
+      }
+    },
+
+    async fetchCalibrationMetrics() {
+      this.calibrationLoading = true;
+      try {
+        const res = await fetch('/api/calibration/metrics');
+        if (!res.ok) return;
+        this.calibrationMetrics = await res.json();
+      } catch {
+        // Ignore background polling errors.
+      } finally {
+        this.calibrationLoading = false;
+      }
+    },
+
+    formatPercent(value) {
+      const numberValue = Number(value);
+      if (!Number.isFinite(numberValue)) return 'n/a';
+      return Math.round(numberValue * 100) + '%';
+    },
+
+    hasRunningJob() {
+      return (this.jobs || []).some(job => job.status === 'running');
+    },
+
+    async cancelJob(jobId) {
+      if (!jobId || this.jobCancelingId) return;
+      this.jobCancelingId = jobId;
+      try {
+        const res = await fetch('/api/triage/jobs/' + encodeURIComponent(jobId) + '/cancel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data.message || 'Failed to cancel triage job.');
+          return;
+        }
+
+        if (this.activeJob?.job_id === jobId) {
+          this.activeJob = { ...this.activeJob, status: data.status || 'cancelled' };
+        }
+        if (this.itemTriageJob?.job_id === jobId) {
+          this.itemTriageJob = { ...this.itemTriageJob, status: data.status || 'cancelled' };
+        }
+
+        await Promise.all([
+          this.fetchJobs(),
+          this.fetchJob(this.activeJobId),
+          this.fetchItemTriageJob(this.itemTriageJobId || jobId),
+        ]);
+      } finally {
+        this.jobCancelingId = '';
+      }
+    },
+
+    async openJob(jobId) {
+      this.activeJobId = jobId;
+      this.switchTab('triage');
+      await this.fetchJob(jobId);
+    },
+
+    progressPercent(job) {
+      if (!job || !job.total) return 0;
+      return Math.min(100, Math.round((job.completed / job.total) * 100));
+    },
+
+    triageDimensionRows(result) {
+      const dimensions = result?.dimensions || {};
+      const rows = [
+        { key: 'goal_alignment', label: 'Goal alignment' },
+        { key: 'methodological_rigor', label: 'Methodological rigor' },
+        { key: 'actionability', label: 'Actionability' },
+        { key: 'novelty_for_goals', label: 'Novelty for goals' },
+        { key: 'evidence_strength', label: 'Evidence strength' },
+      ];
+
+      return rows.map(row => {
+        const rawValue = Number(dimensions[row.key] || 0);
+        const value = Number.isFinite(rawValue) ? Math.max(0, Math.min(5, rawValue)) : 0;
+        return {
+          key: row.key,
+          label: row.label,
+          value,
+          percent: Math.round((value / 5) * 100),
+        };
+      });
+    },
+
+    async fetchPending() {
+      const requestToken = ++this.pendingRequestToken;
+      this.pendingLoading = true;
+      try {
+        const params = new URLSearchParams({ limit: '500', status: this.pendingStatus });
+        const res = await fetch('/api/pending?' + params.toString());
+        const data = await res.json();
+        if (requestToken !== this.pendingRequestToken) {
+          return;
+        }
+        if (!res.ok) {
+          this.pendingActionMessage = data.message || 'Failed to load changes.';
+          this.pendingActionIsError = true;
+          return;
+        }
+
+        this.pending = data.items || [];
+        this.pendingSelected = new Set([...this.pendingSelected].filter(id => this.pending.some(item => item.id === id)));
+      } catch {
+        if (requestToken !== this.pendingRequestToken) {
+          return;
+        }
+        this.pendingActionMessage = 'Failed to load changes.';
+        this.pendingActionIsError = true;
+        this.pending = [];
+      } finally {
+        if (requestToken === this.pendingRequestToken) {
+          this.pendingLoading = false;
+        }
+      }
+    },
+
+    async fetchPendingCount() {
+      const res = await fetch('/api/pending/count');
+      const data = await res.json();
+      this.pendingCount = data.count || 0;
+    },
+
+    get groupedPending() {
+      const map = new Map();
+      for (const item of this.pending) {
+        if (!map.has(item.item_key)) {
+          map.set(item.item_key, { item_key: item.item_key, item_title: item.item_title, changes: [] });
+        }
+        map.get(item.item_key).changes.push(item);
+      }
+      return [...map.values()];
+    },
+
+    get selectedPendingStatusLabel() {
+      const row = this.pendingStatusTabs.find(tab => tab.value === this.pendingStatus);
+      return row ? row.label.toLowerCase() : this.pendingStatus;
+    },
+
+    setPendingStatus(status) {
+      this.pendingStatus = status;
+      this.pendingSelected = new Set();
+      this.pendingEditDrafts = {};
+      this.pendingActionMessage = '';
+      this.pendingActionIsError = false;
+      this.fetchPending();
+    },
+
+    togglePending(changeId) {
+      if (this.pendingStatus !== 'pending') {
+        return;
+      }
+      if (this.pendingSelected.has(changeId)) {
+        this.pendingSelected.delete(changeId);
+      } else {
+        this.pendingSelected.add(changeId);
+      }
+      this.pendingSelected = new Set(this.pendingSelected);
+    },
+
+    selectAllPending(selectAll) {
+      if (this.pendingStatus !== 'pending') {
+        return;
+      }
+      if (selectAll) {
+        this.pendingSelected = new Set(this.pending.map(item => item.id));
+      } else {
+        this.pendingSelected = new Set();
+      }
+    },
+
+    pendingPayload(change) {
+      try {
+        if (typeof change.payload_json === 'string') {
+          return JSON.parse(change.payload_json || '{}');
+        }
+        return change.payload_json || {};
+      } catch {
+        return {};
+      }
+    },
+
+    buildPendingDraft(change) {
+      const payload = this.pendingPayload(change);
+      if (change.change_type === 'tag_changes') {
+        return {
+          add_tags_text: (payload.add_tags || []).join(', '),
+          remove_tags_text: (payload.remove_tags || []).join(', '),
+        };
+      }
+      if (change.change_type === 'add_to_collection' || change.change_type === 'remove_from_collection') {
+        return {
+          collection_key: String(payload.collection_key || '').trim(),
+          collection_path: String(payload.collection_path || payload.collection_name || '').trim(),
+        };
+      }
+      if (change.change_type === 'add_note') {
+        return {
+          note_title: String(payload.note_title || 'Triage note').trim(),
+          note_html: String(payload.note_html || '').trim(),
+        };
+      }
+      return {};
+    },
+
+    getPendingDraftField(changeId, field, change) {
+      const existing = this.pendingEditDrafts[changeId];
+      if (existing && Object.prototype.hasOwnProperty.call(existing, field)) {
+        return existing[field];
+      }
+
+      const nextDraft = this.buildPendingDraft(change);
+      this.pendingEditDrafts = { ...this.pendingEditDrafts, [changeId]: nextDraft };
+      return nextDraft[field] || '';
+    },
+
+    setPendingDraftField(changeId, field, value, change) {
+      const current = {
+        ...this.buildPendingDraft(change),
+        ...(this.pendingEditDrafts[changeId] || {}),
+      };
+      current[field] = value;
+      if (field === 'collection_key') {
+        const entry = (this.flatCollections || []).find(node => String(node.key || '') === String(value || ''));
+        if (entry) {
+          current.collection_path = String(entry.name || '').trim();
+        }
+      }
+      this.pendingEditDrafts = { ...this.pendingEditDrafts, [changeId]: current };
+    },
+
+    pendingPayloadFromDraft(change) {
+      const draft = {
+        ...this.buildPendingDraft(change),
+        ...(this.pendingEditDrafts[change.id] || {}),
+      };
+
+      if (change.change_type === 'tag_changes') {
+        return {
+          add_tags: this.parseCommaTags(draft.add_tags_text || ''),
+          remove_tags: this.parseCommaTags(draft.remove_tags_text || ''),
+        };
+      }
+      if (change.change_type === 'add_to_collection' || change.change_type === 'remove_from_collection') {
+        const collectionKey = String(draft.collection_key || '').trim();
+        const entry = (this.flatCollections || []).find(node => String(node.key || '') === collectionKey);
+        const collectionPath = String(entry?.name || draft.collection_path || '').trim();
+        return {
+          collection_key: collectionKey,
+          collection_path: collectionPath,
+        };
+      }
+      if (change.change_type === 'add_note') {
+        return {
+          note_title: String(draft.note_title || '').trim(),
+          note_html: String(draft.note_html || '').trim(),
+        };
+      }
+      return null;
+    },
+
+    async savePendingChangeEdit(change) {
+      if (this.pendingStatus !== 'pending') {
+        this.pendingActionMessage = 'Switch to Pending status before editing.';
+        this.pendingActionIsError = true;
+        return;
+      }
+
+      const changeId = Number(change.id || 0);
+      if (!Number.isFinite(changeId) || changeId <= 0) {
+        this.pendingActionMessage = 'Invalid change ID.';
+        this.pendingActionIsError = true;
+        return;
+      }
+
+      const payload = this.pendingPayloadFromDraft(change);
+      if (!payload) {
+        this.pendingActionMessage = 'This change type cannot be edited here.';
+        this.pendingActionIsError = true;
+        return;
+      }
+
+      this.pendingSaving = { ...this.pendingSaving, [changeId]: true };
+      try {
+        const res = await fetch('/api/pending/change/' + encodeURIComponent(changeId), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ payload }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          this.pendingActionMessage = data.message || 'Failed to save pending change.';
+          this.pendingActionIsError = true;
+          return;
+        }
+
+        this.pendingActionMessage = 'Pending change updated.';
+        this.pendingActionIsError = false;
+        this.pendingEditDrafts = {
+          ...this.pendingEditDrafts,
+          [changeId]: this.buildPendingDraft({ ...change, payload_json: data.payload }),
+        };
+        await this.fetchPending();
+      } finally {
+        this.pendingSaving = { ...this.pendingSaving, [changeId]: false };
+      }
+    },
+
+    previewChange(change) {
+      try {
+        const payload = this.pendingPayload(change);
+        if (change.change_type === 'tag_changes') {
+          const added = (payload.add_tags || []).join(', ');
+          const removed = (payload.remove_tags || []).join(', ');
+          return 'add=[' + added + '] remove=[' + removed + ']';
+        }
+        if (change.change_type === 'add_note') {
+          return (payload.note_title || 'Triage note') + ' :: ' + this.stripHtml(payload.note_html || '').slice(0, 100);
+        }
+        if (change.change_type === 'add_to_collection') {
+          const target = String(payload.collection_path || payload.collection_name || payload.collection_key || '').trim();
+          return 'add_to_collection=[' + target + ']';
+        }
+        if (change.change_type === 'remove_from_collection') {
+          const target = String(payload.collection_path || payload.collection_name || payload.collection_key || '').trim();
+          return 'remove_from_collection=[' + target + ']';
+        }
+        return JSON.stringify(payload).slice(0, 140);
+      } catch {
+        return String(change.payload_json || '');
+      }
+    },
+
+    async applyPending(force = false) {
+      if (this.pendingStatus !== 'pending') {
+        this.pendingActionMessage = 'Only pending rows can be applied.';
+        this.pendingActionIsError = true;
+        return;
+      }
+      if (!this.pendingSelected.size) return;
+      const body = { change_ids: [...this.pendingSelected], force };
+      const res = await fetch('/api/pending/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (data.error === 'zotero_running' && !force) {
+        const proceed = confirm('Zotero appears to be running. Apply anyway?');
+        if (proceed) {
+          await this.applyPending(true);
+        }
+        return;
+      }
+      if (!res.ok) {
+        this.pendingActionMessage = data.message || 'Failed to apply changes.';
+        this.pendingActionIsError = true;
+        return;
+      }
+      this.pendingSelected = new Set();
+      const inboxRemoved = Number(data.inbox_removed || 0);
+      this.pendingActionMessage = inboxRemoved > 0
+        ? ('Selected changes applied. Removed from Inbox: ' + inboxRemoved + '.')
+        : 'Selected changes applied.';
+      this.pendingActionIsError = false;
+      await this.fetchPending();
+      await this.fetchPendingCount();
+    },
+
+    async rejectPending() {
+      if (this.pendingStatus !== 'pending') {
+        this.pendingActionMessage = 'Only pending rows can be rejected.';
+        this.pendingActionIsError = true;
+        return;
+      }
+      if (!this.pendingSelected.size) return;
+      const body = { change_ids: [...this.pendingSelected] };
+      const res = await fetch('/api/pending/reject', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        this.pendingActionMessage = data.message || 'Failed to reject changes.';
+        this.pendingActionIsError = true;
+        return;
+      }
+      this.pendingSelected = new Set();
+      this.pendingActionMessage = 'Selected changes rejected.';
+      this.pendingActionIsError = false;
+      await this.fetchPending();
+      await this.fetchPendingCount();
+    },
+
+    async loadConfig() {
+      const res = await fetch('/api/config');
+      if (!res.ok) return;
+      const cfg = await res.json();
+      this.config = cfg;
+      this.settingsDraft = {
+        research_goals_text: (cfg.research_goals || []).join('\n'),
+        triage_criteria_text: (cfg.triage_criteria || []).join('\n'),
+        similarity_threshold: Number(cfg.corpus?.similarity_threshold ?? -0.3),
+        output_language: cfg.output_language || 'English',
+        refine_model: cfg.llm?.refine_model || '',
+        api_base: cfg.llm?.api_base || '',
+      };
+    },
+
+    async saveSettings() {
+      if (!this.config) return;
+      const payload = JSON.parse(JSON.stringify(this.config));
+      payload.research_goals = this.splitLines(this.settingsDraft.research_goals_text);
+      payload.triage_criteria = this.splitLines(this.settingsDraft.triage_criteria_text);
+      payload.output_language = this.settingsDraft.output_language || 'English';
+      payload.llm = payload.llm || {};
+      payload.llm.refine_model = this.settingsDraft.refine_model;
+      payload.llm.api_base = this.settingsDraft.api_base;
+      payload.corpus = payload.corpus || {};
+      payload.corpus.similarity_threshold = Number(this.settingsDraft.similarity_threshold ?? -0.3);
+
+      const res = await fetch('/api/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        this.settingsMessage = data.message || 'Failed to save settings';
+        return;
+      }
+      this.settingsMessage = 'Saved successfully';
+      this.config = data.config || payload;
+      setTimeout(() => { this.settingsMessage = ''; }, 3000);
+    },
+
+    splitLines(text) {
+      return (text || '')
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean);
+    },
+
+    stripHtml(input) {
+      return String(input || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    },
+
+    statusClass(isAvailable) {
+      return isAvailable ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-700';
+    },
+
+    priorityLabel(priority) {
+      const map = {
+        must_read: 'Must read',
+        should_read: 'Should read',
+        could_read: 'Could read',
+        dont_read: "Don't read",
+      };
+      return map[priority] || 'Not triaged';
+    },
+
+    priorityBadge(priority) {
+      const map = {
+        must_read: 'bg-red-100 text-red-700',
+        should_read: 'bg-orange-100 text-orange-700',
+        could_read: 'bg-yellow-100 text-yellow-700',
+        dont_read: 'bg-slate-200 text-slate-600',
+      };
+      return map[priority] || 'bg-slate-100 text-slate-400';
+    },
+
+    formatShortDate(dateStr) {
+      if (!dateStr) return '—';
+      try {
+        const cleaned = dateStr.split(' ')[0];
+        const d = new Date(cleaned);
+        if (isNaN(d.getTime())) return dateStr.split(' ')[0] || '—';
+        return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+      } catch { return dateStr; }
+    },
+
+    truncateAuthors(authors) {
+      if (!authors) return '—';
+      if (authors.length <= 50) return authors;
+      const parts = authors.split(';');
+      if (parts.length <= 2) return authors.slice(0, 50) + '…';
+      return parts.slice(0, 2).join('; ').trim() + ' et al.';
+    },
+
+    changeBadgeClass(changeType) {
+      if (changeType === 'tag_changes') return 'tag';
+      if (changeType === 'add_note') return 'note';
+      if (changeType === 'add_to_collection') return 'collection';
+      if (changeType === 'remove_from_collection') return 'collection';
+      if (changeType === 'set_priority' || changeType === 'override_priority') return 'priority';
+      return 'default';
+    },
+
+    changeTypeLabel(changeType) {
+      const map = {
+        tag_changes: 'Tags',
+        add_note: 'Note',
+        add_to_collection: 'Collection',
+        remove_from_collection: 'Remove collection',
+        set_priority: 'Priority',
+        override_priority: 'Priority',
+      };
+      return map[changeType] || changeType;
+    },
+  };
+}
+</script>
+</body>
+</html>
