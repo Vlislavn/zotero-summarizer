@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -13,6 +14,34 @@ from zotero_summarizer.domain import is_valid_reading_priority
 
 class ZoteroReadError(RuntimeError):
     """Raised when reading from the local Zotero database fails."""
+
+
+# Strip C0/C1 control chars (preserving tab/newline/cr) plus Unicode tag chars
+# (U+E0000-U+E007F). The tag-char range was infamously used to smuggle invisible
+# prompt-injection payloads in 2024 — see Greshake et al. USENIX Security 2024
+# (arXiv:2302.12173v3) and Anthropic's Dec 2024 indirect-prompt-injection guidance.
+# All feed-supplied strings pass through this on read so the rest of the pipeline
+# cannot accidentally hand untrusted control chars to an LLM.
+_INJECTION_CHAR_PATTERN = re.compile(
+    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\U000e0000-\U000e007f]"
+)
+
+
+_ARXIV_RE = re.compile(
+    r"(?:arxiv[.:/]|arxiv\.org/(?:abs|pdf)/)([0-9]{4}\.[0-9]{4,5}(?:v\d+)?|[a-z\-]+(?:\.[A-Z]{2})?/\d{7})",
+    re.IGNORECASE,
+)
+
+
+def _arxiv_id_from_url_or_doi(url: str, doi: str) -> str:
+    """Extract an arXiv ID from a feed item's URL or DOI fields."""
+    for value in (url, doi):
+        if not value:
+            continue
+        match = _ARXIV_RE.search(value)
+        if match:
+            return match.group(1)
+    return ""
 
 
 class ZoteroReader:
@@ -127,6 +156,347 @@ class ZoteroReader:
 
             self._sort_collection_nodes(roots)
             return roots
+
+        return self._execute_read(_read)
+
+    def get_user_library_id(self) -> int:
+        """Return the libraryID of the user's personal library (type='user')."""
+
+        def _read(conn: sqlite3.Connection) -> int:
+            row = conn.execute(
+                "SELECT libraryID FROM libraries WHERE type='user' LIMIT 1"
+            ).fetchone()
+            if not row:
+                raise ZoteroReadError("No user library found in Zotero database")
+            return int(row["libraryID"])
+
+        return self._execute_read(_read)
+
+    def get_feed_groups(self) -> list[dict[str, Any]]:
+        """Return every Zotero RSS feed (one library per feed) with metadata.
+
+        Each feed is its own row in the `feeds` table keyed by `libraryID`. The
+        return shape mirrors `get_collections()` so the UI / CLI can render them
+        the same way.
+        """
+
+        def _read(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+            rows = conn.execute(
+                """
+                SELECT
+                    f.libraryID,
+                    f.name,
+                    f.url,
+                    f.lastUpdate,
+                    f.lastCheck,
+                    f.lastCheckError,
+                    f.refreshInterval
+                FROM feeds f
+                JOIN libraries l ON l.libraryID = f.libraryID
+                WHERE l.type = 'feed'
+                ORDER BY lower(f.name) ASC
+                """
+            ).fetchall()
+            return [
+                {
+                    "library_id": int(row["libraryID"]),
+                    "name": self._sanitize_text(str(row["name"] or "")),
+                    "url": self._sanitize_text(str(row["url"] or "")),
+                    "last_update": str(row["lastUpdate"] or ""),
+                    "last_check": str(row["lastCheck"] or ""),
+                    "last_check_error": str(row["lastCheckError"] or "") or None,
+                    "refresh_interval_minutes": int(row["refreshInterval"] or 0),
+                }
+                for row in rows
+            ]
+
+        return self._execute_read(_read)
+
+    def get_feed_items(
+        self,
+        feed_library_id: int | None = None,
+        since: str | None = None,
+        limit: int = 1000,
+        unread_only: bool = False,
+        order: str = "newest_first",
+    ) -> list[dict[str, Any]]:
+        """Return feed items joined with their metadata fields.
+
+        Feed items live in `items` (with a feed libraryID) plus the sparse
+        `feedItems` table (which contributes `guid`, `readTime`, `translatedTime`).
+        Title / abstract / URL / DOI / date come from `itemData` + `fields`.
+
+        Args:
+            feed_library_id: filter to a single feed library. If None, returns
+                items from all feed libraries (joined via `libraries.type='feed'`).
+            since: optional ISO timestamp (inclusive) — items with `dateAdded >= since`.
+                Phase 1.5 daemon ignores --since by default and uses unread_only=True
+                instead; this kwarg remains for the one-shot CLI / preview.
+            limit: maximum rows returned (capped at 5000).
+            unread_only: when True, only return items where `feedItems.readTime IS NULL`.
+                This is the Phase 1.5 daemon's canonical work queue.
+            order: "newest_first" (default, dateAdded DESC) or "oldest_first"
+                (dateAdded ASC, useful for round-robin oldest-unread scan).
+        """
+        safe_limit = max(1, min(int(limit), 5000))
+        where = ["l.type = 'feed'"]
+        params: list[Any] = []
+        if feed_library_id is not None:
+            where.append("i.libraryID = ?")
+            params.append(int(feed_library_id))
+        if since:
+            where.append("i.dateAdded >= ?")
+            params.append(str(since))
+        if unread_only:
+            where.append("fi.readTime IS NULL")
+        where_sql = " AND ".join(where)
+        order_sql = "i.dateAdded ASC" if order == "oldest_first" else "i.dateAdded DESC"
+
+        def _read(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+            sql = f"""
+                SELECT
+                    i.itemID,
+                    i.libraryID AS feed_library_id,
+                    l_feed.name AS feed_name,
+                    fi.guid,
+                    fi.readTime,
+                    fi.translatedTime,
+                    i.dateAdded,
+                    i.dateModified,
+                    (
+                        SELECT v.value
+                        FROM itemData id JOIN fields f ON f.fieldID=id.fieldID
+                        JOIN itemDataValues v ON v.valueID=id.valueID
+                        WHERE id.itemID=i.itemID AND f.fieldName='title' LIMIT 1
+                    ) AS title,
+                    (
+                        SELECT v.value
+                        FROM itemData id JOIN fields f ON f.fieldID=id.fieldID
+                        JOIN itemDataValues v ON v.valueID=id.valueID
+                        WHERE id.itemID=i.itemID AND f.fieldName='abstractNote' LIMIT 1
+                    ) AS abstract,
+                    (
+                        SELECT v.value
+                        FROM itemData id JOIN fields f ON f.fieldID=id.fieldID
+                        JOIN itemDataValues v ON v.valueID=id.valueID
+                        WHERE id.itemID=i.itemID AND f.fieldName='url' LIMIT 1
+                    ) AS url,
+                    (
+                        SELECT v.value
+                        FROM itemData id JOIN fields f ON f.fieldID=id.fieldID
+                        JOIN itemDataValues v ON v.valueID=id.valueID
+                        WHERE id.itemID=i.itemID AND f.fieldName='DOI' LIMIT 1
+                    ) AS doi,
+                    (
+                        SELECT v.value
+                        FROM itemData id JOIN fields f ON f.fieldID=id.fieldID
+                        JOIN itemDataValues v ON v.valueID=id.valueID
+                        WHERE id.itemID=i.itemID AND f.fieldName='date' LIMIT 1
+                    ) AS publication_date,
+                    (
+                        SELECT v.value
+                        FROM itemData id JOIN fields f ON f.fieldID=id.fieldID
+                        JOIN itemDataValues v ON v.valueID=id.valueID
+                        WHERE id.itemID=i.itemID AND f.fieldName='publicationTitle' LIMIT 1
+                    ) AS publication_title,
+                    (
+                        SELECT group_concat(
+                            CASE WHEN c.fieldMode=1
+                                 THEN COALESCE(c.lastName, '')
+                                 ELSE trim(COALESCE(c.firstName, '')||' '||COALESCE(c.lastName, ''))
+                            END,
+                            '; '
+                        )
+                        FROM itemCreators ic JOIN creators c ON c.creatorID=ic.creatorID
+                        WHERE ic.itemID=i.itemID
+                    ) AS authors,
+                    it.typeName AS item_type
+                FROM items i
+                JOIN libraries l ON l.libraryID=i.libraryID
+                JOIN itemTypes it ON it.itemTypeID=i.itemTypeID
+                LEFT JOIN feedItems fi ON fi.itemID=i.itemID
+                LEFT JOIN feeds l_feed ON l_feed.libraryID=l.libraryID
+                WHERE {where_sql}
+                ORDER BY {order_sql}
+                LIMIT ?
+            """
+            rows = conn.execute(sql, [*params, safe_limit]).fetchall()
+            results: list[dict[str, Any]] = []
+            for row in rows:
+                arxiv_id = _arxiv_id_from_url_or_doi(
+                    str(row["url"] or ""), str(row["doi"] or "")
+                )
+                results.append(
+                    {
+                        "item_id": int(row["itemID"]),
+                        "feed_library_id": int(row["feed_library_id"]),
+                        "feed_name": self._sanitize_text(str(row["feed_name"] or "")),
+                        "guid": self._sanitize_text(str(row["guid"] or "")),
+                        "title": self._sanitize_text(str(row["title"] or "")),
+                        "abstract": self._sanitize_text(str(row["abstract"] or "")),
+                        "url": self._sanitize_text(str(row["url"] or "")),
+                        "doi": self._sanitize_text(str(row["doi"] or "")),
+                        "arxiv_id": arxiv_id,
+                        "publication_date": str(row["publication_date"] or ""),
+                        "publication_title": self._sanitize_text(
+                            str(row["publication_title"] or "")
+                        ),
+                        "authors": self._sanitize_text(str(row["authors"] or "")),
+                        "item_type": str(row["item_type"] or "journalArticle"),
+                        "read_time": str(row["readTime"] or "") or None,
+                        "date_added": str(row["dateAdded"] or ""),
+                        "date_modified": str(row["dateModified"] or ""),
+                    }
+                )
+            return results
+
+        return self._execute_read(_read)
+
+    def find_by_external_id(
+        self, doi: str | None = None, arxiv_id: str | None = None
+    ) -> str | None:
+        """Look up an existing user-library item by DOI or arXiv ID.
+
+        Used for dedup before materializing a feed item: if the paper is already
+        in the user's library, skip creating a duplicate.
+        Returns the item key if found, else None.
+        """
+        if not doi and not arxiv_id:
+            return None
+
+        def _read(conn: sqlite3.Connection) -> str | None:
+            user_lib_row = conn.execute(
+                "SELECT libraryID FROM libraries WHERE type='user' LIMIT 1"
+            ).fetchone()
+            if not user_lib_row:
+                return None
+            user_lib_id = int(user_lib_row["libraryID"])
+
+            # DOI direct match (Zotero stores DOI in the DOI field)
+            if doi:
+                doi_norm = doi.strip().lower()
+                if doi_norm:
+                    row = conn.execute(
+                        """
+                        SELECT i.key FROM items i
+                        JOIN itemData id ON id.itemID=i.itemID
+                        JOIN fields f ON f.fieldID=id.fieldID
+                        JOIN itemDataValues v ON v.valueID=id.valueID
+                        LEFT JOIN deletedItems di ON di.itemID=i.itemID
+                        WHERE i.libraryID=? AND f.fieldName='DOI'
+                          AND lower(v.value)=?
+                          AND di.itemID IS NULL
+                        LIMIT 1
+                        """,
+                        (user_lib_id, doi_norm),
+                    ).fetchone()
+                    if row:
+                        return str(row["key"])
+
+            # arXiv ID: check URL field (Zotero typically stores arXiv as URL)
+            if arxiv_id:
+                arxiv_norm = arxiv_id.strip().lower()
+                if arxiv_norm:
+                    pattern = f"%{arxiv_norm}%"
+                    row = conn.execute(
+                        """
+                        SELECT i.key FROM items i
+                        JOIN itemData id ON id.itemID=i.itemID
+                        JOIN fields f ON f.fieldID=id.fieldID
+                        JOIN itemDataValues v ON v.valueID=id.valueID
+                        LEFT JOIN deletedItems di ON di.itemID=i.itemID
+                        WHERE i.libraryID=? AND f.fieldName IN ('url', 'DOI')
+                          AND lower(v.value) LIKE ?
+                          AND di.itemID IS NULL
+                        LIMIT 1
+                        """,
+                        (user_lib_id, pattern),
+                    ).fetchone()
+                    if row:
+                        return str(row["key"])
+            return None
+
+        return self._execute_read(_read)
+
+    def get_item_membership(self, item_key: str) -> dict[str, Any]:
+        """Return collection + trash + engagement-tag membership for one item.
+
+        Used by the Phase 1.5 outcome detector: an item the agent materialized
+        N days ago is now queried to see whether the user kept it (collection
+        membership), filed it (out of Inbox), trashed it (deletedItems), or
+        engaged with it (🧠/👀 tags).
+
+        Returns a dict with:
+          - exists (bool): the item still exists in `items`
+          - is_trashed (bool): row present in `deletedItems`
+          - collection_keys (list[str]): collection keys this item belongs to
+          - collection_names (list[str]): collection names (parallel to keys)
+          - is_in_inbox (bool): membership in the "Inbox" collection
+          - tags (list[str]): every tag on this item
+          - has_engagement_tag (bool): any tag containing 🧠 or 👀
+
+        For a hard-deleted item (gone from `items`), returns
+        `{"exists": False, "is_trashed": False, "collection_keys": [],
+          "collection_names": [], "is_in_inbox": False, "tags": [],
+          "has_engagement_tag": False}`.
+        """
+
+        def _read(conn: sqlite3.Connection) -> dict[str, Any]:
+            row = conn.execute(
+                "SELECT itemID FROM items WHERE key = ? LIMIT 1",
+                (item_key,),
+            ).fetchone()
+            if not row:
+                return {
+                    "exists": False,
+                    "is_trashed": False,
+                    "collection_keys": [],
+                    "collection_names": [],
+                    "is_in_inbox": False,
+                    "tags": [],
+                    "has_engagement_tag": False,
+                }
+            item_id = int(row["itemID"])
+            trashed_row = conn.execute(
+                "SELECT 1 FROM deletedItems WHERE itemID = ? LIMIT 1",
+                (item_id,),
+            ).fetchone()
+            is_trashed = trashed_row is not None
+            collection_rows = conn.execute(
+                """
+                SELECT c.key AS collection_key, c.collectionName AS collection_name
+                FROM collectionItems ci
+                JOIN collections c ON c.collectionID = ci.collectionID
+                WHERE ci.itemID = ?
+                """,
+                (item_id,),
+            ).fetchall()
+            collection_keys: list[str] = []
+            collection_names: list[str] = []
+            for crow in collection_rows:
+                collection_keys.append(str(crow["collection_key"] or ""))
+                collection_names.append(str(crow["collection_name"] or ""))
+            is_in_inbox = any(name.casefold() == "inbox" for name in collection_names)
+            tag_rows = conn.execute(
+                """
+                SELECT t.name
+                FROM itemTags it
+                JOIN tags t ON t.tagID = it.tagID
+                WHERE it.itemID = ?
+                """,
+                (item_id,),
+            ).fetchall()
+            tags = [str(t["name"] or "") for t in tag_rows if str(t["name"] or "").strip()]
+            has_engagement = any("🧠" in t or "👀" in t for t in tags)
+            return {
+                "exists": True,
+                "is_trashed": is_trashed,
+                "collection_keys": collection_keys,
+                "collection_names": collection_names,
+                "is_in_inbox": is_in_inbox,
+                "tags": tags,
+                "has_engagement_tag": has_engagement,
+            }
 
         return self._execute_read(_read)
 
@@ -564,8 +934,12 @@ class ZoteroReader:
     def _connect(self) -> sqlite3.Connection:
         return self._connect_db(self.db_path)
 
-    def _connect_db(self, db_path: Path) -> sqlite3.Connection:
-        uri = f"file:{db_path}?mode=ro"
+    def _connect_db(self, db_path: Path, *, immutable: bool = False) -> sqlite3.Connection:
+        # immutable=1 disables WAL replay and change detection. Safe ONLY for snapshot
+        # copies in a temp dir (where the file truly won't change). Never apply to the
+        # live Zotero DB while Zotero may be writing — that produces stale reads.
+        params = "mode=ro&immutable=1" if immutable else "mode=ro"
+        uri = f"file:{db_path}?{params}"
         conn = sqlite3.connect(uri, uri=True, timeout=self._SQLITE_TIMEOUT_SECONDS)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA query_only = ON")
@@ -602,7 +976,10 @@ class ZoteroReader:
             snapshot_dir = Path(tmp_dir)
             snapshot_db_path = snapshot_dir / self.db_path.name
             self._copy_database_snapshot(snapshot_db_path)
-            conn = self._connect_db(snapshot_db_path)
+            # immutable=1 tells SQLite to skip WAL replay on the snapshot copy. This
+            # gives us a consistent point-in-time view even if the source DB's WAL/SHM
+            # was mid-flight when we copied — without needing write access to checkpoint.
+            conn = self._connect_db(snapshot_db_path, immutable=True)
             try:
                 return fn(conn)
             except sqlite3.Error as exc:
@@ -659,6 +1036,20 @@ class ZoteroReader:
         nodes.sort(key=lambda node: str(node.get("name") or "").lower())
         for node in nodes:
             ZoteroReader._sort_collection_nodes(node.get("children", []))
+
+    @staticmethod
+    def _sanitize_text(value: str) -> str:
+        """Strip injection-risk control + Unicode tag chars from feed-supplied text.
+
+        Defense layer 1 against indirect prompt injection: feed abstracts go
+        directly into the triage LLM prompt. Without this strip, U+E0000-U+E007F
+        tag chars or control chars can smuggle hidden instructions past visual
+        review. The triage prompt also wraps the content in <untrusted_input>
+        tags as layer 2 (see goals.yaml prompts.triage).
+        """
+        if not value:
+            return ""
+        return _INJECTION_CHAR_PATTERN.sub("", value)
 
     @staticmethod
     def _split_blob(blob: str) -> list[str]:

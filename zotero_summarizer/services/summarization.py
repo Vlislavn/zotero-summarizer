@@ -133,6 +133,197 @@ def _new_batch_id() -> str:
     return datetime.now(timezone.utc).strftime("batch_%Y%m%d_%H%M%S_%f")
 
 
+def run_abstract_pipeline(req: SummarizeRequest, log_prefix: str | None = None) -> SummarizeResponse:
+    """Triage a paper using only title + abstract (no PDF).
+
+    Used by the RSS-feed batch processor: feed items have title + abstract but
+    not yet a downloaded PDF. The same refine + triage prompts are reused; the
+    LLM operates on the abstract directly. Zotero's "Find Available PDF"
+    feature fetches PDFs after the item lands in a collection, so deep-text
+    analysis can happen on a future re-triage if the user promotes the paper.
+
+    The corpus pre-filter still applies — papers with very low corpus affinity
+    are fast-rejected before any LLM call, exactly as in `run_pipeline`.
+    """
+    app_state = state()
+    config: GoalsConfig = app_state.app_state.config
+    llm: LLMClient = app_state.llm_refine
+    prefix = log_prefix or build_log_prefix(req)
+    pipeline_started = perf_counter()
+
+    abstract_text = (req.abstract or "").strip()
+    if not abstract_text:
+        # Without an abstract there's nothing for the LLM to evaluate.
+        return _abstract_only_empty_response("Feed item missing abstract")
+
+    log_context(prefix, "abstract pipeline started chars=%d", len(abstract_text))
+
+    corpus_context = corpus.run_corpus_match(req, abstract_text)
+    log_context(
+        prefix,
+        "corpus stage has_corpus=%s affinity=%.3f matched_goal=%s",
+        corpus_context.get("has_corpus"),
+        corpus_context.get("affinity_score", 0.0),
+        corpus_context.get("matched_goal", ""),
+    )
+
+    if (
+        corpus_context.get("has_corpus")
+        and float(corpus_context.get("affinity_score", 0.0)) < config.corpus.similarity_threshold
+    ):
+        log_context(prefix, "fast-rejected by corpus threshold=%.3f", config.corpus.similarity_threshold)
+        return _fast_reject_response(req, corpus_context, abstract_text)
+
+    # Use the abstract as paper_text directly — same refine/triage prompts.
+    refined = _refine_with_retry(llm, config, req, abstract_text, prefix)
+    triage = _run_triage(llm, config, req, refined, corpus_context)
+    composite_score = scoring.compute_composite_score(triage, float(corpus_context.get("affinity_score", 0.0)))
+    mapped_priority = scoring.map_priority_from_score(composite_score)
+
+    log_context(
+        prefix,
+        "abstract pipeline completed in %.2fs composite=%.2f priority=%s",
+        perf_counter() - pipeline_started,
+        composite_score,
+        mapped_priority,
+    )
+    return _assemble_summary_response(
+        refined, triage, composite_score, mapped_priority, corpus_context
+    )
+
+
+def _abstract_only_empty_response(reason: str) -> SummarizeResponse:
+    return SummarizeResponse(
+        executive_summary=reason,
+        should_deep_read="No.",
+        key_sections_to_read=[],
+        relevance_to_research="",
+        controversial_points="",
+        industry_academy_impact="",
+        unknown_unknowns="",
+        implementation_quickstart="",
+        key_findings=[],
+        methods="",
+        limitations="",
+        relevance_score=1,
+        composite_relevance_score=1.0,
+        reading_priority=ReadingPriority.DONT_READ.value,
+        tags=["abstract_missing"],
+        triage_rationale=reason,
+        triage_dimensions=None,
+        triage_confidence=0.5,
+        corpus_affinity_score=0.0,
+    )
+
+
+def _fast_reject_response(
+    req: SummarizeRequest, corpus_context: dict[str, Any], paper_text: str
+) -> SummarizeResponse:
+    """Build a low-priority response when corpus pre-filter rejects."""
+    summary_seed = (req.abstract or paper_text).strip()[:2000] or "Low corpus affinity."
+    return SummarizeResponse(
+        executive_summary=summary_seed,
+        should_deep_read="No. Low corpus affinity against your engaged library.",
+        key_sections_to_read=[],
+        relevance_to_research="Fast-rejected by corpus similarity pre-filter.",
+        controversial_points="",
+        industry_academy_impact="",
+        unknown_unknowns="",
+        implementation_quickstart="",
+        key_findings=[],
+        methods="",
+        limitations="",
+        relevance_score=1,
+        composite_relevance_score=1.0,
+        reading_priority=ReadingPriority.DONT_READ.value,
+        tags=["prefilter_low_corpus_affinity"],
+        triage_rationale="Corpus affinity was below threshold; paper likely does not match your engaged library profile.",
+        triage_dimensions=None,
+        triage_confidence=0.9,
+        corpus_affinity_score=float(corpus_context.get("affinity_score", 0.0)),
+        corpus_positive_similarity=float(corpus_context.get("positive_similarity", 0.0)),
+        corpus_negative_similarity=float(corpus_context.get("negative_similarity", 0.0)),
+        matched_goal=str(corpus_context.get("matched_goal", "") or ""),
+        matched_goal_similarity=float(corpus_context.get("matched_goal_similarity", 0.0)),
+        suggested_collections=list(corpus_context.get("suggested_collections", [])),
+        top_similar_items=list(corpus_context.get("top_similar_items", [])),
+    )
+
+
+def _refine_with_retry(
+    llm: LLMClient,
+    config: GoalsConfig,
+    req: SummarizeRequest,
+    paper_text: str,
+    prefix: str,
+) -> RefinedSummary:
+    refine_prompt = _build_refine_prompt(config, req, paper_text)
+    refined_text = to_text(llm.prompt(refine_prompt))
+    try:
+        return RefinedSummary.model_validate(extract_json_blob(refined_text))
+    except ValueError:
+        LOGGER.warning("%s refine JSON parse failed, retrying", prefix)
+        retry_prompt = (
+            "The following text contains a research analysis. Return a single valid JSON "
+            "object with keys: executive_summary, should_deep_read, key_sections_to_read, "
+            "relevance_to_research, controversial_points, industry_academy_impact, "
+            "unknown_unknowns, implementation_quickstart, key_findings, methods, limitations. "
+            "Return ONLY the JSON, no other text.\n\n" + refined_text
+        )
+        retry_text = to_text(llm.prompt(retry_prompt))
+        return RefinedSummary.model_validate(extract_json_blob(retry_text))
+
+
+def _run_triage(
+    llm: LLMClient,
+    config: GoalsConfig,
+    req: SummarizeRequest,
+    refined: RefinedSummary,
+    corpus_context: dict[str, Any],
+) -> TriageResult:
+    triage_prompt = _build_triage_prompt(config, req, refined, corpus_context)
+    triage = llm.pydantic_prompt(prompt=triage_prompt, pydantic_model=TriageResult)
+    if not isinstance(triage, TriageResult):
+        triage = TriageResult.model_validate(extract_json_blob(to_text(triage)))
+    return triage
+
+
+def _assemble_summary_response(
+    refined: RefinedSummary,
+    triage: TriageResult,
+    composite_score: float,
+    mapped_priority: str,
+    corpus_context: dict[str, Any],
+) -> SummarizeResponse:
+    return SummarizeResponse(
+        executive_summary=refined.executive_summary,
+        should_deep_read=refined.should_deep_read,
+        key_sections_to_read=refined.key_sections_to_read,
+        relevance_to_research=refined.relevance_to_research,
+        controversial_points=refined.controversial_points,
+        industry_academy_impact=refined.industry_academy_impact,
+        unknown_unknowns=refined.unknown_unknowns,
+        implementation_quickstart=refined.implementation_quickstart,
+        key_findings=refined.key_findings,
+        methods=refined.methods,
+        limitations=refined.limitations,
+        relevance_score=triage.score,
+        composite_relevance_score=composite_score,
+        reading_priority=mapped_priority,
+        tags=triage.tags,
+        triage_rationale=triage.rationale,
+        triage_dimensions=triage.dimensions,
+        triage_confidence=triage.confidence,
+        corpus_affinity_score=float(corpus_context.get("affinity_score", 0.0)),
+        corpus_positive_similarity=float(corpus_context.get("positive_similarity", 0.0)),
+        corpus_negative_similarity=float(corpus_context.get("negative_similarity", 0.0)),
+        matched_goal=str(corpus_context.get("matched_goal", "") or ""),
+        matched_goal_similarity=float(corpus_context.get("matched_goal_similarity", 0.0)),
+        suggested_collections=list(corpus_context.get("suggested_collections", [])),
+        top_similar_items=list(corpus_context.get("top_similar_items", [])),
+    )
+
+
 def run_pipeline(req: SummarizeRequest, log_prefix: str | None = None) -> SummarizeResponse:
     app_state = state()
     config: GoalsConfig = app_state.app_state.config

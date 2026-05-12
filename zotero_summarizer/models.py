@@ -73,7 +73,11 @@ class GoalsConfig(BaseModel):
 class SummarizeRequest(BaseModel):
     title: str = Field(..., min_length=1)
     doi: Optional[str] = None
-    pdf_path: str = Field(..., min_length=1)
+    # pdf_path is required for the PDF pipeline (run_pipeline) but feed items
+    # have no PDF when run_abstract_pipeline is called — empty string is the
+    # documented sentinel for "abstract-only triage". The pipeline functions
+    # validate presence themselves.
+    pdf_path: str = ""
     abstract: Optional[str] = None
 
 

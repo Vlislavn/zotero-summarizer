@@ -44,10 +44,23 @@ http://127.0.0.1:8000/results
 ## CLI
 
 ```bash
-zotero-summarizer serve
-zotero-summarizer mcp
-zotero-summarizer migrate
-zotero-summarizer smoke-test
+zotero-summarizer serve              # FastAPI server (browser UI)
+zotero-summarizer mcp                # MCP server over stdio
+zotero-summarizer migrate            # Init/migrate local SQLite stores
+zotero-summarizer smoke-test         # Verify package + app construction
+```
+
+### Feed processor (Phase 1.5 daemon)
+
+The primary user workflow — see [feeds.md](feeds.md) for the full guide.
+
+```bash
+zotero-summarizer feeds list                       # Show configured RSS feeds
+zotero-summarizer feeds preview <id> --unread-only # Peek at unread items
+zotero-summarizer feeds serve                      # Run the background daemon
+zotero-summarizer feeds tick                       # One tick, then exit (cron-friendly)
+zotero-summarizer feeds select-daily               # Manually trigger daily selection
+zotero-summarizer feeds run --dry-run              # Phase 1 one-shot batch (legacy)
 ```
 
 Low-level server command:

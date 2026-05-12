@@ -218,6 +218,8 @@ def _get_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
 
 def init_db() -> None:
     """Create or migrate storage schema to support batch history."""
+    from zotero_summarizer.storage import feeds as feeds_storage
+
     conn = _get_conn()
     try:
         conn.execute(_CREATE_BATCH_TABLE)
@@ -226,6 +228,7 @@ def init_db() -> None:
         conn.execute(_CREATE_PENDING_CHANGES_TABLE)
         conn.execute(_CREATE_TRIAGE_JOBS_TABLE)
         conn.execute(_CREATE_TRIAGE_DIMENSION_OVERRIDES_TABLE)
+        feeds_storage.init_feeds_schema(conn)
 
         columns = _get_columns(conn, "triage_results")
         if "batch_id" not in columns:

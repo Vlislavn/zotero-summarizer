@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+from datetime import datetime, timezone
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
@@ -16,6 +17,17 @@ from zotero_summarizer.models import (
 )
 from zotero_summarizer.services._common import LOGGER, unique_non_empty_strings
 from zotero_summarizer.storage import repositories as triage_db
+
+
+# Phase 1.5: provenance constants. The /zs/feeds-v3 system tag and the v3
+# comment header are how the user (and future agents) distinguish notes the
+# daemon wrote from notes the user wrote. The user already has 215 prior
+# v2-format notes; HTML comments survive Zotero's TinyMCE round-trips
+# (verified by precedent in their library).
+NOTE_VERSION = 3
+NOTE_PROVENANCE_NAMESPACE = "zs"  # Continues the existing zotero-summarizer prefix.
+NOTE_PROVENANCE_SOURCE = "feed-batch"
+SYSTEM_TAG_FEEDS_V3 = "/zs/feeds-v3"
 
 
 PRIORITY_TAG_CASEFOLDED = {
@@ -189,29 +201,126 @@ def normalize_collection_suggestions(collections: list[str]) -> list[str]:
     return unique_non_empty_strings(collections)
 
 
-def build_triage_note_html(title: str, summary: SummarizeResponse) -> str:
-    key_sections = "".join(
-        f"<li>{html.escape(section)}</li>" for section in summary.key_sections_to_read if str(section).strip()
-    )
-    findings = "".join(f"<li>{html.escape(finding)}</li>" for finding in summary.key_findings if str(finding).strip())
-    return "".join(
+# --- Reading priority emojis surfaced in the note's headline -----------------
+_PRIORITY_GLYPH = {
+    "must_read": "🔥",
+    "should_read": "👀",
+    "could_read": "📎",
+    "dont_read": "—",
+}
+
+# Zotero's note editor (TinyMCE) silently strips most non-trivial HTML — no CSS,
+# no <div>, no <h1> (which it renders as document title). The note template uses
+# ONLY <h2>, <p>, <ul>/<li>, <strong>, <em>. Adding any other tag will get
+# dropped on display, so the template builder below is the single source of truth
+# for note HTML.
+
+
+def build_provenance_comment(
+    *,
+    run_id: str | None = None,
+    source: str = NOTE_PROVENANCE_SOURCE,
+    version: int = NOTE_VERSION,
+) -> str:
+    """Build the HTML comment that marks a note as agent-generated.
+
+    Format mirrors the user's 215 prior v2 notes (verified to survive Zotero's
+    TinyMCE round-trips), bumped to version=3 with `source=feed-batch` to
+    distinguish daemon-written notes from older library-triage notes.
+
+    The comment is parseable as `key=value;key=value;...` for any future tool
+    that wants to grep notes by run_id, model, or version.
+    """
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    safe_run = (run_id or "").replace("-->", "").replace("<!--", "")
+    safe_source = source.replace("-->", "").replace("<!--", "")
+    fields = [
+        f"{NOTE_PROVENANCE_NAMESPACE}:note_type=triage",
+        f"version={int(version)}",
+        f"generated_at={ts}",
+        f"source={safe_source}",
+    ]
+    if safe_run:
+        fields.append(f"run_id={safe_run}")
+    return f"<!-- {';'.join(fields)} -->"
+
+
+def build_triage_note_html(
+    title: str,
+    summary: SummarizeResponse,
+    *,
+    is_black_swan: bool = False,
+    surprise_score: float | None = None,
+    run_id: str | None = None,
+    include_provenance: bool = True,
+) -> str:
+    """Render a concise Zotero-renderable triage note.
+
+    Phase 1.5 v3 format (verified against the user's 215 prior agent notes in
+    /Users/vladnikulin/Zotero/zotero.sqlite — TinyMCE preserves comments):
+      - Leading <!-- zs:note_type=triage;version=3;... --> provenance marker.
+      - NO <div class="zotero-note znv1"> wrapper (the user said v2 "looks
+        poorly"; Zotero TinyMCE often strips <div> anyway).
+      - NO "[ZS TRIAGE v2] 🔴 Article Analysis" heading (was the noise).
+      - 3 sections + 1 footer, target <150 words rendered.
+      - Only Zotero-safe HTML (<h2>, <p>, <ul>/<li>, <strong>, <em>).
+      - Concrete metrics in key findings (the LLM is prompted for numbers).
+      - Optional black-swan badge in the footer.
+
+    The other 8 LLM-produced fields (controversial_points, methods, limitations,
+    industry_academy_impact, etc.) stay in triage_history.db for inspection via
+    the web UI — they're deliberately omitted from the note to keep it scannable.
+    """
+    glyph = _PRIORITY_GLYPH.get(summary.reading_priority, "•")
+    priority_label = summary.reading_priority.replace("_", " ").title()
+
+    # Verdict: prefer the LLM's triage rationale, fall back to should_deep_read,
+    # then executive_summary, then a bare reference to the paper title so the
+    # note is never empty.
+    verdict = (summary.triage_rationale or summary.should_deep_read or summary.executive_summary or "").strip()
+    if not verdict:
+        verdict = f"Triaged paper: {title or 'Untitled'}."
+
+    # Pick at most 3 key findings; skip blanks.
+    findings = [f for f in (summary.key_findings or []) if str(f).strip()][:3]
+    findings_html = "".join(f"<li>{html.escape(str(f))}</li>" for f in findings) or "<li><em>No specific findings extracted.</em></li>"
+
+    # Relevance — keep to 1-2 sentences max.
+    relevance = (summary.relevance_to_research or "").strip()
+    if not relevance:
+        relevance = "(No specific connection to your goals extracted.)"
+
+    tags_preview = ", ".join(html.escape(t) for t in (summary.tags or [])[:3]) or "—"
+    matched_goal = html.escape(summary.matched_goal or "—")
+
+    parts: list[str] = []
+    if include_provenance:
+        parts.append(build_provenance_comment(run_id=run_id))
+    parts.extend(
         [
-            "<h1>Zotero Summarizer Triage Note</h1>",
-            f"<p><strong>Title:</strong> {html.escape(title)}</p>",
-            f"<p><strong>Priority:</strong> {html.escape(summary.reading_priority)}</p>",
-            f"<p><strong>Composite score:</strong> {summary.composite_relevance_score:.2f}</p>",
-            "<h2>Executive Summary</h2>",
-            f"<p>{html.escape(summary.executive_summary)}</p>",
-            "<h2>Should I Deep Read?</h2>",
-            f"<p>{html.escape(summary.should_deep_read)}</p>",
-            "<h2>Key Sections</h2>",
-            f"<ul>{key_sections or '<li>None</li>'}</ul>",
-            "<h2>Key Findings</h2>",
-            f"<ul>{findings or '<li>None</li>'}</ul>",
-            "<h2>Triage Rationale</h2>",
-            f"<p>{html.escape(summary.triage_rationale)}</p>",
+            f"<h2>{html.escape(glyph)} {html.escape(priority_label)}</h2>",
+            f"<p>{html.escape(verdict)}</p>",
+            "<h2>Key findings</h2>",
+            f"<ul>{findings_html}</ul>",
+            "<h2>Relevance to my work</h2>",
+            f"<p>{html.escape(relevance)}</p>",
         ]
     )
+
+    # Compact footer in <em> to visually separate metadata from content.
+    footer_bits = [
+        f"score {summary.composite_relevance_score:.1f}",
+        f"goal: {matched_goal}",
+        f"tags: {tags_preview}",
+    ]
+    if is_black_swan:
+        if surprise_score is not None:
+            footer_bits.append(f"🦢 surprise {surprise_score:.2f}")
+        else:
+            footer_bits.append("🦢 surprise pick")
+    parts.append(f"<p><em>{' · '.join(footer_bits)}</em></p>")
+
+    return "".join(parts)
 
 
 def queue_changes_for_item(item_key: str, title: str, summary: SummarizeResponse) -> int:

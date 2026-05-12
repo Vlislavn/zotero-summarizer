@@ -85,9 +85,36 @@ After successful apply, the app refreshes corpus metadata for affected items and
 
 ## Feedback Loop
 
-Feedback comes from two sources:
+Feedback comes from three sources:
 
 - Explicit approve/reject actions in the UI.
 - Inferred corpus signals from tags, notes, annotations, and stale untouched papers.
+- **Phase 1.5 outcome detection** (feeds daemon): 7 days after a paper lands
+  in Inbox via the daemon, the system queries Zotero to see whether the user
+  kept it (kept_inbox, weak negative), filed it to a real collection
+  (moved_collection, weak positive), deleted it from all collections
+  (deleted_all, **strong negative**), trashed it (trashed, **strong negative**),
+  or tagged it 🧠/👀 (engaged, strong positive). The asymmetric weights
+  (delete:ignore = 6:1) follow Schnabel et al. *Recommendations as Treatments*
+  (ICML 2016).
 
 Feedback is stored in `user_feedback` and is used by corpus matching and calibration metrics. Calibration compares model-positive priorities (`must_read`, `should_read`) against user-positive feedback (`approve`).
+
+## RSS Feed Daemon (Phase 1.5)
+
+A second subsystem — see [feeds.md](feeds.md) — runs alongside the library
+triage pipeline. It consumes Zotero's `feedItems` table (RSS aggregator state)
+rather than the user library, and is structured as a long-running daemon
+(`feeds serve`):
+
+- Every 5 minutes: triage K=5 unread items, mark them read in Zotero, resolve
+  any due outcomes from prior materializations.
+- Every 24 hours: plateau-select 1–2 best items from the rolling 24-hour
+  triaged pool and materialize them directly into the **Inbox** collection
+  (bypassing the pending-changes queue — feed creates are low-blast-radius).
+
+The daemon's selection criterion is `feedItems.readTime IS NULL`, not a
+date window — Zotero's unread badge IS the work queue. Materialized items
+get a `<!-- zs:note_type=triage;version=3;... -->` provenance comment and
+the auto-tag `/zs/feeds-v3` (itemTags.type=1) so they're machine-distinguishable
+from user-written notes.

@@ -98,6 +98,53 @@ corpus:
 
 `api_base: ${OPENAI_API_BASE}` is expanded from `.env` at startup. Keep the provider URL in `.env` so the repo remains generic.
 
+### `feeds:` section (RSS feed daemon)
+
+The feed daemon ([feeds.md](feeds.md)) reads its config from the `feeds:` block:
+
+```yaml
+feeds:
+  enabled: true
+  inbox_collection_name: Inbox
+  dedup_against_library: true
+  # --- daemon ----------------------------------------------------------
+  daemon_enabled: true
+  daemon_tick_seconds: 300        # 5 min between ticks
+  daemon_batch_size: 5            # items LLM-scored per tick
+  mark_processed_as_read: true    # write feedItems.readTime = now
+  outcome_window_days: 7          # wait N days before scoring outcome
+  outcome_check_per_tick: 3       # resolve up to N due outcomes per tick
+  # --- daily selection -------------------------------------------------
+  daily_selection_interval_hours: 24
+  daily_window_hours: 24
+  daily_target_min: 1
+  daily_target_max: 2
+  daily_force_black_swan_every_run: false
+  # --- legacy one-shot CLI --------------------------------------------
+  default_since_days: 7
+  default_item_type: journalArticle
+
+selection:
+  target_fraction: 0.05    # used by the one-shot `feeds run` only
+  hard_min: 10
+  hard_max: 15
+  kneedle_sensitivity: 1.0
+
+surprise:
+  black_swan_fraction: 0.10
+  min_score: 0.30
+  black_swan_tag: "🦢 black-swan"
+```
+
+Tuning notes:
+
+- **Throughput**: raise `daemon_batch_size` if your hardware can take more
+  LLM calls per tick; lower `daemon_tick_seconds` for tighter cadence.
+- **More aggressive pre-filter**: raise `corpus.similarity_threshold` from
+  −0.3 toward 0.0 to fast-reject more items before LLM calls.
+- **Different daily target**: change `daily_target_max` (default 2). Going
+  higher than ~5/day defeats the "1–2 best" goal.
+
 ## LLM Notes
 
 The app uses an OpenAI-compatible endpoint through the OnPrem LLM wrapper. The LLM adapter passes:
