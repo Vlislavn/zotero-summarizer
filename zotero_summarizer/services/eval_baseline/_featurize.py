@@ -28,6 +28,7 @@ class FeaturizedGolden:
     y_priority: list[str]
     item_keys: list[str]
     n_features: int
+    sample_weights: np.ndarray | None = None  # (n,) float — per-row confidence
 
 
 def featurize_golden(
@@ -45,7 +46,14 @@ def featurize_golden(
     y_continuous: list[float] = []
     y_priority: list[str] = []
     selected: list[dict[str, str]] = []
+    from zotero_summarizer.domain import is_training_eligible
+
     for r in rows:
+        # Hygiene cut: F5 (in_trash) + Sprint-1 tier filter (first_glance, meta).
+        # Matches production training in classifier.predict_new_items and
+        # classifier_persistence.train_and_save.
+        if not is_training_eligible(r):
+            continue
         gold = (r.get("gold_priority_final") or "").strip()
         title = (r.get("title") or "").strip()
         abstract = (r.get("abstract") or "").strip()
@@ -79,13 +87,15 @@ def featurize_golden(
     embed_cache, openalex_client = classifier._build_aux_providers(
         corpus_db_path, goals_config,
     )
+    from zotero_summarizer.services.library_features import (
+        compute_library_features,
+        load_positive_library_from_rows,
+    )
+    library = load_positive_library_from_rows(rows, corpus_db_path)
     X = np.zeros((n, classifier.FEATURE_DIM), dtype=np.float32)
     for i, (k, t, a) in enumerate(zip(keys, titles, abstracts)):
-        authors = (selected[i].get("authors") or "").strip()
-        venue = (selected[i].get("venue") or "").strip()
-        X[i, :classifier.EMBEDDING_DIM] = classifier.get_or_compute_embedding(
-            corpus_db_path, k, t, a, authors=authors, venue=venue,
-        )
+        emb = classifier.get_or_compute_embedding(corpus_db_path, k, t, a)
+        X[i, :classifier.EMBEDDING_DIM] = emb
         year_str = (selected[i].get("year") or "").strip()
         year_i = int(year_str[:4]) if year_str[:4].isdigit() else None
         doi = (selected[i].get("doi") or "").strip()
@@ -93,12 +103,22 @@ def featurize_golden(
             embed_cache, openalex_client,
             title=t, abstract=a, doi=doi, year=year_i,
         )
+        authors_str = (selected[i].get("authors") or "").strip()
+        nearest, centroid, recent, drift, authors_overlap = compute_library_features(
+            emb, library, candidate_authors=authors_str,
+        )
         X[i, classifier.EMBEDDING_DIM:] = classifier._extra_features(
             selected[i], t, a,
             corpus_affinity=affinity, prestige_score=prestige,
+            nearest_kept_cosine=nearest, positive_centroid_cosine=centroid,
+            recent_centroid_cosine=recent, topic_drift=drift,
+            author_overlap_count=authors_overlap,
         )
         if progress_cb is not None and (i + 1) % 50 == 0:
             progress_cb(i + 1, n)
+    from zotero_summarizer.services.label_weights import compute_row_weights
+
+    weights = compute_row_weights(selected)
     return FeaturizedGolden(
         X=X,
         y_binary=np.asarray(y_binary, dtype=np.int32),
@@ -106,6 +126,7 @@ def featurize_golden(
         y_priority=y_priority,
         item_keys=keys,
         n_features=classifier.FEATURE_DIM,
+        sample_weights=weights,
     )
 
 

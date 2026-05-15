@@ -488,6 +488,78 @@ def _goldenset_eval_baseline(args: argparse.Namespace) -> int:
     return 0
 
 
+def _goldenset_tune(args: argparse.Namespace) -> int:
+    """Sprint-3c — Optuna hyperparameter sweep over the LightGBM regressor."""
+    import csv as _csv
+
+    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.tune import (
+        DEFAULT_TUNED_PARAMS_PATH,
+        tune_lightgbm,
+    )
+
+    settings = Settings.load(project_root=args.project_root)
+    input_csv = Path(args.input or settings.project_root / "zotero-summarizer-golden.csv")
+    if not input_csv.exists():
+        raise FileNotFoundError(f"Golden CSV not found at {input_csv}")
+
+    with input_csv.open("r", encoding="utf-8", newline="") as f:
+        rows = list(_csv.DictReader(f))
+
+    goals_config = read_config(settings.config_path)
+    output_path = Path(args.output) if args.output else DEFAULT_TUNED_PARAMS_PATH
+
+    result = tune_lightgbm(
+        rows,
+        corpus_db_path=settings.corpus_db_path,
+        goals_config=goals_config,
+        n_trials=args.n_trials,
+        n_folds=args.n_folds,
+        seed=args.seed,
+        output_path=output_path,
+    )
+    print(json.dumps({
+        "best_value_spearman_median": result.best_value,
+        "n_trials": result.n_trials_completed,
+        "best_pca_specter_dim": result.best_pca_specter_dim,
+        "best_lgbm_params": result.best_params,
+        "output_path": str(output_path),
+    }, indent=2))
+    return 0
+
+
+def _goldenset_suggest_labels(args: argparse.Namespace) -> int:
+    """Print library rows whose re-labelling would help the model most.
+
+    See :mod:`services.active_learning` for the ranking criterion.
+    """
+    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.active_learning import (
+        format_suggestions_markdown,
+        load_rows,
+        suggest_border_labels,
+    )
+
+    settings = Settings.load(project_root=args.project_root)
+    input_csv = Path(args.input or settings.project_root / "zotero-summarizer-golden.csv")
+    rows = load_rows(input_csv)
+    goals_config = read_config(settings.config_path)
+    suggestions = suggest_border_labels(
+        rows,
+        corpus_db_path=settings.corpus_db_path,
+        goals_config=goals_config,
+        classifier_name=args.classifier,
+        top_k=args.top_k,
+    )
+    print(format_suggestions_markdown(suggestions))
+    print()
+    print(f"Listed {len(suggestions)} border-case library rows. Open each in")
+    print("Zotero and tag (🧠 must / 👀 should / 🥱 don't), then run:")
+    print("  zotero-summarizer goldenset export      # re-export from Zotero")
+    print("  zotero-summarizer goldenset train-classifier --force --classifier lightgbm")
+    return 0
+
+
 def _goldenset_compare(args: argparse.Namespace) -> int:
     """Print every classifier's latest run side-by-side from the run log."""
     from zotero_summarizer.services import run_log
@@ -806,8 +878,6 @@ def _goldenset_predict_feed(args: argparse.Namespace) -> int:
         classifier_name=args.classifier,
         pca_dim=args.pca_dim,
         n_folds=args.folds,
-        calibration=args.calibration,
-        threshold_strategy=args.threshold_strategy,
         goals_config=goals_config,
         progress_cb=_progress,
     )
@@ -831,7 +901,7 @@ def _goldenset_classify(args: argparse.Namespace) -> int:
     """
     import csv as _csv
 
-    from zotero_summarizer.services import classifier, run_log
+    from zotero_summarizer.services import classifier, hybrid_gt, run_log
     from zotero_summarizer.services._common import read_config
 
     settings = Settings.load(project_root=args.project_root)
@@ -841,6 +911,14 @@ def _goldenset_classify(args: argparse.Namespace) -> int:
 
     with input_csv.open("r", encoding="utf-8", newline="") as f:
         rows = list(_csv.DictReader(f))
+
+    # Phase 1.18 Step 2: overlay user verdicts from label_verdicts. This
+    # closes the loop on the Annotate UI — labels typed in the React tool
+    # now act as ground truth for the next train.
+    rows = hybrid_gt.apply_hybrid(rows, settings.triage_db_path)
+    n_user = sum(1 for r in rows if r.get("_hybrid_source") == hybrid_gt.SOURCE_USER)
+    if n_user:
+        print(f"  hybrid GT: {n_user} user-overridden labels applied")
 
     def _progress(done: int, total: int) -> None:
         print(f"  embedded {done}/{total}", flush=True)
@@ -1554,6 +1632,64 @@ def build_parser() -> argparse.ArgumentParser:
     )
     gs_eval_baseline.add_argument("--project-root", default=None)
     gs_eval_baseline.set_defaults(func=_goldenset_eval_baseline)
+
+    gs_tune = gs_sub.add_parser(
+        "tune",
+        help=(
+            "Sprint-3c (May 2026) — Optuna sweep over LightGBM hyperparameters "
+            "and PCA dim. Maximises median per-fold Spearman ρ over a "
+            "5-fold CV. Writes the winning params to "
+            "~/.cache/zotero-summarizer/optuna-best-params.json so the next "
+            "`train-classifier --force` retrain picks them up automatically."
+        ),
+    )
+    gs_tune.add_argument(
+        "--input", default=None,
+        help="Path to golden CSV. Default: <project-root>/zotero-summarizer-golden.csv",
+    )
+    gs_tune.add_argument(
+        "--n-trials", type=int, default=50,
+        help="Number of Optuna trials. Default: 50.",
+    )
+    gs_tune.add_argument(
+        "--n-folds", type=int, default=5,
+        help="CV folds per trial. Default: 5.",
+    )
+    gs_tune.add_argument(
+        "--seed", type=int, default=42,
+        help="Random seed.",
+    )
+    gs_tune.add_argument(
+        "--output", default=None,
+        help="Where to write best params. Default: ~/.cache/zotero-summarizer/optuna-best-params.json",
+    )
+    gs_tune.add_argument("--project-root", default=None)
+    gs_tune.set_defaults(func=_goldenset_tune)
+
+    gs_suggest = gs_sub.add_parser(
+        "suggest-labels",
+        help=(
+            "Active-learning: print library rows where the regressor's "
+            "predicted score sits closest to a priority border (4.5 / "
+            "3.6 / 2.6). Re-labelling these in Zotero gives the highest "
+            "marginal AUC lift per label."
+        ),
+    )
+    gs_suggest.add_argument(
+        "--input", default=None,
+        help="Path to golden CSV. Default: <project-root>/zotero-summarizer-golden.csv",
+    )
+    gs_suggest.add_argument(
+        "--classifier", default="lightgbm",
+        choices=["lightgbm", "tabpfn", "logreg"],
+        help="Model to use for the predictions. Default: lightgbm.",
+    )
+    gs_suggest.add_argument(
+        "--top-k", type=int, default=20,
+        help="How many border-case rows to print. Default: 20.",
+    )
+    gs_suggest.add_argument("--project-root", default=None)
+    gs_suggest.set_defaults(func=_goldenset_suggest_labels)
 
     gs_compare = gs_sub.add_parser(
         "compare",

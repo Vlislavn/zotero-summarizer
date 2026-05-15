@@ -13,7 +13,7 @@ from zotero_summarizer.services.classifier_persistence import (
 
 def _row_with_known_values(
     embedding_sum: float = 0.6,
-    extras: tuple[float, ...] = (0.1, 0.05, -0.02, 0.0, 0.0, 0.4, 0.08),
+    extras: tuple[float, ...] = (0.1, 0.05, -0.02, 0.0, 0.0, 0.4, 0.08, 0.0, 0.0, 0.0, 0.0, 0.0),
     bias: float = -0.5,
 ) -> np.ndarray:
     """Synthetic SHAP row: known embedding-bucket sum + named extras + bias."""
@@ -43,7 +43,7 @@ def test_format_shap_aggregates_embedding_dimensions():
 
 
 def test_format_shap_preserves_extra_feature_values():
-    extras = (0.1, 0.05, -0.02, 0.07, 0.04, 0.4, 0.08)
+    extras = (0.1, 0.05, -0.02, 0.07, 0.04, 0.4, 0.08, 0.12, -0.03, 0.02, 0.05, 0.01)
     out = _format_shap(_row_with_known_values(extras=extras))
     by_name = {c["feature"]: c["contribution"] for c in out}
     for i, name in enumerate(_EXTRA_FEATURE_NAMES):
@@ -53,7 +53,7 @@ def test_format_shap_preserves_extra_feature_values():
 def test_format_shap_sorted_by_absolute_contribution():
     out = _format_shap(_row_with_known_values(
         embedding_sum=0.1,
-        extras=(0.0, 0.0, 0.0, 0.0, 0.0, 0.42, 0.0),
+        extras=(0.0, 0.0, 0.0, 0.0, 0.0, 0.42, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
         bias=-0.9,
     ))
     abs_vals = [abs(c["contribution"]) for c in out]
@@ -65,7 +65,7 @@ def test_format_shap_completeness_matches_logit():
     """TreeSHAP property: sum(contributions) ≈ raw model logit."""
     out = _format_shap(_row_with_known_values(
         embedding_sum=0.6,
-        extras=(0.1, 0.05, -0.02, 0.0, 0.0, 0.4, 0.08),
+        extras=(0.1, 0.05, -0.02, 0.0, 0.0, 0.4, 0.08, 0.0, 0.0, 0.0, 0.0, 0.0),
         bias=-0.5,
     ))
     total = sum(c["contribution"] for c in out)

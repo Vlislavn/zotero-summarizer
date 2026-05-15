@@ -208,24 +208,38 @@ def test_adaptive_cutoffs_avoid_zero_floor_for_degenerate_negatives():
 
 
 def test_extra_features_includes_corpus_affinity_and_prestige_with_defaults():
-    """When aux providers aren't wired, defaults (0.0 affinity, 3.0 prestige) flow through."""
+    """Defaults: 0.0 affinity, 3.0 prestige, all library features 0.0."""
     row = {"doi": "10.1/x", "venue": "Nature", "year": "2024"}
     out = classifier._extra_features(row, "title goes here", "abstract goes here")
     assert out.shape == (classifier.N_EXTRA_FEATURES,)
-    assert classifier.N_EXTRA_FEATURES == 7
-    # Last two dims are corpus_affinity, prestige_score.
+    assert classifier.N_EXTRA_FEATURES == 12
+    # 5,6 = corpus_affinity, prestige_score; 7..11 = library features.
     assert out[5] == pytest.approx(0.0)
     assert out[6] == pytest.approx(3.0)
+    assert out[7] == pytest.approx(0.0)   # nearest_kept_cosine
+    assert out[8] == pytest.approx(0.0)   # positive_centroid_cosine
+    assert out[9] == pytest.approx(0.0)   # recent_centroid_cosine
+    assert out[10] == pytest.approx(0.0)  # topic_drift
+    assert out[11] == pytest.approx(0.0)  # author_overlap_count
 
 
 def test_extra_features_passes_aux_through():
-    """Explicit aux values land in the last two dims."""
+    """All explicit aux values land in their assigned indices."""
     row = {"doi": "", "venue": "", "year": ""}
     out = classifier._extra_features(
-        row, "t", "a", corpus_affinity=0.42, prestige_score=4.7,
+        row, "t", "a",
+        corpus_affinity=0.42, prestige_score=4.7,
+        nearest_kept_cosine=0.81, positive_centroid_cosine=0.33,
+        recent_centroid_cosine=0.55, topic_drift=0.22,
+        author_overlap_count=3.0,
     )
     assert out[5] == pytest.approx(0.42)
     assert out[6] == pytest.approx(4.7)
+    assert out[7] == pytest.approx(0.81)
+    assert out[8] == pytest.approx(0.33)
+    assert out[9] == pytest.approx(0.55)
+    assert out[10] == pytest.approx(0.22)
+    assert out[11] == pytest.approx(3.0)
 
 
 def test_compute_aux_falls_back_to_neutral_when_no_providers():

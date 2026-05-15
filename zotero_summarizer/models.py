@@ -73,12 +73,11 @@ class ClassifierGateConfig(BaseModel):
     drop_priorities: List[str] = Field(default_factory=lambda: ["dont_read"])
     pca_dim: int = Field(default=100, ge=2, le=500)
     n_folds: int = Field(default=5, ge=2, le=10)
-    # Phase 1.14 partial fix for known threshold bug: when >0, items whose
-    # *raw* (uncalibrated) classifier probability is below this cutoff get
-    # treated as dont_read regardless of the trained `t_could` threshold.
-    # The isotonic calibrator inflates the low end of the score distribution,
-    # so ~70% of items that should be filtered out come out as should_read
-    # under the calibrated thresholds alone. 0.05 is a sensible starting cap.
+    # Deprecated in Sprint-1 redesign (May 2026): kept for config-forward-
+    # compat but no longer applied. The regression-based classifier emits
+    # priorities through `domain.score_to_priority` and the deterministic
+    # bucketing is the single source of truth. Will be removed in a future
+    # major-version bump.
     raw_score_dont_read_below: float = Field(default=0.0, ge=0.0, le=1.0)
     # Phase 1.15 (2.3): counterfactual gate audit. At end of each
     # `_apply_classifier_gate`, resurrect N random rows that the gate

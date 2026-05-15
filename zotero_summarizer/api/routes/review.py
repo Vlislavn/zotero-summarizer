@@ -47,6 +47,7 @@ async def list_review_queue(
     state: str = "awaiting_review",
     since_hours: int = 720,
     limit: int = 1000,
+    sort: str = "recent",
 ) -> dict[str, Any]:
     """List review-queue rows for one decision state.
 
@@ -54,6 +55,12 @@ async def list_review_queue(
     the classifier dropped before LLM so the user can spot-check false
     negatives and relabel them; ``awaiting_review`` (the default) is the
     main triage queue.
+
+    ``sort`` controls ordering:
+      * ``recent`` (default) — by created_at DESC, the existing behaviour.
+      * ``border`` — Sprint-3+ active learning: rank by abs(composite_score
+        − nearest priority threshold). The most "uncertain" rows surface
+        first so triaging them maximises model improvement per click.
     """
     if state not in _LIST_STATES:
         raise APIError(
@@ -61,8 +68,33 @@ async def list_review_queue(
             message=f"state must be one of {_LIST_STATES}; got {state!r}",
             status_code=422,
         )
+    if sort not in ("recent", "border"):
+        raise APIError(
+            error="validation_error",
+            message=f"sort must be one of ('recent', 'border'); got {sort!r}",
+            status_code=422,
+        )
     items = await asyncio.to_thread(review.list_by_state, state, since_hours, limit)
-    return {"state": state, "items": items, "count": len(items)}
+    if sort == "border":
+        from zotero_summarizer.domain import (
+            PRIORITY_COULD_READ_THRESHOLD,
+            PRIORITY_MUST_READ_THRESHOLD,
+            PRIORITY_SHOULD_READ_THRESHOLD,
+        )
+        thresholds = (
+            PRIORITY_COULD_READ_THRESHOLD,
+            PRIORITY_SHOULD_READ_THRESHOLD,
+            PRIORITY_MUST_READ_THRESHOLD,
+        )
+
+        def _border_dist(row: dict[str, Any]) -> float:
+            score = row.get("composite_score")
+            if score is None:
+                return 1e9
+            return float(min(abs(float(score) - t) for t in thresholds))
+
+        items = sorted(items, key=_border_dist)
+    return {"state": state, "items": items, "count": len(items), "sort": sort}
 
 
 async def approve(processed_id: int) -> dict[str, Any]:

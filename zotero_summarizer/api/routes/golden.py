@@ -23,7 +23,11 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services import label_provenance, review_detail as review_detail_svc
+from zotero_summarizer.services import (
+    hybrid_gt,
+    label_provenance,
+    review_detail as review_detail_svc,
+)
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.zotero import get_zotero_reader_or_raise
 from zotero_summarizer.storage import repositories
@@ -261,9 +265,95 @@ async def remove_verdict(item_key: str) -> dict[str, Any]:
     return {"deleted": deleted}
 
 
+async def effective_labels_summary() -> dict[str, Any]:
+    """Aggregate counts for the hybrid ground-truth pipeline.
+
+    Phase 1.18 Step 2: surfaces how many CSV rows have a user verdict
+    overlaid, and of those, how many changed the derived label vs.
+    confirmed it. Powers the "Used as GT" badge and the Settings
+    "Effective labels" widget.
+    """
+    return hybrid_gt.hybrid_summary(_golden_csv_path(), _db_path())
+
+
+async def effective_labels_list() -> dict[str, Any]:
+    """Return the full hybrid ground-truth map.
+
+    Keys are item_key, values carry both the derived and user labels and
+    the ``effective_priority`` that ML pipelines use. Useful for the UI
+    to mark which rows are user-overridden.
+    """
+    merged = hybrid_gt.load_hybrid_labels(_golden_csv_path(), _db_path())
+    return {
+        "items": list(merged.values()),
+        "total": len(merged),
+    }
+
+
+async def border_suggestions(top_k: int = 20) -> dict[str, Any]:
+    """Active-learning endpoint: return library rows whose re-labelling
+    would maximally help the model, ranked by distance to the nearest
+    priority threshold (4.5 / 3.6 / 2.6). The user opens each one in the
+    UI and updates the verdict.
+    """
+    from zotero_summarizer.services import active_learning
+    from zotero_summarizer.services._common import read_config
+
+    csv_path = _golden_csv_path()
+    if not csv_path.exists():
+        raise APIError(
+            error="not_found",
+            message=f"golden CSV missing at {csv_path}",
+            status_code=404,
+        )
+    rows = active_learning.load_rows(csv_path)
+    goals_config = read_config(get_settings().config_path)
+    suggestions = await asyncio.to_thread(
+        active_learning.suggest_border_labels,
+        rows,
+        corpus_db_path=get_settings().corpus_db_path,
+        goals_config=goals_config,
+        classifier_name="lightgbm",
+        top_k=int(top_k),
+    )
+    return {
+        "items": [
+            {
+                "item_key": s.item_key,
+                "title": s.title,
+                "authors": s.authors,
+                "venue": s.venue,
+                "abstract_preview": s.abstract_preview,
+                "predicted_score": round(s.predicted_score, 4),
+                "predicted_priority": s.predicted_priority,
+                "current_priority": s.current_priority,
+                "border_distance": round(s.border_distance, 4),
+                "disagrees": s.disagrees,
+            }
+            for s in suggestions
+        ],
+        "total": len(suggestions),
+    }
+
+
 router.add_api_route("/api/golden/provenance", get_one, methods=["GET"])
 router.add_api_route("/api/golden/provenance/list", list_all, methods=["GET"])
 router.add_api_route("/api/golden/review-detail", review_detail, methods=["GET"])
 router.add_api_route("/api/golden/verdict", submit_verdict, methods=["POST"])
 router.add_api_route("/api/golden/verdicts", list_verdicts, methods=["GET"])
 router.add_api_route("/api/golden/verdict", remove_verdict, methods=["DELETE"])
+router.add_api_route(
+    "/api/golden/effective-labels/summary",
+    effective_labels_summary,
+    methods=["GET"],
+)
+router.add_api_route(
+    "/api/golden/border-suggestions",
+    border_suggestions,
+    methods=["GET"],
+)
+router.add_api_route(
+    "/api/golden/effective-labels",
+    effective_labels_list,
+    methods=["GET"],
+)

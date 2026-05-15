@@ -93,26 +93,43 @@ def _one_fold_metrics(
     classifier_name: str,
     pca_dim: int,
 ) -> FoldMetrics:
-    """Run one CV fold. Caller MUST have filtered degenerate folds via
-    :func:`_is_degenerate_val` first; this function fails-fast if not."""
+    """Run one CV fold (regression path).
+
+    Sprint-1: regression directly on `gold_inferred_relevance`. No
+    calibrator, no quantile bins. Output is clipped to [1, 5] and a
+    pseudo-probability is derived for `compute_fold_metrics` (which still
+    needs a [0, 1] vector for AUC) by `(score - 1) / 4`.
+    Sprint-3b/c: if `tune.load_tuned_params` returns non-empty overrides
+    (i.e. `optuna-best-params.json` exists), they're applied inside the
+    fold for both the PCA dim and the LightGBM hyperparameters. Missing
+    file ⇒ Sprint-1/2 defaults.
+    """
     if _is_degenerate_val(feat, val_idx):
         raise ValueError(
             "_one_fold_metrics called on a degenerate val slice — "
             "caller must filter via _is_degenerate_val first"
         )
-    X_tr, y_tr = feat.X[train_idx], feat.y_binary[train_idx]
+    from zotero_summarizer.services.tune import load_tuned_params
+
+    tuned_params, tuned_pca = load_tuned_params()
+    X_tr, y_tr = feat.X[train_idx], feat.y_continuous[train_idx]
     X_val = feat.X[val_idx]
-    p_tr_raw, p_val_raw = classifier._fit_predict(
+    sw = feat.sample_weights[train_idx] if feat.sample_weights is not None else None
+    _, p_val_raw = classifier._fit_predict(
         classifier_name, X_tr, y_tr, X_val,
-        pca_dim=pca_dim, return_train_probs=True,
+        pca_dim=pca_dim, return_train_probs=False,
+        objective="regression",
+        pca_specter_dim=tuned_pca,
+        lgbm_params=tuned_params or None,
+        sample_weight=sw,
     )
-    cal = classifier._fit_calibrator(p_tr_raw, y_tr, method="isotonic")
-    p_val = classifier._apply_calibrator(cal, p_val_raw)
+    p_val = np.clip(np.asarray(p_val_raw, dtype=np.float64), 1.0, 5.0)
+    pseudo_proba = (p_val - 1.0) / 4.0
     return compute_fold_metrics(
         y_true_continuous=feat.y_continuous[val_idx],
         y_true_binary=feat.y_binary[val_idx],
         y_true_priority=[feat.y_priority[i] for i in val_idx],
-        proba=np.asarray(p_val, dtype=np.float64),
+        proba=pseudo_proba,
     )
 
 

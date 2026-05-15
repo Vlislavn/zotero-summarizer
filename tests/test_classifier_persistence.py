@@ -28,10 +28,14 @@ def _fake_embedding(title: str, abstract: str, *, authors: str = "", venue: str 
 def _write_golden_csv(path: Path, n_pos: int = 12, n_neg: int = 12) -> None:
     fields = [
         "item_key", "title", "authors", "year", "venue", "doi", "url", "abstract",
-        "gold_priority_final", "gold_signal_strength",
+        "gold_priority_final", "gold_signal_strength", "gold_inferred_relevance",
+        "gold_signal_tier",
     ]
     rows = []
+    # Map priority → canonical continuous relevance (must=5, should=4, could=3, dont=1).
+    rel_map = {"must_read": 5.0, "should_read": 4.0, "could_read": 3.0, "dont_read": 1.0}
     for i in range(n_pos):
+        priority = "must_read" if i % 2 == 0 else "should_read"
         rows.append({
             "item_key": f"P{i}",
             "title": f"Positive paper {i}",
@@ -41,10 +45,13 @@ def _write_golden_csv(path: Path, n_pos: int = 12, n_neg: int = 12) -> None:
             "doi": f"10.1/p{i}",
             "url": "",
             "abstract": "positive abstract " * 20,
-            "gold_priority_final": "must_read" if i % 2 == 0 else "should_read",
+            "gold_priority_final": priority,
             "gold_signal_strength": "high",
+            "gold_inferred_relevance": str(rel_map[priority]),
+            "gold_signal_tier": "strong_positive",
         })
     for i in range(n_neg):
+        priority = "dont_read" if i % 2 == 0 else "could_read"
         rows.append({
             "item_key": f"N{i}",
             "title": f"Negative paper {i}",
@@ -54,8 +61,10 @@ def _write_golden_csv(path: Path, n_pos: int = 12, n_neg: int = 12) -> None:
             "doi": "",
             "url": "",
             "abstract": "off-topic abstract " * 20,
-            "gold_priority_final": "dont_read" if i % 2 == 0 else "could_read",
+            "gold_priority_final": priority,
             "gold_signal_strength": "low",
+            "gold_inferred_relevance": str(rel_map[priority]),
+            "gold_signal_tier": "hard_veto",
         })
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields)

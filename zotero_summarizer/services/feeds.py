@@ -596,16 +596,12 @@ def _apply_classifier_gate(
         goals_config=config,
         return_shap=True,
     )
-    # Phase 1.14 partial fix: raw-score override for the dont_read decision.
-    # The isotonic calibrator inflates the low end so t_could (≈0.0007) almost
-    # never triggers. When raw_score_dont_read_below > 0, any item whose raw
-    # (uncalibrated) probability falls below it is reclassified as dont_read.
-    # gate_cfg is guaranteed non-None here (drop_priorities accessed above).
-    raw_floor = float(gate_cfg.raw_score_dont_read_below)
-    if raw_floor > 0:
-        for pred in predictions:
-            if pred.predicted_priority != "dont_read" and pred.raw_score < raw_floor:
-                pred.predicted_priority = "dont_read"
+    # Sprint-1 (May 2026): no longer need the Phase 1.14 `raw_score_dont_read_below`
+    # override here — the regression-based classifier emits priorities through
+    # `domain.score_to_priority`, which is the single source of truth for the
+    # score → 4-class mapping. The legacy `gate_cfg.raw_score_dont_read_below`
+    # field is preserved on the config dataclass for forward-compat but no
+    # longer applied. See `docs/model-roadmap.md` (F4 fix).
 
     by_key = {p.item_key: p for p in predictions}
     survivors: list[dict[str, Any]] = []

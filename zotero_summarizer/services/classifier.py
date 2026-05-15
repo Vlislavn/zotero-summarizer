@@ -34,10 +34,27 @@ LOGGER = logging.getLogger(__name__)
 
 
 SPECTER2_MODEL_NAME = "allenai/specter2_base"
+# Sprint-3a (May 2026): load the `proximity` adapter on top of SPECTER2 base.
+# The proximity adapter (Singh et al. 2023, allenai/specter2) is fine-tuned
+# for nearest-neighbour retrieval — exactly the geometry our P-set features
+# need. Adapter switch invalidates every cached embedding; the content_hash
+# below is keyed by adapter name so the change auto-busts the cache.
+SPECTER2_ADAPTER_NAME = "allenai/specter2"
 EMBEDDING_DIM = 768
-# Extras layout: has_doi, has_venue, year_recency, title_log_len, abstract_log_len,
-#                corpus_affinity, prestige_score
-N_EXTRA_FEATURES = 7
+# Extras layout (12 dims after Sprint 2):
+#   0  has_doi                  binary
+#   1  has_venue                binary
+#   2  year_recency             int 0..20
+#   3  title_log_len            log1p(len)
+#   4  abstract_log_len         log1p(len)
+#   5  corpus_affinity          cosine to research_goals
+#   6  prestige_score           OpenAlex h-index/venue blend, [1, 5]
+#   7  nearest_kept_cosine      max cosine to positive-engagement subset P
+#   8  positive_centroid_cosine cosine to mean(P)
+#   9  recent_centroid_cosine   cosine to mean(P ∩ last 90d)
+#  10  topic_drift              recent − all-time centroid cosine
+#  11  author_overlap_count     surname overlap with P authors, [0, 5]
+N_EXTRA_FEATURES = 12
 FEATURE_DIM = EMBEDDING_DIM + N_EXTRA_FEATURES
 POSITIVE_CLASSES = frozenset({"must_read", "should_read"})
 CURRENT_YEAR = 2026          # for `year_recency` feature; bump or compute dynamically
@@ -59,13 +76,14 @@ CREATE TABLE IF NOT EXISTS specter2_embeddings (
 
 
 def _content_hash(title: str, abstract: str, authors: str = "", venue: str = "") -> str:
-    """Stable identity for the (title, abstract, authors, venue) tuple.
+    """Stable identity for SPECTER2 embedding cache.
 
-    Changing any of these invalidates the cached embedding — desired, since
-    SPECTER2 input now includes all four. Pre-1.10 entries (hash from
-    title+abstract only) will silently miss and recompute.
+    Sprint-3a (May 2026): the hash mixes `title|abstract|adapter-name` so
+    that swapping the proximity adapter automatically invalidates every
+    cached vector. `authors` and `venue` are accepted for backward compat
+    but no longer affect the hash (Sprint 1).
     """
-    blob = f"{title}|||{abstract}|||{authors}|||{venue}"
+    blob = f"{title}|||{abstract}|||{SPECTER2_ADAPTER_NAME}"
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()
 
 
@@ -73,18 +91,34 @@ _MODEL_CACHE: dict[str, Any] = {}
 
 
 def _load_specter2() -> tuple[Any, Any, Any]:
-    """Lazy-load SPECTER2 (heavy import). Returns (tokenizer, model, torch)."""
+    """Lazy-load SPECTER2 base + proximity adapter. Returns (tokenizer, model, torch).
+
+    Sprint-3a: switched from `transformers.AutoModel` to
+    `adapters.AutoAdapterModel` so we can load the proximity adapter on
+    top of the base encoder. The adapter is set active so subsequent
+    forward passes route through it.
+    """
     if "loaded" in _MODEL_CACHE:
         return _MODEL_CACHE["tok"], _MODEL_CACHE["mdl"], _MODEL_CACHE["torch"]
-    LOGGER.info("loading SPECTER2 model %r — first call may download ~400MB", SPECTER2_MODEL_NAME)
+    LOGGER.info(
+        "loading SPECTER2 base %r + proximity adapter %r (first call ~400MB+50MB)",
+        SPECTER2_MODEL_NAME, SPECTER2_ADAPTER_NAME,
+    )
     import torch
-    from transformers import AutoModel, AutoTokenizer
+    from adapters import AutoAdapterModel
+    from transformers import AutoTokenizer
 
     tok = AutoTokenizer.from_pretrained(SPECTER2_MODEL_NAME)
-    mdl = AutoModel.from_pretrained(SPECTER2_MODEL_NAME)
+    mdl = AutoAdapterModel.from_pretrained(SPECTER2_MODEL_NAME)
+    mdl.load_adapter(
+        SPECTER2_ADAPTER_NAME,
+        source="hf",
+        load_as="proximity",
+        set_active=True,
+    )
     mdl.eval()
     _MODEL_CACHE.update({"tok": tok, "mdl": mdl, "torch": torch, "loaded": True})
-    LOGGER.info("SPECTER2 ready")
+    LOGGER.info("SPECTER2 + proximity adapter ready")
     return tok, mdl, torch
 
 
@@ -97,17 +131,19 @@ def compute_embedding(
 ) -> np.ndarray:
     """Run SPECTER2 once. Returns a (768,) float32 ndarray.
 
-    Input layout: ``title [SEP] authors [SEP] venue [SEP] abstract``. SPECTER2
-    was trained on (title [SEP] abstract); appending authors+venue gives the
-    encoder access to provenance signals the user implicitly weights when
-    deciding whether to engage with a paper. Empty fields are dropped from
-    the prompt to avoid stuffing the encoder with separators-only.
+    Sprint-1 (May 2026): input layout is ``title [SEP] abstract`` — the
+    layout SPECTER2 was actually trained on (Cohan 2020). Authors and venue
+    used to be concatenated into the text but they pushed the encoder's
+    first 30 tokens off-distribution and let surname collisions (Wang/Li/
+    Chen) spuriously inflate cosine similarity. Author/venue signal is
+    captured by tabular library-conditioned features instead.
+
+    The ``authors`` and ``venue`` kwargs are accepted for backward
+    compatibility but are no longer mixed into the text or the cache hash.
     """
     tok, mdl, torch = _load_specter2()
     parts = [p for p in [
         (title or "Untitled").strip(),
-        (authors or "").strip(),
-        (venue or "").strip(),
         (abstract or "").strip(),
     ] if p]
     text = tok.sep_token.join(parts)
@@ -407,62 +443,70 @@ def predict_new_items(
     new_items: list[dict[str, str]],
     *,
     corpus_db_path: Path,
-    classifier_name: str = "tabpfn",
+    classifier_name: str = "lightgbm",
     pca_dim: int = 100,
     n_folds: int = 5,
-    calibration: str = "isotonic",
-    threshold_strategy: str = "youden",
     abstract_preview_chars: int = 200,
     goals_config: Any | None = None,
     progress_cb: Callable[[int, int], None] | None = None,
 ) -> tuple[list[FeedPrediction], dict[str, float]]:
-    """Train on the golden labels, predict 4-class priority for each new item.
+    """Train regressor on `gold_inferred_relevance`, predict relevance for new items.
 
-    Pipeline mirrors :func:`cross_validate`'s held-out path:
+    Sprint-1 redesign (May 2026). The model now outputs a continuous score
+    in [1, 5]; the 4-class priority is a deterministic bucketing via
+    :func:`domain.score_to_priority` and only kept for UI/notes
+    compatibility. The legacy isotonic-calibrator / Youden's-J /
+    quantile-bin stack has been removed.
 
-      1. Build (X_train, y_train) from rows that have title + abstract + gold.
-      2. Run k-fold CV on training set → OOF probabilities.
-      3. Fit a fresh calibrator on (OOF probs, y_train).
-      4. Pick the binary keep-threshold from OOF probs via Youden's J.
-      5. Derive adaptive 4-class cutoffs from OOF probs.
-      6. Fit the FINAL classifier on the full training set.
-      7. Extract features for every new item, predict raw probs, apply
-         calibrator, then apply thresholds.
+    Pipeline:
+      1. Build (X_train, y_train) from filtered rows. `y_train` is the
+         continuous `gold_inferred_relevance` value.
+      2. Run k-fold CV → OOF Spearman ρ for diagnostic logging.
+      3. Fit the final regressor on the full training set.
+      4. Featurise + score every new item; map score → priority.
 
-    Returns ``(predictions, threshold_info)``. The latter contains the binary
-    keep / must / could cutoffs so callers can document how labels were
-    derived.
+    Returns ``(predictions, metadata)`` where ``metadata`` reports the
+    diagnostic OOF Spearman ρ and the row counts. No threshold dict any
+    more — thresholds are constants in ``domain``.
     """
-    from sklearn.metrics import roc_auc_score
-    from sklearn.model_selection import StratifiedKFold
+    from scipy.stats import spearmanr
+    from sklearn.model_selection import KFold
+
+    from zotero_summarizer.domain import is_training_eligible, score_to_priority
 
     # 1. Filter & featurise training set.
-    keys, titles, abstracts, labels, train_rows = [], [], [], [], []
+    keys, titles, abstracts, y_cont, train_rows = [], [], [], [], []
     for r in training_rows:
+        if not is_training_eligible(r):
+            continue
         gold = (r.get("gold_priority_final") or "").strip()
         title = (r.get("title") or "").strip()
         abstract = (r.get("abstract") or "").strip()
-        if not gold or not title or not abstract:
+        rel_str = (r.get("gold_inferred_relevance") or "").strip()
+        if not gold or not title or not abstract or not rel_str:
             continue
+        rel = float(rel_str)
         keys.append(r.get("item_key", ""))
         titles.append(title)
         abstracts.append(abstract)
-        labels.append(1 if gold in POSITIVE_CLASSES else 0)
+        y_cont.append(rel)
         train_rows.append(r)
-    if len(labels) < n_folds * 2:
+    if len(y_cont) < n_folds * 2:
         raise ValueError(
-            f"need at least {n_folds * 2} labeled rows for {n_folds}-fold CV; got {len(labels)}"
+            f"need at least {n_folds * 2} labeled rows for {n_folds}-fold CV; got {len(y_cont)}"
         )
 
     embed_cache, openalex_client = _build_aux_providers(corpus_db_path, goals_config)
-    n_train = len(labels)
+    from zotero_summarizer.services.library_features import (
+        compute_library_features,
+        load_positive_library_from_rows,
+    )
+    library = load_positive_library_from_rows(training_rows, corpus_db_path)
+    n_train = len(y_cont)
     X_train = np.zeros((n_train, FEATURE_DIM), dtype=np.float32)
     for i, (k, t, a) in enumerate(zip(keys, titles, abstracts)):
-        authors = (train_rows[i].get("authors") or "").strip()
-        venue = (train_rows[i].get("venue") or "").strip()
-        X_train[i, :EMBEDDING_DIM] = get_or_compute_embedding(
-            corpus_db_path, k, t, a, authors=authors, venue=venue,
-        )
+        emb = get_or_compute_embedding(corpus_db_path, k, t, a)
+        X_train[i, :EMBEDDING_DIM] = emb
         year_str = (train_rows[i].get("year") or "").strip()
         year_i = int(year_str[:4]) if year_str[:4].isdigit() else None
         doi = (train_rows[i].get("doi") or "").strip()
@@ -470,59 +514,55 @@ def predict_new_items(
             embed_cache, openalex_client,
             title=t, abstract=a, doi=doi, year=year_i,
         )
+        authors_str = (train_rows[i].get("authors") or "").strip()
+        nearest, centroid, recent, drift, authors_overlap = compute_library_features(
+            emb, library, candidate_authors=authors_str,
+        )
         X_train[i, EMBEDDING_DIM:] = _extra_features(
             train_rows[i], t, a,
             corpus_affinity=affinity, prestige_score=prestige,
+            nearest_kept_cosine=nearest, positive_centroid_cosine=centroid,
+            recent_centroid_cosine=recent, topic_drift=drift,
+            author_overlap_count=authors_overlap,
         )
         if progress_cb is not None and (i + 1) % 50 == 0:
             progress_cb(i + 1, n_train)
-    y_train = np.asarray(labels, dtype=np.int32)
+    y_train = np.asarray(y_cont, dtype=np.float64)
+    from zotero_summarizer.services.label_weights import compute_row_weights
+    sw_all = compute_row_weights(train_rows)
 
-    # 2. K-fold OOF predictions for calibration + threshold tuning.
-    probs_oof = np.zeros(n_train, dtype=np.float64)
-    skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=42)
-    for fold_idx, (tr, vl) in enumerate(skf.split(X_train, y_train), start=1):
-        p_tr_raw, p_vl_raw = _fit_predict(
+    # 2. K-fold OOF predictions purely for diagnostic Spearman ρ logging.
+    preds_oof = np.zeros(n_train, dtype=np.float64)
+    skf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
+    for fold_idx, (tr, vl) in enumerate(skf.split(X_train), start=1):
+        _, p_vl = _fit_predict(
             classifier_name, X_train[tr], y_train[tr], X_train[vl],
-            pca_dim=pca_dim, return_train_probs=True,
+            pca_dim=pca_dim, return_train_probs=False,
+            objective="regression",
+            sample_weight=sw_all[tr],
         )
-        cal = _fit_calibrator(p_tr_raw, y_train[tr], method=calibration)
-        probs_oof[vl] = _apply_calibrator(cal, p_vl_raw)
+        preds_oof[vl] = p_vl
         LOGGER.info("oof fold %d/%d done", fold_idx, n_folds)
+    oof_rho = float(spearmanr(y_train, preds_oof).statistic) if n_train > 2 else 0.0
 
-    auc = float(roc_auc_score(y_train, probs_oof)) if len(set(y_train)) > 1 else 0.0
-    t_keep = _find_optimal_threshold(y_train, probs_oof, strategy=threshold_strategy)
-    must_t, could_t = _adaptive_4class_cutoffs(probs_oof, t_keep)
-
-    # 3. Final calibrator + final classifier on full training set.
-    final_calibrator = _fit_calibrator(probs_oof, y_train, method=calibration)
-
-    # 4. Featurise new items.
+    # 3. Featurise new items.
     valid_new: list[dict[str, str]] = [
         it for it in new_items
         if (it.get("title") or "").strip() and (it.get("abstract") or "").strip()
     ]
     if not valid_new:
-        return [], {
-            "oof_auc": auc,
-            "t_keep": t_keep,
-            "t_must": must_t,
-            "t_could": could_t,
-        }
+        return [], {"oof_spearman": oof_rho, "n_train": float(n_train)}
 
     n_new = len(valid_new)
     X_new = np.zeros((n_new, FEATURE_DIM), dtype=np.float32)
     for i, it in enumerate(valid_new):
         title = (it.get("title") or "").strip()
         abstract = (it.get("abstract") or "").strip()
-        authors = (it.get("authors") or "").strip()
-        venue = (it.get("publication_title") or it.get("venue") or "").strip()
-        # Use stable per-item cache key. Feed items have integer item_id; library
-        # items have item_key. Either becomes the cache primary key.
         cache_key = str(it.get("item_key") or it.get("item_id") or f"feed_{i}")
-        X_new[i, :EMBEDDING_DIM] = get_or_compute_embedding(
-            corpus_db_path, cache_key, title, abstract, authors=authors, venue=venue,
+        emb_new = get_or_compute_embedding(
+            corpus_db_path, cache_key, title, abstract,
         )
+        X_new[i, :EMBEDDING_DIM] = emb_new
         doi = (it.get("doi") or "").strip()
         year_str = (it.get("publication_date") or "")[:4]
         year_i = int(year_str) if year_str.isdigit() else None
@@ -530,34 +570,37 @@ def predict_new_items(
             embed_cache, openalex_client,
             title=title, abstract=abstract, doi=doi, year=year_i,
         )
-        # Build a row dict that _extra_features understands.
-        feature_row = {
-            "doi": doi,
-            "venue": venue,
-            "year": year_str,
-        }
+        authors_str = (it.get("authors") or "").strip()
+        nearest_n, centroid_n, recent_n, drift_n, authors_overlap_n = compute_library_features(
+            emb_new, library, candidate_authors=authors_str,
+        )
+        venue = (it.get("publication_title") or it.get("venue") or "").strip()
+        feature_row = {"doi": doi, "venue": venue, "year": year_str}
         X_new[i, EMBEDDING_DIM:] = _extra_features(
             feature_row, title, abstract,
             corpus_affinity=affinity, prestige_score=prestige,
+            nearest_kept_cosine=nearest_n, positive_centroid_cosine=centroid_n,
+            recent_centroid_cosine=recent_n, topic_drift=drift_n,
+            author_overlap_count=authors_overlap_n,
         )
 
-    # 5. Final classifier fit on FULL training → predict on new.
-    _, p_new_raw = _fit_predict(
+    # 4. Fit final regressor on FULL training, predict on new.
+    _, p_new = _fit_predict(
         classifier_name, X_train, y_train, X_new,
         pca_dim=pca_dim, return_train_probs=False,
+        objective="regression",
+        sample_weight=sw_all,
     )
-    p_new_cal = _apply_calibrator(final_calibrator, p_new_raw)
+    p_new = np.clip(p_new, 1.0, 5.0)
 
-    # 6. Assemble report rows.
+    # 5. Assemble result rows.
     predictions: list[FeedPrediction] = []
-    for it, raw, cal in zip(valid_new, p_new_raw, p_new_cal):
+    for it, score in zip(valid_new, p_new):
         title = (it.get("title") or "").strip()
         abstract = (it.get("abstract") or "").strip()
         if len(abstract) > abstract_preview_chars:
             abstract = abstract[:abstract_preview_chars].rstrip() + "…"
-        priority = _prob_to_priority_adaptive(
-            float(cal), t_keep=t_keep, t_must=must_t, t_could=could_t,
-        )
+        s = float(score)
         predictions.append(FeedPrediction(
             item_key=str(it.get("item_key") or it.get("item_id") or ""),
             title=title,
@@ -565,20 +608,13 @@ def predict_new_items(
             venue=(it.get("publication_title") or it.get("venue") or "").strip(),
             doi=(it.get("doi") or "").strip(),
             abstract_preview=abstract,
-            raw_score=float(raw),
-            calibrated_score=float(cal),
-            predicted_priority=priority,
+            raw_score=s,
+            calibrated_score=s / 5.0,
+            predicted_priority=score_to_priority(s),
         ))
 
-    # Sort by calibrated score descending so highest-confidence picks are first.
-    predictions.sort(key=lambda p: p.calibrated_score, reverse=True)
-
-    return predictions, {
-        "oof_auc": auc,
-        "t_keep": t_keep,
-        "t_must": must_t,
-        "t_could": could_t,
-    }
+    predictions.sort(key=lambda p: p.raw_score, reverse=True)
+    return predictions, {"oof_spearman": oof_rho, "n_train": float(n_train)}
 
 
 def write_feed_predictions_csv(
@@ -604,22 +640,36 @@ def format_feed_predictions_markdown(
     predictions: list[FeedPrediction],
     thresholds: dict[str, float],
 ) -> str:
-    """Compact human-readable summary suitable for terminal review."""
+    """Compact human-readable summary suitable for terminal review.
+
+    Sprint-1 (May 2026): the `thresholds` dict now carries `oof_spearman`
+    and `n_train` (regression diagnostics) instead of the old binary
+    keep/must/could thresholds + AUC. We surface the bucketing thresholds
+    from :mod:`domain` instead — they're constants now, not learned.
+    """
+    from zotero_summarizer.domain import (
+        PRIORITY_COULD_READ_THRESHOLD,
+        PRIORITY_MUST_READ_THRESHOLD,
+        PRIORITY_SHOULD_READ_THRESHOLD,
+    )
+
     lines = []
     lines.append(
-        f"thresholds (calibrated probability): keep≥{thresholds['t_keep']:.3f} · "
-        f"must≥{thresholds['t_must']:.3f} · could≥{thresholds['t_could']:.3f}"
+        f"score → priority: must≥{PRIORITY_MUST_READ_THRESHOLD} · "
+        f"should≥{PRIORITY_SHOULD_READ_THRESHOLD} · could≥{PRIORITY_COULD_READ_THRESHOLD}"
     )
-    lines.append(f"OOF AUC on training set: {thresholds['oof_auc']:.3f}")
+    rho = thresholds.get("oof_spearman", 0.0)
+    n_train = int(thresholds.get("n_train", 0))
+    lines.append(f"OOF Spearman ρ on training set (n={n_train}): {rho:.3f}")
     lines.append("")
-    lines.append("| # | priority | cal_score | title (~80 chars) | venue | authors (1st) |")
+    lines.append("| # | priority | score (1-5) | title (~80 chars) | venue | authors (1st) |")
     lines.append("|---|---|---|---|---|---|")
     for i, p in enumerate(predictions, start=1):
         title = p.title[:80].replace("|", "\\|")
         first_author = p.authors.split(";")[0].strip()[:30].replace("|", "\\|")
         venue = p.venue[:25].replace("|", "\\|")
         lines.append(
-            f"| {i} | **{p.predicted_priority}** | {p.calibrated_score:.3f} "
+            f"| {i} | **{p.predicted_priority}** | {p.raw_score:.2f} "
             f"| {title} | {venue} | {first_author} |"
         )
     return "\n".join(lines)
@@ -633,16 +683,40 @@ def _fit_predict(
     *,
     pca_dim: int = 100,
     return_train_probs: bool = False,
+    objective: str = "regression",
+    pca_specter_dim: int | None = None,
+    lgbm_params: dict[str, Any] | None = None,
+    sample_weight: np.ndarray | None = None,
 ) -> tuple[np.ndarray | None, np.ndarray]:
-    """Train ``classifier_name`` and return ``(train_probs_or_None, val_probs)``.
+    """Fit ``classifier_name`` and return ``(train_scores_or_None, val_scores)``.
 
-    ``train_probs`` is needed by the calibrator (we fit on training-set
-    predictions to learn how the classifier's raw scores map to true
-    probabilities); ``None`` for the held-out predict-only path.
+    Sprint-1: default objective is ``regression`` — every model predicts
+    the continuous relevance label in [1, 5]. Sprint-3b: when
+    ``pca_specter_dim`` is set (not None), the 768-d SPECTER2 block is
+    PCA-reduced to that many components inside the fold (TRAIN-fit, val-
+    transform, no leakage), then concatenated with the tabular extras.
+    Sprint-3c: ``lgbm_params`` lets Optuna pass hyperparameter overrides
+    into the LightGBM constructor without touching this function's body.
+
+    ``train_scores`` is used by callers that fit a downstream calibrator on
+    training-set predictions; ``None`` for the held-out predict-only path.
     """
-    from sklearn.linear_model import LogisticRegression
+    if pca_specter_dim is not None:
+        X_train, X_val = _reduce_for_tabpfn(
+            X_train, X_val, pca_dim=pca_specter_dim,
+        )
 
     if classifier_name == "logreg":
+        if objective == "regression":
+            from sklearn.linear_model import Ridge
+
+            clf = Ridge(alpha=1.0, random_state=42)
+            clf.fit(X_train, y_train, sample_weight=sample_weight)
+            p_val = clf.predict(X_val)
+            p_train = clf.predict(X_train) if return_train_probs else None
+            return p_train, p_val
+        from sklearn.linear_model import LogisticRegression
+
         clf = LogisticRegression(
             C=1.0,
             class_weight="balanced",
@@ -656,6 +730,19 @@ def _fit_predict(
 
     if classifier_name == "tabpfn":
         X_train_red, X_val_red = _reduce_for_tabpfn(X_train, X_val, pca_dim=pca_dim)
+        if objective == "regression":
+            from tabpfn import TabPFNRegressor
+
+            reg = TabPFNRegressor(
+                n_estimators=8,
+                device="auto",
+                ignore_pretraining_limits=False,
+                random_state=42,
+            )
+            reg.fit(X_train_red, y_train)
+            p_val = reg.predict(X_val_red)
+            p_train = reg.predict(X_train_red) if return_train_probs else None
+            return p_train, p_val
         from tabpfn import TabPFNClassifier
 
         clf = TabPFNClassifier(
@@ -671,6 +758,28 @@ def _fit_predict(
 
     if classifier_name == "lightgbm":
         import lightgbm as lgb
+
+        if objective == "regression":
+            defaults = {
+                "objective": "regression",
+                "n_estimators": 200,
+                "num_leaves": 15,
+                "max_depth": 4,
+                "learning_rate": 0.05,
+                "min_child_samples": 10,
+                "reg_lambda": 1.0,
+                "verbose": -1,
+                "random_state": 42,
+                "n_jobs": 1,
+                "num_threads": 1,
+            }
+            if lgbm_params:
+                defaults.update(lgbm_params)
+            reg = lgb.LGBMRegressor(**defaults)
+            reg.fit(X_train, y_train, sample_weight=sample_weight)
+            p_val = reg.predict(X_val)
+            p_train = reg.predict(X_train) if return_train_probs else None
+            return p_train, p_val
 
         clf = lgb.LGBMClassifier(
             n_estimators=200,
@@ -823,10 +932,12 @@ def _reduce_for_tabpfn(
     *,
     pca_dim: int = 100,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """PCA-reduce the SPECTER2 part (first 768 dims) so total feature count
-    fits under TabPFN's 500-feature ceiling. Tabular extras pass through.
+    """PCA-reduce the SPECTER2 part (first 768 dims). Tabular extras pass through.
 
-    PCA is fit on the TRAIN fold only (no test leakage) and applied to val.
+    Originally added for TabPFN's 500-feature ceiling; in Sprint-3b we
+    apply the same reduction to LightGBM/Ridge to control overfitting on
+    n≈500 training rows where 768 raw embedding dims dominate the 12
+    tabular extras. PCA is fit on the TRAIN fold only (no test leakage).
     """
     from sklearn.decomposition import PCA
 
@@ -834,7 +945,6 @@ def _reduce_for_tabpfn(
     emb_val = X_val[:, :EMBEDDING_DIM]
     extras_train = X_train[:, EMBEDDING_DIM:]
     extras_val = X_val[:, EMBEDDING_DIM:]
-    # PCA can output at most min(n_samples, n_features) components.
     actual_dim = min(pca_dim, emb_train.shape[0], emb_train.shape[1])
     pca = PCA(n_components=actual_dim, random_state=42)
     emb_train_red = pca.fit_transform(emb_train)
@@ -976,28 +1086,27 @@ def _extra_features(
     *,
     corpus_affinity: float = 0.0,
     prestige_score: float = 3.0,
+    nearest_kept_cosine: float = 0.0,
+    positive_centroid_cosine: float = 0.0,
+    recent_centroid_cosine: float = 0.0,
+    topic_drift: float = 0.0,
+    author_overlap_count: float = 0.0,
 ) -> np.ndarray:
-    """Tabular features alongside the SPECTER2 embedding (7 dims).
+    """Tabular features alongside the SPECTER2 embedding (12 dims).
 
-    Layout matches ``N_EXTRA_FEATURES``:
-      0  has_doi          binary
-      1  has_venue        binary
-      2  year_recency     int 0..20 (older = 20, missing = 20)
-      3  title_log_len    log1p(len)
-      4  abstract_log_len log1p(len)
-      5  corpus_affinity  cosine to research_goals via all-MiniLM, [-1, 1]
-      6  prestige_score   OpenAlex h-index/venue blend, [1, 5] (3.0 = neutral)
-
-    All seven are CONTENT- and provenance-based. Engagement-derived signals
-    (emoji tags, notes, annotations) are deliberately excluded — those are
-    the labels we are trying to predict, so they would leak.
+    See module-level constant ``N_EXTRA_FEATURES`` for the layout table.
+    Indices 0-6 are content/provenance-based; 7-11 are personalised over
+    the user's positive-engagement subset P (computed by
+    :mod:`library_features`). Engagement-derived signals that ARE the
+    labels (emoji tags, notes, annotations counts) are deliberately
+    excluded from features to prevent leakage.
     """
     has_doi = 1.0 if (row.get("doi") or "").strip() else 0.0
     has_venue = 1.0 if (row.get("venue") or "").strip() else 0.0
     year_str = (row.get("year") or "").strip()
-    try:
-        year = int(year_str[:4]) if year_str[:4].isdigit() else 0
-    except (ValueError, IndexError):
+    if year_str[:4].isdigit():
+        year = int(year_str[:4])
+    else:
         year = 0
     recency = float(min(20, max(0, CURRENT_YEAR - year))) if year else 20.0
     title_log_len = float(np.log1p(len(title or "")))
@@ -1006,6 +1115,9 @@ def _extra_features(
         [
             has_doi, has_venue, recency, title_log_len, abstract_log_len,
             float(corpus_affinity), float(prestige_score),
+            float(nearest_kept_cosine), float(positive_centroid_cosine),
+            float(recent_centroid_cosine), float(topic_drift),
+            float(author_overlap_count),
         ],
         dtype=np.float32,
     )

@@ -611,7 +611,14 @@ def append_to_golden(
         url="",
         abstract=abstract,
         matched_emojis="",
-        gold_signal_tier="first_glance",
+        # Sprint-1+ wiring fix (May 2026): conscious UI relabel must NOT be
+        # tier=first_glance — that tier is the goldenset audit marker for
+        # the *automated* preview during feed ingestion, and the Sprint-1
+        # training filter drops it as noise. A relabel is a deliberate
+        # user verdict (positive or negative) on a specific item, so it
+        # gets `feed_user_label` which `domain.is_training_eligible`
+        # explicitly accepts.
+        gold_signal_tier="feed_user_label",
         note_count=0,
         annotation_count=0,
         collection_count=0,
