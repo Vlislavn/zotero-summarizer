@@ -235,6 +235,203 @@ Request:
 
 Applies approved changes to Zotero and creates a Zotero SQLite backup.
 
+## Feed Review (Phase 1.14)
+
+Endpoints for the review-mode workflow (`feeds run` default — and
+`feeds run --gate-only`). Two row states are surfaced for human action:
+
+- `awaiting_review` — items the classifier gate kept (the main queue).
+- `gate_rejected` — items the gate dropped pre-LLM. Surface for spot-checking
+  false negatives and bulk-confirming positives via the UI.
+
+### `GET /api/feeds/review?state=awaiting_review&since_hours=720&limit=1000`
+
+Lists rows in the requested state. `state` defaults to `awaiting_review`;
+pass `state=gate_rejected` to see the gate-rejected pile. Each item embeds
+the parsed payload from `shap_contribs_json`.
+
+Response (top-level field `state` echoes the query):
+
+```json
+{
+  "state": "awaiting_review",
+  "count": 1,
+  "items": [
+    {
+      "id": 294,
+      "feed_library_id": 99,
+      "feed_item_id": 8001,
+      "title": "Multi-agent self-improving research assistants",
+      "doi": null,
+      "arxiv_id": "2605.02366v1",
+      "guid": "http://arxiv.org/abs/2605.02366v1",
+      "reading_priority": "should_read",
+      "composite_score": 3.4,
+      "decision": "awaiting_review",
+      "shap": [
+        {"feature": "corpus_affinity",         "contribution":  0.42},
+        {"feature": "semantic_match_specter2", "contribution":  0.30},
+        {"feature": "prestige_score",          "contribution":  0.08},
+        {"feature": "bias",                    "contribution": -0.55}
+      ],
+      "aux_context": {
+        "max_author_h_index": 88,
+        "venue_works_count": 12345,
+        "cited_by_count": 3
+      },
+      "summary": {
+        "executive_summary": "...",
+        "reading_priority": "should_read",
+        "triage_rationale": "...",
+        "tags": ["..."],
+        "suggested_collections": []
+      }
+    }
+  ]
+}
+```
+
+`shap` is non-null only when the classifier gate ran with a LightGBM model
+(TreeSHAP via `predict_proba(X, pred_contrib=True)`). The 768 SPECTER2
+embedding dimensions are aggregated into a single `semantic_match_specter2`
+bucket; the 7 named tabular extras and the bias term are surfaced
+individually. The list is sorted by `|contribution|` descending and capped
+at 8 entries.
+
+### `POST /api/feeds/review/{processed_id}/approve`
+
+Flips `decision` to `user_approved`. Does **not** write to Zotero yet and
+does **not** queue `pending_changes` — feed items don't exist in the user's
+library until materialised, so the library-centric pending_changes pipeline
+("apply a tag/note to existing item X") would fail with "Item not found".
+Use `POST /api/feeds/review/apply-all` later in the session to materialise
+the batch via `apply_feed_materialization` (the daemon-direct create path).
+
+Only accepts rows in state `awaiting_review`. Synthetic gate-rejected items
+that need to be "promoted to Zotero" should use the `relabel` endpoint
+instead (it synthesises a `SummarizeResponse` on the fly).
+
+Response:
+
+```json
+{ "processed_id": 294, "state": "user_approved" }
+```
+
+Errors:
+- `404 not_found` — `processed_id` doesn't exist
+- `422 validation_error` — row is not in `awaiting_review`, or the persisted
+  payload is missing the LLM summary (predates Phase 1.14)
+
+### `POST /api/feeds/review/{processed_id}/reject`
+
+Flips `decision` to `user_rejected`. Optionally appends a `dont_read` row
+to `zotero-summarizer-golden.csv` so the next classifier retrain learns
+from the rejection.
+
+Request (all fields optional):
+
+```json
+{ "write_to_golden": true }
+```
+
+Response:
+
+```json
+{ "processed_id": 294, "golden_csv_row_added": true }
+```
+
+`golden_csv_row_added: false` means the same `item_key` (formatted
+`feed:<feed_item_id>`) was already in the CSV — idempotent on duplicate.
+
+### `POST /api/feeds/review/{processed_id}/relabel`
+
+Override the predicted priority. Accepts rows in either `awaiting_review`
+or `gate_rejected`. The chosen label is persisted both in the row's
+`shap_contribs_json` payload (so `apply-all` can use the right priority for
+the Zotero note) and as a new row in `zotero-summarizer-golden.csv` (for
+the next retrain). For gate-rejected items with no stored LLM summary, a
+minimal `SummarizeResponse` is synthesised on the fly so materialisation
+still has a valid payload.
+
+- `new_priority = must_read | should_read | could_read` → row → `user_approved`,
+  golden CSV appended, materialisation deferred to `apply-all`.
+- `new_priority = dont_read` → row → `user_rejected`, golden CSV appended
+  with `dont_read`. For a gate_rejected source row this means "user
+  confirmed the gate was right".
+
+Request:
+
+```json
+{ "new_priority": "must_read" }
+```
+
+Response:
+
+```json
+{
+  "processed_id": 294,
+  "state": "user_approved",
+  "golden_csv_row_added": true
+}
+```
+
+Errors:
+- `422 validation_error` — `new_priority` not in `{must_read, should_read, could_read, dont_read}`, or row not in an actionable state
+
+### `POST /api/feeds/review/apply-all`
+
+Materialise every `user_approved` row in the last 30 days to Zotero. For
+each row, calls `ZoteroWriter.apply_feed_materialization` (daemon-direct
+create — NOT `pending_changes`, which would fail on items the user's
+library doesn't yet contain). On success the row transitions to:
+
+- `decision = selected`
+- `decision_reason = materialized_via_review_ui`
+- `materialized_zotero_key = <new key>`
+- `outcome_eligible_at = now + 7 days` (Phase 1.5 feedback loop)
+
+Per-row failures are caught and reported so one bad row (e.g. Zotero locked)
+doesn't block the rest of the batch.
+
+Request: empty body (`{}`).
+
+Response:
+
+```json
+{
+  "applied": 38,
+  "failed_count": 0,
+  "failed": []
+}
+```
+
+When `failed_count > 0` the `failed` array carries the first 20 errors:
+`[{"id": <int>, "title": <str>, "error": <str>}, ...]`.
+
+### `POST /api/feeds/review/confirm-gate-rejected`
+
+Bulk-append a `dont_read` row to the golden CSV for every `gate_rejected`
+item in the last 30 days that doesn't already have an `item_key` in the
+CSV. Semantics: *"no click = I confirm the model was right"*. The row's
+`decision` stays `gate_rejected` (the user didn't act — just confirmed it).
+
+Idempotent: subsequent calls only append items that have been added since
+the previous call. Triggers a model retrain via sha mismatch on the next
+`feeds run` start.
+
+Request: empty body (`{}`).
+
+Response:
+
+```json
+{
+  "appended": 415,
+  "skipped_duplicate": 12,
+  "skipped_no_feed_id": 0,
+  "total_considered": 427
+}
+```
+
 ## Corpus And Feedback
 
 ### `POST /api/corpus/import`

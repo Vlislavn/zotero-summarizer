@@ -231,33 +231,74 @@ def add_tag_to_item(db_path: Path, *, item_id: int, tag_name: str, tag_type: int
         conn.close()
 
 
+def add_feed(
+    db_path: Path,
+    *,
+    library_id: int,
+    name: str,
+    url: str = "http://example.com/feed.xml",
+) -> None:
+    """Insert a feed row + matching library row (for tests that need custom feeds)."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO libraries(libraryID, type) VALUES (?, 'feed')",
+            (library_id,),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO feeds(libraryID, name, url, lastUpdate, lastCheck)"
+            " VALUES (?, ?, ?, '2026-05-01 00:00:00', '2026-05-01 00:00:00')",
+            (library_id, name, url),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def add_feed_item(
     db_path: Path,
     *,
     feed_library_id: int,
-    guid: str,
-    title: str,
+    item_id: int | None = None,
+    guid: str | None = None,
+    title: str = "Test Item",
     abstract: str = "",
     url: str = "",
     doi: str = "",
     publication_date: str = "",
     date_added: str = "2026-05-12 09:00:00",
 ) -> int:
-    """Insert one feed item with metadata. Returns itemID."""
+    """Insert one feed item with metadata. Returns itemID.
+
+    Either ``item_id`` or ``guid`` (or both) may be supplied.  When omitted,
+    they default to a unique synthetic value so callers only have to specify
+    what they care about.
+    """
+    if guid is None:
+        guid = f"guid-{item_id or 0}-auto"
+
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     try:
         type_row = conn.execute(
             "SELECT itemTypeID FROM itemTypes WHERE typeName='journalArticle'"
         ).fetchone()
-        cursor = conn.execute(
-            "INSERT INTO items(itemTypeID, libraryID, key, dateAdded) VALUES (?,?,?,?)",
-            (int(type_row["itemTypeID"]), feed_library_id, f"FK{guid[-6:]:>06}", date_added),
-        )
-        item_id = int(cursor.lastrowid)
+        item_key = f"FK{abs(hash(guid)) % 10**6:06d}"
+        if item_id is not None:
+            conn.execute(
+                "INSERT INTO items(itemID, itemTypeID, libraryID, key, dateAdded) VALUES (?,?,?,?,?)",
+                (item_id, int(type_row["itemTypeID"]), feed_library_id, item_key, date_added),
+            )
+            inserted_id = item_id
+        else:
+            cursor = conn.execute(
+                "INSERT INTO items(itemTypeID, libraryID, key, dateAdded) VALUES (?,?,?,?)",
+                (int(type_row["itemTypeID"]), feed_library_id, item_key, date_added),
+            )
+            inserted_id = int(cursor.lastrowid)
         conn.execute(
             "INSERT INTO feedItems(itemID, guid) VALUES (?,?)",
-            (item_id, guid),
+            (inserted_id, guid),
         )
         for field_name, value in (
             ("title", title),
@@ -276,9 +317,9 @@ def add_feed_item(
             )
             conn.execute(
                 "INSERT INTO itemData(itemID, fieldID, valueID) VALUES (?,?,?)",
-                (item_id, int(field_row["fieldID"]), int(value_row.lastrowid)),
+                (inserted_id, int(field_row["fieldID"]), int(value_row.lastrowid)),
             )
         conn.commit()
-        return item_id
+        return inserted_id
     finally:
         conn.close()

@@ -1,6 +1,7 @@
 .venv/
 venv/
 env/
+.claude/skills
 __pycache__/
 *.pyc
 *.pyo
@@ -26,3 +27,11 @@ server.log
 *.log
 tmp_review_logs/
 *.tmp
+# Personal golden-label dataset exported from local Zotero — never commit.
+zotero-summarizer-golden.csv
+zotero-summarizer-golden.jsonl
+zotero-summarizer-golden-report.md
+feed-predictions-*.csv
+note-analyses*.csv
+classifier-runs.jsonl
+reports/

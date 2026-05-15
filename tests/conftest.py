@@ -21,7 +21,9 @@ def _install_onprem_stubs() -> None:
 
     class DummyLLM:
         def __init__(self, *args, **kwargs):
-            pass
+            # Capture kwargs so tests can introspect model name etc.
+            self.model = kwargs.get("model", args[1] if len(args) > 1 else None)
+            self._kwargs = kwargs
 
         def prompt(self, *args, **kwargs):
             raise NotImplementedError("DummyLLM.prompt should not be called in unit tests")

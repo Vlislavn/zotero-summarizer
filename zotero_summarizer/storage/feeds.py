@@ -39,112 +39,53 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+# Re-export the decision/outcome taxonomy and table DDL so existing
+# `from zotero_summarizer.storage import feeds as fs; fs.DECISION_*` callers
+# keep working. The split exists only for file-size compliance.
+from zotero_summarizer.storage.feeds_constants import (  # noqa: F401  (re-exported)
+    DECISION_AWAITING_REVIEW,
+    DECISION_BLACK_SWAN,
+    DECISION_GATE_REJECTED,
+    DECISION_REJECTED_DAILY_CUTOFF,
+    DECISION_REJECTED_DEDUP_LIBRARY,
+    DECISION_REJECTED_DEDUP_PROCESSED,
+    DECISION_REJECTED_ELBOW,
+    DECISION_REJECTED_LOW_SCORE,
+    DECISION_SELECTED,
+    DECISION_SKIPPED_ERROR,
+    DECISION_TRIAGED_PENDING,
+    DECISION_USER_APPROVED,
+    DECISION_USER_REJECTED,
+    OUTCOME_DELETED_ALL,
+    OUTCOME_ENGAGED,
+    OUTCOME_KEPT_INBOX,
+    OUTCOME_MOVED_COLLECTION,
+    OUTCOME_PENDING,
+    OUTCOME_TRASHED,
+    OUTCOME_UNKNOWN,
+    OUTCOME_WEIGHT,
+    TERMINAL_MATERIALIZED_DECISIONS,
+)
+from zotero_summarizer.storage.feeds_schema import (
+    CREATE_TABLE as _CREATE_TABLE,
+    INDEX_STATEMENTS as _INDEX_STATEMENTS,
+    MIGRATION_COLUMNS as _MIGRATION_COLUMNS,
+)
+
 LOGGER = logging.getLogger("zotero_summarizer.storage.feeds")
-
-
-# Decision taxonomy — keep in sync with services/feeds.py.
-DECISION_TRIAGED_PENDING = "triaged_pending"  # LLM-scored, awaiting daily selection
-DECISION_SELECTED = "selected"
-DECISION_BLACK_SWAN = "black_swan"
-DECISION_REJECTED_DAILY_CUTOFF = "rejected_daily_cutoff"  # below daily plateau
-DECISION_REJECTED_ELBOW = "rejected_elbow"  # legacy Phase 1 (one-shot batch)
-DECISION_REJECTED_LOW_SCORE = "rejected_low_score"  # corpus fast-reject
-DECISION_REJECTED_DEDUP_LIBRARY = "rejected_dedup_library"
-DECISION_REJECTED_DEDUP_PROCESSED = "rejected_dedup_processed"
-DECISION_SKIPPED_ERROR = "skipped_error"
-
-# Terminal decisions — these get final outcomes; the "triaged_pending"
-# intermediate state never receives an outcome.
-TERMINAL_MATERIALIZED_DECISIONS = frozenset({DECISION_SELECTED, DECISION_BLACK_SWAN})
-
-# Outcome taxonomy — what the user did with a materialized item after N days.
-OUTCOME_PENDING = "pending"  # outcome window not yet elapsed
-OUTCOME_KEPT_INBOX = "kept_inbox"  # still in Inbox only — weak negative
-OUTCOME_MOVED_COLLECTION = "moved_collection"  # moved out of Inbox to a real collection — weak positive
-OUTCOME_DELETED_ALL = "deleted_all"  # removed from every collection — strong negative
-OUTCOME_TRASHED = "trashed"  # moved to Zotero trash — strong negative
-OUTCOME_ENGAGED = "engaged"  # has 🧠 or 👀 tag — strong positive
-OUTCOME_UNKNOWN = "unknown"  # item key resolved to nothing (hard-delete, merge edge case)
-
-# Signal weights — asymmetric per Schnabel et al. ICML 2016
-# (Recommendations as Treatments, arXiv:1602.05352). Industrial-feed convention
-# (YouTube/Pinterest/Meta) is delete ≈ 3–10× ignore. We sit at 6× (3.0 vs 0.5).
-OUTCOME_WEIGHT = {
-    OUTCOME_ENGAGED: 3.0,
-    OUTCOME_MOVED_COLLECTION: 1.0,
-    OUTCOME_KEPT_INBOX: -0.5,
-    OUTCOME_DELETED_ALL: -3.0,
-    OUTCOME_TRASHED: -3.0,
-    OUTCOME_UNKNOWN: -1.0,
-}
-
-
-_CREATE_TABLE = """
-CREATE TABLE IF NOT EXISTS processed_feed_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    feed_library_id INTEGER NOT NULL,
-    feed_item_id INTEGER NOT NULL,
-    guid TEXT NOT NULL,
-    title TEXT NOT NULL,
-    doi TEXT,
-    arxiv_id TEXT,
-    feed_name TEXT,
-    decision TEXT NOT NULL,
-    decision_reason TEXT NOT NULL DEFAULT '',
-    composite_score REAL,
-    surprise_score REAL,
-    corpus_affinity REAL,
-    reading_priority TEXT,
-    is_black_swan INTEGER NOT NULL DEFAULT 0,
-    model_version TEXT,
-    run_id TEXT NOT NULL,
-    planned_zotero_key TEXT,
-    matched_collections_json TEXT,
-    error TEXT,
-    -- Phase 1.5 outcome-feedback columns
-    materialized_zotero_key TEXT,
-    outcome_eligible_at TEXT,
-    outcome_detected_at TEXT,
-    final_outcome TEXT,
-    outcome_signal_weight REAL,
-    read_time_marked_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(feed_library_id, feed_item_id)
-)
-"""
-
-_INDEX_STATEMENTS = (
-    "CREATE INDEX IF NOT EXISTS idx_processed_feed_run ON processed_feed_items(run_id, created_at)",
-    "CREATE INDEX IF NOT EXISTS idx_processed_feed_guid ON processed_feed_items(guid)",
-    "CREATE INDEX IF NOT EXISTS idx_processed_feed_decision ON processed_feed_items(decision, created_at)",
-    "CREATE INDEX IF NOT EXISTS idx_processed_feed_zotero_key ON processed_feed_items(materialized_zotero_key)",
-    "CREATE INDEX IF NOT EXISTS idx_processed_feed_outcome_due ON processed_feed_items(outcome_eligible_at, outcome_detected_at)",
-)
-
-# Phase 1.5 migration: add new columns to pre-existing Phase 1 databases.
-# Note: SQLite ALTER TABLE does NOT support non-constant defaults like
-# `datetime('now')`, so `updated_at` is added without a default. The CREATE
-# TABLE path (fresh DB) does include the default — both code paths converge.
-# Existing Phase 1 rows get NULL for `updated_at` until their next update.
-_MIGRATION_COLUMNS = (
-    ("materialized_zotero_key", "TEXT"),
-    ("outcome_eligible_at", "TEXT"),
-    ("outcome_detected_at", "TEXT"),
-    ("final_outcome", "TEXT"),
-    ("outcome_signal_weight", "REAL"),
-    ("read_time_marked_at", "TEXT"),
-    ("updated_at", "TEXT"),
-)
 
 
 def init_feeds_schema(conn: sqlite3.Connection) -> None:
     """Create the processed_feed_items table + indexes; migrate Phase 1 DBs.
 
-    Idempotent. Safe to call on every app start.
+    Idempotent. Safe to call on every app start. The narrow
+    ``except sqlite3.OperationalError`` branch is a deliberate carry-over
+    from Phase 1.5: concurrent daemon starts race PRAGMA + ALTER and the
+    second loser must NOT abort startup. Tightening this to a specific
+    error message is queued for the fail-fast pass; until then, the
+    warning log preserves visibility.
     """
     conn.execute(_CREATE_TABLE)
-    # Migrate any pre-Phase-1.5 DBs by adding missing columns.
     existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(processed_feed_items)").fetchall()}
     for col_name, col_def in _MIGRATION_COLUMNS:
         if col_name not in existing_cols:
@@ -168,6 +109,37 @@ def is_processed(conn: sqlite3.Connection, feed_library_id: int, feed_item_id: i
         (feed_library_id, feed_item_id),
     ).fetchone()
     return row is not None
+
+
+def get_processed_feed_item_by_id(
+    conn: sqlite3.Connection,
+    feed_item_id: int,
+) -> dict[str, Any] | None:
+    """Return the most recent processed_feed_items row for a given feed_item_id.
+
+    The golden CSV uses ``feed:<feed_item_id>`` as the row key, dropping the
+    library id. Resolving back from CSV to a DB row therefore goes through
+    feed_item_id alone. If the same item id appears across multiple feed
+    libraries (rare; Zotero reuses ids per library), the newest row wins
+    — the older one is from a previous library that has since gone away.
+
+    Returns ``None`` only when the row genuinely does not exist (caller's
+    contract: distinguish "not in DB" from a hard error). ``feed_item_id``
+    must be a positive int — invalid ids are programmer errors and raise.
+    """
+    safe_id = int(feed_item_id)
+    if safe_id <= 0:
+        raise ValueError(f"feed_item_id must be positive; got {feed_item_id!r}")
+    row = conn.execute(
+        """
+        SELECT * FROM processed_feed_items
+        WHERE feed_item_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (safe_id,),
+    ).fetchone()
+    return dict(row) if row else None
 
 
 def filter_unprocessed(
@@ -224,6 +196,7 @@ def record_decision(
     planned_zotero_key: str | None = None,
     matched_collections: list[str] | None = None,
     error: str | None = None,
+    shap_contribs_json: str | None = None,
 ) -> int:
     """Insert one decision row. Returns the row id.
 
@@ -241,8 +214,8 @@ def record_decision(
             decision, decision_reason,
             composite_score, surprise_score, corpus_affinity, reading_priority,
             is_black_swan, model_version, run_id, planned_zotero_key,
-            matched_collections_json, error
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            matched_collections_json, error, shap_contribs_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             int(feed_item.get("feed_library_id") or 0),
@@ -264,6 +237,7 @@ def record_decision(
             planned_zotero_key,
             _json.dumps(matched_collections or []),
             error,
+            shap_contribs_json,
         ),
     )
     return int(cursor.lastrowid or 0)
@@ -354,31 +328,73 @@ def record_read_marked(
     return int(cursor.rowcount or 0) > 0
 
 
+def select_by_decisions(
+    conn: sqlite3.Connection,
+    *,
+    decisions: list[str],
+    since_hours: int = 24,
+    limit: int = 1000,
+    feed_library_ids: list[int] | None = None,
+) -> list[dict[str, Any]]:
+    """Return rows whose decision is in ``decisions`` from the last N hours.
+
+    Used by:
+      * Daily-selection (decisions=[DECISION_TRIAGED_PENDING]) to gather the
+        plateau candidate pool. Order by composite_score DESC works for
+        kneedle-on-descending-curve.
+      * Review UI (decisions=[DECISION_AWAITING_REVIEW]) to list items
+        awaiting user verdict.
+
+    When ``feed_library_ids`` is provided, restrict to those feeds (used by
+    ``feeds run --feeds <name>``).
+    """
+    if not decisions:
+        raise ValueError("decisions must be non-empty")
+    safe_limit = max(1, min(int(limit), 5000))
+    safe_hours = max(1, int(since_hours))
+    decision_placeholders = ",".join("?" * len(decisions))
+    if feed_library_ids:
+        feed_placeholders = ",".join("?" * len(feed_library_ids))
+        rows = conn.execute(
+            f"""
+            SELECT * FROM processed_feed_items
+            WHERE decision IN ({decision_placeholders})
+              AND created_at >= datetime('now', ?)
+              AND feed_library_id IN ({feed_placeholders})
+            ORDER BY COALESCE(composite_score, 0) DESC
+            LIMIT ?
+            """,
+            (*decisions, f"-{safe_hours} hours", *feed_library_ids, safe_limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            f"""
+            SELECT * FROM processed_feed_items
+            WHERE decision IN ({decision_placeholders})
+              AND created_at >= datetime('now', ?)
+            ORDER BY COALESCE(composite_score, 0) DESC
+            LIMIT ?
+            """,
+            (*decisions, f"-{safe_hours} hours", safe_limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def select_pending_triaged(
     conn: sqlite3.Connection,
     *,
     since_hours: int = 24,
     limit: int = 1000,
+    feed_library_ids: list[int] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return rows in the 'triaged_pending' state from the last N hours.
-
-    Used by the daily-selection job to gather the candidate pool for plateau
-    selection. Ordered by composite_score DESC so kneedle-on-descending-curve
-    works directly.
-    """
-    safe_limit = max(1, min(int(limit), 5000))
-    safe_hours = max(1, int(since_hours))
-    rows = conn.execute(
-        """
-        SELECT * FROM processed_feed_items
-        WHERE decision = ?
-          AND created_at >= datetime('now', ?)
-        ORDER BY COALESCE(composite_score, 0) DESC
-        LIMIT ?
-        """,
-        (DECISION_TRIAGED_PENDING, f"-{safe_hours} hours", safe_limit),
-    ).fetchall()
-    return [dict(r) for r in rows]
+    """Compatibility wrapper: returns triaged_pending rows for daily selection."""
+    return select_by_decisions(
+        conn,
+        decisions=[DECISION_TRIAGED_PENDING],
+        since_hours=since_hours,
+        limit=limit,
+        feed_library_ids=feed_library_ids,
+    )
 
 
 def due_outcome_checks(

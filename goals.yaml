@@ -45,6 +45,12 @@ llm:
   refine_model: gpt-oss:20b
   api_base: ${OPENAI_API_BASE}
   api_key_env: OPENAI_API_KEY
+  # extra_body: provider-specific kwargs sent as OpenAI `extra_body`.
+  # vLLM/OnPrem reasoning models accept `chat_template_kwargs`; real OpenAI
+  # rejects unknown params with HTTP 400. Leave empty/null for api.openai.com.
+  # extra_body:
+  #   chat_template_kwargs:
+  #     enable_thinking: false
 prompts:
   map: 'You are analyzing one chunk of an academic article.
 
@@ -184,6 +190,42 @@ corpus:
   similarity_threshold: -0.3
   stale_days_for_weak_negative: 30
 
+# --- OpenAlex author/venue prestige (Phase 1.8) -----------------------------
+# Looks up h-index, venue impact, and citation count to blend into the
+# composite score. Off by default; flip enabled: true to opt in.
+prestige:
+  enabled: true
+  weight: 0.15                       # share of the LLM component (rest rebalanced)
+  cache_ttl_days: 30                 # cached lookups expire after this many days
+  fallback_neutral: 3.0              # score used when OpenAlex has no record
+  user_agent_email: "vlislavn@gmail.com"  # polite-pool mailto; recommended (faster, fewer 429s)
+  require_doi: false                 # if true, skip lookup for items without a DOI
+
+# --- Two-stage triage with full-text PDF reading (Phase 1.8) ---------------
+# After plateau selection picks the top K items, fetch their OA PDFs via
+# Unpaywall/arXiv and re-score with full text before materializing.
+full_text_refine:
+  enabled: false
+  top_k: 2                           # only refine the top-K plateau picks
+  max_pdf_bytes: 20000000            # hard cap to avoid huge downloads
+  fetch_timeout_secs: 30
+  unpaywall_email: ""                # required for non-arXiv OA PDFs
+
+# --- Hybrid daemon classifier gate (Phase 1.13) ---------------------------
+# When enabled, the daemon trains (or loads cached) a classifier on the
+# golden CSV at startup and uses it to fast-reject feed items before the LLM.
+# Auto-retrains when the golden CSV sha256 changes (startup + per-tick check).
+# Run `zotero-summarizer goldenset train-classifier --force` for an immediate
+# refresh outside the daemon.
+classifier_gate:
+  enabled: true                      # opt-in
+  model_name: lightgbm               # tabpfn (best F1) | lightgbm (fast) | logreg
+  drop_priorities: [dont_read]       # priorities that skip LLM entirely
+  raw_score_dont_read_below: 0.05    # Phase 1.14 override: if raw_score < this, force dont_read
+                                     # (works around isotonic calibrator inflating t_could to ~0.0007)
+  pca_dim: 100                       # PCA target for tabpfn embedding compression
+  n_folds: 5                         # k-fold CV for calibration + thresholds
+
 # --- RSS feed batch processor (Phase 1) -------------------------------------
 # Reads from Zotero's own feeds/feedItems tables. Selects the plateau of best
 # papers via kneed elbow detection, with a hard cap so the inbox never explodes.
@@ -211,8 +253,9 @@ feeds:
   outcome_window_days: 7          # wait N days before scoring a materialized item's outcome
   outcome_check_per_tick: 3       # resolve up to N due outcomes per tick
 
-  # --- Daily-selection sub-job (runs once every interval_hours inside daemon) ---
-  daily_selection_interval_hours: 24   # how often to plateau-select
+  # --- Daily-selection sub-job (runs once per morning inside daemon) ----------
+  daily_selection_at: "08:00"          # local time to deliver papers (HH:MM); overrides interval below
+  daily_selection_interval_hours: 24   # fallback if daily_selection_at is absent
   daily_window_hours: 24               # how far back to gather triaged_pending rows
   daily_target_min: 1                  # always pick at least this many (if pool has any)
   daily_target_max: 2                  # never pick more than this — user wants "1-2 best per day"

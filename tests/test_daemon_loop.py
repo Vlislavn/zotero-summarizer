@@ -96,11 +96,17 @@ def _bootstrap_minimal_settings(project: Path, monkeypatch) -> "object":
     from zotero_summarizer.services import lifecycle
     from zotero_summarizer.settings import Settings
 
+    import asyncio
+
     project.mkdir(parents=True, exist_ok=True)
     (project / "goals.yaml").write_text(_MINIMAL_GOALS_YAML, encoding="utf-8")
     monkeypatch.setenv("TEST_KEY", "test-key-not-used")
     settings = Settings.load(project_root=project)
     set_context(AppContext(settings=settings))
+    # Python 3.12+ raises RuntimeError from get_event_loop() if no loop is set
+    # after a prior asyncio.run() call.  Set a fresh loop for the test process.
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     lifecycle.startup()
     return settings
 
@@ -135,3 +141,75 @@ def test_should_run_daily_selection_respects_interval(tmp_path: Path, monkeypatc
     assert _should_run_daily_selection({"daily_selection_interval_hours": 24}) is False
     # With zero-hour interval, it should always be True.
     assert _should_run_daily_selection({"daily_selection_interval_hours": 0}) is True
+
+
+# --- time-of-day mode -------------------------------------------------------
+
+
+def test_should_run_daily_selection_time_of_day_too_early(tmp_path: Path, monkeypatch):
+    """Before the target time today, should-run returns False even on a fresh DB."""
+    _bootstrap_minimal_settings(tmp_path / "proj", monkeypatch)
+    # Fake now() to be 06:00; target is 08:00 → too early.
+    fake_now = datetime.now().replace(hour=6, minute=0, second=0, microsecond=0)
+    with patch("zotero_summarizer.services.feeds.datetime") as mock_dt:
+        mock_dt.now.return_value = fake_now
+        mock_dt.strptime.side_effect = datetime.strptime
+        result = _should_run_daily_selection({"daily_selection_at": "08:00"})
+    assert result is False
+
+
+def test_should_run_daily_selection_time_of_day_after_target_no_prior_run(tmp_path: Path, monkeypatch):
+    """After the target time with no prior run, should-run returns True."""
+    _bootstrap_minimal_settings(tmp_path / "proj", monkeypatch)
+    fake_now = datetime.now().replace(hour=9, minute=0, second=0, microsecond=0)
+    with patch("zotero_summarizer.services.feeds.datetime") as mock_dt:
+        mock_dt.now.return_value = fake_now
+        mock_dt.strptime.side_effect = datetime.strptime
+        result = _should_run_daily_selection({"daily_selection_at": "08:00"})
+    assert result is True
+
+
+def test_should_run_daily_selection_time_of_day_already_ran_today(tmp_path: Path, monkeypatch):
+    """After the target time but already ran today, should-run returns False."""
+    settings = _bootstrap_minimal_settings(tmp_path / "proj", monkeypatch)
+    # Record a selection run at 08:05 today (UTC ~ local for test purposes).
+    ran_at_local = datetime.now().replace(hour=8, minute=5, second=0, microsecond=0)
+    ran_at_utc_str = ran_at_local.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    conn = sqlite3.connect(str(settings.triage_db_path))
+    fs.init_feeds_schema(conn)
+    conn.execute(
+        "INSERT INTO processed_feed_items (feed_library_id, feed_item_id, guid, title, decision, run_id, updated_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (1, 1, "g", "t", fs.DECISION_SELECTED, "r", ran_at_utc_str),
+    )
+    conn.commit()
+    conn.close()
+    # Now is 09:00 — past target, but already ran.
+    fake_now = datetime.now().replace(hour=9, minute=0, second=0, microsecond=0)
+    with patch("zotero_summarizer.services.feeds.datetime") as mock_dt:
+        mock_dt.now.return_value = fake_now
+        mock_dt.strptime.side_effect = datetime.strptime
+        result = _should_run_daily_selection({"daily_selection_at": "08:00"})
+    assert result is False
+
+
+def test_should_run_daily_selection_time_of_day_yesterday_run_triggers_today(tmp_path: Path, monkeypatch):
+    """Ran yesterday; it's now past the target time today → should fire again."""
+    settings = _bootstrap_minimal_settings(tmp_path / "proj", monkeypatch)
+    yesterday_utc = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+    conn = sqlite3.connect(str(settings.triage_db_path))
+    fs.init_feeds_schema(conn)
+    conn.execute(
+        "INSERT INTO processed_feed_items (feed_library_id, feed_item_id, guid, title, decision, run_id, updated_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (1, 1, "g", "t", fs.DECISION_SELECTED, "r", yesterday_utc),
+    )
+    conn.commit()
+    conn.close()
+    # Now is 09:00 today — past the 08:00 target, last run was yesterday.
+    fake_now = datetime.now().replace(hour=9, minute=0, second=0, microsecond=0)
+    with patch("zotero_summarizer.services.feeds.datetime") as mock_dt:
+        mock_dt.now.return_value = fake_now
+        mock_dt.strptime.side_effect = datetime.strptime
+        result = _should_run_daily_selection({"daily_selection_at": "08:00"})
+    assert result is True

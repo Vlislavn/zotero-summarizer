@@ -98,6 +98,78 @@ corpus:
 
 `api_base: ${OPENAI_API_BASE}` is expanded from `.env` at startup. Keep the provider URL in `.env` so the repo remains generic.
 
+### Switching to OpenAI (api.openai.com)
+
+OpenAI's API rejects unknown request fields with HTTP 400. The repo defaults
+omit any provider-specific kwargs, so a fresh OpenAI setup works out of the box:
+
+```dotenv
+OPENAI_API_KEY=sk-...
+OPENAI_API_BASE=https://api.openai.com/v1
+```
+
+```yaml
+llm:
+  draft_model: gpt-4o-mini
+  refine_model: gpt-4o-mini
+  api_base: ${OPENAI_API_BASE}
+  api_key_env: OPENAI_API_KEY
+  # extra_body intentionally omitted for OpenAI
+```
+
+If you're switching back to a vLLM-served reasoning model (OnPrem, qwen3, etc.),
+re-enable the `enable_thinking=false` toggle by setting `extra_body`:
+
+```yaml
+llm:
+  extra_body:
+    chat_template_kwargs:
+      enable_thinking: false
+```
+
+Anything you put under `llm.extra_body` is forwarded verbatim to the underlying
+OpenAI-compatible client as the `extra_body` request kwarg.
+
+### `prestige:` section (Phase 1.8 OpenAlex enrichment)
+
+Off by default. Flip `enabled: true` to blend author h-index, venue impact, and
+citation count into the composite score:
+
+```yaml
+prestige:
+  enabled: true
+  weight: 0.15                   # share of the LLM component
+  cache_ttl_days: 30
+  fallback_neutral: 3.0          # used when OpenAlex has no record
+  user_agent_email: "you@example.com"   # polite-pool mailto
+  require_doi: false             # skip title-fallback lookups
+```
+
+When enabled the daemon logs one line per triaged item:
+
+```
+[tick_…] prestige: h=22 venue=3450 cites=156 score=3.78 composite=3.45
+```
+
+### `full_text_refine:` section (Phase 1.8 two-stage triage)
+
+Off by default. When enabled, after plateau selection picks the top items the
+daemon fetches their open-access PDFs (arXiv direct → Unpaywall → URL ending in
+`.pdf`) and re-scores them with the full-text pipeline before materializing:
+
+```yaml
+full_text_refine:
+  enabled: true
+  top_k: 2                       # refine only the top-K plateau picks
+  max_pdf_bytes: 20000000        # hard cap on download size (~20 MB)
+  fetch_timeout_secs: 30
+  unpaywall_email: "you@example.com"   # required for non-arXiv OA papers
+```
+
+PDFs are streamed to `~/.cache/zotero-summarizer/pdfs/` and verified against
+the `%PDF` magic bytes before extraction. Failures (no OA source, timeout,
+non-PDF response) are logged and the abstract-derived score is kept.
+
 ### `feeds:` section (RSS feed daemon)
 
 The feed daemon ([feeds.md](feeds.md)) reads its config from the `feeds:` block:
@@ -115,7 +187,11 @@ feeds:
   outcome_window_days: 7          # wait N days before scoring outcome
   outcome_check_per_tick: 3       # resolve up to N due outcomes per tick
   # --- daily selection -------------------------------------------------
-  daily_selection_interval_hours: 24
+  # Use daily_selection_at for clock-based delivery (fires once per calendar
+  # day after the target local time).  Use daily_selection_interval_hours as
+  # a fallback when daily_selection_at is not set (fires every N hours).
+  daily_selection_at: "08:00"           # fire at 08:00 local time every day
+  # daily_selection_interval_hours: 24  # alternative: fire every 24 h
   daily_window_hours: 24
   daily_target_min: 1
   daily_target_max: 2
@@ -144,6 +220,42 @@ Tuning notes:
   −0.3 toward 0.0 to fast-reject more items before LLM calls.
 - **Different daily target**: change `daily_target_max` (default 2). Going
   higher than ~5/day defeats the "1–2 best" goal.
+- **Fixed delivery time**: set `daily_selection_at: "08:00"` to receive papers
+  at the same local time every morning. Remove the key (or set
+  `daily_selection_interval_hours: 24`) to fall back to "fire every 24 h since
+  the last run" behavior.
+- **Per-session model override**: `--model TEXT` on `feeds serve`, `feeds run`,
+  or `feeds tick` overrides `llm.refine_model` for that session without editing
+  this file. Useful for temporarily switching to a faster local model.
+
+### `classifier_gate:` section (Phase 1.13/1.14 fast-reject)
+
+The classifier gate batch-predicts feed items before the LLM. See
+[feeds.md §Classifier gate](feeds.md#phase-113-classifier-gate-fast-reject-before-llm)
+for the full prose and current performance numbers.
+
+```yaml
+classifier_gate:
+  enabled: true                      # off → daemon runs without the gate
+  model_name: lightgbm               # lightgbm (default, fast + SHAP) | tabpfn | logreg
+  drop_priorities: [dont_read]       # priorities that skip the LLM
+  raw_score_dont_read_below: 0.05    # see "Calibration override" below
+  pca_dim: 100                       # TabPFN only
+  n_folds: 5                         # CV folds for threshold derivation
+  audit_sample_per_tick: 1           # Phase 1.15 counterfactual audit
+```
+
+**Calibration override (`raw_score_dont_read_below`)**: the isotonic
+calibrator inflates the low end of the score distribution, so the trained
+`t_could` threshold can collapse to ~0.001 — meaning no item is ever
+predicted `dont_read` from the calibrated score alone. When the override
+is > 0, items whose **raw** (uncalibrated) probability falls below it are
+force-flipped to `dont_read` inside the daemon's `_apply_classifier_gate`.
+This is a Phase 1.14 workaround for an underlying calibration pathology;
+it does not currently apply to `classifier.predict_new_items` callers
+(see [feeds.md](feeds.md) for the scope caveat and
+[baseline-ceiling-20260515.md](baseline-ceiling-20260515.md) for the
+broader 4-class κ ≈ 0.04 issue).
 
 ## LLM Notes
 

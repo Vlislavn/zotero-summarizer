@@ -166,6 +166,48 @@ CREATE TABLE IF NOT EXISTS triage_dimension_overrides (
 );
 """
 
+# Phase 1.17 Step 2 — per-paper role-value verdicts for daily-5 validation.
+_CREATE_ROLE_VALUE_VERDICTS_TABLE = """
+CREATE TABLE IF NOT EXISTS role_value_verdicts (
+    id              INTEGER PRIMARY KEY,
+    item_key        TEXT NOT NULL,
+    role            TEXT NOT NULL,
+    verdict         TEXT NOT NULL CHECK (verdict IN ('worth', 'waste', 'unknown')),
+    composite_score REAL,
+    surprise_score  REAL,
+    corpus_affinity REAL,
+    created_at      TEXT NOT NULL
+);
+"""
+
+# Phase 1.17 Step 4 — weekly A/B verdicts (roles vs pure-score).
+_CREATE_WEEKLY_AB_VERDICTS_TABLE = """
+CREATE TABLE IF NOT EXISTS weekly_ab_verdicts (
+    id             INTEGER PRIMARY KEY,
+    week_start     TEXT NOT NULL,
+    winner         TEXT NOT NULL CHECK (winner IN ('roles', 'pure_score', 'tied')),
+    slate_a_keys   TEXT NOT NULL,
+    slate_b_keys   TEXT NOT NULL,
+    created_at     TEXT NOT NULL
+);
+"""
+
+# Phase 1.18 Step 1 — user verdicts on derived labels. One row per paper;
+# new verdict UPSERTs over the prior one so the table is auditable but small.
+_CREATE_LABEL_VERDICTS_TABLE = """
+CREATE TABLE IF NOT EXISTS label_verdicts (
+    id                         INTEGER PRIMARY KEY,
+    item_key                   TEXT NOT NULL,
+    original_derived_priority  TEXT NOT NULL,
+    user_priority              TEXT NOT NULL CHECK (user_priority IN (
+        'must_read', 'should_read', 'could_read', 'dont_read'
+    )),
+    comment                    TEXT NOT NULL,
+    created_at                 TEXT NOT NULL,
+    UNIQUE(item_key)
+);
+"""
+
 _INDEX_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_results_item_id ON triage_results(item_id)",
     "CREATE INDEX IF NOT EXISTS idx_results_batch_id ON triage_results(batch_id)",
@@ -180,6 +222,10 @@ _INDEX_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_triage_jobs_started_at ON triage_jobs(started_at)",
     "CREATE INDEX IF NOT EXISTS idx_triage_dim_overrides_item_id ON triage_dimension_overrides(item_id)",
     "CREATE INDEX IF NOT EXISTS idx_triage_dim_overrides_created_at ON triage_dimension_overrides(created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_role_verdicts_role ON role_value_verdicts(role)",
+    "CREATE INDEX IF NOT EXISTS idx_weekly_ab_week_start ON weekly_ab_verdicts(week_start)",
+    "CREATE INDEX IF NOT EXISTS idx_label_verdicts_priority ON label_verdicts(user_priority)",
+    "CREATE INDEX IF NOT EXISTS idx_label_verdicts_created_at ON label_verdicts(created_at)",
 ]
 
 _ALLOWED_SORT = {
@@ -228,6 +274,9 @@ def init_db() -> None:
         conn.execute(_CREATE_PENDING_CHANGES_TABLE)
         conn.execute(_CREATE_TRIAGE_JOBS_TABLE)
         conn.execute(_CREATE_TRIAGE_DIMENSION_OVERRIDES_TABLE)
+        conn.execute(_CREATE_ROLE_VALUE_VERDICTS_TABLE)
+        conn.execute(_CREATE_WEEKLY_AB_VERDICTS_TABLE)
+        conn.execute(_CREATE_LABEL_VERDICTS_TABLE)
         feeds_storage.init_feeds_schema(conn)
 
         columns = _get_columns(conn, "triage_results")
@@ -235,6 +284,8 @@ def init_db() -> None:
             conn.execute("ALTER TABLE triage_results ADD COLUMN batch_id TEXT")
         if "pdf_path" not in columns:
             conn.execute("ALTER TABLE triage_results ADD COLUMN pdf_path TEXT")
+        if "prestige_score" not in columns:
+            conn.execute("ALTER TABLE triage_results ADD COLUMN prestige_score REAL DEFAULT NULL")
 
         triage_job_columns = _get_columns(conn, "triage_jobs")
         if "queue_changes" not in triage_job_columns:
@@ -305,6 +356,7 @@ def insert_result(
     percentile: float | None = None,
     rank: int | None = None,
     pdf_path: str | None = None,
+    prestige_score: float | None = None,
 ) -> None:
     conn = _get_conn()
     try:
@@ -313,9 +365,9 @@ def insert_result(
             INSERT INTO triage_results (
                 batch_id, item_id, title, relevance_score, composite_score,
                 reading_priority, forced_priority, normalized_score, percentile,
-                rank, confidence, pdf_path, response_json
+                rank, confidence, pdf_path, response_json, prestige_score
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 batch_id,
@@ -331,6 +383,7 @@ def insert_result(
                 response_dict.get("triage_confidence", 0.0),
                 pdf_path,
                 json.dumps(response_dict, ensure_ascii=False),
+                prestige_score if prestige_score is not None else response_dict.get("prestige_score"),
             ),
         )
         conn.commit()
@@ -1145,6 +1198,436 @@ def set_pending_changes_status(
             )
         conn.commit()
         return int(cursor.rowcount or 0)
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Phase 1.17 — role-value verdicts + weekly A/B (Steps 2 and 4)
+# ---------------------------------------------------------------------------
+
+
+_VALID_VERDICTS = ("worth", "waste", "unknown")
+_VALID_AB_WINNERS = ("roles", "pure_score", "tied")
+_AB_DECISION_THRESHOLD = 8     # weeks needed before decision rule fires
+_AB_WINNING_MARGIN = 6         # >=6/8 locks the decision
+
+
+def _connect_to(db_path: Path) -> sqlite3.Connection:
+    """Open a connection to *db_path* with the same hardening as ``_get_conn``."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    if not db_path.exists():
+        db_path.touch(mode=0o600)
+    else:
+        os.chmod(db_path, 0o600)
+    conn = sqlite3.connect(str(db_path), timeout=5)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
+
+
+def insert_role_value_verdict(
+    db_path: Path,
+    *,
+    item_key: str,
+    role: str,
+    verdict: str,
+    composite_score: float | None,
+    surprise_score: float | None,
+    corpus_affinity: float | None,
+) -> int:
+    """Insert one role-value verdict; returns the new row id.
+
+    Fails fast on bad inputs:
+    - empty item_key / role
+    - verdict not in {'worth', 'waste', 'unknown'}
+    """
+    safe_item_key = str(item_key or "").strip()
+    safe_role = str(role or "").strip()
+    safe_verdict = str(verdict or "").strip()
+    if not safe_item_key:
+        raise ValueError("item_key is required")
+    if not safe_role:
+        raise ValueError("role is required")
+    if safe_verdict not in _VALID_VERDICTS:
+        raise ValueError(
+            f"verdict must be one of {_VALID_VERDICTS}; got {verdict!r}"
+        )
+
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    conn = _connect_to(db_path)
+    try:
+        cursor = conn.execute(
+            """
+            INSERT INTO role_value_verdicts (
+                item_key, role, verdict, composite_score, surprise_score,
+                corpus_affinity, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                safe_item_key,
+                safe_role,
+                safe_verdict,
+                None if composite_score is None else float(composite_score),
+                None if surprise_score is None else float(surprise_score),
+                None if corpus_affinity is None else float(corpus_affinity),
+                now_iso,
+            ),
+        )
+        conn.commit()
+        new_id = cursor.lastrowid
+        if new_id is None:
+            raise RuntimeError("INSERT did not produce a lastrowid")
+        return int(new_id)
+    finally:
+        conn.close()
+
+
+def list_role_verdicts_summary(db_path: Path) -> dict[str, dict[str, Any]]:
+    """Return per-role win-rate stats with binomial Wilson 95% CI.
+
+    Schema per role::
+
+        {"worth": int, "waste": int, "unknown": int,
+         "win_rate": float | None, "ci_low": float | None,
+         "ci_high": float | None, "n": int}
+
+    ``win_rate = worth / (worth + waste)``. Roles with ``worth + waste < 5``
+    receive ``ci_low = ci_high = None`` (sample too small for reliable CI).
+    """
+    from scipy.stats import binomtest
+
+    conn = _connect_to(db_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT role, verdict, COUNT(*) AS cnt
+            FROM role_value_verdicts
+            GROUP BY role, verdict
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    out: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        role = str(row["role"])
+        verdict = str(row["verdict"])
+        if verdict not in _VALID_VERDICTS:
+            raise ValueError(
+                f"Found invalid verdict {verdict!r} for role {role!r} in DB"
+            )
+        bucket = out.setdefault(
+            role, {"worth": 0, "waste": 0, "unknown": 0}
+        )
+        bucket[verdict] = int(row["cnt"] or 0)
+
+    for role, bucket in out.items():
+        worth = int(bucket["worth"])
+        waste = int(bucket["waste"])
+        decided = worth + waste
+        bucket["n"] = decided
+        if decided == 0:
+            bucket["win_rate"] = None
+            bucket["ci_low"] = None
+            bucket["ci_high"] = None
+            continue
+        bucket["win_rate"] = worth / decided
+        if decided < 5:
+            bucket["ci_low"] = None
+            bucket["ci_high"] = None
+            continue
+        ci = binomtest(worth, decided).proportion_ci(0.95, method="wilson")
+        bucket["ci_low"] = float(ci.low)
+        bucket["ci_high"] = float(ci.high)
+    return out
+
+
+def insert_weekly_ab_verdict(
+    db_path: Path,
+    *,
+    week_start: str,
+    winner: str,
+    slate_a_keys: list[str],
+    slate_b_keys: list[str],
+) -> int:
+    """Insert one weekly A/B verdict; returns the new row id.
+
+    Fails fast on bad inputs:
+    - week_start must be YYYY-MM-DD
+    - winner not in {'roles', 'pure_score', 'tied'}
+    - slate_a_keys / slate_b_keys must be non-empty lists of strings
+    """
+    safe_week_start = str(week_start or "").strip()
+    safe_winner = str(winner or "").strip()
+    if not safe_week_start:
+        raise ValueError("week_start is required")
+    # Lenient ISO-date validation: YYYY-MM-DD only.
+    from datetime import date, datetime, timezone
+    parsed = datetime.strptime(safe_week_start, "%Y-%m-%d").date()
+    if not isinstance(parsed, date):
+        raise ValueError(f"week_start must be YYYY-MM-DD; got {week_start!r}")
+    if safe_winner not in _VALID_AB_WINNERS:
+        raise ValueError(
+            f"winner must be one of {_VALID_AB_WINNERS}; got {winner!r}"
+        )
+    if not isinstance(slate_a_keys, list) or not slate_a_keys:
+        raise ValueError("slate_a_keys must be a non-empty list")
+    if not isinstance(slate_b_keys, list) or not slate_b_keys:
+        raise ValueError("slate_b_keys must be a non-empty list")
+    for key in (*slate_a_keys, *slate_b_keys):
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("slate keys must be non-empty strings")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    conn = _connect_to(db_path)
+    try:
+        cursor = conn.execute(
+            """
+            INSERT INTO weekly_ab_verdicts (
+                week_start, winner, slate_a_keys, slate_b_keys, created_at
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                safe_week_start,
+                safe_winner,
+                json.dumps(list(slate_a_keys), ensure_ascii=False),
+                json.dumps(list(slate_b_keys), ensure_ascii=False),
+                now_iso,
+            ),
+        )
+        conn.commit()
+        new_id = cursor.lastrowid
+        if new_id is None:
+            raise RuntimeError("INSERT did not produce a lastrowid")
+        return int(new_id)
+    finally:
+        conn.close()
+
+
+def list_ab_decision_status(db_path: Path) -> dict[str, Any]:
+    """Return the current weekly A/B decision status.
+
+    Decision rule: after :data:`_AB_DECISION_THRESHOLD` (8) verdicts total, if
+    ``roles >= _AB_WINNING_MARGIN`` (6) the decision locks on ``"roles"``; if
+    ``pure_score >= _AB_WINNING_MARGIN`` the decision locks on ``"pure_score"``.
+    Otherwise the decision stays ``None``.
+    """
+    conn = _connect_to(db_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT winner, COUNT(*) AS cnt
+            FROM weekly_ab_verdicts
+            GROUP BY winner
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    counts: dict[str, int] = {w: 0 for w in _VALID_AB_WINNERS}
+    for row in rows:
+        winner = str(row["winner"])
+        if winner not in _VALID_AB_WINNERS:
+            raise ValueError(f"Found invalid winner {winner!r} in weekly_ab_verdicts")
+        counts[winner] = int(row["cnt"] or 0)
+
+    total = sum(counts.values())
+    decision: str | None = None
+    decision_locked = False
+    if total >= _AB_DECISION_THRESHOLD:
+        if counts["roles"] >= _AB_WINNING_MARGIN:
+            decision = "roles"
+            decision_locked = True
+        elif counts["pure_score"] >= _AB_WINNING_MARGIN:
+            decision = "pure_score"
+            decision_locked = True
+
+    remaining = max(0, _AB_DECISION_THRESHOLD - total)
+    return {
+        "total": total,
+        "roles_wins": counts["roles"],
+        "pure_score_wins": counts["pure_score"],
+        "tied": counts["tied"],
+        "decision_locked": decision_locked,
+        "decision": decision,
+        "remaining_until_decision": remaining,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase 1.18 Step 1 — label verdicts (user audit of derived priorities)
+# ---------------------------------------------------------------------------
+
+
+_VALID_LABEL_PRIORITIES = (
+    "must_read", "should_read", "could_read", "dont_read",
+)
+
+
+def _row_to_label_verdict(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": int(row["id"]),
+        "item_key": str(row["item_key"]),
+        "original_derived_priority": str(row["original_derived_priority"]),
+        "user_priority": str(row["user_priority"]),
+        "comment": str(row["comment"]),
+        "created_at": str(row["created_at"]),
+    }
+
+
+def insert_or_update_label_verdict(
+    db_path: Path,
+    *,
+    item_key: str,
+    original_derived_priority: str,
+    user_priority: str,
+    comment: str,
+) -> int:
+    """Insert one label verdict, or REPLACE the existing row for ``item_key``.
+
+    Returns the row id. Fails fast on bad inputs:
+    - empty item_key / original_derived_priority
+    - user_priority not in the 4-class enum
+    - comment must be a string (may be empty)
+    """
+    safe_item_key = str(item_key or "").strip()
+    safe_original = str(original_derived_priority or "").strip()
+    safe_user = str(user_priority or "").strip()
+    if not safe_item_key:
+        raise ValueError("item_key is required")
+    if not safe_original:
+        raise ValueError("original_derived_priority is required")
+    if safe_user not in _VALID_LABEL_PRIORITIES:
+        raise ValueError(
+            f"user_priority must be one of {_VALID_LABEL_PRIORITIES}; got {user_priority!r}"
+        )
+    if not isinstance(comment, str):
+        raise ValueError(f"comment must be a string; got {type(comment).__name__}")
+
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    conn = _connect_to(db_path)
+    try:
+        cursor = conn.execute(
+            """
+            INSERT INTO label_verdicts (
+                item_key, original_derived_priority, user_priority, comment, created_at
+            )
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(item_key) DO UPDATE SET
+                original_derived_priority = excluded.original_derived_priority,
+                user_priority = excluded.user_priority,
+                comment = excluded.comment,
+                created_at = excluded.created_at
+            """,
+            (safe_item_key, safe_original, safe_user, comment, now_iso),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT id FROM label_verdicts WHERE item_key = ?",
+            (safe_item_key,),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError(
+                f"UPSERT completed but no row found for item_key {safe_item_key!r}"
+            )
+        return int(row["id"])
+    finally:
+        conn.close()
+
+
+def get_label_verdict(db_path: Path, item_key: str) -> dict[str, Any] | None:
+    """Return one verdict for ``item_key`` or None if not present.
+
+    None signals absence (boundary contract), not an error.
+    """
+    safe_item_key = str(item_key or "").strip()
+    if not safe_item_key:
+        raise ValueError("item_key is required")
+    conn = _connect_to(db_path)
+    try:
+        row = conn.execute(
+            """
+            SELECT id, item_key, original_derived_priority, user_priority,
+                   comment, created_at
+            FROM label_verdicts
+            WHERE item_key = ?
+            """,
+            (safe_item_key,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    return _row_to_label_verdict(row)
+
+
+def list_label_verdicts(
+    db_path: Path,
+    *,
+    user_priority: str | None = None,
+    limit: int = 500,
+) -> list[dict[str, Any]]:
+    """List verdicts most-recent-first; optionally filter by ``user_priority``."""
+    safe_limit = int(limit)
+    if not (1 <= safe_limit <= 5000):
+        raise ValueError(f"limit must be between 1 and 5000; got {limit}")
+    safe_filter: str | None = None
+    if user_priority is not None:
+        candidate = str(user_priority).strip()
+        if candidate not in _VALID_LABEL_PRIORITIES:
+            raise ValueError(
+                f"user_priority must be one of {_VALID_LABEL_PRIORITIES}; got {user_priority!r}"
+            )
+        safe_filter = candidate
+
+    conn = _connect_to(db_path)
+    try:
+        if safe_filter is None:
+            rows = conn.execute(
+                """
+                SELECT id, item_key, original_derived_priority, user_priority,
+                       comment, created_at
+                FROM label_verdicts
+                ORDER BY datetime(created_at) DESC, id DESC
+                LIMIT ?
+                """,
+                (safe_limit,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT id, item_key, original_derived_priority, user_priority,
+                       comment, created_at
+                FROM label_verdicts
+                WHERE user_priority = ?
+                ORDER BY datetime(created_at) DESC, id DESC
+                LIMIT ?
+                """,
+                (safe_filter, safe_limit),
+            ).fetchall()
+    finally:
+        conn.close()
+    return [_row_to_label_verdict(r) for r in rows]
+
+
+def delete_label_verdict(db_path: Path, item_key: str) -> bool:
+    """Delete one verdict; return True iff a row was removed."""
+    safe_item_key = str(item_key or "").strip()
+    if not safe_item_key:
+        raise ValueError("item_key is required")
+    conn = _connect_to(db_path)
+    try:
+        cursor = conn.execute(
+            "DELETE FROM label_verdicts WHERE item_key = ?",
+            (safe_item_key,),
+        )
+        conn.commit()
+        return int(cursor.rowcount or 0) > 0
     finally:
         conn.close()
 

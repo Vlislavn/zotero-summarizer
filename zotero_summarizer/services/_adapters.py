@@ -27,9 +27,16 @@ def _load_onprem() -> tuple[Any, Any]:
         return LLM, load_single_document
 
 
-def build_llm(model_url: str, model_name: str, api_key: str, max_tokens: int = 4096) -> InstrumentedLLMClient:
+def build_llm(
+    model_url: str,
+    model_name: str,
+    api_key: str,
+    max_tokens: int = 4096,
+    *,
+    extra_body: dict[str, Any] | None = None,
+) -> InstrumentedLLMClient:
     llm_cls, _ = _load_onprem()
-    inner = llm_cls(
+    kwargs: dict[str, Any] = dict(
         model_url=model_url,
         model=model_name,
         openai_api_key=api_key,
@@ -37,9 +44,10 @@ def build_llm(model_url: str, model_name: str, api_key: str, max_tokens: int = 4
         max_tokens=max_tokens,
         mute_stream=True,
         verbose=False,
-        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
-    return InstrumentedLLMClient(inner)
+    if extra_body:
+        kwargs["extra_body"] = extra_body
+    return InstrumentedLLMClient(llm_cls(**kwargs))
 
 
 def build_pdf_extractor() -> OnPremPdfExtractor:

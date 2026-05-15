@@ -38,9 +38,15 @@ def map_priority_from_score(score: float) -> str:
     return ReadingPriority.DONT_READ.value
 
 
-def compute_composite_score(triage: TriageResult, corpus_affinity: float) -> float:
+def compute_composite_score(
+    triage: TriageResult,
+    corpus_affinity: float,
+    prestige_score: float | None = None,
+) -> float:
     affinity = clamp(corpus_affinity, -1.0, 1.0)
     corpus_scaled = 1.0 + 4.0 * ((affinity + 1.0) / 2.0)
+    # Neutral 3.0 when prestige is unknown — does not perturb the baseline.
+    prestige_norm = clamp(float(prestige_score) if prestige_score is not None else 3.0, 1.0, 5.0)
 
     if not triage.dimensions:
         baseline = float(triage.score)
@@ -50,12 +56,14 @@ def compute_composite_score(triage: TriageResult, corpus_affinity: float) -> flo
 
     dims = triage.dimensions
     floor = min(dims.goal_alignment, dims.methodological_rigor)
+    # Weights sum to 1.0 across the LLM component (floor + sub-dims + prestige).
     llm_component = (
-        0.6 * floor
-        + 0.1 * dims.actionability
-        + 0.1 * dims.novelty_for_goals
-        + 0.1 * dims.evidence_strength
-        + 0.1 * triage.score
+        0.50 * floor
+        + 0.10 * dims.actionability
+        + 0.10 * dims.novelty_for_goals
+        + 0.10 * dims.evidence_strength
+        + 0.05 * triage.score
+        + 0.15 * prestige_norm
     )
     score = 0.5 * llm_component + 0.5 * corpus_scaled
     score -= 1.0 * (1.0 - triage.confidence)

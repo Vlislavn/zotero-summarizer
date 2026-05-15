@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from zotero_summarizer.services import emoji_signals
+
 
 def _parse_created_at(value: str | None) -> datetime | None:
     if not value:
@@ -58,10 +60,7 @@ def infer_feedback_events_from_corpus_items(
         )
 
     for item in items:
-        tags = list(getattr(item, "tags", []) or [])
-        has_brain = any("🧠" in str(tag) for tag in tags)
-        has_eyes = any("👀" in str(tag) for tag in tags)
-        has_down = any("👎" in str(tag) or "❌" in str(tag) for tag in tags)
+        tags = [str(t) for t in (getattr(item, "tags", []) or []) if t]
         annotation_count = int(getattr(item, "annotation_count", 0) or 0)
         manual_note_count = int(getattr(item, "manual_note_count", 0) or 0)
         created_at = _parse_created_at(getattr(item, "created_at", None))
@@ -70,21 +69,39 @@ def infer_feedback_events_from_corpus_items(
         if not item_id:
             continue
 
-        if has_brain:
-            append_event(item_id, "implicit_engagement", "brain_tag", 5.0)
-        if has_eyes:
-            append_event(item_id, "implicit_engagement", "eyes_tag", 4.5)
+        # Walk the shared emoji taxonomy: any matched emoji fires its tier's event.
+        signals = emoji_signals.detect_signals(tags)
+        has_emoji_negative = False
+        has_emoji_positive = False
+        for sig in signals:
+            base = (
+                "implicit_negative"
+                if sig.tier in ("strong_negative", "boring")
+                else "implicit_engagement"
+            )
+            # Translate the additive score_delta back into an absolute
+            # 1..5 inferred_relevance value for the user_feedback row.
+            sig_relevance = max(1.0, min(5.0, emoji_signals.NEUTRAL_SCORE + sig.score_delta))
+            append_event(item_id, base, _signal_label(sig), sig_relevance)
+            if base == "implicit_negative":
+                has_emoji_negative = True
+            else:
+                has_emoji_positive = True
+
         if annotation_count > 0:
             append_event(item_id, "implicit_engagement", "has_annotations", 4.5)
         if manual_note_count > 0:
             append_event(item_id, "implicit_engagement", "manual_note", 4.0)
-        if has_down:
-            append_event(item_id, "implicit_negative", "thumbsdown_or_cross", 1.0)
 
-        has_positive = has_brain or has_eyes or annotation_count > 0 or manual_note_count > 0
-        if not has_positive and not has_down and created_at is not None:
+        has_positive = has_emoji_positive or annotation_count > 0 or manual_note_count > 0
+        if not has_positive and not has_emoji_negative and created_at is not None:
             age_days = (now - created_at.astimezone(timezone.utc)).days
             if age_days >= stale_days_for_weak_negative:
                 append_event(item_id, "implicit_weak_negative", "stale_without_engagement", 2.0)
 
     return events
+
+
+def _signal_label(sig: "emoji_signals.EmojiSignal") -> str:
+    """Stable identifier used as the ``signal`` column in `user_feedback`."""
+    return f"{sig.tier}:{sig.emoji}"

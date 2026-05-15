@@ -84,7 +84,7 @@
   </div>
 
   <div class="flex flex-wrap gap-2 mb-4">
-    <template x-for="tab in tabs" :key="tab.key">
+    <template x-for="tab in tabs.filter(t => t.key !== 'review' || showAdvancedTabs)" :key="tab.key">
       <button
         @click="switchTab(tab.key)"
         :class="activeTab === tab.key ? 'bg-teal-700 text-white' : 'bg-white text-slate-700 hover:bg-slate-100'"
@@ -93,6 +93,213 @@
         <span x-text="tab.label"></span>
       </button>
     </template>
+  </div>
+
+  <!-- Today tab (Phase 1.17 Step 1+2+3) -->
+  <div x-show="activeTab === 'today'" class="glass rounded-2xl border border-slate-200 p-4">
+    <div class="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+      <div>
+        <h2 class="text-lg font-bold">Today's reading</h2>
+        <p class="text-xs text-slate-500 mt-1">
+          Up to K papers across all RSS feeds, role-allocated (2 model + 1 surprise + 1 audit + 1 diversity).
+          Keep the ones worth your attention; rate each role-slot so the system learns what to surface tomorrow.
+        </p>
+      </div>
+      <div class="flex items-center gap-2 text-xs">
+        <label class="text-slate-600">K =</label>
+        <select x-model.number="dailyK" @change="loadToday()" class="px-2 py-1 rounded border border-slate-300 text-xs">
+          <option :value="3">3</option>
+          <option :value="5">5</option>
+          <option :value="7">7</option>
+          <option :value="10">10</option>
+        </select>
+        <button @click="loadToday()" class="px-3 py-1 rounded-lg border border-slate-300 text-xs">Refresh</button>
+        <span class="text-slate-500" x-show="dailySlate"
+              x-text="'pool ' + dailySlate.pool_size + (dailySlate.capped_at ? ' (capped at ' + dailySlate.capped_at + ')' : '')"></span>
+      </div>
+    </div>
+
+    <div x-show="ceilingBanner" class="mb-3 p-3 rounded-xl border border-violet-300 bg-violet-50 text-sm">
+      <div class="font-semibold text-violet-900">
+        Model status: Spearman &rho; = <span x-text="ceilingBanner?.spearman_rho?.toFixed(3)"></span>
+        at <span x-text="ceilingBanner?.percent?.toFixed(0)"></span>% of your test-retest ceiling
+        (Pearson r = <span x-text="ceilingBanner?.pearson_r?.toFixed(3)"></span>).
+      </div>
+      <div class="text-xs text-violet-800 mt-1">
+        Verdict: <span x-text="ceilingBanner?.verdict"></span>
+      </div>
+    </div>
+
+    <div x-show="dailyError" class="mb-3 p-2 rounded bg-rose-50 border border-rose-200 text-xs text-rose-800"
+         x-text="dailyError"></div>
+
+    <div x-show="dailyLoading" class="text-sm text-slate-500">Loading today's slate&hellip;</div>
+
+    <div x-show="!dailyLoading && dailySlate && dailySlate.papers.length === 0"
+         class="text-sm text-slate-500 p-3 rounded bg-slate-50 border border-slate-200">
+      No papers in the daily slate yet. Run <span class="mono">zotero-summarizer feeds run</span> to populate the queue.
+    </div>
+
+    <div class="space-y-3">
+      <template x-for="(paper, idx) in (dailySlate ? dailySlate.papers : [])" :key="paper.item_key">
+        <div>
+          <!-- Paper card -->
+          <div class="border border-slate-200 rounded-xl p-3 bg-white">
+            <div class="flex items-center gap-2 text-xs mb-1 flex-wrap">
+              <span class="px-2 py-0.5 rounded-full font-bold uppercase tracking-wide border"
+                    :class="roleBadgeClass(paper.role)"
+                    :title="roleBadgeTooltip(paper.role)"
+                    x-text="roleBadgeLabel(paper.role)"></span>
+              <span class="mono text-slate-400 text-[10px]" x-text="paper.item_key"></span>
+            </div>
+
+            <div class="text-sm font-bold" x-text="paper.title || '(untitled)'"></div>
+            <div class="text-xs text-slate-600 mt-0.5">
+              <span x-text="paper.authors || '(no authors)'"></span>
+              <span x-show="paper.venue" class="text-slate-400"> · </span>
+              <span x-show="paper.venue" class="italic" x-text="paper.venue"></span>
+            </div>
+
+            <!-- Scores -->
+            <div class="mt-2 flex flex-wrap items-center gap-3 text-xs">
+              <span title="Composite score (model + corpus + prestige)">
+                <span class="text-slate-500">composite</span>
+                <span class="font-bold mono ml-1" x-text="paper.composite_score?.toFixed(2)"></span>
+              </span>
+              <span title="Surprise = how far from your existing corpus this lands">
+                <span class="text-slate-500">surprise</span>
+                <span class="mono ml-1" x-text="paper.surprise_score?.toFixed(2)"></span>
+              </span>
+              <span title="Cosine similarity to your existing corpus (negative = far)">
+                <span class="text-slate-500">corpus</span>
+                <span class="mono ml-1" x-text="paper.corpus_affinity?.toFixed(2)"></span>
+              </span>
+              <span title="Venue / author prestige">
+                <span class="text-slate-500">prestige</span>
+                <span class="mono ml-1" x-text="paper.prestige_score?.toFixed(2)"></span>
+              </span>
+            </div>
+
+            <!-- SHAP top-3 pills -->
+            <div x-show="paper.shap_top && paper.shap_top.length" class="mt-2 flex flex-wrap gap-1">
+              <template x-for="contrib in (paper.shap_top || []).slice(0, 3)" :key="contrib.feature">
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] mono border"
+                      :class="contrib.contribution >= 0 ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'">
+                  <span x-text="contrib.feature"></span>
+                  <span x-text="(contrib.contribution >= 0 ? '+' : '') + contrib.contribution.toFixed(2)"></span>
+                </span>
+              </template>
+            </div>
+
+            <!-- Rationale (collapsed 3 lines) -->
+            <div x-show="paper.rationale" class="mt-2 text-xs text-slate-700 italic">
+              <span class="text-slate-400">LLM:</span>
+              <span :class="todayRationaleExpanded[paper.item_key] ? '' : 'line-clamp-3'"
+                    x-text="paper.rationale"></span>
+              <button @click="todayRationaleExpanded[paper.item_key] = !todayRationaleExpanded[paper.item_key]"
+                      class="text-teal-700 underline ml-1 not-italic"
+                      x-text="todayRationaleExpanded[paper.item_key] ? 'show less' : 'show more'"></button>
+            </div>
+
+            <!-- Keep / Skip -->
+            <div class="mt-3 flex flex-wrap items-center gap-2">
+              <button type="button" @click="keep(paper)"
+                      :disabled="!!todayActionState[paper.item_key]"
+                      class="px-3 py-1 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-500">
+                Keep
+              </button>
+              <button type="button" @click="skip(paper)"
+                      :disabled="!!todayActionState[paper.item_key]"
+                      class="px-3 py-1 rounded-lg text-xs font-semibold bg-rose-600 text-white hover:bg-rose-700 disabled:bg-slate-200 disabled:text-slate-500">
+                Skip
+              </button>
+              <span x-show="todayActionState[paper.item_key]"
+                    class="text-xs ml-1"
+                    :class="todayActionState[paper.item_key] === 'kept' ? 'text-emerald-700' : 'text-rose-700'"
+                    x-text="'-> ' + todayActionState[paper.item_key]"></span>
+            </div>
+
+            <!-- Role-verdict row -->
+            <div class="mt-2 flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
+              <span class="text-[11px] text-slate-500">Was this slot worth your attention?</span>
+              <button type="button" @click="submitRoleVerdict(paper, 'worth')"
+                      :disabled="!!roleVerdictsSent[paper.item_key]"
+                      class="px-2 py-0.5 rounded-lg text-[11px] border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50">
+                &check; Worth it
+              </button>
+              <button type="button" @click="submitRoleVerdict(paper, 'waste')"
+                      :disabled="!!roleVerdictsSent[paper.item_key]"
+                      class="px-2 py-0.5 rounded-lg text-[11px] border border-rose-300 bg-rose-50 text-rose-800 hover:bg-rose-100 disabled:opacity-50">
+                &times; Waste
+              </button>
+              <button type="button" @click="submitRoleVerdict(paper, 'unknown')"
+                      :disabled="!!roleVerdictsSent[paper.item_key]"
+                      class="px-2 py-0.5 rounded-lg text-[11px] border border-slate-300 bg-slate-50 text-slate-600 hover:bg-slate-100 disabled:opacity-50">
+                ? Unknown
+              </button>
+              <span x-show="roleVerdictsSent[paper.item_key]"
+                    class="text-[10px] text-slate-400 ml-1"
+                    x-text="'verdict: ' + roleVerdictsSent[paper.item_key]"></span>
+            </div>
+          </div>
+
+          <!-- Trickle audit card inserted after the first paper -->
+          <template x-if="idx === 0 && trickleCandidates.length > 0">
+            <div class="mt-3 border-2 border-violet-300 rounded-xl p-3 bg-violet-50">
+              <div class="text-xs font-bold text-violet-900 uppercase tracking-wide mb-2"
+                   x-text="'🔁 Audit: re-label this paper from ~' + trickleCandidates[0].days_since_added + ' days ago'"></div>
+              <div class="text-sm font-bold" x-text="trickleCandidates[0].title || '(untitled)'"></div>
+              <div class="text-xs text-slate-700 mt-0.5">
+                <span x-text="trickleCandidates[0].authors || '(no authors)'"></span>
+                <span x-show="trickleCandidates[0].venue" class="text-slate-400"> · </span>
+                <span x-show="trickleCandidates[0].venue" class="italic" x-text="trickleCandidates[0].venue"></span>
+              </div>
+              <div class="text-sm whitespace-pre-line text-slate-800 mt-2 mb-3" x-text="trickleCandidates[0].abstract"></div>
+              <div class="flex gap-2 flex-wrap">
+                <button @click="submitTrickleAudit(trickleCandidates[0], 'must_read')"
+                        class="px-3 py-1 rounded bg-emerald-600 text-white text-xs">must_read</button>
+                <button @click="submitTrickleAudit(trickleCandidates[0], 'should_read')"
+                        class="px-3 py-1 rounded bg-sky-600 text-white text-xs">should_read</button>
+                <button @click="submitTrickleAudit(trickleCandidates[0], 'could_read')"
+                        class="px-3 py-1 rounded bg-amber-500 text-white text-xs">could_read</button>
+                <button @click="submitTrickleAudit(trickleCandidates[0], 'dont_read')"
+                        class="px-3 py-1 rounded bg-rose-600 text-white text-xs">dont_read</button>
+              </div>
+            </div>
+          </template>
+
+          <!-- Second trickle card after the third paper (if there is one) -->
+          <template x-if="idx === 2 && trickleCandidates.length > 1">
+            <div class="mt-3 border-2 border-violet-300 rounded-xl p-3 bg-violet-50">
+              <div class="text-xs font-bold text-violet-900 uppercase tracking-wide mb-2"
+                   x-text="'🔁 Audit: re-label this paper from ~' + trickleCandidates[1].days_since_added + ' days ago'"></div>
+              <div class="text-sm font-bold" x-text="trickleCandidates[1].title || '(untitled)'"></div>
+              <div class="text-xs text-slate-700 mt-0.5">
+                <span x-text="trickleCandidates[1].authors || '(no authors)'"></span>
+                <span x-show="trickleCandidates[1].venue" class="text-slate-400"> · </span>
+                <span x-show="trickleCandidates[1].venue" class="italic" x-text="trickleCandidates[1].venue"></span>
+              </div>
+              <div class="text-sm whitespace-pre-line text-slate-800 mt-2 mb-3" x-text="trickleCandidates[1].abstract"></div>
+              <div class="flex gap-2 flex-wrap">
+                <button @click="submitTrickleAudit(trickleCandidates[1], 'must_read')"
+                        class="px-3 py-1 rounded bg-emerald-600 text-white text-xs">must_read</button>
+                <button @click="submitTrickleAudit(trickleCandidates[1], 'should_read')"
+                        class="px-3 py-1 rounded bg-sky-600 text-white text-xs">should_read</button>
+                <button @click="submitTrickleAudit(trickleCandidates[1], 'could_read')"
+                        class="px-3 py-1 rounded bg-amber-500 text-white text-xs">could_read</button>
+                <button @click="submitTrickleAudit(trickleCandidates[1], 'dont_read')"
+                        class="px-3 py-1 rounded bg-rose-600 text-white text-xs">dont_read</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+
+    <div x-show="dailySlate && dailySlate.empty_role_events && dailySlate.empty_role_events.length"
+         class="mt-3 text-xs text-slate-500 italic">
+      Couldn't fill: <span x-text="(dailySlate?.empty_role_events || []).join(', ')"></span>
+    </div>
   </div>
 
   <div x-show="activeTab === 'library'" class="grid grid-cols-1 lg:grid-cols-4 gap-4">
@@ -725,6 +932,175 @@
     </div>
   </div>
 
+  <div x-show="activeTab === 'review'" class="glass rounded-2xl border border-slate-200 p-4">
+    <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+      <div class="flex items-center gap-2">
+        <h2 class="text-lg font-bold">Feed Review</h2>
+        <button type="button" @click="reviewSwitchState('awaiting_review')"
+                :class="reviewState === 'awaiting_review' ? 'bg-teal-700 text-white' : 'bg-white text-slate-700 hover:bg-slate-100'"
+                class="px-3 py-1 rounded-lg border border-slate-300 text-xs font-semibold">
+          Awaiting review
+        </button>
+        <button type="button" @click="reviewSwitchState('gate_rejected')"
+                :class="reviewState === 'gate_rejected' ? 'bg-rose-700 text-white' : 'bg-white text-slate-700 hover:bg-slate-100'"
+                class="px-3 py-1 rounded-lg border border-slate-300 text-xs font-semibold">
+          Gate-rejected
+        </button>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-slate-500" x-text="reviewLoading ? 'Loading…' : (reviewItems.length + ' in queue')"></span>
+        <button @click="fetchReview()" class="px-3 py-1 rounded-lg border border-slate-300 text-xs">Refresh</button>
+        <button
+          @click="reviewApplyAll()"
+          :disabled="reviewApprovedCount === 0 || reviewApplying"
+          :class="reviewApprovedCount === 0 ? 'bg-slate-200 text-slate-500' : 'bg-teal-700 text-white hover:bg-teal-800'"
+          class="px-3 py-1 rounded-lg text-xs font-semibold"
+          x-text="reviewApplying ? 'Applying…' : ('Apply ' + reviewApprovedCount + ' approved → Zotero')"
+        ></button>
+      </div>
+    </div>
+    <div x-show="reviewState === 'gate_rejected'" class="mb-3 p-2 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-900">
+      <div class="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <strong>Gate-rejected pile</strong> — items the classifier dropped before LLM
+          (<span x-text="reviewItems.length"></span> shown). Use <b>relabel</b> to either
+          confirm the verdict (dont) or correct false negatives (must / should / could).
+          Approve / Reject are hidden here — relabel does the right thing for both training and Zotero.
+        </div>
+        <button type="button" @click="reviewConfirmAllGateRejected()"
+                :disabled="reviewConfirming"
+                class="px-3 py-1 rounded-lg text-xs font-semibold bg-rose-700 text-white hover:bg-rose-800 disabled:bg-slate-300">
+          <span x-show="!reviewConfirming">Confirm remaining as dont_read</span>
+          <span x-show="reviewConfirming">Writing…</span>
+        </button>
+      </div>
+    </div>
+    <div x-show="reviewMessage" class="mb-3 text-xs"
+         :class="reviewMessageIsError ? 'text-red-600' : 'text-emerald-700'"
+         x-text="reviewMessage"></div>
+    <div x-show="!reviewLoading && reviewItems.length === 0" class="text-sm text-slate-500">
+      No items awaiting review. Run <span class="mono">zotero-summarizer feeds run --feeds &lt;name&gt;</span> first.
+    </div>
+    <div class="space-y-3">
+      <template x-for="item in reviewItems" :key="item.id">
+        <div class="border border-slate-200 rounded-xl p-3"
+             :class="reviewItemState[item.id] === 'approved' ? 'bg-emerald-50 border-emerald-300'
+                   : reviewItemState[item.id] === 'rejected' ? 'bg-rose-50 border-rose-300'
+                   : 'bg-white'">
+          <div class="flex items-baseline justify-between gap-3">
+            <div class="flex-1">
+              <div class="flex items-center gap-2 text-xs">
+                <span class="font-bold uppercase tracking-wide px-2 py-0.5 rounded"
+                      :class="reviewPriorityClass(item.reading_priority)"
+                      x-text="item.reading_priority || '?'"></span>
+                <span class="mono text-slate-500" x-text="(item.composite_score != null ? item.composite_score.toFixed(2) : '—')"></span>
+                <span class="text-slate-400" x-text="'feed' + (item.feed_library_id || '?')"></span>
+                <span x-show="item.audit_pick"
+                      class="px-2 py-0.5 rounded bg-violet-100 text-violet-800 border border-violet-300 font-semibold"
+                      title="Gate said dont_read — surfaced for audit. Your verdict here measures the gate's false-negative rate.">
+                  🎲 audit pick
+                </span>
+                <template x-if="reviewPaperUrl(item)">
+                  <a :href="reviewPaperUrl(item)" target="_blank" rel="noopener"
+                     class="text-teal-700 hover:text-teal-900 underline text-xs font-semibold">
+                    open ↗
+                  </a>
+                </template>
+                <span x-show="item.doi" class="text-slate-400 mono text-[10px]" x-text="item.doi"></span>
+              </div>
+              <div class="text-sm font-semibold mt-1">
+                <template x-if="reviewPaperUrl(item)">
+                  <a :href="reviewPaperUrl(item)" target="_blank" rel="noopener"
+                     class="hover:text-teal-800 hover:underline" x-text="item.title || '(untitled)'"></a>
+                </template>
+                <template x-if="!reviewPaperUrl(item)">
+                  <span x-text="item.title || '(untitled)'"></span>
+                </template>
+              </div>
+              <div class="text-xs text-slate-600 mt-1 line-clamp-2" x-text="(item.summary && item.summary.abstract_preview) || ''"></div>
+            </div>
+          </div>
+
+          <!-- SHAP bars -->
+          <div x-show="item.shap && item.shap.length" class="mt-2">
+            <div class="text-[11px] uppercase tracking-wider text-slate-500 mb-1">Why this score</div>
+            <div class="space-y-1">
+              <template x-for="contrib in (item.shap || []).slice(0, reviewShapExpanded[item.id] ? 99 : 4)" :key="contrib.feature">
+                <div class="flex items-center gap-2 text-[11px]">
+                  <span class="w-44 truncate" x-text="contrib.feature"></span>
+                  <div class="flex-1 h-2 rounded bg-slate-100 relative">
+                    <div class="absolute top-0 h-2 rounded"
+                         :class="contrib.contribution >= 0 ? 'bg-emerald-500' : 'bg-rose-500'"
+                         :style="reviewBarStyle(item, contrib.contribution)"></div>
+                  </div>
+                  <span class="mono w-14 text-right"
+                        :class="contrib.contribution >= 0 ? 'text-emerald-700' : 'text-rose-700'"
+                        x-text="(contrib.contribution >= 0 ? '+' : '') + contrib.contribution.toFixed(3)"></span>
+                </div>
+              </template>
+              <button x-show="(item.shap || []).length > 4"
+                      @click="reviewShapExpanded[item.id] = !reviewShapExpanded[item.id]"
+                      class="text-[11px] text-teal-700 underline"
+                      x-text="reviewShapExpanded[item.id] ? 'show top 4' : ('show all ' + item.shap.length)"></button>
+            </div>
+          </div>
+
+          <!-- Author / venue panel -->
+          <div x-show="item.aux_context" class="mt-2 text-[11px] text-slate-600 flex flex-wrap gap-3">
+            <span x-show="item.aux_context && item.aux_context.max_author_h_index">
+              Max author h-index: <span class="mono font-semibold" x-text="item.aux_context.max_author_h_index"></span>
+            </span>
+            <span x-show="item.aux_context && item.aux_context.venue_works_count">
+              Venue works: <span class="mono font-semibold" x-text="item.aux_context.venue_works_count"></span>
+            </span>
+            <span x-show="item.aux_context && item.aux_context.cited_by_count">
+              Cited: <span class="mono font-semibold" x-text="item.aux_context.cited_by_count"></span>
+            </span>
+          </div>
+
+          <!-- LLM rationale -->
+          <div x-show="item.summary && item.summary.triage_rationale" class="mt-2 text-xs text-slate-700 italic">
+            <span class="text-slate-400">LLM:</span>
+            <span x-text="(item.summary && item.summary.triage_rationale) || ''"></span>
+          </div>
+
+          <!-- Actions -->
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button" x-show="reviewState === 'awaiting_review'"
+                    @click="reviewAction(item.id, 'approve')"
+                    :disabled="!!reviewItemState[item.id]"
+                    class="px-3 py-1 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-500">
+              Approve
+            </button>
+            <button type="button" x-show="reviewState === 'awaiting_review'"
+                    @click="reviewAction(item.id, 'reject')"
+                    :disabled="!!reviewItemState[item.id]"
+                    class="px-3 py-1 rounded-lg text-xs font-semibold bg-rose-600 text-white hover:bg-rose-700 disabled:bg-slate-200 disabled:text-slate-500">
+              Reject
+            </button>
+            <span class="text-xs text-slate-500 ml-1">Relabel:</span>
+            <button type="button" @click="reviewAction(item.id, 'relabel', 'must_read')"
+                    :disabled="!!reviewItemState[item.id]"
+                    class="px-2 py-1 rounded-lg text-xs border border-amber-300 bg-amber-50 hover:bg-amber-100 disabled:opacity-50">must</button>
+            <button type="button" @click="reviewAction(item.id, 'relabel', 'should_read')"
+                    :disabled="!!reviewItemState[item.id]"
+                    class="px-2 py-1 rounded-lg text-xs border border-sky-300 bg-sky-50 hover:bg-sky-100 disabled:opacity-50">should</button>
+            <button type="button" @click="reviewAction(item.id, 'relabel', 'could_read')"
+                    :disabled="!!reviewItemState[item.id]"
+                    class="px-2 py-1 rounded-lg text-xs border border-slate-300 bg-slate-50 hover:bg-slate-100 disabled:opacity-50">could</button>
+            <button type="button" @click="reviewAction(item.id, 'relabel', 'dont_read')"
+                    :disabled="!!reviewItemState[item.id]"
+                    class="px-2 py-1 rounded-lg text-xs border border-rose-300 bg-rose-50 hover:bg-rose-100 disabled:opacity-50">dont</button>
+            <span x-show="reviewItemState[item.id]"
+                  class="text-xs ml-2"
+                  :class="reviewItemState[item.id] === 'approved' ? 'text-emerald-700' : 'text-rose-700'"
+                  x-text="'→ ' + reviewItemState[item.id]"></span>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
   <div x-show="activeTab === 'pending'" class="glass rounded-2xl border border-slate-200 p-4">
     <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
       <div>
@@ -876,8 +1252,352 @@
     <div x-show="!pendingLoading && pending.length === 0" class="text-sm text-slate-500" x-text="'No ' + selectedPendingStatusLabel + ' changes.'"></div>
   </div>
 
+  <!-- Phase 1.16 Step 0.2: Re-label audit (test-retest reliability) -->
+  <div x-show="activeTab === 'audit'" class="glass rounded-2xl border border-slate-200 p-4">
+    <div class="flex items-baseline justify-between mb-3">
+      <div>
+        <h2 class="text-lg font-bold">Re-label Audit</h2>
+        <p class="text-xs text-slate-500 mt-1">
+          Blind re-label of papers you labeled &ge;90 days ago. Measures your test-retest reliability
+          (Cohen's &kappa;, ICC, Pearson r). The Pearson r is the empirical ceiling on
+          any model's Spearman &rho;.
+        </p>
+      </div>
+      <div class="space-x-2">
+        <button @click="auditInit()" class="px-3 py-1 rounded bg-teal-700 text-white text-sm">
+          Start / Resume
+        </button>
+        <button @click="auditMetrics()" class="px-3 py-1 rounded bg-slate-200 text-slate-800 text-sm">
+          Show metrics
+        </button>
+        <button @click="auditReset()" class="px-3 py-1 rounded bg-rose-100 text-rose-800 text-sm border border-rose-200">
+          Reset session
+        </button>
+      </div>
+    </div>
+
+    <!-- Session summary -->
+    <div x-show="auditSession" class="mb-4 p-3 rounded bg-slate-50 border border-slate-200 text-sm">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div><span class="font-semibold">Target / actual:</span>
+          <span x-text="auditSession?.sample_size_target + ' / ' + auditSession?.sample_size_actual"></span>
+        </div>
+        <div><span class="font-semibold">Answered:</span>
+          <span x-text="auditSession?.answered"></span>
+        </div>
+        <div><span class="font-semibold">Remaining:</span>
+          <span x-text="auditSession?.remaining"></span>
+        </div>
+        <div><span class="font-semibold">Seed:</span>
+          <span x-text="auditSession?.seed"></span>
+        </div>
+      </div>
+      <div class="mt-2 text-xs text-slate-600" x-show="auditSession?.by_age_bucket">
+        By age bucket:
+        <template x-for="(n, b) in auditSession?.by_age_bucket">
+          <span class="mr-3"><span x-text="b"></span>=<span x-text="n"></span></span>
+        </template>
+      </div>
+    </div>
+
+    <!-- Current candidate (blind) -->
+    <div x-show="auditCandidate" class="p-4 rounded border border-slate-300 bg-white">
+      <div class="text-xs text-slate-500 mb-1">
+        <span x-text="'Age bucket: ' + auditCandidate?.age_bucket + ' (' + auditCandidate?.days_since_added + ' days)'"></span>
+      </div>
+      <h3 class="text-base font-bold mb-2" x-text="auditCandidate?.title"></h3>
+      <div class="text-sm text-slate-700 mb-1" x-text="auditCandidate?.authors || '(no authors)'"></div>
+      <div class="text-xs text-slate-500 mb-3" x-text="auditCandidate?.venue || '(no venue)'"></div>
+      <div class="text-sm whitespace-pre-line text-slate-800 mb-4" x-text="auditCandidate?.abstract"></div>
+      <div class="flex gap-2 flex-wrap">
+        <button @click="auditSubmit('must_read')"
+                class="px-3 py-1 rounded bg-emerald-600 text-white text-sm">
+          must_read
+        </button>
+        <button @click="auditSubmit('should_read')"
+                class="px-3 py-1 rounded bg-sky-600 text-white text-sm">
+          should_read
+        </button>
+        <button @click="auditSubmit('could_read')"
+                class="px-3 py-1 rounded bg-amber-500 text-white text-sm">
+          could_read
+        </button>
+        <button @click="auditSubmit('dont_read')"
+                class="px-3 py-1 rounded bg-rose-600 text-white text-sm">
+          dont_read
+        </button>
+      </div>
+    </div>
+
+    <!-- All done -->
+    <div x-show="auditSession && auditSession.remaining === 0 && !auditCandidate"
+         class="p-4 rounded border border-emerald-300 bg-emerald-50 text-sm">
+      All candidates labeled. Click <strong>Show metrics</strong> above.
+    </div>
+
+    <!-- Metrics panel -->
+    <div x-show="auditMetricsResult" class="mt-4 p-3 rounded border border-violet-300 bg-violet-50 text-sm">
+      <div class="font-bold mb-2">Reliability metrics (n=<span x-text="auditMetricsResult?.n_paired"></span>)</div>
+      <table class="w-full">
+        <tbody>
+          <tr><td class="font-semibold pr-3">Cohen's &kappa; (4-class)</td>
+              <td x-text="auditMetricsResult?.cohen_kappa?.toFixed(3)"></td>
+              <td class="text-xs text-slate-600 pl-3">
+                Landis-Koch: &lt;0.2 slight, 0.2-0.4 fair, 0.4-0.6 moderate, 0.6-0.8 substantial.
+              </td></tr>
+          <tr><td class="font-semibold pr-3">Cohen's &kappa; (weighted, ordinal)</td>
+              <td x-text="auditMetricsResult?.cohen_kappa_weighted?.toFixed(3)"></td>
+              <td class="text-xs text-slate-600 pl-3">Penalises distant disagreements more.</td></tr>
+          <tr><td class="font-semibold pr-3">ICC(2,1)</td>
+              <td x-text="auditMetricsResult?.icc_2_1?.toFixed(3)"></td>
+              <td class="text-xs text-slate-600 pl-3">
+                Koo-Li: &lt;0.5 poor, 0.5-0.75 moderate, 0.75-0.9 good.
+              </td></tr>
+          <tr><td class="font-semibold pr-3">Pearson r (CEILING)</td>
+              <td x-text="auditMetricsResult?.pearson_r?.toFixed(3)" class="text-violet-800 font-bold"></td>
+              <td class="text-xs text-slate-600 pl-3">
+                Upper bound on Spearman &rho; any model can achieve.
+              </td></tr>
+          <tr><td class="font-semibold pr-3">Spearman &rho;</td>
+              <td x-text="auditMetricsResult?.spearman_rho?.toFixed(3)"></td>
+              <td class="text-xs text-slate-600 pl-3">Rank correlation between old and new continuous scores.</td></tr>
+        </tbody>
+      </table>
+      <div class="mt-3 text-xs text-slate-600" x-show="auditMetricsResult?.by_age_bucket">
+        <span class="font-semibold">By age bucket:</span>
+        <template x-for="(k, b) in auditMetricsResult?.by_age_bucket">
+          <span class="mr-3"><span x-text="b"></span>: &kappa;=<span x-text="k?.toFixed(2)"></span></span>
+        </template>
+      </div>
+      <div class="mt-1 text-xs text-slate-600" x-show="auditMetricsResult?.by_class">
+        <span class="font-semibold">P(agree | original):</span>
+        <template x-for="(p, c) in auditMetricsResult?.by_class">
+          <span class="mr-3"><span x-text="c"></span>: <span x-text="(p * 100).toFixed(0)"></span>%</span>
+        </template>
+      </div>
+    </div>
+
+    <div x-show="auditError" class="mt-3 p-2 rounded bg-rose-50 border border-rose-200 text-sm text-rose-800"
+         x-text="auditError"></div>
+  </div>
+
+  <!-- Phase 1.18 Step 1: Label Provenance Audit (the trust foundation) -->
+  <div x-show="activeTab === 'labels'" class="glass rounded-2xl border border-slate-200 p-4">
+    <div class="flex items-baseline justify-between mb-3">
+      <div>
+        <h2 class="text-lg font-bold">Label Audit</h2>
+        <p class="text-xs text-slate-500 mt-1">
+          Inspect why each paper has its priority. The label comes from a derivation rule
+          (emoji tags + annotations + notes + age decay) — not your typing. Use this to
+          verify the labels are credible before trusting any model metric computed against them.
+        </p>
+      </div>
+      <button @click="loadLabelAudit()" class="px-3 py-1 rounded bg-teal-700 text-white text-sm">
+        Refresh
+      </button>
+    </div>
+
+    <!-- Summary stats -->
+    <div x-show="labelAuditData" class="mb-4 p-3 rounded bg-slate-50 border border-slate-200 text-sm">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div><span class="font-semibold">Total rows:</span>
+          <span x-text="labelAuditData?.total_rows"></span></div>
+        <div><span class="font-semibold text-amber-700">Weak must_reads:</span>
+          <span x-text="labelAuditData?.flag_counts?.weak_must_read || 0"></span></div>
+        <div><span class="font-semibold text-violet-700">Near must_reads:</span>
+          <span x-text="labelAuditData?.flag_counts?.near_must_read || 0"></span></div>
+        <div><span class="font-semibold text-emerald-700">Manual overrides:</span>
+          <span x-text="labelAuditData?.flag_counts?.manual_override || 0"></span></div>
+      </div>
+      <div class="mt-2 text-xs text-slate-600">
+        Filters:
+        <button @click="setLabelFilter('priority', 'must_read')"
+                :class="labelFilter.priority === 'must_read' ? 'bg-teal-700 text-white' : 'bg-slate-200 text-slate-800'"
+                class="px-2 py-0.5 rounded">must_read</button>
+        <button @click="setLabelFilter('priority', 'should_read')"
+                :class="labelFilter.priority === 'should_read' ? 'bg-teal-700 text-white' : 'bg-slate-200 text-slate-800'"
+                class="px-2 py-0.5 rounded">should_read</button>
+        <button @click="setLabelFilter('priority', 'could_read')"
+                :class="labelFilter.priority === 'could_read' ? 'bg-teal-700 text-white' : 'bg-slate-200 text-slate-800'"
+                class="px-2 py-0.5 rounded">could_read</button>
+        <button @click="setLabelFilter('priority', 'dont_read')"
+                :class="labelFilter.priority === 'dont_read' ? 'bg-teal-700 text-white' : 'bg-slate-200 text-slate-800'"
+                class="px-2 py-0.5 rounded">dont_read</button>
+        <span class="ml-3">|</span>
+        <button @click="setLabelFilter('flag', 'weak_must_read')"
+                :class="labelFilter.flag === 'weak_must_read' ? 'bg-amber-600 text-white' : 'bg-slate-200 text-slate-800'"
+                class="px-2 py-0.5 rounded">weak_must_read</button>
+        <button @click="setLabelFilter('flag', 'near_must_read')"
+                :class="labelFilter.flag === 'near_must_read' ? 'bg-violet-600 text-white' : 'bg-slate-200 text-slate-800'"
+                class="px-2 py-0.5 rounded">near_must_read</button>
+        <button @click="setLabelFilter('flag', 'manual_override')"
+                :class="labelFilter.flag === 'manual_override' ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-800'"
+                class="px-2 py-0.5 rounded">manual_override</button>
+        <button @click="clearLabelFilter()" class="px-2 py-0.5 rounded bg-rose-100 text-rose-800 ml-2">clear</button>
+      </div>
+    </div>
+
+    <!-- List of items -->
+    <div x-show="labelAuditData?.items?.length > 0" class="space-y-2">
+      <div class="text-xs text-slate-500" x-text="'Showing ' + labelAuditData?.items?.length + ' of ' + labelAuditData?.total_matched + ' matched'"></div>
+      <template x-for="item in labelAuditData?.items" :key="item.item_key">
+        <div class="p-3 rounded border border-slate-300 bg-white hover:bg-slate-50 cursor-pointer"
+             @click="loadLabelDetail(item.item_key)">
+          <div class="flex items-center gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded font-semibold"
+                  :class="{
+                    'bg-emerald-100 text-emerald-800': item.persisted_priority === 'must_read',
+                    'bg-sky-100 text-sky-800': item.persisted_priority === 'should_read',
+                    'bg-amber-100 text-amber-800': item.persisted_priority === 'could_read',
+                    'bg-rose-100 text-rose-800': item.persisted_priority === 'dont_read',
+                  }"
+                  x-text="item.persisted_priority"></span>
+            <span class="text-slate-500">score:</span>
+            <span class="font-mono" x-text="item.derived_score.toFixed(2)"></span>
+            <span x-show="item.is_direct_user_verdict"
+                  class="px-2 py-0.5 rounded bg-blue-100 text-blue-800"
+                  title="Direct button click in the Feed Review UI; derivation doesn't apply">
+              direct verdict
+            </span>
+            <span x-show="item.is_manual_override"
+                  class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800"
+                  title="Persisted label disagrees with derivation — strong user-typed signal">
+              user override
+            </span>
+            <template x-for="flag in item.flags" :key="flag">
+              <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800" x-text="flag"></span>
+            </template>
+          </div>
+          <div class="text-sm mt-1 font-medium" x-text="item.title"></div>
+          <div class="text-xs text-slate-500 font-mono mt-1" x-text="item.item_key"></div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Single-item detail (expanded provenance) -->
+    <div x-show="labelDetail" class="mt-4 p-4 rounded border-2 border-violet-300 bg-violet-50">
+      <div class="flex justify-between items-start mb-2">
+        <h3 class="font-bold text-base" x-text="labelDetail?.title"></h3>
+        <button @click="labelDetail = null" class="text-sm text-slate-500 hover:text-slate-800">close ×</button>
+      </div>
+      <div class="text-xs text-slate-500 font-mono mb-3" x-text="labelDetail?.item_key"></div>
+
+      <!-- Outcome -->
+      <div class="mb-3 p-2 rounded bg-white text-sm">
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <span class="font-semibold">Derived priority:</span>
+            <span x-text="labelDetail?.derived_priority"></span>
+          </div>
+          <div>
+            <span class="font-semibold">Derived score:</span>
+            <span class="font-mono" x-text="labelDetail?.derived_score?.toFixed(2)"></span>
+            <span class="text-xs text-slate-500">/ 5.0</span>
+          </div>
+          <div>
+            <span class="font-semibold">Persisted priority:</span>
+            <span x-text="labelDetail?.persisted_priority"></span>
+          </div>
+          <div>
+            <span class="font-semibold">Direct user verdict?</span>
+            <span x-text="labelDetail?.is_direct_user_verdict ? 'YES (button click)' : 'no (derived)'"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Short-circuits -->
+      <div x-show="labelDetail?.short_circuits?.in_trash_override || (labelDetail?.short_circuits?.hard_veto_emojis?.length > 0)"
+           class="mb-3 p-2 rounded bg-rose-50 border border-rose-200 text-sm">
+        <div class="font-semibold text-rose-800">Hard short-circuit applied (overrides additive scoring):</div>
+        <div x-show="labelDetail?.short_circuits?.in_trash_override" class="text-xs text-rose-700">
+          ▸ Paper is in Zotero trash → forced to dont_read.
+        </div>
+        <div x-show="labelDetail?.short_circuits?.hard_veto_emojis?.length > 0" class="text-xs text-rose-700">
+          ▸ Hard-veto emoji present:
+          <span x-text="labelDetail?.short_circuits?.hard_veto_emojis?.join(' ')"></span>
+          → forced to dont_read.
+        </div>
+      </div>
+
+      <!-- Additive scoring chain -->
+      <div class="mb-3 p-2 rounded bg-white text-sm">
+        <div class="font-semibold mb-2">Additive scoring chain:</div>
+        <div class="space-y-1 text-xs font-mono">
+          <div>
+            baseline: <span x-text="labelDetail?.additive_scoring?.baseline?.toFixed(2)"></span>
+            (neutral)
+          </div>
+          <template x-for="c in labelDetail?.additive_scoring?.emoji_contributions" :key="c.emoji">
+            <div>
+              <span x-text="c.emoji"></span>
+              <span class="text-slate-500" x-text="'(' + c.description + ')'"></span>
+              <span>: raw <span class="font-bold" :class="c.raw_delta >= 0 ? 'text-emerald-700' : 'text-rose-700'"
+                     x-text="(c.raw_delta >= 0 ? '+' : '') + c.raw_delta.toFixed(2)"></span></span>
+              <span>→ decayed <span x-text="(c.decayed_delta >= 0 ? '+' : '') + c.decayed_delta.toFixed(2)"></span></span>
+            </div>
+          </template>
+          <div x-show="(labelDetail?.additive_scoring?.annotation_count || 0) > 0">
+            annotations:
+            <span x-text="labelDetail?.additive_scoring?.annotation_count"></span>
+            × 0.25 = raw <span x-text="'+' + labelDetail?.additive_scoring?.annotation_score_raw?.toFixed(2)"></span>
+            (capped <span x-text="'+' + labelDetail?.additive_scoring?.annotation_score_capped?.toFixed(2)"></span>,
+            decayed <span x-text="'+' + labelDetail?.additive_scoring?.annotation_decayed?.toFixed(2)"></span>)
+          </div>
+          <div x-show="(labelDetail?.additive_scoring?.user_note_count || 0) > 0">
+            user notes:
+            <span x-text="labelDetail?.additive_scoring?.user_note_count"></span>
+            × 0.5 = raw <span x-text="'+' + labelDetail?.additive_scoring?.user_note_score_raw?.toFixed(2)"></span>
+            (capped <span x-text="'+' + labelDetail?.additive_scoring?.user_note_score_capped?.toFixed(2)"></span>,
+            decayed <span x-text="'+' + labelDetail?.additive_scoring?.user_note_decayed?.toFixed(2)"></span>)
+          </div>
+          <div>
+            decay factor:
+            <span x-text="labelDetail?.additive_scoring?.decay_factor?.toFixed(4)"></span>
+            (= 0.5 ^ <span x-text="(labelDetail?.additive_scoring?.days_since_added || 0) + ' days / 180'"></span>)
+          </div>
+          <div class="pt-1 border-t border-slate-200">
+            engagement sum (capped+decayed):
+            <span class="font-bold" x-text="labelDetail?.additive_scoring?.engagement_sum_decayed?.toFixed(2)"></span>
+            + baseline 3.00 → final score
+            <span class="font-bold" x-text="labelDetail?.derived_score?.toFixed(2)"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Thresholds -->
+      <div class="text-xs text-slate-500">
+        Thresholds: dont_read &lt; <span x-text="labelDetail?.thresholds?.dont_read_upper"></span>
+        ≤ could_read &lt; <span x-text="labelDetail?.thresholds?.could_read_upper"></span>
+        ≤ should_read &lt; <span x-text="labelDetail?.thresholds?.should_read_upper"></span>
+        ≤ must_read
+      </div>
+    </div>
+
+    <div x-show="labelAuditError" class="mt-3 p-2 rounded bg-rose-50 border border-rose-200 text-sm text-rose-800"
+         x-text="labelAuditError"></div>
+  </div>
+
+  <!-- Phase 1.18 Step 1 follow-up: React annotation tool, embedded inline.
+       Source app lives in /frontend; FastAPI mounts the built bundle at /annotate. -->
+  <div x-show="activeTab === 'annotate'" class="glass rounded-2xl border border-slate-200 p-0 overflow-hidden">
+    <iframe
+      src="/annotate/"
+      title="Annotate (React)"
+      class="w-full block"
+      style="height: calc(100vh - 9rem); border: 0;"
+      loading="lazy"
+    ></iframe>
+  </div>
+
   <div x-show="activeTab === 'settings'" class="glass rounded-2xl border border-slate-200 p-4">
     <h2 class="text-lg font-bold mb-3">Triage Preferences</h2>
+    <div class="mb-4 p-3 rounded bg-amber-50 border border-amber-200 text-sm">
+      <label class="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" x-model="showAdvancedTabs" class="rounded">
+        <span class="font-semibold">Show advanced tabs</span>
+        <span class="text-slate-500 text-xs">(adds "Feed Review" per-feed view)</span>
+      </label>
+    </div>
     <div class="grid md:grid-cols-2 gap-4">
       <div>
         <label class="text-sm font-semibold text-slate-700">Research goals (one per line)</label>
@@ -916,10 +1636,102 @@
       <button @click="saveSettings()" class="px-4 py-2 rounded-lg bg-slate-900 text-white">Save settings</button>
       <span class="text-sm text-slate-600" x-text="settingsMessage"></span>
     </div>
-  </div>
 
-  <div x-show="activeTab === 'dashboard'" class="glass rounded-2xl border border-slate-200 p-2">
-    <iframe :src="dashboardSrc" class="w-full h-screen rounded-xl border border-slate-200"></iframe>
+    <!-- Validation (Phase 1.17 Steps 2 + 4) -->
+    <div class="mt-8 pt-6 border-t border-slate-200">
+      <div class="flex items-baseline justify-between mb-3">
+        <h3 class="text-lg font-bold">Validation</h3>
+        <button @click="loadValidation()" class="px-3 py-1 rounded-lg border border-slate-300 text-xs">Refresh</button>
+      </div>
+
+      <div x-show="validationError" class="mb-3 p-2 rounded bg-rose-50 border border-rose-200 text-xs text-rose-800"
+           x-text="validationError"></div>
+
+      <!-- Role-stats panel -->
+      <div class="mb-5 p-3 rounded-xl border border-slate-200 bg-slate-50">
+        <div class="text-sm font-semibold mb-2">Per-role win-rate (Stage 1 of 3)</div>
+        <div x-show="!roleStats" class="text-xs text-slate-500">No role-verdict data yet. Rate slots on the Today tab.</div>
+        <div x-show="roleStats" class="space-y-1">
+          <template x-for="role in ['model', 'surprise', 'audit', 'diversity', 'model_fallback']" :key="role">
+            <div class="flex items-center gap-3 text-xs">
+              <span class="w-32 font-semibold" x-text="role"></span>
+              <span x-show="roleStats && roleStats[role]" class="mono">
+                <span x-text="'win=' + (roleStats[role]?.worth || 0) + '/' + (roleStats[role]?.n || 0)"></span>
+                <template x-if="roleStats[role]?.win_rate != null">
+                  <span class="ml-2"
+                        x-text="'(' + Math.round((roleStats[role].win_rate || 0) * 100) + '%' + (roleStats[role].ci_low != null ? (', CI [' + Math.round(roleStats[role].ci_low * 100) + '%, ' + Math.round(roleStats[role].ci_high * 100) + '%])') : ', not enough data yet)') "></span>
+                </template>
+              </span>
+              <span x-show="!roleStats || !roleStats[role] || (roleStats[role]?.n || 0) === 0"
+                    class="text-slate-400 italic">no verdicts yet</span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- A/B status panel -->
+      <div class="mb-5 p-3 rounded-xl border border-slate-200 bg-slate-50">
+        <div class="text-sm font-semibold mb-2">Weekly A/B (Stage 2 of 3)</div>
+        <div x-show="!abStatus" class="text-xs text-slate-500">Loading A/B status&hellip;</div>
+        <div x-show="abStatus && !abStatus.decision_locked" class="text-xs text-slate-700">
+          Total: <span class="mono font-bold" x-text="(abStatus?.total || 0) + '/8'"></span> weekly A/B verdicts.
+          Roles: <span class="mono" x-text="abStatus?.roles_wins"></span>,
+          Pure-score: <span class="mono" x-text="abStatus?.pure_score_wins"></span>,
+          Tied: <span class="mono" x-text="abStatus?.tied"></span>.
+          Decision: <span class="italic" x-text="'pending (' + (abStatus?.remaining_until_decision || 0) + ' more to go)'"></span>
+        </div>
+        <div x-show="abStatus && abStatus.decision_locked"
+             class="text-sm font-semibold p-2 rounded bg-emerald-50 border border-emerald-200 text-emerald-900">
+          🔒 Decision locked: <span x-text="abStatus?.decision"></span> wins —
+          <span x-show="abStatus?.decision === 'roles'">keeping the 2+1+1+1 allocation.</span>
+          <span x-show="abStatus?.decision === 'pure_score'">switching to pure top-K by composite score.</span>
+        </div>
+      </div>
+
+      <!-- Run weekly A/B button -->
+      <div class="mb-5 p-3 rounded-xl border border-slate-200 bg-white">
+        <div class="flex items-baseline justify-between mb-2">
+          <div class="text-sm font-semibold">Run weekly A/B comparison now</div>
+          <button @click="runWeeklyAB()" :disabled="abLoading"
+                  class="px-3 py-1 rounded-lg bg-slate-900 text-white text-xs disabled:bg-slate-300"
+                  x-text="abLoading ? 'Loading slates…' : 'Build slates'"></button>
+        </div>
+        <div x-show="abComparisonError" class="text-xs text-rose-700" x-text="abComparisonError"></div>
+
+        <div x-show="abSlateA && abSlateB" class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+          <div class="border border-teal-300 rounded p-2 bg-teal-50">
+            <div class="text-xs font-bold uppercase text-teal-900 mb-2">Slate A — role-allocated</div>
+            <template x-for="(p, i) in (abSlateA || [])" :key="'a-' + p.item_key">
+              <div class="text-xs mb-2">
+                <span class="mono text-teal-700" x-text="(i+1) + '.'"></span>
+                <span class="font-semibold" x-text="p.title"></span>
+                <span class="text-slate-500" x-text="' [' + p.role + ', ' + p.composite_score?.toFixed(2) + ']'"></span>
+              </div>
+            </template>
+          </div>
+          <div class="border border-amber-300 rounded p-2 bg-amber-50">
+            <div class="text-xs font-bold uppercase text-amber-900 mb-2">Slate B — pure top-K by composite</div>
+            <template x-for="(p, i) in (abSlateB || [])" :key="'b-' + p.item_key">
+              <div class="text-xs mb-2">
+                <span class="mono text-amber-700" x-text="(i+1) + '.'"></span>
+                <span class="font-semibold" x-text="p.title"></span>
+                <span class="text-slate-500" x-text="' [' + p.composite_score?.toFixed(2) + ']'"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <div x-show="abSlateA && abSlateB" class="mt-3 flex flex-wrap gap-2">
+          <button @click="submitABVerdict('roles')"
+                  class="px-3 py-1 rounded bg-teal-700 text-white text-xs">A wins (roles)</button>
+          <button @click="submitABVerdict('pure_score')"
+                  class="px-3 py-1 rounded bg-amber-700 text-white text-xs">B wins (pure score)</button>
+          <button @click="submitABVerdict('tied')"
+                  class="px-3 py-1 rounded bg-slate-600 text-white text-xs">Tied</button>
+          <span x-show="abVerdictMessage" class="text-xs text-emerald-700 ml-2" x-text="abVerdictMessage"></span>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -927,13 +1739,18 @@
 function zoteroUI() {
   return {
     tabs: [
+      { key: 'today', label: 'Today' },
       { key: 'library', label: 'Library' },
       { key: 'triage', label: 'Triage' },
+      { key: 'review', label: 'Feed Review' },
       { key: 'pending', label: 'Pending' },
+      { key: 'audit', label: 'Re-label Audit' },
+      { key: 'labels', label: 'Label Audit' },
+      { key: 'annotate', label: 'Annotate' },
       { key: 'settings', label: 'Settings' },
-      { key: 'dashboard', label: 'Results Dashboard' },
     ],
-    activeTab: 'library',
+    showAdvancedTabs: false,
+    activeTab: 'today',
     zoteroStatus: { available: false, stats: null, error: '' },
     collections: [],
     flatCollections: [],
@@ -967,6 +1784,26 @@ function zoteroUI() {
     pendingActionMessage: '',
     pendingActionIsError: false,
     pendingCount: 0,
+    // Re-label Audit tab (Phase 1.16 Step 0.2 — test-retest reliability)
+    auditSession: null,
+    auditCandidate: null,
+    auditMetricsResult: null,
+    auditError: '',
+    // Phase 1.18 Step 1: Label Audit
+    labelAuditData: null,
+    labelDetail: null,
+    labelFilter: { priority: null, flag: null },
+    labelAuditError: '',
+    // Feed Review tab (Phase 1.14)
+    reviewItems: [],
+    reviewLoading: false,
+    reviewState: 'awaiting_review',  // 'awaiting_review' | 'gate_rejected'
+    reviewItemState: {},        // {item_id: 'approved'|'rejected'}
+    reviewShapExpanded: {},     // {item_id: bool}
+    reviewMessage: '',
+    reviewMessageIsError: false,
+    reviewApplying: false,
+    reviewConfirming: false,
     config: null,
     settingsDraft: {
       research_goals_text: '',
@@ -999,11 +1836,33 @@ function zoteroUI() {
     pendingRequestToken: 0,
     calibrationMetrics: null,
     calibrationLoading: false,
-    dashboardSrc: '/results',
-    dashboardNeedsRefresh: false,
+    // Today tab (Phase 1.17 Steps 1+2+3)
+    dailySlate: null,
+    dailyLoading: false,
+    dailyError: '',
+    dailyK: 5,
+    trickleCandidates: [],
+    roleVerdictsSent: {},      // {item_key: 'worth'|'waste'|'unknown'}
+    todayActionState: {},      // {item_key: 'kept'|'skipped'}
+    todayRationaleExpanded: {},// {item_key: bool}
+    // Validation (Steps 4 + 5 + 6)
+    roleStats: null,
+    abStatus: null,
+    abSlateA: null,
+    abSlateB: null,
+    abLoading: false,
+    abComparisonError: '',
+    abVerdictMessage: '',
+    validationError: '',
+    ceilingBanner: null,
 
     async initialize() {
+      this.showAdvancedTabs = localStorage.getItem('zs.showAdvancedTabs') === 'true';
+      this.$watch('showAdvancedTabs', v => localStorage.setItem('zs.showAdvancedTabs', String(v)));
       await this.refreshAll();
+      // Today tab is the default landing; load its data + ceiling banner now.
+      this.loadToday();
+      this.loadCeiling();
       this.pollTimer = setInterval(() => {
         if (this.hasActiveMutation()) {
           return;
@@ -1046,21 +1905,182 @@ function zoteroUI() {
 
     switchTab(tabKey) {
       this.activeTab = tabKey;
-      if (tabKey === 'dashboard') {
-        this.refreshDashboard(true);
-        this.dashboardNeedsRefresh = false;
-      }
       if (tabKey === 'pending') {
         this.fetchPending();
       }
+      if (tabKey === 'review') {
+        this.fetchReview();
+      }
+      if (tabKey === 'today') {
+        this.loadToday();
+        this.loadCeiling();
+      }
+      if (tabKey === 'settings') {
+        this.loadValidation();
+        this.loadCeiling();
+      }
+      if (tabKey === 'labels' && !this.labelAuditData) {
+        this.loadLabelAudit();
+      }
     },
 
-    refreshDashboard(force = false) {
-      if (!force && this.activeTab !== 'dashboard') {
-        this.dashboardNeedsRefresh = true;
-        return;
+    // Feed Review (Phase 1.14)
+    get reviewApprovedCount() {
+      return Object.values(this.reviewItemState).filter(v => v === 'approved').length;
+    },
+    reviewPaperUrl(item) {
+      // Prefer a stable canonical link. DOI > arXiv > guid (when it's an http URL).
+      const doi = (item.doi || '').trim();
+      if (doi) {
+        if (doi.startsWith('http')) return doi;
+        return 'https://doi.org/' + doi;
       }
-      this.dashboardSrc = '/results?ts=' + Date.now();
+      const arxiv = (item.arxiv_id || '').trim();
+      if (arxiv) return 'https://arxiv.org/abs/' + arxiv;
+      const guid = (item.guid || '').trim();
+      if (guid.startsWith('http://') || guid.startsWith('https://')) return guid;
+      return '';
+    },
+    reviewPriorityClass(p) {
+      if (p === 'must_read') return 'bg-amber-200 text-amber-900';
+      if (p === 'should_read') return 'bg-sky-200 text-sky-900';
+      if (p === 'could_read') return 'bg-slate-200 text-slate-700';
+      if (p === 'dont_read') return 'bg-rose-200 text-rose-900';
+      return 'bg-slate-100 text-slate-500';
+    },
+    reviewBarStyle(item, contribution) {
+      // Bars centred at 50%; positive grows right, negative grows left.
+      const maxAbs = Math.max(
+        ...((item.shap || []).map(c => Math.abs(c.contribution))), 0.001
+      );
+      const widthPct = Math.min(50, (Math.abs(contribution) / maxAbs) * 50);
+      if (contribution >= 0) {
+        return `left: 50%; width: ${widthPct}%`;
+      }
+      return `right: 50%; width: ${widthPct}%`;
+    },
+    async fetchReview() {
+      this.reviewLoading = true;
+      this.reviewMessage = '';
+      try {
+        const url = `/api/feeds/review?state=${encodeURIComponent(this.reviewState)}&limit=500`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        this.reviewItems = data.items || [];
+        // Reset transient state for items that no longer exist server-side.
+        const ids = new Set(this.reviewItems.map(it => it.id));
+        for (const k of Object.keys(this.reviewItemState)) {
+          if (!ids.has(Number(k))) delete this.reviewItemState[k];
+        }
+      } catch (e) {
+        this.reviewMessage = 'Failed to load review queue: ' + (e.message || e);
+        this.reviewMessageIsError = true;
+      } finally {
+        this.reviewLoading = false;
+      }
+    },
+    reviewSwitchState(state) {
+      if (state !== 'awaiting_review' && state !== 'gate_rejected') return;
+      if (this.reviewState === state) return;
+      this.reviewState = state;
+      this.fetchReview();
+    },
+    async reviewAction(id, action, label) {
+      const url = `/api/feeds/review/${id}/${action}`;
+      const body = action === 'relabel' ? JSON.stringify({ new_priority: label })
+                 : action === 'reject' ? JSON.stringify({ write_to_golden: true })
+                 : '{}';
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || `HTTP ${res.status}`);
+        }
+        const result = await res.json();
+        // Mark client-side: approve+relabel (with non-dont) → 'approved'; reject (or dont) → 'rejected'
+        const wentApproved = action === 'approve' || (action === 'relabel' && label !== 'dont_read');
+        this.reviewItemState[id] = wentApproved ? 'approved' : 'rejected';
+        this.reviewMessage = `Item ${id}: ${action}${label ? ' (' + label + ')' : ''} OK`
+          + (result.queued_pending_changes ? ` — queued ${result.queued_pending_changes} pending change(s)` : '')
+          + (result.golden_csv_row_added ? ' — appended to golden CSV' : '');
+        this.reviewMessageIsError = false;
+        this.fetchPendingCount && this.fetchPendingCount();
+      } catch (e) {
+        this.reviewMessage = `Item ${id}: ${action} failed — ${e.message || e}`;
+        this.reviewMessageIsError = true;
+      }
+    },
+    async reviewConfirmAllGateRejected() {
+      // Bulk: write dont_read to golden CSV for every gate_rejected row
+      // that the user has not explicitly relabelled. "No click = confirm."
+      if (!confirm(
+        `Confirm all ${this.reviewItems.length} unaltered gate_rejected items as dont_read?\n\n` +
+        'This appends them to zotero-summarizer-golden.csv as negative training rows. ' +
+        'Already-relabelled items are skipped automatically. The next feeds run will retrain.'
+      )) return;
+      this.reviewConfirming = true;
+      this.reviewMessage = '';
+      try {
+        const res = await fetch('/api/feeds/review/confirm-gate-rejected', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || `HTTP ${res.status}`);
+        }
+        const result = await res.json();
+        this.reviewMessage =
+          `Appended ${result.appended || 0} dont_read row(s) to golden CSV; ` +
+          `${result.skipped_duplicate || 0} already there.`;
+        this.reviewMessageIsError = false;
+      } catch (e) {
+        this.reviewMessage = 'Bulk-confirm failed: ' + (e.message || e);
+        this.reviewMessageIsError = true;
+      } finally {
+        this.reviewConfirming = false;
+      }
+    },
+    async reviewApplyAll() {
+      // Phase 1.14 fix: dedicated endpoint that uses apply_feed_materialization
+      // (NOT pending_changes — feed items don't exist in Zotero yet).
+      this.reviewApplying = true;
+      this.reviewMessage = '';
+      try {
+        const res = await fetch('/api/feeds/review/apply-all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || `HTTP ${res.status}`);
+        }
+        const result = await res.json();
+        const applied = result.applied || 0;
+        const failedCount = result.failed_count || 0;
+        let msg = `Materialized ${applied} item(s) to Zotero Inbox`;
+        if (failedCount > 0) {
+          msg += `; ${failedCount} failed`;
+          const first = (result.failed || [])[0];
+          if (first) msg += ` (e.g. "${first.title || first.id}": ${first.error || ''})`;
+        }
+        if (applied === 0 && failedCount === 0) msg = 'Nothing to apply (no user_approved rows in DB).';
+        this.reviewMessage = msg;
+        this.reviewMessageIsError = failedCount > 0;
+        await this.fetchReview();
+      } catch (e) {
+        this.reviewMessage = 'Apply-all failed: ' + (e.message || e);
+        this.reviewMessageIsError = true;
+      } finally {
+        this.reviewApplying = false;
+      }
     },
 
     async fetchZoteroStatus() {
@@ -1548,7 +2568,6 @@ function zoteroUI() {
           this.itemActionMessage = firstError;
           this.itemActionIsError = true;
         }
-        this.refreshDashboard();
       }
     },
 
@@ -1766,7 +2785,6 @@ function zoteroUI() {
       if (data.status === 'completed' || data.status === 'failed' || data.status === 'cancelled') {
         this.fetchPending();
         this.fetchItems();
-        this.refreshDashboard();
       }
     },
 
@@ -1970,6 +2988,128 @@ function zoteroUI() {
           percent: Math.round((value / 5) * 100),
         };
       });
+    },
+
+    // === Re-label Audit (Phase 1.16 Step 0.2) ===
+
+    async auditInit() {
+      this.auditError = '';
+      this.auditMetricsResult = null;
+      try {
+        const res = await fetch('/api/relabel-audit/init', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sample_size: 100, seed: 42, resume_if_exists: true }),
+        });
+        const data = await res.json();
+        if (!res.ok) { throw new Error(data.message || JSON.stringify(data)); }
+        this.auditSession = data;
+        await this.auditFetchNext();
+      } catch (err) {
+        this.auditError = 'Init failed: ' + err.message;
+      }
+    },
+
+    async auditFetchNext() {
+      try {
+        const res = await fetch('/api/relabel-audit/next');
+        const data = await res.json();
+        if (!res.ok) { throw new Error(data.message || JSON.stringify(data)); }
+        this.auditCandidate = data.candidate;
+      } catch (err) {
+        this.auditError = 'Fetch-next failed: ' + err.message;
+        this.auditCandidate = null;
+      }
+    },
+
+    async auditSubmit(newPriority) {
+      if (!this.auditCandidate) { return; }
+      const key = this.auditCandidate.item_key;
+      try {
+        const res = await fetch('/api/relabel-audit/' + encodeURIComponent(key), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ new_priority: newPriority }),
+        });
+        const data = await res.json();
+        if (!res.ok) { throw new Error(data.message || JSON.stringify(data)); }
+        this.auditSession = data;
+        await this.auditFetchNext();
+      } catch (err) {
+        this.auditError = 'Submit failed: ' + err.message;
+      }
+    },
+
+    async auditMetrics() {
+      this.auditError = '';
+      try {
+        const res = await fetch('/api/relabel-audit/metrics');
+        const data = await res.json();
+        if (!res.ok) { throw new Error(data.message || JSON.stringify(data)); }
+        this.auditMetricsResult = data;
+      } catch (err) {
+        this.auditError = 'Metrics failed: ' + err.message;
+      }
+    },
+
+    // Phase 1.18 Step 1: Label Audit
+    async loadLabelAudit() {
+      this.labelAuditError = '';
+      this.labelDetail = null;
+      try {
+        const params = new URLSearchParams();
+        params.set('limit', '200');
+        if (this.labelFilter.priority) params.set('priority', this.labelFilter.priority);
+        if (this.labelFilter.flag) params.set('flag', this.labelFilter.flag);
+        const res = await fetch('/api/golden/provenance/list?' + params.toString());
+        const data = await res.json();
+        if (!res.ok) { throw new Error(data.message || JSON.stringify(data)); }
+        this.labelAuditData = data;
+      } catch (err) {
+        this.labelAuditError = 'Load failed: ' + err.message;
+      }
+    },
+
+    async loadLabelDetail(itemKey) {
+      this.labelAuditError = '';
+      try {
+        const url = '/api/golden/provenance?item_key=' + encodeURIComponent(itemKey);
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!res.ok) { throw new Error(data.message || JSON.stringify(data)); }
+        this.labelDetail = data;
+      } catch (err) {
+        this.labelAuditError = 'Detail load failed: ' + err.message;
+      }
+    },
+
+    setLabelFilter(kind, value) {
+      // Toggle: clicking the same filter again clears it
+      if (this.labelFilter[kind] === value) {
+        this.labelFilter[kind] = null;
+      } else {
+        this.labelFilter[kind] = value;
+      }
+      this.loadLabelAudit();
+    },
+
+    clearLabelFilter() {
+      this.labelFilter = { priority: null, flag: null };
+      this.loadLabelAudit();
+    },
+
+    async auditReset() {
+      if (!confirm('Reset the audit session? All current responses will be lost.')) { return; }
+      this.auditError = '';
+      this.auditCandidate = null;
+      this.auditSession = null;
+      this.auditMetricsResult = null;
+      try {
+        const res = await fetch('/api/relabel-audit/reset', { method: 'POST' });
+        if (!res.ok) { throw new Error('reset failed'); }
+      } catch (err) {
+        this.auditError = 'Reset failed: ' + err.message;
+      }
     },
 
     async fetchPending() {
@@ -2396,6 +3536,270 @@ function zoteroUI() {
         override_priority: 'Priority',
       };
       return map[changeType] || changeType;
+    },
+
+    // ---------------------------------------------------------------
+    // Today tab (Phase 1.17 Steps 1 + 2 + 3)
+    // ---------------------------------------------------------------
+
+    roleBadgeClass(role) {
+      if (role === 'model') return 'bg-teal-100 text-teal-900 border-teal-300';
+      if (role === 'surprise') return 'bg-violet-100 text-violet-900 border-violet-300';
+      if (role === 'audit') return 'bg-amber-100 text-amber-900 border-amber-300';
+      if (role === 'diversity') return 'bg-rose-100 text-rose-900 border-rose-300';
+      if (role === 'model_fallback') return 'bg-slate-100 text-slate-700 border-slate-300';
+      return 'bg-slate-100 text-slate-700 border-slate-300';
+    },
+    roleBadgeLabel(role) {
+      const map = {
+        model: '🎯 model',
+        surprise: '💫 surprise',
+        audit: '🔁 audit',
+        diversity: '🌍 diversity',
+        model_fallback: '⏬ fallback',
+      };
+      return map[role] || role;
+    },
+    roleBadgeTooltip(role) {
+      const map = {
+        model: 'Top-ranked by composite score — straight model pick.',
+        surprise: 'High surprise-score — far from your existing corpus, worth a look.',
+        audit: 'Gate-rejected but prestigious — audits the model for false negatives.',
+        diversity: 'Low corpus-affinity high composite — broadens your reading.',
+        model_fallback: 'Filled this slot because the intended role had no candidates.',
+      };
+      return map[role] || role;
+    },
+
+    async loadToday() {
+      this.dailyLoading = true;
+      this.dailyError = '';
+      try {
+        const url = '/api/daily?K=' + encodeURIComponent(this.dailyK || 5) + '&lookback_hours=168';
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || ('HTTP ' + res.status));
+        this.dailySlate = data;
+      } catch (err) {
+        this.dailyError = 'Load failed: ' + (err.message || err);
+        this.dailySlate = null;
+      } finally {
+        this.dailyLoading = false;
+      }
+      // Trickle audit — best-effort; failure here doesn't block the slate.
+      try {
+        const res = await fetch('/api/relabel-audit/trickle?max_per_day=2');
+        if (res.ok) {
+          const data = await res.json();
+          this.trickleCandidates = data.candidates || [];
+        } else if (res.status === 404) {
+          // No audit session — that's fine, just no trickle cards.
+          this.trickleCandidates = [];
+        } else {
+          this.trickleCandidates = [];
+        }
+      } catch (err) {
+        this.trickleCandidates = [];
+      }
+    },
+
+    async keep(paper) {
+      if (!paper || !paper.item_id) {
+        this.dailyError = 'Cannot keep: paper has no item_id';
+        return;
+      }
+      try {
+        const res = await fetch('/api/feeds/review/' + paper.item_id + '/approve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.message || ('HTTP ' + res.status));
+        this.todayActionState[paper.item_key] = 'kept';
+        this.fetchPendingCount && this.fetchPendingCount();
+      } catch (err) {
+        this.dailyError = 'Keep failed: ' + (err.message || err);
+      }
+    },
+
+    async skip(paper) {
+      if (!paper || !paper.item_id) {
+        this.dailyError = 'Cannot skip: paper has no item_id';
+        return;
+      }
+      try {
+        const res = await fetch('/api/feeds/review/' + paper.item_id + '/reject', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ write_to_golden: true }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.message || ('HTTP ' + res.status));
+        this.todayActionState[paper.item_key] = 'skipped';
+      } catch (err) {
+        this.dailyError = 'Skip failed: ' + (err.message || err);
+      }
+    },
+
+    async submitRoleVerdict(paper, verdict) {
+      try {
+        const res = await fetch('/api/daily/' + encodeURIComponent(paper.item_key) + '/role-verdict', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            role: paper.role,
+            verdict: verdict,
+            composite_score: paper.composite_score,
+            surprise_score: paper.surprise_score,
+            corpus_affinity: paper.corpus_affinity,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.message || ('HTTP ' + res.status));
+        this.roleVerdictsSent[paper.item_key] = verdict;
+      } catch (err) {
+        this.dailyError = 'Role-verdict failed: ' + (err.message || err);
+      }
+    },
+
+    async submitTrickleAudit(cand, newPriority) {
+      try {
+        const res = await fetch('/api/relabel-audit/' + encodeURIComponent(cand.item_key), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ new_priority: newPriority }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.message || ('HTTP ' + res.status));
+        this.trickleCandidates = this.trickleCandidates.filter(c => c.item_key !== cand.item_key);
+      } catch (err) {
+        this.dailyError = 'Audit submit failed: ' + (err.message || err);
+      }
+    },
+
+    // ---------------------------------------------------------------
+    // Validation (Phase 1.17 Steps 4 + 5)
+    // ---------------------------------------------------------------
+
+    async loadValidation() {
+      this.validationError = '';
+      try {
+        const res = await fetch('/api/daily/role-stats');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || ('HTTP ' + res.status));
+        this.roleStats = data.roles || {};
+      } catch (err) {
+        this.validationError = 'Load role-stats failed: ' + (err.message || err);
+      }
+      try {
+        const res = await fetch('/api/daily/ab-status');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || ('HTTP ' + res.status));
+        this.abStatus = data;
+      } catch (err) {
+        this.validationError = (this.validationError ? this.validationError + ' | ' : '')
+          + 'Load A/B status failed: ' + (err.message || err);
+      }
+    },
+
+    async runWeeklyAB() {
+      this.abLoading = true;
+      this.abComparisonError = '';
+      this.abVerdictMessage = '';
+      try {
+        // Slate A: role-allocated (today's slate)
+        const res = await fetch('/api/daily?K=5&lookback_hours=168');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || ('HTTP ' + res.status));
+        const papers = (data.papers || []).slice();
+        this.abSlateA = papers.slice(0, 5);
+        // Slate B: same pool re-sorted purely by composite_score (client-side).
+        const sortedB = papers.slice().sort((a, b) => (b.composite_score || 0) - (a.composite_score || 0));
+        this.abSlateB = sortedB.slice(0, 5);
+      } catch (err) {
+        this.abComparisonError = 'Build slates failed: ' + (err.message || err);
+        this.abSlateA = null;
+        this.abSlateB = null;
+      } finally {
+        this.abLoading = false;
+      }
+    },
+
+    weekStartIso() {
+      // Current week's Monday in YYYY-MM-DD (local time).
+      const now = new Date();
+      const day = now.getDay(); // 0=Sun, 1=Mon...
+      const diff = (day === 0 ? -6 : 1 - day); // shift back to Monday
+      const monday = new Date(now);
+      monday.setDate(now.getDate() + diff);
+      const y = monday.getFullYear();
+      const m = String(monday.getMonth() + 1).padStart(2, '0');
+      const d = String(monday.getDate()).padStart(2, '0');
+      return y + '-' + m + '-' + d;
+    },
+
+    async submitABVerdict(winner) {
+      if (!this.abSlateA || !this.abSlateB) {
+        this.abComparisonError = 'Build slates first.';
+        return;
+      }
+      try {
+        const res = await fetch('/api/daily/weekly-ab', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            winner: winner,
+            slate_a_keys: this.abSlateA.map(p => p.item_key),
+            slate_b_keys: this.abSlateB.map(p => p.item_key),
+            week_start: this.weekStartIso(),
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.message || ('HTTP ' + res.status));
+        this.abVerdictMessage = 'Recorded verdict: ' + winner;
+        // Refresh A/B status to show the new total / possible lock.
+        await this.loadValidation();
+      } catch (err) {
+        this.abComparisonError = 'Submit verdict failed: ' + (err.message || err);
+      }
+    },
+
+    // ---------------------------------------------------------------
+    // Ceiling banner (Phase 1.17 Step 6)
+    // ---------------------------------------------------------------
+
+    async loadCeiling() {
+      try {
+        const res = await fetch('/api/relabel-audit/metrics');
+        if (!res.ok) {
+          this.ceilingBanner = null;
+          return;
+        }
+        const data = await res.json();
+        const nPaired = Number(data.n_paired || 0);
+        const pearson = Number(data.pearson_r || 0);
+        if (nPaired < 30 || !pearson) {
+          this.ceilingBanner = null;
+          return;
+        }
+        // TODO: read from eval-baseline-*.json; hardcoded for now.
+        const modelSpearman = 0.205;
+        const percent = (modelSpearman / pearson) * 100;
+        let verdict;
+        if (percent >= 85) verdict = 'invest in features (Phase 1.18A)';
+        else if (percent < 65) verdict = 'refactor model class (Phase 1.18B)';
+        else verdict = 'ambiguous — try features first';
+        this.ceilingBanner = {
+          percent: percent,
+          pearson_r: pearson,
+          spearman_rho: modelSpearman,
+          verdict: verdict,
+        };
+      } catch (err) {
+        // Silent here: ceiling banner is non-critical UI; absence is expected pre-30.
+        this.ceilingBanner = null;
+      }
     },
   };
 }

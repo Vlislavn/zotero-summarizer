@@ -1,0 +1,304 @@
+"""5×5 repeated stratified K-fold CV with BCa bootstrap CIs (run_baseline)
+and stratified subsample learning curve (run_learning_curve)."""
+
+from __future__ import annotations
+
+import logging
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable
+
+import numpy as np
+
+from zotero_summarizer.services import classifier
+from zotero_summarizer.services.eval_baseline._bootstrap import bca_ci
+from zotero_summarizer.services.eval_baseline._featurize import (
+    FeaturizedGolden,
+    featurize_golden,
+)
+from zotero_summarizer.services.eval_baseline._metrics import (
+    FoldMetrics,
+    compute_fold_metrics,
+)
+
+
+LOGGER = logging.getLogger(__name__)
+
+
+DEFAULT_N_REPEATS = 5
+DEFAULT_N_FOLDS = 5
+DEFAULT_BOOTSTRAP = 2000
+DEFAULT_BOOTSTRAP_SEED = 42
+DEFAULT_LEARNING_CURVE_FRACTIONS = (0.15, 0.30, 0.60, 0.85, 1.00)
+
+
+@dataclass
+class MetricCI:
+    point: float
+    ci_low: float
+    ci_high: float
+    n_bootstrap: int
+
+
+@dataclass
+class BaselineReport:
+    n_repeats: int
+    n_folds: int
+    n_bootstrap: int
+    n_rows_total: int
+    n_features: int
+    classifier_name: str
+    folds: list[FoldMetrics]
+    spearman_rho: MetricCI
+    kendall_tau: MetricCI
+    auc: MetricCI
+    ndcg_at_10: MetricCI
+    mae: MetricCI
+    cohen_kappa: MetricCI
+    elapsed_seconds: float
+    seed: int = DEFAULT_BOOTSTRAP_SEED
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class LearningCurvePoint:
+    n_train: int
+    fraction: float
+    spearman: MetricCI
+    ndcg_at_10: MetricCI
+
+
+@dataclass
+class LearningCurveReport:
+    points: list[LearningCurvePoint]
+    n_repeats: int
+    n_folds: int
+    n_bootstrap: int
+    seed: int
+    elapsed_seconds: float
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+def _is_degenerate_val(feat: FeaturizedGolden, val_idx: np.ndarray) -> bool:
+    """A fold whose val slice has a single class is unusable for AUC/Spearman."""
+    return len(set(feat.y_binary[val_idx])) < 2
+
+
+def _one_fold_metrics(
+    feat: FeaturizedGolden,
+    train_idx: np.ndarray,
+    val_idx: np.ndarray,
+    *,
+    classifier_name: str,
+    pca_dim: int,
+) -> FoldMetrics:
+    """Run one CV fold. Caller MUST have filtered degenerate folds via
+    :func:`_is_degenerate_val` first; this function fails-fast if not."""
+    if _is_degenerate_val(feat, val_idx):
+        raise ValueError(
+            "_one_fold_metrics called on a degenerate val slice — "
+            "caller must filter via _is_degenerate_val first"
+        )
+    X_tr, y_tr = feat.X[train_idx], feat.y_binary[train_idx]
+    X_val = feat.X[val_idx]
+    p_tr_raw, p_val_raw = classifier._fit_predict(
+        classifier_name, X_tr, y_tr, X_val,
+        pca_dim=pca_dim, return_train_probs=True,
+    )
+    cal = classifier._fit_calibrator(p_tr_raw, y_tr, method="isotonic")
+    p_val = classifier._apply_calibrator(cal, p_val_raw)
+    return compute_fold_metrics(
+        y_true_continuous=feat.y_continuous[val_idx],
+        y_true_binary=feat.y_binary[val_idx],
+        y_true_priority=[feat.y_priority[i] for i in val_idx],
+        proba=np.asarray(p_val, dtype=np.float64),
+    )
+
+
+def run_baseline(
+    rows: list[dict[str, str]],
+    *,
+    corpus_db_path: Path,
+    goals_config: Any,
+    classifier_name: str = "lightgbm",
+    n_repeats: int = DEFAULT_N_REPEATS,
+    n_folds: int = DEFAULT_N_FOLDS,
+    n_bootstrap: int = DEFAULT_BOOTSTRAP,
+    pca_dim: int = 100,
+    seed: int = DEFAULT_BOOTSTRAP_SEED,
+    progress_cb: Callable[[int, int], None] | None = None,
+) -> BaselineReport:
+    """Run n_repeats × n_folds stratified CV, return aggregated metrics with BCa CIs."""
+    from sklearn.model_selection import StratifiedKFold
+
+    t0 = time.time()
+    feat = featurize_golden(
+        rows,
+        corpus_db_path=corpus_db_path,
+        goals_config=goals_config,
+        progress_cb=progress_cb,
+    )
+
+    fold_results: list[FoldMetrics] = []
+    for repeat_i in range(n_repeats):
+        skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed + repeat_i)
+        for fold_i, (train_idx, val_idx) in enumerate(skf.split(feat.X, feat.y_binary)):
+            if _is_degenerate_val(feat, val_idx):
+                LOGGER.warning(
+                    "baseline repeat=%d/%d fold=%d: degenerate (single-class val) — skipped",
+                    repeat_i + 1, n_repeats, fold_i + 1,
+                )
+                continue
+            fm = _one_fold_metrics(
+                feat, train_idx, val_idx,
+                classifier_name=classifier_name, pca_dim=pca_dim,
+            )
+            fold_results.append(fm)
+            LOGGER.info(
+                "baseline repeat=%d/%d fold=%d/%d  rho=%.3f auc=%.3f ndcg=%.3f kappa=%.3f",
+                repeat_i + 1, n_repeats, fold_i + 1, n_folds,
+                fm.spearman_rho, fm.auc, fm.ndcg_at_10, fm.cohen_kappa,
+            )
+
+    if len(fold_results) < n_folds:
+        raise RuntimeError(
+            f"too few non-degenerate folds ({len(fold_results)}); cannot bootstrap"
+        )
+
+    def _ci(attr: str) -> MetricCI:
+        vals = np.array([getattr(fm, attr) for fm in fold_results], dtype=np.float64)
+        point, low, high = bca_ci(vals, n_bootstrap=n_bootstrap, seed=seed)
+        return MetricCI(point=point, ci_low=low, ci_high=high, n_bootstrap=n_bootstrap)
+
+    return BaselineReport(
+        n_repeats=n_repeats,
+        n_folds=n_folds,
+        n_bootstrap=n_bootstrap,
+        n_rows_total=feat.X.shape[0],
+        n_features=feat.n_features,
+        classifier_name=classifier_name,
+        folds=fold_results,
+        spearman_rho=_ci("spearman_rho"),
+        kendall_tau=_ci("kendall_tau"),
+        auc=_ci("auc"),
+        ndcg_at_10=_ci("ndcg_at_10"),
+        mae=_ci("mae"),
+        cohen_kappa=_ci("cohen_kappa"),
+        elapsed_seconds=time.time() - t0,
+        seed=seed,
+        metadata={
+            "method": "5x5 repeated stratified K-fold CV with isotonic calibration",
+            "metric_primary": "spearman_rho",
+            "bootstrap_method": "BCa (Efron 1987)",
+            "n_positive_total": int(np.sum(feat.y_binary)),
+        },
+    )
+
+
+def run_learning_curve(
+    rows: list[dict[str, str]],
+    *,
+    corpus_db_path: Path,
+    goals_config: Any,
+    classifier_name: str = "lightgbm",
+    fractions: tuple[float, ...] = DEFAULT_LEARNING_CURVE_FRACTIONS,
+    n_repeats: int = 3,
+    n_folds: int = 5,
+    n_bootstrap: int = 500,
+    pca_dim: int = 100,
+    seed: int = DEFAULT_BOOTSTRAP_SEED,
+    progress_cb: Callable[[int, int], None] | None = None,
+) -> LearningCurveReport:
+    """Sweep n_train (as a fraction of available data)."""
+    from sklearn.model_selection import StratifiedKFold
+
+    if any(f <= 0.0 or f > 1.0 for f in fractions):
+        raise ValueError(f"learning-curve fractions must be in (0, 1]; got {fractions}")
+    if list(fractions) != sorted(fractions):
+        raise ValueError("learning-curve fractions must be ascending")
+
+    t0 = time.time()
+    feat = featurize_golden(
+        rows,
+        corpus_db_path=corpus_db_path,
+        goals_config=goals_config,
+        progress_cb=progress_cb,
+    )
+
+    rng = np.random.default_rng(seed)
+    points: list[LearningCurvePoint] = []
+
+    for frac in fractions:
+        n_target = min(max(50, int(round(feat.X.shape[0] * frac))), feat.X.shape[0])
+        rho_vals: list[float] = []
+        ndcg_vals: list[float] = []
+        for repeat_i in range(n_repeats):
+            pos_idx = np.flatnonzero(feat.y_binary == 1)
+            neg_idx = np.flatnonzero(feat.y_binary == 0)
+            n_pos = max(1, int(round(len(pos_idx) * frac)))
+            n_neg = max(1, min(n_target - n_pos, len(neg_idx)))
+            sub_pos = rng.choice(pos_idx, size=n_pos, replace=False)
+            sub_neg = rng.choice(neg_idx, size=n_neg, replace=False)
+            sub_idx = np.concatenate([sub_pos, sub_neg])
+            rng.shuffle(sub_idx)
+            sub_feat = FeaturizedGolden(
+                X=feat.X[sub_idx],
+                y_binary=feat.y_binary[sub_idx],
+                y_continuous=feat.y_continuous[sub_idx],
+                y_priority=[feat.y_priority[i] for i in sub_idx],
+                item_keys=[feat.item_keys[i] for i in sub_idx],
+                n_features=feat.n_features,
+            )
+            skf = StratifiedKFold(
+                n_splits=n_folds, shuffle=True, random_state=seed + repeat_i,
+            )
+            for train_idx, val_idx in skf.split(sub_feat.X, sub_feat.y_binary):
+                if _is_degenerate_val(sub_feat, val_idx):
+                    continue
+                fm = _one_fold_metrics(
+                    sub_feat, train_idx, val_idx,
+                    classifier_name=classifier_name, pca_dim=pca_dim,
+                )
+                rho_vals.append(fm.spearman_rho)
+                ndcg_vals.append(fm.ndcg_at_10)
+
+        if not rho_vals:
+            raise RuntimeError(
+                f"learning_curve frac={frac:.2f}: zero non-degenerate folds"
+            )
+
+        rho_p, rho_lo, rho_hi = bca_ci(
+            np.asarray(rho_vals, dtype=np.float64),
+            n_bootstrap=n_bootstrap, seed=seed,
+        )
+        ndcg_p, ndcg_lo, ndcg_hi = bca_ci(
+            np.asarray(ndcg_vals, dtype=np.float64),
+            n_bootstrap=n_bootstrap, seed=seed,
+        )
+        points.append(
+            LearningCurvePoint(
+                n_train=n_target,
+                fraction=frac,
+                spearman=MetricCI(point=rho_p, ci_low=rho_lo, ci_high=rho_hi, n_bootstrap=n_bootstrap),
+                ndcg_at_10=MetricCI(point=ndcg_p, ci_low=ndcg_lo, ci_high=ndcg_hi, n_bootstrap=n_bootstrap),
+            )
+        )
+        LOGGER.info(
+            "learning_curve frac=%.2f n=%d  rho=%.3f [%.3f, %.3f]",
+            frac, n_target, rho_p, rho_lo, rho_hi,
+        )
+
+    return LearningCurveReport(
+        points=points,
+        n_repeats=n_repeats,
+        n_folds=n_folds,
+        n_bootstrap=n_bootstrap,
+        seed=seed,
+        elapsed_seconds=time.time() - t0,
+        metadata={
+            "method": "stratified subsample × repeated K-fold CV with BCa bootstrap",
+            "metric_primary": "spearman_rho",
+            "fractions": list(fractions),
+        },
+    )

@@ -47,10 +47,21 @@ llm:
 ## Commands
 
 ```bash
-zotero-summarizer serve
-zotero-summarizer mcp
-zotero-summarizer migrate
-zotero-summarizer smoke-test
+zotero-summarizer serve              # FastAPI server (browser UI)
+zotero-summarizer mcp                # MCP server over stdio
+zotero-summarizer migrate            # Init/migrate local SQLite stores
+zotero-summarizer smoke-test         # Verify package + app construction
+```
+
+Feed processor (primary workflow — runs in the background):
+
+```bash
+zotero-summarizer feeds list                              # Discover feed names and IDs
+zotero-summarizer feeds serve                             # Long-running background daemon
+zotero-summarizer feeds serve --model qwen3:8b            # Use a different model temporarily
+zotero-summarizer feeds run --feeds "Agents"              # One-shot: exhaust one feed by name
+zotero-summarizer feeds run --feeds 2 --model qwen3:8b   # One-shot by ID with model override
+zotero-summarizer feeds tick                              # Single tick (cron-friendly, no lock)
 ```
 
 Low-level server alternative:
@@ -65,6 +76,7 @@ uvicorn zotero_summarizer.api.app:app --host 127.0.0.1 --port 8000 --reload
 - [Configuration](docs/configuration.md)
 - [API Schemas](docs/api.md)
 - [Operations](docs/operations.md)
+- [RSS Feed Processor](docs/feeds.md)
 
 ## Safety Model
 

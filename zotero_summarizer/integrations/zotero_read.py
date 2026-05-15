@@ -32,6 +32,17 @@ _ARXIV_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Zotero stores annotation kind as an integer; map to the canonical string label
+# used by the JS client. Source: Zotero/chrome/content/zotero/xpcom/annotations.js
+_ANNOTATION_TYPE_NAMES: dict[int, str] = {
+    1: "highlight",
+    2: "note",
+    3: "image",
+    4: "ink",
+    5: "underline",
+    6: "text",
+}
+
 
 def _arxiv_id_from_url_or_doi(url: str, doi: str) -> str:
     """Extract an arXiv ID from a feed item's URL or DOI fields."""
@@ -903,6 +914,35 @@ class ZoteroReader:
                 }
                 for row in note_rows
             ]
+
+            # PDF annotations live in itemAnnotations, keyed by attachment.itemID.
+            # The dateAdded column is on items, not itemAnnotations — join items.
+            annotation_rows = conn.execute(
+                """
+                SELECT a.itemID, a.text, a.comment, a.pageLabel, a.type,
+                       a.color, ann.dateAdded
+                FROM itemAnnotations a
+                JOIN items ann ON ann.itemID = a.itemID
+                JOIN itemAttachments att ON att.itemID = a.parentItemID
+                WHERE att.parentItemID = ?
+                ORDER BY ann.dateAdded ASC
+                """,
+                (item_id,),
+            ).fetchall()
+            annotations = [
+                {
+                    "text": str(row["text"] or ""),
+                    "comment": str(row["comment"] or ""),
+                    "page_label": str(row["pageLabel"] or ""),
+                    "type": _ANNOTATION_TYPE_NAMES.get(
+                        int(row["type"]), f"unknown_{int(row['type'])}"
+                    ),
+                    "color": str(row["color"] or ""),
+                    "date_added": str(row["dateAdded"] or ""),
+                }
+                for row in annotation_rows
+            ]
+
             return {
                 "item_key": str(item_row["key"]),
                 "title": fields.get("title", "Untitled"),
@@ -914,6 +954,7 @@ class ZoteroReader:
                 "tags": tags,
                 "collections": collections,
                 "notes": notes,
+                "annotations": annotations,
                 "attachments": attachments,
                 "pdf_path": pdf_path,
                 "has_pdf": pdf_path is not None,

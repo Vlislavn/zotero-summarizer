@@ -28,11 +28,13 @@ async def update_runtime_config(new_config: GoalsConfig) -> dict:
         )
 
     new_llm_refine = await asyncio.to_thread(
-        build_llm,
-        new_config.llm.api_base,
-        new_config.llm.refine_model,
-        api_key,
-        4096,
+        lambda: build_llm(
+            new_config.llm.api_base,
+            new_config.llm.refine_model,
+            api_key,
+            4096,
+            extra_body=new_config.llm.extra_body,
+        )
     )
 
     app_state = state()
