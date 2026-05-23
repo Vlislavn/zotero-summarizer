@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from zotero_summarizer.services.goldenset import GoldenSample, _write_csv
+from zotero_summarizer.services.golden.goldenset import GoldenSample, _write_csv
 
 
 def _sample(item_key: str, priority: str = "could_read") -> GoldenSample:

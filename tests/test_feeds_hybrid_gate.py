@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from zotero_summarizer.services import feeds
+from zotero_summarizer.services.triage.feeds import _gate as feeds
 from zotero_summarizer.storage import feeds as feeds_storage
 
 
@@ -201,7 +201,7 @@ def test_retrain_not_scheduled_when_sha_matches(tmp_path):
         classifier_gate=gate,
         classifier_gate_training=False,
     )
-    fake_settings = SimpleNamespace(project_root=tmp_path)
+    fake_settings = SimpleNamespace(project_root=tmp_path, golden_csv_path=golden)
     with patch.object(feeds, "get_state", return_value=fake_state), \
          patch.object(feeds, "get_settings", return_value=fake_settings), \
          patch("threading.Thread") as mock_thread:
@@ -221,7 +221,7 @@ def test_retrain_scheduled_when_sha_differs(tmp_path):
         classifier_gate=gate,
         classifier_gate_training=False,
     )
-    fake_settings = SimpleNamespace(project_root=tmp_path)
+    fake_settings = SimpleNamespace(project_root=tmp_path, golden_csv_path=golden)
     with patch.object(feeds, "get_state", return_value=fake_state), \
          patch.object(feeds, "get_settings", return_value=fake_settings), \
          patch("threading.Thread") as mock_thread:
@@ -241,7 +241,7 @@ def test_retrain_skipped_when_already_in_progress(tmp_path):
         classifier_gate=gate,
         classifier_gate_training=True,
     )
-    fake_settings = SimpleNamespace(project_root=tmp_path)
+    fake_settings = SimpleNamespace(project_root=tmp_path, golden_csv_path=golden)
     with patch.object(feeds, "get_state", return_value=fake_state), \
          patch.object(feeds, "get_settings", return_value=fake_settings), \
          patch("threading.Thread") as mock_thread:

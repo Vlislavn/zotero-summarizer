@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from zotero_summarizer.services.feeds import _compute_outcome_from_membership
+from zotero_summarizer.services.triage.feeds import _compute_outcome_from_membership
 from zotero_summarizer.storage import feeds as fs
 
 

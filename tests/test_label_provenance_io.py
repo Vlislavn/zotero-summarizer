@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from zotero_summarizer.services import label_provenance as lp
+from zotero_summarizer.services.golden import label_provenance as lp
 
 
 # ---------------------------------------------------------------------------

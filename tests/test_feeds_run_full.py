@@ -8,7 +8,7 @@ import pytest
 
 from tests._zotero_fixtures import add_feed, add_feed_item, build_zotero_db
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
-from zotero_summarizer.services.feeds import _pick_unread_batch_round_robin
+from zotero_summarizer.services.triage.feeds import _pick_unread_batch_round_robin
 from zotero_summarizer.storage import feeds as fs
 
 

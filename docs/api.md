@@ -18,92 +18,6 @@ Response:
 }
 ```
 
-## Summaries
-
-### `POST /api/summaries`
-
-Optional query parameter: `item_id=<zotero_item_id>`. If present, the result is persisted to SQLite.
-
-Request:
-
-```json
-{
-  "title": "Example Paper",
-  "doi": "10.1000/example",
-  "pdf_path": "/absolute/path/to/paper.pdf",
-  "abstract": "Optional abstract text"
-}
-```
-
-Response fields:
-
-| Field | Type | Description |
-|---|---|---|
-| `executive_summary` | string | Main research note |
-| `should_deep_read` | string | Reading recommendation |
-| `key_sections_to_read` | string[] | Specific sections worth reading |
-| `relevance_to_research` | string | Connection to configured goals |
-| `controversial_points` | string | Debatable claims |
-| `industry_academy_impact` | string | Practical implications |
-| `unknown_unknowns` | string | Non-obvious implications |
-| `implementation_quickstart` | string | Implementation guidance |
-| `key_findings` | string[] | Main findings and metrics |
-| `methods` | string | Methodology summary |
-| `limitations` | string | Caveats |
-| `relevance_score` | int | LLM relevance score, `1..5` |
-| `composite_relevance_score` | float | Final score, `0..5` |
-| `reading_priority` | string | `must_read`, `should_read`, `could_read`, `dont_read` |
-| `tags` | string[] | Specific topic/method tags |
-| `triage_rationale` | string | Score explanation |
-| `triage_dimensions` | object/null | Goal alignment, novelty, rigor, actionability, evidence |
-| `triage_confidence` | float | `0..1` confidence |
-| `corpus_affinity_score` | float | `-1..1` net corpus affinity |
-| `matched_goal` | string | Closest configured research goal |
-| `suggested_collections` | string[] | Candidate Zotero collections |
-| `top_similar_items` | string[] | Similar existing corpus items |
-
-### `POST /api/summaries/batch`
-
-Request:
-
-```json
-{
-  "items": [
-    {
-      "item_id": "ABCD1234",
-      "request": {
-        "title": "Example Paper",
-        "doi": "10.1000/example",
-        "pdf_path": "/absolute/path/to/paper.pdf",
-        "abstract": "Optional abstract"
-      }
-    }
-  ]
-}
-```
-
-Response:
-
-```json
-{
-  "batch_id": "batch_20260507_120000_000000",
-  "total_items": 1,
-  "ranked_items": [
-    {
-      "batch_id": "batch_20260507_120000_000000",
-      "item_id": "ABCD1234",
-      "title": "Example Paper",
-      "summary": {},
-      "normalized_score": 82.5,
-      "percentile": 100.0,
-      "rank": 1,
-      "forced_priority": "must_read"
-    }
-  ],
-  "failed_items": []
-}
-```
-
 ## Zotero
 
 ### `GET /api/zotero/status`
@@ -215,10 +129,6 @@ Returns pending, applied, rejected, failed, or all changes.
 ### `PUT /api/pending/change/{change_id}`
 
 Edits a pending payload before apply.
-
-### `POST /api/pending/override-priority`
-
-Queues a priority tag override instead of writing immediately.
 
 ### `POST /api/pending/reject`
 
@@ -432,37 +342,100 @@ Response:
 }
 ```
 
-## Corpus And Feedback
+## Today (Daily Slate) — Stage 1 cull
 
-### `POST /api/corpus/import`
+### `GET /api/daily?K=5&lookback_hours=168`
 
-Request:
+Assemble the role-mixed daily slate. Each paper carries provenance + scores +
+any saved verdict:
 
 ```json
 {
+  "papers": [
+    {
+      "item_id": 13, "item_key": "http://arxiv.org/abs/2604.18349v1",
+      "title": "...", "authors": "Smith J, Lee P", "venue": "...", "year": "2026",
+      "role": "model", "feed_name": "bioRxiv — Bioinformatics",
+      "composite_score": 2.93, "prestige_score": 0.46, "shap_top": [...],
+      "role_value_verdict": null, "user_priority": null
+    }
+  ],
+  "pool_size": 25, "capped_at": 25, "lookback_hours": 168,
+  "empty_role_events": [], "fellback_to_recent": true
+}
+```
+
+`role` is the allocation bucket (`model`/`surprise`/`audit`/`diversity`);
+`feed_name` is the source RSS feed. `fellback_to_recent` is true when the
+lookback window was empty and the slate fell back to recent rows.
+
+### `POST /api/daily/add-to-library`
+
+Body `{ "item_ids": [13, 15] }` (processed_feed_items PKs). Materializes each
+into the Zotero **Inbox** collection and records a positive (`should_read`)
+training label. Returns `{ "added": 2, "failed_count": 0, "failed": [] }`.
+Empty `item_ids` → `422`.
+
+### `POST /api/daily/trash`
+
+Body `{ "item_ids": [14] }`. Records `dont_read` for each + marks the feed
+items read. Returns `{ "trashed": 1, "marked_read": 1, "failed_count": 0, "failed": [] }`.
+
+### `POST /api/daily/triage-backlog` · `GET /api/daily/triage-status`
+
+Start a background drain of the un-triaged feed backlog (SOTA model via
+`CUSTOM_*`), and poll its progress
+(`{ "running": true, "triaged": 3, "gate_rejected": 21, "ticks": 1, ... }`).
+
+### `POST /api/daily/verdict`
+
+Record a `must/should/could/dont_read` label on a Today card. Writes
+`label_verdicts` (keyed `feed:<feed_item_id>`) **and** appends the item to the
+golden CSV so it trains. Body `{ "item_id": 13, "user_priority": "must_read",
+"comment": "" }` where `item_id` is the `processed_feed_items` PK. Returns
+`{ "id": <verdict_row_id>, "item_key": "feed:32448" }`.
+
+### `POST /api/daily/role-verdict`
+
+Record an after-reading `worth/waste/unknown` rating for a slot (rehydrated by
+`GET /api/daily`). `item_key` travels in the **body** (feed keys are URL-shaped):
+`{ item_key, role, verdict, composite_score?, surprise_score?, corpus_affinity? }`.
+(Legacy path form `POST /api/daily/{item_key}/role-verdict` still exists.)
+
+## Library — Stage 2 reading queue
+
+### `GET /api/library/reading-queue?include_read=false&limit=30&refresh=false`
+
+Unread library papers ranked by the gate's relevance score (background-computed
++ cached). `include_read=true` also lists already-read items; `refresh=true`
+forces a rescore.
+
+```json
+{
+  "status": "ready",
+  "model_ready": true,
+  "total_unread": 500,
+  "read_hidden": 0,
   "items": [
     {
-      "item_id": "ABCD1234",
-      "title": "Example Paper",
-      "abstract": "Optional abstract",
-      "tags": ["topic:agents"],
-      "collections": ["Research > Agents"],
-      "annotation_count": 4,
-      "manual_note_count": 1,
-      "created_at": "2026-05-07T10:00:00Z"
+      "item_key": "3Q28D3J6", "title": "...", "authors": "...",
+      "reading_priority": "", "has_pdf": true, "date_added": "2026-05-20",
+      "read": false, "relevance_score": 2.88, "why_reason": "Topic match"
     }
   ]
 }
 ```
 
-Response:
+`status` is `"computing"` while the background scoring job runs (poll until
+`"ready"`). `model_ready=false` → the gate isn't loaded yet and items are
+ordered by recency. `limit` must be 1–200 (else `422`). Each item's
+`relevance_score` matches the `composite_score` shown by
+`GET /api/golden/review-detail?item_key=<key>` for that paper.
 
-```json
-{
-  "imported_items": 1,
-  "updated_items": 0
-}
-```
+## Corpus And Feedback
+
+The corpus (SPECTER2 embeddings of your existing library) is populated
+automatically from Zotero at startup — there is no HTTP import route.
 
 ### `GET /api/corpus/items`
 
@@ -471,14 +444,6 @@ Lists corpus metadata.
 ### `GET /api/corpus/item/{item_key}`
 
 Returns one corpus metadata row when present.
-
-### `POST /api/feedback`
-
-Stores explicit feedback events.
-
-### `GET /api/feedback`
-
-Lists recent feedback events.
 
 ### `POST /api/triage/results/{item_key}/feedback`
 
@@ -492,19 +457,15 @@ Request:
 
 Queues corresponding Zotero approval/rejection tags.
 
-### `POST /api/triage/results/{item_key}/override-dimensions`
-
-Overrides one or more triage dimensions and recalculates score/priority.
-
 ### `GET /api/calibration/metrics`
 
 Returns `last_7d`, `last_30d`, and `all_time` calibration metrics.
 
 ## Results
 
-### `GET /results`
-
-Serves the dashboard page.
+> The legacy `GET /results` dashboard page was removed in the 2026-05-15 UI
+> redesign. The React SPA is served at `/` and any unknown non-`/api/` path
+> falls through to it (client-side routing).
 
 ### `GET /api/results`
 
@@ -520,13 +481,65 @@ Query parameters:
 | `limit` | Max rows |
 | `offset` | Pagination offset |
 
-### `GET /api/batches`
-
-Returns recent batch runs.
-
 ### `GET /api/results/{item_id}`
 
 Returns one stored triage result.
+
+## Annotate (golden labels)
+
+### `GET /api/golden/provenance/list?priority=&flag=&limit=200`
+
+The Annotate list. Each item carries `effective_priority` (the user's verdict
+if any, else derived — **manual wins**), `derived_priority`, `user_priority`,
+`is_user_override`, and `orphaned`. Filtering by `priority` uses
+`effective_priority`. Orphaned verdicts (key not in the CSV) are appended.
+
+### `GET /api/golden/review-detail?item_key=...`
+
+Full detail for one paper. Dispatches by key prefix (`feed:` / `note:` /
+8-char library). Returns a uniform shape with `source`, `authors`,
+`scoring` (SHAP), `provenance` (null for rows not in the CSV), and `verdict`.
+Never 404s a key that has a verdict — falls back to a CSV/stub payload.
+
+### `POST /api/golden/verdict` · `DELETE /api/golden/verdict?item_key=...`
+
+Save (UPSERT) or delete a manual verdict. Body:
+`{ item_key, user_priority, comment }`. Saving works even for a key not in
+the golden CSV (e.g. a Today feed item).
+
+### `GET /api/golden/effective-labels` · `/api/golden/effective-labels/summary`
+
+The merged hybrid ground-truth map (`source: "user" | "derived"`) and its
+counts (`total_rows`, `user_verdicts`, `user_overrode_derivation`).
+
+### `GET /api/golden/border-suggestions?top_k=50`
+
+Active-learning suggestions, background-computed + sha-cached. Returns
+`{ status: "computing" | "ready" | "error", items: [...], total }`. Poll
+until `ready`. `top_k` must be 1–2000.
+
+## Admin (Settings → Model lifecycle)
+
+### `GET /api/admin/model`
+
+The current trained gate's metadata: classifier, objective, `oof_spearman`,
+`n_train`, `trained_at`, `git_commit`, golden-CSV sha, thresholds. Returns
+`{ "model": null }` when none is trained yet.
+
+### `POST /api/admin/refresh-labels`
+
+Re-export `zotero-summarizer-golden.csv` from Zotero (synchronous; returns
+counts). Manual verdicts in `label_verdicts` are unaffected and still win.
+
+### `POST /api/admin/retrain`
+
+Retrain the gate on the current hybrid ground truth as a background job.
+Body: `{ classifier_name?: "logreg"|"lightgbm"|"tabpfn", n_folds?: 5 }`.
+Returns `{ job_id, status }`; 409 if one is already running.
+
+### `GET /api/admin/jobs` · `GET /api/admin/jobs/{job_id}`
+
+List jobs / poll one retrain job (`status ∈ running|succeeded|failed`).
 
 ## Errors
 

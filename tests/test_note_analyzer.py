@@ -11,12 +11,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from zotero_summarizer.services import note_analyzer
-from zotero_summarizer.services.note_analyzer import (
+from zotero_summarizer.services.zotero import note_analyzer
+from zotero_summarizer.services._common import html_to_text
+from zotero_summarizer.services.zotero.note_analyzer import (
     NoteAnalysis,
     UserNote,
     _NoteVerdict,
-    _strip_html,
     classify_notes,
     distribution,
     write_analyses_csv,
@@ -30,7 +30,7 @@ from zotero_summarizer.services.note_analyzer import (
 
 def test_strip_html_normalises_whitespace_and_drops_tags():
     raw = "<p>hello\n\t<b>world</b></p>"
-    assert _strip_html(raw) == "hello world"
+    assert html_to_text(raw) == "hello world"
 
 
 def test_pdf_annotation_extracts_are_filtered_out_by_regex():

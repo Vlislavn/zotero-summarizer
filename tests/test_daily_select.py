@@ -9,140 +9,19 @@ with crafted rows.
 
 from __future__ import annotations
 
-import json
-import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from pathlib import Path
-from typing import Iterable
 
 import pytest
 
-from zotero_summarizer.services.daily_select import (
+from zotero_summarizer.services.triage.daily_select import (
     DailySlate,
     SlatePaper,
     assemble_daily_slate,
+    count_awaiting_unhandled,
 )
-
-
-# ---------------------------------------------------------------------------
-# Fixture helpers
-# ---------------------------------------------------------------------------
-
-
-_CREATE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS processed_feed_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    feed_library_id INTEGER NOT NULL,
-    feed_item_id INTEGER NOT NULL,
-    guid TEXT NOT NULL,
-    title TEXT NOT NULL,
-    doi TEXT,
-    arxiv_id TEXT,
-    feed_name TEXT,
-    decision TEXT NOT NULL,
-    decision_reason TEXT NOT NULL DEFAULT '',
-    composite_score REAL,
-    surprise_score REAL,
-    corpus_affinity REAL,
-    reading_priority TEXT,
-    is_black_swan INTEGER NOT NULL DEFAULT 0,
-    model_version TEXT,
-    run_id TEXT NOT NULL,
-    planned_zotero_key TEXT,
-    matched_collections_json TEXT,
-    error TEXT,
-    materialized_zotero_key TEXT,
-    outcome_eligible_at TEXT,
-    outcome_detected_at TEXT,
-    final_outcome TEXT,
-    outcome_signal_weight REAL,
-    read_time_marked_at TEXT,
-    shap_contribs_json TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(feed_library_id, feed_item_id)
-)
-"""
-
-
-_DEFAULT_NOW = datetime(2026, 5, 15, 12, 0, 0, tzinfo=timezone.utc)
-
-
-def _make_shap_json(*, affinity: float = 0.3, prestige: float | None = 4.2) -> str:
-    payload: dict[str, object] = {
-        "shap": [
-            {"feature": "venue_h_index", "contribution": 0.12},
-            {"feature": "year_recency", "contribution": -0.04},
-            {"feature": "title_log_len", "contribution": 0.01},
-        ],
-        "aux_context": {"corpus_affinity": affinity},
-    }
-    if prestige is not None:
-        payload["summary"] = {"prestige_score": prestige}
-    return json.dumps(payload)
-
-
-def _create_db(db_path: Path) -> None:
-    conn = sqlite3.connect(str(db_path))
-    try:
-        conn.execute(_CREATE_TABLE_SQL)
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def _insert(
-    db_path: Path,
-    *,
-    item_key: str,
-    decision: str,
-    composite_score: float,
-    surprise_score: float = 0.0,
-    corpus_affinity: float | None = None,
-    created_at: datetime | None = None,
-    shap_contribs_json: str | None = None,
-    feed_item_id: int | None = None,
-    title: str = "Test paper",
-) -> None:
-    conn = sqlite3.connect(str(db_path))
-    try:
-        ts = (created_at or _DEFAULT_NOW).astimezone(timezone.utc)
-        created_str = ts.strftime("%Y-%m-%d %H:%M:%S")
-        cur = conn.execute("SELECT COALESCE(MAX(feed_item_id), 0) FROM processed_feed_items")
-        next_id = int(cur.fetchone()[0]) + 1 if feed_item_id is None else int(feed_item_id)
-        shap_json = shap_contribs_json
-        if shap_json is None:
-            shap_json = _make_shap_json(
-                affinity=corpus_affinity if corpus_affinity is not None else 0.3,
-                prestige=4.2,
-            )
-        conn.execute(
-            """
-            INSERT INTO processed_feed_items (
-                feed_library_id, feed_item_id, guid, title, decision,
-                composite_score, surprise_score, corpus_affinity, run_id,
-                shap_contribs_json, created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                1,
-                next_id,
-                item_key,
-                title,
-                decision,
-                float(composite_score),
-                float(surprise_score),
-                None if corpus_affinity is None else float(corpus_affinity),
-                "test-run",
-                shap_json,
-                created_str,
-                created_str,
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+from zotero_summarizer.storage import repositories as repo
+from tests._daily_select_helpers import _DEFAULT_NOW, _create_db, _insert, _make_shap_json
 
 
 @pytest.fixture
@@ -316,11 +195,35 @@ def test_assemble_daily_slate_audit_pool_from_gate_rejected(triage_db: Path) -> 
             composite_score=1.0,
             shap_contribs_json=_make_shap_json(affinity=0.0, prestige=4.5),
         )
-    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    # The audit role is no longer in the default slate (it degenerated into an
+    # endless one-at-a-time stream when the primary pool was empty); callers can
+    # still opt in by passing roles explicitly, which is what we exercise here.
+    slate = assemble_daily_slate(
+        db_path=triage_db,
+        K=5,
+        roles={"model": 2, "surprise": 1, "audit": 1, "diversity": 1},
+        now=_DEFAULT_NOW,
+    )
     audit_papers = [p for p in slate.papers if p.role == "audit"]
     assert len(audit_papers) == 1
     assert audit_papers[0].item_key.startswith("G")
     assert audit_papers[0].decision == "gate_rejected"
+
+
+def test_assemble_daily_slate_default_has_no_audit(triage_db: Path) -> None:
+    """The default slate must never allocate the audit role — that was the
+    source of the endless 'spot-check forever' stream when the queue emptied."""
+    for i in range(3):
+        _insert(
+            triage_db,
+            item_key=f"G{i}",
+            decision="gate_rejected",
+            composite_score=1.0,
+            shap_contribs_json=_make_shap_json(affinity=0.0, prestige=4.5),
+        )
+    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    assert [p for p in slate.papers if p.role == "audit"] == []
+    assert slate.papers == []  # gate_rejected alone no longer fills the slate
 
 
 def test_assemble_daily_slate_audit_deterministic_within_day(triage_db: Path) -> None:
@@ -341,8 +244,9 @@ def test_assemble_daily_slate_audit_deterministic_within_day(triage_db: Path) ->
             composite_score=1.0,
             shap_contribs_json=_make_shap_json(affinity=0.0, prestige=4.5),
         )
-    slate_a = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
-    slate_b = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    roles = {"model": 2, "surprise": 1, "audit": 1, "diversity": 1}
+    slate_a = assemble_daily_slate(db_path=triage_db, K=5, roles=roles, now=_DEFAULT_NOW)
+    slate_b = assemble_daily_slate(db_path=triage_db, K=5, roles=roles, now=_DEFAULT_NOW)
     audit_a = [p.item_key for p in slate_a.papers if p.role == "audit"]
     audit_b = [p.item_key for p in slate_b.papers if p.role == "audit"]
     assert audit_a == audit_b
@@ -377,16 +281,16 @@ def test_assemble_daily_slate_K_larger_than_pool(triage_db: Path) -> None:
         corpus_affinity=0.3,
     )
     slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
-    # 2 papers from a pool of 2, multiple empty_role_events because
-    # surprise+audit+diversity all fall through to model_fallback which itself
-    # runs out of candidates.
+    # 2 papers from a pool of 2, multiple empty_role_events because the third
+    # model slot + surprise + diversity all fall through to model_fallback which
+    # itself runs out of candidates. (audit is no longer a default role.)
     assert len(slate.papers) == 2
     # Surprise should be in empty roles (no surprise_score >= 0.30).
     assert "surprise" in slate.empty_role_events
     # Diversity also empty (no negative-affinity rows).
     assert "diversity" in slate.empty_role_events
-    # Audit also empty (no gate_rejected rows).
-    assert "audit" in slate.empty_role_events
+    # audit is not a default role anymore, so it must not appear.
+    assert "audit" not in slate.empty_role_events
 
 
 def test_assemble_daily_slate_rejects_invalid_K(triage_db: Path) -> None:
@@ -399,3 +303,96 @@ def test_assemble_daily_slate_missing_db_raises(tmp_path: Path) -> None:
         assemble_daily_slate(
             db_path=tmp_path / "does_not_exist.db", K=5, now=_DEFAULT_NOW
         )
+
+
+# ---------------------------------------------------------------------------
+# Handled papers (rated or labeled) drop out of the slate
+# ---------------------------------------------------------------------------
+
+
+def test_feed_name_flows_to_slate_paper(triage_db: Path) -> None:
+    # Provenance: feed_name on the row must reach SlatePaper for the card badge.
+    _insert(triage_db, item_key="http://arxiv.org/abs/N", decision="triaged_pending",
+            composite_score=4.0, feed_item_id=900, feed_name="bioRxiv")
+    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    paper = next(p for p in slate.papers if p.item_key == "http://arxiv.org/abs/N")
+    assert paper.feed_name == "bioRxiv"
+    assert paper.role  # bucket is set
+
+
+def test_rated_paper_excluded_from_slate(triage_db: Path) -> None:
+    # Two fresh model candidates; one gets an after-reading rating.
+    _insert(triage_db, item_key="http://arxiv.org/abs/A", decision="triaged_pending",
+            composite_score=4.0, feed_item_id=501)
+    _insert(triage_db, item_key="http://arxiv.org/abs/B", decision="triaged_pending",
+            composite_score=3.0, feed_item_id=502)
+    repo.insert_role_value_verdict(
+        triage_db, item_key="http://arxiv.org/abs/A", role="model",
+        verdict="waste", composite_score=4.0, surprise_score=None, corpus_affinity=None,
+    )
+    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    keys = {p.item_key for p in slate.papers}
+    assert "http://arxiv.org/abs/A" not in keys
+    assert "http://arxiv.org/abs/B" in keys
+
+
+def test_labeled_paper_excluded_from_slate(triage_db: Path) -> None:
+    _insert(triage_db, item_key="http://arxiv.org/abs/C", decision="triaged_pending",
+            composite_score=4.0, feed_item_id=601)
+    _insert(triage_db, item_key="http://arxiv.org/abs/D", decision="triaged_pending",
+            composite_score=3.0, feed_item_id=602)
+    repo.insert_or_update_label_verdict(
+        triage_db, item_key="feed:601",
+        original_derived_priority="could_read", user_priority="must_read", comment="",
+    )
+    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    keys = {p.item_key for p in slate.papers}
+    assert "http://arxiv.org/abs/C" not in keys
+    assert "http://arxiv.org/abs/D" in keys
+
+
+def test_count_awaiting_unhandled_excludes_handled(triage_db: Path) -> None:
+    # Two pending papers; one already labeled (handled). The honest counter the
+    # Today header now uses must report 1, not 2 (the old raw count returned 2
+    # and disagreed with the slate).
+    _insert(triage_db, item_key="http://arxiv.org/abs/X", decision="triaged_pending",
+            composite_score=4.0, feed_item_id=801)
+    _insert(triage_db, item_key="http://arxiv.org/abs/Y", decision="triaged_pending",
+            composite_score=3.0, feed_item_id=802)
+    repo.insert_or_update_label_verdict(
+        triage_db, item_key="feed:801",
+        original_derived_priority="could_read", user_priority="dont_read", comment="",
+    )
+    assert count_awaiting_unhandled(triage_db) == 1
+    # Matches the slate's own count exactly (single source of truth).
+    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    assert count_awaiting_unhandled(triage_db) == len(slate.papers)
+
+
+def test_count_awaiting_unhandled_zero_when_all_handled(triage_db: Path) -> None:
+    _insert(triage_db, item_key="http://arxiv.org/abs/Z", decision="triaged_pending",
+            composite_score=4.0, feed_item_id=811)
+    repo.insert_or_update_label_verdict(
+        triage_db, item_key="feed:811",
+        original_derived_priority="could_read", user_priority="must_read", comment="",
+    )
+    assert count_awaiting_unhandled(triage_db) == 0
+
+
+def test_handled_paper_excluded_from_recent_fallback(triage_db: Path) -> None:
+    # Old rows (outside the 168h window) so the slate must use the recent
+    # fallback; the labeled one is still excluded there too.
+    old = _DEFAULT_NOW - timedelta(days=30)
+    _insert(triage_db, item_key="http://arxiv.org/abs/E", decision="triaged_pending",
+            composite_score=4.0, feed_item_id=701, created_at=old)
+    _insert(triage_db, item_key="http://arxiv.org/abs/F", decision="triaged_pending",
+            composite_score=3.0, feed_item_id=702, created_at=old)
+    repo.insert_role_value_verdict(
+        triage_db, item_key="http://arxiv.org/abs/E", role="model",
+        verdict="worth", composite_score=4.0, surprise_score=None, corpus_affinity=None,
+    )
+    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    keys = {p.item_key for p in slate.papers}
+    assert slate.fellback_to_recent is True
+    assert "http://arxiv.org/abs/E" not in keys
+    assert "http://arxiv.org/abs/F" in keys

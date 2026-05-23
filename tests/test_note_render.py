@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 
 from zotero_summarizer.models import SummarizeResponse, TriageDimensions
-from zotero_summarizer.services.pending import build_triage_note_html
+from zotero_summarizer.services.zotero.pending import build_triage_note_html
 
 
 def _summary(**overrides) -> SummarizeResponse:

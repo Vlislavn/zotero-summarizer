@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from zotero_summarizer.services import llm_classifier
-from zotero_summarizer.services.llm_classifier import (
+from zotero_summarizer.services.model import llm_classifier
+from zotero_summarizer.services.model.llm_classifier import (
     LLMClassification,
     _LLMVerdict,
     classify_papers_with_llm,

@@ -51,6 +51,64 @@ def test_filter_unprocessed_skips_already_recorded():
     assert unprocessed[0]["item_id"] == 101
 
 
+def test_filter_unprocessed_retries_skipped_error():
+    """skipped_error rows are transient failures → treated as retryable, so
+    they are NOT filtered out (otherwise they poison the picker forever)."""
+    conn = _open()
+    feeds_storage.record_decision(
+        conn, run_id="r1", feed_item=_item(2, 100),
+        decision=feeds_storage.DECISION_SKIPPED_ERROR,
+    )
+    conn.commit()
+    unprocessed, skipped = feeds_storage.filter_unprocessed(conn, [_item(2, 100)])
+    assert skipped == 0
+    assert len(unprocessed) == 1
+
+
+def test_select_stale_unread_to_mark():
+    """Terminal-decided items are returned (so the daemon marks them read);
+    skipped_error (retryable) and awaiting_review (review queue) are excluded,
+    and never-recorded items are excluded."""
+    conn = _open()
+    for item_id, decision in (
+        (100, feeds_storage.DECISION_SELECTED),
+        (101, feeds_storage.DECISION_GATE_REJECTED),
+        (102, feeds_storage.DECISION_SKIPPED_ERROR),
+        (103, feeds_storage.DECISION_AWAITING_REVIEW),
+    ):
+        feeds_storage.record_decision(
+            conn, run_id="r1", feed_item=_item(2, item_id), decision=decision,
+        )
+    conn.commit()
+    # 104 is never recorded.
+    raw = [_item(2, i) for i in (100, 101, 102, 103, 104)]
+    stale = feeds_storage.select_stale_unread_to_mark(conn, raw)
+    assert set(stale) == {(2, 100), (2, 101)}
+
+
+def test_select_stale_unread_to_mark_empty():
+    assert feeds_storage.select_stale_unread_to_mark(_open(), []) == []
+
+
+def test_clear_error_rows_removes_only_skipped_error():
+    conn = _open()
+    feeds_storage.record_decision(
+        conn, run_id="r1", feed_item=_item(2, 100),
+        decision=feeds_storage.DECISION_SKIPPED_ERROR,
+    )
+    feeds_storage.record_decision(
+        conn, run_id="r1", feed_item=_item(2, 101),
+        decision=feeds_storage.DECISION_SELECTED,
+    )
+    conn.commit()
+    deleted = feeds_storage.clear_error_rows(conn, [_item(2, 100), _item(2, 101)])
+    conn.commit()
+    assert deleted == 1
+    # The error row is gone (retryable); the selected row remains (processed).
+    unprocessed, _ = feeds_storage.filter_unprocessed(conn, [_item(2, 100), _item(2, 101)])
+    assert {it["item_id"] for it in unprocessed} == {100}
+
+
 def test_record_decision_is_idempotent():
     """INSERT OR IGNORE — recording the same (feed_lib, item_id) twice doesn't dup."""
     conn = _open()

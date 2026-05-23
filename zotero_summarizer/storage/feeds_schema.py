@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS processed_feed_items (
     read_time_marked_at TEXT,
     -- Phase 1.14: SHAP contributions + OpenAlex author/venue raw context, JSON-encoded.
     shap_contribs_json TEXT,
+    -- Full-text peer-review quality assessment (QualityReview), JSON-encoded.
+    quality_review_json TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(feed_library_id, feed_item_id)
@@ -71,4 +73,5 @@ MIGRATION_COLUMNS = (
     ("read_time_marked_at", "TEXT"),
     ("updated_at", "TEXT"),
     ("shap_contribs_json", "TEXT"),   # Phase 1.14
+    ("quality_review_json", "TEXT"),  # full-text quality review
 )

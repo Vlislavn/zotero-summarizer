@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from zotero_summarizer.services.surprise import (
+from zotero_summarizer.services.model.surprise import (
     allocate_black_swan_slots,
     compute_surprise_score,
 )

@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from tests._zotero_fixtures import add_library_item, build_zotero_db
-from zotero_summarizer.services.feeds import (
+from zotero_summarizer.services.triage.feeds import (
     _compute_outcome_from_membership,
     _feedback_type_from_outcome,
     _relevance_from_weight,

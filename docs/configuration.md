@@ -35,6 +35,8 @@ Recommended `.env` schema:
 ```dotenv
 OPENAI_API_KEY=your_api_key_here
 OPENAI_API_BASE=https://api.openai.com/v1
+CUSTOM_BASE_URL=https://api.kather.ai/v1
+CUSTOM_API_KEY=your_kather_api_key_here
 SUMMARY_TIMEOUT_SECONDS=900
 TRIAGE_JOB_CONCURRENCY=4
 PDF_ROOT=/Users/your-user/Zotero/storage
@@ -49,6 +51,8 @@ APP_LOG_FILE=server.log
 |---|---|---|
 | `OPENAI_API_KEY` | Yes | API key passed to the OpenAI-compatible LLM endpoint |
 | `OPENAI_API_BASE` | Yes | Generic OpenAI-compatible base URL used by `goals.yaml` |
+| `CUSTOM_BASE_URL` | For Today triage | OpenAI-compatible base URL for the "Today" backlog triage (e.g. `https://api.kather.ai/v1`). Unset = the backlog-triage button reports the provider is missing |
+| `CUSTOM_API_KEY` | For Today triage | API key for `CUSTOM_BASE_URL`. The backlog drain uses `model: sota` on this endpoint |
 | `SUMMARY_TIMEOUT_SECONDS` | No | Per-paper timeout, default `420` |
 | `TRIAGE_JOB_CONCURRENCY` | No | Parallel papers per triage job, default `4`, max `16` |
 | `PDF_ROOT` | Recommended | Restricts PDF reads to this directory tree |
@@ -97,6 +101,24 @@ corpus:
 ```
 
 `api_base: ${OPENAI_API_BASE}` is expanded from `.env` at startup. Keep the provider URL in `.env` so the repo remains generic.
+
+### Today backlog triage provider (`CUSTOM_*`)
+
+The "Today" tab's on-demand backlog drain (`POST /api/daily/triage-backlog`)
+scores survivors of the gate with a **second** provider, independent of the
+`llm:` block above. It is configured purely from `.env`:
+
+```dotenv
+CUSTOM_BASE_URL=https://api.kather.ai/v1
+CUSTOM_API_KEY=your_kather_api_key_here
+```
+
+The model id is `sota` (the alias api.kather.ai exposes); the client is built
+by `services/_adapters.build_triage_llm()`. This keeps the primary `llm:`
+provider (often a fast local model) for summaries + library triage while the
+backlog drain uses a stronger SOTA model only on the gate's survivors. If
+`CUSTOM_*` is unset the drain refuses to start with a clear error; nothing
+else is affected.
 
 ### Switching to OpenAI (api.openai.com)
 

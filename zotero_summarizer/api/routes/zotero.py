@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from zotero_summarizer.models import ZoteroCollectionsResponse, ZoteroItemsResponse, ZoteroStatusResponse
-from zotero_summarizer.services import zotero
+from zotero_summarizer.services.zotero import zotero
 
 router = APIRouter()
 router.add_api_route("/api/zotero/status", zotero.zotero_status, methods=["GET"], response_model=ZoteroStatusResponse)

@@ -7,8 +7,8 @@ import pytest
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models import PendingChangeUpdateRequest, ZoteroItemPriorityUpdateRequest, ZoteroItemTagUpdateRequest
 from zotero_summarizer.runtime import get_context
-from zotero_summarizer.services import pending as pending_service
-from zotero_summarizer.services import zotero as zotero_service
+from zotero_summarizer.services.zotero import pending as pending_service
+from zotero_summarizer.services.zotero import zotero as zotero_service
 
 
 def _state():

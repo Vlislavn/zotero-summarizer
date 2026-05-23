@@ -41,10 +41,13 @@ async function request(path, options = {}) {
  * GET /api/golden/provenance/list
  * Returns { items, total_matched, total_rows, flag_counts }.
  */
-export async function fetchProvenanceList({ priority, flag, limit = 200 } = {}) {
+export async function fetchProvenanceList({ priority, flag, limit = 200, collection, tag, search } = {}) {
   const qs = new URLSearchParams();
   if (priority) qs.set('priority', priority);
   if (flag) qs.set('flag', flag);
+  if (collection) qs.set('collection', collection);
+  if (tag) qs.set('tag', tag);
+  if (search && search.trim()) qs.set('search', search.trim());
   if (limit) qs.set('limit', String(limit));
   const path = qs.toString() ? `/provenance/list?${qs.toString()}` : '/provenance/list';
   return request(path);

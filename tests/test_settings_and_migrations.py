@@ -32,11 +32,14 @@ def test_settings_loads_from_project_root_env_file(monkeypatch, tmp_path):
     settings = Settings.load(project_root=tmp_path)
 
     assert settings.project_root == tmp_path
+    assert settings.data_dir == tmp_path / "data"
     assert settings.summary_timeout_seconds == 123
     assert settings.triage_job_concurrency == 16
-    assert settings.app_log_file == tmp_path / "logs/app.log"
-    assert settings.triage_db_path == tmp_path / "triage_history.db"
-    assert settings.corpus_db_path == tmp_path / "corpus_cache.db"
+    # All app-generated state lives under data/ so the project root stays clean.
+    assert settings.app_log_file == tmp_path / "data" / "logs/app.log"
+    assert settings.triage_db_path == tmp_path / "data" / "triage_history.db"
+    assert settings.corpus_db_path == tmp_path / "data" / "corpus_cache.db"
+    assert settings.golden_csv_path == tmp_path / "data" / "zotero-summarizer-golden.csv"
 
 
 def test_goals_config_expands_llm_api_base_from_env(monkeypatch, tmp_path):

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from zotero_summarizer.services import relabel_audit
+from zotero_summarizer.services.golden import relabel_audit
 
 
 # ---------------------------------------------------------------------------

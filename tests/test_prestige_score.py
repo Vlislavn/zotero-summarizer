@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from zotero_summarizer.integrations.openalex import OpenAlexWork
-from zotero_summarizer.services.prestige import compute_prestige_score
+from zotero_summarizer.services.model.prestige import compute_prestige_score
 
 
 def _work(h: int = 0, venue: int = 0, cites: int = 0) -> OpenAlexWork:

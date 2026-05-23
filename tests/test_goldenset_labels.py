@@ -26,7 +26,7 @@ Score model (baseline 3.0, clamped to [1.0, 5.0]):
 
 from __future__ import annotations
 
-from zotero_summarizer.services.goldenset import _infer_label
+from zotero_summarizer.services.golden.goldenset import _infer_label
 
 
 def _call(tags: list[str], *, in_trash: bool = False, note_count: int = 0,
@@ -300,7 +300,7 @@ def test_decay_at_180d_halves_engagement():
     priority, _, rel, _ = _call(["🧠"], annotation_count=0)
     # No way to pass days_since_added through the public _call(); test the
     # underlying _infer_label directly.
-    from zotero_summarizer.services.goldenset import _infer_label
+    from zotero_summarizer.services.golden.goldenset import _infer_label
     p, _, r, _ = _infer_label(
         tags=["🧠"], in_trash=False, note_count=0, annotation_count=0,
         days_since_added=180,
@@ -311,7 +311,7 @@ def test_decay_at_180d_halves_engagement():
 
 def test_decay_at_360d_quarters_engagement():
     """🧠 at ~360 days: weight 0.25 × 2.0 = 0.5 → score 3.5 → should_read."""
-    from zotero_summarizer.services.goldenset import _infer_label
+    from zotero_summarizer.services.golden.goldenset import _infer_label
     p, _, r, _ = _infer_label(
         tags=["🧠"], in_trash=False, note_count=0, annotation_count=0,
         days_since_added=360,
@@ -322,7 +322,7 @@ def test_decay_at_360d_quarters_engagement():
 
 def test_decay_at_730d_pushes_to_could_read():
     """🧠 at ~2 years: weight ≈0.063 × 2.0 ≈ 0.125 → score ≈ 3.125 → could_read."""
-    from zotero_summarizer.services.goldenset import _infer_label
+    from zotero_summarizer.services.golden.goldenset import _infer_label
     p, _, r, _ = _infer_label(
         tags=["🧠"], in_trash=False, note_count=0, annotation_count=0,
         days_since_added=730,
@@ -334,7 +334,7 @@ def test_decay_at_730d_pushes_to_could_read():
 def test_decay_does_not_apply_to_neutral_baseline():
     """An item with no engagement signals at all stays at 3.0 → could_read,
     regardless of how old it is — decay multiplies the *delta*, not the baseline."""
-    from zotero_summarizer.services.goldenset import _infer_label
+    from zotero_summarizer.services.golden.goldenset import _infer_label
     p, _, r, _ = _infer_label(
         tags=[], in_trash=False, note_count=0, annotation_count=0,
         days_since_added=10000,
@@ -345,7 +345,7 @@ def test_decay_does_not_apply_to_neutral_baseline():
 
 def test_decay_does_not_apply_to_hard_veto():
     """🥱 short-circuits before decay is applied: still hard veto at year 5."""
-    from zotero_summarizer.services.goldenset import _infer_label
+    from zotero_summarizer.services.golden.goldenset import _infer_label
     p, _, r, t = _infer_label(
         tags=["🥱"], in_trash=False, note_count=0, annotation_count=0,
         days_since_added=1825,

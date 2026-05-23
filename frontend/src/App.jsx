@@ -1,23 +1,31 @@
+import { Navigate, Route, Routes } from 'react-router-dom';
+import NavBar from './components/NavBar.jsx';
 import AnnotationVerdict from './pages/AnnotationVerdict.jsx';
+import Today from './pages/Today.jsx';
+import Settings from './pages/Settings.jsx';
+import Library from './pages/Library.jsx';
+import Triage from './pages/Triage.jsx';
+import Review from './pages/Review.jsx';
+import Pending from './pages/Pending.jsx';
+import Audit from './pages/Audit.jsx';
 
 export default function App() {
   return (
     <div className="min-h-screen px-4 py-5 max-w-[1400px] mx-auto">
-      <header className="glass border border-slate-200 rounded-2xl shadow-lg p-4 mb-5">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Label Audit</h1>
-            <p className="text-sm text-slate-600">
-              Review annotations, notes, and tags to confirm or correct triage verdicts.
-            </p>
-          </div>
-          <div className="text-xs text-slate-500">
-            Zotero Summarizer · <span className="mono">/annotate</span>
-          </div>
-        </div>
-      </header>
+      <NavBar />
       <main>
-        <AnnotationVerdict />
+        <Routes>
+          <Route path="/" element={<Navigate to="/today" replace />} />
+          <Route path="/today" element={<Today />} />
+          <Route path="/annotate" element={<AnnotationVerdict />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/library" element={<Library />} />
+          <Route path="/triage" element={<Triage />} />
+          <Route path="/review" element={<Review />} />
+          <Route path="/pending" element={<Pending />} />
+          <Route path="/audit" element={<Audit />} />
+          <Route path="*" element={<Navigate to="/today" replace />} />
+        </Routes>
       </main>
     </div>
   );

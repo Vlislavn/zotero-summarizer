@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import pytest
 
-from zotero_summarizer.services import emoji_signals, label_provenance as lp
+from zotero_summarizer.services import emoji_signals
+from zotero_summarizer.services.golden import label_provenance as lp
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +205,7 @@ def test_compute_provenance_matches_infer_label_for_variety_of_inputs():
     what ``goldenset._infer_label`` produces. If the source-of-truth code
     drifts, our mirror must follow.
     """
-    from zotero_summarizer.services import goldenset
+    from zotero_summarizer.services.golden import goldenset
 
     test_cases = [
         ([], False, 0, 0, 0),

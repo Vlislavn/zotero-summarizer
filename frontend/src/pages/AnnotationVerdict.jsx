@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   useMutation,
   useQuery,
@@ -13,15 +14,17 @@ import {
   fetchEffectiveLabelsSummary,
   fetchBorderSuggestions,
 } from '../api/goldenApi.js';
+import { fetchCollections, fetchTags } from '../api/libraryApi.js';
 import PaperListItem from '../components/PaperListItem.jsx';
-import TagsRow from '../components/TagsRow.jsx';
 import ProvenanceBreakdown from '../components/ProvenanceBreakdown.jsx';
 import AnnotationsList from '../components/AnnotationsList.jsx';
 import NotesList from '../components/NotesList.jsx';
 import VerdictPanel from '../components/VerdictPanel.jsx';
 import AuthorByline from '../components/AuthorByline.jsx';
-import PrestigeWaterfall from '../components/PrestigeWaterfall.jsx';
 import PaperDetailLayout from '../components/PaperDetailLayout.jsx';
+import LinksRow from '../components/paper/LinksRow.jsx';
+import TagOfInterestEditor from '../components/paper/TagOfInterestEditor.jsx';
+import DeepReviewSection from '../components/paper/DeepReviewSection.jsx';
 import {
   PRIORITY_FILTERS,
   FLAG_FILTERS,
@@ -29,20 +32,39 @@ import {
   FilterChip,
   ErrorBanner,
   AbstractBlock,
-  PdfButton,
   GroundTruthOneLiner,
   EffectiveLabelsStrip,
+  TriageProgress,
 } from './AnnotationVerdict_helpers.jsx';
+
+// Flatten the Zotero collection tree into indented <option>s for a compact
+// <select> (annotate's left column is narrow — a dropdown beats Library's tree).
+function flattenCollections(nodes, depth = 0) {
+  const flat = [];
+  for (const node of nodes || []) {
+    flat.push({ key: node.key, name: `${' '.repeat(depth * 2)}${node.name}`, item_count: node.item_count || 0 });
+    if (node.children?.length) flat.push(...flattenCollections(node.children, depth + 1));
+  }
+  return flat;
+}
 
 // Tightly-composed metadata strip for the sticky top zone. Stays ~60-90px.
 function DetailTopStrip({ detail }) {
   return (
     <div>
       <h2
-        className="text-base font-bold text-slate-900 leading-snug truncate"
+        className="text-base font-bold text-slate-900 leading-snug truncate flex items-center gap-2"
         title={detail.title || '(untitled)'}
       >
-        {detail.title || '(untitled)'}
+        <span className="truncate">{detail.title || '(untitled)'}</span>
+        {detail.source === 'csv_stub' && (
+          <span
+            className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 font-semibold"
+            title="The live source (Zotero / feed DB) no longer has this row. Showing data from the golden CSV."
+          >
+            stub
+          </span>
+        )}
       </h2>
       <div className="mt-1">
         <AuthorByline authors={detail.authors} source={detail.source} />
@@ -50,25 +72,10 @@ function DetailTopStrip({ detail }) {
       <div className="text-[11px] text-slate-500 mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
         {detail.venue && <span>{detail.venue}</span>}
         {detail.year && <span>{detail.year}</span>}
-        {detail.doi && (
-          <a
-            href={`https://doi.org/${detail.doi}`}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="text-teal-700 hover:text-teal-900 underline"
-          >
-            DOI: {detail.doi}
-          </a>
-        )}
-        {detail.url && (
-          <a
-            href={detail.url}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="text-teal-700 hover:text-teal-900 underline"
-          >
-            URL
-          </a>
+        {detail.date_added && (
+          <span title="When this paper was added to your library">
+            Added {String(detail.date_added).slice(0, 10)}
+          </span>
         )}
         <span className="mono text-slate-400">{detail.item_key}</span>
       </div>
@@ -88,10 +95,18 @@ function DetailShell({ children }) {
 
 export default function AnnotationVerdict() {
   const queryClient = useQueryClient();
+  // Deep-link: the Library "Read next" queue opens a specific item via
+  // ?item_key=<zoteroKey>. The detail panel loads it independently of the
+  // provenance list (review_detail handles library keys), and the auto-select
+  // effect below honors it until the user picks something else.
+  const [searchParams] = useSearchParams();
+  const deepLinkedKey = searchParams.get('item_key') || null;
   const [priorityFilter, setPriorityFilter] = useState('must_read');
   const [flagFilter, setFlagFilter] = useState('');
+  const [selectedCollection, setSelectedCollection] = useState('');
+  const [selectedTag, setSelectedTag] = useState('');
   const [search, setSearch] = useState('');
-  const [selectedKey, setSelectedKey] = useState(null);
+  const [selectedKey, setSelectedKey] = useState(deepLinkedKey);
   // Phase 1.18 batch-mode bundle: keyboard shortcuts (j/k navigate, 1-4 priority),
   // optimistic auto-advance on verdict save, flashStatus for keyboard feedback.
   const [flashStatus, setFlashStatus] = useState(null);
@@ -105,12 +120,14 @@ export default function AnnotationVerdict() {
   // on every call (~30 s), so cache aggressively.
   const isBorderMode = priorityFilter === 'border';
   const listQuery = useQuery({
-    queryKey: ['provenance-list', priorityFilter, flagFilter],
+    queryKey: ['provenance-list', priorityFilter, flagFilter, selectedCollection, selectedTag],
     enabled: !isBorderMode,
     queryFn: () =>
       fetchProvenanceList({
         priority: priorityFilter || undefined,
         flag: flagFilter || undefined,
+        collection: selectedCollection || undefined,
+        tag: selectedTag || undefined,
         limit: 200,
       }),
   });
@@ -119,7 +136,26 @@ export default function AnnotationVerdict() {
     enabled: isBorderMode,
     queryFn: () => fetchBorderSuggestions({ topK: 50 }),
     staleTime: 5 * 60_000,
+    // The endpoint computes in the background (scoring ~740 rows takes a
+    // few minutes). While status==="computing" it returns no items; poll
+    // every 4 s until the result is ready, then stop.
+    refetchInterval: (query) =>
+      query.state.data?.status === 'computing' ? 4000 : false,
   });
+  const borderStatus = borderQuery.data?.status ?? null;
+
+  // Collection/tag filter sources (same Zotero data Library's sidebar uses).
+  const collectionsQuery = useQuery({
+    queryKey: ['zotero-collections'], queryFn: fetchCollections, staleTime: 5 * 60_000,
+  });
+  const tagsQuery = useQuery({
+    queryKey: ['zotero-tags', 300], queryFn: () => fetchTags({ limit: 300 }), staleTime: 5 * 60_000,
+  });
+  const flatCollections = useMemo(
+    () => flattenCollections(collectionsQuery.data?.items || []),
+    [collectionsQuery.data],
+  );
+  const topTags = tagsQuery.data?.items || [];
 
   const items = useMemo(() => {
     if (isBorderMode) {
@@ -185,6 +221,36 @@ export default function AnnotationVerdict() {
     [filteredItems, selectedKey],
   );
 
+  // Goal-Gradient progress: how many of the visible pile already carry the
+  // user's verdict. Mirrors PaperListItem's "★ yours" condition so the bar and
+  // the badges agree. Refreshes with effective-labels after each save.
+  const labeledCount = useMemo(
+    () =>
+      filteredItems.filter(
+        (it) =>
+          effectiveSourceByKey.get(it.item_key) === 'user'
+          || it.is_user_override
+          || it.is_direct_user_verdict
+          || it.is_manual_override,
+      ).length,
+    [filteredItems, effectiveSourceByKey],
+  );
+
+  // Auto-select the first paper on load (and when the filter changes
+  // such that the current selection drops out of the list). Skips the
+  // "Select a paper" empty pane — the user lands directly in flow.
+  useEffect(() => {
+    if (filteredItems.length === 0) return;
+    // Honor a deep-linked key (from Library Read-next) even though it isn't in
+    // the provenance list — its detail loads via the detail query.
+    if (selectedKey && selectedKey === deepLinkedKey) return;
+    const stillVisible = selectedKey
+      && filteredItems.some((it) => it.item_key === selectedKey);
+    if (!stillVisible) {
+      setSelectedKey(filteredItems[0].item_key);
+    }
+  }, [filteredItems, selectedKey, deepLinkedKey]);
+
   // Doherty-threshold-driven: advance UI BEFORE the network round-trip lands.
   const advance = useCallback(
     (direction = 'next') => {
@@ -246,6 +312,14 @@ export default function AnnotationVerdict() {
       submitMutation.mutate(
         { item_key: itemKey, user_priority, comment },
         {
+          onSuccess: (data) => {
+            // Comment is mirrored to Zotero as a note; flag a soft failure
+            // (e.g. Zotero open) without undoing the saved verdict.
+            if (data?.note_error) {
+              setFlashStatus(`Saved ${itemKey} → ${user_priority} (note not written: ${data.note_error})`);
+              setTimeout(() => setFlashStatus(null), 4000);
+            }
+          },
           onError: (err) => {
             setSelectedKey(itemKey);
             setFlashStatus(`Save failed for ${itemKey}: ${err.message || err}`);
@@ -284,8 +358,23 @@ export default function AnnotationVerdict() {
       if (PRIORITY_BY_KEY[e.key] && selectedKey) {
         e.preventDefault();
         const priority = PRIORITY_BY_KEY[e.key];
-        const existingComment = detailQuery.data?.verdict?.comment ?? '';
-        handleVerdictSubmit({ user_priority: priority, comment: existingComment });
+        const existing = detailQuery.data?.verdict ?? null;
+        // Overwrite guard, relocated from the mouse path's "Edit" gate
+        // (Tesler's Law): a number key commits instantly for a new or unchanged
+        // verdict — the common batch case — but changing an existing verdict to
+        // a different value asks first, so a fumbled key can't silently destroy
+        // a deliberate label.
+        if (
+          existing
+          && existing.user_priority
+          && existing.user_priority !== priority
+          && !window.confirm(
+            `Overwrite your verdict (${existing.user_priority} → ${priority}) for this paper?`,
+          )
+        ) {
+          return;
+        }
+        handleVerdictSubmit({ user_priority: priority, comment: existing?.comment ?? '' });
         return;
       }
     }
@@ -352,29 +441,34 @@ export default function AnnotationVerdict() {
       >
         <ErrorBanner error={detailQuery.error} title="Detail load failed" />
 
-        {/* PDF button (kept out of the topStrip per design) */}
-        {detail.has_pdf && detail.pdf_path && (
-          <div>
-            <PdfButton pdfPath={detail.pdf_path} hasPdf={detail.has_pdf} />
-          </div>
-        )}
+        {/* Links: abstract / DOI / full PDF (shared with Library) */}
+        <LinksRow detail={detail} itemKey={detail.item_key} />
+
+        {/* Deep review (full-text quality + relevance, shared with Library) */}
+        <DeepReviewSection
+          itemKey={detail.item_key}
+          deep={detail.deep_review}
+          hasPdf={detail.has_pdf}
+          onDone={() => queryClient.invalidateQueries({ queryKey: ['review-detail', selectedKey] })}
+        />
 
         {/* Abstract */}
         <AbstractBlock abstract={detail.abstract} />
 
-        {/* Tags */}
+        {/* Tags of interest: emoji signals + free text (shared with Library) */}
         <div>
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
             Tags
           </h3>
-          <TagsRow tags={detail.tags} />
+          <TagOfInterestEditor
+            itemKey={detail.item_key}
+            tags={detail.tags}
+            onChanged={() => queryClient.invalidateQueries({ queryKey: ['review-detail', selectedKey] })}
+          />
         </div>
 
         {/* Provenance */}
         <ProvenanceBreakdown provenance={detail.provenance} />
-
-        {/* NEW: SHAP / prestige waterfall */}
-        <PrestigeWaterfall scoring={detail.scoring} />
 
         {/* Annotations */}
         <AnnotationsList annotations={detail.annotations} />
@@ -382,6 +476,29 @@ export default function AnnotationVerdict() {
         {/* Notes */}
         <NotesList notes={detail.notes} />
       </PaperDetailLayout>
+    );
+  } else {
+    // selectedKey is set, not loading, but no detail => the detail query
+    // errored. Selective Attention: surface the failure in the detail pane
+    // where the user is looking, with a way out — never a silent blank column.
+    detailContent = (
+      <PaperDetailLayout
+        emptyState={
+          <DetailShell>
+            <ErrorBanner
+              error={detailQuery.error || new Error('This paper could not be loaded.')}
+              title="Couldn't load this paper"
+            />
+            <button
+              type="button"
+              onClick={() => detailQuery.refetch()}
+              className="mt-2 px-3 py-1.5 rounded-lg border border-slate-300 text-sm font-semibold hover:bg-slate-50"
+            >
+              Retry
+            </button>
+          </DetailShell>
+        }
+      />
     );
   }
 
@@ -401,6 +518,8 @@ export default function AnnotationVerdict() {
           </span>
         </div>
 
+        <TriageProgress labeled={labeledCount} total={filteredItems.length} />
+
         <EffectiveLabelsStrip summary={effectiveLabelsSummaryQuery.data} />
 
         <div className="space-y-2 mb-2">
@@ -410,28 +529,72 @@ export default function AnnotationVerdict() {
                 key={p.key || 'all'}
                 active={priorityFilter === p.key}
                 activeCls={p.cls}
-                onClick={() => setPriorityFilter(p.key)}
+                onClick={() => {
+                  // Clear the title search when switching filters, else a
+                  // leftover query silently shrinks the new list (e.g.
+                  // switching to 'border' showed "1 of 50" because an old
+                  // search term still matched a single row).
+                  setSearch('');
+                  setPriorityFilter(p.key);
+                }}
               >
                 {p.label}
               </FilterChip>
             ))}
           </div>
+          <details
+            open={Boolean(flagFilter)}
+            className="text-xs"
+          >
+            <summary className="cursor-pointer text-slate-500 hover:text-slate-800 select-none mb-1.5">
+              Advanced filters
+              {flagFilter && (
+                <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
+                  {flagFilter}
+                </span>
+              )}
+            </summary>
+            <div className="flex flex-wrap gap-1.5">
+              {FLAG_FILTERS.map((f) => {
+                const count = f.key ? flagCounts[f.key] : null;
+                return (
+                  <FilterChip
+                    key={f.key || 'any'}
+                    active={flagFilter === f.key}
+                    onClick={() => setFlagFilter(f.key)}
+                  >
+                    {f.label}
+                    {typeof count === 'number' && (
+                      <span className="ml-1 text-slate-400">({count})</span>
+                    )}
+                  </FilterChip>
+                );
+              })}
+            </div>
+          </details>
           <div className="flex flex-wrap gap-1.5">
-            {FLAG_FILTERS.map((f) => {
-              const count = f.key ? flagCounts[f.key] : null;
-              return (
-                <FilterChip
-                  key={f.key || 'any'}
-                  active={flagFilter === f.key}
-                  onClick={() => setFlagFilter(f.key)}
-                >
-                  {f.label}
-                  {typeof count === 'number' && (
-                    <span className="ml-1 text-slate-400">({count})</span>
-                  )}
-                </FilterChip>
-              );
-            })}
+            <select
+              value={selectedCollection}
+              onChange={(e) => setSelectedCollection(e.target.value)}
+              title="Filter by Zotero collection"
+              className="flex-1 min-w-0 text-xs px-2 py-1.5 rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+            >
+              <option value="">All collections</option>
+              {flatCollections.map((c) => (
+                <option key={c.key} value={c.key}>{c.name} ({c.item_count})</option>
+              ))}
+            </select>
+            <select
+              value={selectedTag}
+              onChange={(e) => setSelectedTag(e.target.value)}
+              title="Filter by Zotero tag"
+              className="flex-1 min-w-0 text-xs px-2 py-1.5 rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+            >
+              <option value="">All tags</option>
+              {topTags.map((t) => (
+                <option key={t.tag} value={t.tag}>{t.tag} ({t.item_count})</option>
+              ))}
+            </select>
           </div>
           <input
             type="text"
@@ -442,13 +605,29 @@ export default function AnnotationVerdict() {
           />
         </div>
 
-        <ErrorBanner error={listQuery.error} title="List load failed" />
+        <ErrorBanner error={listQuery.error || borderQuery.error} title="List load failed" />
 
         <ul className="space-y-1.5 slim-scroll overflow-y-auto flex-1 pr-1">
-          {listQuery.isLoading && (
-            <li className="text-xs text-slate-500 p-3">Loading papers…</li>
+          {(listQuery.isLoading || borderQuery.isLoading) && (
+            <li className="text-xs text-slate-500 p-3">
+              {isBorderMode ? 'Loading border suggestions…' : 'Loading papers…'}
+            </li>
           )}
-          {!listQuery.isLoading && filteredItems.length === 0 && (
+          {isBorderMode && borderStatus === 'computing' && (
+            <li className="text-xs text-slate-500 p-3">
+              Scoring your library against the current model… this runs in the
+              background (a few minutes the first time after re-labelling, then
+              cached). The list will fill in automatically.
+            </li>
+          )}
+          {isBorderMode && borderStatus === 'error' && (
+            <li className="text-xs text-rose-700 p-3">
+              Border computation failed: {borderQuery.data?.message || 'unknown error'}
+            </li>
+          )}
+          {!(listQuery.isLoading || borderQuery.isLoading)
+            && borderStatus !== 'computing'
+            && filteredItems.length === 0 && (
             <li className="text-xs text-slate-500 p-3">No papers match these filters.</li>
           )}
           {filteredItems.map((it) => (

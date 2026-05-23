@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   fetchReview,
   reviewAction,
   reviewApplyAll,
   reviewConfirmAllGateRejected,
 } from '../api/reviewApi.js';
-import { priorityClass, reviewPaperUrl, reviewBarStyle } from './reviewHelpers.js';
+import { priorityClass, reviewPaperUrl } from './reviewHelpers.js';
+
+// Tabs the Today funnel can deep-link into (?state=gate_rejected etc.).
+const VALID_STATES = new Set(['awaiting_review', 'gate_rejected']);
 
 // Feed Review page — port of the `activeTab === 'review'` block from
 // zotero_summarizer/web/ui.html. Functional parity with the Alpine version
@@ -18,43 +22,6 @@ function StatusBanner({ message, isError }) {
     ? 'bg-rose-50 border-rose-200 text-rose-800'
     : 'bg-emerald-50 border-emerald-200 text-emerald-800';
   return <div className={`my-2 p-2 rounded-lg border text-xs ${cls}`}>{message}</div>;
-}
-
-function ShapBars({ item, expanded, onToggle }) {
-  const shap = item.shap || [];
-  if (!shap.length) return null;
-  const shown = expanded ? shap : shap.slice(0, 4);
-  return (
-    <div className="mt-2">
-      <div className="text-[11px] uppercase tracking-wider text-slate-500 mb-1">
-        Why this score
-      </div>
-      <div className="space-y-1">
-        {shown.map((c) => {
-          const positive = c.contribution >= 0;
-          return (
-            <div key={c.feature} className="flex items-center gap-2 text-[11px]">
-              <span className="w-44 truncate">{c.feature}</span>
-              <div className="flex-1 h-2 rounded bg-slate-100 relative">
-                <div
-                  className={`absolute top-0 h-2 rounded ${positive ? 'bg-emerald-500' : 'bg-rose-500'}`}
-                  style={reviewBarStyle(item, c.contribution)}
-                />
-              </div>
-              <span className={`mono w-14 text-right ${positive ? 'text-emerald-700' : 'text-rose-700'}`}>
-                {(positive ? '+' : '') + Number(c.contribution).toFixed(3)}
-              </span>
-            </div>
-          );
-        })}
-        {shap.length > 4 && (
-          <button type="button" onClick={onToggle} className="text-[11px] text-teal-700 underline">
-            {expanded ? 'show top 4' : `show all ${shap.length}`}
-          </button>
-        )}
-      </div>
-    </div>
-  );
 }
 
 function AuxContext({ aux }) {
@@ -74,7 +41,7 @@ function AuxContext({ aux }) {
   );
 }
 
-function ReviewItem({ item, state, localState, expanded, onToggleShap, onAction }) {
+function ReviewItem({ item, state, localState, onAction }) {
   const url = reviewPaperUrl(item);
   const wrapperClass = localState === 'approved'
     ? 'bg-emerald-50 border-emerald-300'
@@ -122,7 +89,6 @@ function ReviewItem({ item, state, localState, expanded, onToggleShap, onAction 
         </div>
       </div>
 
-      <ShapBars item={item} expanded={expanded} onToggle={onToggleShap} />
       <AuxContext aux={item.aux_context} />
 
       {item.summary?.triage_rationale && (
@@ -171,7 +137,11 @@ function ReviewItem({ item, state, localState, expanded, onToggleShap, onAction 
 }
 
 export default function Review() {
-  const [state, setState] = useState('awaiting_review');
+  const [searchParams] = useSearchParams();
+  const initialState = VALID_STATES.has(searchParams.get('state'))
+    ? searchParams.get('state')
+    : 'awaiting_review';
+  const [state, setState] = useState(initialState);
   const [sort, setSort] = useState('recent');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -180,7 +150,6 @@ export default function Review() {
   const [message, setMessage] = useState('');
   const [isError, setIsError] = useState(false);
   const [itemState, setItemState] = useState({});
-  const [shapExpanded, setShapExpanded] = useState({});
 
   const load = useCallback(async (currentState = state, currentSort = sort) => {
     setLoading(true);
@@ -372,8 +341,6 @@ export default function Review() {
             item={item}
             state={state}
             localState={itemState[item.id]}
-            expanded={Boolean(shapExpanded[item.id])}
-            onToggleShap={() => setShapExpanded((prev) => ({ ...prev, [item.id]: !prev[item.id] }))}
             onAction={handleAction}
           />
         ))}

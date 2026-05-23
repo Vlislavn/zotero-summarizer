@@ -1,12 +1,13 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// Vite config for the annotation-verdict tool.
+// Vite config for the zotero-summarizer React frontend.
 // - In dev, Vite proxies /api/* to the FastAPI backend on :8000.
-// - In prod, FastAPI mounts the build at URL /annotate, so we set base accordingly.
+// - In prod, FastAPI mounts the build at the root so the SPA owns the
+//   whole tab list (Today / Annotate / Settings + Power tools).
 export default defineConfig({
   plugins: [react()],
-  base: '/annotate/',
+  base: '/',
   build: {
     outDir: 'dist',
     emptyOutDir: true,

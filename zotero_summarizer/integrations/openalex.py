@@ -5,7 +5,7 @@ moves you into the polite pool (faster, lower error rate). Rate limit is
 ~10 req/s; a threading semaphore keeps us under that bound.
 
 The client returns a normalized :class:`OpenAlexWork` with the fields needed
-for :mod:`zotero_summarizer.services.prestige`. Author h-index requires a
+for :mod:`zotero_summarizer.services.model.prestige`. Author h-index requires a
 follow-up call to ``/authors/{id}`` — we look up at most ``max_authors`` (default
 3) to keep latency bounded.
 

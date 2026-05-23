@@ -124,6 +124,66 @@ def test_insert_role_verdict_rejects_empty_role(verdict_db: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# dedup on re-rate + read-back (Today persistence fix)
+# ---------------------------------------------------------------------------
+
+
+def _count_rows(db_path: Path, item_key: str, role: str) -> int:
+    conn = sqlite3.connect(str(db_path))
+    try:
+        return conn.execute(
+            "SELECT COUNT(*) FROM role_value_verdicts WHERE item_key=? AND role=?",
+            (item_key, role),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+
+def test_re_rating_same_slot_overwrites(verdict_db: Path) -> None:
+    repo.insert_role_value_verdict(
+        verdict_db, item_key="K1", role="model", verdict="worth",
+        composite_score=1.0, surprise_score=None, corpus_affinity=None,
+    )
+    repo.insert_role_value_verdict(
+        verdict_db, item_key="K1", role="model", verdict="waste",
+        composite_score=2.0, surprise_score=None, corpus_affinity=None,
+    )
+    assert _count_rows(verdict_db, "K1", "model") == 1
+    assert repo.get_role_verdicts_by_keys(verdict_db, ["K1"]) == {"K1": "waste"}
+
+
+def test_dedup_is_scoped_to_item_and_role(verdict_db: Path) -> None:
+    # Same item, different role → distinct rows survive.
+    repo.insert_role_value_verdict(
+        verdict_db, item_key="K1", role="model", verdict="worth",
+        composite_score=None, surprise_score=None, corpus_affinity=None,
+    )
+    repo.insert_role_value_verdict(
+        verdict_db, item_key="K1", role="surprise", verdict="waste",
+        composite_score=None, surprise_score=None, corpus_affinity=None,
+    )
+    assert _count_rows(verdict_db, "K1", "model") == 1
+    assert _count_rows(verdict_db, "K1", "surprise") == 1
+
+
+def test_get_role_verdicts_by_keys_filters_and_maps(verdict_db: Path) -> None:
+    repo.insert_role_value_verdict(
+        verdict_db, item_key="K1", role="model", verdict="worth",
+        composite_score=None, surprise_score=None, corpus_affinity=None,
+    )
+    repo.insert_role_value_verdict(
+        verdict_db, item_key="K2", role="surprise", verdict="unknown",
+        composite_score=None, surprise_score=None, corpus_affinity=None,
+    )
+    out = repo.get_role_verdicts_by_keys(verdict_db, ["K1", "K2", "K_absent"])
+    assert out == {"K1": "worth", "K2": "unknown"}
+
+
+def test_get_role_verdicts_by_keys_empty_input(verdict_db: Path) -> None:
+    assert repo.get_role_verdicts_by_keys(verdict_db, []) == {}
+
+
+# ---------------------------------------------------------------------------
 # list_role_verdicts_summary
 # ---------------------------------------------------------------------------
 

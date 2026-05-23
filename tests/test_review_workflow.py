@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from zotero_summarizer.services import review
+from zotero_summarizer.services.library import review, review_summary
 from zotero_summarizer.storage import feeds as fs
 
 
@@ -86,11 +86,14 @@ def patched_settings(tmp_path: Path, monkeypatch):
     fake_settings = SimpleNamespace(
         triage_db_path=tmp_path / "triage.db",
         project_root=tmp_path,
+        golden_csv_path=golden,
         zotero_data_dir=tmp_path / "zotero",   # _fetch_feed_metadata reads this
     )
     monkeypatch.setattr(review, "get_settings", lambda: fake_settings)
+    # The golden-append + summary helpers now live in review_summary.
+    monkeypatch.setattr(review_summary, "get_settings", lambda: fake_settings)
     # Stub _fetch_feed_metadata so tests don't need a real Zotero install.
-    monkeypatch.setattr(review, "_fetch_feed_metadata", lambda **kw: {})
+    monkeypatch.setattr(review_summary, "_fetch_feed_metadata", lambda **kw: {})
     # Pre-create the schema so `_init_triage_db` and `_conn` agree.
     _init_triage_db(tmp_path).close()
     return tmp_path

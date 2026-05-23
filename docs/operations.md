@@ -35,11 +35,8 @@ Open:
 http://127.0.0.1:8000/
 ```
 
-Dashboard:
-
-```text
-http://127.0.0.1:8000/results
-```
+The React SPA is served at `/`; it owns all non-`/api/` routes (Today, Library,
+Annotate, Settings, and the power tools).
 
 ## CLI
 
@@ -109,7 +106,7 @@ Expected health shape:
 7. Confirm pending tag/note/collection changes are queued.
 8. Review pending changes.
 9. Apply approved changes.
-10. Open `/results` and verify the result appears.
+10. Confirm `GET /api/results?scope=latest` returns the new result.
 
 ## Interpreting classifier-gate metrics
 

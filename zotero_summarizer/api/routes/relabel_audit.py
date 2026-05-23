@@ -9,20 +9,19 @@ Six endpoints:
 - POST /api/relabel-audit/reset    delete the session (start over)
 
 The session is persisted as JSON on disk at
-``<project_root>/relabel-audit-session.json``. The original label is never
+``<project_root>/data/relabel-audit-session.json``. The original label is never
 sent in the ``/next`` payload — only `title + authors + venue + abstract`.
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict, is_dataclass
 from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services import relabel_audit
+from zotero_summarizer.services.golden import relabel_audit
 from zotero_summarizer.services._common import settings as get_settings
 
 router = APIRouter()
@@ -32,11 +31,11 @@ SESSION_FILENAME = "relabel-audit-session.json"
 
 
 def _session_path():
-    return get_settings().project_root / SESSION_FILENAME
+    return get_settings().data_dir / SESSION_FILENAME
 
 
 def _golden_csv_path():
-    return get_settings().project_root / "zotero-summarizer-golden.csv"
+    return get_settings().golden_csv_path
 
 
 # ---------------------------------------------------------------------------
@@ -149,16 +148,6 @@ async def submit(item_key: str, body: SubmitRequest) -> dict[str, Any]:
     return _session_summary(session)
 
 
-async def get_status() -> dict[str, Any]:
-    """Summarize the session (no candidate payloads — count only)."""
-    path = _session_path()
-    if not path.exists():
-        return {"exists": False}
-    summary = _session_summary(relabel_audit.read_session(path))
-    summary["exists"] = True
-    return summary
-
-
 async def get_metrics() -> dict[str, Any]:
     """Compute κ, ICC, Pearson, Spearman over the responses collected so far."""
     path = _session_path()
@@ -188,54 +177,6 @@ async def reset() -> dict[str, Any]:
     return {"deleted": True, "path": str(path)}
 
 
-async def get_trickle(max_per_day: int = 2) -> dict[str, Any]:
-    """Return up to ``max_per_day`` blind audit candidates (Phase 1.17 Step 3).
-
-    ``rate_limited`` is ``True`` when zero candidates are returned but the
-    unanswered pool is non-empty — i.e., the 24h-since-last-response gate is
-    still active. Strips ``original_priority`` / ``original_inferred_relevance``
-    from the payload (same blind rule as ``/next``).
-    """
-    if not (1 <= int(max_per_day) <= 5):
-        raise APIError(
-            error="validation_error",
-            message=f"max_per_day must be between 1 and 5 inclusive; got {max_per_day}",
-            status_code=422,
-        )
-    path = _session_path()
-    if not path.exists():
-        raise APIError(
-            error="no_session",
-            message="No audit session exists; call POST /api/relabel-audit/init first.",
-            status_code=404,
-        )
-    candidates = relabel_audit.next_audit_for_today(
-        path, max_per_day=int(max_per_day),
-    )
-    if candidates:
-        normalized: list[dict[str, Any]] = []
-        for cand in candidates:
-            if isinstance(cand, dict):
-                normalized.append(cand)
-            elif is_dataclass(cand):
-                normalized.append(asdict(cand))
-            else:
-                raise TypeError(
-                    f"next_audit_for_today returned unsupported type {type(cand).__name__}"
-                )
-        return {
-            "candidates": [_blind_candidate_payload(cand) for cand in normalized],
-            "rate_limited": False,
-        }
-
-    session = relabel_audit.read_session(path)
-    answered = set((session.get("responses") or {}).keys())
-    unanswered_remaining = any(
-        c["item_key"] not in answered for c in session["candidates"]
-    )
-    return {"candidates": [], "rate_limited": unanswered_remaining}
-
-
 router.add_api_route(
     "/api/relabel-audit/init", init_audit, methods=["POST"],
 )
@@ -246,14 +187,8 @@ router.add_api_route(
     "/api/relabel-audit/{item_key}", submit, methods=["POST"],
 )
 router.add_api_route(
-    "/api/relabel-audit/status", get_status, methods=["GET"],
-)
-router.add_api_route(
     "/api/relabel-audit/metrics", get_metrics, methods=["GET"],
 )
 router.add_api_route(
     "/api/relabel-audit/reset", reset, methods=["POST"],
-)
-router.add_api_route(
-    "/api/relabel-audit/trickle", get_trickle, methods=["GET"],
 )

@@ -17,20 +17,28 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services import (
-    hybrid_gt,
-    label_provenance,
-    review_detail as review_detail_svc,
-)
-from zotero_summarizer.services._common import settings as get_settings
-from zotero_summarizer.services.zotero import get_zotero_reader_or_raise
+from zotero_summarizer.services.golden import hybrid_gt, label_provenance
+from zotero_summarizer.services.library import review_detail as review_detail_svc
+from zotero_summarizer.services.zotero.zotero import zotero_upsert_verdict_note
 from zotero_summarizer.storage import repositories
+from zotero_summarizer.api.routes._golden_helpers import (
+    _append_verdict_golden,
+    _build_source_payload,
+    _compute_border_into_cache,
+    _db_path,
+    _golden_csv_path,
+    _load_all,
+    _zotero_candidate_keys,
+)
+
+LOGGER = logging.getLogger(__name__)
 
 
 router = APIRouter()
@@ -51,17 +59,10 @@ class VerdictRequest(BaseModel):
     )
 
 
-def _golden_csv_path():
-    return get_settings().project_root / "zotero-summarizer-golden.csv"
 
 
-def _db_path():
-    return get_settings().triage_db_path
 
 
-def _load_all():
-    """Load every row's provenance. Fail-fast if the CSV is missing."""
-    return label_provenance.load_golden_provenance(_golden_csv_path())
 
 
 async def get_one(item_key: str) -> dict[str, Any]:
@@ -77,15 +78,26 @@ async def get_one(item_key: str) -> dict[str, Any]:
     )
 
 
+
+
 async def list_all(
     priority: str | None = None,
     flag: str | None = None,
     limit: int = 200,
+    collection: str = "",
+    tag: str = "",
+    search: str = "",
 ) -> dict[str, Any]:
-    """List provenance summaries with optional priority/flag filters.
+    """List provenance summaries with optional priority/flag filters, plus
+    Zotero collection/tag/search filters (intersected with the provenance set).
 
-    Use ``priority=must_read&flag=weak_must_read`` to find borderline labels
-    the user should review. ``limit`` caps response size to keep the UI fast.
+    The user's manual verdict (``label_verdicts``) always wins: each row's
+    ``effective_priority`` is the user_priority when a verdict exists, else
+    the derived/persisted value. Filtering by ``priority`` uses
+    ``effective_priority`` so a manually-reclassified paper shows under its
+    manual class even after a Refresh-labels re-derivation. Verdicts whose
+    key is no longer in the golden CSV are appended as ``orphaned`` rows so
+    a manual label is never hidden.
     """
     if not (1 <= int(limit) <= 2000):
         raise APIError(
@@ -94,60 +106,77 @@ async def list_all(
             status_code=422,
         )
     provs = _load_all()
+    verdicts = hybrid_gt.load_user_verdicts(_db_path())
 
-    filtered = provs
-    if priority:
-        filtered = [p for p in filtered if p.persisted_priority == priority]
-    if flag:
-        filtered = [p for p in filtered if flag in p.flags]
+    def _effective(p) -> str:
+        v = verdicts.get(p.item_key)
+        return v["user_priority"] if v is not None else p.persisted_priority
 
-    summary = label_provenance.flag_summary(provs)
-    items = [
-        {
+    items_all: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    for p in provs:
+        seen_keys.add(p.item_key)
+        v = verdicts.get(p.item_key)
+        items_all.append({
             "item_key": p.item_key,
             "title": p.title,
             "persisted_priority": p.persisted_priority,
             "derived_priority": p.derived_priority,
+            "effective_priority": _effective(p),
+            "user_priority": v["user_priority"] if v is not None else None,
+            "is_user_override": bool(v is not None),
             "derived_score": p.derived_score,
             "is_direct_user_verdict": p.is_direct_user_verdict,
             "is_manual_override": p.is_manual_override,
+            "orphaned": False,
             "flags": list(p.flags),
-        }
-        for p in filtered[:limit]
-    ]
+        })
+
+    # Orphaned verdicts: a manual label whose paper left the golden CSV.
+    # Keep it visible (and editable via the no-404 detail path) so a
+    # verdict the user cast can never silently vanish.
+    for key, v in verdicts.items():
+        if key in seen_keys:
+            continue
+        items_all.append({
+            "item_key": key,
+            "title": "(no longer in current set)",
+            "persisted_priority": None,
+            "derived_priority": None,
+            "effective_priority": v["user_priority"],
+            "user_priority": v["user_priority"],
+            "is_user_override": True,
+            "derived_score": None,
+            "is_direct_user_verdict": False,
+            "is_manual_override": True,
+            "orphaned": True,
+            "flags": ["orphaned"],
+        })
+
+    filtered = items_all
+    if priority:
+        filtered = [it for it in filtered if it["effective_priority"] == priority]
+    if flag:
+        filtered = [it for it in filtered if flag in it["flags"]]
+    if collection or tag or search:
+        candidate_keys = await asyncio.to_thread(
+            _zotero_candidate_keys, collection=collection, tag=tag, search=search,
+        )
+        filtered = [it for it in filtered if it["item_key"] in candidate_keys]
+
+    summary = label_provenance.flag_summary(provs)
+    flag_counts = {k: len(v) for k, v in summary.items()}
+    flag_counts["orphaned"] = sum(1 for it in items_all if it["orphaned"])
     return {
-        "items": items,
+        "items": filtered[:limit],
         "total_matched": len(filtered),
-        "total_rows": len(provs),
-        "flag_counts": {k: len(v) for k, v in summary.items()},
+        "total_rows": len(items_all),
+        "flag_counts": flag_counts,
     }
 
 
-def _build_source_payload(item_key: str) -> dict[str, Any] | None:
-    """Dispatch by ``item_key`` prefix and return the source-specific
-    payload, or ``None`` when the underlying data row is gone.
 
-    Each branch is a thin wrapper that resolves dependencies (DB path,
-    Zotero reader) before delegating to ``services.review_detail``.
-    """
-    settings_ = get_settings()
-    source = review_detail_svc.classify_item_key(item_key)
 
-    if source == review_detail_svc.SOURCE_FEED:
-        feed_item_id = review_detail_svc.parse_feed_key(item_key)
-        return review_detail_svc.build_feed_detail(
-            triage_db_path=settings_.triage_db_path,
-            zotero_data_dir=settings_.zotero_data_dir,
-            feed_item_id=feed_item_id,
-        )
-
-    if source == review_detail_svc.SOURCE_NOTE:
-        parent_key, note_id = review_detail_svc.parse_note_key(item_key)
-        reader = get_zotero_reader_or_raise()
-        return review_detail_svc.build_note_detail(reader, parent_key, note_id)
-
-    reader = get_zotero_reader_or_raise()
-    return review_detail_svc.build_library_detail(reader, item_key)
 
 
 async def review_detail(item_key: str) -> dict[str, Any]:
@@ -173,27 +202,54 @@ async def review_detail(item_key: str) -> dict[str, Any]:
 
     provs = _load_all()
     prov_match = next((p for p in provs if p.item_key == safe_item_key), None)
-    if prov_match is None:
-        raise APIError(
-            error="not_found",
-            message=f"item_key {safe_item_key!r} not in golden CSV",
-            status_code=404,
-        )
-
-    source_payload = await asyncio.to_thread(_build_source_payload, safe_item_key)
-    if source_payload is None:
-        raise APIError(
-            error="not_found",
-            message=f"item_key {safe_item_key!r}: underlying row not found in its source store",
-            status_code=404,
-        )
-
     verdict_row = repositories.get_label_verdict(_db_path(), safe_item_key)
+
+    try:
+        source_payload = await asyncio.to_thread(_build_source_payload, safe_item_key)
+    except review_detail_svc.InvalidItemKey as exc:
+        # A structurally-malformed key (``feed:abc``, ``note:X:notanum``).
+        # Surface as 422 rather than an opaque 500.
+        raise APIError(
+            error="validation_error",
+            message=f"item_key {safe_item_key!r} is malformed: {exc}",
+            status_code=422,
+        ) from exc
+    except APIError as exc:
+        # Zotero unavailable (503) — degrade to the csv_stub so annotation
+        # stays usable. Narrow: only the zotero_unavailable case.
+        if exc.error != "zotero_unavailable":
+            raise
+        source_payload = None
+
+    if source_payload is None:
+        # Live source gone — fall back to a stub from the golden CSV row.
+        csv_row = await asyncio.to_thread(
+            review_detail_svc.load_csv_row, _golden_csv_path(), safe_item_key,
+        )
+        if csv_row is not None:
+            source_payload = review_detail_svc.build_csv_stub_detail(csv_row)
+        elif verdict_row is not None:
+            # No source row anywhere, but the user cast a manual verdict on
+            # this key (e.g. a Today feed item, or a paper that left the
+            # engaged set). Never 404 a verdict the user owns — return a
+            # minimal stub so it stays viewable + editable + deletable.
+            source_payload = review_detail_svc.build_csv_stub_detail(
+                {"item_key": safe_item_key, "title": "(no longer in current set)"}
+            )
+        else:
+            raise APIError(
+                error="not_found",
+                message=f"item_key {safe_item_key!r}: not in any source",
+                status_code=404,
+            )
 
     return {
         "item_key": safe_item_key,
         **source_payload,
-        "provenance": label_provenance.provenance_to_dict(prov_match),
+        "provenance": (
+            label_provenance.provenance_to_dict(prov_match)
+            if prov_match is not None else None
+        ),
         "verdict": verdict_row,
     }
 
@@ -210,29 +266,66 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
             status_code=422,
         )
 
-    # Anchor original_derived_priority to the CURRENT provenance, never the client.
+    # Anchor original_derived_priority to the CURRENT provenance when the
+    # key is in the golden CSV; never the client. A key absent from the CSV
+    # (a Today feed item, or a paper that left the engaged set) is still
+    # labellable — the user's manual verdict must always be saveable. We
+    # then anchor to the existing verdict's original (preserve history) or
+    # "unknown".
     provs = _load_all()
     prov_match = next((p for p in provs if p.item_key == req.item_key), None)
-    if prov_match is None:
-        raise APIError(
-            error="not_found",
-            message=f"item_key {req.item_key!r} not in golden CSV",
-            status_code=404,
-        )
+    if prov_match is not None:
+        original = prov_match.derived_priority
+    else:
+        existing = repositories.get_label_verdict(_db_path(), req.item_key)
+        original = existing["original_derived_priority"] if existing is not None else "unknown"
 
     row_id = repositories.insert_or_update_label_verdict(
         _db_path(),
         item_key=req.item_key,
-        original_derived_priority=prov_match.derived_priority,
+        original_derived_priority=original,
         user_priority=req.user_priority,
         comment=req.comment,
     )
+    # Make the verdict a first-class training row (covers materialized-but-unread
+    # items the engagement-only export skips). Idempotent + no-op if source gone.
+    # Boundary: the verdict is ALREADY durably saved above — this golden-row
+    # enrichment must never block that, so a metadata-fetch failure is logged,
+    # not raised (the hybrid overlay still trains any existing row from the
+    # verdict). The user authorized "make sure verdicts go to training".
+    try:
+        await asyncio.to_thread(
+            _append_verdict_golden, req.item_key, req.user_priority, req.comment,
+        )
+    except Exception as exc:  # noqa: BLE001 — verdict save must not fail on enrichment
+        LOGGER.warning("golden append for verdict %s failed: %s", req.item_key, exc)
+    # Save the comment to Zotero as a single (upserted) note. Direct write, but
+    # the verdict is ALREADY durable above — a note failure (e.g. Zotero open)
+    # must never block it, so it's reported, not raised. The user authorized
+    # "comments I leave with a verdict should be saved to Zotero as a note".
+    note_written = False
+    note_error: str | None = None
+    if req.comment.strip():
+        try:
+            await asyncio.to_thread(
+                zotero_upsert_verdict_note, req.item_key, req.user_priority, req.comment,
+            )
+            note_written = True
+        except Exception as exc:  # noqa: BLE001 — note write must not block the verdict
+            note_error = f"{type(exc).__name__}: {exc}"
+            LOGGER.warning("verdict note write for %s failed: %s", req.item_key, exc)
+
     stored = repositories.get_label_verdict(_db_path(), req.item_key)
     if stored is None:
         raise RuntimeError(
             f"verdict UPSERT returned id={row_id} but get_label_verdict found nothing"
         )
-    return {"id": row_id, "created_at": stored["created_at"]}
+    return {
+        "id": row_id,
+        "created_at": stored["created_at"],
+        "note_written": note_written,
+        "note_error": note_error,
+    }
 
 
 async def list_verdicts(user_priority: str | None = None) -> dict[str, Any]:
@@ -290,14 +383,34 @@ async def effective_labels_list() -> dict[str, Any]:
     }
 
 
-async def border_suggestions(top_k: int = 20) -> dict[str, Any]:
-    """Active-learning endpoint: return library rows whose re-labelling
-    would maximally help the model, ranked by distance to the nearest
-    priority threshold (4.5 / 3.6 / 2.6). The user opens each one in the
-    UI and updates the verdict.
+
+
+
+
+async def border_suggestions(top_k: int = 20, refresh: bool = False) -> dict[str, Any]:
+    """Active-learning endpoint: library rows whose re-labelling would most
+    help the model, ranked by distance to the nearest priority threshold.
+
+    Cached + background-computed (see ``services.border_cache``). Scoring
+    every library row is ~1 s/row, so a synchronous compute took >10 min.
+    Now:
+      * ``status="ready"`` + items — cache hit for the current golden sha.
+      * ``status="computing"`` — a background scoring pass is in flight;
+        the client should poll.
+      * ``status="error"`` — the last background pass failed (message set).
+
+    ``refresh=true`` forces a recompute even when a fresh cache exists.
     """
-    from zotero_summarizer.services import active_learning
-    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.library import border_cache
+    from zotero_summarizer.services import run_log
+    from zotero_summarizer.services.model.classifier_persistence import DEFAULT_MODEL_DIR
+
+    if not (1 <= int(top_k) <= 2000):
+        raise APIError(
+            error="validation_error",
+            message=f"top_k must be between 1 and 2000; got {top_k}",
+            status_code=422,
+        )
 
     csv_path = _golden_csv_path()
     if not csv_path.exists():
@@ -306,34 +419,30 @@ async def border_suggestions(top_k: int = 20) -> dict[str, Any]:
             message=f"golden CSV missing at {csv_path}",
             status_code=404,
         )
-    rows = active_learning.load_rows(csv_path)
-    goals_config = read_config(get_settings().config_path)
-    suggestions = await asyncio.to_thread(
-        active_learning.suggest_border_labels,
-        rows,
-        corpus_db_path=get_settings().corpus_db_path,
-        goals_config=goals_config,
-        classifier_name="lightgbm",
-        top_k=int(top_k),
-    )
-    return {
-        "items": [
-            {
-                "item_key": s.item_key,
-                "title": s.title,
-                "authors": s.authors,
-                "venue": s.venue,
-                "abstract_preview": s.abstract_preview,
-                "predicted_score": round(s.predicted_score, 4),
-                "predicted_priority": s.predicted_priority,
-                "current_priority": s.current_priority,
-                "border_distance": round(s.border_distance, 4),
-                "disagrees": s.disagrees,
-            }
-            for s in suggestions
-        ],
-        "total": len(suggestions),
-    }
+
+    golden_sha = run_log.file_sha256(csv_path, prefix_len=64)
+    cached = None if refresh else border_cache.read_cache(DEFAULT_MODEL_DIR, golden_sha)
+    if cached is not None:
+        items = cached["items"][: int(top_k)]
+        return {
+            "status": "ready",
+            "items": items,
+            "total": len(items),
+            "cached_total": cached.get("total", len(items)),
+            "computed_at": cached.get("computed_at"),
+        }
+
+    # No fresh cache — ensure a background compute is running.
+    if border_cache.try_start():
+        border_cache.run_in_background(
+            lambda: _compute_border_into_cache(golden_sha, int(top_k))
+        )
+        return {"status": "computing", "items": [], "total": 0}
+
+    err = border_cache.last_error()
+    if err is not None and not border_cache.is_running():
+        return {"status": "error", "items": [], "total": 0, "message": err}
+    return {"status": "computing", "items": [], "total": 0}
 
 
 router.add_api_route("/api/golden/provenance", get_one, methods=["GET"])

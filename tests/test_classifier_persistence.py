@@ -10,7 +10,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from zotero_summarizer.services import classifier, classifier_persistence
+from zotero_summarizer.services.model import classifier, classifier_embed, classifier_persistence
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +82,7 @@ def test_train_and_save_writes_joblib_and_json(tmp_path: Path):
     golden = tmp_path / "golden.csv"
     _write_golden_csv(golden)
     output_dir = tmp_path / "models"
-    with patch.object(classifier, "compute_embedding", side_effect=_fake_embedding):
+    with patch.object(classifier_embed, "compute_embedding", side_effect=_fake_embedding):
         trained = classifier_persistence.train_and_save(
             golden,
             classifier_name="lightgbm",
@@ -113,7 +113,7 @@ def test_predict_after_load_matches_in_memory_predict(tmp_path: Path):
         {"item_key": "X2", "title": "An off-topic paper", "abstract": "off-topic abstract " * 20},
     ]
 
-    with patch.object(classifier, "compute_embedding", side_effect=_fake_embedding):
+    with patch.object(classifier_embed, "compute_embedding", side_effect=_fake_embedding):
         trained = classifier_persistence.train_and_save(
             golden,
             classifier_name="lightgbm",
@@ -150,7 +150,7 @@ def test_load_or_train_loads_when_sha_matches(tmp_path: Path):
     _write_golden_csv(golden)
     output_dir = tmp_path / "models"
 
-    with patch.object(classifier, "compute_embedding", side_effect=_fake_embedding):
+    with patch.object(classifier_embed, "compute_embedding", side_effect=_fake_embedding):
         first = classifier_persistence.load_or_train(
             golden,
             classifier_name="lightgbm",
@@ -179,7 +179,7 @@ def test_load_or_train_retrains_when_sha_changes(tmp_path: Path):
     _write_golden_csv(golden)
     output_dir = tmp_path / "models"
 
-    with patch.object(classifier, "compute_embedding", side_effect=_fake_embedding):
+    with patch.object(classifier_embed, "compute_embedding", side_effect=_fake_embedding):
         first = classifier_persistence.load_or_train(
             golden,
             classifier_name="lightgbm",
@@ -216,7 +216,7 @@ def test_load_or_train_force_retrain_overrides_cache(tmp_path: Path):
         call_count[0] += 1
         return real_train(*args, **kwargs)
 
-    with patch.object(classifier, "compute_embedding", side_effect=_fake_embedding), \
+    with patch.object(classifier_embed, "compute_embedding", side_effect=_fake_embedding), \
          patch.object(classifier_persistence, "train_and_save", side_effect=counting_train):
         first = classifier_persistence.load_or_train(
             golden,

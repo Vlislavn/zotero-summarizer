@@ -1,14 +1,40 @@
 # How It Works
 
-Zotero Summarizer is a local FastAPI app backed by SQLite. The supported user workflow is:
+Zotero Summarizer is a local FastAPI app backed by SQLite, with a React
+single-page UI served at `/`. There are two everyday workflows:
 
-1. Browse local Zotero items in the browser UI.
-2. Select PDF-backed papers.
-3. Start a triage job.
-4. Review queued Zotero changes.
-5. Explicitly apply or reject those changes.
+- **Today (cull)** — feed papers are triaged (scored), ranked, and shown as
+  a daily slate. You make a binary, batch call per paper: **Add to library**
+  (materialize into the Zotero *Inbox*, positive training signal) or **Trash**
+  (negative signal, marked read). No fine label here.
+- **Library → Read next (read)** — your *unread* library papers ranked by the
+  gate's relevance score (with a one-line reason); read-already items (emoji
+  tags) are hidden by default. Opening one shows its "Why this score?"
+  waterfall and lets you set the fine label in `Annotate`.
+- **Annotate** — set/override the fine `must`/`should`/`could`/`don't` label
+  on any golden-CSV or library/feed row. Your manual verdict always wins
+  (display, filters, and training).
+
+Plus a library-triage path (Power tools → Library → Browse / Triage): select
+PDF-backed Zotero items, run a triage job, review queued Zotero changes, then
+explicitly apply or reject them.
 
 The app is intentionally local-first. It reads from the local Zotero SQLite database, writes its own triage/corpus state to local SQLite files, and writes to Zotero only through the pending-change apply flow.
+
+## The big picture in five sentences
+
+1. **Feeds in** — Zotero's RSS `feedItems` are scored by a cheap LightGBM
+   gate, then survivors by an LLM, producing `processed_feed_items` rows.
+2. **Today** ranks those rows into a daily slate; if nothing is fresh it
+   auto-runs a background backlog drain (SOTA model via the `CUSTOM_*`
+   provider) and falls back to recent rows so it's never empty.
+3. **You decide** — on Today you Add/Trash (coarse, → `should_read`/`dont_read`);
+   in Annotate (reached via Library → Read next) you set the fine label. Both
+   are stored in `label_verdicts` and appended to `zotero-summarizer-golden.csv`.
+4. **Hybrid ground truth** overlays your manual labels on top of the
+   derived CSV labels — manual always wins — for both display and training.
+5. **Retrain** rebuilds the gate on that hybrid ground truth, closing the
+   loop so tomorrow's slate is sharper.
 
 ## Package Layout
 
@@ -19,9 +45,10 @@ The app is intentionally local-first. It reads from the local Zotero SQLite data
 | `zotero_summarizer/storage/` | SQLite migrations, repositories, and embedding corpus cache |
 | `zotero_summarizer/integrations/` | Zotero reader/writer, PDF extraction adapter, and LLM adapter protocols |
 | `zotero_summarizer/mcp/` | MCP server and tools that call the local API |
-| `zotero_summarizer/web/` | Static browser UI and results dashboard |
+| `frontend/` | React single-page UI (Vite + Tailwind), built to `frontend/dist` and served by FastAPI at `/`. Replaced the old Alpine `web/ui.html` in the 2026-05-15 UI redesign. |
 | `zotero_summarizer/settings.py` | Explicit settings loader from `.env`, environment, and project root |
 | `goals.yaml` | Research goals, triage criteria, model names, prompt templates, and corpus settings |
+| `data/` | All app-generated state (gitignored): `triage_history.db`, `corpus_cache.db`, the personal `zotero-summarizer-golden.csv`/`.jsonl`, logs, and ML eval/run artifacts. Every path is derived from `Settings.data_dir`. |
 
 There are no supported root-module compatibility imports. Use the package modules and CLI.
 
@@ -58,7 +85,7 @@ Long PDFs are split into two chunks before the final refine prompt. LLM and SQLi
 ### Phase 1.8 — Prestige + two-stage triage
 
 When `prestige.enabled: true` in `goals.yaml`, `_triage_one()` calls OpenAlex
-(via `services.prestige.lookup_prestige`) after the LLM summary and re-computes
+(via `services.model.prestige.lookup_prestige`) after the LLM summary and re-computes
 the composite score with the h-index/venue/citations signal blended in (default
 weight 0.15). Results are cached in `corpus_cache.db` (table `openalex_cache`,
 TTL 30 days), so re-runs are essentially free.
@@ -91,7 +118,19 @@ lives in `goals.yaml` under `llm.extra_body`.
   `shap_contribs_json` column carrying the JSON-serialised TreeSHAP
   contributions, OpenAlex author/venue snapshot, and full `SummarizeResponse`
   used by the review-mode Approve path)
+- `label_verdicts` (one row per item: the user's manual priority override,
+  the original derived priority it overrode, and a free-text comment. This
+  is the source of truth for "manual wins" — see [Hybrid Ground
+  Truth](#hybrid-ground-truth-manual-labels-win))
+- `role_value_verdicts` (legacy per-slot "Time well spent / Wasted my time"
+  ratings; the table + `/api/daily/role-verdict` endpoint remain, but the
+  Today UI no longer collects this signal after the two-stage redesign)
 - manual dimension overrides
+
+Concurrent writers (the API + the feed daemon) are made safe by a
+`busy_timeout` PRAGMA set before the WAL-mode switch in
+`repositories._connect_to`, so a write waits for the lock instead of raising
+"database is locked".
 
 `corpus_cache.db` stores corpus metadata, embeddings, OpenAlex prestige
 cache, and schema migration metadata.
@@ -127,6 +166,83 @@ Feedback comes from three sources:
   (ICML 2016).
 
 Feedback is stored in `user_feedback` and is used by corpus matching and calibration metrics. Calibration compares model-positive priorities (`must_read`, `should_read`) against user-positive feedback (`approve`).
+
+## Hybrid Ground Truth (manual labels win)
+
+The golden CSV's `gold_priority_final` is **derived** by
+`services/goldenset.py:_infer_label` (emoji tags + annotation/note counts +
+age decay). The user can override any label via the UI; overrides are stored
+in the `label_verdicts` table (one row per item, UPSERT), never in the CSV.
+
+`services/hybrid_gt.py` is the single place these merge:
+
+- `load_hybrid_labels(csv_path, db_path)` → `{item_key: {derived_priority,
+  user_priority, effective_priority, source, ...}}`. `source="user"` when a
+  verdict exists (it wins); otherwise `"derived"`. Verdicts whose key is no
+  longer in the CSV are kept (flagged orphaned), so a manual label is never
+  lost.
+- `apply_hybrid(rows, db_path)` overlays the verdict onto each CSV row's
+  `gold_priority_final` **and** `gold_inferred_relevance` (the regressor's
+  continuous target), so retraining learns from the manual label.
+
+Consumers: `api/routes/golden.py:list_all` (the Annotate list shows + filters
+by `effective_priority`), `effective-labels` endpoints, and
+`classifier_persistence.train_and_save(..., triage_db_path=...)` (training).
+This is why a manual label survives a Refresh-labels re-export: the CSV is
+re-derived, but the verdict is re-applied on top.
+
+## Today Slate + In-UI Backlog Triage
+
+`GET /api/daily` assembles a role-mixed daily slate via
+`services/daily_select`. It reads `triaged_pending` / `awaiting_review` rows
+from `processed_feed_items`. Two robustness features keep "Today" useful:
+
+- **Never empty**: if the lookback window has no rows,
+  `assemble_daily_slate` falls back to the most-recent scored rows
+  regardless of age (`fellback_to_recent=True`).
+- **On-demand backlog drain**: `services/triage_backlog.py` runs
+  `run_daemon_tick` in a loop on a background thread until the unread feed
+  backlog is drained, scoring survivors with a SOTA model. The triage LLM
+  provider is injected (no global mutation) by threading `triage_llm`
+  through `run_daemon_tick → _triage_one → summarization.run_abstract_pipeline`
+  (`llm_override`). The client is built by
+  `services/_adapters.build_triage_llm("sota")` from `CUSTOM_BASE_URL` +
+  `CUSTOM_API_KEY`. Endpoints: `POST /api/daily/triage-backlog` (start),
+  `GET /api/daily/triage-status` (poll). The cheap gate still runs first,
+  so only survivors cost a SOTA call.
+
+Acting on cards is **binary + batched** (`services/daily_actions.py`):
+`POST /api/daily/add-to-library` materializes each selected card into the
+Zotero *Inbox* (reusing `review.materialize_row`) and records a positive
+`should_read` label; `POST /api/daily/trash` records `dont_read` and marks the
+feed items read. Both write `label_verdicts` (keyed `feed:<feed_item_id>`) +
+append to the golden CSV (`services/review.py:append_to_golden`), so acted
+papers train the next gate **and** drop out of the slate (the slate excludes
+any item that already has a verdict — `daily_select.fetch_handled_keys`).
+
+## Library Reading Queue (Read next)
+
+`GET /api/library/reading-queue` (`services/reading_queue.py`) ranks the user's
+**unread** library items by the gate's relevance score so "what to read next"
+is explainable. Like border suggestions it is **background-computed and
+disk-cached**, but keyed by the *loaded gate's* `golden_csv_sha256` (so adding
+papers from Today doesn't invalidate it — only a real retrain does) and scored
+**incrementally** in 50-item batches. Read-status is applied **live** at request
+time from Zotero emoji tags (🧠/👀/veto), so reading a paper removes it without a
+rescore. Each row carries a `relevance_score` + a one-line `why_reason`.
+`build_library_detail` reuses the same cached score (`get_cached_scoring`, else
+a live single-item score) so the annotation detail's "Why this score?" waterfall
+matches the queue ranking. Gate off → recency fallback (`model_ready=false`).
+
+## Active-Learning Border Suggestions
+
+`GET /api/golden/border-suggestions` ranks library rows by how close the
+model's score sits to a class threshold (re-labelling those gives the most
+training value per click). Because scoring every row is expensive, it is
+**background-computed and disk-cached by golden-CSV sha** in
+`services/border_cache.py`; the endpoint returns `{status: "computing"}`
+and the UI polls until `status: "ready"`. It reuses the persisted gate model
+(`classifier_persistence.load_or_train`) rather than retraining per call.
 
 ## RSS Feed Daemon
 
@@ -183,7 +299,7 @@ n=836 and **declines** to n=1393) is in
 
 When `classifier_gate.enabled: true` in `goals.yaml`, every tick batch-predicts
 the surviving items with a trained classifier
-(`services.classifier_persistence.TrainedClassifier`, loaded at lifecycle
+(`services.model.classifier_persistence.TrainedClassifier`, loaded at lifecycle
 startup from `~/.cache/zotero-summarizer/models/{name}.joblib`). Items whose
 `predicted_priority` is in `drop_priorities` (default `[dont_read]`) skip the
 LLM entirely and land as `gate_rejected`. The gate also runs a per-tick
@@ -194,13 +310,13 @@ model). The lock `classifier_gate_training` (on the app state) prevents
 concurrent retrains.
 
 For LightGBM, the gate also computes per-item TreeSHAP via
-`predict_proba(X, pred_contrib=True)`. `services.classifier_persistence._format_shap`
+`predict_proba(X, pred_contrib=True)`. `services.model.classifier_persistence._format_shap`
 aggregates the 768 SPECTER2 dimensions into one `semantic_match_specter2`
 bucket, surfaces the seven named tabular extras (`has_doi`, `has_venue`,
 `year_recency`, `title_log_len`, `abstract_log_len`, `corpus_affinity`,
 `prestige_score`), and the bias term separately. The output, plus a snapshot
 of OpenAlex author/venue stats from
-`services.classifier._compute_aux_with_context`, is serialised into
+`services.model.classifier._compute_aux_with_context`, is serialised into
 `processed_feed_items.shap_contribs_json` so the review UI can render score
 attribution.
 
@@ -277,7 +393,7 @@ Notable invariants:
   untouched `gate_rejected` item but does NOT change the row's decision —
   the user only confirmed the model's verdict; nothing else moved.
 - **Golden CSV append always pulls full abstract + authors + venue + year
-  from Zotero's live `feedItems` table** (`services.review._fetch_feed_metadata`),
+  from Zotero's live `feedItems` table** (`services.library.review._fetch_feed_metadata`),
   not the 200-char `summary.abstract_preview`. Crucial for training quality —
   rows with empty abstracts get filtered out of the classifier's training set.
 

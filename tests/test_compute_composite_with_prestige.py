@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from zotero_summarizer.models import TriageDimensions, TriageResult
-from zotero_summarizer.services import scoring
+from zotero_summarizer.services.model import scoring
 
 
 def _triage() -> TriageResult:

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from zotero_summarizer.services import feedback, scoring
+from zotero_summarizer.services.golden import feedback
+from zotero_summarizer.services.model import scoring
 from zotero_summarizer.models import TriageDimensions, TriageResult
 
 

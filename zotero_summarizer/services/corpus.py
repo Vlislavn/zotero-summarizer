@@ -6,14 +6,11 @@ from typing import Any
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models import (
     CalibrationMetricsResponse,
-    CorpusImportRequest,
-    CorpusImportResponse,
     CorpusItem,
-    FeedbackRequest,
     GoalsConfig,
     SummarizeRequest,
 )
-from zotero_summarizer.services import feedback
+from zotero_summarizer.services.golden import feedback
 from zotero_summarizer.services._common import LOGGER, state, unique_non_empty_strings
 from zotero_summarizer.storage import repositories as triage_db
 from zotero_summarizer.storage.corpus import EmbeddingCache
@@ -34,7 +31,7 @@ def empty_corpus_match_result() -> dict[str, Any]:
 
 def build_corpus_context_text(context: dict[str, Any]) -> str:
     if not context.get("has_corpus"):
-        return "No library corpus imported yet. Use /api/corpus/import first."
+        return "No library corpus available yet (it auto-imports from Zotero at startup)."
 
     similar = context.get("top_similar_items") or []
     similar_text = "\n".join(f"- {item}" for item in similar) if similar else "- none"
@@ -246,11 +243,6 @@ async def refresh_corpus_items_by_keys(item_keys: list[str]) -> tuple[int, int, 
     return imported, updated, inferred_feedback
 
 
-async def import_corpus(req: CorpusImportRequest) -> CorpusImportResponse:
-    imported, updated, _ = await import_corpus_items(req.items)
-    return CorpusImportResponse(imported_items=imported, updated_items=updated)
-
-
 async def corpus_item_metadata(item_key: str) -> dict[str, Any]:
     app_state = state()
     cache: EmbeddingCache | None = getattr(app_state, "embedding_cache", None)
@@ -288,17 +280,6 @@ async def corpus_items_metadata(
         sort,
         order,
     )
-
-
-async def ingest_feedback(req: FeedbackRequest) -> dict[str, int]:
-    events = [event.model_dump() for event in req.events]
-    inserted = await asyncio.to_thread(triage_db.insert_feedback_events, events)
-    return {"inserted": inserted}
-
-
-async def list_feedback(limit: int = 200) -> dict[str, Any]:
-    rows = await asyncio.to_thread(triage_db.get_feedback_events, limit)
-    return {"items": rows}
 
 
 async def calibration_metrics() -> CalibrationMetricsResponse:

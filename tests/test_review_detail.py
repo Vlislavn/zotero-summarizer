@@ -19,7 +19,7 @@ import sqlite3
 
 import pytest
 
-from zotero_summarizer.services import review_detail as rd
+from zotero_summarizer.services.library import review_detail as rd
 from zotero_summarizer.storage import feeds as fs
 
 
@@ -260,3 +260,81 @@ def test_get_processed_feed_item_by_id_rejects_non_positive():
         fs.get_processed_feed_item_by_id(conn, 0)
     with pytest.raises(ValueError):
         fs.get_processed_feed_item_by_id(conn, -1)
+
+
+# ---------------------------------------------------------------------------
+# CSV-stub fallback (Phase 1.18 Step 3 — usability fix for deleted rows)
+# ---------------------------------------------------------------------------
+
+
+def test_build_csv_stub_detail_uses_csv_columns():
+    """When source-store is gone, the stub carries CSV bibliographics."""
+    row = {
+        "item_key": "57ZSGVPD",
+        "title": "BALAR : A Bayesian Agentic Loop",
+        "authors": "Emily B. Fox; Aymen Echarghaoui",
+        "year": "2026",
+        "venue": "arxiv",
+        "doi": "10.1234/balar",
+        "url": "https://arxiv.org/abs/2604.12345",
+        "abstract": "Large language models in interactive settings…",
+    }
+    stub = rd.build_csv_stub_detail(row)
+    assert stub["source"] == "csv_stub"
+    assert stub["title"] == "BALAR : A Bayesian Agentic Loop"
+    assert [a["name"] for a in stub["authors"]] == ["Emily B. Fox", "Aymen Echarghaoui"]
+    assert stub["year"] == "2026"
+    assert stub["doi"] == "10.1234/balar"
+    assert stub["abstract"].startswith("Large language models")
+    assert stub["has_pdf"] is False
+    assert stub["annotations"] == []
+    assert stub["notes"] == []
+    assert stub["date_added"] == ""  # no date column in the CSV
+    assert stub["scoring"] is None
+
+
+def test_build_library_detail_surfaces_date_added(monkeypatch):
+    """The library detail must expose Zotero's dateAdded so the UI can show
+    'Added <date>'. Scoring is isolated here (gate off)."""
+    from zotero_summarizer.services.library import reading_queue
+
+    monkeypatch.setattr(reading_queue, "get_cached_scoring", lambda k: None)
+    monkeypatch.setattr(reading_queue, "live_scoring", lambda item: None)
+
+    class _Reader:
+        def get_item_detail(self, key):
+            return {
+                "title": "T", "abstract": "a", "publication_date": "2026",
+                "doi": "", "url": "", "authors": ["X"], "tags": [], "collections": [],
+                "annotations": [], "notes": [], "has_pdf": False, "pdf_path": None,
+                "date_added": "2026-05-22 21:14:30", "date_modified": "",
+            }
+
+    out = rd.build_library_detail(_Reader(), "ABCDEFGH")
+    assert out["source"] == "library"
+    assert out["date_added"] == "2026-05-22 21:14:30"
+    assert out["scoring"] is None
+
+
+def test_load_csv_row_finds_match(tmp_path):
+    csv_path = tmp_path / "g.csv"
+    csv_path.write_text(
+        "item_key,title,authors\n"
+        "ABC12345,First paper,Alice; Bob\n"
+        "feed:42,Second paper,Carol\n",
+        encoding="utf-8",
+    )
+    r = rd.load_csv_row(csv_path, "feed:42")
+    assert r is not None
+    assert r["title"] == "Second paper"
+    assert r["authors"] == "Carol"
+
+
+def test_load_csv_row_returns_none_when_missing(tmp_path):
+    csv_path = tmp_path / "g.csv"
+    csv_path.write_text("item_key,title\nABC12345,First paper\n", encoding="utf-8")
+    assert rd.load_csv_row(csv_path, "NOPE") is None
+
+
+def test_load_csv_row_returns_none_when_csv_missing(tmp_path):
+    assert rd.load_csv_row(tmp_path / "does-not-exist.csv", "ABC12345") is None

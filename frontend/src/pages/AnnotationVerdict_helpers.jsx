@@ -140,50 +140,67 @@ export function GroundTruthOneLiner({ detail }) {
   );
 }
 
-// Above the filter chips: one-line summary of the hybrid GT pipeline counts.
+// Above the filter chips: one-line summary of the labels the model trains on.
 // Renders only when `summary` is loaded (the parent passes null otherwise).
+// `total_rows` counts every training label (mostly auto-derived); `yours` is
+// the subset carrying a saved verdict — broken down into how many changed the
+// model's guess vs. confirmed it. The old copy mislabelled the total as
+// "effective labels" and used "overridden/GT" jargon a cold reader can't parse.
 export function EffectiveLabelsStrip({ summary }) {
   if (!summary) return null;
   const total = summary.total_rows ?? 0;
-  const overridden = summary.user_overrode_derivation ?? 0;
+  const changed = summary.user_overrode_derivation ?? 0;
   const confirmed = summary.user_confirmed_derivation ?? 0;
+  const yours = summary.user_verdicts ?? changed + confirmed;
+  const autoDerived = Math.max(total - yours, 0);
   return (
     <div
       className="mb-2 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-[12px] text-slate-700"
       role="status"
-      aria-label="Effective labels summary"
+      aria-label="Training-label summary"
+      title={
+        `${total.toLocaleString()} labels train the model. `
+        + `${yours.toLocaleString()} carry your verdict `
+        + `(${changed} changed the model's guess, ${confirmed} confirmed it); `
+        + `the other ${autoDerived.toLocaleString()} are auto-derived.`
+      }
     >
-      <span className="font-semibold text-slate-900">Effective labels:</span>{' '}
-      {total.toLocaleString()} total ·{' '}
-      <span className="text-emerald-800 font-semibold">{overridden}</span>{' '}
-      user-overridden ·{' '}
-      <span className="text-emerald-800 font-semibold">{confirmed}</span>{' '}
-      user-confirmed
+      <span className="font-semibold text-slate-900">{total.toLocaleString()}</span>{' '}
+      training labels ·{' '}
+      <span className="text-emerald-800 font-semibold">{yours.toLocaleString()}</span>{' '}
+      yours{' '}
+      <span className="text-slate-500">
+        ({changed} changed · {confirmed} confirmed)
+      </span>
     </div>
   );
 }
 
-export function PdfButton({ pdfPath, hasPdf }) {
-  const [copied, setCopied] = useState(false);
-  if (!hasPdf || !pdfPath) return null;
-  async function handleClick() {
-    try {
-      await navigator.clipboard.writeText(pdfPath);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      // Fallback: prompt the user with the path so they can copy manually.
-      window.prompt('Copy this PDF path:', pdfPath);
-    }
-  }
+// Goal-Gradient + Zeigarnik: a truthful, visible completion signal for the
+// pile the user is working through. `labeled` = visible rows that already carry
+// the user's verdict; the bar fills toward the finish line as triage proceeds,
+// and the loop is closed explicitly at 100% ("All N labeled ✓"). Distinct from
+// the "Showing X of Y" list-size readout, which is filter feedback, not progress.
+export function TriageProgress({ labeled, total }) {
+  if (!total) return null;
+  const pct = Math.min(Math.round((labeled / total) * 100), 100);
+  const done = labeled >= total;
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-semibold hover:bg-slate-700"
-      title={pdfPath}
-    >
-      {copied ? 'PDF path copied to clipboard ✓' : 'Copy PDF path'}
-    </button>
+    <div className="mb-2" role="status" aria-label={`${labeled} of ${total} labeled`}>
+      <div className="flex items-center justify-between text-[11px] mb-1">
+        <span className="text-slate-600">
+          {done ? `All ${total} labeled` : `${labeled} of ${total} labeled`}
+        </span>
+        <span className={done ? 'text-emerald-700 font-semibold' : 'text-slate-400'}>
+          {done ? '✓' : `${total - labeled} to go`}
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all ${done ? 'bg-emerald-500' : 'bg-teal-500'}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
   );
 }

@@ -14,7 +14,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services import review
+from zotero_summarizer.services.library import review
 
 router = APIRouter()
 

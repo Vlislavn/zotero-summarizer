@@ -4,8 +4,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from zotero_summarizer.services import classifier
-from zotero_summarizer.services.classifier_persistence import (
+from zotero_summarizer.services.model import classifier
+from zotero_summarizer.services.model.classifier_persistence import (
     _EXTRA_FEATURE_NAMES,
     _format_shap,
 )

@@ -71,6 +71,10 @@ from zotero_summarizer.storage.feeds_schema import (
     INDEX_STATEMENTS as _INDEX_STATEMENTS,
     MIGRATION_COLUMNS as _MIGRATION_COLUMNS,
 )
+from zotero_summarizer.storage.feeds_lookup import (  # noqa: F401  (re-exported)
+    get_processed_feed_item_by_id,
+    get_processed_feed_item_by_pk,
+)
 
 LOGGER = logging.getLogger("zotero_summarizer.storage.feeds")
 
@@ -111,37 +115,6 @@ def is_processed(conn: sqlite3.Connection, feed_library_id: int, feed_item_id: i
     return row is not None
 
 
-def get_processed_feed_item_by_id(
-    conn: sqlite3.Connection,
-    feed_item_id: int,
-) -> dict[str, Any] | None:
-    """Return the most recent processed_feed_items row for a given feed_item_id.
-
-    The golden CSV uses ``feed:<feed_item_id>`` as the row key, dropping the
-    library id. Resolving back from CSV to a DB row therefore goes through
-    feed_item_id alone. If the same item id appears across multiple feed
-    libraries (rare; Zotero reuses ids per library), the newest row wins
-    — the older one is from a previous library that has since gone away.
-
-    Returns ``None`` only when the row genuinely does not exist (caller's
-    contract: distinguish "not in DB" from a hard error). ``feed_item_id``
-    must be a positive int — invalid ids are programmer errors and raise.
-    """
-    safe_id = int(feed_item_id)
-    if safe_id <= 0:
-        raise ValueError(f"feed_item_id must be positive; got {feed_item_id!r}")
-    row = conn.execute(
-        """
-        SELECT * FROM processed_feed_items
-        WHERE feed_item_id = ?
-        ORDER BY created_at DESC
-        LIMIT 1
-        """,
-        (safe_id,),
-    ).fetchone()
-    return dict(row) if row else None
-
-
 def filter_unprocessed(
     conn: sqlite3.Connection,
     feed_items: list[dict[str, Any]],
@@ -162,13 +135,20 @@ def filter_unprocessed(
     for fl, fi in keys:
         flat.extend([fl, fi])
 
+    # `skipped_error` rows are transient LLM/endpoint failures the daemon
+    # explicitly keeps for retry (the item was never scored). Treat them as
+    # NOT processed so the next tick re-picks them; otherwise an errored item
+    # stays unread forever AND blocks the round-robin picker from advancing to
+    # newer unprocessed items. `clear_error_rows` removes the stale row before
+    # the retry records a fresh decision.
     seen_rows = conn.execute(
         f"""
         SELECT feed_library_id, feed_item_id
         FROM processed_feed_items
         WHERE (feed_library_id, feed_item_id) IN (VALUES {placeholders})
+          AND decision != ?
         """,
-        flat,
+        [*flat, DECISION_SKIPPED_ERROR],
     ).fetchall()
     seen: set[tuple[int, int]] = {(int(r[0]), int(r[1])) for r in seen_rows}
 
@@ -178,6 +158,70 @@ def filter_unprocessed(
         if key not in seen:
             unprocessed.append(item)
     return unprocessed, len(feed_items) - len(unprocessed)
+
+
+def select_stale_unread_to_mark(
+    conn: sqlite3.Connection,
+    feed_items: list[dict[str, Any]],
+) -> list[tuple[int, int]]:
+    """Keys ``(feed_library_id, feed_item_id)`` of items already decided with a
+    TERMINAL decision — the ones the daemon should mark read in Zotero.
+
+    These are items the dedup in :func:`filter_unprocessed` skips (already
+    recorded) but that linger as *unread* in Zotero, so the bounded round-robin
+    picker keeps re-grabbing the same batch every tick and never advances to new
+    items. Marking them read evicts them from the unread pool.
+
+    Excluded:
+      * ``skipped_error`` — retryable (the item was never scored), must stay pickable.
+      * ``awaiting_review`` — the review flow keeps these unread on purpose.
+    """
+    if not feed_items:
+        return []
+    keys = [(int(it.get("feed_library_id") or 0), int(it.get("item_id") or 0)) for it in feed_items]
+    placeholders = ",".join("(?,?)" for _ in keys)
+    flat: list[Any] = []
+    for fl, fi in keys:
+        flat.extend([fl, fi])
+
+    rows = conn.execute(
+        f"""
+        SELECT DISTINCT feed_library_id, feed_item_id
+        FROM processed_feed_items
+        WHERE (feed_library_id, feed_item_id) IN (VALUES {placeholders})
+          AND decision NOT IN (?, ?)
+        """,
+        [*flat, DECISION_SKIPPED_ERROR, DECISION_AWAITING_REVIEW],
+    ).fetchall()
+    return [(int(r[0]), int(r[1])) for r in rows]
+
+
+def clear_error_rows(
+    conn: sqlite3.Connection, feed_items: list[dict[str, Any]]
+) -> int:
+    """Delete any ``skipped_error`` rows for these items; returns the count.
+
+    Counterpart to :func:`filter_unprocessed` treating ``skipped_error`` as
+    retryable: ``record_decision`` is ``INSERT OR IGNORE``, so the stale error
+    row must be removed first or the retry's fresh decision silently no-ops.
+    The caller commits.
+    """
+    if not feed_items:
+        return 0
+    keys = [(int(it.get("feed_library_id") or 0), int(it.get("item_id") or 0)) for it in feed_items]
+    placeholders = ",".join("(?,?)" for _ in keys)
+    flat: list[Any] = []
+    for fl, fi in keys:
+        flat.extend([fl, fi])
+    cursor = conn.execute(
+        f"""
+        DELETE FROM processed_feed_items
+        WHERE decision = ?
+          AND (feed_library_id, feed_item_id) IN (VALUES {placeholders})
+        """,
+        [DECISION_SKIPPED_ERROR, *flat],
+    )
+    return cursor.rowcount
 
 
 def record_decision(
@@ -277,6 +321,52 @@ def update_to_decision(
     return int(cursor.rowcount or 0) > 0
 
 
+def update_quality_review(
+    conn: sqlite3.Connection,
+    *,
+    row_id: int,
+    quality_review_json: str,
+) -> bool:
+    """Store the full-text :class:`QualityReview` JSON on a row (by PK ``id``)."""
+    cursor = conn.execute(
+        """
+        UPDATE processed_feed_items
+        SET quality_review_json = ?, updated_at = datetime('now')
+        WHERE id = ?
+        """,
+        (quality_review_json, int(row_id)),
+    )
+    return int(cursor.rowcount or 0) > 0
+
+
+def count_by_decisions(conn: sqlite3.Connection, decisions: list[str]) -> int:
+    """Uncapped count of rows whose ``decision`` is in ``decisions``.
+
+    Backs the Today backlog header (e.g. how many triaged items await the
+    user's add/trash call). Empty ``decisions`` -> 0.
+    """
+    if not decisions:
+        return 0
+    placeholders = ",".join("?" for _ in decisions)
+    row = conn.execute(
+        f"SELECT COUNT(*) FROM processed_feed_items WHERE decision IN ({placeholders})",
+        tuple(decisions),
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def count_all_by_decision(conn: sqlite3.Connection) -> dict[str, int]:
+    """Full per-decision histogram across every processed feed item.
+
+    Backs the Today pipeline-funnel overview (came in / filtered / awaiting /
+    added / trashed). Mirrors :func:`get_run_summary` but spans all runs.
+    """
+    rows = conn.execute(
+        "SELECT decision, COUNT(*) AS n FROM processed_feed_items GROUP BY decision"
+    ).fetchall()
+    return {str(r["decision"]): int(r["n"]) for r in rows}
+
+
 def record_materialization(
     conn: sqlite3.Connection,
     *,
@@ -328,164 +418,12 @@ def record_read_marked(
     return int(cursor.rowcount or 0) > 0
 
 
-def select_by_decisions(
-    conn: sqlite3.Connection,
-    *,
-    decisions: list[str],
-    since_hours: int = 24,
-    limit: int = 1000,
-    feed_library_ids: list[int] | None = None,
-) -> list[dict[str, Any]]:
-    """Return rows whose decision is in ``decisions`` from the last N hours.
-
-    Used by:
-      * Daily-selection (decisions=[DECISION_TRIAGED_PENDING]) to gather the
-        plateau candidate pool. Order by composite_score DESC works for
-        kneedle-on-descending-curve.
-      * Review UI (decisions=[DECISION_AWAITING_REVIEW]) to list items
-        awaiting user verdict.
-
-    When ``feed_library_ids`` is provided, restrict to those feeds (used by
-    ``feeds run --feeds <name>``).
-    """
-    if not decisions:
-        raise ValueError("decisions must be non-empty")
-    safe_limit = max(1, min(int(limit), 5000))
-    safe_hours = max(1, int(since_hours))
-    decision_placeholders = ",".join("?" * len(decisions))
-    if feed_library_ids:
-        feed_placeholders = ",".join("?" * len(feed_library_ids))
-        rows = conn.execute(
-            f"""
-            SELECT * FROM processed_feed_items
-            WHERE decision IN ({decision_placeholders})
-              AND created_at >= datetime('now', ?)
-              AND feed_library_id IN ({feed_placeholders})
-            ORDER BY COALESCE(composite_score, 0) DESC
-            LIMIT ?
-            """,
-            (*decisions, f"-{safe_hours} hours", *feed_library_ids, safe_limit),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            f"""
-            SELECT * FROM processed_feed_items
-            WHERE decision IN ({decision_placeholders})
-              AND created_at >= datetime('now', ?)
-            ORDER BY COALESCE(composite_score, 0) DESC
-            LIMIT ?
-            """,
-            (*decisions, f"-{safe_hours} hours", safe_limit),
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def select_pending_triaged(
-    conn: sqlite3.Connection,
-    *,
-    since_hours: int = 24,
-    limit: int = 1000,
-    feed_library_ids: list[int] | None = None,
-) -> list[dict[str, Any]]:
-    """Compatibility wrapper: returns triaged_pending rows for daily selection."""
-    return select_by_decisions(
-        conn,
-        decisions=[DECISION_TRIAGED_PENDING],
-        since_hours=since_hours,
-        limit=limit,
-        feed_library_ids=feed_library_ids,
-    )
-
-
-def due_outcome_checks(
-    conn: sqlite3.Connection,
-    *,
-    limit: int = 5,
-) -> list[dict[str, Any]]:
-    """Return materialized rows whose outcome window has elapsed.
-
-    Daemon picks N due rows per tick to amortize Zotero membership lookups.
-    Ordered by outcome_eligible_at ASC so the oldest gets resolved first.
-    """
-    safe_limit = max(1, min(int(limit), 100))
-    rows = conn.execute(
-        """
-        SELECT * FROM processed_feed_items
-        WHERE materialized_zotero_key IS NOT NULL
-          AND outcome_eligible_at IS NOT NULL
-          AND outcome_eligible_at <= datetime('now')
-          AND outcome_detected_at IS NULL
-        ORDER BY outcome_eligible_at ASC
-        LIMIT ?
-        """,
-        (safe_limit,),
-    ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def record_outcome(
-    conn: sqlite3.Connection,
-    *,
-    feed_library_id: int,
-    feed_item_id: int,
-    final_outcome: str,
-    signal_weight: float,
-) -> bool:
-    """Write the resolved outcome + signal weight back to the row."""
-    cursor = conn.execute(
-        """
-        UPDATE processed_feed_items
-        SET final_outcome = ?,
-            outcome_signal_weight = ?,
-            outcome_detected_at = datetime('now'),
-            updated_at = datetime('now')
-        WHERE feed_library_id = ? AND feed_item_id = ?
-        """,
-        (final_outcome, float(signal_weight), feed_library_id, feed_item_id),
-    )
-    return int(cursor.rowcount or 0) > 0
-
-
-def get_run_summary(conn: sqlite3.Connection, run_id: str) -> dict[str, Any]:
-    """Return a per-decision count summary for a run."""
-    rows = conn.execute(
-        """
-        SELECT decision, COUNT(*) AS n
-        FROM processed_feed_items
-        WHERE run_id = ?
-        GROUP BY decision
-        """,
-        (run_id,),
-    ).fetchall()
-    counts = {str(r["decision"]): int(r["n"]) for r in rows}
-    total = sum(counts.values())
-    return {"run_id": run_id, "total": total, "by_decision": counts}
-
-
-def list_recent_decisions(
-    conn: sqlite3.Connection,
-    limit: int = 100,
-    decision: str | None = None,
-) -> list[dict[str, Any]]:
-    """Return recent decision rows (for the CLI audit view)."""
-    safe_limit = max(1, min(int(limit), 1000))
-    if decision:
-        rows = conn.execute(
-            """
-            SELECT * FROM processed_feed_items
-            WHERE decision = ?
-            ORDER BY created_at DESC
-            LIMIT ?
-            """,
-            (decision, safe_limit),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            """
-            SELECT * FROM processed_feed_items
-            ORDER BY created_at DESC
-            LIMIT ?
-            """,
-            (safe_limit,),
-        ).fetchall()
-    return [dict(r) for r in rows]
+# Selection + outcome/history queries live in feeds_history (re-exported).
+from zotero_summarizer.storage.feeds_history import (  # noqa: F401,E402
+    due_outcome_checks,
+    get_run_summary,
+    list_recent_decisions,
+    record_outcome,
+    select_by_decisions,
+    select_pending_triaged,
+)

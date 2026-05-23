@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from zotero_summarizer.services.golden_metrics import (
+from zotero_summarizer.services.model.golden_metrics import (
     CLASSES,
     accuracy,
     compute_binary,

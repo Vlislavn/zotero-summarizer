@@ -13,7 +13,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from zotero_summarizer.services.eval_baseline import (
+from zotero_summarizer.services.model.eval_baseline import (
     PRIORITY_BIN_EDGES,
     PRIORITY_NAMES,
     BaselineReport,
@@ -25,12 +25,12 @@ from zotero_summarizer.services.eval_baseline import (
     run_baseline,
     run_learning_curve,
 )
-from zotero_summarizer.services.eval_baseline._bootstrap import bca_ci
-from zotero_summarizer.services.eval_baseline._featurize import (
+from zotero_summarizer.services.model.eval_baseline._bootstrap import bca_ci
+from zotero_summarizer.services.model.eval_baseline._featurize import (
     FeaturizedGolden,
     load_golden_rows,
 )
-from zotero_summarizer.services.eval_baseline._metrics import (
+from zotero_summarizer.services.model.eval_baseline._metrics import (
     FoldMetrics,
     compute_fold_metrics,
 )
@@ -142,11 +142,13 @@ def test_compute_fold_metrics_constant_continuous_raises():
 
 def _make_synthetic_feat(n: int = 200, seed: int = 0) -> FeaturizedGolden:
     """A FeaturizedGolden with random features but a meaningful signal:
-    extra feature [0] is highly correlated with the continuous label."""
+    feature [0] is highly correlated with the continuous label. ``selected_rows``
+    carry a unique DOI per row so grouped CV treats each as its own group (≈
+    plain K-fold) and the per-fold P recompute has rows to work with."""
+    from zotero_summarizer.services.model.classifier import FEATURE_DIM
+
     rng = np.random.default_rng(seed)
-    # 768-d SPECTER2 mock + 7 extras (mocked) = 775 features
-    n_features = 775
-    X = rng.normal(size=(n, n_features)).astype(np.float32)
+    X = rng.normal(size=(n, FEATURE_DIM)).astype(np.float32)
     y_cont = rng.uniform(1.0, 5.0, size=n)
     # Inject signal: shove the continuous label into feature 0 (rescaled).
     X[:, 0] = (y_cont - 3.0).astype(np.float32) + rng.normal(scale=0.5, size=n).astype(np.float32)
@@ -158,7 +160,11 @@ def _make_synthetic_feat(n: int = 200, seed: int = 0) -> FeaturizedGolden:
         y_continuous=y_cont,
         y_priority=y_prio,
         item_keys=[f"k{i}" for i in range(n)],
-        n_features=n_features,
+        n_features=FEATURE_DIM,
+        selected_rows=[
+            {"item_key": f"k{i}", "doi": f"10.1/{i}", "title": f"t{i}", "authors": ""}
+            for i in range(n)
+        ],
     )
 
 
@@ -166,7 +172,7 @@ def test_run_baseline_returns_fold_count_and_cis():
     """End-to-end with featurization mocked. Use logreg (cheap, deterministic)."""
     feat = _make_synthetic_feat(n=200, seed=0)
     with patch(
-        "zotero_summarizer.services.eval_baseline._runners.featurize_golden",
+        "zotero_summarizer.services.model.eval_baseline._runners.featurize_golden",
         return_value=feat,
     ):
         # Pass an arbitrary path & rows — the mock replaces it.
@@ -200,7 +206,7 @@ def test_run_baseline_detects_signal_in_synthetic_data():
     """With the seeded signal in feature 0, Spearman should be clearly positive."""
     feat = _make_synthetic_feat(n=300, seed=0)
     with patch(
-        "zotero_summarizer.services.eval_baseline._runners.featurize_golden",
+        "zotero_summarizer.services.model.eval_baseline._runners.featurize_golden",
         return_value=feat,
     ):
         report = run_baseline(
@@ -227,7 +233,7 @@ def test_run_baseline_detects_signal_in_synthetic_data():
 def test_run_learning_curve_emits_one_point_per_fraction():
     feat = _make_synthetic_feat(n=300, seed=0)
     with patch(
-        "zotero_summarizer.services.eval_baseline._runners.featurize_golden",
+        "zotero_summarizer.services.model.eval_baseline._runners.featurize_golden",
         return_value=feat,
     ):
         report = run_learning_curve(
@@ -252,7 +258,7 @@ def test_run_learning_curve_emits_one_point_per_fraction():
 def test_run_learning_curve_rejects_invalid_fractions():
     feat = _make_synthetic_feat(n=200, seed=0)
     with patch(
-        "zotero_summarizer.services.eval_baseline._runners.featurize_golden",
+        "zotero_summarizer.services.model.eval_baseline._runners.featurize_golden",
         return_value=feat,
     ):
         with pytest.raises(ValueError, match="must be in"):
@@ -283,7 +289,7 @@ def test_report_to_dict_round_trip_via_json():
 
     feat = _make_synthetic_feat(n=200, seed=0)
     with patch(
-        "zotero_summarizer.services.eval_baseline._runners.featurize_golden",
+        "zotero_summarizer.services.model.eval_baseline._runners.featurize_golden",
         return_value=feat,
     ):
         report = run_baseline(
@@ -310,7 +316,7 @@ def test_learning_curve_to_dict_round_trip_via_json():
 
     feat = _make_synthetic_feat(n=200, seed=0)
     with patch(
-        "zotero_summarizer.services.eval_baseline._runners.featurize_golden",
+        "zotero_summarizer.services.model.eval_baseline._runners.featurize_golden",
         return_value=feat,
     ):
         report = run_learning_curve(

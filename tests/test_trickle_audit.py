@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from zotero_summarizer.services import relabel_audit
-from zotero_summarizer.services.relabel_audit._constants import AuditCandidate
+from zotero_summarizer.services.golden import relabel_audit
+from zotero_summarizer.services.golden.relabel_audit._constants import AuditCandidate
 
 
 _NOW = datetime(2026, 5, 15, 12, 0, 0, tzinfo=timezone.utc)

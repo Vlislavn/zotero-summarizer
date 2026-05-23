@@ -55,6 +55,7 @@ def migrate_existing(settings: Settings | None = None) -> MigrationResult:
     lightweight `schema_migrations` table without deleting user data.
     """
     effective_settings = settings or Settings.load()
+    effective_settings.data_dir.mkdir(parents=True, exist_ok=True)
 
     previous_db_path = repositories.DB_PATH
     repositories.DB_PATH = effective_settings.triage_db_path

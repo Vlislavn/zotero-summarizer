@@ -6,9 +6,9 @@ import logging
 import os
 from pathlib import Path
 import re
+import sqlite3
 from typing import Any
 
-from fastapi.responses import FileResponse
 import yaml
 
 from zotero_summarizer.models import GoalsConfig, SummarizeRequest
@@ -17,7 +17,6 @@ from zotero_summarizer.settings import Settings
 
 
 LOGGER = logging.getLogger("zotero_summarizer")
-PACKAGE_WEB_DIR = Path(__file__).resolve().parents[1] / "web"
 
 
 def settings() -> Settings:
@@ -71,23 +70,6 @@ def write_config_atomic(config_path: Path, payload: dict[str, Any]) -> None:
     with tmp_path.open("w", encoding="utf-8") as config_file:
         yaml.safe_dump(payload, config_file, sort_keys=False, allow_unicode=False)
     tmp_path.replace(config_path)
-
-
-def web_file(name: str) -> Path:
-    # Project-level overrides are kept for local development, but packaged files
-    # are the supported source after repo cleanup.
-    project_file = settings().project_root / name
-    if project_file.exists():
-        return project_file
-    return PACKAGE_WEB_DIR / name
-
-
-def html_file_response(path: Path) -> FileResponse:
-    response = FileResponse(str(path), media_type="text/html")
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    return response
 
 
 def to_text(value: Any) -> str:
@@ -151,6 +133,19 @@ def clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
+def connect_sqlite_ro(db_path: Path, *, timeout: float = 5.0) -> sqlite3.Connection:
+    """Open a SQLite DB read-only with a ``Row`` factory.
+
+    Pre-checks existence so a missing file raises a clear ``FileNotFoundError``
+    instead of an opaque ``sqlite3.OperationalError`` from URI mode.
+    """
+    if not db_path.exists():
+        raise FileNotFoundError(f"database not found at {db_path}")
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=timeout)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def unique_non_empty_strings(values: Any) -> list[str]:
     normalized: list[str] = []
     seen: set[str] = set()
@@ -168,6 +163,20 @@ def unique_non_empty_strings(values: Any) -> list[str]:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def now_iso_z() -> str:
+    """UTC timestamp, second precision, ``Z`` suffix (e.g. ``2026-05-23T12:00:00Z``)."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_HTML_WS_RE = re.compile(r"\s+")
+
+
+def html_to_text(html: str) -> str:
+    """Strip HTML tags and collapse whitespace to a single trimmed line."""
+    return _HTML_WS_RE.sub(" ", _HTML_TAG_RE.sub(" ", html or "")).strip()
 
 
 def log_context(prefix: str, message: str, *args: Any) -> None:

@@ -326,7 +326,7 @@ I confirm the model was right"*).
 ### How the learning loop closes
 
 Every UI action that mutates the label writes one row to
-`zotero-summarizer-golden.csv`. The append helper (`services.review.append_to_golden`)
+`zotero-summarizer-golden.csv`. The append helper (`services.library.review.append_to_golden`)
 pulls the **full abstract + authors + venue + year** from Zotero's live
 `feedItems` table — not from the truncated `summary.abstract_preview` — so
 training has real signal, not just a 200-char snippet.

@@ -1,0 +1,23 @@
+# Project guardrails. Install once: `pre-commit install` (see docs/developer-guide.md).
+# Run on demand: `pre-commit run --all-files`.
+repos:
+  - repo: local
+    hooks:
+      - id: file-loc-limit
+        name: file LOC <= 500 (legacy files grandfathered, may not grow)
+        entry: python3 tools/precommit/check_file_loc.py
+        language: system
+        types: [python]
+
+      - id: import-structure-policy
+        name: layered-import + services-structure policy
+        entry: python3 tools/precommit/check_import_policy.py
+        language: system
+        types: [python]
+
+      - id: module-readme
+        name: every package has a README, refreshed when its code changes
+        entry: python3 tools/precommit/check_module_readme.py
+        language: system
+        pass_filenames: false
+        always_run: true

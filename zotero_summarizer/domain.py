@@ -81,6 +81,28 @@ def is_training_eligible(row: dict[str, str]) -> bool:
     return True
 
 
+def paper_group_id(row: dict[str, str]) -> str:
+    """Stable per-paper identity for grouped cross-validation.
+
+    The same paper can appear as multiple golden-CSV rows (a ``feed:<id>`` row
+    from triage AND a Zotero-key row once it's added/read). Random K-fold would
+    split these near-identical-embedding twins across train/test, leaking signal
+    and inflating the metrics. We group by DOI when present, else by a
+    normalised title, else fall back to the row's own ``item_key`` so genuinely
+    distinct rows are never merged into one group.
+    """
+    doi = (row.get("doi") or "").strip().lower()
+    for prefix in ("https://doi.org/", "http://doi.org/", "doi:"):
+        if doi.startswith(prefix):
+            doi = doi[len(prefix):].strip()
+    if doi:
+        return f"doi:{doi}"
+    title = " ".join((row.get("title") or "").lower().split())
+    if title:
+        return f"title:{title}"
+    return f"key:{(row.get('item_key') or '').strip()}"
+
+
 def score_to_priority(score: float) -> str:
     """Deterministic mapping of a continuous relevance score in [1, 5]
     to the four-class `ReadingPriority` label, using the thresholds defined

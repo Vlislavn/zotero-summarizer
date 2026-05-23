@@ -9,7 +9,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from zotero_summarizer.services import classifier
+from zotero_summarizer.services.model import classifier, classifier_embed
 
 
 # ---------------------------------------------------------------------------
@@ -29,7 +29,7 @@ def _fake_embedding(title: str, abstract: str, *, authors: str = "", venue: str 
 
 def test_cache_hit_returns_identical_array(tmp_path: Path):
     db = tmp_path / "cache.db"
-    with patch.object(classifier, "compute_embedding", side_effect=_fake_embedding) as mock:
+    with patch.object(classifier_embed, "compute_embedding", side_effect=_fake_embedding) as mock:
         first = classifier.get_or_compute_embedding(db, "KEY1", "Title A", "Abstract A")
         second = classifier.get_or_compute_embedding(db, "KEY1", "Title A", "Abstract A")
     assert mock.call_count == 1, "second call should hit the SQLite cache"
@@ -38,7 +38,7 @@ def test_cache_hit_returns_identical_array(tmp_path: Path):
 
 def test_cache_invalidated_on_content_change(tmp_path: Path):
     db = tmp_path / "cache.db"
-    with patch.object(classifier, "compute_embedding", side_effect=_fake_embedding) as mock:
+    with patch.object(classifier_embed, "compute_embedding", side_effect=_fake_embedding) as mock:
         classifier.get_or_compute_embedding(db, "KEY1", "Title A", "Abstract A")
         classifier.get_or_compute_embedding(db, "KEY1", "Title A", "Abstract A NEW")
     assert mock.call_count == 2, "abstract change should trigger recompute"
@@ -81,7 +81,7 @@ def test_cv_produces_one_probability_per_eligible_row(tmp_path: Path):
     for i in range(10):
         rows.append(_golden_row(f"N{i}", f"Negative paper {i}", "abstract " * 30, "dont_read"))
 
-    with patch.object(classifier, "compute_embedding", side_effect=_fake_embedding):
+    with patch.object(classifier_embed, "compute_embedding", side_effect=_fake_embedding):
         report = classifier.cross_validate(
             rows, corpus_db_path=db, n_folds=5, holdout_fraction=0.0,
         )
@@ -110,7 +110,7 @@ def test_cv_with_holdout_returns_both_splits(tmp_path: Path):
     for i in range(20):
         rows.append(_golden_row(f"N{i}", f"Neg {i}", "abstract " * 30, "dont_read"))
 
-    with patch.object(classifier, "compute_embedding", side_effect=_fake_embedding):
+    with patch.object(classifier_embed, "compute_embedding", side_effect=_fake_embedding):
         report = classifier.cross_validate(
             rows, corpus_db_path=db, n_folds=4, holdout_fraction=0.25,
         )
@@ -137,7 +137,7 @@ def test_cv_skips_rows_with_missing_fields(tmp_path: Path):
         {"item_key": "Y", "title": "Title", "abstract": "", "gold_priority_final": "must_read"},
         {"item_key": "Z", "title": "Title", "abstract": "abs", "gold_priority_final": ""},
     ]
-    with patch.object(classifier, "compute_embedding", side_effect=_fake_embedding):
+    with patch.object(classifier_embed, "compute_embedding", side_effect=_fake_embedding):
         report = classifier.cross_validate(
             rows, corpus_db_path=db, n_folds=4, holdout_fraction=0.0,
         )
@@ -147,7 +147,7 @@ def test_cv_skips_rows_with_missing_fields(tmp_path: Path):
 def test_cv_raises_when_dataset_too_small(tmp_path: Path):
     db = tmp_path / "cache.db"
     rows = [_golden_row("A", "Title", "abs", "must_read")]
-    with patch.object(classifier, "compute_embedding", side_effect=_fake_embedding):
+    with patch.object(classifier_embed, "compute_embedding", side_effect=_fake_embedding):
         with pytest.raises(ValueError, match="at least"):
             classifier.cross_validate(
                 rows, corpus_db_path=db, n_folds=5, holdout_fraction=0.0,
@@ -369,3 +369,45 @@ def test_calibrator_none_returns_input_unchanged():
     p = np.array([0.1, 0.4, 0.9])
     out = classifier._apply_calibrator(None, p)
     np.testing.assert_allclose(out, p)
+
+
+# ---------------------------------------------------------------------------
+# predict_named — silence LightGBM's benign feature-name UserWarning
+# ---------------------------------------------------------------------------
+
+
+def test_predict_named_silences_feature_name_warning_with_parity():
+    """LightGBM auto-sets feature_names_in_ ('Column_N') even for an ndarray fit,
+    so a bare-ndarray predict trips sklearn's feature-name validation. The helper
+    must suppress that warning while keeping predictions identical."""
+    import warnings
+
+    import lightgbm as lgb
+
+    rng = np.random.default_rng(0)
+    X = rng.random((50, 6)).astype(np.float32)
+    y = rng.random(50)
+    model = lgb.LGBMRegressor(n_estimators=5, verbose=-1).fit(X, y)
+    assert hasattr(model, "feature_names_in_"), "precondition: numpy fit sets names"
+
+    X_new = rng.random((4, 6)).astype(np.float32)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        out = classifier.predict_named(model, X_new)
+    assert not any("feature names" in str(w.message) for w in caught)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        baseline = model.predict(X_new)
+    np.testing.assert_allclose(out, baseline)
+
+
+def test_predict_named_is_noop_without_feature_names():
+    """Models fit without names (or already-framed inputs) pass straight through."""
+
+    class _Dummy:
+        def predict(self, X, **kwargs):
+            return X
+
+    arr = np.arange(6).reshape(2, 3)
+    np.testing.assert_array_equal(classifier.predict_named(_Dummy(), arr), arr)

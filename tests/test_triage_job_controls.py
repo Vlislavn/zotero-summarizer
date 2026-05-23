@@ -7,7 +7,7 @@ import time
 import pytest
 
 from zotero_summarizer.runtime import get_context
-from zotero_summarizer.services import triage_jobs as app_module
+from zotero_summarizer.services.triage import triage_jobs as app_module
 from zotero_summarizer.models import SummarizeResponse, TriageRunRequest
 
 

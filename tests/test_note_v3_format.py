@@ -6,7 +6,7 @@ import re
 import pytest
 
 from zotero_summarizer.models import SummarizeResponse, TriageDimensions
-from zotero_summarizer.services.pending import (
+from zotero_summarizer.services.zotero.pending import (
     NOTE_VERSION,
     SYSTEM_TAG_FEEDS_V3,
     build_provenance_comment,

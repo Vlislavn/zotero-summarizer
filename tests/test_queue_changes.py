@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from zotero_summarizer.services import pending as pending_service
+from zotero_summarizer.services.zotero import pending as pending_service
 from zotero_summarizer.models import SummarizeResponse
 
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from zotero_summarizer.services import feeds
+from zotero_summarizer.services.triage.feeds import _tick as feeds
 
 
 def test_daemon_tick_with_batch_size_none_calls_pick_with_none():

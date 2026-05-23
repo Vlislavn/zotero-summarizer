@@ -18,20 +18,22 @@ build/
 .env
 .env.*
 !.env.example
-triage_history.db
-corpus_cache.db
-triage.db
+
+# All app-generated state lives here: SQLite DBs, the personal golden-label
+# dataset, logs, and ML eval/run artifacts. Never commit. See settings.data_dir.
+data/
+
+# Generic safety nets (data/ already covers the in-app paths).
 *.sqlite
 *.sqlite3
-server.log
 *.log
-tmp_review_logs/
 *.tmp
-# Personal golden-label dataset exported from local Zotero — never commit.
-zotero-summarizer-golden.csv
-zotero-summarizer-golden.jsonl
-zotero-summarizer-golden-report.md
-feed-predictions-*.csv
-note-analyses*.csv
-classifier-runs.jsonl
-reports/
+*.bak
+tmp_review_logs/
+
+# Frontend e2e: vendored deps, screenshots, and generated audit reports.
+tests/e2e/node_modules/
+tests/e2e/screenshots/
+tests/e2e/screenshots-pre/
+tests/e2e/audit-shots/
+tests/e2e/*-report*.json

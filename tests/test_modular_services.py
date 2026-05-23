@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from zotero_summarizer.contracts import Paper
 from zotero_summarizer.models import SummarizeRequest, SummarizeResponse
-from zotero_summarizer.services.pending import PendingChangePlanner
-from zotero_summarizer.services.summarization import SummarizationService
-from zotero_summarizer.services.triage_jobs import TriageJobService
+from zotero_summarizer.services.zotero.pending import PendingChangePlanner
+from zotero_summarizer.services.triage.summarization import SummarizationService
+from zotero_summarizer.services.triage.triage_jobs import TriageJobService
 from zotero_summarizer.storage.repositories import TriageRepository
 
 
