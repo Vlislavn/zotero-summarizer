@@ -1,135 +1,157 @@
 # Zotero Summarizer
 
-Local-first Zotero paper triage app. It browses your local Zotero library, extracts PDF text, summarizes and scores papers with an OpenAI-compatible LLM, queues suggested Zotero changes for review, and only writes approved changes back to Zotero.
+Local-first paper-triage assistant for [Zotero](https://www.zotero.org/). It reads
+the RSS feeds you follow in Zotero, scores each new paper for how worth-reading it
+is (a cheap ML gate first, an LLM for the survivors), and gives you a small daily
+slate to cull. Your keep/trash decisions train the model, so tomorrow's slate is
+sharper. Zotero stays the source of truth — the app only writes back tags and
+collection memberships you approve, after backing up first.
 
-## Quick Start
+Everything runs on your machine. There is **no shipped training data**: the model
+learns from *your* labels (see [Bring your own ground truth](#bring-your-own-ground-truth)).
+
+## Prerequisites
+
+- **Python 3.10+**
+- **Node 18+** (to build the React UI)
+- **Zotero desktop** with at least one **RSS feed** subscribed (the app reads
+  Zotero's own SQLite DB; it never logs into anything on your behalf)
+- An **OpenAI-compatible LLM endpoint** — a local one (Ollama, vLLM, LM Studio)
+  or a hosted API. You provide the base URL + key.
+
+## Quickstart
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+# 1. Install
+python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-# Build the React UI (Phase 1.18 — replaces the legacy ui.html)
+
+# 2. Build the UI
 cd frontend && npm install && npm run build && cd ..
-cp .env.example .env
+
+# 3. Configure (both files are gitignored — see Configuration below)
+cp .env.example .env            # then edit: LLM key/URL + Zotero paths
+cp goals.example.yaml goals.yaml # then edit: your research goals
+
+# 4. Create the local databases
 zotero-summarizer migrate
-zotero-summarizer serve --host 127.0.0.1 --port 8000 --reload
+
+# 5. Run
+zotero-summarizer serve --host 127.0.0.1 --port 8000
 ```
 
-OnPrem is a required dependency. It is listed in `pyproject.toml`, so the install command above installs it from PyPI. If needed, install it explicitly with `pip install onprem`.
+Open <http://127.0.0.1:8000/>. On the **Today** tab, click **Triage backlog** to
+score your unread feed papers, then start culling.
 
-Open:
+## How you use it
 
-```text
-http://127.0.0.1:8000/
-```
+Two stages, both of which train the model:
 
-## Documentation
+1. **Today (cull).** A ranked slate of fresh feed papers. For each, make one
+   binary call — **Add to library** (keep, a positive signal → materialized into
+   your Zotero *Inbox*) or **Trash** (a negative signal). No fine-grained label here.
+2. **Library → Read next, then Annotate (label).** Your unread library papers
+   ranked by relevance. When you actually read one, give it the fine label
+   (`must` / `should` / `could` / `don't`) and notes in **Annotate**.
 
-- [User guide](docs/user_guide.md) — daily workflow, what each tab does, how the verdict labels work.
-- [Frontend dev guide](docs/frontend.md) — React layout, shared components, how to add a route.
-- [Configuration](docs/configuration.md), [API](docs/api.md), [Architecture](docs/architecture.md), [Operations](docs/operations.md), [Feeds](docs/feeds.md).
-- [Architecture decisions](docs/decisions/) — most recent: [2026-05-15 UI redesign](docs/decisions/2026-05-15-ui-redesign.md).
+Open PDFs and take notes in Zotero as usual; come back here to triage.
 
-## Configure
+## Two ways to run triage
 
-Edit `.env`:
+Scoring papers always runs the same pipeline (gate → LLM → SQLite). What *triggers*
+it is your choice:
+
+- **UI, on demand (simplest).** Just run `serve` and click **Triage backlog** on
+  *Today* whenever you want fresh papers scored. No background process.
+- **Daemon, automatic (optional).** `zotero-summarizer feeds serve` runs a
+  background loop that scores unread items every few minutes and, each morning,
+  auto-materializes the 1–2 best into your Inbox — so a slate is waiting without
+  you clicking anything. The `feeds.*` config block only matters if you run this.
+
+Use whichever fits. The daemon is convenience, not a requirement.
+
+## Bring your own ground truth
+
+The model is trained on a **golden dataset** that *you* build — nothing ships with
+the repo. You create it just by using the app:
+
+1. **Cull and label** as above. Add/Trash on *Today* and the fine labels in
+   *Annotate* are recorded as engagement signals. (You can also signal directly in
+   Zotero with emoji tags: 🧠 deeply engaged, 👀 skimmed, 👎 not relevant.)
+2. **Refresh labels** (Settings tab, or `zotero-summarizer goldenset export`) writes
+   `data/zotero-summarizer-golden.csv` from those signals — that file *is* your
+   ground truth.
+3. **Retrain model** (Settings, or `zotero-summarizer goldenset train`) rebuilds the
+   relevance gate on your labels.
+
+Until you have labels, the gate stays off and the daemon/UI simply LLM-scores
+everything — the app is fully usable while your dataset grows. A few dozen
+keep/trash decisions is enough to start; quality improves as you label more.
+
+## Configuration
+
+Two files, both gitignored; copy the committed `*.example` templates to create them.
+
+**`.env`** — secrets, paths, runtime knobs:
 
 ```dotenv
-OPENAI_API_KEY=your_api_key_here          # primary LLM (summaries, library triage)
-OPENAI_API_BASE=https://api.openai.com/v1
-PDF_ROOT=/Users/your-user/Zotero/storage
-ZOTERO_DATA_DIR=/Users/your-user/Zotero
+OPENAI_API_KEY=...                        # primary LLM (summaries, library triage)
+OPENAI_API_BASE=https://api.openai.com/v1 # any OpenAI-compatible base URL
+PDF_ROOT=/Users/you/Zotero/storage
+ZOTERO_DATA_DIR=/Users/you/Zotero
 
-# Optional: provider for the "Today" backlog triage (scores feed papers
-# with a SOTA model). Point at api.kather.ai or any OpenAI-compatible API.
+# Optional second provider for the Today "Triage backlog" drain (a stronger
+# model for the freshest papers). Leave unset to skip that button.
 CUSTOM_BASE_URL=https://api.kather.ai/v1
-CUSTOM_API_KEY=your_kather_api_key_here
+CUSTOM_API_KEY=...
 ```
 
-`ONPREM_PATH` is optional and only exists for unusual local source-checkout setups. The normal path is PyPI installation with `pip install onprem`.
-
-> **Two LLM providers, by design.** `OPENAI_API_*` drives summaries and
-> library triage (often a fast local model via Ollama/vLLM). `CUSTOM_*`
-> drives the on-demand "Today" backlog drain, which scores the freshest
-> feed papers with a SOTA model (`model: sota` on api.kather.ai). The
-> cheap LightGBM gate fast-rejects obvious non-matches first, so only the
-> survivors cost a SOTA call. If `CUSTOM_*` is unset, the backlog-triage
-> button reports that the provider is not configured; everything else
-> still works.
-
-Edit `goals.yaml` for research goals, triage criteria, model names, and prompts. Keep the LLM base URL generic:
+**`goals.yaml`** — your research goals, triage criteria, model names, and prompts.
+Keep the LLM base URL generic so it follows `.env`:
 
 ```yaml
 llm:
-  draft_model: GPT-OSS-120B
-  refine_model: GPT-OSS-120B
+  draft_model: your-model
+  refine_model: your-model
   api_base: ${OPENAI_API_BASE}
   api_key_env: OPENAI_API_KEY
 ```
 
+All app state (the two SQLite DBs, your golden dataset, logs, ML artifacts) lives
+under `data/` (gitignored).
+
 ## Commands
 
 ```bash
-zotero-summarizer serve              # FastAPI server (browser UI)
-zotero-summarizer mcp                # MCP server over stdio
-zotero-summarizer migrate            # Init/migrate local SQLite stores
-zotero-summarizer smoke-test         # Verify package + app construction
+zotero-summarizer serve            # FastAPI server + browser UI
+zotero-summarizer migrate          # init/upgrade the local SQLite stores
+zotero-summarizer mcp              # MCP server over stdio (agent surface)
+zotero-summarizer smoke-test       # verify the app constructs
+
+# Feeds (optional daemon / one-shots)
+zotero-summarizer feeds list       # discover feed names + IDs
+zotero-summarizer feeds serve      # background daemon (auto-triage + daily pick)
+zotero-summarizer feeds run --feeds "Agents"   # one-shot: exhaust one feed
+zotero-summarizer feeds tick       # single tick (cron/launchd-friendly)
+
+# Ground-truth lifecycle
+zotero-summarizer goldenset export # write data/zotero-summarizer-golden.csv
+zotero-summarizer goldenset train  # (re)train the relevance gate on your labels
 ```
 
-Feed processor (primary workflow — runs in the background):
+## Safety model
+
+Triage never writes directly to Zotero. It queues pending tag/note/collection
+changes; you review and explicitly apply or reject them in the UI. Applying takes a
+Zotero SQLite backup first.
+
+## Development
 
 ```bash
-zotero-summarizer feeds list                              # Discover feed names and IDs
-zotero-summarizer feeds serve                             # Long-running background daemon
-zotero-summarizer feeds serve --model qwen3:8b            # Use a different model temporarily
-zotero-summarizer feeds run --feeds "Agents"              # One-shot: exhaust one feed by name
-zotero-summarizer feeds run --feeds 2 --model qwen3:8b   # One-shot by ID with model override
-zotero-summarizer feeds tick                              # Single tick (cron-friendly, no lock)
+pre-commit run --all-files                       # LOC / layering / README guardrails
+KMP_DUPLICATE_LIB_OK=TRUE pytest -q --forked     # backend tests (see ARCHITECTURE.md)
+cd frontend && npm run lint && npm test && npm run build
 ```
 
-Low-level server alternative:
-
-```bash
-uvicorn zotero_summarizer.api.app:app --host 127.0.0.1 --port 8000 --reload
-```
-
-## Web UI
-
-Single-page React app at `frontend/`, served by FastAPI at `/`. Primary tabs:
-
-- **Today (cull)** — your daily slate of feed papers, ranked, each card
-  tagged with its **bucket** + source **feed**. Make a binary, batch call:
-  tick papers and **Add to library** (materialize into the Zotero *Inbox*,
-  positive training signal) or **Trash** (negative signal). No fine label
-  here. If no papers are scored yet, Today **auto-runs a background triage**
-  of your feed backlog (via the `CUSTOM_*` SOTA provider) and fills in when
-  it finishes; if a window is empty it falls back to recent items so the tab
-  is never blank.
-- **Library → Read next (read)** — your *unread* library papers ranked by
-  model relevance (★ score + a one-line reason); already-read items (🧠/👀
-  emoji) hidden by default with a toggle. Click one to read + label it.
-- **Annotate** — set/override the fine `must`/`should`/`could`/`don't` label
-  on every golden-CSV / library / feed row. Your manual label always wins: it
-  drives the list badge and the priority filters, and survives a
-  Refresh-labels re-export. Keyboard: `j`/`k` to move, `1`/`2`/`3`/`4` to
-  label. A `🎯 border` filter surfaces the highest-information papers.
-- **Settings** — research goals, triage criteria, model config, plus
-  **Refresh labels** (re-export the golden CSV from Zotero) and **Retrain
-  model** (rebuild the gate on your current labels).
-
-Power tools (Library, Triage, Feed Review, Pending, Re-label Audit) live behind
-a "More" disclosure in the top navigation.
-
-Dev: `cd frontend && npm run dev` (port 5173, proxies `/api/*` to `:8000`).
-Build: `cd frontend && npm run build`.
-
-## Safety Model
-
-Triage never writes directly to Zotero. It creates pending tag, note, and collection changes. You review those changes in the UI, then explicitly apply or reject them. Apply creates a Zotero SQLite backup first.
-
-## Verify
-
-```bash
-.venv/bin/python -m pytest -q
-.venv/bin/python -m zotero_summarizer.cli smoke-test
-```
+Architecture, layering rules, and the mental model live in
+[docs/architecture.md](docs/architecture.md).

@@ -36,5 +36,5 @@ queues suggested Zotero changes for you to approve.
 ## More
 
 Subpackages each have their own README. Start with
-[docs/developer-guide.md](../docs/developer-guide.md) for the end-to-end mental
-model, then [docs/architecture.md](../docs/architecture.md) for detail.
+[docs/architecture.md](../docs/architecture.md) for the end-to-end mental model,
+then the [README](../README.md) for setup + usage.

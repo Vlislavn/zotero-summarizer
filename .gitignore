@@ -19,6 +19,10 @@ build/
 .env.*
 !.env.example
 
+# Personal config (research goals + mailto). Copy goals.example.yaml ->
+# goals.yaml and edit; the real file is never committed.
+goals.yaml
+
 # All app-generated state lives here: SQLite DBs, the personal golden-label
 # dataset, logs, and ML eval/run artifacts. Never commit. See settings.data_dir.
 data/

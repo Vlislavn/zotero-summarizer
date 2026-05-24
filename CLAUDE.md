@@ -1,8 +1,8 @@
 # CLAUDE.md — agent guide
 
 Local-first Zotero paper-triage app (FastAPI + SQLite + React). **Read
-[docs/developer-guide.md](docs/developer-guide.md) first** for the one-diagram
-mental model and where things live.
+[docs/architecture.md](docs/architecture.md) first** for the one-diagram
+mental model and where things live; the [README](README.md) covers setup + usage.
 
 ## Mental model (30s)
 
@@ -31,7 +31,7 @@ Each package has a `README.md` with an ASCII sketch — read it before editing.
 
 ## Workflow
 
-- Verify: `pre-commit run --all-files`, then `pytest -q --forked` (see the guide
-  re: the known macOS native-lib fork-crash — diff failures vs a baseline, don't
-  expect zero), and `cd frontend && npm run build` for UI changes.
+- Verify: `pre-commit run --all-files`, then `pytest -q --forked` (see
+  docs/architecture.md re: the known macOS native-lib fork-crash — diff failures
+  vs a baseline, don't expect zero), and `cd frontend && npm run build` for UI changes.
 - Don't commit unless asked. Keep changes minimal and within the layering.

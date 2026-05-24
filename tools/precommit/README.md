@@ -10,4 +10,4 @@ Stdlib-only scripts wired by `.pre-commit-config.yaml`. Run all:
 | `check_module_readme.py` | every package has a README; editing a package's code re-stages its README |
 | `loc_allowlist.txt` | grandfathered oversized files (path + frozen ceiling) — shrink to empty |
 
-See [docs/developer-guide.md](../../docs/developer-guide.md) for the rules in context.
+See [docs/architecture.md](../../docs/architecture.md) for the rules in context.
