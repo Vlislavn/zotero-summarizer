@@ -21,7 +21,7 @@ run_daemon_loop ─every N s→ run_daemon_tick (_tick)
 | `_triage.py` | abstract-only triage primitive + concurrent scoring + prestige re-score (accepts a `triage_llm` override — the backlog drain passes the optional `CUSTOM_*` provider) |
 | `_gate.py` | Phase 1.13 classifier gate, counterfactual audit, background retrain |
 | `_daily.py` | daily plateau selection, full-text refine, row→payload reconstruction |
-| `_tick.py` | one daemon tick — the orchestration (pick → gate → triage → persist) |
+| `_tick.py` | one daemon tick — pick → gate → triage → persist. Library dedup normalises DOIs (URL/prefix variants) and skips an item on a lookup error (never re-materialises a dupe); `allow_daily_selection` gates auto-materialization |
 | `_outcomes.py` | outcome detection: what the user did with a materialized item → feedback |
 | `_loop.py` | the long-running asyncio loop driving `run_daemon_tick` |
 

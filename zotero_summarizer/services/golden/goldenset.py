@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from zotero_summarizer.services import emoji_signals
-from zotero_summarizer.services._common import connect_sqlite_ro
+from zotero_summarizer.services._common import atomic_write, connect_sqlite_ro
 
 
 LOGGER = logging.getLogger(__name__)
@@ -90,9 +90,11 @@ def export_golden_dataset(
     if triage_db_path is not None:
         from zotero_summarizer.storage import repositories
 
+        # High cap (effectively uncapped): a low limit would silently drop
+        # manual verdicts from preserve_keys, losing them on the next re-export.
         preserve_keys = frozenset(
             str(r["item_key"])
-            for r in repositories.list_label_verdicts(triage_db_path, limit=5000)
+            for r in repositories.list_label_verdicts(triage_db_path, limit=1_000_000)
             if r.get("item_key")
         )
 
@@ -424,19 +426,27 @@ def _write_csv(
                 if key not in sample_keys and (":" in key or key in preserve_keys):
                     preserved.append({c: row.get(c, "") for c in fieldnames})
 
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for s in samples:
-            writer.writerow(asdict(s))
-        for r in preserved:
-            writer.writerow(r)
+    def _write(target: Path) -> None:
+        with target.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for s in samples:
+                writer.writerow(asdict(s))
+            for r in preserved:
+                writer.writerow(r)
+
+    # tmp + os.replace: a crash mid-write must never truncate the golden CSV
+    # (months of labels live here and the preserved rows are already in memory).
+    atomic_write(path, _write)
 
 
 def _write_jsonl(samples: list[GoldenSample], path: Path) -> None:
-    with path.open("w", encoding="utf-8") as f:
-        for s in samples:
-            f.write(json.dumps(asdict(s), ensure_ascii=False) + "\n")
+    def _write(target: Path) -> None:
+        with target.open("w", encoding="utf-8") as f:
+            for s in samples:
+                f.write(json.dumps(asdict(s), ensure_ascii=False) + "\n")
+
+    atomic_write(path, _write)
 
 
 def _class_distribution(samples: list[GoldenSample]) -> dict[str, int]:
@@ -459,9 +469,8 @@ def _strength_distribution(samples: list[GoldenSample]) -> dict[str, int]:
 # ---------------------------------------------------------------------------
 
 
-_PRIORITY_TO_RELEVANCE = {
-    "must_read": 5.0,
-    "should_read": 4.5,
-    "could_read": 3.0,        # weaker than zotero notes (4.0) — first glance only
-    "dont_read": 1.0,
-}
+# Single source of truth (domain). Re-exported under the legacy private name so
+# existing importers (services.library.review / review_summary) keep working.
+# Previously should_read was 4.5 here (the must_read boundary) — a silent bug
+# that trained review-appended should_read rows toward must_read.
+from zotero_summarizer.domain import PRIORITY_TO_RELEVANCE as _PRIORITY_TO_RELEVANCE  # noqa: E402

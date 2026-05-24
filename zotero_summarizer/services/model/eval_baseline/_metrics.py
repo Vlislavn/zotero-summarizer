@@ -12,19 +12,22 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from zotero_summarizer import domain
 
-# Quantile bin edges (inferred-relevance → priority class). Picked to mirror
-# the empirical distribution in goldenset (see plan & docs/feeds.md).
-PRIORITY_BIN_EDGES = (2.0, 3.5, 4.5)
+
+# Bin edges (inferred-relevance → priority class) come from the single source
+# in ``domain`` so eval mirrors exactly how labels are derived and predicted.
+PRIORITY_BIN_EDGES = (
+    domain.PRIORITY_COULD_READ_THRESHOLD,
+    domain.PRIORITY_SHOULD_READ_THRESHOLD,
+    domain.PRIORITY_MUST_READ_THRESHOLD,
+)
 PRIORITY_NAMES = ("dont_read", "could_read", "should_read", "must_read")
 
 
 def priority_from_continuous(score: float) -> str:
     """Map a continuous [1, 5] score onto the 4-class priority."""
-    for edge, name in zip(PRIORITY_BIN_EDGES, PRIORITY_NAMES[:-1]):
-        if score < edge:
-            return name
-    return PRIORITY_NAMES[-1]
+    return domain.score_to_priority(score)
 
 
 @dataclass

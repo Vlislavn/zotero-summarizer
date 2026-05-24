@@ -244,18 +244,19 @@ def _adaptive_4class_cutoffs(p: np.ndarray, t_keep: float) -> tuple[float, float
     """
     keep_probs = p[p >= t_keep]
     skip_probs = p[p < t_keep]
+    # With < 4 samples a quantile is meaningless. The old code used max(keep)/
+    # min(skip), which on a tiny fold collapsed must_t onto the single keep prob
+    # — forcing the lone keep item to must_read and making the should_read band
+    # data-unstable. Use a fixed offset (midpoint to the range bound) so the
+    # interior cutoffs stay a stable, non-empty band regardless of fold size.
     if len(keep_probs) >= 4:
         must_t = float(np.quantile(keep_probs, 0.75))
-    elif len(keep_probs) >= 1:
-        must_t = float(np.max(keep_probs))
     else:
-        must_t = float(t_keep)
+        must_t = float(t_keep + (1.0 - t_keep) / 2.0)
     if len(skip_probs) >= 4:
         could_t = float(np.quantile(skip_probs, 0.25))
-    elif len(skip_probs) >= 1:
-        could_t = float(np.min(skip_probs))
     else:
-        could_t = float(t_keep)
+        could_t = float(t_keep / 2.0)
     # Guard against the buckets collapsing into each other.
     must_t = max(must_t, t_keep)
     could_t = min(could_t, t_keep)

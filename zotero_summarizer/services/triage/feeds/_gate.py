@@ -16,12 +16,7 @@ from zotero_summarizer.services.triage.feeds._common import (
     get_state,
 )
 
-_PRIORITY_TO_RELEVANCE: dict[str, int] = {
-    "must_read": 5,
-    "should_read": 4,
-    "could_read": 3,
-    "dont_read": 1,
-}
+from zotero_summarizer.domain import PRIORITY_TO_RELEVANCE as _PRIORITY_TO_RELEVANCE  # noqa: E402
 
 
 def _synthesize_gate_only_candidate(item: dict[str, Any]) -> "TriagedCandidate":

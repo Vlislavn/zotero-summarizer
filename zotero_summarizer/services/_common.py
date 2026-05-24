@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -130,7 +130,22 @@ def safe_parse_response_json(raw: Any, context: str = "") -> dict[str, Any]:
 
 
 def clamp(value: float, low: float, high: float) -> float:
+    # NaN must never silently pass: `max(low, min(high, NaN))` returns `high`,
+    # which would make a NaN score the top-ranked item. Surface it instead so
+    # the bad upstream value (e.g. a malformed LLM number) fails loudly.
+    if value != value:
+        raise ValueError(f"clamp received NaN (low={low}, high={high})")
     return max(low, min(high, value))
+
+
+def atomic_write(path: Path, write: Callable[[Path], None]) -> None:
+    """Write via a temp file + ``os.replace`` so a crash/race can never leave a
+    half-written or truncated file at ``path`` (POSIX rename is atomic). Used for
+    irreplaceable artifacts like the golden CSV and the model joblib.
+    """
+    tmp_path = path.with_name(path.name + ".tmp")
+    write(tmp_path)
+    os.replace(tmp_path, path)
 
 
 def connect_sqlite_ro(db_path: Path, *, timeout: float = 5.0) -> sqlite3.Connection:

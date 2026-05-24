@@ -48,9 +48,27 @@ class ChangeStatus(str, Enum):
     FAILED = "failed"
 
 
+# Single source of truth for the continuous-score → 4-class boundaries.
+# These MUST match the bins used to *derive* labels from engagement
+# (services.emoji_signals.priority_for_score) — the regressor trains on a
+# continuous relevance target and is binned back with score_to_priority, so a
+# divergence silently mis-classifies every borderline paper. Bins:
+#   dont_read  < 2.0 <= could_read < 3.5 <= should_read < 4.5 <= must_read
 PRIORITY_MUST_READ_THRESHOLD = 4.5
-PRIORITY_SHOULD_READ_THRESHOLD = 3.6
-PRIORITY_COULD_READ_THRESHOLD = 2.6
+PRIORITY_SHOULD_READ_THRESHOLD = 3.5
+PRIORITY_COULD_READ_THRESHOLD = 2.0
+
+# Canonical class → continuous relevance value, used whenever a 4-class label
+# must be written as a regression target (user verdicts, review-appended rows,
+# gate-only synthesis). Each value MUST round-trip through score_to_priority
+# (e.g. should_read=4.0 → score_to_priority(4.0)=="should_read"); 4.5 would
+# silently land on the must_read boundary, so should_read is 4.0.
+PRIORITY_TO_RELEVANCE: dict[str, float] = {
+    ReadingPriority.MUST_READ.value: 5.0,
+    ReadingPriority.SHOULD_READ.value: 4.0,
+    ReadingPriority.COULD_READ.value: 3.0,
+    ReadingPriority.DONT_READ.value: 1.0,
+}
 
 
 # Training-row filter — Sprint 3+ (May 2026). Drop only `meta` (library
@@ -81,6 +99,25 @@ def is_training_eligible(row: dict[str, str]) -> bool:
     return True
 
 
+_DOI_PREFIXES = ("https://doi.org/", "http://doi.org/", "https://dx.doi.org/", "doi:")
+
+
+def normalize_doi(doi: str) -> str:
+    """Canonicalise a DOI to its bare, lower-cased form.
+
+    Strips the common URL/scheme prefixes and a trailing slash so that
+    ``https://doi.org/10.1/X``, ``doi:10.1/x`` and ``10.1/x`` all compare equal.
+    Single source of truth for DOI comparison (dedup, grouping). Returns "" for
+    empty/blank input.
+    """
+    value = (doi or "").strip().lower()
+    for prefix in _DOI_PREFIXES:
+        if value.startswith(prefix):
+            value = value[len(prefix):].strip()
+            break
+    return value.rstrip("/")
+
+
 def paper_group_id(row: dict[str, str]) -> str:
     """Stable per-paper identity for grouped cross-validation.
 
@@ -91,10 +128,7 @@ def paper_group_id(row: dict[str, str]) -> str:
     normalised title, else fall back to the row's own ``item_key`` so genuinely
     distinct rows are never merged into one group.
     """
-    doi = (row.get("doi") or "").strip().lower()
-    for prefix in ("https://doi.org/", "http://doi.org/", "doi:"):
-        if doi.startswith(prefix):
-            doi = doi[len(prefix):].strip()
+    doi = normalize_doi(row.get("doi") or "")
     if doi:
         return f"doi:{doi}"
     title = " ".join((row.get("title") or "").lower().split())
@@ -114,9 +148,9 @@ def score_to_priority(score: float) -> str:
     thresholds anywhere else.
 
     must_read   if score >= 4.5
-    should_read if 3.6 <= score < 4.5
-    could_read  if 2.6 <= score < 3.6
-    dont_read   if score < 2.6
+    should_read if 3.5 <= score < 4.5
+    could_read  if 2.0 <= score < 3.5
+    dont_read   if score < 2.0
     """
     if score >= PRIORITY_MUST_READ_THRESHOLD:
         return ReadingPriority.MUST_READ.value

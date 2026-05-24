@@ -17,9 +17,9 @@ golden CSV ─featurize→ SPECTER2 embeds + library/prestige features
 |---|---|
 | `classifier.py` | SPECTER2 classifier core: `cross_validate` + `predict_new_items` (re-exports the rest) |
 | `classifier_const.py` | constants + result types (`ClassifierReport`/`FeedPrediction`) |
-| `classifier_embed.py` · `classifier_features.py` · `classifier_fit.py` · `classifier_io.py` | embeddings · aux features · fit/calibration · CSV/metrics IO |
+| `classifier_embed.py` · `classifier_features.py` · `classifier_fit.py` · `classifier_io.py` | embeddings · aux features · fit/calibration (4-class cutoffs stay a stable band on tiny folds) · CSV/metrics IO |
 | `classifier_artifact.py` | the serialisable `TrainedClassifier` + SHAP attribution |
-| `classifier_training.py` | `train_and_save` / `save_trained` (run pipeline → joblib + JSON twin) |
+| `classifier_training.py` | `train_and_save` / `save_trained` (run pipeline → joblib + JSON twin, written atomically via tmp+replace) |
 | `classifier_persistence.py` | on-disk location, load, lazy retrain; re-exports the artifact/training API |
 | `llm_classifier.py` | LLM-as-classifier baseline (title+abstract → label); any OpenAI-compatible model, e.g. `--classifier-name llm_custom` |
 | `scoring.py` · `prestige.py` · `surprise.py` | composite score; OpenAlex prestige; serendipity |

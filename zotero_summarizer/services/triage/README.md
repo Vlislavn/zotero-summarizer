@@ -25,8 +25,8 @@ Zotero feedItems ─feeds.run_daemon_tick→ gate(model) ─reject──> droppe
 | `summarization.py` | the LLM summarize/refine pipeline (`run_pipeline`) |
 | `select.py` | plateau/elbow cutoff for daily materialization |
 | `daily_actions.py` | Today keep/trash → Zotero Inbox + training labels |
-| `triage_jobs.py` | background triage-job lifecycle (`/api/triage/run`) |
-| `triage_backlog.py` | single-thread drain of un-triaged feed backlog |
+| `triage_jobs.py` | background triage-job lifecycle (`/api/triage/run`); persists a snapshot copy so the DB-write thread never serialises a live-mutating job |
+| `triage_backlog.py` | single-thread drain of un-triaged feed backlog (`allow_daily_selection=False` — the UI button never auto-materialises into the Inbox) |
 | `daily_select/` | the role-allocated Today slate (see its README) |
 
 **Boundaries:** imports `model/` (gate), `zotero/` (pending), and shared

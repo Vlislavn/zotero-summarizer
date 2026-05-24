@@ -12,7 +12,7 @@ import numpy as np
 from zotero_summarizer.services.model import classifier
 from zotero_summarizer.services.model.classifier_artifact import DEFAULT_MODEL_DIR, TrainedClassifier
 from zotero_summarizer.services import run_log
-from zotero_summarizer.services._common import now_iso_z
+from zotero_summarizer.services._common import atomic_write, now_iso_z
 
 LOGGER = logging.getLogger(__name__)
 
@@ -228,14 +228,19 @@ def train_and_save(
 
 
 def save_trained(trained: TrainedClassifier, output_dir: Path) -> tuple[Path, Path]:
-    """Write the joblib payload + JSON metadata mirror."""
+    """Write the joblib payload + JSON metadata mirror (atomically)."""
     output_dir.mkdir(parents=True, exist_ok=True)
     joblib_path = output_dir / f"{trained.classifier_name}.joblib"
     json_path = output_dir / f"{trained.classifier_name}.json"
-    joblib.dump(trained, joblib_path)
-    json_path.write_text(
-        json.dumps(_serialisable_metadata(trained), indent=2, ensure_ascii=False),
-        encoding="utf-8",
+    # tmp + os.replace: a crash mid-dump must not leave a truncated .joblib that
+    # then fails to unpickle and bricks the gate on the next startup.
+    atomic_write(joblib_path, lambda target: joblib.dump(trained, target))
+    atomic_write(
+        json_path,
+        lambda target: target.write_text(
+            json.dumps(_serialisable_metadata(trained), indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        ),
     )
     return joblib_path, json_path
 

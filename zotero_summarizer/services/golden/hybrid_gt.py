@@ -45,12 +45,7 @@ SOURCE_USER = "user"
 # matching continuous score, else the model's target column stays at the
 # stale derivation. Mapping matches the canonical values produced by
 # `goldenset._infer_label` for hard veto / strong positive.
-_PRIORITY_TO_RELEVANCE = {
-    "must_read": 5.0,
-    "should_read": 4.0,
-    "could_read": 3.0,
-    "dont_read": 1.0,
-}
+from zotero_summarizer.domain import PRIORITY_TO_RELEVANCE as _PRIORITY_TO_RELEVANCE  # noqa: E402
 
 
 def load_user_verdicts(db_path: Path) -> dict[str, dict[str, Any]]:

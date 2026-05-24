@@ -13,7 +13,7 @@ golden rows ─_sampling→ stratified blind sample ─_session→ JSON (data/re
 
 | file | responsibility |
 |---|---|
-| `_constants.py` | priority↔score maps, age buckets, dataclasses (dependency-light) |
+| `_constants.py` | age buckets, dataclasses (dependency-light); `PRIORITY_TO_SCORE` re-exports `domain.PRIORITY_TO_RELEVANCE` (single source) |
 | `_sampling.py` | eligibility predicate + stratified sampling |
 | `_session.py` | session JSON I/O (create/resume/record) |
 | `_metrics.py` | κ / ICC / Pearson / Spearman over paired responses |

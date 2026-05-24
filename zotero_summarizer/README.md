@@ -28,7 +28,7 @@ queues suggested Zotero changes for you to approve.
 |---|---|
 | `cli/` | `zotero-summarizer` CLI: serve, mcp, migrate, feeds, goldenset/ML lifecycle |
 | `models/` | Pydantic request/response + config schemas (the API contract) |
-| `domain.py` | Pure constants/helpers: priorities, tags, score↔priority mapping |
+| `domain.py` | Pure constants/helpers — the single source for priority thresholds, `score_to_priority`/`PRIORITY_TO_RELEVANCE` (derivation == prediction), tags, and `normalize_doi` |
 | `contracts.py` | Small shared dataclasses (e.g. `Paper`, `PendingChange`) |
 | `settings.py` | `Settings.load()` — every path (incl. `data_dir`) derives from here |
 | `runtime.py` | `AppContext` + typed `RuntimeState` — how services reach runtime deps without FastAPI globals |

@@ -4,6 +4,8 @@ from __future__ import annotations
 import sqlite3  # noqa: F401  (type hints)
 from typing import Any  # noqa: F401
 
+from zotero_summarizer.domain import normalize_doi
+
 
 class ZoteroLookupMixin:
     def find_by_external_id(
@@ -26,23 +28,33 @@ class ZoteroLookupMixin:
                 return None
             user_lib_id = int(user_lib_row["libraryID"])
 
-            # DOI direct match (Zotero stores DOI in the DOI field)
+            # DOI match. Normalize to the bare form and match every common
+            # stored variant: the feed DOI may be `https://doi.org/10.x` while
+            # Zotero stores bare `10.x` (or vice-versa). Matching only the raw
+            # lower-cased string silently missed those, re-materializing dupes.
             if doi:
-                doi_norm = doi.strip().lower()
-                if doi_norm:
+                bare = normalize_doi(doi)
+                if bare:
+                    variants = [
+                        bare,
+                        f"doi:{bare}",
+                        f"https://doi.org/{bare}",
+                        f"http://doi.org/{bare}",
+                    ]
+                    placeholders = ",".join("?" for _ in variants)
                     row = conn.execute(
-                        """
+                        f"""
                         SELECT i.key FROM items i
                         JOIN itemData id ON id.itemID=i.itemID
                         JOIN fields f ON f.fieldID=id.fieldID
                         JOIN itemDataValues v ON v.valueID=id.valueID
                         LEFT JOIN deletedItems di ON di.itemID=i.itemID
                         WHERE i.libraryID=? AND f.fieldName='DOI'
-                          AND lower(v.value)=?
+                          AND lower(v.value) IN ({placeholders})
                           AND di.itemID IS NULL
                         LIMIT 1
                         """,
-                        (user_lib_id, doi_norm),
+                        (user_lib_id, *variants),
                     ).fetchone()
                     if row:
                         return str(row["key"])

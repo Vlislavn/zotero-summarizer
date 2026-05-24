@@ -274,7 +274,10 @@ def _get_conn() -> sqlite3.Connection:
         db_path.touch(mode=0o600)
     else:
         os.chmod(db_path, 0o600)
-    conn = sqlite3.connect(str(db_path), timeout=5)
+    # timeout=10 sets sqlite's busy_timeout to 10000 ms (Python maps the two),
+    # matching _connect_to so every writer waits the same for a held WAL lock
+    # under API + daemon contention before raising "database is locked".
+    conn = sqlite3.connect(str(db_path), timeout=10)
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA journal_mode=WAL")

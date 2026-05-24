@@ -27,4 +27,5 @@ services/ ─call→ storage/
 | `migrations.py` | `migrate_existing()` + `run_migrations()` — ordered, version-gated steps recorded in `schema_migrations`. Add a schema change as a new numbered `Migration`, never an inline ALTER. `repositories.apply_schema` is the v1 baseline. |
 
 **Boundaries:** must NOT import `services/` or `api/` (enforced). Connection
-hardening (WAL + busy_timeout + 0600) lives in `repositories._connect_to`.
+hardening (WAL + busy_timeout=10s + 0600) is consistent across `_get_conn` and
+`_connect_to` so every writer waits equally for a held lock.

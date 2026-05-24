@@ -11,13 +11,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 
+from zotero_summarizer.domain import PRIORITY_TO_RELEVANCE
+
 AUDIT_PRIORITY_NAMES = ("dont_read", "could_read", "should_read", "must_read")
-PRIORITY_TO_SCORE = {
-    "dont_read": 1.0,
-    "could_read": 3.0,
-    "should_read": 4.0,
-    "must_read": 5.0,
-}
+# Single source of truth (domain) — kept under the legacy name for importers.
+PRIORITY_TO_SCORE = dict(PRIORITY_TO_RELEVANCE)
 AGE_BUCKET_EDGES = (90, 180, 365, 730)  # days_since_added thresholds
 AGE_BUCKET_NAMES = ("90-180", "180-365", "365-730", ">730")
 DEFAULT_SAMPLE_SIZE = 100

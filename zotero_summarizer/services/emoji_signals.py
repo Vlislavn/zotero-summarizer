@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from zotero_summarizer import domain
+
 
 @dataclass(frozen=True)
 class EmojiSignal:
@@ -134,9 +136,12 @@ def decay_weight(days_since_added: int | float) -> float:
 
 # Additive scoring (Phase 1.14, user-confirmed 2026-05-14).
 NEUTRAL_SCORE: float = 3.0
-SCORE_DONT_READ_UPPER: float = 2.0      # < 2.0 → dont_read
-SCORE_COULD_READ_UPPER: float = 3.5     # 2.0..3.5 → could_read
-SCORE_SHOULD_READ_UPPER: float = 4.5    # 3.5..4.5 → should_read; ≥ 4.5 → must_read
+# Bin edges come from the single source in ``domain`` so engagement-score
+# derivation here and regressor-output binning (domain.score_to_priority) can
+# never silently diverge. Names kept for label_provenance's threshold display.
+SCORE_DONT_READ_UPPER: float = domain.PRIORITY_COULD_READ_THRESHOLD     # < this → dont_read
+SCORE_COULD_READ_UPPER: float = domain.PRIORITY_SHOULD_READ_THRESHOLD   # < this → could_read
+SCORE_SHOULD_READ_UPPER: float = domain.PRIORITY_MUST_READ_THRESHOLD    # < this → should_read; ≥ → must_read
 
 # Annotation increment: small positive contribution per annotation, capped.
 # 1 annotation alone is just a highlight (no priority bump above neutral).
@@ -171,14 +176,12 @@ def score_notes(count: int) -> float:
 
 
 def priority_for_score(score: float) -> str:
-    """Bin an aggregate engagement score into the 4-class reading priority."""
-    if score < SCORE_DONT_READ_UPPER:
-        return "dont_read"
-    if score < SCORE_COULD_READ_UPPER:
-        return "could_read"
-    if score < SCORE_SHOULD_READ_UPPER:
-        return "should_read"
-    return "must_read"
+    """Bin an aggregate engagement score into the 4-class reading priority.
+
+    Delegates to :func:`domain.score_to_priority` so the bins used to *derive*
+    labels are identical to the bins used to *predict* them.
+    """
+    return domain.score_to_priority(score)
 
 
 def strength_for_score(score: float, num_signals: int) -> str:

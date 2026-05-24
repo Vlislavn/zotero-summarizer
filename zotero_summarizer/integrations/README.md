@@ -11,7 +11,7 @@ services/ ─calls→ integrations/ ─talks to→  Zotero DB | PDFs | LLM API |
 | file | responsibility |
 |---|---|
 | `zotero_read.py` | `ZoteroReader`: connection/execute infra + collection helpers |
-| `_zotero_read_items.py` · `_zotero_read_lookup.py` · `_zotero_read_feeds.py` | reader query mixins (items/detail · find/membership/tags · feeds) |
+| `_zotero_read_items.py` · `_zotero_read_lookup.py` · `_zotero_read_feeds.py` | reader query mixins (items/detail · find/membership/tags — DOI dedup matches all `domain.normalize_doi` variants · feeds) |
 | `_zotero_read_common.py` | `ZoteroReadError` + arXiv/sanitize helpers (leaf) |
 | `zotero_write.py` | `ZoteroWriter`: backup + the apply-changes dispatcher |
 | `_zotero_write_items.py` · `_zotero_write_tags.py` · `_zotero_write_collections.py` | writer mixins (item creation/materialization · tag/note + helpers · collections) |

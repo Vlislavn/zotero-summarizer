@@ -115,6 +115,7 @@ def run_daemon_tick(
     feed_library_ids: list[int] | None = None,
     batch_size: int | None = None,
     force_daily_selection: bool = False,
+    allow_daily_selection: bool = True,
     dry_run: bool = False,
     review_mode: bool = False,
     gate_only: bool = False,
@@ -210,8 +211,16 @@ def run_daemon_tick(
                 continue
             try:
                 existing = reader.find_by_external_id(doi=doi or None, arxiv_id=arxiv or None)
-            except Exception:
-                existing = None
+            except Exception as exc:  # noqa: BLE001 — external Zotero-read boundary
+                # A failed dedup LOOKUP must NOT be read as "not in library":
+                # doing so would re-materialize a paper that already exists as a
+                # duplicate. Skip the item this tick; it stays unprocessed and is
+                # retried next tick once the read succeeds.
+                LOGGER.warning(
+                    "[%s] dedup lookup failed for %r; skipping this tick: %s",
+                    tick_id, (item.get("title") or "")[:60], exc,
+                )
+                continue
             if existing:
                 LOGGER.info(
                     "[%s] skip dedup: %r (already in library)",
@@ -382,7 +391,7 @@ def run_daemon_tick(
     daily_ran = False
     daily_materialized = 0
     daily_rejected = 0
-    if not review_mode and (force_daily_selection or _should_run_daily_selection(feeds_cfg)):
+    if not review_mode and allow_daily_selection and (force_daily_selection or _should_run_daily_selection(feeds_cfg)):
         try:
             # When force_daily_selection is True (feeds run) and feed_library_ids
             # is set, scope the candidate pool to those feeds so the user sees

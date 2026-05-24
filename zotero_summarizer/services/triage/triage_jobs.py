@@ -61,6 +61,21 @@ def _effective_concurrency(total_remaining: int) -> int:
     return max(1, min(int(configured), total_remaining if total_remaining else 1))
 
 
+def _job_snapshot(job: dict[str, Any]) -> dict[str, Any]:
+    """Shallow copy with the mutable lists copied.
+
+    The job dict is mutated on the event loop (worker is a coroutine), but
+    ``upsert_triage_job`` runs in a worker thread via ``to_thread`` and
+    serialises those lists. Handing it a snapshot guarantees the thread never
+    iterates a list the event loop could mutate at an await boundary.
+    """
+    snap = dict(job)
+    snap["results"] = list(job.get("results") or [])
+    snap["errors"] = list(job.get("errors") or [])
+    snap["item_keys"] = list(job.get("item_keys") or [])
+    return snap
+
+
 def trim_job_cache(jobs: dict[str, dict[str, Any]], keep: int = 20) -> None:
     if len(jobs) <= keep:
         return
@@ -118,7 +133,7 @@ async def run_triage_job_worker(job_id: str, item_keys: list[str], queue_changes
     if str(job.get("status") or "") != "cancelled":
         job["status"] = "running"
     job["updated_at"] = now_iso()
-    await asyncio.to_thread(triage_db.upsert_triage_job, job)
+    await asyncio.to_thread(triage_db.upsert_triage_job, _job_snapshot(job))
 
     reader = None
 
@@ -228,7 +243,7 @@ async def run_triage_job_worker(job_id: str, item_keys: list[str], queue_changes
                 job["current_item_key"] = item_key
                 job["current_title"] = str(outcome.get("title") or "")
                 job["updated_at"] = now_iso()
-                await asyncio.to_thread(triage_db.upsert_triage_job, job)
+                await asyncio.to_thread(triage_db.upsert_triage_job, _job_snapshot(job))
 
         if str(job.get("status") or "") == "running":
             job["status"] = "failed" if job.get("errors") else "completed"
@@ -247,7 +262,7 @@ async def run_triage_job_worker(job_id: str, item_keys: list[str], queue_changes
         job["current_item_key"] = ""
         job["current_title"] = ""
         job["updated_at"] = now_iso()
-        await asyncio.to_thread(triage_db.upsert_triage_job, job)
+        await asyncio.to_thread(triage_db.upsert_triage_job, _job_snapshot(job))
 
 
 async def run_triage_job(req: TriageRunRequest) -> TriageRunResponse:
@@ -280,7 +295,7 @@ async def run_triage_job(req: TriageRunRequest) -> TriageRunResponse:
         job_id = str(job["job_id"])
         app_state.triage_jobs[job_id] = job
         trim_job_cache(app_state.triage_jobs)
-        await asyncio.to_thread(triage_db.upsert_triage_job, job)
+        await asyncio.to_thread(triage_db.upsert_triage_job, _job_snapshot(job))
         asyncio.create_task(run_triage_job_worker(job_id, req.item_keys, req.queue_changes))
         return TriageRunResponse(job_id=job_id, status="running", total=len(req.item_keys))
 
@@ -352,7 +367,7 @@ async def cancel_triage_job(job_id: str) -> dict[str, Any]:
 
     job["status"] = "cancelled"
     job["updated_at"] = now_iso()
-    await asyncio.to_thread(triage_db.upsert_triage_job, job)
+    await asyncio.to_thread(triage_db.upsert_triage_job, _job_snapshot(job))
     LOGGER.info(
         "Cancel requested for triage job %s at %s/%s",
         job_id,

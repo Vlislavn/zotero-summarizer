@@ -161,7 +161,10 @@ def _drain_worker(model: str) -> None:
         for _ in range(_MAX_TICKS):
             report = feeds.run_daemon_tick(
                 batch_size=_BATCH_SIZE,
-                review_mode=False,        # writes triaged_pending (slate needs it)
+                review_mode=False,           # writes triaged_pending (slate needs it)
+                allow_daily_selection=False,  # the UI button must not auto-materialize
+                                              # papers into the Inbox — the user picks
+                                              # on Today. Only the daemon auto-selects.
                 triage_llm=triage_llm,
             )
             _accumulate(report)

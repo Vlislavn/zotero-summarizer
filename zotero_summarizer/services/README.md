@@ -21,7 +21,9 @@ small set of shared/infra files at the top level.
 | `library/` | Stage-2 reading: reading queue, deep/quality review, feed review |
 | `zotero/` | write path: pending changes, note rendering, Zotero read helpers |
 
-Shared files: `_common` (helpers: settings/logging/sqlite-ro/now_iso_z/html_to_text),
+Shared files: `_common` (helpers: settings/logging/sqlite-ro/now_iso_z/html_to_text,
+`atomic_write` for tmp+replace artifact writes, NaN-rejecting `clamp`; `emoji_signals`
+bins via `domain` so label derivation == prediction),
 `_adapters` (build LLM/PDF; `build_triage_llm` targets the optional `CUSTOM_*`
 provider), `lifecycle` (startup composition root — small `_init_*` builders wire
 each singleton onto `RuntimeState`), `run_log`, `config`,
