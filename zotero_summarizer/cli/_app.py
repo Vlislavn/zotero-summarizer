@@ -10,8 +10,11 @@ from zotero_summarizer.storage.migrations import migrate_existing
 def _serve(args: argparse.Namespace) -> int:
     import uvicorn
 
+    # factory=True so the app is built when uvicorn starts (and on each reload),
+    # not as an import-time side effect of api.app.
     uvicorn.run(
-        "zotero_summarizer.api.app:app",
+        "zotero_summarizer.api.app:create_app",
+        factory=True,
         host=args.host,
         port=args.port,
         reload=args.reload,

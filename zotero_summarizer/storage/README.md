@@ -14,16 +14,17 @@ services/ ─call→ storage/
 
 | file | responsibility |
 |---|---|
-| `repositories.py` | triage-DB core: `DB_PATH`, schema, connection hardening, shared query helpers (re-exports the `_repo_*` groups below) |
+| `repositories.py` | triage-DB core: `DB_PATH` (set once at startup) + `with_db_path()`/`TriageRepository` for a concurrency-safe per-context override, schema, connection hardening, shared query helpers (re-exports the `_repo_*` groups below) |
 | `_repo_results.py` · `_repo_jobs.py` | batch/result rows + queries · triage-job upserts/listing |
 | `_repo_pending.py` · `_repo_feedback.py` | pending-change queue · feedback signals |
 | `_repo_verdicts.py` · `_repo_labels.py` | role-value + weekly-A/B verdicts · label verdicts |
+| `rows.py` | typed row models for the read boundary — `from_row` fails loud on schema drift, `to_dict` keeps the legacy contract. First adopter: `_repo_pending`. Add a model + route its reader to type more tables. |
 | `corpus.py` | `EmbeddingCache` — embeddings/upserts + the math helpers |
 | `corpus_read.py` · `corpus_types.py` | `EmbeddingCache` read/match methods (mixin) · shared value types |
 | `feeds.py` | facade for `processed_feed_items`: schema + decision/materialization writes (re-exports below) |
 | `feeds_history.py` | selection + outcome/history queries (re-exported by `feeds`) |
 | `feeds_schema.py` · `feeds_constants.py` · `feeds_lookup.py` | schema / decision+outcome enums / single-row lookups |
-| `migrations.py` | `migrate_existing()` — idempotent schema init/upgrade |
+| `migrations.py` | `migrate_existing()` + `run_migrations()` — ordered, version-gated steps recorded in `schema_migrations`. Add a schema change as a new numbered `Migration`, never an inline ALTER. `repositories.apply_schema` is the v1 baseline. |
 
 **Boundaries:** must NOT import `services/` or `api/` (enforced). Connection
 hardening (WAL + busy_timeout + 0600) lives in `repositories._connect_to`.

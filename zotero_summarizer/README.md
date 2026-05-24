@@ -31,7 +31,7 @@ queues suggested Zotero changes for you to approve.
 | `domain.py` | Pure constants/helpers: priorities, tags, score↔priority mapping |
 | `contracts.py` | Small shared dataclasses (e.g. `Paper`, `PendingChange`) |
 | `settings.py` | `Settings.load()` — every path (incl. `data_dir`) derives from here |
-| `runtime.py` | `AppContext` — how services reach runtime deps without FastAPI globals |
+| `runtime.py` | `AppContext` + typed `RuntimeState` — how services reach runtime deps without FastAPI globals |
 
 ## More
 

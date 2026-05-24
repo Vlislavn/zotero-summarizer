@@ -19,7 +19,7 @@ main() = build_parser().parse_args(argv).func(args)
 | `__init__.py` | `build_parser()` + `main()` (the entry point `zotero-summarizer`) |
 | `__main__.py` | enables `python -m zotero_summarizer.cli` |
 | `_helpers.py` | shared CLI helpers: feed-id resolution, the feeds lock, run-log writing, slugs |
-| `_app.py` | `serve` / `mcp` / `migrate` / `smoke-test` |
+| `_app.py` | `serve` (uvicorn `api.app:create_app`, `factory=True`) / `mcp` / `migrate` / `smoke-test` |
 | `_feeds.py` | the `feeds` subcommands (drive the RSS daemon) |
 | `_goldenset.py` | golden-set export + ML lifecycle (train/eval/tune/suggest) + group wiring |
 | `_goldenset_classify.py` · `_goldenset_predict.py` | the heavier classify/predict/analyze commands |

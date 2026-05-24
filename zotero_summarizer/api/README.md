@@ -13,7 +13,7 @@ errors.py  ── APIError -> uniform JSON error body + handlers
 
 | file | responsibility |
 |---|---|
-| `app.py` | `create_app()` / `app` — wiring, SPA mount, exception handlers, lifespan |
+| `app.py` | `create_app()` factory — wiring, SPA mount, exception handlers, lifespan (no import-time app; uvicorn uses `app:create_app` with `factory=True`) |
 | `errors.py` | `APIError` + the canonical error schema and FastAPI handlers |
 | `routes/` | one module per resource (see routes/README.md) |
 

@@ -79,6 +79,3 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     include_routes(app)
     _install_spa(app)
     return app
-
-
-app = create_app()

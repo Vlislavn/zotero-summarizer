@@ -2,56 +2,80 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 import sqlite3
+from contextvars import ContextVar
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from zotero_summarizer.domain import ChangeStatus, EXPLICIT_FEEDBACK_SIGNALS, READING_PRIORITY_SORT_RANK
-from zotero_summarizer.settings import Settings
+from zotero_summarizer.settings import default_project_root
 
 LOGGER = logging.getLogger("zotero_summarizer.db")
-DB_PATH = Settings.load().triage_db_path
+
+# The triage DB path. Resolved cheaply at import (no .env read) and overwritten
+# once by ``lifecycle.startup`` / ``migrations`` with the real Settings value;
+# tests monkeypatch it. It is set once at startup and only read concurrently
+# thereafter, so plain reads from the feed daemon / API threads are safe.
+DB_PATH = default_project_root() / "data" / "triage_history.db"
+
+# Per-context path override. Used by ``TriageRepository`` and ``with_db_path`` to
+# point the no-arg ``_get_conn`` at a different DB *without* mutating the module
+# global. A ``ContextVar`` is isolated per thread and per asyncio task, so the
+# feed daemon, API worker threads, and triage tasks never clobber each other's
+# override (the old save/restore-on-a-global approach was racy).
+_DB_PATH_OVERRIDE: ContextVar[Path | None] = ContextVar("triage_db_path_override", default=None)
+
+
+def _resolve_db_path() -> Path:
+    return _DB_PATH_OVERRIDE.get() or DB_PATH
+
+
+@contextlib.contextmanager
+def with_db_path(db_path: Path) -> Iterator[None]:
+    """Scope all no-arg connections in this thread/task to *db_path*."""
+    token = _DB_PATH_OVERRIDE.set(db_path)
+    try:
+        yield
+    finally:
+        _DB_PATH_OVERRIDE.reset(token)
 
 
 class TriageRepository:
-    """Small object-oriented facade over the SQLite triage store.
+    """Object-oriented facade over the SQLite triage store.
 
-    The module-level function API remains for transition support, but services should
-    depend on this facade so storage can be injected in tests.
+    The module-level function API remains, but services/tests can depend on this
+    facade to bind storage to a specific DB path. The binding is applied through
+    a ``ContextVar`` (see :func:`with_db_path`), so it is concurrency-safe.
     """
 
     def __init__(self, db_path: Path | None = None) -> None:
         self.db_path = db_path or DB_PATH
 
-    def _with_db_path(self, fn, *args: Any, **kwargs: Any):
-        global DB_PATH
-        previous = DB_PATH
-        DB_PATH = self.db_path
-        try:
+    def _scoped(self, fn, *args: Any, **kwargs: Any):
+        with with_db_path(self.db_path):
             return fn(*args, **kwargs)
-        finally:
-            DB_PATH = previous
 
     def init(self) -> None:
-        self._with_db_path(init_db)
+        self._scoped(init_db)
 
     def insert_result(self, *args: Any, **kwargs: Any) -> None:
-        self._with_db_path(insert_result, *args, **kwargs)
+        self._scoped(insert_result, *args, **kwargs)
 
     def get_result_by_item_id(self, item_id: str, batch_id: str | None = None) -> dict[str, Any] | None:
-        return self._with_db_path(get_result_by_item_id, item_id, batch_id)
+        return self._scoped(get_result_by_item_id, item_id, batch_id)
 
     def insert_pending_changes(self, item_key: str, item_title: str, changes: list[dict[str, Any]]) -> int:
-        return self._with_db_path(insert_pending_changes, item_key, item_title, changes)
+        return self._scoped(insert_pending_changes, item_key, item_title, changes)
 
     def get_pending_changes(self, status: str | None = ChangeStatus.PENDING.value, limit: int = 500) -> list[dict[str, Any]]:
-        return self._with_db_path(get_pending_changes, status, limit)
+        return self._scoped(get_pending_changes, status, limit)
 
     def get_pending_changes_by_ids(self, change_ids: list[int], status: str | None = None) -> list[dict[str, Any]]:
-        return self._with_db_path(get_pending_changes_by_ids, change_ids, status)
+        return self._scoped(get_pending_changes_by_ids, change_ids, status)
 
     def set_pending_changes_status(
         self,
@@ -59,20 +83,21 @@ class TriageRepository:
         status: str,
         error_message: str | None = None,
     ) -> int:
-        return self._with_db_path(set_pending_changes_status, change_ids, status, error_message)
+        return self._scoped(set_pending_changes_status, change_ids, status, error_message)
 
     def upsert_triage_job(self, job: dict[str, Any]) -> None:
-        self._with_db_path(upsert_triage_job, job)
+        self._scoped(upsert_triage_job, job)
 
     def get_triage_job(self, job_id: str) -> dict[str, Any] | None:
-        return self._with_db_path(get_triage_job, job_id)
+        return self._scoped(get_triage_job, job_id)
 
     def list_triage_jobs(
         self,
         limit: int = 20,
         statuses: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        return self._with_db_path(list_triage_jobs, limit, statuses)
+        return self._scoped(list_triage_jobs, limit, statuses)
+
 
 _CREATE_BATCH_TABLE = """
 CREATE TABLE IF NOT EXISTS batch_runs (
@@ -243,12 +268,13 @@ _ALLOWED_SORT = {
 
 
 def _get_conn() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if not DB_PATH.exists():
-        DB_PATH.touch(mode=0o600)
+    db_path = _resolve_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    if not db_path.exists():
+        db_path.touch(mode=0o600)
     else:
-        os.chmod(DB_PATH, 0o600)
-    conn = sqlite3.connect(str(DB_PATH), timeout=5)
+        os.chmod(db_path, 0o600)
+    conn = sqlite3.connect(str(db_path), timeout=5)
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA journal_mode=WAL")
@@ -262,77 +288,81 @@ def _get_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
     return {row[1] for row in rows}
 
 
-def init_db() -> None:
-    """Create or migrate storage schema to support batch history."""
+def apply_schema(conn: sqlite3.Connection) -> None:
+    """Create/upgrade the full triage schema on *conn* (no commit).
+
+    This is the baseline-schema step (migration v1, see ``storage.migrations``).
+    It is idempotent — every ``CREATE TABLE IF NOT EXISTS`` / column-presence
+    ``ALTER`` converges to the same shape on a fresh or existing DB — so it is
+    safe to re-run on every startup via :func:`init_db`. New schema changes go
+    in a *new* numbered migration step, not as more inline ALTERs here.
+    """
     from zotero_summarizer.storage import feeds as feeds_storage
 
+    conn.execute(_CREATE_BATCH_TABLE)
+    conn.execute(_CREATE_RESULTS_TABLE)
+    conn.execute(_CREATE_FEEDBACK_TABLE)
+    conn.execute(_CREATE_PENDING_CHANGES_TABLE)
+    conn.execute(_CREATE_TRIAGE_JOBS_TABLE)
+    conn.execute(_CREATE_TRIAGE_DIMENSION_OVERRIDES_TABLE)
+    conn.execute(_CREATE_ROLE_VALUE_VERDICTS_TABLE)
+    conn.execute(_CREATE_WEEKLY_AB_VERDICTS_TABLE)
+    conn.execute(_CREATE_LABEL_VERDICTS_TABLE)
+    feeds_storage.init_feeds_schema(conn)
+
+    columns = _get_columns(conn, "triage_results")
+    if "batch_id" not in columns:
+        conn.execute("ALTER TABLE triage_results ADD COLUMN batch_id TEXT")
+    if "pdf_path" not in columns:
+        conn.execute("ALTER TABLE triage_results ADD COLUMN pdf_path TEXT")
+    if "prestige_score" not in columns:
+        conn.execute("ALTER TABLE triage_results ADD COLUMN prestige_score REAL DEFAULT NULL")
+
+    triage_job_columns = _get_columns(conn, "triage_jobs")
+    if "queue_changes" not in triage_job_columns:
+        conn.execute("ALTER TABLE triage_jobs ADD COLUMN queue_changes INTEGER NOT NULL DEFAULT 1")
+    if "item_keys_json" not in triage_job_columns:
+        conn.execute("ALTER TABLE triage_jobs ADD COLUMN item_keys_json TEXT NOT NULL DEFAULT '[]'")
+    if "results_json" not in triage_job_columns:
+        conn.execute("ALTER TABLE triage_jobs ADD COLUMN results_json TEXT NOT NULL DEFAULT '[]'")
+    if "errors_json" not in triage_job_columns:
+        conn.execute("ALTER TABLE triage_jobs ADD COLUMN errors_json TEXT NOT NULL DEFAULT '[]'")
+
+    triage_override_columns = _get_columns(conn, "triage_dimension_overrides")
+    override_column_defs = {
+        "item_id": "TEXT NOT NULL DEFAULT ''",
+        "result_row_id": "INTEGER",
+        "original_dimensions_json": "TEXT NOT NULL DEFAULT '{}'",
+        "override_dimensions_json": "TEXT NOT NULL DEFAULT '{}'",
+        "merged_dimensions_json": "TEXT NOT NULL DEFAULT '{}'",
+        "corpus_affinity": "REAL NOT NULL DEFAULT 0",
+        "original_composite_score": "REAL",
+        "new_composite_score": "REAL NOT NULL DEFAULT 0",
+        "original_priority": "TEXT",
+        "new_priority": "TEXT NOT NULL DEFAULT ''",
+        "created_at": "TEXT DEFAULT (datetime('now'))",
+    }
+    for column_name, column_sql in override_column_defs.items():
+        if column_name not in triage_override_columns:
+            conn.execute(
+                f"ALTER TABLE triage_dimension_overrides ADD COLUMN {column_name} {column_sql}"
+            )
+
+    # Drop legacy unique index so repeated processing across batches is preserved.
+    conn.execute("DROP INDEX IF EXISTS idx_item_id")
+    for statement in _INDEX_STATEMENTS:
+        conn.execute(statement)
+
+
+def init_db() -> None:
+    """Ensure the triage schema exists on the active DB (idempotent startup path)."""
     conn = _get_conn()
     try:
-        conn.execute(_CREATE_BATCH_TABLE)
-        conn.execute(_CREATE_RESULTS_TABLE)
-        conn.execute(_CREATE_FEEDBACK_TABLE)
-        conn.execute(_CREATE_PENDING_CHANGES_TABLE)
-        conn.execute(_CREATE_TRIAGE_JOBS_TABLE)
-        conn.execute(_CREATE_TRIAGE_DIMENSION_OVERRIDES_TABLE)
-        conn.execute(_CREATE_ROLE_VALUE_VERDICTS_TABLE)
-        conn.execute(_CREATE_WEEKLY_AB_VERDICTS_TABLE)
-        conn.execute(_CREATE_LABEL_VERDICTS_TABLE)
-        feeds_storage.init_feeds_schema(conn)
-
-        columns = _get_columns(conn, "triage_results")
-        if "batch_id" not in columns:
-            conn.execute("ALTER TABLE triage_results ADD COLUMN batch_id TEXT")
-        if "pdf_path" not in columns:
-            conn.execute("ALTER TABLE triage_results ADD COLUMN pdf_path TEXT")
-        if "prestige_score" not in columns:
-            conn.execute("ALTER TABLE triage_results ADD COLUMN prestige_score REAL DEFAULT NULL")
-
-        triage_job_columns = _get_columns(conn, "triage_jobs")
-        if "queue_changes" not in triage_job_columns:
-            conn.execute("ALTER TABLE triage_jobs ADD COLUMN queue_changes INTEGER NOT NULL DEFAULT 1")
-        if "item_keys_json" not in triage_job_columns:
-            conn.execute("ALTER TABLE triage_jobs ADD COLUMN item_keys_json TEXT NOT NULL DEFAULT '[]'")
-        if "results_json" not in triage_job_columns:
-            conn.execute("ALTER TABLE triage_jobs ADD COLUMN results_json TEXT NOT NULL DEFAULT '[]'")
-        if "errors_json" not in triage_job_columns:
-            conn.execute("ALTER TABLE triage_jobs ADD COLUMN errors_json TEXT NOT NULL DEFAULT '[]'")
-
-        triage_override_columns = _get_columns(conn, "triage_dimension_overrides")
-        override_column_defs = {
-            "item_id": "TEXT NOT NULL DEFAULT ''",
-            "result_row_id": "INTEGER",
-            "original_dimensions_json": "TEXT NOT NULL DEFAULT '{}'",
-            "override_dimensions_json": "TEXT NOT NULL DEFAULT '{}'",
-            "merged_dimensions_json": "TEXT NOT NULL DEFAULT '{}'",
-            "corpus_affinity": "REAL NOT NULL DEFAULT 0",
-            "original_composite_score": "REAL",
-            "new_composite_score": "REAL NOT NULL DEFAULT 0",
-            "original_priority": "TEXT",
-            "new_priority": "TEXT NOT NULL DEFAULT ''",
-            "created_at": "TEXT DEFAULT (datetime('now'))",
-        }
-        for column_name, column_sql in override_column_defs.items():
-            if column_name not in triage_override_columns:
-                conn.execute(
-                    f"ALTER TABLE triage_dimension_overrides ADD COLUMN {column_name} {column_sql}"
-                )
-
-        # Drop legacy unique index so repeated processing across batches is preserved.
-        conn.execute("DROP INDEX IF EXISTS idx_item_id")
-        for statement in _INDEX_STATEMENTS:
-            conn.execute(statement)
+        apply_schema(conn)
         conn.commit()
     finally:
         conn.close()
-    LOGGER.info("Database initialized at %s", DB_PATH)
-
-
-
-
-
-
-
-
+    LOGGER.info("Database initialized at %s", _resolve_db_path())
 
 
 def _normalize_order(order: str) -> str:
@@ -372,52 +402,6 @@ def _json_to_list(raw_value: Any) -> list[Any]:
     return []
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # ---------------------------------------------------------------------------
 # Phase 1.17 — role-value verdicts + weekly A/B (Steps 2 and 4)
 # ---------------------------------------------------------------------------
@@ -446,18 +430,6 @@ def _connect_to(db_path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA busy_timeout=10000")
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 # ---------------------------------------------------------------------------

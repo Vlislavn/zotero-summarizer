@@ -22,6 +22,13 @@ from zotero_summarizer.storage.repositories import (  # noqa: F401
     _rows_to_dicts,
     _sort_expression,
 )
+from zotero_summarizer.storage.rows import PendingChangeRow
+
+
+def _pending_rows(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
+    """Validate each row against the typed model (fail-loud on schema drift),
+    then emit the legacy dict shape so callers are unchanged."""
+    return [PendingChangeRow.from_row(dict(row)).to_dict() for row in rows]
 
 
 def insert_pending_changes(item_key: str, item_title: str, changes: list[dict[str, Any]]) -> int:
@@ -88,7 +95,7 @@ def get_pending_changes(status: str | None = ChangeStatus.PENDING.value, limit: 
                 """,
                 (safe_limit,),
             ).fetchall()
-        return _rows_to_dicts(rows)
+        return _pending_rows(rows)
     finally:
         conn.close()
 
@@ -135,7 +142,7 @@ def get_pending_changes_by_ids(change_ids: list[int], status: str | None = None)
                 """,
                 normalized,
             ).fetchall()
-        return _rows_to_dicts(rows)
+        return _pending_rows(rows)
     finally:
         conn.close()
 

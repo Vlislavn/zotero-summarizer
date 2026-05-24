@@ -1,30 +1,7 @@
 // Thin fetch wrappers for the /api/triage/* and /api/calibration/* endpoints.
-// Mirrors the Alpine code in zotero_summarizer/web/ui.html (triage tab).
+// Shared request() lives in ./client (extract the rest of api/*.js the same way).
 
-async function request(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-    ...options,
-  });
-  const text = await res.text();
-  let data = null;
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = { _raw: text };
-    }
-  }
-  if (!res.ok) {
-    const message = (data && (data.message || data.detail))
-      || `HTTP ${res.status} ${res.statusText}`;
-    const err = new Error(message);
-    err.status = res.status;
-    err.body = data;
-    throw err;
-  }
-  return data;
-}
+import { request } from './client';
 
 /** GET /api/triage/jobs — recent jobs list. */
 export async function fetchJobs() {
