@@ -147,7 +147,7 @@ def run_abstract_pipeline(
     are fast-rejected before any LLM call, exactly as in `run_pipeline`.
 
     ``llm_override`` lets a caller (e.g. the backlog-triage job) score with a
-    different provider — the whole-backlog drain uses api.kather.ai ``sota``
+    different provider — the whole-backlog drain uses the custom ``sota``
     — without mutating the global ``app_state.llm_refine`` used by all other
     requests. ``None`` keeps the default refine client.
     """

@@ -101,8 +101,8 @@ PDF_ROOT=/Users/you/Zotero/storage
 ZOTERO_DATA_DIR=/Users/you/Zotero
 
 # Optional second provider for the Today "Triage backlog" drain (a stronger
-# model for the freshest papers). Leave unset to skip that button.
-CUSTOM_BASE_URL=https://api.kather.ai/v1
+# model for the freshest papers). Any OpenAI-compatible endpoint; unset to skip.
+CUSTOM_BASE_URL=https://your-provider.example/v1
 CUSTOM_API_KEY=...
 ```
 

@@ -305,14 +305,14 @@ async def _record_role_verdict(item_key: str, body: RoleVerdictRequest) -> dict[
 
 
 # ---------------------------------------------------------------------------
-# Backlog triage (drain the un-triaged feed backlog via api.kather.ai sota)
+# Backlog triage (drain the un-triaged feed backlog via the custom SOTA provider)
 # ---------------------------------------------------------------------------
 
 
 async def trigger_triage_backlog() -> dict[str, Any]:
     """Start a background drain of the un-triaged feed backlog.
 
-    Scoring uses the kather ``sota`` model (gate fast-rejects the obvious
+    Scoring uses the custom ``sota`` provider (gate fast-rejects the obvious
     non-matches for free first). Returns immediately; the client polls
     ``GET /api/daily/triage-status``. If a drain is already running, this
     is a no-op that reports the in-flight status.

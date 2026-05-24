@@ -11,7 +11,8 @@ Zotero feedItems ─feeds.run_daemon_tick→ gate(model) ─reject──> droppe
    daily_select/          : Today's role-mixed slate (model+surprise+diversity)
    daily_actions          : Today "Add to library" / "Trash" (write labels)
    triage_jobs            : on-demand library triage jobs
-   triage_backlog         : drain the un-triaged backlog with the SOTA model
+   triage_backlog         : drain the un-triaged backlog with the optional
+                            custom (CUSTOM_*) SOTA provider
 ```
 
 | file | responsibility |

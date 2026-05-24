@@ -1,14 +1,14 @@
-"""Background drain of the un-triaged feed backlog via api.kather.ai ``sota``.
+"""Background drain of the un-triaged feed backlog via the custom ``sota`` provider.
 
 The daily "Today" slate needs ``triaged_pending`` rows. Triage is otherwise
 CLI/daemon-only (`run_daemon_tick`), so a fresh feed backlog (thousands of
 unread items) never gets scored and Today stays empty. This module runs the
 existing pipeline — gate fast-rejects the obvious non-matches for free, then
-survivors are scored by the kather ``sota`` LLM — looping until the backlog
+survivors are scored by the custom ``sota`` LLM — looping until the backlog
 is drained, on a single background thread with pollable status.
 
 Single responsibility: job lifecycle + accounting. The actual triage is
-``services.feeds.run_daemon_tick`` (with a kather ``sota`` ``triage_llm``).
+``services.feeds.run_daemon_tick`` (with a custom ``sota`` ``triage_llm``).
 Idempotent: ``run_daemon_tick`` skips already-processed items, so re-running
 is safe.
 """

@@ -100,7 +100,7 @@ export async function trashPapers(itemIds) {
 /**
  * POST /api/daily/triage-backlog
  * Start a background drain of the un-triaged feed backlog (scored via the
- * kather `sota` model). Returns immediately; poll getTriageStatus().
+ * custom `sota` provider). Returns immediately; poll getTriageStatus().
  */
 export async function triggerTriageBacklog() {
   return request('/daily/triage-backlog', { method: 'POST', body: '{}' });

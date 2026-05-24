@@ -93,7 +93,7 @@ def write_predictions_to_csv(
     if not classifier_name or "/" in classifier_name or " " in classifier_name:
         raise ValueError(
             f"invalid classifier_name {classifier_name!r}; must be a short slug like "
-            "'logreg' / 'tabpfn' / 'lightgbm' / 'llm_kather'."
+            "'logreg' / 'tabpfn' / 'lightgbm' / 'llm_custom'."
         )
 
     rows: list[dict[str, str]] = []
@@ -160,7 +160,7 @@ def compute_metrics_against_gold(
     """Read predictions vs ``gold_priority_final`` and compute P/R/F1.
 
     ``priority_column`` selects which prediction column to score (e.g.
-    ``cls_tabpfn_priority``, ``cls_llm_kather_priority``).
+    ``cls_tabpfn_priority``, ``cls_llm_custom_priority``).
 
     ``split`` ∈ {"cv", "holdout", None}. When set, filters by
     ``split_column`` (defaults to ``cls_{name}_split`` derived from

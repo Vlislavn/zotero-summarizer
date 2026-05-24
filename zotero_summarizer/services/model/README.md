@@ -21,7 +21,7 @@ golden CSV ─featurize→ SPECTER2 embeds + library/prestige features
 | `classifier_artifact.py` | the serialisable `TrainedClassifier` + SHAP attribution |
 | `classifier_training.py` | `train_and_save` / `save_trained` (run pipeline → joblib + JSON twin) |
 | `classifier_persistence.py` | on-disk location, load, lazy retrain; re-exports the artifact/training API |
-| `llm_classifier.py` | LLM-as-classifier baseline (title+abstract → label) |
+| `llm_classifier.py` | LLM-as-classifier baseline (title+abstract → label); any OpenAI-compatible model, e.g. `--classifier-name llm_custom` |
 | `scoring.py` · `prestige.py` · `surprise.py` | composite score; OpenAlex prestige; serendipity |
 | `label_weights.py` | per-row training weights |
 | `golden_metrics.py` | accuracy / per-class / confusion for eval |

@@ -314,7 +314,7 @@ def register_goldenset_classify(gs_sub) -> None:
             "classifies directly (single prompt per paper, parallel batch). "
             "Comparable to LogReg / LightGBM / TabPFN. Override the endpoint "
             "with --api-base + --api-key-env + --model to test any "
-            "OpenAI-compatible model (e.g. api.kather.ai)."
+            "OpenAI-compatible model."
         ),
     )
     gs_cls_llm.add_argument(
@@ -344,7 +344,7 @@ def register_goldenset_classify(gs_sub) -> None:
         default=None,
         help=(
             "Override LLM model. Default: goals.yaml refine_model. "
-            "For api.kather.ai pass the model id exposed by that endpoint."
+            "Pass the model id exposed by your endpoint."
         ),
     )
     gs_cls_llm.add_argument(
@@ -352,7 +352,7 @@ def register_goldenset_classify(gs_sub) -> None:
         default=None,
         help=(
             "Override OpenAI-compatible endpoint. Default: goals.yaml api_base. "
-            "For api.kather.ai use 'https://api.kather.ai/v1'."
+            "e.g. 'https://your-provider.example/v1'."
         ),
     )
     gs_cls_llm.add_argument(

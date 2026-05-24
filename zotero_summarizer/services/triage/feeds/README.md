@@ -18,7 +18,7 @@ run_daemon_loop ─every N s→ run_daemon_tick (_tick)
 |---|---|
 | `__init__.py` | facade: re-exports the public + test-accessed API |
 | `_common.py` | constants, `TriagedCandidate`/`DaemonTickReport`, conn + config helpers (leaf) |
-| `_triage.py` | abstract-only triage primitive + concurrent scoring + prestige re-score |
+| `_triage.py` | abstract-only triage primitive + concurrent scoring + prestige re-score (accepts a `triage_llm` override — the backlog drain passes the optional `CUSTOM_*` provider) |
 | `_gate.py` | Phase 1.13 classifier gate, counterfactual audit, background retrain |
 | `_daily.py` | daily plateau selection, full-text refine, row→payload reconstruction |
 | `_tick.py` | one daemon tick — the orchestration (pick → gate → triage → persist) |

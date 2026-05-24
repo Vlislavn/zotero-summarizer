@@ -88,14 +88,14 @@ def test_write_predictions_adds_per_classifier_columns(tmp_path: Path):
         LLMClassification("B", "dont_read", 0.9, "off-topic"),
     ]
     updated = write_predictions_to_csv(
-        csv_path, classifications, classifier_name="llm_kather",
+        csv_path, classifications, classifier_name="llm_custom",
     )
     assert updated == 2
     rows = list(csv.DictReader(csv_path.open()))
-    assert rows[0]["cls_llm_kather_priority"] == "should_read"
-    assert rows[1]["cls_llm_kather_priority"] == "dont_read"
-    assert "cls_llm_kather_score" in rows[0]
-    assert "cls_llm_kather_rationale" in rows[0]
+    assert rows[0]["cls_llm_custom_priority"] == "should_read"
+    assert rows[1]["cls_llm_custom_priority"] == "dont_read"
+    assert "cls_llm_custom_score" in rows[0]
+    assert "cls_llm_custom_rationale" in rows[0]
 
 
 def test_write_predictions_rejects_invalid_classifier_name(tmp_path: Path):

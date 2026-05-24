@@ -13,7 +13,7 @@ __init__.include_routes(app)
 
 | file | endpoints (prefix) |
 |---|---|
-| `daily.py` | `/api/daily*` — the Today slate, add-to-library/trash, backlog drain |
+| `daily.py` | `/api/daily*` — the Today slate, add-to-library/trash, backlog drain (optional `CUSTOM_*` provider) |
 | `golden.py` | `/api/golden*` — labels, verdicts, review-detail, effective labels |
 | `library.py` | `/api/library*` — reading queue, deep-review, PDF stream |
 | `review.py` | `/api/feeds/review*` — Phase 1.14 feed-review workflow |

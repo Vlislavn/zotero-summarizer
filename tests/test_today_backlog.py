@@ -1,6 +1,6 @@
 """Part B tests: never-empty slate fallback + backlog-drain job state.
 
-The live triage drain (kather sota LLM) and append_to_golden are covered
+The live triage drain (custom SOTA LLM) and append_to_golden are covered
 by the live P2 verification, not unit tests (they need Zotero + network).
 Here we cover the pure logic: the recent-rows fallback and the job-state
 machine.

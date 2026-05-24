@@ -52,7 +52,7 @@ def build_llm(
 
 def build_triage_llm(model: str = "sota") -> InstrumentedLLMClient:
     """Build the LLM client for the whole-backlog triage drain, pointed at
-    the custom provider (api.kather.ai) configured via ``CUSTOM_BASE_URL`` +
+    the custom provider configured via ``CUSTOM_BASE_URL`` +
     ``CUSTOM_API_KEY`` in ``.env``. ``model`` defaults to the endpoint's
     ``sota`` alias.
 
@@ -66,11 +66,11 @@ def build_triage_llm(model: str = "sota") -> InstrumentedLLMClient:
     key = os.environ.get("CUSTOM_API_KEY", "").strip()
     if not base:
         raise RuntimeError(
-            "CUSTOM_BASE_URL is not set; add the api.kather.ai base URL to .env"
+            "CUSTOM_BASE_URL is not set; add the custom provider base URL to .env"
         )
     if not key:
         raise RuntimeError(
-            "CUSTOM_API_KEY is not set; add the api.kather.ai API key to .env"
+            "CUSTOM_API_KEY is not set; add the custom provider API key to .env"
         )
     # `sota` is a reasoning model: at max_tokens=2048 the thinking phase
     # consumed the entire budget and the response came back EMPTY, so every
