@@ -3,7 +3,14 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from zotero_summarizer.models.providers import (
+    DefaultModelConfig,
+    LLMRoutingConfig,
+    ProviderConfig,
+    ProviderType,
+)
 
 
 __all__ = [
@@ -100,6 +107,11 @@ class ClassifierGateConfig(BaseModel):
     enabled: bool = Field(default=False)
     model_name: str = Field(default="tabpfn")           # tabpfn | lightgbm | logreg
     drop_priorities: List[str] = Field(default_factory=lambda: ["dont_read"])
+    # ML-first backlog drain: when True (default) the bulk drain runs gate-only
+    # (the classifier scores every survivor, NO per-item LLM call) and the LLM
+    # is reserved for an on-demand full-text review per paper. Set False to keep
+    # the legacy gate→LLM scoring of every survivor during the drain.
+    bulk_drain_gate_only: bool = Field(default=True)
     pca_dim: int = Field(default=100, ge=2, le=500)
     n_folds: int = Field(default=5, ge=2, le=10)
     # Deprecated in Sprint-1 redesign (May 2026): kept for config-forward-
@@ -147,6 +159,10 @@ class GoalsConfig(BaseModel):
     summary_structure: List[str] = Field(default_factory=list)
     output_language: str = Field(default="English")
     llm: LLMConfig
+    # Per-stage provider+model routing. Optional in goals.yaml: when absent it is
+    # synthesized from the legacy ``llm:`` block below (see ``_synthesize_routing``)
+    # so existing configs keep working with zero edits.
+    llm_routing: Optional[LLMRoutingConfig] = None
     prompts: PromptOverrides = Field(default_factory=PromptOverrides)
     corpus: CorpusConfig = Field(default_factory=CorpusConfig)
     prestige: PrestigeConfig = Field(default_factory=PrestigeConfig)
@@ -183,3 +199,25 @@ class GoalsConfig(BaseModel):
         if any(not v for v in value.values()):
             raise ValueError("relevance_scale descriptions must be non-empty")
         return value
+
+    @model_validator(mode="after")
+    def _synthesize_routing(self) -> "GoalsConfig":
+        """Back-compat: when goals.yaml has no ``llm_routing:`` block, build one
+        from the legacy flat ``llm:`` block — a single ``default`` provider that
+        all three stages inherit. Existing configs keep booting unchanged; the
+        first PUT /api/config then persists the explicit ``llm_routing`` block.
+        """
+        if self.llm_routing is None:
+            self.llm_routing = LLMRoutingConfig(
+                providers=[
+                    ProviderConfig(
+                        name="default",
+                        type=ProviderType.openai,
+                        base_url=self.llm.api_base,
+                        api_key_env=self.llm.api_key_env,
+                        extra_body=self.llm.extra_body,
+                    )
+                ],
+                default=DefaultModelConfig(provider="default", model=self.llm.refine_model),
+            )
+        return self

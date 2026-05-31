@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from zotero_summarizer.models import SummarizeRequest, SummarizeResponse
+from zotero_summarizer.services._common import effective_llm_concurrency
 from zotero_summarizer.services.model import prestige as prestige_service
 from zotero_summarizer.services.model import scoring as scoring_service
 from zotero_summarizer.services.model import surprise as surprise_service
@@ -70,6 +71,7 @@ def _score_survivors(
     *,
     tick_id: str,
     triage_llm: Any | None,
+    provider: Any | None = None,
 ) -> tuple[
     list[tuple[dict[str, Any], "TriagedCandidate"]],
     list[tuple[dict[str, Any], "TriagedCandidate"]],
@@ -80,8 +82,11 @@ def _score_survivors(
 
     Returns ``(triaged, fast_rejected, errors, fatal_seen)``. The per-item LLM
     call is the drain's bottleneck and each item is independent I/O, so they run
-    on a thread pool sized by ``triage_job_concurrency`` (TRIAGE_JOB_CONCURRENCY,
-    default 4) — reusing the in-repo pattern from ``services.llm_classifier``.
+    on a thread pool sized by ``effective_llm_concurrency(provider, n)`` — the
+    configured ``TRIAGE_JOB_CONCURRENCY`` for a remote provider, but **1 for a
+    local provider** (one on-device model can't absorb concurrent inference).
+    ``provider`` is the resolved stage provider passed by the caller; ``None``
+    falls back to the remote/configured cap.
 
     ``_triage_one`` converts every per-item failure into ``(None, err, fatal)``
     and never raises, so ``fut.result()`` is the per-item boundary, not an
@@ -96,7 +101,7 @@ def _score_survivors(
     if not to_triage:
         return triaged_results, fast_rejected_results, errors_results, fatal_seen
 
-    workers = max(1, min(get_settings().triage_job_concurrency, len(to_triage)))
+    workers = effective_llm_concurrency(provider, len(to_triage))
     LOGGER.info("[%s] scoring %d survivors with %d workers", tick_id, len(to_triage), workers)
     outcomes: list[tuple[TriagedCandidate | None, str | None, bool] | None] = (
         [None] * len(to_triage)

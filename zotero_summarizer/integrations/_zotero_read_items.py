@@ -5,7 +5,10 @@ import sqlite3  # noqa: F401  (type hints)
 from pathlib import Path  # noqa: F401
 from typing import Any  # noqa: F401
 
-from zotero_summarizer.integrations._zotero_read_common import _ANNOTATION_TYPE_NAMES
+from zotero_summarizer.integrations._zotero_read_common import (
+    _ANNOTATION_TYPE_NAMES,
+    _NON_BIBLIOGRAPHIC_TYPES_SQL,
+)
 
 
 class ZoteroItemsMixin:
@@ -22,7 +25,7 @@ class ZoteroItemsMixin:
         safe_offset = max(0, offset)
         where_clauses = [
             "di.itemID IS NULL",
-            "it.typeName NOT IN ('attachment', 'note')",
+            f"it.typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL})",
         ]
         params: list[Any] = []
 
@@ -212,6 +215,34 @@ class ZoteroItemsMixin:
 
         return self._execute_read(_read)
 
+    def get_all_items(
+        self,
+        collection_key: str | None = None,
+        search: str | None = None,
+        tag: str | None = None,
+        page_size: int = 500,
+    ) -> dict[str, Any]:
+        """Every matching top-level item, paginating internally past ``get_items``'
+        500-per-call clamp. Loops ``offset`` by the returned page length, using the
+        reported ``total`` (or a short page) as the stop condition. Same row shape as
+        ``get_items``; returns ``{items, total}``. Use for whole-library passes
+        (full-library scoring, the Zotero rank/tag writes)."""
+        safe_page = max(1, min(page_size, 500))
+        out: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            page = self.get_items(
+                collection_key=collection_key, search=search, tag=tag,
+                limit=safe_page, offset=offset,
+            )
+            rows = page.get("items") or []
+            out.extend(rows)
+            offset += len(rows)
+            total = int(page.get("total") or 0)
+            if not rows or len(rows) < safe_page or offset >= total:
+                break
+        return {"items": out, "total": len(out)}
+
     def get_item_notes(self, item_key: str) -> list[dict[str, Any]]:
         """Return child notes for a specific parent item key."""
 
@@ -247,14 +278,14 @@ class ZoteroItemsMixin:
 
         def _read(conn: sqlite3.Connection) -> dict[str, Any] | None:
             item_row = conn.execute(
-                """
+                f"""
                 SELECT i.itemID, i.key, i.dateAdded, i.dateModified, i.libraryID
                 FROM items i
                 JOIN itemTypes it ON it.itemTypeID = i.itemTypeID
                 LEFT JOIN deletedItems di ON di.itemID = i.itemID
                 WHERE i.key = ?
                   AND di.itemID IS NULL
-                  AND it.typeName NOT IN ('attachment', 'note')
+                  AND it.typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL})
                 LIMIT 1
                 """,
                 (item_key,),

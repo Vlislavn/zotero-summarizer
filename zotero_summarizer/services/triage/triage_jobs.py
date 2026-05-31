@@ -11,7 +11,10 @@ from zotero_summarizer.domain import EXPLICIT_FEEDBACK_SIGNALS, feedback_verdict
 from zotero_summarizer.models import SummarizeRequest, TriageRunRequest, TriageRunResponse
 from zotero_summarizer.services.zotero import pending
 from zotero_summarizer.services.triage import summarization
-from zotero_summarizer.services._common import LOGGER, build_log_prefix, now_iso, settings, state, unique_non_empty_strings
+from zotero_summarizer.services._common import (
+    LOGGER, build_log_prefix, effective_llm_concurrency, now_iso, settings, state,
+    unique_non_empty_strings,
+)
 from zotero_summarizer.services.zotero.zotero import get_zotero_reader_or_raise
 from zotero_summarizer.storage import repositories as triage_db
 
@@ -57,8 +60,14 @@ class TriageJobService:
 
 
 def _effective_concurrency(total_remaining: int) -> int:
-    configured = TRIAGE_JOB_CONCURRENCY if TRIAGE_JOB_CONCURRENCY is not None else settings().triage_job_concurrency
-    return max(1, min(int(configured), total_remaining if total_remaining else 1))
+    # The module-level override (tests / explicit ops pin) is a hard value that
+    # wins regardless of provider locality.
+    if TRIAGE_JOB_CONCURRENCY is not None:
+        return max(1, min(int(TRIAGE_JOB_CONCURRENCY), total_remaining if total_remaining else 1))
+    # Otherwise size by the feed-stage provider: serial for a local model,
+    # the configured cap for a remote one. This job runs the feed pipeline.
+    provider = state().resolve_stage_provider("feed")
+    return effective_llm_concurrency(provider, total_remaining)
 
 
 def _job_snapshot(job: dict[str, Any]) -> dict[str, Any]:

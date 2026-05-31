@@ -5,6 +5,8 @@ import {
   fetchTags,
   startTriage,
   fetchReadingQueue,
+  syncRelTags,
+  syncScoreRanks,
 } from '../api/libraryApi.js';
 import ReadNextView from '../components/library/ReadNextView.jsx';
 import { StatusBanner } from '../components/library/shared.jsx';
@@ -32,7 +34,7 @@ export default function Library() {
   const [queue, setQueue] = useState([]);
   const [queueMeta, setQueueMeta] = useState({
     read_hidden: 0, total_unread: 0, status: 'ready', model_ready: true,
-    error: null, computed_at: null, scores_stale: false,
+    error: null, computed_at: null, scores_stale: false, distribution: null,
   });
   const pollRef = useRef(null);
   const [queueLoading, setQueueLoading] = useState(false);
@@ -47,6 +49,8 @@ export default function Library() {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
   const [starting, setStarting] = useState(false);
+  const [syncingTags, setSyncingTags] = useState(false);
+  const [syncingRanks, setSyncingRanks] = useState(false);
   const [message, setMessage] = useState('');
   const [isError, setIsError] = useState(false);
 
@@ -89,6 +93,7 @@ export default function Library() {
         error: data?.error || null,
         computed_at: data?.computed_at || null,
         scores_stale: Boolean(data?.scores_stale),
+        distribution: data?.distribution || null,
       });
       if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null; }
       // Background scoring in progress → poll (without forcing another rescore).
@@ -153,6 +158,63 @@ export default function Library() {
       setIsError(true);
     } finally {
       setStarting(false);
+    }
+  }
+
+  async function handleSyncRelTags(force = false) {
+    setSyncingTags(true);
+    setMessage('');
+    try {
+      const data = await syncRelTags({ force });
+      if (data?.requires_force) {
+        if (window.confirm('Zotero appears to be running. Apply anyway? (a backup is taken first)')) {
+          return await handleSyncRelTags(true);
+        }
+        setMessage('Sync cancelled — close Zotero, then retry.');
+        setIsError(false);
+        return;
+      }
+      const bands = Object.entries(data?.by_band || {}).map(([b, n]) => `${b}: ${n}`).join(', ');
+      setMessage(
+        `Tagged ${data?.tagged || 0} item(s)${bands ? ` (${bands})` : ''}.`
+        + (data?.backup_path ? ` Backup: ${data.backup_path}.` : '')
+        + (data?.message ? ` ${data.message}` : ''),
+      );
+      setIsError(false);
+    } catch (err) {
+      setMessage(`Failed to sync relevance tags: ${err.message || err}`);
+      setIsError(true);
+    } finally {
+      setSyncingTags(false);
+    }
+  }
+
+  async function handleSyncScoreRanks(force = false) {
+    setSyncingRanks(true);
+    setMessage('');
+    try {
+      const data = await syncScoreRanks({ force });
+      if (data?.requires_force) {
+        if (window.confirm('Zotero appears to be running. Apply anyway? (a backup is taken first)')) {
+          return await handleSyncScoreRanks(true);
+        }
+        setMessage('Sync cancelled — close Zotero, then retry.');
+        setIsError(false);
+        return;
+      }
+      setMessage(
+        `Ranked ${data?.ranked || 0} papers across your whole library into Zotero "Call Number" (zr0001…)`
+        + (data?.unscored ? ` — ${data.scored} scored, ${data.unscored} not-yet-scored at the bottom (Rescore for a complete ranking)` : '')
+        + '. Add the Call Number column in Zotero and sort it ascending to get this order.'
+        + (data?.backup_path ? ` Backup: ${data.backup_path}.` : '')
+        + (data?.message ? ` ${data.message}` : ''),
+      );
+      setIsError(false);
+    } catch (err) {
+      setMessage(`Failed to sync score ranks: ${err.message || err}`);
+      setIsError(true);
+    } finally {
+      setSyncingRanks(false);
     }
   }
 
@@ -249,6 +311,24 @@ export default function Library() {
               Clear
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => handleSyncRelTags(false)}
+            disabled={syncingTags || syncingRanks}
+            title="Write zs:rel/<band> tags onto scored library items so you can FILTER by ML relevance in Zotero. Backs up first; doesn't touch your priority/manual tags."
+            className="ml-auto px-3 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm hover:bg-slate-50 disabled:opacity-50"
+          >
+            {syncingTags ? 'Syncing…' : 'Sync relevance tags → Zotero'}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSyncScoreRanks(false)}
+            disabled={syncingTags || syncingRanks}
+            title="Stamp a whole-library rank into every paper's Zotero Call Number (zr0001…) — scorable papers first, no-abstract ones last — so you can SORT your ENTIRE library by relevance in Zotero. Run Rescore first for complete scores. Add the Call Number column and sort ascending. Backs up first."
+            className="px-3 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm hover:bg-slate-50 disabled:opacity-50"
+          >
+            {syncingRanks ? 'Writing…' : 'Sort ranks → Zotero'}
+          </button>
         </div>
 
         <StatusBanner message={message} isError={isError} />
@@ -266,6 +346,7 @@ export default function Library() {
           error={queueMeta.error}
           computedAt={queueMeta.computed_at}
           scoresStale={queueMeta.scores_stale}
+          distribution={queueMeta.distribution}
           onRescore={() => loadQueue(true)}
           onSaved={() => loadQueue()}
           selectMode={selectMode}

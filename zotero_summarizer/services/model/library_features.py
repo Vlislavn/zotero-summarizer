@@ -172,23 +172,24 @@ def load_positive_library_from_rows(
     """Build P from already-loaded golden rows."""
     from zotero_summarizer.services.model import classifier
 
-    keys: list[str] = []
-    raw_embeddings: list[np.ndarray] = []
-    recent_mask: list[bool] = []
-    for row in rows:
-        if not _is_positive_engagement(row):
-            continue
-        title = (row.get("title") or "").strip()
-        abstract = (row.get("abstract") or "").strip()
-        item_key = (row.get("item_key") or "").strip()
-        if not title or not abstract or not item_key:
-            continue
-        emb = classifier.get_or_compute_embedding(
-            corpus_db_path, item_key, title, abstract,
-        )
-        keys.append(item_key)
-        raw_embeddings.append(emb)
-        recent_mask.append(_parse_days_since(row) <= RECENT_WINDOW_DAYS)
+    valid = [
+        row for row in rows
+        if _is_positive_engagement(row)
+        and (row.get("title") or "").strip()
+        and (row.get("abstract") or "").strip()
+        and (row.get("item_key") or "").strip()
+    ]
+    keys = [(row.get("item_key") or "").strip() for row in valid]
+    # Batched (GPU) encode of the whole P-set instead of one call per row.
+    embeddings = classifier.get_or_compute_embeddings_batch(
+        corpus_db_path,
+        [{"item_key": keys[i],
+          "title": (row.get("title") or "").strip(),
+          "abstract": (row.get("abstract") or "").strip()}
+         for i, row in enumerate(valid)],
+    )
+    raw_embeddings = [embeddings[i] for i in range(len(valid))]
+    recent_mask = [_parse_days_since(row) <= RECENT_WINDOW_DAYS for row in valid]
     authors = _collect_author_tokens(rows)
     return _stack_library(keys, raw_embeddings, recent_mask, authors)
 

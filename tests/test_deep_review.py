@@ -68,6 +68,11 @@ def _fake_state(config, *, extractor, reader):
         pdf_extractor=extractor,
         unpaywall_client=None,
         zotero_reader=reader,
+        # The deep_review stage now resolves its client via the runtime state.
+        resolve_stage_client=lambda stage: _StubLLM(),
+        # Provider drives concurrency (local → serial). A local stub keeps the
+        # deep-review job single-threaded and deterministic in tests.
+        resolve_stage_provider=lambda stage: types.SimpleNamespace(is_local=True),
     )
 
 
@@ -81,7 +86,6 @@ def _detail(*, title="T", pdf_path="/x/p.pdf", doi="10.1/x", url="", abstract="a
 
 def _wire(monkeypatch, config, *, reader, extractor, note_fn=None):
     monkeypatch.setattr(deep_review, "get_state", lambda: _fake_state(config, extractor=extractor, reader=reader))
-    monkeypatch.setattr(deep_review, "build_triage_llm", lambda model="sota": _StubLLM())
     # The digest is upserted to Zotero inside _review_one; stub it (no real lib).
     monkeypatch.setattr(zotero_svc, "zotero_upsert_digest_note", note_fn or (lambda _ik, _d: None))
 
@@ -90,7 +94,7 @@ def test_run_job_writes_digest_entry(config, monkeypatch):
     reader = _StubReader({"K1": _detail()})
     _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"))
 
-    deep_review._run_job([{"item_key": "K1", "title": "T", "gate_relevance": 3.0}], model="x")
+    deep_review._run_job([{"item_key": "K1", "title": "T", "gate_relevance": 3.0}])
 
     entry = deep_review.get_cached_review("K1")
     assert entry is not None
@@ -119,7 +123,7 @@ def test_run_job_marks_needs_pdf_without_local_pdf_and_never_fetches(config, mon
     _wire(monkeypatch, config, reader=reader,
           extractor=types.SimpleNamespace(extract_text=_boom_extract), note_fn=_boom_note)
 
-    deep_review._run_job([{"item_key": "K1", "title": "T", "gate_relevance": None}], model="x")
+    deep_review._run_job([{"item_key": "K1", "title": "T", "gate_relevance": None}])
 
     entry = deep_review.get_cached_review("K1")
     assert entry["needs_pdf"] is True
@@ -134,7 +138,7 @@ def test_run_job_records_note_failure_without_dropping_digest(config, monkeypatc
         raise RuntimeError("Zotero is open")
 
     _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"), note_fn=_failing_note)
-    deep_review._run_job([{"item_key": "K1", "title": "T"}], model="x")
+    deep_review._run_job([{"item_key": "K1", "title": "T"}])
 
     entry = deep_review.get_cached_review("K1")
     assert entry["digest"]["grade"] == "A"  # digest still produced
@@ -147,7 +151,7 @@ def test_run_job_isolates_per_item_failure(config, monkeypatch):
     _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"))
 
     deep_review._run_job(
-        [{"item_key": "GOOD", "title": "GOOD"}, {"item_key": "BAD", "title": "BAD"}], model="x",
+        [{"item_key": "GOOD", "title": "GOOD"}, {"item_key": "BAD", "title": "BAD"}],
     )
 
     assert deep_review.get_cached_review("GOOD") is not None
@@ -219,7 +223,7 @@ def test_start_with_item_keys_skips_queue(monkeypatch):
         lambda key: {"composite_score": 4.1} if key == "K1" else None,
     )
     captured = {}
-    monkeypatch.setattr(deep_review, "_run_job", lambda items, *, model: captured.update(items=items, model=model))
+    monkeypatch.setattr(deep_review, "_run_job", lambda items: captured.update(items=items))
     monkeypatch.setattr(deep_review, "run_in_background", lambda target: target())
 
     out = deep_review.start(item_keys=["K1"])

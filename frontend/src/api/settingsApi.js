@@ -105,6 +105,38 @@ export async function getJob(jobId) {
 }
 
 /**
+ * POST /api/admin/llm-check
+ * On-demand operational probe of the saved LLM routing config. Probes each of
+ * the 3 pipeline stages (feed / backlog / deep_review) with a tiny prompt and
+ * reports per-stage pass/fail. A failing stage does NOT fail the request — it
+ * comes back with status "fail" and a `detail` string. Resolves to
+ *   { status: 'ok'|'degraded',
+ *     stages: [ { stage, provider, type, model,
+ *                 status: 'operational'|'fail', detail } ] }.
+ */
+export async function checkLlm() {
+  return request(`${ADMIN_BASE}/llm-check`, { method: 'POST' });
+}
+
+/**
+ * POST /api/admin/llm-models
+ * Lists the models a provider serves, for the Settings model-picker. Body is one
+ * provider profile ({ name, type, base_url, api_key_env, ... }) taken from the
+ * in-progress edit (no "save first" needed). Resolves to
+ *   { provider, type, models: string[] }.
+ * Throws on a missing API key (400) or an unreachable/erroring endpoint.
+ */
+export async function listModels(provider) {
+  if (!provider || typeof provider !== 'object') {
+    throw new Error('listModels: provider must be an object');
+  }
+  return request(`${ADMIN_BASE}/llm-models`, {
+    method: 'POST',
+    body: JSON.stringify(provider),
+  });
+}
+
+/**
  * GET /api/admin/model
  * Returns the freshest-on-disk trained classifier's metadata for the
  * Settings model card. Resolves to ``{model: null}`` when no model has

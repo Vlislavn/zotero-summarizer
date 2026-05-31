@@ -54,7 +54,8 @@ def _golden_key(row: dict[str, Any]) -> str:
 
 
 def _record_label(
-    row: dict[str, Any], priority: str, note: str, *, signal_tier: str = "feed_user_label",
+    row: dict[str, Any], priority: str, note: str, *,
+    signal_tier: str = "feed_user_label", original_priority: str | None = None,
 ) -> None:
     """Write the training label two ways: golden CSV (for retrain) + the
     label_verdicts overlay (so it persists, wins, and excludes the card from
@@ -62,12 +63,19 @@ def _record_label(
 
     ``signal_tier`` sets the golden row's training weight tier — `feed_interest`
     for the soft pre-read "Add to library" signal, `feed_user_label` (default)
-    for a confident decision like trash."""
+    for a confident decision like trash.
+
+    ``original_priority`` records the gate/model's derived priority on the
+    verdict overlay. Callers that mutate ``row["reading_priority"]`` before
+    labelling (e.g. ``add_to_library``) MUST pass the pre-mutation value here,
+    or the overlay would store the user's new label as the "original"."""
+    if original_priority is None:
+        original_priority = (row.get("reading_priority") or "").strip() or "unknown"
     review.append_to_golden(row, label=priority, note=note, signal_tier=signal_tier)
     repositories.insert_or_update_label_verdict(
         _db_path(),
         item_key=_golden_key(row),
-        original_derived_priority=(row.get("reading_priority") or "").strip() or "unknown",
+        original_derived_priority=original_priority,
         user_priority=priority,
         comment=note,
     )
@@ -98,12 +106,23 @@ def add_to_library(item_ids: list[int]) -> dict[str, Any]:
     failed: list[dict[str, Any]] = []
     for row in rows:
         try:
+            # Capture the gate/model's derived priority BEFORE overriding it, so
+            # the verdict overlay records the original (e.g. "dont_read"), not the
+            # "add" label we're about to write below.
+            original_priority = (row.get("reading_priority") or "").strip() or "unknown"
+            # Gate-rejected rows carry reading_priority="dont_read"; override it
+            # so the Zotero tag reflects the user's positive "add" intent, not the
+            # gate's verdict.
+            row["reading_priority"] = _ADD_PRIORITY
             review.materialize_row(row, writer=writer, used_keys=used_keys, reason="today_add")
             # Soft, low-weight training signal: "Add" is pre-read interest, not
             # endorsement — feed_interest → WEIGHT_INTEREST (0.3). A later read +
             # label (or Zotero engagement) on the materialized library item
             # carries full weight and dominates this.
-            _record_label(row, _ADD_PRIORITY, "added from Today", signal_tier="feed_interest")
+            _record_label(
+                row, _ADD_PRIORITY, "added from Today",
+                signal_tier="feed_interest", original_priority=original_priority,
+            )
             added += 1
         except Exception as exc:
             # Batch contract: a Zotero-locked / bad row must not strand the

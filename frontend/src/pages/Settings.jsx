@@ -6,6 +6,7 @@ import {
 } from '@tanstack/react-query';
 import { fetchConfig, updateConfig } from '../api/settingsApi.js';
 import AdminSection from '../components/AdminSection.jsx';
+import LlmRoutingSection from '../components/LlmRoutingSection.jsx';
 import ModelCard from '../components/ModelCard.jsx';
 
 // Ported from the legacy Alpine settings tab in zotero_summarizer/web/ui.html
@@ -57,6 +58,20 @@ function configToFormState(cfg) {
       : ['dont_read'],
     gate_raw_score_dont_read_below: Number(gate.raw_score_dont_read_below ?? 0),
     gate_audit_sample_per_tick: Number(gate.audit_sample_per_tick ?? 0),
+    // Per-stage LLM routing stays a structured object (not flattened like the
+    // other fields) — LlmRoutingSection edits it as a tree, and the
+    // JSON.stringify dirty-check + formStateToConfig both handle nesting fine.
+    // The backend always synthesizes `llm_routing` for GET, but guard with a
+    // sensible empty shape so the editor never crashes on a malformed payload.
+    llm_routing: cfg.llm_routing
+      ? JSON.parse(JSON.stringify(cfg.llm_routing))
+      : {
+          providers: [],
+          default: { provider: null, model: null },
+          feed: { provider: null, model: null },
+          backlog: { provider: null, model: null },
+          deep_review: { provider: null, model: null },
+        },
   };
 }
 
@@ -88,6 +103,14 @@ function formStateToConfig(form, baseConfig) {
     raw_score_dont_read_below: Number(form.gate_raw_score_dont_read_below ?? 0),
     audit_sample_per_tick: Number(form.gate_audit_sample_per_tick ?? 0),
   };
+  // Write the structured routing tree straight back. The backend re-validates
+  // it strictly (unique provider names, openai requires base_url, env-var name
+  // not secret, stage providers must reference an existing provider, …) and
+  // surfaces failures via the 400 body's `.message`, which `request()` turns
+  // into the save-error banner. `next` is already a deep clone of baseConfig.
+  if (form.llm_routing !== undefined) {
+    next.llm_routing = form.llm_routing;
+  }
   return next;
 }
 
@@ -422,6 +445,18 @@ export default function Settings() {
             </label>
           </div>
         </div>
+      </SectionCard>
+
+      {/* ---------- LLM providers & stage routing ---------- */}
+      <SectionCard
+        title="LLM providers & stage routing"
+        description="Register OpenAI-compatible / Anthropic providers, then route each pipeline stage. Configure the default once; stages inherit it unless overridden."
+      >
+        <LlmRoutingSection
+          value={form.llm_routing}
+          onChange={(nextRouting) => updateField('llm_routing', nextRouting)}
+          isDirty={isDirty}
+        />
       </SectionCard>
 
       {/* ---------- Classifier gate ---------- */}

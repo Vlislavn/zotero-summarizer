@@ -16,6 +16,11 @@ class _FakeReader:
     def get_items(self, *, limit=100, offset=0, collection_key=None, search=None, tag=None):
         return {"items": self._items, "total": len(self._items)}
 
+    def get_all_items(self, *, collection_key=None, search=None, tag=None, page_size=500):
+        # Whole-library scan source (the real one paginates get_items); the fake
+        # already returns everything in one page.
+        return {"items": self._items, "total": len(self._items)}
+
 
 class _Pred:
     def __init__(self, item_key, raw_score, shap=None, aux=None):
@@ -25,12 +30,31 @@ class _Pred:
         self.aux_context = aux or {}
 
 
+def test_score_distribution_bins_by_band():
+    records = [
+        {"relevance_score": 4.8},   # must_read  (bin 4.5–5.0)
+        {"relevance_score": 4.0},   # should_read(bin 4.0–4.5)
+        {"relevance_score": 3.6},   # should_read(bin 3.5–4.0)
+        {"relevance_score": 2.2},   # could_read (bin 2.0–2.5)
+        {"relevance_score": 1.2},   # dont_read  (bin 1.0–1.5)
+        {"relevance_score": None},  # unscored
+    ]
+    dist = reading_queue._score_distribution(records)
+    assert dist["total_scored"] == 5
+    assert dist["unscored"] == 1
+    assert dist["by_band"] == {"must_read": 1, "should_read": 2, "could_read": 1, "dont_read": 1}
+    assert len(dist["bins"]) == 8
+    assert dist["bins"][-1]["band"] == "must_read" and dist["bins"][-1]["count"] == 1  # 4.5–5.0
+    assert dist["bins"][0]["band"] == "dont_read" and dist["bins"][0]["count"] == 1    # 1.0–1.5
+    assert sum(b["count"] for b in dist["bins"]) == 5
+
+
 class _FakeGate:
     def __init__(self, sha, scores=None):
         self.golden_csv_sha256 = sha
         self._scores = scores or {}
 
-    def predict(self, items, *, corpus_db_path, goals_config, return_shap=False):
+    def predict(self, items, *, corpus_db_path, goals_config, return_shap=False, prestige_network=True):
         return [
             _Pred(
                 it["item_key"], self._scores.get(it["item_key"], 3.0),
@@ -170,12 +194,35 @@ def test_scoring_from_prediction_maps_value_and_composite():
     pred = _Pred(
         "X", 3.7,
         shap=[{"feature": "semantic_match_specter2", "contribution": 0.6}, {"feature": "bias", "contribution": 2.4}],
-        aux={"max_author_h_index": 20},
+        aux={"citation_percentile": 0.75, "max_author_h_index": 20},
     )
     sc = reading_queue.scoring_from_prediction(pred)
     assert sc["composite_score"] == 3.7
     assert {"feature": "semantic_match_specter2", "value": 0.6} in sc["shap_top"]
-    assert sc["prestige_score"] is not None
+    # Prestige now derives from the field-normalized percentile (0.75 → 4.0),
+    # not the h-index; h-index is kept only as a context input.
+    assert sc["prestige_score"] == 4.0
+
+
+def test_dedup_by_content_keeps_first_and_preserves_order():
+    # Same paper, two Zotero copies (distinct keys, identical title, authors in
+    # DIFFERENT order/format) → one survives, the FIRST (best-ranked after sort).
+    # Title-only key, so author ordering can't defeat it.
+    recs = [
+        {"item_key": "A", "title": "GlobalDentBench: a benchmark", "authors": "Smith, J; Lee, K"},
+        {"item_key": "B", "title": "A totally different paper", "authors": "Doe, J"},
+        {"item_key": "C", "title": "globaldentbench: A Benchmark", "authors": "Lee K., Smith J."},  # dup of A (reordered authors)
+        {"item_key": "D", "title": "AutoScientists: agent teams", "authors": "Zitnik; Gao; Fang"},
+        {"item_key": "E", "title": "AutoScientists: agent teams", "authors": "Gao; Fang; Zitnik"},  # dup of D (reordered)
+    ]
+    out = reading_queue._dedup_by_content(recs)
+    keys = [r["item_key"] for r in out]
+    assert keys == ["A", "B", "D"]  # C dup of A, E dup of D; order preserved
+
+
+def test_dedup_by_content_never_merges_untitled():
+    recs = [{"item_key": "A", "title": "", "authors": "X"}, {"item_key": "B", "title": "", "authors": "X"}]
+    assert [r["item_key"] for r in reading_queue._dedup_by_content(recs)] == ["A", "B"]
 
 
 def test_why_reason_excludes_baseline():
@@ -205,9 +252,12 @@ class _PartialGate(_FakeGate):
         super().__init__(sha)
         self._skip = set(skip)
 
-    def predict(self, items, *, corpus_db_path, goals_config, return_shap=False):
+    def predict(self, items, *, corpus_db_path, goals_config, return_shap=False, prestige_network=True):
         scorable = [it for it in items if it["item_key"] not in self._skip]
-        return super().predict(scorable, corpus_db_path=corpus_db_path, goals_config=goals_config, return_shap=return_shap)
+        return super().predict(
+            scorable, corpus_db_path=corpus_db_path, goals_config=goals_config,
+            return_shap=return_shap, prestige_network=prestige_network,
+        )
 
 
 def test_unscorable_item_gets_sentinel_and_stops_recompute(monkeypatch):
@@ -224,6 +274,45 @@ def test_unscorable_item_gets_sentinel_and_stops_recompute(monkeypatch):
     assert [i["item_key"] for i in res["items"]][0] == "A"
     u = next(i for i in res["items"] if i["item_key"] == "U")
     assert u["relevance_score"] is None
+
+
+def test_full_library_scoring_includes_read_items(monkeypatch):
+    """The whole-library scan scores read AND unread items (read item carries a
+    🧠 emoji). Needed so every paper has a cached score for the global Zotero rank."""
+    reader = _FakeReader([_item("A"), _item("R", tags=["🧠"])])
+    _patch_state(monkeypatch, reader, _FakeGate("sha1", {"A": 3.0, "R": 4.0}))
+    reading_queue._compute_scores_into_cache("sha1", full=True)
+    cached = reading_queue._read_cache("sha1")
+    assert cached["A"]["relevance_score"] == 3.0
+    assert cached["R"]["relevance_score"] == 4.0  # read item scored too (not skipped)
+
+
+def test_no_abstract_item_never_enters_cache(monkeypatch):
+    """A no-abstract item is unscorable (gate needs an abstract) and must NOT enter
+    the cache — it's handled at rank time by sinking to the bottom of the order."""
+    noabs = {**_item("N"), "abstract": ""}
+    reader = _FakeReader([_item("A"), noabs])
+    _patch_state(monkeypatch, reader, _FakeGate("sha1", {"A": 3.0}))
+    reading_queue._compute_scores_into_cache("sha1", full=True)
+    cached = reading_queue._read_cache("sha1")
+    assert "A" in cached
+    assert "N" not in cached  # no abstract → skipped entirely
+
+
+def test_blended_sort_sinks_unscored_to_bottom():
+    """_blended_sort handles a mixed list (scored + None-relevance) in one pass:
+    scored papers rank on top, unscored sink to the bottom ordered by date."""
+    recs = [
+        {"item_key": "lo", "relevance_score": 2.0, "goal_sim": None, "date_added": "2026-01-01"},
+        {"item_key": "none_old", "relevance_score": None, "goal_sim": None, "date_added": "2026-01-01"},
+        {"item_key": "hi", "relevance_score": 4.5, "goal_sim": None, "date_added": "2026-01-01"},
+        {"item_key": "none_new", "relevance_score": None, "goal_sim": None, "date_added": "2026-02-01"},
+    ]
+    reading_queue._blended_sort(recs)
+    keys = [r["item_key"] for r in recs]
+    assert keys[:2] == ["hi", "lo"]              # scored on top, best first
+    assert set(keys[2:]) == {"none_new", "none_old"}  # unscored at the bottom
+    assert keys[2] == "none_new"                 # newer unscored first (date desc)
 
 
 def test_job_error_surfaced_and_not_auto_retried(monkeypatch):

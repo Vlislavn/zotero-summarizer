@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services.library import deep_review, reading_queue
+from zotero_summarizer.services.library import deep_review, reading_queue, score_tags
 from zotero_summarizer.services.zotero.zotero import get_zotero_reader_or_raise
 from zotero_summarizer.storage import repositories as triage_db
 
@@ -30,6 +30,11 @@ class DeepReviewRunRequest(BaseModel):
 
 class RejectTagRequest(BaseModel):
     item_key: str = Field(..., min_length=1)
+
+
+class RelTagSyncRequest(BaseModel):
+    # Apply even if Zotero is running (writes back up first regardless).
+    force: bool = Field(default=False)
 
 
 async def get_reading_queue(
@@ -109,8 +114,26 @@ async def queue_reject_tag(req: RejectTagRequest) -> dict[str, Any]:
     return {"queued": queued, "item_key": req.item_key, "add_tags": [_REJECT_TAG]}
 
 
+async def sync_rel_tags(req: RelTagSyncRequest) -> dict[str, Any]:
+    """Apply ``zs:rel/<band>`` relevance tags to scored library items so the user
+    can filter by ML relevance in Zotero. Backs up first; mutually exclusive in
+    the ``zs:rel/*`` namespace; never touches priority/manual tags."""
+    return await asyncio.to_thread(score_tags.sync_rel_tags, force=req.force)
+
+
+async def sync_score_ranks(req: RelTagSyncRequest) -> dict[str, Any]:
+    """Stamp a whole-library goal-blended rank into EVERY paper's Zotero Call
+    Number (``zr0001``…) — scorable papers first, no-abstract last — so the user
+    can SORT their entire library by relevance in Zotero (tags only filter).
+    Reads the global score cache (Rescore first); backs up first; overwrites only
+    the Call Number field."""
+    return await asyncio.to_thread(score_tags.sync_score_ranks, force=req.force)
+
+
 router.add_api_route("/api/library/reading-queue", get_reading_queue, methods=["GET"])
 router.add_api_route("/api/library/pdf/{item_key}", get_item_pdf, methods=["GET"])
 router.add_api_route("/api/library/deep-review/run", run_deep_review, methods=["POST"])
 router.add_api_route("/api/library/deep-review/status", get_deep_review_status, methods=["GET"])
 router.add_api_route("/api/library/reject-tag", queue_reject_tag, methods=["POST"])
+router.add_api_route("/api/library/sync-rel-tags", sync_rel_tags, methods=["POST"])
+router.add_api_route("/api/library/sync-score-ranks", sync_score_ranks, methods=["POST"])

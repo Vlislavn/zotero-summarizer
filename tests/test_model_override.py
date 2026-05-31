@@ -13,7 +13,7 @@ def test_startup_uses_yaml_model_by_default(tmp_path: Path, monkeypatch):
     _bootstrap_minimal_settings(tmp_path / "proj", monkeypatch)
     from zotero_summarizer.services._common import state
 
-    llm = state().llm_refine
+    llm = state().resolve_stage_client("feed")
     # _MINIMAL_GOALS_YAML sets draft_model/refine_model to "test-model"
     assert llm._inner.model == "test"
 
@@ -29,7 +29,7 @@ def test_startup_overrides_model_when_specified(tmp_path: Path, monkeypatch):
     set_context(AppContext(settings=settings))
     lifecycle.startup(override_model="fast-local-model")
 
-    llm = state().llm_refine
+    llm = state().resolve_stage_client("feed")
     assert llm._inner.model == "fast-local-model"
 
 
@@ -43,5 +43,5 @@ def test_startup_override_model_none_uses_yaml(tmp_path: Path, monkeypatch):
     set_context(AppContext(settings=settings))
     lifecycle.startup(override_model=None)
 
-    llm = state().llm_refine
+    llm = state().resolve_stage_client("feed")
     assert llm._inner.model == "test"

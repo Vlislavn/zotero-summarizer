@@ -44,7 +44,7 @@ def _build_db(tmp_path: Path) -> Path:
     return db
 
 
-def _record(db: Path, feed_item_id: int) -> int:
+def _record(db: Path, feed_item_id: int, *, reading_priority: str | None = None) -> int:
     conn = sqlite3.connect(str(db))
     conn.row_factory = sqlite3.Row
     try:
@@ -55,6 +55,7 @@ def _record(db: Path, feed_item_id: int) -> int:
                 "guid": f"http://arxiv.org/abs/{feed_item_id}", "title": f"P{feed_item_id}",
             },
             decision=fs.DECISION_TRIAGED_PENDING, composite_score=2.0,
+            reading_priority=reading_priority,
         )
         conn.commit()
         return int(conn.execute(
@@ -117,6 +118,20 @@ def test_add_to_library_materializes_and_labels_should_read(env, monkeypatch):
     assert repo.get_label_verdict(db, "feed:200")["user_priority"] == "should_read"
     # Add is a soft pre-read interest signal → feed_interest tier (weight 0.3).
     assert (200, "should_read", "feed_interest") in appended
+
+
+def test_add_to_library_records_original_gate_priority_not_add_label(env, monkeypatch):
+    """Regression: add_to_library overrides row["reading_priority"] to
+    should_read for the Zotero tag, but the verdict overlay must still record
+    the gate/model's ORIGINAL derived priority — not the add label."""
+    db, _appended = env
+    pk = _record(db, 250, reading_priority="dont_read")  # gate-rejected derived priority
+    monkeypatch.setattr(review, "materialize_row", lambda row, **k: "KEY1")
+    res = daily_actions.add_to_library([pk])
+    assert res["added"] == 1
+    verdict = repo.get_label_verdict(db, "feed:250")
+    assert verdict["user_priority"] == "should_read"          # the user's add intent
+    assert verdict["original_derived_priority"] == "dont_read"  # the gate's verdict, preserved
 
 
 def test_batch_handles_multiple_ids(env, monkeypatch):

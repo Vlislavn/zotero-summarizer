@@ -17,12 +17,18 @@ from zotero_summarizer.services.model.classifier_const import *  # noqa: F401,F4
 def _build_aux_providers(
     corpus_db_path: Path,
     goals_config: Any | None,
+    *,
+    allow_network: bool = True,
 ) -> tuple[Any, Any]:
     """Lazy-init the corpus EmbeddingCache + OpenAlex client when configured.
 
     Returns ``(embed_cache_or_None, openalex_client_or_None)``. Either being
     None makes :func:`_compute_aux` fall back to its neutral defaults so the
     classifier still runs end-to-end without those signals.
+
+    ``allow_network=False`` builds a CACHE-ONLY OpenAlex client (no network) for
+    interactive request paths that must not block on a lookup — see
+    :class:`OpenAlexClient`.
     """
     embed_cache = None
     openalex_client = None
@@ -51,7 +57,7 @@ def _build_aux_providers(
                 ttl_seconds=int(prestige_cfg.cache_ttl_days) * 86400,
             )
             mailto = (getattr(prestige_cfg, "user_agent_email", "") or "").strip() or None
-            openalex_client = OpenAlexClient(cache, mailto=mailto)
+            openalex_client = OpenAlexClient(cache, mailto=mailto, allow_network=allow_network)
     except Exception as exc:
         LOGGER.warning("OpenAlex client init failed: %s", exc)
 
@@ -106,17 +112,22 @@ def _compute_aux_with_context(
     """
     affinity = 0.0
     prestige = float(prestige_neutral)
-    ctx: dict[str, float] = {
+    ctx: dict[str, float | None] = {
         "max_author_h_index": 0.0,
         "venue_works_count": 0.0,
         "cited_by_count": 0.0,
+        # Field-normalized citation percentile [0,1] (None = unknown / cold-start).
+        # The quality signal the Library prestige + floor use downstream.
+        "citation_percentile": None,
     }
     if embed_cache is not None:
         try:
-            result = embed_cache.match_candidate(title, abstract, stale_days_for_weak_negative=stale_days)
-            affinity = float(getattr(result, "affinity_score", 0.0) or 0.0)
+            # Fast vectorized affinity (cached corpus matrix) — the gate scores
+            # every item, so the per-item Python cosine loop in match_candidate
+            # was the bottleneck. affinity_only returns the same number.
+            affinity = float(embed_cache.affinity_only(title, abstract, stale_days_for_weak_negative=stale_days))
         except Exception as exc:
-            LOGGER.debug("corpus match failed: %s", exc)
+            LOGGER.debug("corpus affinity failed: %s", exc)
     if openalex_client is not None:
         try:
             from zotero_summarizer.services.model.prestige import lookup_prestige
@@ -133,6 +144,8 @@ def _compute_aux_with_context(
                 ctx["max_author_h_index"] = float(getattr(work, "max_author_h_index", 0) or 0)
                 ctx["venue_works_count"] = float(getattr(work, "venue_works_count", 0) or 0)
                 ctx["cited_by_count"] = float(getattr(work, "cited_by_count", 0) or 0)
+                pct = getattr(work, "citation_percentile", None)
+                ctx["citation_percentile"] = float(pct) if pct is not None else None
         except Exception as exc:
             LOGGER.debug("prestige lookup failed: %s", exc)
     return affinity, prestige, ctx

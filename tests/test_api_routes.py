@@ -52,7 +52,16 @@ def test_get_item_pdf_404_when_item_missing(monkeypatch):
     assert excinfo.value.status_code == 404
 
 
-def test_app_uses_canonical_routes_only():
+def test_app_uses_canonical_routes_only(tmp_path, monkeypatch):
+    # _install_spa only registers "/" when frontend/dist/index.html exists.
+    # Create a stub so the assertion holds on a clean checkout (no built dist).
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html>")
+    (dist / "assets").mkdir()
+    import zotero_summarizer.api.app as _app_mod
+    monkeypatch.setattr(_app_mod, "_FRONTEND_DIST", dist)
+
     app = create_app()
     paths = {getattr(route, "path", "") for route in app.routes}
 

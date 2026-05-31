@@ -28,6 +28,7 @@ def train_and_save(
     pca_dim: int = 100,
     progress_cb: Callable[[int, int], None] | None = None,
     triage_db_path: Path | None = None,
+    runs_log_path: Path | None = None,
 ) -> TrainedClassifier:
     """Train regressor on `gold_inferred_relevance` and persist to disk.
 
@@ -91,8 +92,13 @@ def train_and_save(
     library = load_positive_library_from_rows(all_rows, corpus_db_path)
     n_train = len(y_cont)
     X_train = np.zeros((n_train, classifier.FEATURE_DIM), dtype=np.float32)
+    # Embed the whole training set in batched (GPU) passes, not one-at-a-time.
+    embeddings = classifier.get_or_compute_embeddings_batch(
+        corpus_db_path,
+        [{"item_key": k, "title": t, "abstract": a} for k, t, a in zip(keys, titles, abstracts)],
+    )
     for i, (k, t, a) in enumerate(zip(keys, titles, abstracts)):
-        emb = classifier.get_or_compute_embedding(corpus_db_path, k, t, a)
+        emb = embeddings[i]
         X_train[i, :classifier.EMBEDDING_DIM] = emb
         year_str = (train_rows[i].get("year") or "").strip()
         year_i = int(year_str[:4]) if year_str[:4].isdigit() else None
@@ -134,6 +140,23 @@ def train_and_save(
         preds_oof[vl] = p_vl
         LOGGER.info("train_and_save: fold %d/%d done", fold_idx, n_folds)
     oof_rho = float(spearmanr(y_train, preds_oof).statistic) if n_train > 2 else 0.0
+
+    # Out-of-fold per-class quality (honest — these predictions never saw their
+    # own fold). Bucket the OOF continuous scores to priorities via the same
+    # domain mapping the gate uses, then compare to gold. Reuses golden_metrics
+    # so the model card can render precision/recall/F1 + a confusion matrix.
+    from zotero_summarizer.domain import score_to_priority
+    from zotero_summarizer.services.model import golden_metrics as gm
+
+    gold_labels = [(r.get("gold_priority_final") or "").strip() for r in train_rows]
+    pred_labels = [score_to_priority(float(p)) for p in preds_oof]
+    oof_metrics = {
+        "total": len(gold_labels),
+        "accuracy": round(gm.accuracy(gold_labels, pred_labels), 4),
+        "per_class": {k: v.as_dict() for k, v in gm.compute_per_class(gold_labels, pred_labels).items()},
+        "binary": gm.compute_binary(gold_labels, pred_labels).as_dict(),
+        "confusion": gm.compute_confusion(gold_labels, pred_labels),
+    }
 
     # 4. Final fit on FULL training set.
     pca_object = None
@@ -211,6 +234,7 @@ def train_and_save(
             "n_positive_library": library.n_rows,
             "objective": "regression",
             "oof_spearman": round(oof_rho, 4),
+            "oof_metrics_vs_gold": oof_metrics,
             "trained_at": now_iso_z(),
             "git_commit": run_log.short_git_commit(),
         },
@@ -220,6 +244,19 @@ def train_and_save(
     output_dir = output_dir or DEFAULT_MODEL_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
     save_trained(trained, output_dir)
+    # FAIR run-log entry so the Settings ModelCard renders the OOF per-class
+    # table after a retrain (it reads runlog.cv.metrics_vs_gold.per_class). The
+    # path is provided by the API retrain worker; CLI/gate callers pass None.
+    if runs_log_path is not None:
+        run_log.append_run(runs_log_path, {
+            "run_id": run_log.make_run_id(classifier_name),
+            "timestamp": now_iso_z(),
+            "git_commit": run_log.short_git_commit(),
+            "classifier": classifier_name,
+            "type": "train_artifact",
+            "cv": {"n_rows": n_train, "auc": None, "metrics_vs_gold": oof_metrics},
+            "input_csv_sha256_prefix": sha256[:12],
+        })
     LOGGER.info(
         "trained regressor %s saved to %s (n_train=%d, OOF Spearman ρ=%.3f)",
         classifier_name, output_dir, n_train, oof_rho,

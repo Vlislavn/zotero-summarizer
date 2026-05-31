@@ -147,7 +147,9 @@ def build_scoring(row: dict[str, Any]) -> dict[str, Any] | None:
     composite = row.get("composite_score")
     prestige_inputs: dict[str, Any] = {}
     if isinstance(aux, dict):
-        for key in ("max_author_h_index", "venue_works_count", "cited_by_count"):
+        # citation_percentile is THE prestige signal (field+year-normalized);
+        # h-index/venue/cites are kept for context only.
+        for key in ("citation_percentile", "max_author_h_index", "venue_works_count", "cited_by_count"):
             if key in aux and aux[key] is not None:
                 prestige_inputs[key] = aux[key]
 

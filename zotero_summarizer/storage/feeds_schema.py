@@ -74,4 +74,6 @@ MIGRATION_COLUMNS = (
     ("updated_at", "TEXT"),
     ("shap_contribs_json", "TEXT"),   # Phase 1.14
     ("quality_review_json", "TEXT"),  # full-text quality review
+    ("abstract", "TEXT"),             # feed item abstract (for Today card)
+    ("pub_year", "INTEGER"),          # publication year parsed from publication_date
 )

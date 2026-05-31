@@ -100,18 +100,24 @@ def row_corpus_affinity(row: dict[str, Any], payload: dict[str, Any]) -> float:
 
 
 def row_prestige(row: dict[str, Any], payload: dict[str, Any]) -> float:
-    """Prestige in [0, 1]. Plan-mandated source priority:
+    """Prestige in [0, 1]. Source priority (SOTA signal first):
 
+      0. ``aux_context.citation_percentile`` — OpenAlex field+year-normalized
+         citation percentile, already in [0, 1]. The robust, non-gameable signal
+         (same one the Library floor uses); used verbatim when present.
       1. ``summary.prestige_score`` (LLM 1-5 scale) normalized to [0, 1].
       2. ``aux_context.max_author_h_index`` log-ratio against reference ~30.
       3. Plan says "if absent, use the row's ``composite_score`` field" —
          we normalise composite (0..5 scale) to [0, 1] as the last resort.
     """
+    aux = _aux_dict(payload)
+    pct = aux.get("citation_percentile")
+    if pct is not None:
+        return min(1.0, max(0.0, float(pct)))
     summary = _summary_dict(payload)
     prestige = summary.get("prestige_score")
     if prestige is not None:
         return float(prestige) / 5.0
-    aux = _aux_dict(payload)
     h = aux.get("max_author_h_index")
     if h is not None:
         h_val = max(0.0, float(h))
@@ -175,6 +181,15 @@ def _row_item_key(row: dict[str, Any]) -> str:
     return f"row-{int(row_id)}"
 
 
+def row_abstract(row: dict[str, Any]) -> str:
+    return str(row.get("abstract") or "")
+
+
+def row_pub_year(row: dict[str, Any]) -> int | None:
+    v = row.get("pub_year")
+    return int(v) if v is not None else None
+
+
 def row_top_author_h_index(payload: dict[str, Any]) -> int | None:
     """Top-author h-index from ``aux_context.max_author_h_index``.
 
@@ -217,6 +232,8 @@ def make_candidate(row: dict[str, Any]) -> dict[str, Any]:
         "max_author_h_index": row_top_author_h_index(payload),
         "feed_name": str(row.get("feed_name") or ""),
         "created_at": str(row.get("created_at") or ""),
+        "abstract": row_abstract(row),
+        "pub_year": row_pub_year(row),
     }
 
 
@@ -243,4 +260,6 @@ __all__ = [
     "row_venue",
     "row_rationale",
     "row_quality",
+    "row_abstract",
+    "row_pub_year",
 ]

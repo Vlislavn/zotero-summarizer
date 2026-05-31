@@ -160,6 +160,40 @@ def score_to_priority(score: float) -> str:
         return ReadingPriority.COULD_READ.value
     return ReadingPriority.DONT_READ.value
 
+
+# One-band demotion for the prestige/quality floor. The top bands stay
+# high-quality: a top-tier item whose KNOWN prestige is below a data-derived
+# floor drops one band, one step at a time. Demote-only.
+_DEMOTE_ONE_BAND: dict[str, str] = {
+    ReadingPriority.MUST_READ.value: ReadingPriority.SHOULD_READ.value,
+    ReadingPriority.SHOULD_READ.value: ReadingPriority.COULD_READ.value,
+}
+
+
+def apply_prestige_floor(
+    priority: str,
+    prestige_score: float | None,
+    *,
+    prestige_known: bool,
+    floor: float | None,
+) -> str:
+    """Quality floor on the top bands: demote ``priority`` one step when its
+    KNOWN prestige is below ``floor`` (must_read→should_read,
+    should_read→could_read). Pure post-band policy — the raw score and
+    :func:`score_to_priority` are untouched (the round-trip invariant holds; only
+    the displayed/applied band changes).
+
+    Never penalises missing evidence: ``floor is None`` (no known prestige in the
+    library → inert), ``prestige_known is False`` (no OpenAlex record / cold-start
+    with no signal), or ``prestige_score is None`` all return ``priority``
+    unchanged. could_read / dont_read are never demoted."""
+    if floor is None or not prestige_known or prestige_score is None:
+        return priority
+    if float(prestige_score) >= float(floor):
+        return priority
+    return _DEMOTE_ONE_BAND.get(priority, priority)
+
+
 TRIAGE_APPROVED_TAG = "✅ triage-approved"
 TRIAGE_REJECTED_TAG = "🚫 triage-rejected"
 TRIAGE_APPROVED_TAG_TOKEN = "triage-approved"

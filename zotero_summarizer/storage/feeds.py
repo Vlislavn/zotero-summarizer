@@ -79,6 +79,11 @@ from zotero_summarizer.storage.feeds_lookup import (  # noqa: F401  (re-exported
 LOGGER = logging.getLogger("zotero_summarizer.storage.feeds")
 
 
+def _parse_pub_year(date_str: Any) -> int | None:
+    s = str(date_str or "").strip()
+    return int(s[:4]) if len(s) >= 4 and s[:4].isdigit() else None
+
+
 def init_feeds_schema(conn: sqlite3.Connection) -> None:
     """Create the processed_feed_items table + indexes; migrate Phase 1 DBs.
 
@@ -258,8 +263,9 @@ def record_decision(
             decision, decision_reason,
             composite_score, surprise_score, corpus_affinity, reading_priority,
             is_black_swan, model_version, run_id, planned_zotero_key,
-            matched_collections_json, error, shap_contribs_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            matched_collections_json, error, shap_contribs_json,
+            abstract, pub_year
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             int(feed_item.get("feed_library_id") or 0),
@@ -282,6 +288,8 @@ def record_decision(
             _json.dumps(matched_collections or []),
             error,
             shap_contribs_json,
+            str(feed_item.get("abstract") or "") or None,
+            _parse_pub_year(feed_item.get("publication_date")),
         ),
     )
     return int(cursor.lastrowid or 0)
@@ -335,6 +343,33 @@ def update_quality_review(
         WHERE id = ?
         """,
         (quality_review_json, int(row_id)),
+    )
+    return int(cursor.rowcount or 0) > 0
+
+
+def update_scores(
+    conn: sqlite3.Connection,
+    *,
+    row_id: int,
+    composite_score: float,
+    reading_priority: str,
+    shap_contribs_json: str | None,
+) -> bool:
+    """Refresh a row's gate scores IN PLACE (by PK ``id``) after a model upgrade.
+
+    Updates ONLY the gate-derived fields (composite_score, reading_priority,
+    shap_contribs_json) — never the ``decision``, read status, or outcome — so a
+    re-score re-ranks the Today slate without re-surfacing items the user already
+    handled. Returns True if a row was updated. Used by ``rescore_slate``.
+    """
+    cursor = conn.execute(
+        """
+        UPDATE processed_feed_items
+        SET composite_score = ?, reading_priority = ?, shap_contribs_json = ?,
+            updated_at = datetime('now')
+        WHERE id = ?
+        """,
+        (float(composite_score), reading_priority, shap_contribs_json, int(row_id)),
     )
     return int(cursor.rowcount or 0) > 0
 

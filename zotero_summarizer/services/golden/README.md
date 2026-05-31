@@ -14,7 +14,7 @@ label_provenance: per-row "why this label?"   relabel_audit/: is labeling reliab
 
 | file | responsibility |
 |---|---|
-| `goldenset.py` | export the golden CSV/JSONL from Zotero engagement signals (atomic tmp+replace so a crash can't truncate it; labels/relevance from `domain`) |
+| `goldenset.py` | export the golden CSV/JSONL from Zotero engagement signals (atomic tmp+replace so a crash can't truncate it; labels/relevance from `domain`). Preserves **all** manual verdict keys on re-export via the uncapped `repositories.list_label_verdict_keys` (a capped fetch would silently drop verdicts); strips note HTML with the canonical `services._common.html_to_text` |
 | `hybrid_gt.py` | overlay manual verdicts on derived labels (manual wins); relevance values from `domain.PRIORITY_TO_RELEVANCE` |
 | `label_provenance.py` | per-row provenance: which signal produced which label |
 | `feedback.py` | map emoji/engagement events to training signal tiers |

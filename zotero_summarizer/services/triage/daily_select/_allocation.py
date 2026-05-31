@@ -36,6 +36,8 @@ def _to_slate_paper(cand: dict[str, Any], *, role: str) -> SlatePaper:
         max_author_h_index=cand.get("max_author_h_index"),
         feed_name=cand.get("feed_name", ""),
         quality=cand.get("quality") or {},
+        abstract=cand.get("abstract", ""),
+        pub_year=cand.get("pub_year"),
     )
 
 

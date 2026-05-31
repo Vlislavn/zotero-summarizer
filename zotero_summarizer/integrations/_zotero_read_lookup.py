@@ -5,6 +5,7 @@ import sqlite3  # noqa: F401  (type hints)
 from typing import Any  # noqa: F401
 
 from zotero_summarizer.domain import normalize_doi
+from zotero_summarizer.integrations._zotero_read_common import _NON_BIBLIOGRAPHIC_TYPES_SQL
 
 
 class ZoteroLookupMixin:
@@ -172,7 +173,7 @@ class ZoteroLookupMixin:
 
         def _read(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             rows = conn.execute(
-                """
+                f"""
                 SELECT t.name, COUNT(DISTINCT it.itemID) AS item_count
                 FROM tags t
                 JOIN itemTags it ON it.tagID = t.tagID
@@ -180,7 +181,7 @@ class ZoteroLookupMixin:
                 JOIN itemTypes typ ON typ.itemTypeID = i.itemTypeID
                 LEFT JOIN deletedItems di ON di.itemID = i.itemID
                 WHERE di.itemID IS NULL
-                  AND typ.typeName NOT IN ('attachment', 'note')
+                  AND typ.typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL})
                 GROUP BY t.tagID
                 ORDER BY item_count DESC, t.name ASC
                 LIMIT ?

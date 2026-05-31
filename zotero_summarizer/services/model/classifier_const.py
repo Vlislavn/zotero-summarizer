@@ -23,7 +23,7 @@ EMBEDDING_DIM = 768
 #   3  title_log_len            log1p(len)
 #   4  abstract_log_len         log1p(len)
 #   5  corpus_affinity          cosine to research_goals
-#   6  prestige_score           OpenAlex h-index/venue blend, [1, 5]
+#   6  prestige_score           OpenAlex field-normalized citation percentile → [1, 5]
 #   7  nearest_kept_cosine      max cosine to positive-engagement subset P
 #   8  positive_centroid_cosine cosine to mean(P)
 #   9  recent_centroid_cosine   cosine to mean(P ∩ last 90d)

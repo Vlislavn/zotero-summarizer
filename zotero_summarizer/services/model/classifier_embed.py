@@ -29,6 +29,17 @@ def _content_hash(title: str, abstract: str, authors: str = "", venue: str = "")
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()
 
 
+def _select_device(torch: Any) -> str:
+    """Pick the fastest available device for encoder inference: Apple-Silicon
+    MPS, then CUDA, then CPU. A small (~0.5GB) encoder runs comfortably on the
+    GPU and is far faster there than on CPU for the per-tick gate batch."""
+    if torch.backends.mps.is_available():
+        return "mps"
+    if torch.cuda.is_available():
+        return "cuda"
+    return "cpu"
+
+
 def _load_specter2() -> tuple[Any, Any, Any]:
     """Lazy-load SPECTER2 base + proximity adapter. Returns (tokenizer, model, torch).
 
@@ -36,6 +47,9 @@ def _load_specter2() -> tuple[Any, Any, Any]:
     `adapters.AutoAdapterModel` so we can load the proximity adapter on
     top of the base encoder. The adapter is set active so subsequent
     forward passes route through it.
+
+    The model is moved onto the selected device (MPS/CUDA/CPU); the device is
+    cached so the encode helpers know where to place inputs.
     """
     if "loaded" in _MODEL_CACHE:
         return _MODEL_CACHE["tok"], _MODEL_CACHE["mdl"], _MODEL_CACHE["torch"]
@@ -56,9 +70,67 @@ def _load_specter2() -> tuple[Any, Any, Any]:
         set_active=True,
     )
     mdl.eval()
-    _MODEL_CACHE.update({"tok": tok, "mdl": mdl, "torch": torch, "loaded": True})
-    LOGGER.info("SPECTER2 + proximity adapter ready")
+    device = _select_device(torch)
+    mdl.to(device)
+    _MODEL_CACHE.update({"tok": tok, "mdl": mdl, "torch": torch, "device": device, "loaded": True})
+    LOGGER.info("SPECTER2 + proximity adapter ready on device=%s", device)
     return tok, mdl, torch
+
+
+def _pair_to_text(tok: Any, title: str, abstract: str) -> str:
+    """``title [SEP] abstract`` — the layout SPECTER2 was trained on (Cohan 2020).
+    Authors/venue are deliberately excluded (they pushed the first tokens
+    off-distribution); that signal lives in the tabular library features."""
+    parts = [p for p in [(title or "Untitled").strip(), (abstract or "").strip()] if p]
+    return tok.sep_token.join(parts)
+
+
+def _encode_chunk(tok: Any, mdl: Any, torch: Any, texts: list[str], device: str) -> np.ndarray:
+    """One batched forward pass → (len(texts), 768) CLS vectors on CPU.
+
+    Device→CPU fallback (user-authorized: "Batch + MPS GPU, CPU fallback"):
+    MPS op coverage is incomplete, so a device RuntimeError/NotImplementedError
+    is logged and the batch is retried on CPU, after which the model stays on CPU
+    for the rest of the process. An error on CPU is real and propagates.
+    """
+    inputs = tok(texts, padding=True, truncation=True, max_length=512, return_tensors="pt")
+    try:
+        moved = {k: v.to(device) for k, v in inputs.items()}
+        with torch.no_grad():
+            outputs = mdl(**moved)
+        return outputs.last_hidden_state[:, 0, :].cpu().numpy().astype(np.float32)
+    except (RuntimeError, NotImplementedError) as exc:
+        if device == "cpu":
+            raise
+        LOGGER.warning("SPECTER2 forward failed on device=%s (%s); falling back to cpu", device, exc)
+        mdl.to("cpu")
+        _MODEL_CACHE["device"] = "cpu"
+        with torch.no_grad():
+            outputs = mdl(**{k: v.to("cpu") for k, v in inputs.items()})
+        return outputs.last_hidden_state[:, 0, :].cpu().numpy().astype(np.float32)
+
+
+def compute_embeddings_batch(
+    pairs: list[tuple[str, str]],
+    *,
+    sub_batch: int = 32,
+) -> np.ndarray:
+    """Embed many ``(title, abstract)`` pairs in batched forward passes.
+
+    Returns ``(N, 768)`` float32. This is the throughput primitive for the gate:
+    one forward pass over a sub-batch instead of N single-item passes. Inputs run
+    on the selected device (MPS/CUDA/CPU) with the CPU fallback in ``_encode_chunk``.
+    """
+    if not pairs:
+        return np.zeros((0, EMBEDDING_DIM), dtype=np.float32)
+    tok, mdl, torch = _load_specter2()
+    device = _MODEL_CACHE["device"]
+    texts = [_pair_to_text(tok, title, abstract) for title, abstract in pairs]
+    out = np.zeros((len(texts), EMBEDDING_DIM), dtype=np.float32)
+    for start in range(0, len(texts), sub_batch):
+        chunk = texts[start:start + sub_batch]
+        out[start:start + len(chunk)] = _encode_chunk(tok, mdl, torch, chunk, device)
+    return out
 
 
 def compute_embedding(
@@ -68,29 +140,13 @@ def compute_embedding(
     authors: str = "",
     venue: str = "",
 ) -> np.ndarray:
-    """Run SPECTER2 once. Returns a (768,) float32 ndarray.
+    """Run SPECTER2 on one item. Returns a (768,) float32 ndarray.
 
-    Sprint-1 (May 2026): input layout is ``title [SEP] abstract`` — the
-    layout SPECTER2 was actually trained on (Cohan 2020). Authors and venue
-    used to be concatenated into the text but they pushed the encoder's
-    first 30 tokens off-distribution and let surname collisions (Wang/Li/
-    Chen) spuriously inflate cosine similarity. Author/venue signal is
-    captured by tabular library-conditioned features instead.
-
-    The ``authors`` and ``venue`` kwargs are accepted for backward
-    compatibility but are no longer mixed into the text or the cache hash.
+    Thin shim over :func:`compute_embeddings_batch` (kept for back-compat). The
+    ``authors``/``venue`` kwargs are accepted but not mixed into the text or the
+    cache hash (see :func:`_pair_to_text`).
     """
-    tok, mdl, torch = _load_specter2()
-    parts = [p for p in [
-        (title or "Untitled").strip(),
-        (abstract or "").strip(),
-    ] if p]
-    text = tok.sep_token.join(parts)
-    inputs = tok(text, padding=True, truncation=True, max_length=512, return_tensors="pt")
-    with torch.no_grad():
-        outputs = mdl(**inputs)
-    cls = outputs.last_hidden_state[:, 0, :].squeeze(0).cpu().numpy()
-    return cls.astype(np.float32)
+    return compute_embeddings_batch([(title, abstract)])[0]
 
 
 def get_or_compute_embedding(
@@ -125,6 +181,52 @@ def get_or_compute_embedding(
         conn.close()
 
 
+def get_or_compute_embeddings_batch(
+    db_path: Path,
+    items: list[dict[str, str]],
+) -> np.ndarray:
+    """Cache-aware batch embed. ``items`` need ``item_key``/``title``/``abstract``.
+
+    Returns ``(N, 768)`` in input order. Cache hits (matching ``content_hash``)
+    are reused; the misses are encoded in ONE batched pass and inserted. This is
+    the gate's hot-path entry point — a fresh backlog of N items costs one
+    batched forward instead of N single passes.
+    """
+    _ensure_schema(db_path)
+    n = len(items)
+    out = np.zeros((n, EMBEDDING_DIM), dtype=np.float32)
+    if n == 0:
+        return out
+    keys = [str(it.get("item_key") or it.get("item_id") or f"item_{i}") for i, it in enumerate(items)]
+    hashes = [_content_hash(it.get("title") or "", it.get("abstract") or "") for it in items]
+    conn = sqlite3.connect(str(db_path))
+    try:
+        miss_idx: list[int] = []
+        for i, (k, ch) in enumerate(zip(keys, hashes)):
+            row = conn.execute(
+                "SELECT content_hash, embedding_json FROM specter2_embeddings WHERE item_key = ?",
+                (k,),
+            ).fetchone()
+            if row and row[0] == ch:
+                out[i] = np.asarray(json.loads(row[1]), dtype=np.float32)
+            else:
+                miss_idx.append(i)
+        if miss_idx:
+            pairs = [(items[i].get("title") or "", items[i].get("abstract") or "") for i in miss_idx]
+            embs = compute_embeddings_batch(pairs)
+            for j, i in enumerate(miss_idx):
+                out[i] = embs[j]
+                conn.execute(
+                    "INSERT OR REPLACE INTO specter2_embeddings (item_key, content_hash, embedding_json) "
+                    "VALUES (?, ?, ?)",
+                    (keys[i], hashes[i], json.dumps(embs[j].tolist())),
+                )
+            conn.commit()
+        return out
+    finally:
+        conn.close()
+
+
 def _ensure_schema(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
@@ -153,9 +255,12 @@ def _embedding_cached(db_path: Path, item_key: str, content_hash: str) -> bool:
 
 __all__ = [
     "_content_hash",
+    "_select_device",
     "_load_specter2",
     "compute_embedding",
+    "compute_embeddings_batch",
     "get_or_compute_embedding",
+    "get_or_compute_embeddings_batch",
     "_ensure_schema",
     "_embedding_cached",
 ]

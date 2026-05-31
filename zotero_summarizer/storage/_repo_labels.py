@@ -171,6 +171,24 @@ def list_label_verdicts(
     return [_row_to_label_verdict(r) for r in rows]
 
 
+def list_label_verdict_keys(db_path: Path) -> set[str]:
+    """ALL distinct ``item_key`` values that have a manual verdict — uncapped.
+
+    The golden-CSV re-export uses this to PRESERVE every manually-labelled item
+    across the rebuild (a capped/paginated fetch would silently drop verdicts and
+    lose them on re-export). Keys-only + DISTINCT, so it stays cheap even
+    uncapped; the row-listing :func:`list_label_verdicts` keeps its UI page cap.
+    """
+    conn = _connect_to(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT item_key FROM label_verdicts WHERE item_key IS NOT NULL AND item_key != ''"
+        ).fetchall()
+    finally:
+        conn.close()
+    return {str(r["item_key"]) for r in rows}
+
+
 def delete_label_verdict(db_path: Path, item_key: str) -> bool:
     """Delete one verdict; return True iff a row was removed."""
     safe_item_key = str(item_key or "").strip()
@@ -193,5 +211,6 @@ __all__ = [
     "insert_or_update_label_verdict",
     "get_label_verdict",
     "list_label_verdicts",
+    "list_label_verdict_keys",
     "delete_label_verdict",
 ]

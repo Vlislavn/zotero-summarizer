@@ -27,10 +27,9 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from zotero_summarizer.services._common import now_iso_z
+from zotero_summarizer.services._common import effective_llm_concurrency, now_iso_z
 
 from zotero_summarizer.services.library import quality_review, reading_queue
-from zotero_summarizer.services._adapters import build_triage_llm
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services._common import state as get_state
 
@@ -206,9 +205,12 @@ def _review_one(
     }
 
 
-def _run_job(items: list[dict[str, Any]], *, model: str) -> None:
+def _run_job(items: list[dict[str, Any]]) -> None:
     """Background worker: deep-review ``items`` concurrently, writing the cache
-    incrementally from this (single) thread so progress is visible."""
+    incrementally from this (single) thread so progress is visible. The LLM is
+    the configured **deep_review** stage client (``goals.yaml:
+    llm_routing.deep_review``); a missing key / unreachable provider surfaces as
+    this job's error, never an app crash."""
     try:
         app = get_state()
         config = app.app_state.config
@@ -218,10 +220,12 @@ def _run_job(items: list[dict[str, Any]], *, model: str) -> None:
         if reader is None:
             raise RuntimeError("Zotero reader unavailable; cannot deep-review")
         quality_enabled = bool(cfg.enabled and extractor is not None)
-        llm = build_triage_llm(model)
+        llm = app.resolve_stage_client("deep_review")
+        provider = app.resolve_stage_provider("deep_review")
 
         cache = _read_all()
-        max_workers = max(1, min(get_settings().triage_job_concurrency, len(items) or 1))
+        # Serial for a local model (protect RAM), configured cap for a remote one.
+        max_workers = effective_llm_concurrency(provider, len(items) or 1)
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {
                 pool.submit(
@@ -253,7 +257,7 @@ def _run_job(items: list[dict[str, Any]], *, model: str) -> None:
 
 
 def start(
-    top_k: int = _DEFAULT_TOP_K, *, item_keys: list[str] | None = None, model: str = "sota",
+    top_k: int = _DEFAULT_TOP_K, *, item_keys: list[str] | None = None,
 ) -> dict[str, Any]:
     """Kick off a deep review (single-flight). With ``item_keys`` set, reviews
     exactly those papers (the per-paper button); otherwise the top-``top_k``
@@ -298,7 +302,7 @@ def start(
         finish(error=None)
         return status()
 
-    run_in_background(lambda: _run_job(items, model=model))
+    run_in_background(lambda: _run_job(items))
     return status()
 
 

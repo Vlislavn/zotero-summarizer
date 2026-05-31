@@ -165,6 +165,8 @@ def _retrain_worker(job_id: str, *, classifier_name: str, n_folds: int) -> None:
                 n_folds=n_folds,
                 progress_cb=progress,
                 triage_db_path=settings.triage_db_path,
+                # Write the FAIR run-log so ModelCard shows OOF per-class metrics.
+                runs_log_path=settings.data_dir / "classifier-runs.jsonl",
             )
         except Exception as exc:  # pylint: disable=broad-except
             _finish_job(job_id, result=None, error=f"{type(exc).__name__}: {exc}")

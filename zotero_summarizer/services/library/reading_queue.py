@@ -21,7 +21,6 @@ Key design points (see the plan):
 from __future__ import annotations
 
 import json
-import math
 import threading
 from typing import Any
 
@@ -30,6 +29,19 @@ from zotero_summarizer.services._common import now_iso_z
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services._common import state as get_state
 from zotero_summarizer.services.emoji_signals import ALL_EMOJIS, HARD_VETO_EMOJIS
+from zotero_summarizer.services.library._ranking import (  # noqa: F401 — re-export the seam
+    _GOAL_RERANK_WEIGHT,
+    _blended_sort,
+    _content_key,
+    _dedup_by_content,
+    _goal_affinity,
+)
+from zotero_summarizer.services.library._score_distribution import (
+    _HIST_EDGES,  # noqa: F401 — re-export for the stable public seam
+    _entry_prestige,
+    prestige_floor,
+    score_distribution as _score_distribution,
+)
 
 # "Read / handled" = engaged-with (any signal emoji) or vetoed.
 _HANDLED_EMOJIS: frozenset[str] = frozenset(ALL_EMOJIS) | HARD_VETO_EMOJIS
@@ -171,17 +183,22 @@ def scoring_from_prediction(pred: Any) -> dict[str, Any]:
     """Convert a gate ``FeedPrediction`` into the ``scoring`` shape the
     PrestigeWaterfall renders. composite == the gate's raw_score (1–5): the SHAP
     bars sum to it, so the waterfall is internally consistent."""
+    from zotero_summarizer.services.model.prestige import percentile_to_score
+
     aux = pred.aux_context or {}
-    h = aux.get("max_author_h_index")
-    prestige = None
-    if h is not None:
-        prestige = min(1.0, math.log1p(max(0.0, float(h))) / math.log1p(30.0))
+    # Prestige = field+year-normalized citation percentile mapped to [1,5] via the
+    # SAME function the gate feature uses (single source). None percentile
+    # (cold-start / uncited) → prestige None, so the floor treats it as UNKNOWN
+    # and never demotes it — h-index/venue/cites are kept only for the "why" panel.
+    pct = aux.get("citation_percentile")
+    prestige = percentile_to_score(pct) if pct is not None else None
     shap_top = [
         {"feature": str(c.get("feature") or ""), "value": float(c.get("contribution") or 0.0)}
         for c in (pred.shap_contribs or [])
     ]
     prestige_inputs = {
-        k: aux[k] for k in ("max_author_h_index", "venue_works_count", "cited_by_count")
+        k: aux[k]
+        for k in ("citation_percentile", "max_author_h_index", "venue_works_count", "cited_by_count")
         if aux.get(k) is not None
     }
     return {
@@ -204,9 +221,15 @@ def _why_reason(scoring: dict[str, Any]) -> str | None:
     return _FRIENDLY.get(name, name.replace("_", " ").title())
 
 
-def _score_items(items: list[dict[str, Any]], *, return_shap: bool) -> dict[str, Any]:
+def _score_items(
+    items: list[dict[str, Any]], *, return_shap: bool, prestige_network: bool = True,
+) -> dict[str, Any]:
     """Score items with the loaded gate → ``{item_key: FeedPrediction}``.
-    Empty when the gate is unavailable (caller falls back)."""
+    Empty when the gate is unavailable (caller falls back).
+
+    ``prestige_network=False`` makes the gate's OpenAlex prestige lookup
+    cache-only (no network) — used by the interactive ``live_scoring`` path so
+    opening a paper never blocks on a multi-second OpenAlex search."""
     gate = _gate()
     if gate is None or not items:
         return {}
@@ -217,6 +240,7 @@ def _score_items(items: list[dict[str, Any]], *, return_shap: bool) -> dict[str,
         corpus_db_path=settings_.corpus_db_path,
         goals_config=config,
         return_shap=return_shap,
+        prestige_network=prestige_network,
     )
     return {p.item_key: p for p in preds}
 
@@ -240,12 +264,15 @@ def _compute_scores_into_cache(gate_sha: str, *, full: bool = False) -> None:
     partial results appear while a large run is still in progress.
     """
     try:
-        page = _reader().get_items(limit=_SCAN_LIMIT)
+        # Whole-library scan (read AND unread) so every scorable paper gets a
+        # cached score — needed for the global Zotero rank. The displayed queue
+        # routes read items aside separately; here we score them too. No-abstract
+        # items are skipped (the gate needs an abstract) and handled at rank time.
+        page = _reader().get_all_items()
         cached = {} if full else _read_cache(gate_sha)
         todo = [
             it for it in page.get("items", [])
-            if not _is_read(it.get("tags") or [])
-            and (it.get("abstract") or "").strip()
+            if (it.get("abstract") or "").strip()
             and it["item_key"] not in cached
         ]
         for start in range(0, len(todo), _SCORE_BATCH):
@@ -278,9 +305,34 @@ def live_scoring(item: dict[str, Any]) -> dict[str, Any] | None:
     if not str(item.get("title") or "").strip() or not str(item.get("abstract") or "").strip():
         return None
     key = item.get("item_key") or item.get("item_id")
-    preds = _score_items([item], return_shap=True)
+    # Cache-only prestige: this runs on the request path (opening a paper's "why
+    # this score?" detail), so it must never block on an OpenAlex network search.
+    # The score for an item that was triaged/rescored is already in the cache.
+    preds = _score_items([item], return_shap=True, prestige_network=False)
     pred = preds.get(key)
     return scoring_from_prediction(pred) if pred is not None else None
+
+
+def read_score_cache() -> dict[str, dict[str, Any]]:
+    """The current gate's cached scores, keyed by item_key (scored entries only):
+    ``{relevance, prestige, prestige_known}``. Empty when the gate is off or
+    nothing is scored yet. Public seam for the relevance-tag sync so it reads the
+    cache once (relevance for the band, prestige for the quality floor)."""
+    gate_sha = _gate_sha()
+    if gate_sha is None:
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for key, entry in _read_cache(gate_sha).items():
+        score = entry.get("relevance_score")
+        if score is None:
+            continue
+        prestige_score, prestige_known = _entry_prestige(entry)
+        out[str(key)] = {
+            "relevance": float(score),
+            "prestige": prestige_score,
+            "prestige_known": prestige_known,
+        }
+    return out
 
 
 def get_cached_scoring(item_key: str) -> dict[str, Any] | None:
@@ -348,6 +400,7 @@ def build_reading_queue(
         # "Handled" = engaged (emoji) OR the user has cast a verdict on it.
         handled = is_read or it["item_key"] in verdicted
         entry = cached.get(it["item_key"])
+        prestige_score, prestige_known = _entry_prestige(entry)
         rec = {
             "item_key": it["item_key"],
             "title": it.get("title") or "",
@@ -358,6 +411,8 @@ def build_reading_queue(
             "read": is_read,
             "relevance_score": entry["relevance_score"] if entry else None,
             "why_reason": entry["why_reason"] if entry else None,
+            "prestige_score": prestige_score,
+            "prestige_known": prestige_known,
         }
         if handled:
             read.append(rec)
@@ -365,15 +420,28 @@ def build_reading_queue(
             unread.append(rec)
 
     if model_ready:
-        unread.sort(
-            key=lambda c: (c["relevance_score"] is not None, c["relevance_score"] or 0.0, c["date_added"]),
-            reverse=True,
-        )
+        # Goal-aware re-rank: blend the gate's relevance with similarity to the
+        # user's stated goals so on-goal papers the gate under-ranks float up
+        # (the gate alone over-weights "like what I saved"). Banding is untouched.
+        goal_sims = _goal_affinity([r["item_key"] for r in unread]) if _GOAL_RERANK_WEIGHT > 0 else {}
+        for r in unread:
+            r["goal_sim"] = goal_sims.get(r["item_key"])
+        if goal_sims:
+            _blended_sort(unread)
+        else:
+            unread.sort(
+                key=lambda c: (c["relevance_score"] is not None, c["relevance_score"] or 0.0, c["date_added"]),
+                reverse=True,
+            )
     else:
         unread.sort(
             key=lambda c: (_PRIORITY_RANK.get(c["reading_priority"], 0), c["date_added"]),
             reverse=True,
         )
+
+    # Collapse duplicate library items (same paper imported twice) AFTER the sort
+    # so the best-scored copy survives — duplicates were wasting top slots.
+    unread = _dedup_by_content(unread)
 
     # Compute ONLY on an explicit refresh (Rescore). A prior crash (last_error
     # set) is surfaced and not auto-retried — Rescore clears it.
@@ -403,4 +471,11 @@ def build_reading_queue(
         "error": err if status == "error" else None,
         "computed_at": computed_at,
         "scores_stale": bool(stale and cached),
+        # Distribution over the full unread queue (not just the shown slice), so
+        # the histogram reflects everything the current filter selects. The
+        # prestige floor (median of the library's KNOWN prestige) gates the
+        # effective top bands so the legend matches the quality-gated tags.
+        "distribution": _score_distribution(
+            unread, prestige_floor([_entry_prestige(e) for e in cached.values()])
+        ),
     }

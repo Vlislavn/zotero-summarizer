@@ -106,7 +106,9 @@ def build_zotero_db(target_dir: Path) -> Path:
         INSERT INTO itemTypes(itemTypeID, typeName) VALUES
             (22, 'journalArticle'),
             (28, 'note'),
-            (31, 'preprint');
+            (31, 'preprint'),
+            (3, 'attachment'),
+            (37, 'annotation');
         INSERT INTO creatorTypes(creatorTypeID, creatorType) VALUES (8, 'author');
         INSERT INTO fields(fieldID, fieldName) VALUES
             (1, 'title'),
@@ -115,7 +117,8 @@ def build_zotero_db(target_dir: Path) -> Path:
             (4, 'DOI'),
             (5, 'date'),
             (6, 'publicationTitle'),
-            (7, 'language');
+            (7, 'language'),
+            (8, 'callNumber');
         INSERT INTO feeds(libraryID, name, url, lastUpdate, lastCheck) VALUES
             (2, 'Test Feed A', 'http://example.com/feed-a.xml', '2026-05-12 10:00:00', '2026-05-12 12:00:00'),
             (3, 'Test Feed B', 'http://example.com/feed-b.xml', '2026-05-12 09:00:00', '2026-05-12 12:00:00');

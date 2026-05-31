@@ -16,6 +16,6 @@ processed_feed_items ─_querying.open_ro→ rows ─_candidate→ normalized ca
 |---|---|
 | `__init__.py` | public surface: `assemble_daily_slate`, `count_awaiting_unhandled` |
 | `_querying.py` | read-only SQLite access (delegates to `_common.connect_sqlite_ro`) |
-| `_candidate.py` | raw DB row → normalized candidate dict (scores, provenance) |
+| `_candidate.py` | raw DB row → normalized candidate dict (scores, provenance); `row_prestige` prefers OpenAlex field-normalized `citation_percentile` (already [0,1]) → LLM prestige → h-index → composite |
 | `_allocation.py` | greedy role allocator (model / surprise / diversity slots) |
-| `_dataclasses.py` | frozen result types (`DailySlate`, candidate shapes) |
+| `_dataclasses.py` | frozen result types (`DailySlate`, `SlatePaper` — includes `abstract` and `pub_year` for the Today card) |

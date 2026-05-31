@@ -294,12 +294,10 @@ export default function Review() {
           <button
             type="button"
             onClick={handleApplyAll}
-            disabled={approvedCount === 0 || applying}
-            className={`px-3 py-1 rounded-lg text-xs font-semibold ${
-              approvedCount === 0 ? 'bg-slate-200 text-slate-500' : 'bg-teal-700 text-white hover:bg-teal-800'
-            }`}
+            disabled={applying}
+            className="px-3 py-1 rounded-lg text-xs font-semibold bg-teal-700 text-white hover:bg-teal-800 disabled:bg-slate-200 disabled:text-slate-500"
           >
-            {applying ? 'Applying…' : `Apply ${approvedCount} approved → Zotero`}
+            {applying ? 'Applying…' : approvedCount > 0 ? `Apply ${approvedCount} approved → Zotero` : 'Apply approved → Zotero'}
           </button>
         </div>
       </div>

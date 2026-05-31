@@ -90,13 +90,9 @@ def export_golden_dataset(
     if triage_db_path is not None:
         from zotero_summarizer.storage import repositories
 
-        # High cap (effectively uncapped): a low limit would silently drop
-        # manual verdicts from preserve_keys, losing them on the next re-export.
-        preserve_keys = frozenset(
-            str(r["item_key"])
-            for r in repositories.list_label_verdicts(triage_db_path, limit=1_000_000)
-            if r.get("item_key")
-        )
+        # ALL verdict keys, uncapped: a capped/paginated fetch would silently
+        # drop manual verdicts from preserve_keys, losing them on re-export.
+        preserve_keys = frozenset(repositories.list_label_verdict_keys(triage_db_path))
 
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     output_jsonl.parent.mkdir(parents=True, exist_ok=True)
@@ -132,11 +128,15 @@ def _count_user_notes(previews: list[str]) -> int:
     600-char snippets pulled by ``user_note_previews`` (SQL already dropped
     rows containing our own ``zs:note_type=`` provenance marker).
     """
+    from zotero_summarizer.services._common import html_to_text
     from zotero_summarizer.services.zotero import note_analyzer
 
     count = 0
     for raw in previews:
-        body = note_analyzer._strip_html((raw or "").strip())
+        # html_to_text is the canonical strip-tags helper note_analyzer itself
+        # migrated to (the old note_analyzer._strip_html was removed in the
+        # services/ reorg); this call used to AttributeError → refresh-labels 500.
+        body = html_to_text((raw or "").strip())
         if not body:
             continue
         if note_analyzer._PDF_ANNOT_RE.match(body):

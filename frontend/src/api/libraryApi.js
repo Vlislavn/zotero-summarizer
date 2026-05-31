@@ -118,3 +118,31 @@ export async function queueRejectTag(itemKey) {
     body: JSON.stringify({ item_key: itemKey }),
   });
 }
+
+/**
+ * POST /api/library/sync-rel-tags { force }
+ * Writes zs:rel/<band> relevance tags onto scored library items (backs up
+ * first; never touches priority/manual tags). Resolves to
+ *   { tagged, by_band, backup_path, failed_count } | { requires_force, message }.
+ */
+export async function syncRelTags({ force = false } = {}) {
+  return request('/api/library/sync-rel-tags', {
+    method: 'POST',
+    body: JSON.stringify({ force }),
+  });
+}
+
+/**
+ * POST /api/library/sync-score-ranks { force }
+ * Stamps a WHOLE-LIBRARY goal-blended rank into every paper's Zotero Call Number
+ * (zr0001…) — scorable papers first, no-abstract papers last — so you can SORT your
+ * entire library by relevance in Zotero (tags only filter). Backs up first.
+ * Resolves to { ranked, scored, unscored, field, backup_path, failed_count }
+ * | { requires_force, message }.
+ */
+export async function syncScoreRanks({ force = false } = {}) {
+  return request('/api/library/sync-score-ranks', {
+    method: 'POST',
+    body: JSON.stringify({ force }),
+  });
+}

@@ -8,6 +8,14 @@ class ZoteroReadError(RuntimeError):
     """Raised when reading from the local Zotero database fails."""
 
 
+# Item types that are NOT bibliographic references — PDF attachments, standalone
+# notes, and PDF annotations (a highlight is not a paper). Every "library items"
+# query excludes these so annotations/attachments never appear as items or inflate
+# counts. Single source of truth so the ~6 reader queries can't drift; inject as
+# ``... typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL}) ...`` (alias stays inline).
+_NON_BIBLIOGRAPHIC_TYPES_SQL = "'attachment', 'note', 'annotation'"
+
+
 # Strip C0/C1 control chars (preserving tab/newline/cr) plus Unicode tag chars
 # (U+E0000-U+E007F). The tag-char range was infamously used to smuggle invisible
 # prompt-injection payloads in 2024 — see Greshake et al. USENIX Security 2024

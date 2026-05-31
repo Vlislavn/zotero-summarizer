@@ -6,10 +6,128 @@ from __future__ import annotations
 
 import sqlite3  # noqa: F401  (type hints)
 
+import numpy as np
+
 from zotero_summarizer.storage.corpus_types import CorpusMatchResult
 
 
 class CorpusReadMixin:
+
+    def _corpus_arrays(self, stale_days: int) -> tuple[np.ndarray, np.ndarray]:
+        """``(matrix, weights)`` for the corpus, cached until the corpus changes.
+
+        ``matrix``: (N, dim) float32 normalized embeddings; ``weights``: (N,)
+        engagement weights for ``stale_days``. Parsing the (large) embedding set
+        is the expensive part — done once and reused across scored items, rebuilt
+        only when ``_corpus_version`` (bumped on any corpus write) or
+        ``stale_days`` changes."""
+        cache = self._affinity_cache
+        if (
+            cache is not None
+            and cache["version"] == self._corpus_version
+            and cache["stale_days"] == stale_days
+        ):
+            return cache["matrix"], cache["weights"]
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                "SELECT tags_json, collections_json, annotation_count, manual_note_count, "
+                "created_at, embedding_json FROM corpus_embeddings"
+            ).fetchall()
+        finally:
+            conn.close()
+        if not rows:
+            matrix = np.zeros((0, self._vector_dim()), dtype=np.float32)
+            weights = np.zeros((0,), dtype=np.float32)
+        else:
+            matrix = np.asarray(
+                [self._parse_embedding(r["embedding_json"]) for r in rows], dtype=np.float32
+            )
+            weights = np.asarray(
+                [
+                    self._engagement_weight(
+                        tags=self._parse_list(r["tags_json"]),
+                        annotation_count=int(r["annotation_count"] or 0),
+                        manual_note_count=int(r["manual_note_count"] or 0),
+                        created_at=r["created_at"],
+                        stale_days_for_weak_negative=stale_days,
+                    )
+                    for r in rows
+                ],
+                dtype=np.float32,
+            )
+        self._affinity_cache = {
+            "version": self._corpus_version,
+            "stale_days": stale_days,
+            "matrix": matrix,
+            "weights": weights,
+        }
+        return matrix, weights
+
+    def affinity_only(
+        self, title: str, abstract: str, stale_days_for_weak_negative: int = 30
+    ) -> float:
+        """Fast corpus affinity (``positive_similarity - negative_similarity``) —
+        the gate's per-item feature, vectorized over the cached corpus matrix.
+
+        Identical math to :meth:`match_candidate`'s affinity but ~1000× cheaper at
+        scale (one numpy matmul vs a Python cosine loop over the whole corpus with
+        a JSON re-parse each call). The full ``match_candidate`` (collections /
+        goals / top items) stays for the review UI."""
+        matrix, weights = self._corpus_arrays(stale_days_for_weak_negative)
+        if matrix.shape[0] == 0:
+            return 0.0
+        cand = np.asarray(self._embed(self._build_text(title, abstract)), dtype=np.float32)
+        norm = float(np.linalg.norm(cand))
+        if norm > 0:
+            cand = cand / norm
+        sims = matrix @ cand
+        pos = weights > 0
+        neg = weights < 0
+        pos_den = float(weights[pos].sum())
+        neg_w = -weights[neg]
+        neg_den = float(neg_w.sum())
+        positive_similarity = float((sims[pos] * weights[pos]).sum() / pos_den) if pos_den > 0 else 0.0
+        negative_similarity = float((sims[neg] * neg_w).sum() / neg_den) if neg_den > 0 else 0.0
+        affinity = self._clamp(positive_similarity - negative_similarity, -1.0, 1.0)
+        return round(affinity, 4)
+
+    def goal_affinity_for_items(self, item_ids: list[str]) -> dict[str, float]:
+        """``{item_id: max cosine to the research-goal embeddings}`` — the
+        goal-anchored relevance signal.
+
+        Uses ALREADY-CACHED corpus embeddings (no model load, no re-embed), so it
+        is cheap at queue-build time even for the whole library: one IN-query +
+        a (n×dim)·(dim×G) matmul. Items with no cached embedding, or when no goals
+        are set, are omitted (caller falls back to the gate-only order). Distinct
+        from :meth:`affinity_only` (engagement-based pos−neg) — this is similarity
+        to what the user SAID they want, which the gate does not feature."""
+        ids = [str(i) for i in item_ids if str(i or "").strip()]
+        if not ids:
+            return {}
+        conn = self._conn()
+        try:
+            goal_rows = conn.execute("SELECT embedding_json FROM goal_embeddings").fetchall()
+            if not goal_rows:
+                return {}
+            placeholders = ",".join("?" * len(ids))
+            item_rows = conn.execute(
+                f"SELECT item_id, embedding_json FROM corpus_embeddings WHERE item_id IN ({placeholders})",
+                ids,
+            ).fetchall()
+        finally:
+            conn.close()
+        gmat = np.asarray([self._parse_embedding(r["embedding_json"]) for r in goal_rows], dtype=np.float32)
+        gnorms = np.linalg.norm(gmat, axis=1, keepdims=True)
+        gmat = gmat / np.where(gnorms > 0, gnorms, 1.0)
+        out: dict[str, float] = {}
+        for r in item_rows:
+            emb = np.asarray(self._parse_embedding(r["embedding_json"]), dtype=np.float32)
+            norm = float(np.linalg.norm(emb))
+            if norm <= 0:
+                continue
+            out[str(r["item_id"])] = float((gmat @ (emb / norm)).max())
+        return out
 
     def match_candidate(
         self,

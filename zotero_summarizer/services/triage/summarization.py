@@ -146,14 +146,13 @@ def run_abstract_pipeline(
     The corpus pre-filter still applies — papers with very low corpus affinity
     are fast-rejected before any LLM call, exactly as in `run_pipeline`.
 
-    ``llm_override`` lets a caller (e.g. the backlog-triage job) score with a
-    different provider — the whole-backlog drain uses the custom ``sota``
-    — without mutating the global ``app_state.llm_refine`` used by all other
-    requests. ``None`` keeps the default refine client.
+    ``llm_override`` lets a caller (e.g. the backlog-triage job) score with the
+    backlog stage's client instead — without affecting the feed stage client
+    used by the daemon. ``None`` resolves the configured **feed** stage client.
     """
     app_state = state()
     config: GoalsConfig = app_state.app_state.config
-    llm: LLMClient = llm_override if llm_override is not None else app_state.llm_refine
+    llm: LLMClient = llm_override if llm_override is not None else app_state.resolve_stage_client("feed")
     prefix = log_prefix or build_log_prefix(req)
     pipeline_started = perf_counter()
 
@@ -333,7 +332,7 @@ def _assemble_summary_response(
 def run_pipeline(req: SummarizeRequest, log_prefix: str | None = None) -> SummarizeResponse:
     app_state = state()
     config: GoalsConfig = app_state.app_state.config
-    llm: LLMClient = app_state.llm_refine
+    llm: LLMClient = app_state.resolve_stage_client("feed")
     prefix = log_prefix or build_log_prefix(req)
     pipeline_started = perf_counter()
 

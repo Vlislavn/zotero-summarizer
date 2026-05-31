@@ -5,17 +5,18 @@ suitable for blending into :func:`zotero_summarizer.services.model.scoring.compu
 
 Design choices:
 
-* **Log scale** for h-index, venue size, and citations — open-ended counts
-  with long tails. ``log1p`` keeps zero stable.
-* **No author** → neutral ``3.0`` (don't punish unknown).
-* **Weights** sum to 1.0 across the three sub-signals; an h-index of 0 with
-  unknown venue/citations still maps to 1.0 (the floor), not 3.0.
+* **Field- AND year-normalized citation percentile** (OpenAlex
+  ``citation_normalized_percentile``) is the signal — robust and comparable
+  across fields and years, unlike raw citation counts, author h-index, or venue
+  size (gameable, field-biased, and unfair to new work). SOTA per the Leiden
+  Manifesto / OpenAlex guidance.
+* **No record / no percentile yet** → neutral ``3.0`` (cold-start protection:
+  never floor a young or uncited paper at 1.0).
 """
 
 from __future__ import annotations
 
 import logging
-import math
 
 from zotero_summarizer.integrations.openalex import OpenAlexClient, OpenAlexWork
 
@@ -23,37 +24,28 @@ from zotero_summarizer.integrations.openalex import OpenAlexClient, OpenAlexWork
 LOGGER = logging.getLogger(__name__)
 
 
-# Reference ceilings — values above these saturate to 1.0 in the unit-mapped term.
-_H_INDEX_REF = 100.0
-_VENUE_WORKS_REF = 50_000.0
-_CITES_REF = 1_000.0
+def percentile_to_score(percentile: float | None, *, neutral: float = 3.0) -> float:
+    """Map a field-normalized citation percentile ∈ [0, 1] to [1.0, 5.0].
 
-# Sub-weights (must sum to 1.0).
-_W_H = 0.50
-_W_VENUE = 0.30
-_W_CITES = 0.20
+    Linear ``1 + 4·p`` — no tuned blend weights. ``None`` (no percentile yet:
+    too new / uncited) → ``neutral``: cold-start work is never penalised. This is
+    the single source of the percentile→score mapping, shared by the gate
+    feature (:func:`compute_prestige_score`) and the Library prestige floor
+    (``reading_queue.scoring_from_prediction``)."""
+    if percentile is None:
+        return neutral
+    pct = min(1.0, max(0.0, float(percentile)))
+    return round(1.0 + 4.0 * pct, 2)
 
 
 def compute_prestige_score(work: OpenAlexWork | None, *, neutral: float = 3.0) -> float:
-    """Map OpenAlex signals to [1.0, 5.0].
+    """Map a paper's OpenAlex ``citation_normalized_percentile`` to [1.0, 5.0].
 
-    Returns ``neutral`` (default 3.0) when ``work`` is None — i.e., OpenAlex
-    had no record. A work with all-zero metrics maps to 1.0, not neutral.
-    """
+    Returns ``neutral`` (default 3.0) when the work is missing (no OpenAlex
+    record) OR has no percentile yet (too new / uncited)."""
     if work is None:
         return neutral
-    h = _log_ratio(work.max_author_h_index, _H_INDEX_REF)
-    venue = _log_ratio(work.venue_works_count, _VENUE_WORKS_REF)
-    cites = _log_ratio(work.cited_by_count, _CITES_REF)
-    blend = _W_H * h + _W_VENUE * venue + _W_CITES * cites
-    return round(1.0 + 4.0 * blend, 2)
-
-
-def _log_ratio(value: int, reference: float) -> float:
-    """Log-scaled value in [0, 1]."""
-    if value <= 0:
-        return 0.0
-    return min(1.0, math.log1p(float(value)) / math.log1p(reference))
+    return percentile_to_score(work.citation_percentile, neutral=neutral)
 
 
 def lookup_prestige(

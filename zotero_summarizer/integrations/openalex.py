@@ -45,6 +45,11 @@ class OpenAlexWork:
     cited_by_count: int
     is_oa: bool
     oa_url: str | None
+    # Field- AND year-normalized citation impact (SOTA, robust vs raw counts):
+    # citation_percentile in [0,1] (None for too-new / uncited works → cold-start);
+    # fwci = field-weighted citation impact (1.0 == field average).
+    citation_percentile: float | None = None
+    fwci: float | None = None
 
 
 class _RateLimiter:
@@ -76,11 +81,18 @@ class OpenAlexClient:
         mailto: str | None = None,
         max_authors: int = 3,
         http_client: httpx.Client | None = None,
+        allow_network: bool = True,
     ) -> None:
         self.cache = cache
         self.mailto = (mailto or "").strip() or None
         self.max_authors = int(max_authors)
         self._http = http_client or httpx.Client(timeout=_TIMEOUT_SECS)
+        # When False, the client is CACHE-ONLY: it never makes a network call and
+        # a cache miss returns None. Used on interactive request paths (opening a
+        # paper's "why this score?" detail) so a click never blocks on a
+        # multi-second OpenAlex search; network lookups happen during background
+        # triage/rescore, which then populate the cache for these reads.
+        self.allow_network = bool(allow_network)
 
     # ------------------------------------------------------------------ public
 
@@ -166,6 +178,12 @@ class OpenAlexClient:
                 or {}
             )
             oa = payload.get("open_access") or {}
+            # Field+year-normalized impact. citation_normalized_percentile is an
+            # object {value, is_in_top_1_percent, ...}; value is None for too-new
+            # / uncited works (cold-start). Already present in cached full payloads.
+            cnp = payload.get("citation_normalized_percentile") or {}
+            pct = cnp.get("value")
+            fwci = payload.get("fwci")
             return OpenAlexWork(
                 openalex_id=str(payload.get("id") or ""),
                 max_author_h_index=int(payload.get("__max_author_h_index") or 0),
@@ -174,12 +192,16 @@ class OpenAlexClient:
                 cited_by_count=int(payload.get("cited_by_count") or 0),
                 is_oa=bool(oa.get("is_oa") or False),
                 oa_url=(oa.get("oa_url") or None),
+                citation_percentile=(float(pct) if pct is not None else None),
+                fwci=(float(fwci) if fwci is not None else None),
             )
         except (ValueError, TypeError) as exc:
             LOGGER.debug("openalex: payload parse failed: %s", exc)
             return None
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        if not self.allow_network:
+            return None  # cache-only client: a miss yields None, never a network call
         _RATE_LIMITER.acquire()
         merged: dict[str, Any] = dict(params or {})
         if self.mailto:

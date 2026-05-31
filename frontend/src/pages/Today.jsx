@@ -258,6 +258,12 @@ function PaperCard({ paper, selected, onToggleSelect }) {
 
           <QualityBlock quality={paper.quality} />
 
+          {paper.abstract && (
+            <p className="mb-2 text-xs text-slate-600 line-clamp-3 leading-relaxed">
+              {paper.abstract}
+            </p>
+          )}
+
           {paper.rationale && (
             <details className="mb-2 group">
               <summary className="cursor-pointer text-[11px] uppercase tracking-wider font-semibold text-slate-500 hover:text-slate-700 select-none">
@@ -523,13 +529,15 @@ export default function Today() {
             type="button"
             onClick={() => triageMutation.mutate()}
             disabled={draining}
-            title="Score the whole un-triaged feed backlog via sota. Runs in the background; processed items are marked read in Zotero."
+            title="Rank the whole un-triaged feed backlog with the ML gate (no LLM). Runs in the background; processed items are marked read in Zotero."
             className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium hover:bg-slate-100 disabled:opacity-50 inline-flex items-center gap-1.5"
           >
             {draining && (
               <span aria-hidden="true" className="inline-block h-3 w-3 rounded-full border-2 border-slate-300 border-t-teal-600 animate-spin" />
             )}
-            {draining ? `Triaging… ${triageStatus?.triaged || 0}` : 'Triage backlog'}
+            {draining
+              ? `Triaging (ML)… ${triageStatus?.gate_onward ?? triageStatus?.triaged ?? 0} kept`
+              : 'Triage backlog'}
           </button>
           <button
             type="button"
@@ -566,8 +574,11 @@ export default function Today() {
           {triageStatus?.running && (
             <div className="my-2 p-2 rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-600 flex items-center gap-2">
               <span aria-hidden="true" className="inline-block h-3 w-3 rounded-full border-2 border-slate-300 border-t-teal-600 animate-spin" />
-              Triaging your feeds via sota… scored {triageStatus.triaged || 0}, gate-rejected{' '}
-              {triageStatus.gate_rejected || 0} (tick {triageStatus.ticks || 0}). New picks fill in automatically.
+              Triaging via the ML gate — kept {triageStatus.gate_onward ?? triageStatus.triaged ?? 0}, filtered{' '}
+              {triageStatus.gate_rejected || 0}
+              {triageStatus.gate_reject_rate != null
+                && ` (${Math.round(triageStatus.gate_reject_rate * 100)}% by ML)`}, tick{' '}
+              {triageStatus.ticks || 0}. New picks fill in automatically.
               {triageStatus?.error && <span className="text-rose-700"> — {triageStatus.error}</span>}
             </div>
           )}

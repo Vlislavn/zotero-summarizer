@@ -11,7 +11,8 @@ triage.py ──(domain)        all three ──*──> __init__.py  ──>  f
 
 | file | holds |
 |---|---|
-| `config.py` | `goals.yaml` schema: `GoalsConfig` + `LLMConfig`/`CorpusConfig`/`PrestigeConfig`/`ClassifierGateConfig`/… |
+| `config.py` | `goals.yaml` schema: `GoalsConfig` + `LLMConfig`/`CorpusConfig`/`PrestigeConfig`/`ClassifierGateConfig`/… Migrates a legacy flat `llm:` block into `llm_routing` when the latter is absent. |
+| `providers.py` | per-stage LLM routing: `ProviderConfig`/`ProviderType`, `StageModelConfig`, `LLMRoutingConfig`, `resolve_stage()` (stage → effective provider+model, inheriting `default`). `ProviderConfig.is_local` flags loopback endpoints (→ serial triage concurrency). Pure data + lookups — no env reads, no client building. |
 | `triage.py` | `SummarizeRequest/Response`, `TriageResult/Dimensions`, `QualityReview`, `PaperDigest`, batch + corpus + calibration models |
 | `api.py` | HTTP request/response + write-path models (`*Request/*Response`, `AppState`, Zotero/pending shapes) |
 | `__init__.py` | re-exports all of the above (the public `models` surface) |

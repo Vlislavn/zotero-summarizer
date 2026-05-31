@@ -25,6 +25,14 @@ def _fake_embedding(title: str, abstract: str, *, authors: str = "", venue: str 
     return rng.standard_normal(classifier.EMBEDDING_DIM).astype(np.float32)
 
 
+def _fake_embeddings_batch(pairs, *, sub_batch: int = 32) -> np.ndarray:
+    """Batch counterpart of _fake_embedding — the primitive the gate/training
+    path now calls (training + predict batch all rows in one pass)."""
+    if not pairs:
+        return np.zeros((0, classifier.EMBEDDING_DIM), dtype=np.float32)
+    return np.vstack([_fake_embedding(t, a) for t, a in pairs]).astype(np.float32)
+
+
 def _write_golden_csv(path: Path, n_pos: int = 12, n_neg: int = 12) -> None:
     fields = [
         "item_key", "title", "authors", "year", "venue", "doi", "url", "abstract",
@@ -82,7 +90,7 @@ def test_train_and_save_writes_joblib_and_json(tmp_path: Path):
     golden = tmp_path / "golden.csv"
     _write_golden_csv(golden)
     output_dir = tmp_path / "models"
-    with patch.object(classifier_embed, "compute_embedding", side_effect=_fake_embedding):
+    with patch.object(classifier_embed, "compute_embeddings_batch", side_effect=_fake_embeddings_batch):
         trained = classifier_persistence.train_and_save(
             golden,
             classifier_name="lightgbm",
@@ -103,6 +111,54 @@ def test_train_and_save_writes_joblib_and_json(tmp_path: Path):
     assert meta["thresholds"]["keep"] == round(trained.t_keep, 4)
 
 
+def test_retrain_writes_oof_per_class_metrics_and_runlog(tmp_path: Path):
+    """Part E: retrain computes honest OOF per-class metrics and appends a
+    run-log entry shaped for ModelCard (runlog.cv.metrics_vs_gold.per_class).
+    Uses logreg (Ridge) so the test avoids the macOS LightGBM fork crash."""
+    golden = tmp_path / "golden.csv"
+    _write_golden_csv(golden)
+    runs_log = tmp_path / "classifier-runs.jsonl"
+    with patch.object(classifier_embed, "compute_embeddings_batch", side_effect=_fake_embeddings_batch):
+        trained = classifier_persistence.train_and_save(
+            golden,
+            classifier_name="logreg",
+            corpus_db_path=tmp_path / "corpus.db",
+            goals_config=None,
+            output_dir=tmp_path / "models",
+            n_folds=4,
+            runs_log_path=runs_log,
+        )
+
+    # 1. OOF metrics live in training_metadata (→ JSON twin).
+    oof = trained.training_metadata["oof_metrics_vs_gold"]
+    assert set(oof) == {"total", "accuracy", "per_class", "binary", "confusion"}
+    assert set(oof["per_class"]) == {"must_read", "should_read", "could_read", "dont_read"}
+    assert "precision" in oof["per_class"]["must_read"]
+    assert len(oof["confusion"]) == 4
+
+    # 2. Run-log entry is what ModelCard reads to render the per-class table.
+    lines = [ln for ln in runs_log.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    assert lines, "expected a run-log entry to be appended"
+    entry = json.loads(lines[-1])
+    assert entry["classifier"] == "logreg"
+    assert entry["type"] == "train_artifact"
+    assert entry["cv"]["metrics_vs_gold"]["per_class"] == oof["per_class"]
+
+
+def test_train_and_save_skips_runlog_when_path_unset(tmp_path: Path):
+    """Back-compat: no runs_log_path → no append (CLI/gate callers unaffected)."""
+    golden = tmp_path / "golden.csv"
+    _write_golden_csv(golden)
+    runs_log = tmp_path / "classifier-runs.jsonl"
+    with patch.object(classifier_embed, "compute_embeddings_batch", side_effect=_fake_embeddings_batch):
+        classifier_persistence.train_and_save(
+            golden, classifier_name="logreg",
+            corpus_db_path=tmp_path / "corpus.db", goals_config=None,
+            output_dir=tmp_path / "models", n_folds=4,
+        )
+    assert not runs_log.exists()
+
+
 def test_predict_after_load_matches_in_memory_predict(tmp_path: Path):
     """Save → reload → predict yields the same priorities as in-memory."""
     golden = tmp_path / "golden.csv"
@@ -113,7 +169,7 @@ def test_predict_after_load_matches_in_memory_predict(tmp_path: Path):
         {"item_key": "X2", "title": "An off-topic paper", "abstract": "off-topic abstract " * 20},
     ]
 
-    with patch.object(classifier_embed, "compute_embedding", side_effect=_fake_embedding):
+    with patch.object(classifier_embed, "compute_embeddings_batch", side_effect=_fake_embeddings_batch):
         trained = classifier_persistence.train_and_save(
             golden,
             classifier_name="lightgbm",
@@ -150,7 +206,7 @@ def test_load_or_train_loads_when_sha_matches(tmp_path: Path):
     _write_golden_csv(golden)
     output_dir = tmp_path / "models"
 
-    with patch.object(classifier_embed, "compute_embedding", side_effect=_fake_embedding):
+    with patch.object(classifier_embed, "compute_embeddings_batch", side_effect=_fake_embeddings_batch):
         first = classifier_persistence.load_or_train(
             golden,
             classifier_name="lightgbm",
@@ -179,7 +235,7 @@ def test_load_or_train_retrains_when_sha_changes(tmp_path: Path):
     _write_golden_csv(golden)
     output_dir = tmp_path / "models"
 
-    with patch.object(classifier_embed, "compute_embedding", side_effect=_fake_embedding):
+    with patch.object(classifier_embed, "compute_embeddings_batch", side_effect=_fake_embeddings_batch):
         first = classifier_persistence.load_or_train(
             golden,
             classifier_name="lightgbm",
@@ -216,7 +272,7 @@ def test_load_or_train_force_retrain_overrides_cache(tmp_path: Path):
         call_count[0] += 1
         return real_train(*args, **kwargs)
 
-    with patch.object(classifier_embed, "compute_embedding", side_effect=_fake_embedding), \
+    with patch.object(classifier_embed, "compute_embeddings_batch", side_effect=_fake_embeddings_batch), \
          patch.object(classifier_persistence, "train_and_save", side_effect=counting_train):
         first = classifier_persistence.load_or_train(
             golden,

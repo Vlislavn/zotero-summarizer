@@ -21,6 +21,7 @@ from zotero_summarizer.services.triage.feeds._common import (
     _load_config,
     _triage_conn,
     get_settings,
+    get_state,
 )
 from zotero_summarizer.services.triage.feeds._gate import (
     _apply_classifier_gate,
@@ -41,6 +42,7 @@ def _pick_unread_batch_round_robin(
     *,
     batch_size: int | None,
     feed_library_ids: list[int] | None,
+    exclude_feed_names: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Pick unread items across feeds.
 
@@ -50,10 +52,23 @@ def _pick_unread_batch_round_robin(
 
     When ``batch_size`` is ``None``: fetch ALL unread items from every specified
     feed without any cap (used by ``feeds run`` for full exhaustion).
+
+    ``exclude_feed_names`` (casefolded) drops non-paper feeds at the source when
+    feeds are auto-resolved (``feeds.exclude_feeds`` config) — e.g. a
+    GitHub-releases feed that emits changelogs, not papers. An explicit
+    ``feed_library_ids`` (CLI ``--feed``) is the user's own choice and is not
+    filtered.
     """
     if not feed_library_ids:
         feed_groups = reader.get_feed_groups()
-        feed_library_ids = [int(f["library_id"]) for f in feed_groups]
+        excluded = exclude_feed_names or set()
+        kept = [f for f in feed_groups if str(f.get("name") or "").strip().casefold() not in excluded]
+        if len(kept) != len(feed_groups):
+            LOGGER.info(
+                "excluding %d non-paper feed(s) from triage (feeds.exclude_feeds)",
+                len(feed_groups) - len(kept),
+            )
+        feed_library_ids = [int(f["library_id"]) for f in kept]
     if not feed_library_ids:
         return []
 
@@ -117,7 +132,7 @@ def run_daemon_tick(
     force_daily_selection: bool = False,
     allow_daily_selection: bool = True,
     dry_run: bool = False,
-    review_mode: bool = False,
+    review_mode: bool | None = None,
     gate_only: bool = False,
     triage_llm: Any | None = None,
 ) -> DaemonTickReport:
@@ -140,17 +155,20 @@ def run_daemon_tick(
       * SHAP attribution from the gate is persisted with each row.
 
     Phase 1.14 — when ``gate_only=True``:
-      * Implies ``review_mode=True`` (auto-materialise on classifier verdict
-        alone is too risky).
       * The LLM triage loop is skipped entirely; each survivor of the gate
         gets a synthesised ``TriagedCandidate`` from its prediction.
-      * Designed to bootstrap golden-CSV labels through the review UI
-        without paying for LLM calls on every item.
+      * ``review_mode`` is DECOUPLED: left unset it defaults to ``True`` (the
+        label-bootstrap flow through the Review UI). The ML-first backlog drain
+        passes ``review_mode=False`` so gate-only scores are written as
+        ``triaged_pending`` and items are marked read — otherwise un-read
+        survivors saturate the round-robin picker and the drain never drains.
 
     Returns the tick report (for logging / CLI display).
     """
-    if gate_only:
-        review_mode = True
+    # Decoupled gate_only/review_mode: honor an explicit review_mode; only
+    # default to review_mode=True for gate_only when the caller didn't specify.
+    if review_mode is None:
+        review_mode = bool(gate_only)
     start_ts = time.perf_counter()
     tick_id = feeds_storage.new_run_id(prefix="tick")
     config = _load_config()
@@ -165,6 +183,13 @@ def run_daemon_tick(
     dedup_against_library = bool(feeds_cfg.get("dedup_against_library", True))
     mark_processed_as_read = bool(feeds_cfg.get("mark_processed_as_read", True))
     outcome_check_per_tick = int(feeds_cfg.get("outcome_check_per_tick") or 3)
+    # Non-paper feeds (e.g. GitHub releases) the user marked as not-scholarly:
+    # their items never enter triage (and so never get materialised/scored).
+    exclude_feed_names = {
+        str(name).strip().casefold()
+        for name in (feeds_cfg.get("exclude_feeds") or [])
+        if str(name).strip()
+    }
 
     LOGGER.info("[%s] tick start batch=%s", tick_id, effective_batch if effective_batch is not None else "unlimited")
 
@@ -173,6 +198,7 @@ def run_daemon_tick(
         reader,
         batch_size=effective_batch,
         feed_library_ids=feed_library_ids,
+        exclude_feed_names=exclude_feed_names,
     )
     fetched = len(raw)
     if raw:
@@ -252,8 +278,16 @@ def run_daemon_tick(
         for item in to_triage:
             triaged_results.append((item, _synthesize_gate_only_candidate(item)))
     else:
+        # Concurrency depends on the resolved provider: a local model runs
+        # serial (1) to protect RAM, a remote one uses the configured cap.
+        # Stage identity: the live daemon passes triage_llm=None (the feed stage,
+        # resolved per-item inside run_abstract_pipeline); the backlog drain
+        # passes an explicit backlog client. Size the pool from that stage's
+        # provider.
+        stage = "feed" if triage_llm is None else "backlog"
+        provider = get_state().resolve_stage_provider(stage)
         triaged_results, fast_rejected_results, errors_results, fatal_seen = _score_survivors(
-            to_triage, tick_id=tick_id, triage_llm=triage_llm,
+            to_triage, tick_id=tick_id, triage_llm=triage_llm, provider=provider,
         )
 
     # 4. Record decisions.

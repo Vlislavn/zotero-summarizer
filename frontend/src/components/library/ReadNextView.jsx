@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import InlineAnnotate from './InlineAnnotate.jsx';
+import ScoreHistogram from './ScoreHistogram.jsx';
 import { StatusBanner, formatShortDate, truncateAuthors } from './shared.jsx';
 
 // Stage-2 "Read next": the single Library surface. Ranked unread queue with an
@@ -8,7 +9,7 @@ import { StatusBanner, formatShortDate, truncateAuthors } from './shared.jsx';
 // triage (the merged Browse/triage flow), kept secondary to the reading flow.
 export default function ReadNextView({
   items, loading, err, includeRead, onToggleIncludeRead,
-  readHidden, totalUnread, onSaved, status, modelReady, error, computedAt, scoresStale, onRescore,
+  readHidden, totalUnread, onSaved, status, modelReady, error, computedAt, scoresStale, distribution, onRescore,
   selectMode, onToggleSelectMode, selected, onToggleItem, onRunTriage, starting,
 }) {
   const computing = status === 'computing';
@@ -42,7 +43,7 @@ export default function ReadNextView({
                 onClick={onRescore}
                 disabled={computing}
                 className="px-2 py-0.5 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Recompute relevance scores for the whole library against the current model"
+                title="Recompute relevance scores for your whole library (read + unread) against the current model. The first full scan covers ~2,400 papers and can take a few minutes; results appear as they compute and re-scans are fast."
               >
                 {computing ? 'Scoring…' : 'Rescore'}
               </button>
@@ -75,10 +76,11 @@ export default function ReadNextView({
           </label>
         </div>
       </div>
+      {modelReady && <ScoreHistogram distribution={distribution} />}
       {computing && (
         <div className="mb-2 flex items-center gap-2 text-xs text-slate-600">
           <span aria-hidden="true" className="inline-block h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-teal-600 animate-spin" />
-          Scoring your library… (runs once, then it’s instant)
+          Scoring your whole library… first full scan (~2,400 papers) can take a few minutes; results stream in as they compute, then re-scans are fast.
         </div>
       )}
       {errored && error && (

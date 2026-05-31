@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 
 from zotero_summarizer.integrations.openalex import OpenAlexClient
 from zotero_summarizer.integrations.openalex_cache import OpenAlexCache
@@ -12,49 +11,49 @@ from zotero_summarizer.models import AppState, GoalsConfig
 from zotero_summarizer.runtime import RuntimeState
 from zotero_summarizer.services import corpus
 from zotero_summarizer.services.triage import triage_jobs
-from zotero_summarizer.services._adapters import build_llm, build_pdf_extractor
+from zotero_summarizer.services._adapters import build_pdf_extractor
 from zotero_summarizer.services._common import LOGGER, read_config, settings, setup_logging, state
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.storage import repositories as triage_db
 from zotero_summarizer.storage.corpus import EmbeddingCache
 
 
-def _load_validated_config(current_settings: Settings, override_model: str | None) -> tuple[GoalsConfig, str, str]:
-    """Read + validate goals.yaml and resolve the LLM model to use.
+def _load_config(current_settings: Settings, override_model: str | None) -> GoalsConfig:
+    """Read + validate goals.yaml.
 
-    Raises if the config file or the LLM API-key env var is missing — startup
-    must fail loud rather than run half-configured.
+    The app starts even when LLM providers are unreachable or their API keys are
+    unset — provider validation is decoupled from startup (run the manual check
+    via ``POST /api/admin/llm-check``). A missing/invalid config *file* is still
+    fatal: that's a different failure class from a down endpoint.
+
+    ``override_model`` (CLI ``--model``) overrides the default stage model that
+    every stage inherits unless it sets its own.
     """
     if not current_settings.config_path.exists():
         raise RuntimeError(f"Missing config file: {current_settings.config_path}")
 
     config = read_config(current_settings.config_path)
-    api_key = os.getenv(config.llm.api_key_env, "")
-    if not api_key:
-        raise RuntimeError(f"Environment variable {config.llm.api_key_env} is not set")
-
-    model_to_use = override_model or config.llm.refine_model
     if override_model:
-        LOGGER.info("LLM model override: using %r instead of configured %r", override_model, config.llm.refine_model)
-    return config, api_key, model_to_use
+        LOGGER.info(
+            "LLM model override: default stage model %r -> %r",
+            config.llm_routing.default.model, override_model,
+        )
+        config.llm_routing.default.model = override_model
+    return config
 
 
 def _init_models(
     app_state: RuntimeState,
     config: GoalsConfig,
-    model_to_use: str,
-    api_key: str,
     current_settings: Settings,
 ) -> None:
-    """Wire the LLM, PDF extractor, and embedding cache singletons."""
+    """Wire the PDF extractor + embedding cache singletons.
+
+    LLM clients are NOT built here: each pipeline stage resolves its own client
+    lazily on first use via ``RuntimeState.resolve_stage_client`` (so a missing
+    key/unreachable endpoint never blocks startup)."""
     app_state.app_state = AppState(config=config)
-    app_state.llm_refine = build_llm(
-        config.llm.api_base,
-        model_to_use,
-        api_key,
-        max_tokens=4096,
-        extra_body=config.llm.extra_body,
-    )
+    app_state.invalidate_stage_clients()
     app_state.pdf_extractor = build_pdf_extractor()
     app_state.embedding_cache = EmbeddingCache(current_settings.corpus_db_path, config.corpus.embedding_model)
     if config.corpus.enabled:
@@ -263,10 +262,10 @@ def startup(override_model: str | None = None) -> None:
     current_settings = settings()
     setup_logging()
 
-    config, api_key, model_to_use = _load_validated_config(current_settings, override_model)
+    config = _load_config(current_settings, override_model)
     app_state = state()
 
-    _init_models(app_state, config, model_to_use, api_key, current_settings)
+    _init_models(app_state, config, current_settings)
     _init_database(current_settings, app_state)
     _init_metadata_clients(app_state, config, current_settings)
     _init_classifier_gate(app_state, config, current_settings)

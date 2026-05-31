@@ -205,21 +205,43 @@ def _tick_report(**overrides):
     return SimpleNamespace(**base)
 
 
+def _fake_state(*, gate_only: bool):
+    """Minimal RuntimeState stand-in for the drain: the config flag the worker
+    reads + a resolve_stage_client hook to detect whether an LLM was built."""
+    from types import SimpleNamespace
+    calls = {"resolved": False}
+
+    def resolve_stage_client(stage):
+        calls["resolved"] = True
+        return object()
+
+    return SimpleNamespace(
+        app_state=SimpleNamespace(
+            config=SimpleNamespace(
+                classifier_gate=SimpleNamespace(bulk_drain_gate_only=gate_only),
+            ),
+        ),
+        resolve_stage_client=resolve_stage_client,
+        _resolve_calls=calls,
+    )
+
+
 def test_drain_stops_immediately_on_fatal_llm_error(monkeypatch):
     from unittest.mock import MagicMock
+    import zotero_summarizer.services._common as common
     from zotero_summarizer.services.triage import feeds
-    from zotero_summarizer.services import _adapters
 
     triage_backlog._finish(error=None, done=False)
     triage_backlog._reset_and_claim()  # zero the shared counters for isolation
-    monkeypatch.setattr(_adapters, "build_triage_llm", lambda model: object())
+    # Legacy (gate_only=False) path, where a fatal LLM error is realistic.
+    monkeypatch.setattr(common, "state", lambda: _fake_state(gate_only=False))
     # A fatal report on the very first tick must abort the drain (no spin).
     tick = MagicMock(return_value=_tick_report(
         fetched=100, triaged=2, gate_rejected=50, errors=48, fatal_llm_error=True,
     ))
     monkeypatch.setattr(feeds, "run_daemon_tick", tick)
 
-    triage_backlog._drain_worker("sota")
+    triage_backlog._drain_worker()
 
     assert tick.call_count == 1  # stopped after the first fatal tick
     st = triage_backlog.status()
@@ -230,13 +252,12 @@ def test_drain_stops_immediately_on_fatal_llm_error(monkeypatch):
 
 def test_drain_finishes_when_backlog_empty(monkeypatch):
     from unittest.mock import MagicMock
+    import zotero_summarizer.services._common as common
     from zotero_summarizer.services.triage import feeds
-    from zotero_summarizer.services import _adapters
 
     triage_backlog._finish(error=None, done=False)
     triage_backlog._reset_and_claim()  # zero the shared counters for isolation
-    monkeypatch.setattr(_adapters, "build_triage_llm", lambda model: object())
-    monkeypatch.setattr(triage_backlog, "_review_top_k_quality", lambda llm: 0)
+    monkeypatch.setattr(common, "state", lambda: _fake_state(gate_only=True))
     # Tick 1 processes a batch; tick 2 fetches nothing -> drained.
     tick = MagicMock(side_effect=[
         _tick_report(fetched=100, triaged=5, gate_rejected=90, errors=5),
@@ -244,7 +265,7 @@ def test_drain_finishes_when_backlog_empty(monkeypatch):
     ])
     monkeypatch.setattr(feeds, "run_daemon_tick", tick)
 
-    triage_backlog._drain_worker("sota")
+    triage_backlog._drain_worker()
 
     assert tick.call_count == 2
     st = triage_backlog.status()
@@ -252,3 +273,35 @@ def test_drain_finishes_when_backlog_empty(monkeypatch):
     assert st["error"] is None
     assert st["triaged"] == 5
     assert st["gate_rejected"] == 90
+    # Derived gate-effectiveness surfaced for the UI.
+    assert st["gate_onward"] == 5            # triaged + fast_rejected
+    assert st["gate_total_seen"] == 95       # onward + gate_rejected
+    assert st["gate_reject_rate"] == round(90 / 95, 3)
+
+
+def test_drain_ml_only_is_gate_only_with_no_llm(monkeypatch):
+    """Default drain (bulk_drain_gate_only=True): gate_only tick, review_mode
+    explicitly False (so rows are triaged_pending + marked read), and NO LLM
+    client is ever resolved."""
+    from unittest.mock import MagicMock
+    import zotero_summarizer.services._common as common
+    from zotero_summarizer.services.triage import feeds
+
+    triage_backlog._finish(error=None, done=False)
+    triage_backlog._reset_and_claim()
+    fake = _fake_state(gate_only=True)
+    monkeypatch.setattr(common, "state", lambda: fake)
+    tick = MagicMock(side_effect=[
+        _tick_report(fetched=10, triaged=4, gate_rejected=6),
+        _tick_report(fetched=0),
+    ])
+    monkeypatch.setattr(feeds, "run_daemon_tick", tick)
+
+    triage_backlog._drain_worker()
+
+    _, kwargs = tick.call_args_list[0]
+    assert kwargs["gate_only"] is True
+    assert kwargs["review_mode"] is False
+    assert kwargs["triage_llm"] is None
+    assert fake._resolve_calls["resolved"] is False  # no LLM built in the ML-only drain
+    assert triage_backlog.status()["done"] is True

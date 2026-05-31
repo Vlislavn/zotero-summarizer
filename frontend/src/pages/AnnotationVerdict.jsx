@@ -110,6 +110,7 @@ export default function AnnotationVerdict() {
   // Phase 1.18 batch-mode bundle: keyboard shortcuts (j/k navigate, 1-4 priority),
   // optimistic auto-advance on verdict save, flashStatus for keyboard feedback.
   const [flashStatus, setFlashStatus] = useState(null);
+  const [sortOrder, setSortOrder] = useState('score_desc');
   const listRef = useRef(null);
 
   // ---------- List query ----------
@@ -177,11 +178,20 @@ export default function AnnotationVerdict() {
     : listQuery.data?.total_matched ?? 0;
   const flagCounts = listQuery.data?.flag_counts ?? {};
 
+  const sortedItems = useMemo(() => {
+    if (isBorderMode) return items;
+    return [...items].sort((a, b) =>
+      sortOrder === 'score_desc'
+        ? (b.derived_score ?? 0) - (a.derived_score ?? 0)
+        : (a.derived_score ?? 0) - (b.derived_score ?? 0),
+    );
+  }, [items, sortOrder, isBorderMode]);
+
   const filteredItems = useMemo(() => {
-    if (!search.trim()) return items;
+    if (!search.trim()) return sortedItems;
     const q = search.trim().toLowerCase();
-    return items.filter((it) => (it.title || '').toLowerCase().includes(q));
-  }, [items, search]);
+    return sortedItems.filter((it) => (it.title || '').toLowerCase().includes(q));
+  }, [sortedItems, search]);
 
   // ---------- Detail query ----------
   const detailQuery = useQuery({
@@ -596,13 +606,25 @@ export default function AnnotationVerdict() {
               ))}
             </select>
           </div>
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search title…"
-            className="w-full text-sm px-2.5 py-1.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500"
-          />
+          <div className="flex gap-1.5">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search title…"
+              className="flex-1 min-w-0 text-sm px-2.5 py-1.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+            {!isBorderMode && (
+              <button
+                type="button"
+                title={sortOrder === 'score_desc' ? 'Sorted by score ↓ — click for ↑' : 'Sorted by score ↑ — click for ↓'}
+                onClick={() => setSortOrder((s) => s === 'score_desc' ? 'score_asc' : 'score_desc')}
+                className="shrink-0 text-[11px] px-2 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-600 font-semibold"
+              >
+                {sortOrder === 'score_desc' ? '↓ score' : '↑ score'}
+              </button>
+            )}
+          </div>
         </div>
 
         <ErrorBanner error={listQuery.error || borderQuery.error} title="List load failed" />

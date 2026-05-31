@@ -19,9 +19,9 @@ services/ ─call→ storage/
 | `_repo_pending.py` · `_repo_feedback.py` | pending-change queue · feedback signals |
 | `_repo_verdicts.py` · `_repo_labels.py` | role-value + weekly-A/B verdicts · label verdicts |
 | `rows.py` | typed row models for the read boundary — `from_row` fails loud on schema drift, `to_dict` keeps the legacy contract. First adopter: `_repo_pending`. Add a model + route its reader to type more tables. |
-| `corpus.py` | `EmbeddingCache` — embeddings/upserts + the math helpers |
-| `corpus_read.py` · `corpus_types.py` | `EmbeddingCache` read/match methods (mixin) · shared value types |
-| `feeds.py` | facade for `processed_feed_items`: schema + decision/materialization writes (re-exports below) |
+| `corpus.py` | `EmbeddingCache` — embeddings/upserts + the math helpers; caches a normalized corpus matrix (version-invalidated on write) for the fast affinity path |
+| `corpus_read.py` · `corpus_types.py` | `EmbeddingCache` read/match methods (mixin): full `match_candidate` (UI) + `affinity_only` (engagement pos−neg, the gate's per-item feature) + `goal_affinity_for_items` (cosine of cached item embeddings to the research-goal embeddings — the goal-anchored signal the reading-queue blends in; no model load) · shared value types |
+| `feeds.py` | facade for `processed_feed_items`: schema + decision/materialization writes (re-exports below); stores `abstract` and `pub_year` from feed item at insert time; `update_scores` rewrites only the gate-derived fields by PK (slate re-score after a model upgrade) without touching the decision/read status |
 | `feeds_history.py` | selection + outcome/history queries (re-exported by `feeds`) |
 | `feeds_schema.py` · `feeds_constants.py` · `feeds_lookup.py` | schema / decision+outcome enums / single-row lookups |
 | `migrations.py` | `migrate_existing()` + `run_migrations()` — ordered, version-gated steps recorded in `schema_migrations`. Add a schema change as a new numbered `Migration`, never an inline ALTER. `repositories.apply_schema` is the v1 baseline. |

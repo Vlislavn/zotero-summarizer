@@ -351,9 +351,13 @@ export default function Triage() {
                   <div>Rejected: <span className="mono">{p.rejected_count ?? 0}</span></div>
                   <div>Agreement: <span className="mono">{formatPercent(p.agreement_rate)}</span></div>
                   <div>Precision: <span className="mono">{formatPercent(p.precision)}</span></div>
-                  <div>Recall: <span className="mono">{formatPercent(p.recall)}</span></div>
+                  <div title="Counterfactual-audit estimate of how often the ML gate keeps the papers you'd actually want — the gate's online trust signal.">
+                    Gate recall: <span className="mono">{formatPercent(p.recall)}</span>
+                  </div>
                   <div>False positive: <span className="mono">{p.false_positive_count ?? 0}</span></div>
-                  <div>False negative: <span className="mono">{p.false_negative_count ?? 0}</span></div>
+                  <div title="Papers the ML gate dropped but you approved on audit (🎲) — the gate's miss rate. Lower is better.">
+                    Gate misses (audit FN): <span className="mono">{p.false_negative_count ?? 0}</span>
+                  </div>
                 </div>
               );
             })}

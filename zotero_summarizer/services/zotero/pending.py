@@ -43,6 +43,13 @@ PRIORITY_TAGS = {
     ReadingPriority.DONT_READ.value,
 }
 
+# ML-relevance band tags — a DISTINCT namespace (`zs:rel/<band>`) from the
+# priority tags (`zs:<band>`). Written by the Library "Sync relevance tags"
+# action so the user can filter their Zotero library by what the gate scores
+# highly, WITHOUT touching manually-set priority or emoji tags (manual-wins).
+REL_TAG_PREFIX = "zs:rel/"
+REL_TAG_CASEFOLDED = {f"{REL_TAG_PREFIX}{band}".casefold() for band in PRIORITY_TAGS}
+
 
 class PendingChangePlanner:
     """Build reviewed Zotero changes from triage outcomes."""
@@ -147,6 +154,30 @@ def build_priority_tag_change(current_tags: list[str], new_priority: str) -> dic
             seen_remove.add(folded)
             remove_tags.append(tag)
 
+    add_tags = [] if has_target else [target_tag]
+    return {"add_tags": add_tags, "remove_tags": remove_tags}
+
+
+def build_rel_tag_change(current_tags: list[str], band: str) -> dict[str, list[str]]:
+    """Mutually-exclusive ML-relevance band tag (``zs:rel/<band>``).
+
+    Parallel to :func:`build_priority_tag_change` but in the DISTINCT ``zs:rel/``
+    namespace — it only adds/removes ``zs:rel/*`` tags, never the priority
+    (``zs:<band>``) or emoji feedback tags, so manual decisions are preserved.
+    Returns ``{}``-style add/remove lists (empty add when already correct →
+    idempotent)."""
+    target_tag = f"{REL_TAG_PREFIX}{band}"
+    target_folded = target_tag.casefold()
+    has_target = False
+    remove_tags: list[str] = []
+    seen: set[str] = set()
+    for tag in current_tags:
+        folded = tag.casefold()
+        if folded == target_folded:
+            has_target = True
+        if folded in REL_TAG_CASEFOLDED and folded != target_folded and folded not in seen:
+            seen.add(folded)
+            remove_tags.append(tag)
     add_tags = [] if has_target else [target_tag]
     return {"add_tags": add_tags, "remove_tags": remove_tags}
 

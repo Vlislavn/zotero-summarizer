@@ -4,6 +4,7 @@
 - ``GET  /api/daily/pipeline``       — funnel overview (in/filtered/awaiting/added/trashed)
 - ``POST /api/daily/triage-backlog`` — drain the un-triaged backlog (sota model)
 - ``GET  /api/daily/triage-status``  — poll the backlog drain
+- ``POST /api/daily/rescore-slate``  — re-score the current slate in place (gate upgrade)
 - ``POST /api/daily/add-to-library`` — materialize cards into Zotero Inbox (positive label)
 - ``POST /api/daily/trash``          — record dont_read (negative label) + mark read
 - ``POST /api/daily/verdict``        — record a must/should/could/don't card label
@@ -312,13 +313,14 @@ async def _record_role_verdict(item_key: str, body: RoleVerdictRequest) -> dict[
 async def trigger_triage_backlog() -> dict[str, Any]:
     """Start a background drain of the un-triaged feed backlog.
 
-    Scoring uses the custom ``sota`` provider (gate fast-rejects the obvious
-    non-matches for free first). Returns immediately; the client polls
+    Scoring uses the configured **backlog** stage provider/model
+    (``goals.yaml: llm_routing.backlog``); the gate fast-rejects the obvious
+    non-matches for free first. Returns immediately; the client polls
     ``GET /api/daily/triage-status``. If a drain is already running, this
     is a no-op that reports the in-flight status.
     """
     from zotero_summarizer.services.triage import triage_backlog
-    started = triage_backlog.start_drain(model="sota")
+    started = triage_backlog.start_drain()
     return {"started": started, "status": triage_backlog.status()}
 
 
@@ -326,6 +328,19 @@ async def get_triage_status() -> dict[str, Any]:
     """Poll the backlog-drain job status."""
     from zotero_summarizer.services.triage import triage_backlog
     return triage_backlog.status()
+
+
+async def rescore_slate() -> dict[str, Any]:
+    """Re-score the current Today slate IN PLACE with the loaded gate.
+
+    Use after a gate upgrade (e.g. a new model artifact) so the items already
+    on Today reflect the new scores. Updates only the gate-derived fields —
+    never a card's decision or read status, so nothing already handled is
+    re-surfaced. Reads the LIVE in-memory gate, so restart the server first if
+    you trained a new artifact with an unchanged golden-CSV sha.
+    """
+    from zotero_summarizer.services.triage import rescore_slate as rescore
+    return await asyncio.to_thread(rescore.rescore_slate)
 
 
 # ---------------------------------------------------------------------------
@@ -438,6 +453,9 @@ router.add_api_route(
 )
 router.add_api_route(
     "/api/daily/triage-status", get_triage_status, methods=["GET"],
+)
+router.add_api_route(
+    "/api/daily/rescore-slate", rescore_slate, methods=["POST"],
 )
 router.add_api_route(
     "/api/daily/verdict", submit_daily_verdict, methods=["POST"],

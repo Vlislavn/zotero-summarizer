@@ -12,6 +12,7 @@ from zotero_summarizer.domain import is_valid_reading_priority
 from zotero_summarizer.integrations._zotero_read_common import (  # noqa: F401  (ZoteroReadError re-exported)
     ZoteroReadError,
     _INJECTION_CHAR_PATTERN,
+    _NON_BIBLIOGRAPHIC_TYPES_SQL,
 )
 from zotero_summarizer.integrations._zotero_read_feeds import ZoteroFeedsMixin
 from zotero_summarizer.integrations._zotero_read_items import ZoteroItemsMixin
@@ -44,17 +45,17 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
 
     def get_library_stats(self) -> dict[str, Any]:
         """Return high-level counts for the local Zotero library."""
-        query_items = """
+        query_items = f"""
             SELECT COUNT(*) AS value
             FROM items i
             JOIN itemTypes it ON it.itemTypeID = i.itemTypeID
             LEFT JOIN deletedItems di ON di.itemID = i.itemID
             WHERE di.itemID IS NULL
-              AND it.typeName NOT IN ('attachment', 'note')
+              AND it.typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL})
         """
         query_collections = "SELECT COUNT(*) AS value FROM collections"
         query_tags = "SELECT COUNT(*) AS value FROM tags"
-        query_items_with_pdf = """
+        query_items_with_pdf = f"""
             SELECT COUNT(DISTINCT ia.parentItemID) AS value
             FROM itemAttachments ia
             JOIN items parent ON parent.itemID = ia.parentItemID
@@ -63,7 +64,7 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
             WHERE ia.parentItemID IS NOT NULL
               AND lower(COALESCE(ia.contentType, '')) = 'application/pdf'
               AND di.itemID IS NULL
-              AND it.typeName NOT IN ('attachment', 'note')
+              AND it.typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL})
         """
 
         def _read(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -91,14 +92,14 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
                 """
             ).fetchall()
             count_rows = conn.execute(
-                """
+                f"""
                 SELECT ci.collectionID, COUNT(ci.itemID) AS item_count
                 FROM collectionItems ci
                 JOIN items i ON i.itemID = ci.itemID
                 JOIN itemTypes it ON it.itemTypeID = i.itemTypeID
                 LEFT JOIN deletedItems di ON di.itemID = i.itemID
                 WHERE di.itemID IS NULL
-                  AND it.typeName NOT IN ('attachment', 'note')
+                  AND it.typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL})
                 GROUP BY ci.collectionID
                 """
             ).fetchall()

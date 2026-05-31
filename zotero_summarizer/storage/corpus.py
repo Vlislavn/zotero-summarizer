@@ -10,7 +10,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from zotero_summarizer.domain import (
     FeedbackSignal,
@@ -50,6 +50,12 @@ class EmbeddingCache(CorpusReadMixin):
         # thread pool, so serialize the embedding forward pass. Only the fast
         # torch step is guarded — the slow LLM HTTP calls still overlap.
         self._embed_lock = threading.Lock()
+        # Cached corpus matrix for the vectorized affinity_only() fast path:
+        # {version, stale_days, matrix (np float32 N×dim), weights (np N)}.
+        # Rebuilt when _corpus_version changes (bumped on any corpus write) so we
+        # parse the (large) embedding set once, not per scored item.
+        self._affinity_cache: dict[str, Any] | None = None
+        self._corpus_version = 0
         self._init_db()
 
     def _conn(self) -> sqlite3.Connection:
@@ -137,6 +143,7 @@ class EmbeddingCache(CorpusReadMixin):
             row = conn.execute("SELECT COUNT(*) AS total FROM corpus_embeddings").fetchone()
             conn.execute("DELETE FROM corpus_embeddings")
             conn.commit()
+            self._corpus_version += 1  # invalidate the cached affinity matrix
             return int(row["total"] or 0) if row else 0
         finally:
             conn.close()
@@ -245,6 +252,8 @@ class EmbeddingCache(CorpusReadMixin):
             conn.commit()
         finally:
             conn.close()
+        if imported or updated:
+            self._corpus_version += 1  # invalidate the cached affinity matrix
         return imported, updated
 
     def _load_model(self):

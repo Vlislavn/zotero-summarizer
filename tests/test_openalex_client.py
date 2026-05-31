@@ -70,3 +70,52 @@ def test_empty_doi_returns_none(tmp_path):
     assert client.fetch_work_by_doi("") is None
     assert client.fetch_work_by_doi("   ") is None
     http.get.assert_not_called()
+
+
+def test_parses_field_normalized_percentile_and_fwci(tmp_path):
+    """citation_normalized_percentile.value and fwci flow into the dataclass."""
+    cache = OpenAlexCache(tmp_path / "c.db", ttl_seconds=86400)
+    cache.set("doi:10.1/x", {
+        "id": "https://openalex.org/W1",
+        "cited_by_count": 12,
+        "citation_normalized_percentile": {"value": 0.97, "is_in_top_1_percent": False},
+        "fwci": 3.4,
+    })
+    client = OpenAlexClient(cache, http_client=MagicMock())
+    work = client.fetch_work_by_doi("10.1/x")
+    assert work.citation_percentile == 0.97
+    assert work.fwci == 3.4
+
+
+def test_cache_only_client_never_hits_network(tmp_path):
+    """allow_network=False (interactive paths): a cache MISS returns None without
+    any HTTP call, but a cache HIT still resolves — so opening a paper's detail
+    never blocks on a multi-second OpenAlex search."""
+    cache = OpenAlexCache(tmp_path / "c.db", ttl_seconds=86400)
+    http = MagicMock()
+    client = OpenAlexClient(cache, http_client=http, allow_network=False)
+
+    # Miss → None, and NO network call.
+    assert client.fetch_work_by_doi("10.1/uncached") is None
+    http.get.assert_not_called()
+
+    # Hit → resolves from cache, still no network.
+    cache.set("doi:10.1/x", {"id": "https://openalex.org/W1", "cited_by_count": 7})
+    work = client.fetch_work_by_doi("10.1/x")
+    assert work is not None and work.cited_by_count == 7
+    http.get.assert_not_called()
+
+
+def test_cold_start_percentile_is_none(tmp_path):
+    """A too-new / uncited work: OpenAlex returns no percentile → None (cold-start),
+    so prestige stays neutral rather than flooring to 1.0."""
+    cache = OpenAlexCache(tmp_path / "c.db", ttl_seconds=86400)
+    cache.set("doi:10.1/new", {
+        "id": "https://openalex.org/W2",
+        "cited_by_count": 0,
+        "citation_normalized_percentile": {"value": None},
+    })
+    client = OpenAlexClient(cache, http_client=MagicMock())
+    work = client.fetch_work_by_doi("10.1/new")
+    assert work.citation_percentile is None
+    assert work.fwci is None

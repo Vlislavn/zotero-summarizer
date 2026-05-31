@@ -12,6 +12,7 @@ from typing import Any, Callable
 import yaml
 
 from zotero_summarizer.models import GoalsConfig, SummarizeRequest
+from zotero_summarizer.models.providers import ProviderConfig
 from zotero_summarizer.runtime import get_context
 from zotero_summarizer.settings import Settings
 
@@ -25,6 +26,21 @@ def settings() -> Settings:
 
 def state() -> Any:
     return get_context().state
+
+
+def effective_llm_concurrency(provider: ProviderConfig | None, item_count: int) -> int:
+    """Worker count for a per-item LLM fan-out, conditional on the provider.
+
+    A **local** provider (loopback ``base_url``) runs **serial** (1) so one big
+    on-device model isn't asked to serve concurrent inference and thrash host
+    RAM. A **remote** provider uses the configured ``TRIAGE_JOB_CONCURRENCY`` cap,
+    never more than the work on hand. ``provider=None`` falls to the remote
+    branch — the safe default never silently serialises a real remote run.
+    """
+    n = max(1, int(item_count))
+    if provider is not None and provider.is_local:
+        return 1
+    return max(1, min(settings().triage_job_concurrency, n))
 
 
 def setup_logging() -> None:

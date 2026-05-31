@@ -12,13 +12,16 @@ from urllib.request import urlopen
 
 from zotero_summarizer.integrations._zotero_write_common import LOGGER, ZoteroWriteError  # noqa: F401
 from zotero_summarizer.integrations._zotero_write_items import ZoteroItemWriteMixin
+from zotero_summarizer.integrations._zotero_write_fields import ZoteroFieldWriteMixin
 from zotero_summarizer.integrations._zotero_write_tags import ZoteroTagMixin
 from zotero_summarizer.integrations._zotero_write_collections import ZoteroCollectionMixin
 
 _T = TypeVar("_T")
 
 
-class ZoteroWriter(ZoteroItemWriteMixin, ZoteroTagMixin, ZoteroCollectionMixin):
+class ZoteroWriter(
+    ZoteroItemWriteMixin, ZoteroFieldWriteMixin, ZoteroTagMixin, ZoteroCollectionMixin
+):
     """Write adapter that applies reviewed tag/note changes to Zotero SQLite."""
 
     _KEY_ALPHABET = "23456789ABCDEFGHIJKLMNPQRSTUVWXYZ"
@@ -182,6 +185,13 @@ class ZoteroWriter(ZoteroItemWriteMixin, ZoteroTagMixin, ZoteroCollectionMixin):
                             payload={"collection_path": "Inbox"},
                             item_columns=item_columns,
                             collection_columns=collection_columns,
+                        )
+                    elif change_type == "set_field":
+                        self._apply_set_field(
+                            conn,
+                            item_key=item_key,
+                            payload=payload_dict,
+                            item_data_columns=item_data_columns,
                         )
                     elif change_type == "mark_feed_item_read":
                         self._apply_mark_feed_item_read(

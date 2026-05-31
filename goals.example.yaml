@@ -50,6 +50,55 @@ llm:
   # extra_body:
   #   chat_template_kwargs:
   #     enable_thinking: false
+
+# Per-pipeline-stage provider + model routing (optional). When omitted, the
+# `llm:` block above is migrated into a single `default` provider that every
+# stage uses. Define `llm_routing` to point each stage at a different provider
+# and/or model. A *provider* is a named connection profile; `api_key_env` holds
+# the NAME of the env var carrying the key (never the key itself). `type` is
+# `openai` (any OpenAI-compatible endpoint: OpenAI, Ollama, OpenRouter, vLLM…)
+# or `anthropic` (native Anthropic messages API — requires the `anthropic`
+# package + ANTHROPIC_API_KEY). A stage with no provider/model inherits
+# `default`. The app starts even if a provider is unreachable; verify each stage
+# on demand via POST /api/admin/llm-check (or the Settings UI "Check" button).
+# llm_routing:
+#   providers:
+#     - name: local            # fast local model for the high-volume feed
+#       type: openai
+#       base_url: ${OPENAI_API_BASE}
+#       api_key_env: OPENAI_API_KEY
+#       max_tokens: 4096
+#     - name: mlx              # local MLX model via `mlx_lm.server` (Apple Silicon)
+#       type: openai           # mlx_lm.server is OpenAI-compatible (/v1)
+#       base_url: http://localhost:8080/v1
+#       api_key_env: MLX_API_KEY   # mlx needs no key; set a dummy in .env
+#       max_tokens: 4096
+#       extra_body:            # force reasoning off (mlx_lm reads chat_template_kwargs)
+#         chat_template_kwargs:
+#           enable_thinking: false
+#   # NOTE: a stage using `mlx` must set `model:` to the EXACT string passed to
+#   # `mlx_lm.server --model` (the full local path) or "default_model" — any other
+#   # name is treated as a HuggingFace repo id and 404s. e.g.:
+#   #   feed: {provider: mlx, model: /Users/me/models/mlx/Qwen3.6-35B-OptiQ-4bit}
+#     - name: sota             # stronger reasoning model for heavy stages
+#       type: openai
+#       base_url: ${CUSTOM_BASE_URL}
+#       api_key_env: CUSTOM_API_KEY
+#       max_tokens: 16384      # reasoning models need a roomy budget
+#     - name: claude           # native Anthropic
+#       type: anthropic
+#       api_key_env: ANTHROPIC_API_KEY
+#       max_tokens: 4096
+#   default:
+#     provider: local
+#     model: gpt-oss:20b
+#   feed: {}                   # inherits default (local / gpt-oss:20b)
+#   backlog:
+#     provider: sota
+#     model: sota
+#   deep_review:
+#     provider: claude
+#     model: claude-opus-4-8
 prompts:
   map: 'You are analyzing one chunk of an academic article.
 
@@ -286,6 +335,13 @@ feeds:
   dedup_against_library: true
   # The Zotero item types we may create from feed items (typically arXiv -> preprint).
   default_item_type: journalArticle
+  # Non-paper feeds to exclude from triage entirely (matched by Zotero feed NAME,
+  # case-insensitive). Their items are never scored or materialised — use this for
+  # feeds that emit changelogs/releases rather than papers (e.g. GitHub releases),
+  # so junk never reaches the relevance gate. Leave empty to triage every feed.
+  exclude_feeds: []
+  #   - "PyTorch Releases"
+  #   - "Some Project Changelog"
 
   # --- Phase 1.5 daemon (the primary user workflow) ------------------------
   # The daemon picks K unread items per tick, triages them, marks them read,

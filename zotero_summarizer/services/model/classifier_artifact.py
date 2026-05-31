@@ -1,6 +1,7 @@
 """The serialisable TrainedClassifier artefact + SHAP attribution."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -10,6 +11,12 @@ import numpy as np
 from zotero_summarizer.services.model import classifier
 
 DEFAULT_MODEL_DIR = Path.home() / ".cache" / "zotero-summarizer" / "models"
+
+# Per-item aux (corpus affinity + OpenAlex prestige) is I/O-bound — run it
+# across items concurrently to overlap the OpenAlex network latency. This is
+# network/CPU I/O, separate from the local-LLM serial rule; OpenAlex's own
+# rate-limiter still bounds outbound calls.
+_AUX_WORKERS = 8
 
 
 # Human-readable names for the 12 tabular extras (order must match
@@ -104,6 +111,7 @@ class TrainedClassifier:
         goals_config: Any,
         progress_cb: Callable[[int, int], None] | None = None,
         return_shap: bool = False,
+        prestige_network: bool = True,
     ) -> list[classifier.FeedPrediction]:
         """Featurise + predict a batch of items.
 
@@ -122,7 +130,7 @@ class TrainedClassifier:
 
         # 1. Featurise — same as the prediction path in predict_new_items.
         embed_cache, openalex_client = classifier._build_aux_providers(
-            corpus_db_path, goals_config,
+            corpus_db_path, goals_config, allow_network=prestige_network,
         )
         from zotero_summarizer.services.model.library_features import (
             PositiveLibrary,
@@ -159,22 +167,52 @@ class TrainedClassifier:
             )
         X_new = np.zeros((len(valid), self.feature_dim), dtype=np.float32)
         aux_contexts: list[dict[str, float]] = []
+        # Embed the whole batch in ONE (batched, GPU-accelerated) pass instead of
+        # N single-item forwards — the gate's per-tick throughput win. Cache hits
+        # are reused; only misses hit the encoder.
+        cache_keys = [
+            str(it.get("item_key") or it.get("item_id") or f"item_{i}")
+            for i, it in enumerate(valid)
+        ]
+        embeddings = classifier.get_or_compute_embeddings_batch(
+            corpus_db_path,
+            [
+                {"item_key": cache_keys[i],
+                 "title": (it.get("title") or "").strip(),
+                 "abstract": (it.get("abstract") or "").strip()}
+                for i, it in enumerate(valid)
+            ],
+        )
+        # Aux (corpus affinity + OpenAlex prestige) is independent per item and
+        # I/O-bound, so compute it for the whole batch CONCURRENTLY — overlaps the
+        # OpenAlex network latency that dominates per-item cost. Safe: the caches
+        # open a fresh sqlite connection per call and OpenAlex is rate-limited.
+        def _aux_for(it: dict[str, str]) -> tuple[float, float, dict[str, float]]:
+            yr = (it.get("publication_date") or it.get("year") or "")[:4]
+            return classifier._compute_aux_with_context(
+                embed_cache, openalex_client,
+                title=(it.get("title") or "").strip(),
+                abstract=(it.get("abstract") or "").strip(),
+                doi=(it.get("doi") or "").strip(),
+                year=int(yr) if yr.isdigit() else None,
+            )
+
+        if len(valid) > 1 and (embed_cache is not None or openalex_client is not None):
+            with ThreadPoolExecutor(max_workers=min(_AUX_WORKERS, len(valid))) as pool:
+                aux_results = list(pool.map(_aux_for, valid))
+        else:
+            aux_results = [_aux_for(it) for it in valid]
+
         for i, it in enumerate(valid):
             title = (it.get("title") or "").strip()
             abstract = (it.get("abstract") or "").strip()
             venue = (it.get("publication_title") or it.get("venue") or "").strip()
-            cache_key = str(it.get("item_key") or it.get("item_id") or f"item_{i}")
-            emb = classifier.get_or_compute_embedding(
-                corpus_db_path, cache_key, title, abstract,
-            )
+            cache_key = cache_keys[i]
+            emb = embeddings[i]
             X_new[i, :classifier.EMBEDDING_DIM] = emb
             doi = (it.get("doi") or "").strip()
             year_str = (it.get("publication_date") or it.get("year") or "")[:4]
-            year_i = int(year_str) if year_str.isdigit() else None
-            affinity, prestige, ctx = classifier._compute_aux_with_context(
-                embed_cache, openalex_client,
-                title=title, abstract=abstract, doi=doi, year=year_i,
-            )
+            affinity, prestige, ctx = aux_results[i]
             aux_contexts.append(ctx)
             authors_str = (it.get("authors") or "").strip()
             nearest, centroid, recent, drift, authors_overlap = compute_library_features(

@@ -9,7 +9,6 @@ if TYPE_CHECKING:
     import asyncio
     import threading
 
-    from zotero_summarizer.integrations.llm import InstrumentedLLMClient
     from zotero_summarizer.integrations.openalex import OpenAlexClient
     from zotero_summarizer.integrations.openalex_cache import OpenAlexCache
     from zotero_summarizer.integrations.pdf import OnPremPdfExtractor
@@ -36,8 +35,8 @@ class RuntimeState:
     # The validated config holder (``AppState.config`` is the GoalsConfig).
     app_state: "AppState | None" = None
 
-    # LLM + PDF + embedding singletons.
-    llm_refine: "InstrumentedLLMClient | None" = None
+    # PDF + embedding singletons. (LLM clients are not stored here — they are
+    # resolved per stage on demand via ``resolve_stage_client``.)
     pdf_extractor: "OnPremPdfExtractor | None" = None
     embedding_cache: "EmbeddingCache | None" = None
 
@@ -62,6 +61,43 @@ class RuntimeState:
 
     # Serialises concurrent corpus writes (set to an asyncio.Lock at startup).
     corpus_write_lock: "asyncio.Lock | None" = None
+
+    # Per-stage LLM client cache (stage -> LLMClient). Built lazily on first use
+    # so startup never depends on a provider being reachable.
+    _stage_clients: dict[str, Any] = field(default_factory=dict)
+
+    def resolve_stage_client(self, stage: str) -> Any:
+        """Return the LLM client for ``stage`` ('feed'|'backlog'|'deep_review'),
+        building + caching it on first use from ``app_state.config.llm_routing``.
+
+        Raises (APIError / provider error) only here, on first use — never at
+        startup. Callers run inside their own worker boundaries, so a missing
+        key or unreachable endpoint degrades that stage without crashing the app.
+        """
+        cached = self._stage_clients.get(stage)
+        if cached is not None:
+            return cached
+        from zotero_summarizer.models.providers import resolve_stage
+        from zotero_summarizer.services.llm.factory import build_client_for_stage
+
+        routing = self.app_state.config.llm_routing
+        client = build_client_for_stage(resolve_stage(routing, stage))
+        self._stage_clients[stage] = client
+        return client
+
+    def resolve_stage_provider(self, stage: str) -> Any:
+        """Return the resolved ``ProviderConfig`` for ``stage`` — the provider
+        profile only, with no client build and no network. Cheap enough to call
+        every tick to decide per-stage concurrency (local → serial)."""
+        from zotero_summarizer.models.providers import resolve_stage
+
+        routing = self.app_state.config.llm_routing
+        return resolve_stage(routing, stage).provider
+
+    def invalidate_stage_clients(self) -> None:
+        """Drop cached stage clients so the next use rebuilds from current config
+        (call after a config PUT swaps ``app_state``)."""
+        self._stage_clients.clear()
 
 
 @dataclass
