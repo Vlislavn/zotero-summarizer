@@ -19,21 +19,29 @@ def _build_aux_providers(
     goals_config: Any | None,
     *,
     allow_network: bool = True,
-) -> tuple[Any, Any]:
+) -> tuple[Any, Any, Any]:
     """Lazy-init the corpus EmbeddingCache + OpenAlex client when configured.
 
-    Returns ``(embed_cache_or_None, openalex_client_or_None)``. Either being
-    None makes :func:`_compute_aux` fall back to its neutral defaults so the
-    classifier still runs end-to-end without those signals.
+    Returns ``(embed_cache_or_None, openalex_client_or_None, cold_start_policy)``.
+    Either provider being None makes :func:`_compute_aux` fall back to its
+    neutral defaults so the classifier still runs end-to-end without those
+    signals. ``cold_start_policy`` is a :class:`ColdStartPrestigePolicy` derived
+    from the prestige config (disabled when prestige is off), threaded to BOTH
+    training and prediction so the ``prestige_score`` feature stays consistent.
 
     ``allow_network=False`` builds a CACHE-ONLY OpenAlex client (no network) for
     interactive request paths that must not block on a lookup — see
     :class:`OpenAlexClient`.
     """
+    from zotero_summarizer.services.model.prestige import cold_start_policy_from_config
+
     embed_cache = None
     openalex_client = None
+    cold_start_policy = cold_start_policy_from_config(
+        getattr(goals_config, "prestige", None) if goals_config is not None else None
+    )
     if goals_config is None:
-        return embed_cache, openalex_client
+        return embed_cache, openalex_client, cold_start_policy
 
     try:
         corpus_cfg = getattr(goals_config, "corpus", None)
@@ -61,7 +69,7 @@ def _build_aux_providers(
     except Exception as exc:
         LOGGER.warning("OpenAlex client init failed: %s", exc)
 
-    return embed_cache, openalex_client
+    return embed_cache, openalex_client, cold_start_policy
 
 
 def _compute_aux(
@@ -74,6 +82,7 @@ def _compute_aux(
     year: int | None,
     prestige_neutral: float = 3.0,
     stale_days: int = 30,
+    cold_start_policy: Any | None = None,
 ) -> tuple[float, float]:
     """Return ``(corpus_affinity, prestige_score)`` for one paper.
 
@@ -84,8 +93,32 @@ def _compute_aux(
         embed_cache, openalex_client,
         title=title, abstract=abstract, doi=doi, year=year,
         prestige_neutral=prestige_neutral, stale_days=stale_days,
+        cold_start_policy=cold_start_policy,
     )
     return affinity, prestige
+
+
+def _populate_work_context(
+    ctx: dict[str, float | None], work: Any, prestige: float, cold_start_policy: Any | None
+) -> None:
+    """Fill ``ctx`` from an OpenAlex Work (early-returns keep the nesting shallow)."""
+    ctx["max_author_h_index"] = float(getattr(work, "max_author_h_index", 0) or 0)
+    ctx["venue_works_count"] = float(getattr(work, "venue_works_count", 0) or 0)
+    ctx["cited_by_count"] = float(getattr(work, "cited_by_count", 0) or 0)
+    pct = getattr(work, "citation_percentile", None)
+    ctx["citation_percentile"] = float(pct) if pct is not None else None
+    if pct is not None:
+        return
+    # Cold-start only (no percentile of its own): record the author field-percentile
+    # and the provisional prestige the lift produced, so the badge can show an
+    # author-based prior instead of "unknown". ``citation_percentile`` stays None →
+    # the quality floor still treats the paper as UNKNOWN and never demotes it.
+    afp = getattr(work, "max_author_field_percentile", None)
+    if afp is None:
+        return
+    ctx["max_author_field_percentile"] = float(afp)
+    if cold_start_policy is not None and getattr(cold_start_policy, "enabled", False):
+        ctx["cold_start_prestige"] = prestige
 
 
 def _compute_aux_with_context(
@@ -98,6 +131,7 @@ def _compute_aux_with_context(
     year: int | None,
     prestige_neutral: float = 3.0,
     stale_days: int = 30,
+    cold_start_policy: Any | None = None,
 ) -> tuple[float, float, dict[str, float]]:
     """Same as :func:`_compute_aux` but also returns raw OpenAlex Work stats.
 
@@ -106,6 +140,10 @@ def _compute_aux_with_context(
       ``max_author_h_index`` — highest h-index across all authors (int)
       ``venue_works_count``  — host journal/conference output count (int)
       ``cited_by_count``     — citations of THIS work to date (int)
+      ``max_author_field_percentile`` — authors' field-normalized standing [0,1]
+        (only populated at cold-start; the cold-start prior's input)
+      ``cold_start_prestige`` — provisional author-based prestige [1,5] for a
+        cold-start paper (None unless the lift fired), surfaced in the badge
 
     Missing fields default to ``0`` (not "neutral"), so the UI can distinguish
     "OpenAlex said zero" from "we didn't ask".
@@ -119,6 +157,8 @@ def _compute_aux_with_context(
         # Field-normalized citation percentile [0,1] (None = unknown / cold-start).
         # The quality signal the Library prestige + floor use downstream.
         "citation_percentile": None,
+        "max_author_field_percentile": None,
+        "cold_start_prestige": None,
     }
     if embed_cache is not None:
         try:
@@ -138,14 +178,11 @@ def _compute_aux_with_context(
                 title=title,
                 year=year,
                 neutral=prestige_neutral,
+                cold_start_policy=cold_start_policy,
             )
             prestige = float(score)
             if work is not None:
-                ctx["max_author_h_index"] = float(getattr(work, "max_author_h_index", 0) or 0)
-                ctx["venue_works_count"] = float(getattr(work, "venue_works_count", 0) or 0)
-                ctx["cited_by_count"] = float(getattr(work, "cited_by_count", 0) or 0)
-                pct = getattr(work, "citation_percentile", None)
-                ctx["citation_percentile"] = float(pct) if pct is not None else None
+                _populate_work_context(ctx, work, prestige, cold_start_policy)
         except Exception as exc:
             LOGGER.debug("prestige lookup failed: %s", exc)
     return affinity, prestige, ctx

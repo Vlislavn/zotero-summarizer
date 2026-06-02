@@ -13,10 +13,12 @@ class _FakeReader:
     def __init__(self, items):
         self._items = items
 
-    def get_items(self, *, limit=100, offset=0, collection_key=None, search=None, tag=None):
-        return {"items": self._items, "total": len(self._items)}
+    def get_items(self, *, limit=100, offset=0, collection_key=None, search=None, tag=None, include_abstract=True):
+        # The whole-library queue + scoring must read via get_all_items now; a
+        # reversion to the 500-window get_items should fail loudly here.
+        raise AssertionError("reading_queue must use get_all_items, not get_items")
 
-    def get_all_items(self, *, collection_key=None, search=None, tag=None, page_size=500):
+    def get_all_items(self, *, collection_key=None, search=None, tag=None, page_size=500, include_abstract=True):
         # Whole-library scan source (the real one paginates get_items); the fake
         # already returns everything in one page.
         return {"items": self._items, "total": len(self._items)}
@@ -145,9 +147,9 @@ def test_filters_passed_through_to_reader(monkeypatch):
     captured = {}
 
     class _CapturingReader(_FakeReader):
-        def get_items(self, *, limit=100, offset=0, collection_key=None, search=None, tag=None):
+        def get_all_items(self, *, collection_key=None, search=None, tag=None, page_size=500, include_abstract=True):
             captured.update(collection_key=collection_key, tag=tag, search=search)
-            return super().get_items(limit=limit, offset=offset)
+            return super().get_all_items()
 
     _patch_state(monkeypatch, _CapturingReader([_item("A")]), _FakeGate("sha1"))
     _seed("sha1", A=3.0)
@@ -178,8 +180,10 @@ def test_read_items_hidden_live_and_shown_with_toggle(monkeypatch):
     hidden = reading_queue.build_reading_queue(include_read=False)
     assert [i["item_key"] for i in hidden["items"]] == ["A"]
     assert hidden["read_hidden"] == 1
+    assert hidden["total_unread"] == 1  # whole-library count = the one unread paper
     shown = reading_queue.build_reading_queue(include_read=True)
     assert "R" in [i["item_key"] for i in shown["items"]]
+    assert shown["total_unread"] == 1  # include_read must NOT inflate total_unread
 
 
 def test_gate_off_falls_back_to_priority_then_recency(monkeypatch):

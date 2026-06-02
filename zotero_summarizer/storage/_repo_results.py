@@ -126,15 +126,16 @@ def update_result_row_after_override(
 
 def insert_triage_dimension_override(
     item_id: str,
-    result_row_id: int | None,
     original_dimensions: dict[str, Any],
     override_dimensions: dict[str, Any],
     merged_dimensions: dict[str, Any],
-    corpus_affinity: float,
-    original_composite_score: float | None,
     new_composite_score: float,
-    original_priority: str,
     new_priority: str,
+    *,
+    result_row_id: int | None = None,
+    corpus_affinity: float = 0.0,
+    original_composite_score: float | None = None,
+    original_priority: str = "",
 ) -> int:
     safe_item_id = str(item_id or "").strip()
     if not safe_item_id:
@@ -178,36 +179,47 @@ def insert_triage_dimension_override(
         conn.close()
 
 
+def _select_results(
+    body_sql: str, *, sort_by: str, order: str, limit: int, offset: int
+) -> list[dict[str, Any]]:
+    """Run a ``SELECT … FROM triage_results`` body with the shared ORDER BY/LIMIT tail.
+
+    ``body_sql`` is the trusted in-source query prefix (optionally a ``WITH … `` CTE);
+    the validated sort/order are appended, never interpolated from caller input.
+    """
+    sort_expression = _sort_expression(_normalize_sort(sort_by))
+    safe_order = _normalize_order(order)
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            f"{body_sql}\nORDER BY {sort_expression} {safe_order}\nLIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+        return _rows_to_dicts(rows)
+    finally:
+        conn.close()
+
+
 def get_latest_results(
     sort_by: str = "composite_score",
     order: str = "desc",
     limit: int = 200,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    sort_by = _normalize_sort(sort_by)
-    sort_expression = _sort_expression(sort_by)
-    order = _normalize_order(order)
-    conn = _get_conn()
-    try:
-        rows = conn.execute(
-            f"""
-            WITH latest AS (
-                SELECT item_id, MAX(id) AS latest_id
-                FROM triage_results
-                GROUP BY item_id
-            )
-            SELECT r.*, b.created_at AS batch_created_at
-            FROM triage_results r
-            JOIN latest l ON r.id = l.latest_id
-            LEFT JOIN batch_runs b ON r.batch_id = b.batch_id
-            ORDER BY {sort_expression} {order}
-            LIMIT ? OFFSET ?
-            """,
-            (limit, offset),
-        ).fetchall()
-        return _rows_to_dicts(rows)
-    finally:
-        conn.close()
+    return _select_results(
+        """
+        WITH latest AS (
+            SELECT item_id, MAX(id) AS latest_id
+            FROM triage_results
+            GROUP BY item_id
+        )
+        SELECT r.*, b.created_at AS batch_created_at
+        FROM triage_results r
+        JOIN latest l ON r.id = l.latest_id
+        LEFT JOIN batch_runs b ON r.batch_id = b.batch_id
+        """,
+        sort_by=sort_by, order=order, limit=limit, offset=offset,
+    )
 
 
 def get_all_results(
@@ -216,24 +228,14 @@ def get_all_results(
     limit: int = 200,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    sort_by = _normalize_sort(sort_by)
-    sort_expression = _sort_expression(sort_by)
-    order = _normalize_order(order)
-    conn = _get_conn()
-    try:
-        rows = conn.execute(
-            f"""
-            SELECT r.*, b.created_at AS batch_created_at
-            FROM triage_results r
-            LEFT JOIN batch_runs b ON r.batch_id = b.batch_id
-            ORDER BY {sort_expression} {order}
-            LIMIT ? OFFSET ?
-            """,
-            (limit, offset),
-        ).fetchall()
-        return _rows_to_dicts(rows)
-    finally:
-        conn.close()
+    return _select_results(
+        """
+        SELECT r.*, b.created_at AS batch_created_at
+        FROM triage_results r
+        LEFT JOIN batch_runs b ON r.batch_id = b.batch_id
+        """,
+        sort_by=sort_by, order=order, limit=limit, offset=offset,
+    )
 
 
 def get_results_by_batch_ids(

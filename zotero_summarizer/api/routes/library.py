@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services.library import deep_review, reading_queue, score_tags
+from zotero_summarizer.services.library import deep_review, fulltext, reading_queue, score_tags
 from zotero_summarizer.services.zotero.zotero import get_zotero_reader_or_raise
 from zotero_summarizer.storage import repositories as triage_db
 
@@ -39,26 +39,38 @@ class RelTagSyncRequest(BaseModel):
 
 async def get_reading_queue(
     include_read: bool = False, limit: int = 30, refresh: bool = False,
-    collection: str = "", tag: str = "", search: str = "",
+    collection: str = "", tag: str = "", search: str = "", semantic: bool = False,
 ) -> dict[str, Any]:
-    """Ranked 'what to read next' from the library, scored by the gate. Read
-    items are hidden unless ``include_read=true``. ``collection``/``tag``/
-    ``search`` filter the displayed rows. Returns ``status``
+    """Ranked queue over the WHOLE library, scored by the gate. Read items are
+    hidden unless ``include_read=true``. ``collection``/``tag``/``search`` filter
+    the rows. With ``semantic=true`` + a ``search`` query, the queue is ranked by
+    HYBRID search (BM25 + dense embeddings + local cross-encoder rerank) instead of
+    the substring filter; the response adds ``semantic`` / ``reranked`` /
+    ``reranker_loading`` / ``semantic_unavailable`` flags. Returns ``status``
     ('ready'|'computing'), ``model_ready``, ``items`` (each with
     ``relevance_score`` + ``why_reason``), ``total_unread``, ``read_hidden``,
-    ``scores_stale``. ``refresh=true`` forces a background rescore (the only
-    thing that recomputes — opening never rescans)."""
-    if not (1 <= limit <= 200):
+    ``scores_stale``. ``limit`` caps the returned list — the frontend requests the
+    whole library and reveals it incrementally. ``refresh=true`` forces a
+    background rescore (the only thing that recomputes — opening never rescans)."""
+    if not (1 <= limit <= 10000):
         raise APIError(
             error="validation_error",
-            message=f"limit must be between 1 and 200 inclusive; got {limit}",
+            message=f"limit must be between 1 and 10000 inclusive; got {limit}",
             status_code=422,
         )
     return await asyncio.to_thread(
         reading_queue.build_reading_queue,
         include_read=include_read, limit=limit, refresh=refresh,
-        collection=collection, tag=tag, search=search,
+        collection=collection, tag=tag, search=search, semantic=semantic,
     )
+
+
+async def get_reading_queue_status() -> dict[str, Any]:
+    """In-memory scoring-job state ONLY — no Zotero read, no library scan, so it's
+    cheap to poll. The frontend polls THIS while a Rescore is computing (instead of
+    re-fetching the whole-library queue every few seconds) and fires one full
+    reading-queue reload when ``running`` flips to false."""
+    return {"running": reading_queue.is_running(), "error": reading_queue.last_error()}
 
 
 async def get_item_pdf(item_key: str) -> FileResponse:
@@ -121,6 +133,21 @@ async def sync_rel_tags(req: RelTagSyncRequest) -> dict[str, Any]:
     return await asyncio.to_thread(score_tags.sync_rel_tags, force=req.force)
 
 
+async def fetch_fulltext(req: RelTagSyncRequest) -> dict[str, Any]:
+    """Bulk: download arXiv full-text PDFs for every library paper that has an
+    arXiv link but no PDF, and attach them natively to Zotero (imported_url; the
+    library syncs, so Zotero uploads them on its next sync). Runs as a background
+    job; backup-first + connector-guarded. Returns ``{status:'started'|'running'}``
+    or a ``{requires_force}`` notice when Zotero is running."""
+    return await asyncio.to_thread(fulltext.start_bulk, force=req.force)
+
+
+async def fetch_fulltext_status() -> dict[str, Any]:
+    """Cheap in-memory bulk-fetch job state (no Zotero read): ``{running,
+    progress:{done,total}, result}`` — polled by the Library page while running."""
+    return fulltext.status()
+
+
 async def sync_score_ranks(req: RelTagSyncRequest) -> dict[str, Any]:
     """Stamp a whole-library goal-blended rank into EVERY paper's Zotero Call
     Number (``zr0001``…) — scorable papers first, no-abstract last — so the user
@@ -131,9 +158,12 @@ async def sync_score_ranks(req: RelTagSyncRequest) -> dict[str, Any]:
 
 
 router.add_api_route("/api/library/reading-queue", get_reading_queue, methods=["GET"])
+router.add_api_route("/api/library/reading-queue/status", get_reading_queue_status, methods=["GET"])
 router.add_api_route("/api/library/pdf/{item_key}", get_item_pdf, methods=["GET"])
 router.add_api_route("/api/library/deep-review/run", run_deep_review, methods=["POST"])
 router.add_api_route("/api/library/deep-review/status", get_deep_review_status, methods=["GET"])
 router.add_api_route("/api/library/reject-tag", queue_reject_tag, methods=["POST"])
+router.add_api_route("/api/library/fetch-fulltext", fetch_fulltext, methods=["POST"])
+router.add_api_route("/api/library/fetch-fulltext/status", fetch_fulltext_status, methods=["GET"])
 router.add_api_route("/api/library/sync-rel-tags", sync_rel_tags, methods=["POST"])
 router.add_api_route("/api/library/sync-score-ranks", sync_score_ranks, methods=["POST"])

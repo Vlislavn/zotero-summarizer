@@ -64,7 +64,6 @@ from zotero_summarizer.storage.feeds_constants import (  # noqa: F401  (re-expor
     OUTCOME_TRASHED,
     OUTCOME_UNKNOWN,
     OUTCOME_WEIGHT,
-    TERMINAL_MATERIALIZED_DECISIONS,
 )
 from zotero_summarizer.storage.feeds_schema import (
     CREATE_TABLE as _CREATE_TABLE,
@@ -109,15 +108,6 @@ def init_feeds_schema(conn: sqlite3.Connection) -> None:
 def new_run_id(prefix: str = "feeds") -> str:
     """Generate a stable, human-readable run/tick identifier."""
     return datetime.now(timezone.utc).strftime(f"{prefix}_%Y%m%d_%H%M%S_%f")
-
-
-def is_processed(conn: sqlite3.Connection, feed_library_id: int, feed_item_id: int) -> bool:
-    """Return True if this feed item already has a recorded decision."""
-    row = conn.execute(
-        "SELECT 1 FROM processed_feed_items WHERE feed_library_id=? AND feed_item_id=? LIMIT 1",
-        (feed_library_id, feed_item_id),
-    ).fetchone()
-    return row is not None
 
 
 def filter_unprocessed(
@@ -329,24 +319,6 @@ def update_to_decision(
     return int(cursor.rowcount or 0) > 0
 
 
-def update_quality_review(
-    conn: sqlite3.Connection,
-    *,
-    row_id: int,
-    quality_review_json: str,
-) -> bool:
-    """Store the full-text :class:`QualityReview` JSON on a row (by PK ``id``)."""
-    cursor = conn.execute(
-        """
-        UPDATE processed_feed_items
-        SET quality_review_json = ?, updated_at = datetime('now')
-        WHERE id = ?
-        """,
-        (quality_review_json, int(row_id)),
-    )
-    return int(cursor.rowcount or 0) > 0
-
-
 def update_scores(
     conn: sqlite3.Connection,
     *,
@@ -372,22 +344,6 @@ def update_scores(
         (float(composite_score), reading_priority, shap_contribs_json, int(row_id)),
     )
     return int(cursor.rowcount or 0) > 0
-
-
-def count_by_decisions(conn: sqlite3.Connection, decisions: list[str]) -> int:
-    """Uncapped count of rows whose ``decision`` is in ``decisions``.
-
-    Backs the Today backlog header (e.g. how many triaged items await the
-    user's add/trash call). Empty ``decisions`` -> 0.
-    """
-    if not decisions:
-        return 0
-    placeholders = ",".join("?" for _ in decisions)
-    row = conn.execute(
-        f"SELECT COUNT(*) FROM processed_feed_items WHERE decision IN ({placeholders})",
-        tuple(decisions),
-    ).fetchone()
-    return int(row[0]) if row else 0
 
 
 def count_all_by_decision(conn: sqlite3.Connection) -> dict[str, int]:

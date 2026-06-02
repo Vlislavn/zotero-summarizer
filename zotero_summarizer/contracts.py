@@ -3,34 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from zotero_summarizer.domain import ReadingPriority
-
-
-@dataclass(frozen=True)
-class Paper:
-    item_key: str
-    title: str
-    pdf_path: str
-    doi: str = ""
-    abstract: str = ""
-
-
-@dataclass(frozen=True)
-class TriageDecision:
-    relevance_score: int
-    composite_score: float
-    reading_priority: str = ReadingPriority.COULD_READ.value
-    tags: list[str] = field(default_factory=list)
-    rationale: str = ""
-    confidence: float = 0.0
-
-
-@dataclass(frozen=True)
-class Summary:
-    executive_summary: str
-    triage: TriageDecision
-    sections: dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass(frozen=True)
 class PendingChange:
@@ -57,15 +29,3 @@ class TriageJob:
     item_keys: list[str] = field(default_factory=list)
     results: list[dict[str, Any]] = field(default_factory=list)
     errors: list[dict[str, Any]] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class CorpusMatch:
-    has_corpus: bool
-    affinity_score: float
-    positive_similarity: float = 0.0
-    negative_similarity: float = 0.0
-    matched_goal: str = ""
-    matched_goal_similarity: float = 0.0
-    suggested_collections: list[str] = field(default_factory=list)
-    top_similar_items: list[str] = field(default_factory=list)

@@ -127,6 +127,8 @@ zotero-summarizer serve            # FastAPI server + browser UI
 zotero-summarizer migrate          # init/upgrade the local SQLite stores
 zotero-summarizer mcp              # MCP server over stdio (agent surface)
 zotero-summarizer smoke-test       # verify the app constructs
+zotero-summarizer prefetch-models  # download the ML models for offline use (run online once;
+                                   #   --check reports cache status without downloading)
 
 # Feeds (optional daemon / one-shots)
 zotero-summarizer feeds list       # discover feed names + IDs
@@ -138,6 +140,39 @@ zotero-summarizer feeds tick       # single tick (cron/launchd-friendly)
 zotero-summarizer goldenset export # write data/zotero-summarizer-golden.csv
 zotero-summarizer goldenset train  # (re)train the relevance gate on your labels
 ```
+
+## Offline / air-gapped use
+
+The app is **local-first**: the UI, Zotero I/O, the ML relevance gate, and Library
+search (BM25 + embeddings + cross-encoder rerank) all run on your machine. There are
+only two things that need the internet, and both are one-time or swappable:
+
+1. **The ML models** download from HuggingFace on first use (~2.6 GB total): the
+   SPECTER2 gate encoder + adapter, the corpus embedding model, and the search
+   reranker. Pre-cache them once while online:
+
+   ```bash
+   zotero-summarizer prefetch-models          # download all four
+   zotero-summarizer prefetch-models --check   # report what's cached (no download)
+   ```
+
+   Then run offline with cache-only model loading (skips the HuggingFace hub check, so
+   a disconnected machine never hangs on a network timeout):
+
+   ```bash
+   ZS_OFFLINE=1 zotero-summarizer serve         # or set HF_HUB_OFFLINE=1 in .env
+   ```
+
+2. **The LLM** (summaries, deep review, quality review) needs an OpenAI-compatible
+   endpoint. Point it at a **local** server — Ollama, vLLM, LM Studio, `mlx_lm.server` —
+   in `goals.yaml`/`.env` and you're fully offline. With **no** LLM at all, everything
+   still works except those LLM-written summaries; the **ML-only "Triage backlog"** drain
+   (the classifier gate, no LLM) still scores your feed, and Library search/ranking is
+   unaffected.
+
+The optional enrichments — OpenAlex prestige, Unpaywall, and arXiv full-text fetch — are
+**off by default** and skip gracefully when offline. There is no telemetry and the served
+UI pulls no external assets (no CDN/fonts).
 
 ## Safety model
 

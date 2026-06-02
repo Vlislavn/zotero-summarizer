@@ -54,14 +54,6 @@ REL_TAG_CASEFOLDED = {f"{REL_TAG_PREFIX}{band}".casefold() for band in PRIORITY_
 class PendingChangePlanner:
     """Build reviewed Zotero changes from triage outcomes."""
 
-    @staticmethod
-    def normalize_tags(values: list[str] | None) -> list[str]:
-        return unique_non_empty_strings(values or [])
-
-    def priority_tag_payload(self, current_tags: list[str], new_priority: str) -> dict[str, list[str]]:
-        priority = new_priority if new_priority in PRIORITY_TAGS else ReadingPriority.COULD_READ.value
-        return build_priority_tag_change(current_tags, priority)
-
     def triage_changes(
         self,
         *,

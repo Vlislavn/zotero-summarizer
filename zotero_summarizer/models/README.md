@@ -11,7 +11,7 @@ triage.py ──(domain)        all three ──*──> __init__.py  ──>  f
 
 | file | holds |
 |---|---|
-| `config.py` | `goals.yaml` schema: `GoalsConfig` + `LLMConfig`/`CorpusConfig`/`PrestigeConfig`/`ClassifierGateConfig`/… Migrates a legacy flat `llm:` block into `llm_routing` when the latter is absent. |
+| `config.py` | `goals.yaml` schema: `GoalsConfig` + `LLMConfig`/`CorpusConfig`/`PrestigeConfig`/`ClassifierGateConfig`/… Migrates a legacy flat `llm:` block into `llm_routing` when the latter is absent. `CorpusConfig` carries the hybrid Library-search knobs (`bm25_enabled`/`reranker_enabled`/`reranker_model`, all local); `PrestigeConfig` carries the cold-start author-reputation prior (`cold_start_author_lift`/`cold_start_max_lift`/`cold_start_gamma`) — a capped, raise-only fallback to authors' field-normalized standing before a paper has its own citation percentile. |
 | `providers.py` | per-stage LLM routing: `ProviderConfig`/`ProviderType`, `StageModelConfig`, `LLMRoutingConfig`, `resolve_stage()` (stage → effective provider+model, inheriting `default`). `ProviderConfig.is_local` flags loopback endpoints (→ serial triage concurrency). Pure data + lookups — no env reads, no client building. |
 | `triage.py` | `SummarizeRequest/Response`, `TriageResult/Dimensions`, `QualityReview`, `PaperDigest`, batch + corpus + calibration models |
 | `api.py` | HTTP request/response + write-path models (`*Request/*Response`, `AppState`, Zotero/pending shapes) |

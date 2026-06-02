@@ -4,9 +4,22 @@ import contextlib
 import os
 import sys
 from pathlib import Path
-from typing import Generator
+from typing import Callable, Generator
 
 from zotero_summarizer.settings import Settings
+
+
+def progress_printer(label: str) -> Callable[[int, int], None]:
+    """Return a ``progress_cb(done, total)`` printing ``  {label} {done}/{total}``.
+
+    Consolidates the six identical per-command progress callbacks the goldenset CLI
+    commands used to define inline (Tier 6 near-duplicates).
+    """
+
+    def _print(done: int, total: int) -> None:
+        print(f"  {label} {done}/{total}", flush=True)
+
+    return _print
 
 
 def _resolve_feed_ids(raw: str, settings: Settings) -> list[int]:
@@ -85,9 +98,9 @@ def _feeds_lock(project_root: Path) -> Generator[None, None, None]:
                 file=sys.stderr,
             )
             raise SystemExit(1)
-        except (ProcessLookupError, PermissionError):
+        except (ProcessLookupError, PermissionError) as _:
             pass  # Stale lock — overwrite it
-        except ValueError:
+        except ValueError as _:
             pass  # Corrupt lock file — overwrite it
 
     lock_path.write_text(str(os.getpid()))
@@ -96,7 +109,7 @@ def _feeds_lock(project_root: Path) -> Generator[None, None, None]:
     finally:
         try:
             lock_path.unlink(missing_ok=True)
-        except OSError:
+        except OSError as _:
             pass
 
 

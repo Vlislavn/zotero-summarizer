@@ -9,6 +9,15 @@ from zotero_summarizer.domain import normalize_reading_priority
 from zotero_summarizer.models.config import GoalsConfig
 
 
+def _normalized_priority_or_raise(value: str, field: str) -> str:
+    """Strip + canonicalise a reading-priority string, or raise a ``field``-named error."""
+    normalized = str(value or "").strip()
+    coerced = normalize_reading_priority(normalized)
+    if coerced != normalized:
+        raise ValueError(f"{field} must be one of must_read, should_read, could_read, dont_read")
+    return coerced
+
+
 __all__ = [
     "ErrorResponse",
     "HealthResponse",
@@ -147,11 +156,7 @@ class PendingPriorityOverrideRequest(BaseModel):
     @field_validator("new_priority")
     @classmethod
     def _normalize_new_priority(cls, value: str) -> str:
-        normalized = str(value or "").strip()
-        coerced = normalize_reading_priority(normalized)
-        if coerced != normalized:
-            raise ValueError("new_priority must be one of must_read, should_read, could_read, dont_read")
-        return coerced
+        return _normalized_priority_or_raise(value, "new_priority")
 
 
 class PendingChangeUpdateRequest(BaseModel):
@@ -172,11 +177,7 @@ class ZoteroItemPriorityUpdateRequest(BaseModel):
     @field_validator("priority")
     @classmethod
     def _normalize_priority(cls, value: str) -> str:
-        normalized = str(value or "").strip()
-        coerced = normalize_reading_priority(normalized)
-        if coerced != normalized:
-            raise ValueError("priority must be one of must_read, should_read, could_read, dont_read")
-        return coerced
+        return _normalized_priority_or_raise(value, "priority")
 
 
 class ZoteroItemTagUpdateRequest(BaseModel):

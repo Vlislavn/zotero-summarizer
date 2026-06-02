@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Callable, Protocol
+from typing import Any
 
 from zotero_summarizer.api.errors import APIError, ExtractionError
-from zotero_summarizer.contracts import Paper
 from zotero_summarizer.integrations.llm import LLMClient
 from zotero_summarizer.integrations.pdf import PdfExtractor
 from zotero_summarizer.models import (
@@ -28,33 +26,6 @@ from zotero_summarizer.services._common import (
     state,
     to_text,
 )
-
-
-class PipelineCallable(Protocol):
-    def __call__(self, request: SummarizeRequest, log_prefix: str | None = None) -> SummarizeResponse:
-        ...
-
-
-class SummarizationService:
-    """Injectable facade for the PDF -> summary -> triage pipeline."""
-
-    def __init__(self, pipeline: PipelineCallable) -> None:
-        self._pipeline = pipeline
-
-    def summarize(self, paper: Paper, log_prefix: str | None = None) -> SummarizeResponse:
-        request = SummarizeRequest(
-            title=paper.title,
-            doi=paper.doi or None,
-            pdf_path=paper.pdf_path,
-            abstract=paper.abstract or None,
-        )
-        return self._pipeline(request, log_prefix)
-
-
-def service_from_pipeline(
-    pipeline: Callable[[SummarizeRequest, str | None], SummarizeResponse],
-) -> SummarizationService:
-    return SummarizationService(pipeline)
 
 
 def _extract_pdf_text(pdf_path: str) -> str:
@@ -123,10 +94,6 @@ def _build_triage_prompt(
         suggested_collections=", ".join(corpus_context.get("suggested_collections", [])),
         output_language=config.output_language,
     )
-
-
-def _new_batch_id() -> str:
-    return datetime.now(timezone.utc).strftime("batch_%Y%m%d_%H%M%S_%f")
 
 
 def run_abstract_pipeline(
@@ -356,34 +323,7 @@ def run_pipeline(req: SummarizeRequest, log_prefix: str | None = None) -> Summar
         and float(corpus_context.get("affinity_score", 0.0)) < config.corpus.similarity_threshold
     ):
         log_context(prefix, "fast-rejected by corpus threshold=%.3f", config.corpus.similarity_threshold)
-        summary_seed = (req.abstract or "").strip() or "Low corpus affinity pre-filtered this paper as likely irrelevant."
-        return SummarizeResponse(
-            executive_summary=summary_seed[:2000],
-            should_deep_read="No. Low corpus affinity against your engaged library.",
-            key_sections_to_read=[],
-            relevance_to_research="Fast-rejected by corpus similarity pre-filter.",
-            controversial_points="",
-            industry_academy_impact="",
-            unknown_unknowns="",
-            implementation_quickstart="",
-            key_findings=[],
-            methods="",
-            limitations="",
-            relevance_score=1,
-            composite_relevance_score=1.0,
-            reading_priority=ReadingPriority.DONT_READ.value,
-            tags=["prefilter_low_corpus_affinity"],
-            triage_rationale="Corpus affinity was below threshold; paper likely does not match your engaged library profile.",
-            triage_dimensions=None,
-            triage_confidence=0.9,
-            corpus_affinity_score=float(corpus_context.get("affinity_score", 0.0)),
-            corpus_positive_similarity=float(corpus_context.get("positive_similarity", 0.0)),
-            corpus_negative_similarity=float(corpus_context.get("negative_similarity", 0.0)),
-            matched_goal=str(corpus_context.get("matched_goal", "") or ""),
-            matched_goal_similarity=float(corpus_context.get("matched_goal_similarity", 0.0)),
-            suggested_collections=list(corpus_context.get("suggested_collections", [])),
-            top_similar_items=list(corpus_context.get("top_similar_items", [])),
-        )
+        return _fast_reject_response(req, corpus_context, raw_text)
 
     max_direct_chars = 80_000
     if len(raw_text) > max_direct_chars:
@@ -452,30 +392,4 @@ def run_pipeline(req: SummarizeRequest, log_prefix: str | None = None) -> Summar
     )
     log_context(prefix, "pipeline completed in %.2fs", perf_counter() - pipeline_started)
 
-    return SummarizeResponse(
-        executive_summary=refined.executive_summary,
-        should_deep_read=refined.should_deep_read,
-        key_sections_to_read=refined.key_sections_to_read,
-        relevance_to_research=refined.relevance_to_research,
-        controversial_points=refined.controversial_points,
-        industry_academy_impact=refined.industry_academy_impact,
-        unknown_unknowns=refined.unknown_unknowns,
-        implementation_quickstart=refined.implementation_quickstart,
-        key_findings=refined.key_findings,
-        methods=refined.methods,
-        limitations=refined.limitations,
-        relevance_score=triage.score,
-        composite_relevance_score=composite_score,
-        reading_priority=mapped_priority,
-        tags=triage.tags,
-        triage_rationale=triage.rationale,
-        triage_dimensions=triage.dimensions,
-        triage_confidence=triage.confidence,
-        corpus_affinity_score=float(corpus_context.get("affinity_score", 0.0)),
-        corpus_positive_similarity=float(corpus_context.get("positive_similarity", 0.0)),
-        corpus_negative_similarity=float(corpus_context.get("negative_similarity", 0.0)),
-        matched_goal=str(corpus_context.get("matched_goal", "") or ""),
-        matched_goal_similarity=float(corpus_context.get("matched_goal_similarity", 0.0)),
-        suggested_collections=list(corpus_context.get("suggested_collections", [])),
-        top_similar_items=list(corpus_context.get("top_similar_items", [])),
-    )
+    return _assemble_summary_response(refined, triage, composite_score, mapped_priority, corpus_context)

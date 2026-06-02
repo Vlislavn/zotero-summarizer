@@ -24,6 +24,7 @@ from typing import Any
 
 import httpx
 
+from zotero_summarizer.domain import normalize_doi
 from zotero_summarizer.integrations.openalex_cache import OpenAlexCache
 
 
@@ -50,6 +51,12 @@ class OpenAlexWork:
     # fwci = field-weighted citation impact (1.0 == field average).
     citation_percentile: float | None = None
     fwci: float | None = None
+    # Cold-start author-reputation prior: the MAX across the work's (≤max_authors)
+    # authors of each author's FIELD-NORMALIZED standing = median of that author's
+    # works' citation_normalized_percentile, in [0,1]. None when the work already
+    # has its own percentile (not cold-start, so not computed) or no author has any
+    # field-normalized works yet. Used ONLY when ``citation_percentile is None``.
+    max_author_field_percentile: float | None = None
 
 
 class _RateLimiter:
@@ -97,7 +104,7 @@ class OpenAlexClient:
     # ------------------------------------------------------------------ public
 
     def fetch_work_by_doi(self, doi: str) -> OpenAlexWork | None:
-        doi_norm = self._normalize_doi(doi)
+        doi_norm = normalize_doi(doi)
         if not doi_norm:
             return None
         key = f"doi:{doi_norm}"
@@ -128,7 +135,8 @@ class OpenAlexClient:
         if not _title_match(candidate_title, title_clean):
             return None
         enriched = self._enrich_with_authors(top)
-        self.cache.set(key, enriched)
+        if not enriched.pop("__author_pct_incomplete", False):
+            self.cache.set(key, enriched)
         return self._work_from_payload(enriched)
 
     # ----------------------------------------------------------------- private
@@ -141,12 +149,20 @@ class OpenAlexClient:
         if not payload:
             return None
         enriched = self._enrich_with_authors(payload)
-        self.cache.set(cache_key, enriched)
+        if not enriched.pop("__author_pct_incomplete", False):
+            self.cache.set(cache_key, enriched)
         return self._work_from_payload(enriched)
 
     def _enrich_with_authors(self, work: dict[str, Any]) -> dict[str, Any]:
         authorships = work.get("authorships") or []
+        # The author FIELD-PERCENTILE prior is only used when THIS work has no
+        # field-normalized percentile of its own (cold-start). For established
+        # papers (the common case) skip the extra per-author /works calls.
+        work_pct = (work.get("citation_normalized_percentile") or {}).get("value")
+        want_author_pct = work_pct is None
         h_indices: list[int] = []
+        author_pcts: list[float] = []
+        pct_incomplete = False
         for auth in authorships[: self.max_authors]:
             author = (auth or {}).get("author") or {}
             author_id = author.get("id")
@@ -166,8 +182,61 @@ class OpenAlexClient:
                     )
                     self.cache.set(cache_key, {"h_index": h})
             h_indices.append(h)
+            if want_author_pct:
+                ap = self._author_field_percentile(short_id)
+                if ap is not None:
+                    author_pcts.append(ap)
+                elif self.cache.get(f"author_pct:{short_id}") is None:
+                    # None + nothing cached ⇒ the /works call FAILED (a genuine
+                    # empty result caches {"field_percentile": None}). Don't let a
+                    # transient failure freeze this work at "no author signal" for
+                    # the whole work-cache TTL — mark it so the caller skips
+                    # caching and the next pass retries.
+                    pct_incomplete = True
         work["__max_author_h_index"] = max(h_indices) if h_indices else 0
+        # MAX across the work's authors (mirrors __max_author_h_index): a paper
+        # inherits the standing of its STRONGEST author — the common junior-first-
+        # author / senior-PI case is exactly what the cold-start prior should
+        # reward. The bounded cap + convex map keep one gamed coauthor from
+        # dominating (max composite delta ≈ 0.075 on the [1,5] scale).
+        work["__max_author_field_percentile"] = max(author_pcts) if author_pcts else None
+        if pct_incomplete:
+            work["__author_pct_incomplete"] = True
         return work
+
+    def _author_field_percentile(self, short_id: str) -> float | None:
+        """Author's field-normalized standing = MEDIAN of the author's recent
+        works' OpenAlex ``citation_normalized_percentile`` (field- AND
+        year-normalized), in [0, 1]. ``None`` when the author has no works with a
+        percentile yet (too new) — a cold-start author is never penalised.
+
+        Cached per author (``author_pct:{id}``); a cache hit (even a stored
+        ``None``) is reused so we never re-query an author within the TTL.
+        """
+        cache_key = f"author_pct:{short_id}"
+        cached = self.cache.get(cache_key)
+        if cached is not None:
+            v = cached.get("field_percentile")
+            return float(v) if v is not None else None
+        payload = self._get(
+            "/works",
+            params={
+                "filter": f"authorships.author.id:{short_id}",
+                "select": "citation_normalized_percentile",
+                "per-page": 50,
+                "sort": "publication_date:desc",
+            },
+        )
+        if payload is None:
+            return None  # cache-only/no-network or transport error — do not cache
+        vals = sorted(
+            float(v)
+            for w in (payload.get("results") or [])
+            if (v := ((w or {}).get("citation_normalized_percentile") or {}).get("value")) is not None
+        )
+        median = _median(vals)
+        self.cache.set(cache_key, {"field_percentile": median})
+        return median
 
     @staticmethod
     def _work_from_payload(payload: dict[str, Any]) -> OpenAlexWork | None:
@@ -194,6 +263,11 @@ class OpenAlexClient:
                 oa_url=(oa.get("oa_url") or None),
                 citation_percentile=(float(pct) if pct is not None else None),
                 fwci=(float(fwci) if fwci is not None else None),
+                max_author_field_percentile=(
+                    float(payload["__max_author_field_percentile"])
+                    if payload.get("__max_author_field_percentile") is not None
+                    else None
+                ),
             )
         except (ValueError, TypeError) as exc:
             LOGGER.debug("openalex: payload parse failed: %s", exc)
@@ -222,15 +296,15 @@ class OpenAlexClient:
         except ValueError:
             return None
 
-    @staticmethod
-    def _normalize_doi(doi: str) -> str:
-        d = (doi or "").strip().lower()
-        if not d:
-            return ""
-        for prefix in ("https://doi.org/", "http://doi.org/", "doi:"):
-            if d.startswith(prefix):
-                d = d[len(prefix):]
-        return d.strip("/")
+def _median(values: list[float]) -> float | None:
+    """Median of a SORTED list (caller sorts). None for an empty list."""
+    n = len(values)
+    if n == 0:
+        return None
+    mid = n // 2
+    if n % 2:
+        return values[mid]
+    return (values[mid - 1] + values[mid]) / 2.0
 
 
 def _title_match(candidate: str, target: str) -> bool:

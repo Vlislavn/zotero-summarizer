@@ -100,3 +100,29 @@ def test_entry_prestige_known_iff_percentile_present():
     # h-index present but NO percentile → unknown (cold-start), floor won't penalise.
     unknown = rq._entry_prestige({"scoring": {"prestige_score": None, "prestige_inputs": {"max_author_h_index": 80}}})
     assert unknown == (None, False)
+
+
+def test_scoring_from_prediction_surfaces_cold_start_prior():
+    """At cold-start (no percentile) the badge shows the provisional author-based
+    prior from ``cold_start_prestige`` instead of nothing."""
+    sc = rq.scoring_from_prediction(_pred({
+        "citation_percentile": None,
+        "max_author_field_percentile": 0.95,
+        "cold_start_prestige": 3.85,
+    }))
+    assert sc["prestige_score"] == 3.85
+    assert sc["prestige_inputs"]["max_author_field_percentile"] == 0.95
+
+
+def test_cold_start_prior_stays_unknown_for_the_floor():
+    """CRITICAL invariant: even with a provisional prior shown, the paper is
+    UNKNOWN to the quality floor (no citation percentile) so it is never demoted
+    and never pollutes the floor median."""
+    sc = rq.scoring_from_prediction(_pred({
+        "citation_percentile": None,
+        "max_author_field_percentile": 0.95,
+        "cold_start_prestige": 3.85,
+    }))
+    score, known = rq._entry_prestige({"scoring": sc})
+    assert known is False               # not counted as known prestige
+    assert rq.prestige_floor([(score, known)]) is None  # never enters the median

@@ -16,8 +16,9 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
-from zotero_summarizer.services.library import review
+from zotero_summarizer.services.library import fulltext, review
 from zotero_summarizer.services._common import LOGGER
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.storage import feeds as feeds_storage
@@ -103,6 +104,7 @@ def add_to_library(item_ids: list[int]) -> dict[str, Any]:
     writer = ZoteroWriter(get_settings().zotero_data_dir)
     used_keys: set[str] = set()
     added = 0
+    new_keys: list[str] = []
     failed: list[dict[str, Any]] = []
     for row in rows:
         try:
@@ -114,7 +116,8 @@ def add_to_library(item_ids: list[int]) -> dict[str, Any]:
             # so the Zotero tag reflects the user's positive "add" intent, not the
             # gate's verdict.
             row["reading_priority"] = _ADD_PRIORITY
-            review.materialize_row(row, writer=writer, used_keys=used_keys, reason="today_add")
+            new_key = review.materialize_row(row, writer=writer, used_keys=used_keys, reason="today_add")
+            new_keys.append(new_key)
             # Soft, low-weight training signal: "Add" is pre-read interest, not
             # endorsement — feed_interest → WEIGHT_INTEREST (0.3). A later read +
             # label (or Zotero engagement) on the materialized library item
@@ -133,7 +136,35 @@ def add_to_library(item_ids: list[int]) -> dict[str, Any]:
                 "title": str(row.get("title") or ""),
                 "error": str(exc),
             })
-    return {"added": added, "failed_count": len(failed), "failed": failed[:20]}
+    return {
+        "added": added, "failed_count": len(failed), "failed": failed[:20],
+        # Auto-fetch arXiv full text for the just-added papers (user-requested,
+        # 2026-06). Best-effort: the items are already in Zotero, so a fetch
+        # failure (arXiv down, Zotero reopened) must NOT fail the add — it's a
+        # bonus the bulk "Fetch full text" button can complete later.
+        "fulltext": _attach_fulltext_best_effort(new_keys),
+    }
+
+
+def _attach_fulltext_best_effort(new_keys: list[str]) -> dict[str, Any]:
+    """Fetch + attach arXiv PDFs for freshly-materialized items. Never raises —
+    a failure here is non-fatal to the add (documented best-effort boundary)."""
+    if not new_keys:
+        return {"attached": 0}
+    try:
+        reader = ZoteroReader(get_settings().zotero_data_dir)
+        urls = reader.get_field_values("url")
+        dois = reader.get_field_values("DOI")
+        items = [
+            {"item_key": k, "has_pdf": False, "url": urls.get(k, ""), "doi": dois.get(k, "")}
+            for k in new_keys
+        ]
+        res = fulltext.fetch_fulltext_for_items(items)
+        return {"attached": res.get("attached", 0), "no_arxiv": res.get("no_arxiv", 0),
+                "failed": res.get("failed_count", 0)}
+    except Exception as exc:  # noqa: BLE001 — best-effort; the add already succeeded
+        LOGGER.exception("add_to_library: arXiv full-text fetch failed (non-fatal)")
+        return {"attached": 0, "error": f"{type(exc).__name__}: {exc}"}
 
 
 def trash(item_ids: list[int]) -> dict[str, Any]:

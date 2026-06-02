@@ -160,6 +160,7 @@ def _apply_prestige(
         year=year,
         require_doi=bool(prestige_cfg.require_doi),
         neutral=float(prestige_cfg.fallback_neutral),
+        cold_start_policy=prestige_service.cold_start_policy_from_config(prestige_cfg),
     )
     triage = _triage_result_from_summary(summary)
     new_composite = scoring_service.compute_composite_score(

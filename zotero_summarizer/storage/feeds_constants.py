@@ -31,10 +31,6 @@ DECISION_AWAITING_REVIEW = "awaiting_review"
 DECISION_USER_APPROVED = "user_approved"
 DECISION_USER_REJECTED = "user_rejected"
 
-# Terminal decisions — these get final outcomes; the "triaged_pending"
-# intermediate state never receives an outcome.
-TERMINAL_MATERIALIZED_DECISIONS = frozenset({DECISION_SELECTED, DECISION_BLACK_SWAN})
-
 # Outcome taxonomy — what the user did with a materialized item after N days.
 OUTCOME_PENDING = "pending"  # outcome window not yet elapsed
 OUTCOME_KEPT_INBOX = "kept_inbox"  # still in Inbox only — weak negative

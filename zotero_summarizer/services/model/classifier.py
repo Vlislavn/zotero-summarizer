@@ -36,6 +36,61 @@ from zotero_summarizer.services.model.classifier_fit import *  # noqa: F401,F403
 from zotero_summarizer.services.model.classifier_io import *  # noqa: F401,F403
 
 
+def _select_labeled_rows(rows: list[dict[str, str]]):
+    """Filter to rows with title+abstract+gold label; return the parallel column lists."""
+    keys: list[str] = []
+    titles: list[str] = []
+    abstracts: list[str] = []
+    labels: list[int] = []
+    gold_priorities: list[str] = []
+    selected_rows: list[dict[str, str]] = []
+    for r in rows:
+        gold = (r.get("gold_priority_final") or "").strip()
+        title = (r.get("title") or "").strip()
+        abstract = (r.get("abstract") or "").strip()
+        if not gold or not title or not abstract:
+            continue
+        keys.append(r.get("item_key", ""))
+        titles.append(title)
+        abstracts.append(abstract)
+        labels.append(1 if gold in POSITIVE_CLASSES else 0)
+        gold_priorities.append(gold)
+        selected_rows.append(r)
+    return keys, titles, abstracts, labels, gold_priorities, selected_rows
+
+
+def _build_feature_matrix(
+    keys: list[str], titles: list[str], abstracts: list[str], selected_rows: list[dict[str, str]],
+    *, corpus_db_path: Path, goals_config: Any, progress_cb: Callable[[int, int], None] | None = None,
+):
+    """Full SPECTER2 + tabular feature matrix for the kept rows. Returns (X, computed, cached)."""
+    embed_cache, openalex_client, cold_start_policy = _build_aux_providers(corpus_db_path, goals_config)
+    computed = 0
+    cached = 0
+    X = np.zeros((len(keys), FEATURE_DIM), dtype=np.float32)
+    for i, (k, t, a) in enumerate(zip(keys, titles, abstracts)):
+        authors = (selected_rows[i].get("authors") or "").strip()
+        venue = (selected_rows[i].get("venue") or "").strip()
+        if _embedding_cached(corpus_db_path, k, _content_hash(t, a, authors, venue)):
+            cached += 1
+        else:
+            computed += 1
+        X[i, :EMBEDDING_DIM] = get_or_compute_embedding(corpus_db_path, k, t, a, authors=authors, venue=venue)
+        year_str = (selected_rows[i].get("year") or "").strip()
+        year_i = int(year_str[:4]) if year_str[:4].isdigit() else None
+        doi = (selected_rows[i].get("doi") or "").strip()
+        affinity, prestige = _compute_aux(
+            embed_cache, openalex_client, title=t, abstract=a, doi=doi, year=year_i,
+            cold_start_policy=cold_start_policy,
+        )
+        X[i, EMBEDDING_DIM:] = _extra_features(
+            selected_rows[i], t, a, corpus_affinity=affinity, prestige_score=prestige,
+        )
+        if progress_cb is not None and (i + 1) % 25 == 0:
+            progress_cb(i + 1, len(keys))
+    return X, computed, cached
+
+
 def cross_validate(
     rows: list[dict[str, str]],
     *,
@@ -83,24 +138,7 @@ def cross_validate(
     from sklearn.model_selection import StratifiedKFold, train_test_split
 
     start = time.perf_counter()
-    keys: list[str] = []
-    titles: list[str] = []
-    abstracts: list[str] = []
-    labels: list[int] = []
-    gold_priorities: list[str] = []
-    selected_rows: list[dict[str, str]] = []
-    for r in rows:
-        gold = (r.get("gold_priority_final") or "").strip()
-        title = (r.get("title") or "").strip()
-        abstract = (r.get("abstract") or "").strip()
-        if not gold or not title or not abstract:
-            continue
-        keys.append(r.get("item_key", ""))
-        titles.append(title)
-        abstracts.append(abstract)
-        labels.append(1 if gold in POSITIVE_CLASSES else 0)
-        gold_priorities.append(gold)
-        selected_rows.append(r)
+    keys, titles, abstracts, labels, gold_priorities, selected_rows = _select_labeled_rows(rows)
 
     if len(labels) < n_folds * 2:
         raise ValueError(
@@ -108,33 +146,10 @@ def cross_validate(
         )
 
     # Build feature matrix for ALL kept rows (CV + held-out).
-    embed_cache, openalex_client = _build_aux_providers(corpus_db_path, goals_config)
-    computed = 0
-    cached = 0
-    X = np.zeros((len(labels), FEATURE_DIM), dtype=np.float32)
-    for i, (k, t, a) in enumerate(zip(keys, titles, abstracts)):
-        authors = (selected_rows[i].get("authors") or "").strip()
-        venue = (selected_rows[i].get("venue") or "").strip()
-        if _embedding_cached(corpus_db_path, k, _content_hash(t, a, authors, venue)):
-            cached += 1
-        else:
-            computed += 1
-        X[i, :EMBEDDING_DIM] = get_or_compute_embedding(
-            corpus_db_path, k, t, a, authors=authors, venue=venue,
-        )
-        year_str = (selected_rows[i].get("year") or "").strip()
-        year_i = int(year_str[:4]) if year_str[:4].isdigit() else None
-        doi = (selected_rows[i].get("doi") or "").strip()
-        affinity, prestige = _compute_aux(
-            embed_cache, openalex_client,
-            title=t, abstract=a, doi=doi, year=year_i,
-        )
-        X[i, EMBEDDING_DIM:] = _extra_features(
-            selected_rows[i], t, a,
-            corpus_affinity=affinity, prestige_score=prestige,
-        )
-        if progress_cb is not None and (i + 1) % 25 == 0:
-            progress_cb(i + 1, len(labels))
+    X, computed, cached = _build_feature_matrix(
+        keys, titles, abstracts, selected_rows,
+        corpus_db_path=corpus_db_path, goals_config=goals_config, progress_cb=progress_cb,
+    )
     y = np.asarray(labels, dtype=np.int32)
     idx_all = np.arange(len(y))
 
@@ -226,6 +241,107 @@ def cross_validate(
     )
 
 
+def _filter_train_rows(
+    training_rows: list[dict[str, str]], *, n_folds: int
+) -> tuple[list, list[str], list[str], list[float], list[dict]]:
+    """Select training-eligible rows carrying the four fields the regressor needs."""
+    from zotero_summarizer.domain import is_training_eligible
+
+    keys, titles, abstracts, y_cont, train_rows = [], [], [], [], []
+    for r in training_rows:
+        if not is_training_eligible(r):
+            continue
+        gold = (r.get("gold_priority_final") or "").strip()
+        title = (r.get("title") or "").strip()
+        abstract = (r.get("abstract") or "").strip()
+        rel_str = (r.get("gold_inferred_relevance") or "").strip()
+        if not gold or not title or not abstract or not rel_str:
+            continue
+        rel = float(rel_str)
+        keys.append(r.get("item_key", ""))
+        titles.append(title)
+        abstracts.append(abstract)
+        y_cont.append(rel)
+        train_rows.append(r)
+    if len(y_cont) < n_folds * 2:
+        raise ValueError(
+            f"need at least {n_folds * 2} labeled rows for {n_folds}-fold CV; got {len(y_cont)}"
+        )
+    return keys, titles, abstracts, y_cont, train_rows
+
+
+def _featurize_new_items(
+    valid_new: list[dict[str, str]],
+    *,
+    corpus_db_path: Path,
+    embed_cache: Any,
+    openalex_client: Any,
+    cold_start_policy: Any,
+    library: Any,
+) -> "np.ndarray":
+    """Build the feature matrix for the new (unlabeled) items to be scored."""
+    from zotero_summarizer.services.model.library_features import compute_library_features
+
+    n_new = len(valid_new)
+    X_new = np.zeros((n_new, FEATURE_DIM), dtype=np.float32)
+    for i, it in enumerate(valid_new):
+        title = (it.get("title") or "").strip()
+        abstract = (it.get("abstract") or "").strip()
+        cache_key = str(it.get("item_key") or it.get("item_id") or f"feed_{i}")
+        emb_new = get_or_compute_embedding(corpus_db_path, cache_key, title, abstract)
+        X_new[i, :EMBEDDING_DIM] = emb_new
+        doi = (it.get("doi") or "").strip()
+        year_str = (it.get("publication_date") or "")[:4]
+        year_i = int(year_str) if year_str.isdigit() else None
+        affinity, prestige = _compute_aux(
+            embed_cache, openalex_client,
+            title=title, abstract=abstract, doi=doi, year=year_i,
+            cold_start_policy=cold_start_policy,
+        )
+        authors_str = (it.get("authors") or "").strip()
+        nearest_n, centroid_n, recent_n, drift_n, authors_overlap_n = compute_library_features(
+            emb_new, library, candidate_authors=authors_str, exclude_item_key=cache_key,
+        )
+        venue = (it.get("publication_title") or it.get("venue") or "").strip()
+        feature_row = {"doi": doi, "venue": venue, "year": year_str}
+        X_new[i, EMBEDDING_DIM:] = _extra_features(
+            feature_row, title, abstract,
+            corpus_affinity=affinity, prestige_score=prestige,
+            nearest_kept_cosine=nearest_n, positive_centroid_cosine=centroid_n,
+            recent_centroid_cosine=recent_n, topic_drift=drift_n,
+            author_overlap_count=authors_overlap_n,
+        )
+    return X_new
+
+
+def _assemble_predictions(
+    valid_new: list[dict[str, str]], p_new: "np.ndarray", *, abstract_preview_chars: int
+) -> list[FeedPrediction]:
+    """Pack scored new items into descending-sorted :class:`FeedPrediction` rows."""
+    from zotero_summarizer.domain import score_to_priority
+
+    predictions: list[FeedPrediction] = []
+    for it, score in zip(valid_new, p_new):
+        title = (it.get("title") or "").strip()
+        abstract = (it.get("abstract") or "").strip()
+        if len(abstract) > abstract_preview_chars:
+            abstract = abstract[:abstract_preview_chars].rstrip() + "…"
+        s = float(score)
+        predictions.append(FeedPrediction(
+            item_key=str(it.get("item_key") or it.get("item_id") or ""),
+            title=title,
+            authors=(it.get("authors") or "").strip(),
+            venue=(it.get("publication_title") or it.get("venue") or "").strip(),
+            doi=(it.get("doi") or "").strip(),
+            abstract_preview=abstract,
+            raw_score=s,
+            calibrated_score=s / 5.0,
+            predicted_priority=score_to_priority(s),
+        ))
+    predictions.sort(key=lambda p: p.raw_score, reverse=True)
+    return predictions
+
+
 def predict_new_items(
     training_rows: list[dict[str, str]],
     new_items: list[dict[str, str]],
@@ -260,35 +376,14 @@ def predict_new_items(
     from scipy.stats import spearmanr
     from sklearn.model_selection import GroupKFold
 
-    from zotero_summarizer.domain import (
-        is_training_eligible,
-        paper_group_id,
-        score_to_priority,
-    )
+    from zotero_summarizer.domain import paper_group_id
 
     # 1. Filter & featurise training set.
-    keys, titles, abstracts, y_cont, train_rows = [], [], [], [], []
-    for r in training_rows:
-        if not is_training_eligible(r):
-            continue
-        gold = (r.get("gold_priority_final") or "").strip()
-        title = (r.get("title") or "").strip()
-        abstract = (r.get("abstract") or "").strip()
-        rel_str = (r.get("gold_inferred_relevance") or "").strip()
-        if not gold or not title or not abstract or not rel_str:
-            continue
-        rel = float(rel_str)
-        keys.append(r.get("item_key", ""))
-        titles.append(title)
-        abstracts.append(abstract)
-        y_cont.append(rel)
-        train_rows.append(r)
-    if len(y_cont) < n_folds * 2:
-        raise ValueError(
-            f"need at least {n_folds * 2} labeled rows for {n_folds}-fold CV; got {len(y_cont)}"
-        )
+    keys, titles, abstracts, y_cont, train_rows = _filter_train_rows(
+        training_rows, n_folds=n_folds
+    )
 
-    embed_cache, openalex_client = _build_aux_providers(corpus_db_path, goals_config)
+    embed_cache, openalex_client, cold_start_policy = _build_aux_providers(corpus_db_path, goals_config)
     from zotero_summarizer.services.model.library_features import (
         compute_library_features,
         load_positive_library_from_rows,
@@ -305,6 +400,7 @@ def predict_new_items(
         affinity, prestige = _compute_aux(
             embed_cache, openalex_client,
             title=t, abstract=a, doi=doi, year=year_i,
+            cold_start_policy=cold_start_policy,
         )
         authors_str = (train_rows[i].get("authors") or "").strip()
         nearest, centroid, recent, drift, authors_overlap = compute_library_features(
@@ -346,36 +442,14 @@ def predict_new_items(
     if not valid_new:
         return [], {"oof_spearman": oof_rho, "n_train": float(n_train)}
 
-    n_new = len(valid_new)
-    X_new = np.zeros((n_new, FEATURE_DIM), dtype=np.float32)
-    for i, it in enumerate(valid_new):
-        title = (it.get("title") or "").strip()
-        abstract = (it.get("abstract") or "").strip()
-        cache_key = str(it.get("item_key") or it.get("item_id") or f"feed_{i}")
-        emb_new = get_or_compute_embedding(
-            corpus_db_path, cache_key, title, abstract,
-        )
-        X_new[i, :EMBEDDING_DIM] = emb_new
-        doi = (it.get("doi") or "").strip()
-        year_str = (it.get("publication_date") or "")[:4]
-        year_i = int(year_str) if year_str.isdigit() else None
-        affinity, prestige = _compute_aux(
-            embed_cache, openalex_client,
-            title=title, abstract=abstract, doi=doi, year=year_i,
-        )
-        authors_str = (it.get("authors") or "").strip()
-        nearest_n, centroid_n, recent_n, drift_n, authors_overlap_n = compute_library_features(
-            emb_new, library, candidate_authors=authors_str, exclude_item_key=cache_key,
-        )
-        venue = (it.get("publication_title") or it.get("venue") or "").strip()
-        feature_row = {"doi": doi, "venue": venue, "year": year_str}
-        X_new[i, EMBEDDING_DIM:] = _extra_features(
-            feature_row, title, abstract,
-            corpus_affinity=affinity, prestige_score=prestige,
-            nearest_kept_cosine=nearest_n, positive_centroid_cosine=centroid_n,
-            recent_centroid_cosine=recent_n, topic_drift=drift_n,
-            author_overlap_count=authors_overlap_n,
-        )
+    X_new = _featurize_new_items(
+        valid_new,
+        corpus_db_path=corpus_db_path,
+        embed_cache=embed_cache,
+        openalex_client=openalex_client,
+        cold_start_policy=cold_start_policy,
+        library=library,
+    )
 
     # 4. Fit final regressor on FULL training, predict on new.
     _, p_new = _fit_predict(
@@ -387,25 +461,8 @@ def predict_new_items(
     p_new = np.clip(p_new, 1.0, 5.0)
 
     # 5. Assemble result rows.
-    predictions: list[FeedPrediction] = []
-    for it, score in zip(valid_new, p_new):
-        title = (it.get("title") or "").strip()
-        abstract = (it.get("abstract") or "").strip()
-        if len(abstract) > abstract_preview_chars:
-            abstract = abstract[:abstract_preview_chars].rstrip() + "…"
-        s = float(score)
-        predictions.append(FeedPrediction(
-            item_key=str(it.get("item_key") or it.get("item_id") or ""),
-            title=title,
-            authors=(it.get("authors") or "").strip(),
-            venue=(it.get("publication_title") or it.get("venue") or "").strip(),
-            doi=(it.get("doi") or "").strip(),
-            abstract_preview=abstract,
-            raw_score=s,
-            calibrated_score=s / 5.0,
-            predicted_priority=score_to_priority(s),
-        ))
-
-    predictions.sort(key=lambda p: p.raw_score, reverse=True)
+    predictions = _assemble_predictions(
+        valid_new, p_new, abstract_preview_chars=abstract_preview_chars
+    )
     return predictions, {"oof_spearman": oof_rho, "n_train": float(n_train)}
 

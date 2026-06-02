@@ -61,14 +61,25 @@ def _load_specter2() -> tuple[Any, Any, Any]:
     from adapters import AutoAdapterModel
     from transformers import AutoTokenizer
 
-    tok = AutoTokenizer.from_pretrained(SPECTER2_MODEL_NAME)
-    mdl = AutoAdapterModel.from_pretrained(SPECTER2_MODEL_NAME)
-    mdl.load_adapter(
-        SPECTER2_ADAPTER_NAME,
-        source="hf",
-        load_as="proximity",
-        set_active=True,
-    )
+    try:
+        tok = AutoTokenizer.from_pretrained(SPECTER2_MODEL_NAME)
+        mdl = AutoAdapterModel.from_pretrained(SPECTER2_MODEL_NAME)
+        mdl.load_adapter(
+            SPECTER2_ADAPTER_NAME,
+            source="hf",
+            load_as="proximity",
+            set_active=True,
+        )
+    except Exception as exc:
+        # The gate has no local fallback — scoring needs SPECTER2. Turn an opaque
+        # HuggingFace/offline error into an actionable one (re-raised, not swallowed):
+        # offline + not-yet-cached is the common cause.
+        raise RuntimeError(
+            f"Could not load the SPECTER2 gate encoder "
+            f"({SPECTER2_MODEL_NAME} + {SPECTER2_ADAPTER_NAME}). If you are offline, "
+            f"the model is not cached yet — run `zotero-summarizer prefetch-models` "
+            f"while online once to populate the cache. Original error: {exc}"
+        ) from exc
     mdl.eval()
     device = _select_device(torch)
     mdl.to(device)

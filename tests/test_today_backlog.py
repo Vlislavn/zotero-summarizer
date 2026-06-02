@@ -279,6 +279,97 @@ def test_drain_finishes_when_backlog_empty(monkeypatch):
     assert st["gate_reject_rate"] == round(90 / 95, 3)
 
 
+def test_drain_rescores_slate_on_completion(monkeypatch):
+    """When a drain finishes, the Today slate is re-scored under the live gate so
+    the freshly-drained rows rank consistently with what was already there — the
+    user never has to press "Rescore slate" by hand after a backlog run."""
+    from unittest.mock import MagicMock
+    import zotero_summarizer.services._common as common
+    from zotero_summarizer.services.triage import feeds
+    from zotero_summarizer.services.triage import rescore_slate as rescore_mod
+
+    triage_backlog._finish(error=None, done=False)
+    triage_backlog._reset_and_claim()
+    monkeypatch.setattr(common, "state", lambda: _fake_state(gate_only=True))
+    tick = MagicMock(side_effect=[
+        _tick_report(fetched=100, triaged=5, gate_rejected=90, errors=5),
+        _tick_report(fetched=0),
+    ])
+    monkeypatch.setattr(feeds, "run_daemon_tick", tick)
+
+    rescore_calls: list[int] = []
+
+    def fake_rescore():
+        rescore_calls.append(1)
+        return {"rescored": 7, "skipped": 0}
+
+    monkeypatch.setattr(rescore_mod, "rescore_slate", fake_rescore)
+
+    triage_backlog._drain_worker()
+
+    assert rescore_calls == [1]                      # rescored exactly once, after the drain
+    st = triage_backlog.status()
+    assert st["done"] is True
+    assert st["rescored"] == 7                        # count surfaced for the UI
+    assert st["rescore_error"] is None
+
+
+def test_drain_does_not_rescore_on_fatal_error(monkeypatch):
+    """A fatal LLM error aborts the drain early; the gate may be unusable, so the
+    post-drain rescore must NOT fire."""
+    from unittest.mock import MagicMock
+    import zotero_summarizer.services._common as common
+    from zotero_summarizer.services.triage import feeds
+    from zotero_summarizer.services.triage import rescore_slate as rescore_mod
+
+    triage_backlog._finish(error=None, done=False)
+    triage_backlog._reset_and_claim()
+    monkeypatch.setattr(common, "state", lambda: _fake_state(gate_only=False))
+    tick = MagicMock(return_value=_tick_report(
+        fetched=100, triaged=2, gate_rejected=50, errors=48, fatal_llm_error=True,
+    ))
+    monkeypatch.setattr(feeds, "run_daemon_tick", tick)
+
+    rescore_calls: list[int] = []
+    monkeypatch.setattr(rescore_mod, "rescore_slate",
+                        lambda: rescore_calls.append(1) or {"rescored": 0})
+
+    triage_backlog._drain_worker()
+
+    assert rescore_calls == []                        # no rescore on the fatal path
+    assert triage_backlog.status()["rescored"] is None
+
+
+def test_drain_records_rescore_error_but_still_finishes(monkeypatch):
+    """A rescore blow-up after a successful drain is recorded, not raised — the
+    items are already triaged + persisted, so the job still completes."""
+    from unittest.mock import MagicMock
+    import zotero_summarizer.services._common as common
+    from zotero_summarizer.services.triage import feeds
+    from zotero_summarizer.services.triage import rescore_slate as rescore_mod
+
+    triage_backlog._finish(error=None, done=False)
+    triage_backlog._reset_and_claim()
+    monkeypatch.setattr(common, "state", lambda: _fake_state(gate_only=True))
+    tick = MagicMock(side_effect=[
+        _tick_report(fetched=10, triaged=4, gate_rejected=6),
+        _tick_report(fetched=0),
+    ])
+    monkeypatch.setattr(feeds, "run_daemon_tick", tick)
+
+    def boom():
+        raise RuntimeError("rescore down")
+
+    monkeypatch.setattr(rescore_mod, "rescore_slate", boom)
+
+    triage_backlog._drain_worker()                    # must not raise
+
+    st = triage_backlog.status()
+    assert st["done"] is True                          # drain still succeeded
+    assert st["rescored"] is None
+    assert "rescore down" in (st["rescore_error"] or "")
+
+
 def test_drain_ml_only_is_gate_only_with_no_llm(monkeypatch):
     """Default drain (bulk_drain_gate_only=True): gate_only tick, review_mode
     explicitly False (so rows are triaged_pending + marked read), and NO LLM

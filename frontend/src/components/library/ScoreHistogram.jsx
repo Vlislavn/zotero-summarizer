@@ -17,9 +17,11 @@ const BAND_LABEL = {
   dont_read: "don't",
 };
 
-export default function ScoreHistogram({ distribution }) {
+export default function ScoreHistogram({ distribution, onBandClick = null, activeBands = [] }) {
   if (!distribution || !Array.isArray(distribution.bins)) return null;
   const { bins, by_band = {}, total_scored = 0, unscored = 0, prestige_floor = null } = distribution;
+  const interactive = typeof onBandClick === 'function';
+  const activeSet = new Set(activeBands || []);
 
   if (total_scored === 0) {
     return (
@@ -45,30 +47,64 @@ export default function ScoreHistogram({ distribution }) {
           ) : null}
         </span>
         <span className="flex flex-wrap gap-2 text-[10px] text-slate-500">
-          {Object.entries(BAND_LABEL).map(([band, lab]) => (
-            <span key={band} className="flex items-center gap-1">
-              <span className={`inline-block h-2 w-2 rounded-sm ${BAND_BAR[band]}`} />
-              {lab} {by_band[band] || 0}
-            </span>
-          ))}
+          {Object.entries(BAND_LABEL).map(([band, lab]) => {
+            const swatch = (
+              <>
+                <span className={`inline-block h-2 w-2 rounded-sm ${BAND_BAR[band]}`} />
+                {lab} {by_band[band] || 0}
+              </>
+            );
+            if (!interactive) {
+              return <span key={band} className="flex items-center gap-1">{swatch}</span>;
+            }
+            const on = activeSet.has(band);
+            return (
+              <button
+                key={band}
+                type="button"
+                onClick={() => onBandClick(band)}
+                aria-pressed={on}
+                title={on ? `Stop filtering by ${lab}` : `Filter to ${lab}`}
+                className={`flex items-center gap-1 rounded px-1 -mx-1 hover:bg-slate-100 ${on ? 'font-semibold text-slate-800' : ''}`}
+              >
+                {swatch}
+              </button>
+            );
+          })}
         </span>
       </div>
 
       <div className="flex items-end gap-1 h-24">
         {bins.map((b, i) => {
           const pct = Math.round((b.count / max) * 100);
-          const must = b.band === 'must_read';
+          // Ring meaning: a currently-selected band gets a dark "selected" ring;
+          // otherwise the must-read band keeps its emerald Von Restorff highlight.
+          const ring = activeSet.has(b.band)
+            ? 'ring-2 ring-slate-800'
+            : (b.band === 'must_read' ? 'ring-2 ring-emerald-700' : '');
+          const bar = (
+            <div
+              className={`w-full rounded-t ${BAND_BAR[b.band]} ${ring} ${interactive ? 'transition-[filter] hover:brightness-110' : ''}`}
+              style={{ height: `${b.count ? Math.max(4, pct) : 0}%` }}
+            />
+          );
           return (
             <div
               key={i}
               className="flex-1 flex flex-col items-center justify-end h-full"
-              title={`${b.lo.toFixed(1)}–${b.hi.toFixed(1)}: ${b.count}`}
+              title={`${b.lo.toFixed(1)}–${b.hi.toFixed(1)}: ${b.count}${interactive ? ` · click to filter to ${BAND_LABEL[b.band]}` : ''}`}
             >
               <span className="text-[9px] text-slate-500 leading-none mb-0.5">{b.count || ''}</span>
-              <div
-                className={`w-full rounded-t ${BAND_BAR[b.band]} ${must ? 'ring-2 ring-emerald-700' : ''}`}
-                style={{ height: `${b.count ? Math.max(4, pct) : 0}%` }}
-              />
+              {interactive ? (
+                <button
+                  type="button"
+                  onClick={() => onBandClick(b.band)}
+                  aria-pressed={activeSet.has(b.band)}
+                  className="w-full cursor-pointer"
+                >
+                  {bar}
+                </button>
+              ) : bar}
             </div>
           );
         })}

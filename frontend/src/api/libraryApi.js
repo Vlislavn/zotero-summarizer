@@ -73,7 +73,7 @@ export function itemPdfUrl(itemKey) {
  */
 export async function fetchReadingQueue({
   includeRead = false, limit = 30, refresh = false,
-  collection = '', tag = '', search = '',
+  collection = '', tag = '', search = '', semantic = false,
 } = {}) {
   const qs = new URLSearchParams({
     include_read: String(includeRead),
@@ -82,8 +82,21 @@ export async function fetchReadingQueue({
   });
   if (collection) qs.set('collection', collection);
   if (tag) qs.set('tag', tag);
-  if (search.trim()) qs.set('search', search.trim());
+  if (search.trim()) {
+    qs.set('search', search.trim());
+    // "Meaning" mode → hybrid (BM25 + dense + cross-encoder rerank) on the server.
+    if (semantic) qs.set('semantic', 'true');
+  }
   return request(`/api/library/reading-queue?${qs.toString()}`);
+}
+
+/**
+ * GET /api/library/reading-queue/status → { running, error }.
+ * In-memory scoring-job state only (no Zotero read), so it's cheap to poll while
+ * a Rescore is computing — instead of re-fetching the whole-library queue.
+ */
+export async function fetchReadingQueueStatus() {
+  return request('/api/library/reading-queue/status');
 }
 
 /**
@@ -130,6 +143,25 @@ export async function syncRelTags({ force = false } = {}) {
     method: 'POST',
     body: JSON.stringify({ force }),
   });
+}
+
+/**
+ * POST /api/library/fetch-fulltext { force }
+ * Bulk: download arXiv full-text PDFs for every library paper that has an arXiv
+ * link but no PDF, and attach them natively to Zotero (imported_url; uploads on
+ * next sync). Background job; backup-first + connector-guarded. Resolves to
+ * { status: 'started'|'running' } or { requires_force, message }.
+ */
+export async function fetchFulltext({ force = false } = {}) {
+  return request('/api/library/fetch-fulltext', {
+    method: 'POST',
+    body: JSON.stringify({ force }),
+  });
+}
+
+/** GET /api/library/fetch-fulltext/status → { running, progress:{done,total}, result }. */
+export async function fetchFulltextStatus() {
+  return request('/api/library/fetch-fulltext/status');
 }
 
 /**

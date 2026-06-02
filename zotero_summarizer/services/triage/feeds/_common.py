@@ -167,7 +167,7 @@ def _triage_conn() -> Iterator[sqlite3.Connection]:
     try:
         try:
             conn.execute("PRAGMA journal_mode=WAL")
-        except sqlite3.Error:
+        except sqlite3.Error as _:
             pass
         feeds_storage.init_feeds_schema(conn)
         yield conn

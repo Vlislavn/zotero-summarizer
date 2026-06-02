@@ -264,10 +264,97 @@ def _maybe_schedule_gate_retrain(tick_id: str) -> None:
     schedule_gate_retrain_async(tick_id)
 
 
+def _gate_quality_label(md: dict[str, Any]) -> str:
+    """AUC for legacy classification models, Spearman for the Sprint-1
+    regression objective; ``quality=n/a`` when neither is present. Shared by
+    ``install_gate`` and lifecycle so startup + retrain log the same way."""
+    if "oof_auc" in md:
+        return f"AUC={md['oof_auc']:.3f}"
+    if "oof_spearman" in md:
+        return f"Spearman={md['oof_spearman']:.3f}"
+    return "quality=n/a"
+
+
+def _rescore_slate_after_swap(reason: str) -> dict[str, Any] | None:
+    """Re-score the live Today slate with the currently-installed gate.
+
+    A retrain/upgrade gives the daemon a new gate, but the rows ALREADY on
+    Today keep the scores the OLD gate gave them — triage decisions are
+    terminal and never re-scored. Re-scoring here means the user sees the new
+    model's ranking immediately, without having to hit
+    ``POST /api/daily/rescore-slate`` by hand.
+
+    Best-effort: the gate is already live, so a rescore failure must never
+    propagate (it would wrongly look like the install/retrain itself failed).
+    Lazy import breaks the ``rescore_slate`` ↔ ``feeds`` module cycle.
+    """
+    try:
+        from zotero_summarizer.services.triage import rescore_slate
+        result = rescore_slate.rescore_slate()
+        LOGGER.info(
+            "[%s] post-swap slate rescore: rescored=%d skipped=%s",
+            reason, int(result.get("rescored", 0)), result.get("skipped"),
+        )
+        return result
+    except Exception:  # noqa: BLE001 — best-effort; the gate swap already succeeded
+        LOGGER.exception("[%s] post-swap slate rescore failed (non-fatal)", reason)
+        return None
+
+
+def install_gate(new_gate: Any, *, reason: str, rescore: bool = True) -> dict[str, Any] | None:
+    """Atomically make ``new_gate`` the live classifier gate, then (by default)
+    re-score the current Today slate so it reflects the new model at once.
+
+    Single source of truth for "a freshly-trained gate is ready": both the
+    daemon's background retrain (``_gate_retrain_worker``) and the UI-triggered
+    ``POST /api/admin/retrain`` install through here, so the in-memory gate and
+    the Today slate never drift from the on-disk artifact. The swap takes
+    ``classifier_gate_lock`` when lifecycle set one (gate enabled); otherwise it
+    assigns directly. Returns the rescore result dict (or ``None`` when rescoring
+    is skipped/failed) for the caller's status payload.
+    """
+    app_state = get_state()
+    lock = getattr(app_state, "classifier_gate_lock", None)
+    if lock is not None:
+        with lock:
+            app_state.classifier_gate = new_gate
+    else:
+        app_state.classifier_gate = new_gate
+    md = new_gate.training_metadata
+    LOGGER.info(
+        "classifier gate installed (%s): %s (n_train=%d, %s, golden_sha=%s)",
+        reason,
+        new_gate.classifier_name,
+        md.get("n_train", 0),
+        _gate_quality_label(md),
+        new_gate.golden_csv_sha256[:12],
+    )
+    return _rescore_slate_after_swap(reason) if rescore else None
+
+
+def schedule_slate_rescore_async(reason: str) -> None:
+    """Re-score the Today slate on a background daemon thread (never blocks).
+
+    Used at startup when a cached gate loads with an unchanged golden sha: no
+    retrain fires, so ``install_gate``'s rescore never runs, and the slate would
+    otherwise keep stale per-row scores from whenever each row was triaged (e.g.
+    a model trained offline by the CLI, then loaded on the next server start).
+    """
+    import threading
+
+    threading.Thread(
+        target=_rescore_slate_after_swap,
+        args=(reason,),
+        name=f"slate-rescore-{reason}",
+        daemon=True,
+    ).start()
+
+
 def _gate_retrain_worker(golden_csv: Path, classifier_name: str) -> None:
-    """Background thread: retrain + atomic swap. Errors are logged then
-    re-raised so the default thread excepthook surfaces them; the daemon
-    keeps using the old gate in the meantime."""
+    """Background thread: retrain, then atomic swap + slate rescore via
+    ``install_gate``. Errors are logged then re-raised so the default thread
+    excepthook surfaces them; the daemon keeps using the old gate in the
+    meantime."""
     from zotero_summarizer.services.model import classifier_persistence
     try:
         app_state = get_state()
@@ -284,27 +371,11 @@ def _gate_retrain_worker(golden_csv: Path, classifier_name: str) -> None:
             n_folds=gate_cfg.n_folds,
             pca_dim=gate_cfg.pca_dim,
         )
-        lock = getattr(app_state, "classifier_gate_lock", None)
-        if lock is not None:
-            with lock:
-                app_state.classifier_gate = new_gate
-        else:
-            app_state.classifier_gate = new_gate
-        # Mirrors lifecycle.py: surface AUC for legacy classification
-        # models, Spearman for the Sprint-1 regression objective.
-        md = new_gate.training_metadata
-        quality_label = (
-            f"AUC={md['oof_auc']:.3f}" if "oof_auc" in md else
-            f"Spearman={md['oof_spearman']:.3f}" if "oof_spearman" in md else
-            "quality=n/a"
-        )
-        LOGGER.info(
-            "classifier gate swapped: %s (n_train=%d, %s, golden_sha=%s)",
-            new_gate.classifier_name,
-            md["n_train"],
-            quality_label,
-            new_gate.golden_csv_sha256[:12],
-        )
+        # Swap the new gate in AND re-score the live slate so Today reflects the
+        # retrain immediately (single source of truth: install_gate). The rescore
+        # is best-effort and never raises, so the except below stays scoped to
+        # genuine train/swap failures.
+        install_gate(new_gate, reason="daemon-retrain")
     except Exception:
         LOGGER.exception("background gate retrain failed; keeping previous gate")
         raise

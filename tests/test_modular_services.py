@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from zotero_summarizer.contracts import Paper
-from zotero_summarizer.models import SummarizeRequest, SummarizeResponse
 from zotero_summarizer.services.zotero.pending import PendingChangePlanner
-from zotero_summarizer.services.triage.summarization import SummarizationService
 from zotero_summarizer.services.triage.triage_jobs import TriageJobService
 from zotero_summarizer.storage.repositories import TriageRepository
 
@@ -27,26 +24,6 @@ def test_pending_change_planner_builds_review_queue_changes():
     ]
     assert changes[0].payload["add_tags"] == ["zs:must_read", "topic:agents"]
     assert PendingChangePlanner.to_repository_rows(changes)[0]["change_type"] == "tag_changes"
-
-
-def test_summarization_service_is_injectable():
-    calls: list[SummarizeRequest] = []
-
-    def fake_pipeline(request: SummarizeRequest, _log_prefix: str | None = None) -> SummarizeResponse:
-        calls.append(request)
-        return SummarizeResponse(
-            executive_summary="ok",
-            relevance_score=4,
-            composite_relevance_score=4.0,
-            reading_priority="should_read",
-            triage_rationale="relevant",
-        )
-
-    service = SummarizationService(fake_pipeline)
-    result = service.summarize(Paper(item_key="A", title="Title", pdf_path="/tmp/a.pdf"))
-
-    assert result.reading_priority == "should_read"
-    assert calls[0].title == "Title"
 
 
 def test_triage_repository_uses_injected_db_path(tmp_path):

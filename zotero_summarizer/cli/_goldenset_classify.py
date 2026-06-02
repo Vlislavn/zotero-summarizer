@@ -9,6 +9,7 @@ from zotero_summarizer.cli._helpers import (
     _persist_run_log,
     _slugify_model,
     _utc_iso_now,
+    progress_printer,
 )
 
 
@@ -42,9 +43,6 @@ def _goldenset_classify(args: argparse.Namespace) -> int:
     if n_user:
         print(f"  hybrid GT: {n_user} user-overridden labels applied")
 
-    def _progress(done: int, total: int) -> None:
-        print(f"  embedded {done}/{total}", flush=True)
-
     goals_config = read_config(settings.config_path)
     report = classifier.cross_validate(
         rows,
@@ -56,7 +54,7 @@ def _goldenset_classify(args: argparse.Namespace) -> int:
         calibration=args.calibration,
         threshold_strategy=args.threshold_strategy,
         goals_config=goals_config,
-        progress_cb=_progress,
+        progress_cb=progress_printer("embedded"),
     )
     updated = classifier.write_predictions_to_csv(
         input_csv, report, classifier_name=args.classifier,
@@ -119,20 +117,15 @@ def _goldenset_classify(args: argparse.Namespace) -> int:
     return 0
 
 
-def _goldenset_classify_llm(args: argparse.Namespace) -> int:
-    """4th classifier in the comparison: LLM reads title+abstract and classifies directly."""
+def _setup_classify_llm(args: argparse.Namespace, settings: Settings):
+    """Build the LLM client + load the (optionally strength/limit-filtered) golden rows."""
     import csv as _csv
     import os
-    import time
 
-    from zotero_summarizer.services.model import classifier, llm_classifier
     from zotero_summarizer.services._adapters import build_llm
-    from zotero_summarizer.services._common import read_config, setup_logging
+    from zotero_summarizer.services._common import read_config
 
-    settings = Settings.load(project_root=args.project_root)
-    setup_logging()
     config = read_config(settings.config_path)
-
     api_base = (args.api_base or config.llm.api_base).rstrip()
     api_key_env = (args.api_key_env or config.llm.api_key_env).strip()
     model_name = (args.model or config.llm.refine_model).strip()
@@ -151,14 +144,25 @@ def _goldenset_classify_llm(args: argparse.Namespace) -> int:
     if not input_csv.exists():
         raise FileNotFoundError(f"golden CSV not found at {input_csv}")
     with input_csv.open("r", encoding="utf-8", newline="") as f:
-        all_rows = list(_csv.DictReader(f))
-
-    rows = all_rows
+        rows = list(_csv.DictReader(f))
     if args.strength:
         wanted = {s.strip() for s in args.strength.split(",") if s.strip()}
         rows = [r for r in rows if (r.get("gold_signal_strength") or "").strip() in wanted]
     if args.limit is not None and args.limit > 0:
         rows = rows[: args.limit]
+    return config, llm, model_name, api_base, input_csv, rows
+
+
+def _goldenset_classify_llm(args: argparse.Namespace) -> int:
+    """4th classifier in the comparison: LLM reads title+abstract and classifies directly."""
+    import time
+
+    from zotero_summarizer.services.model import classifier, llm_classifier
+    from zotero_summarizer.services._common import setup_logging
+
+    settings = Settings.load(project_root=args.project_root)
+    setup_logging()
+    config, llm, model_name, api_base, input_csv, rows = _setup_classify_llm(args, settings)
 
     print(
         f"classifying {len(rows)} rows via {model_name!r} at {api_base} "
@@ -167,15 +171,12 @@ def _goldenset_classify_llm(args: argparse.Namespace) -> int:
     )
     start = time.perf_counter()
 
-    def _progress(done: int, total: int) -> None:
-        print(f"  classified {done}/{total}", flush=True)
-
     classifications = llm_classifier.classify_papers_with_llm(
         rows,
         llm,
         research_goals=list(config.research_goals or []),
         workers=args.workers,
-        progress_cb=_progress,
+        progress_cb=progress_printer("classified"),
     )
     classifier_slug = (args.classifier_name or _slugify_model(model_name)).strip()
     updated = llm_classifier.write_predictions_to_csv(

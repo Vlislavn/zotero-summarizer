@@ -92,6 +92,36 @@ class CorpusReadMixin:
         affinity = self._clamp(positive_similarity - negative_similarity, -1.0, 1.0)
         return round(affinity, 4)
 
+    def _affinity_to_targets(self, item_ids: list[str], target_mat: np.ndarray) -> dict[str, float]:
+        """``{item_id: max cosine to the rows of target_mat}`` over the items'
+        ALREADY-CACHED corpus embeddings (no model load, no re-embed).
+
+        ``target_mat`` is a ``(G×dim)`` array of ALREADY-L2-normalized target
+        vectors — the research-goal embeddings (``goal_affinity_for_items``) or a
+        ``1×dim`` query vector (``query_affinity_for_items``). One IN-query + one
+        ``(n×dim)·(dim×G)`` matmul → per-item max cosine; items with no cached
+        embedding or a zero-norm vector are omitted (caller falls back)."""
+        ids = [str(i) for i in item_ids if str(i or "").strip()]
+        if not ids or target_mat.shape[0] == 0:
+            return {}
+        conn = self._conn()
+        try:
+            placeholders = ",".join("?" * len(ids))
+            item_rows = conn.execute(
+                f"SELECT item_id, embedding_json FROM corpus_embeddings WHERE item_id IN ({placeholders})",
+                ids,
+            ).fetchall()
+        finally:
+            conn.close()
+        if not item_rows:
+            return {}
+        ids_out = [str(r["item_id"]) for r in item_rows]
+        mat = np.asarray([self._parse_embedding(r["embedding_json"]) for r in item_rows], dtype=np.float32)
+        norms = np.linalg.norm(mat, axis=1, keepdims=True)
+        best = (mat / np.where(norms > 0, norms, 1.0) @ target_mat.T).max(axis=1)
+        valid = norms[:, 0] > 0
+        return {ids_out[i]: float(best[i]) for i in range(len(ids_out)) if valid[i]}
+
     def goal_affinity_for_items(self, item_ids: list[str]) -> dict[str, float]:
         """``{item_id: max cosine to the research-goal embeddings}`` — the
         goal-anchored relevance signal.
@@ -102,32 +132,36 @@ class CorpusReadMixin:
         are set, are omitted (caller falls back to the gate-only order). Distinct
         from :meth:`affinity_only` (engagement-based pos−neg) — this is similarity
         to what the user SAID they want, which the gate does not feature."""
-        ids = [str(i) for i in item_ids if str(i or "").strip()]
-        if not ids:
+        if not [i for i in item_ids if str(i or "").strip()]:
             return {}
         conn = self._conn()
         try:
             goal_rows = conn.execute("SELECT embedding_json FROM goal_embeddings").fetchall()
-            if not goal_rows:
-                return {}
-            placeholders = ",".join("?" * len(ids))
-            item_rows = conn.execute(
-                f"SELECT item_id, embedding_json FROM corpus_embeddings WHERE item_id IN ({placeholders})",
-                ids,
-            ).fetchall()
         finally:
             conn.close()
+        if not goal_rows:
+            return {}
         gmat = np.asarray([self._parse_embedding(r["embedding_json"]) for r in goal_rows], dtype=np.float32)
         gnorms = np.linalg.norm(gmat, axis=1, keepdims=True)
         gmat = gmat / np.where(gnorms > 0, gnorms, 1.0)
-        out: dict[str, float] = {}
-        for r in item_rows:
-            emb = np.asarray(self._parse_embedding(r["embedding_json"]), dtype=np.float32)
-            norm = float(np.linalg.norm(emb))
-            if norm <= 0:
-                continue
-            out[str(r["item_id"])] = float((gmat @ (emb / norm)).max())
-        return out
+        return self._affinity_to_targets(item_ids, gmat)
+
+    def query_affinity_for_items(self, query: str, item_ids: list[str]) -> dict[str, float]:
+        """``{item_id: cosine of the item's cached embedding to the QUERY text}``
+        — ad-hoc semantic-search relevance (the dense leg of Library hybrid
+        search). Embeds the query ONCE via the resident model, then reuses the
+        cached-corpus matmul (``_affinity_to_targets``). Distinct from
+        :meth:`goal_affinity_for_items`: similarity to a search string, not the
+        stored research goals. Empty query / unembeddable → ``{}``."""
+        q = str(query or "").strip()
+        if not q:
+            return {}
+        qvec = np.asarray(self._embed(q), dtype=np.float32)
+        n = float(np.linalg.norm(qvec))
+        if n == 0:
+            return {}
+        qmat = (qvec / n).reshape(1, -1)
+        return self._affinity_to_targets(item_ids, qmat)
 
     def match_candidate(
         self,

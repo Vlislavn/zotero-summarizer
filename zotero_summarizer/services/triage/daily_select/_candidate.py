@@ -63,22 +63,22 @@ def shap_top3(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def _summary_dict(payload: dict[str, Any]) -> dict[str, Any]:
-    summary = payload.get("summary")
-    if summary is None:
+def _obj_field(payload: dict[str, Any], key: str) -> dict[str, Any]:
+    """Return ``payload[key]`` when it is a JSON object (``{}`` if absent/null)."""
+    value = payload.get(key)
+    if value is None:
         return {}
-    if not isinstance(summary, dict):
-        raise ValueError("payload.summary must be a JSON object or null")
-    return summary
+    if not isinstance(value, dict):
+        raise ValueError(f"payload.{key} must be a JSON object or null")
+    return value
+
+
+def _summary_dict(payload: dict[str, Any]) -> dict[str, Any]:
+    return _obj_field(payload, "summary")
 
 
 def _aux_dict(payload: dict[str, Any]) -> dict[str, Any]:
-    aux = payload.get("aux_context")
-    if aux is None:
-        return {}
-    if not isinstance(aux, dict):
-        raise ValueError("payload.aux_context must be a JSON object or null")
-    return aux
+    return _obj_field(payload, "aux_context")
 
 
 def row_corpus_affinity(row: dict[str, Any], payload: dict[str, Any]) -> float:
@@ -129,22 +129,26 @@ def row_prestige(row: dict[str, Any], payload: dict[str, Any]) -> float:
     return min(1.0, max(0.0, float(composite) / 5.0))
 
 
-def row_authors(payload: dict[str, Any]) -> str:
+def _row_str(payload: dict[str, Any], *keys: str) -> str:
+    """First non-empty ``summary[key]`` over ``keys``, coerced to ``str`` (else '')."""
     summary = _summary_dict(payload)
-    a = summary.get("authors") or summary.get("author") or ""
-    return str(a) if a else ""
+    for key in keys:
+        value = summary.get(key)
+        if value:
+            return str(value)
+    return ""
+
+
+def row_authors(payload: dict[str, Any]) -> str:
+    return _row_str(payload, "authors", "author")
 
 
 def row_venue(payload: dict[str, Any]) -> str:
-    summary = _summary_dict(payload)
-    v = summary.get("prestige_venue") or summary.get("venue") or ""
-    return str(v) if v else ""
+    return _row_str(payload, "prestige_venue", "venue")
 
 
 def row_rationale(payload: dict[str, Any]) -> str:
-    summary = _summary_dict(payload)
-    r = summary.get("triage_rationale") or summary.get("rationale") or ""
-    return str(r) if r else ""
+    return _row_str(payload, "triage_rationale", "rationale")
 
 
 def row_quality(row: dict[str, Any]) -> dict[str, Any]:

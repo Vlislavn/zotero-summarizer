@@ -18,20 +18,18 @@ scoring lives in ``services.active_learning.suggest_border_labels``.
 from __future__ import annotations
 
 import json
-import threading
 from pathlib import Path
 from typing import Any
 
 from zotero_summarizer.services._common import now_iso_z
+from zotero_summarizer.services.library import _flight
 
 
 _CACHE_FILENAME = "border_suggestions.json"
 
 # In-process job state. Only one border computation runs at a time; a
 # second request while one is in flight just reports "computing".
-_LOCK = threading.Lock()
-_RUNNING = False
-_LAST_ERROR: str | None = None
+_LATCH = _flight.FlightLatch()
 
 
 def cache_path(model_dir: Path) -> Path:
@@ -74,34 +72,20 @@ def write_cache(
 
 
 def is_running() -> bool:
-    with _LOCK:
-        return _RUNNING
+    return _LATCH.is_running()
 
 
 def last_error() -> str | None:
-    with _LOCK:
-        return _LAST_ERROR
+    return _LATCH.last_error()
 
 
 def try_start() -> bool:
     """Claim the single compute slot. Returns False if one already runs."""
-    global _RUNNING, _LAST_ERROR
-    with _LOCK:
-        if _RUNNING:
-            return False
-        _RUNNING = True
-        _LAST_ERROR = None
-        return True
+    return _LATCH.try_start()
 
 
 def finish(error: str | None = None) -> None:
-    global _RUNNING, _LAST_ERROR
-    with _LOCK:
-        _RUNNING = False
-        _LAST_ERROR = error
+    _LATCH.finish(error)
 
 
-def run_in_background(target) -> None:
-    """Start ``target`` (a zero-arg callable) on a daemon thread."""
-    thread = threading.Thread(target=target, daemon=True)
-    thread.start()
+run_in_background = _flight.run_in_background

@@ -97,15 +97,65 @@ class LabelProvenance:
     flags: list[str] = field(default_factory=list)
 
 
+def _hard_dont_read_provenance(
+    *,
+    item_key: str,
+    title: str,
+    annotation_count: int,
+    user_note_count: int,
+    days_since_added: int,
+    persisted_priority: str,
+    persisted_score: float,
+    is_direct_user_verdict: bool,
+    flags: list[str],
+    in_trash_override: bool,
+    hard_veto_emojis: list[str],
+) -> LabelProvenance:
+    """Fixed ``dont_read``/high-strength provenance for a hard short-circuit
+    (in-trash or hard-veto emoji): every engagement signal is zeroed."""
+    return LabelProvenance(
+        item_key=item_key,
+        title=title,
+        derived_priority="dont_read",
+        derived_score=1.0,
+        derived_strength="high",
+        in_trash_override=in_trash_override,
+        hard_veto_emojis=hard_veto_emojis,
+        baseline=emoji_signals.NEUTRAL_SCORE,
+        emoji_contributions=[],
+        annotation_count=annotation_count,
+        annotation_score_raw=0.0,
+        annotation_score_capped=0.0,
+        annotation_decayed=0.0,
+        user_note_count=user_note_count,
+        user_note_score_raw=0.0,
+        user_note_score_capped=0.0,
+        user_note_decayed=0.0,
+        days_since_added=days_since_added,
+        decay_factor=emoji_signals.decay_weight(days_since_added),
+        engagement_sum_raw=0.0,
+        engagement_sum_capped=0.0,
+        engagement_sum_decayed=0.0,
+        threshold_dont_read_upper=emoji_signals.SCORE_DONT_READ_UPPER,
+        threshold_could_read_upper=emoji_signals.SCORE_COULD_READ_UPPER,
+        threshold_should_read_upper=emoji_signals.SCORE_SHOULD_READ_UPPER,
+        persisted_priority=persisted_priority,
+        persisted_score=persisted_score,
+        is_direct_user_verdict=is_direct_user_verdict,
+        is_manual_override=_is_manual_override("dont_read", persisted_priority, is_direct_user_verdict),
+        flags=flags,
+    )
+
+
 def compute_provenance(
     *,
     item_key: str,
     title: str,
-    tags: list[str],
-    in_trash: bool,
-    annotation_count: int,
-    user_note_count: int,
-    days_since_added: int,
+    tags: list[str] | None = None,
+    in_trash: bool = False,
+    annotation_count: int = 0,
+    user_note_count: int = 0,
+    days_since_added: int = 0,
     persisted_priority: str = "",
     persisted_score: float = 0.0,
     is_direct_user_verdict: bool = False,
@@ -121,44 +171,20 @@ def compute_provenance(
     from button clicks in the Feed Review UI; the additive derivation does
     NOT apply (raw signals are empty). The persisted value is authoritative.
     """
+    tags = tags or []
     flags: list[str] = []
+
+    common = dict(
+        item_key=item_key, title=title,
+        annotation_count=annotation_count, user_note_count=user_note_count,
+        days_since_added=days_since_added,
+        persisted_priority=persisted_priority, persisted_score=persisted_score,
+        is_direct_user_verdict=is_direct_user_verdict, flags=flags,
+    )
 
     # Hard short-circuit 1: trash → dont_read
     if in_trash:
-        return LabelProvenance(
-            item_key=item_key,
-            title=title,
-            derived_priority="dont_read",
-            derived_score=1.0,
-            derived_strength="high",
-            in_trash_override=True,
-            hard_veto_emojis=[],
-            baseline=emoji_signals.NEUTRAL_SCORE,
-            emoji_contributions=[],
-            annotation_count=annotation_count,
-            annotation_score_raw=0.0,
-            annotation_score_capped=0.0,
-            annotation_decayed=0.0,
-            user_note_count=user_note_count,
-            user_note_score_raw=0.0,
-            user_note_score_capped=0.0,
-            user_note_decayed=0.0,
-            days_since_added=days_since_added,
-            decay_factor=emoji_signals.decay_weight(days_since_added),
-            engagement_sum_raw=0.0,
-            engagement_sum_capped=0.0,
-            engagement_sum_decayed=0.0,
-            threshold_dont_read_upper=emoji_signals.SCORE_DONT_READ_UPPER,
-            threshold_could_read_upper=emoji_signals.SCORE_COULD_READ_UPPER,
-            threshold_should_read_upper=emoji_signals.SCORE_SHOULD_READ_UPPER,
-            persisted_priority=persisted_priority,
-            persisted_score=persisted_score,
-            is_direct_user_verdict=is_direct_user_verdict,
-            is_manual_override=_is_manual_override(
-                "dont_read", persisted_priority, is_direct_user_verdict,
-            ),
-            flags=flags,
-        )
+        return _hard_dont_read_provenance(**common, in_trash_override=True, hard_veto_emojis=[])
 
     # Hard short-circuit 2: hard-veto emoji → dont_read
     veto_emojis = [
@@ -166,40 +192,7 @@ def compute_provenance(
         if any(e in t for t in tags if t)
     ]
     if veto_emojis:
-        return LabelProvenance(
-            item_key=item_key,
-            title=title,
-            derived_priority="dont_read",
-            derived_score=1.0,
-            derived_strength="high",
-            in_trash_override=False,
-            hard_veto_emojis=veto_emojis,
-            baseline=emoji_signals.NEUTRAL_SCORE,
-            emoji_contributions=[],
-            annotation_count=annotation_count,
-            annotation_score_raw=0.0,
-            annotation_score_capped=0.0,
-            annotation_decayed=0.0,
-            user_note_count=user_note_count,
-            user_note_score_raw=0.0,
-            user_note_score_capped=0.0,
-            user_note_decayed=0.0,
-            days_since_added=days_since_added,
-            decay_factor=emoji_signals.decay_weight(days_since_added),
-            engagement_sum_raw=0.0,
-            engagement_sum_capped=0.0,
-            engagement_sum_decayed=0.0,
-            threshold_dont_read_upper=emoji_signals.SCORE_DONT_READ_UPPER,
-            threshold_could_read_upper=emoji_signals.SCORE_COULD_READ_UPPER,
-            threshold_should_read_upper=emoji_signals.SCORE_SHOULD_READ_UPPER,
-            persisted_priority=persisted_priority,
-            persisted_score=persisted_score,
-            is_direct_user_verdict=is_direct_user_verdict,
-            is_manual_override=_is_manual_override(
-                "dont_read", persisted_priority, is_direct_user_verdict,
-            ),
-            flags=flags,
-        )
+        return _hard_dont_read_provenance(**common, in_trash_override=False, hard_veto_emojis=veto_emojis)
 
     # Additive scoring path
     signals = emoji_signals.detect_signals(tags)
@@ -380,14 +373,6 @@ def load_golden_provenance(csv_path: Path) -> list[LabelProvenance]:
         for row in csv.DictReader(f):
             out.append(provenance_from_row(row))
     return out
-
-
-def find_provenance(provs: list[LabelProvenance], item_key: str) -> LabelProvenance:
-    """Return the provenance for one item_key. Raises if not found."""
-    for p in provs:
-        if p.item_key == item_key:
-            return p
-    raise KeyError(f"item_key {item_key!r} not found in golden CSV")
 
 
 def flag_summary(provs: list[LabelProvenance]) -> dict[str, list[str]]:

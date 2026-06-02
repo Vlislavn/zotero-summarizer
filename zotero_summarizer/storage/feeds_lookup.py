@@ -12,6 +12,25 @@ import sqlite3
 from typing import Any
 
 
+def _fetch_one_processed(
+    conn: sqlite3.Connection, value: int, label: str, where_sql: str
+) -> dict[str, Any] | None:
+    """Fetch one ``processed_feed_items`` row by a positive-int key.
+
+    ``None`` when the row is absent (caller's contract: distinguish "not in DB"
+    from a hard error). A non-positive ``value`` is a programmer error and raises.
+    ``where_sql`` is the trusted, in-source ``WHERE …``/``ORDER BY …`` fragment.
+    """
+    safe = int(value)
+    if safe <= 0:
+        raise ValueError(f"{label} must be positive; got {value!r}")
+    row = conn.execute(
+        f"SELECT * FROM processed_feed_items WHERE {where_sql} LIMIT 1",
+        (safe,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
 def get_processed_feed_item_by_id(
     conn: sqlite3.Connection,
     feed_item_id: int,
@@ -23,24 +42,10 @@ def get_processed_feed_item_by_id(
     feed_item_id alone. If the same item id appears across multiple feed
     libraries (rare; Zotero reuses ids per library), the newest row wins
     — the older one is from a previous library that has since gone away.
-
-    Returns ``None`` only when the row genuinely does not exist (caller's
-    contract: distinguish "not in DB" from a hard error). ``feed_item_id``
-    must be a positive int — invalid ids are programmer errors and raise.
     """
-    safe_id = int(feed_item_id)
-    if safe_id <= 0:
-        raise ValueError(f"feed_item_id must be positive; got {feed_item_id!r}")
-    row = conn.execute(
-        """
-        SELECT * FROM processed_feed_items
-        WHERE feed_item_id = ?
-        ORDER BY created_at DESC
-        LIMIT 1
-        """,
-        (safe_id,),
-    ).fetchone()
-    return dict(row) if row else None
+    return _fetch_one_processed(
+        conn, feed_item_id, "feed_item_id", "feed_item_id = ? ORDER BY created_at DESC"
+    )
 
 
 def get_processed_feed_item_by_pk(
@@ -50,14 +55,6 @@ def get_processed_feed_item_by_pk(
     """Return one processed_feed_items row by its primary-key ``id``.
 
     The daily slate exposes ``SlatePaper.item_id`` = this PK, so a Today
-    card verdict resolves the source row through it. ``None`` when the row
-    doesn't exist; a non-positive id is a programmer error and raises.
+    card verdict resolves the source row through it.
     """
-    safe_pk = int(pk)
-    if safe_pk <= 0:
-        raise ValueError(f"pk must be positive; got {pk!r}")
-    row = conn.execute(
-        "SELECT * FROM processed_feed_items WHERE id = ? LIMIT 1",
-        (safe_pk,),
-    ).fetchone()
-    return dict(row) if row else None
+    return _fetch_one_processed(conn, pk, "pk", "id = ?")

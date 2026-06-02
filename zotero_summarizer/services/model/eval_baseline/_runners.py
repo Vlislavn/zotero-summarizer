@@ -253,6 +253,19 @@ def run_baseline(
     )
 
 
+def _subset_featurized(feat: FeaturizedGolden, sub_idx: np.ndarray, sub_rows: list) -> FeaturizedGolden:
+    """A ``FeaturizedGolden`` restricted to the rows at ``sub_idx``."""
+    return FeaturizedGolden(
+        X=feat.X[sub_idx],
+        y_binary=feat.y_binary[sub_idx],
+        y_continuous=feat.y_continuous[sub_idx],
+        y_priority=[feat.y_priority[i] for i in sub_idx],
+        item_keys=[feat.item_keys[i] for i in sub_idx],
+        n_features=feat.n_features,
+        selected_rows=sub_rows,
+    )
+
+
 def run_learning_curve(
     rows: list[dict[str, str]],
     *,
@@ -302,15 +315,7 @@ def run_learning_curve(
             sub_idx = np.concatenate([sub_pos, sub_neg])
             rng.shuffle(sub_idx)
             sub_rows = [feat.selected_rows[i] for i in sub_idx]
-            sub_feat = FeaturizedGolden(
-                X=feat.X[sub_idx],
-                y_binary=feat.y_binary[sub_idx],
-                y_continuous=feat.y_continuous[sub_idx],
-                y_priority=[feat.y_priority[i] for i in sub_idx],
-                item_keys=[feat.item_keys[i] for i in sub_idx],
-                n_features=feat.n_features,
-                selected_rows=sub_rows,
-            )
+            sub_feat = _subset_featurized(feat, sub_idx, sub_rows)
             sub_groups = np.array([paper_group_id(r) for r in sub_rows])
             skf = StratifiedGroupKFold(
                 n_splits=n_folds, shuffle=True, random_state=seed + repeat_i,

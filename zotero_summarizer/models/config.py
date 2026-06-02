@@ -50,6 +50,13 @@ class CorpusConfig(BaseModel):
     embedding_model: str = Field(default="sentence-transformers/all-MiniLM-L6-v2", min_length=1)
     similarity_threshold: float = Field(default=-0.30, ge=-1.0, le=1.0)
     stale_days_for_weak_negative: int = Field(default=30, ge=1, le=3650)
+    # Hybrid Library search (BM25 lexical + dense cosine + cross-encoder rerank),
+    # all local. BM25 + dense reuse already-cached corpus data; the reranker
+    # (cross-encoder) downloads once on first semantic search. Disable the
+    # reranker to fall back to BM25+dense fusion order.
+    bm25_enabled: bool = Field(default=True)
+    reranker_enabled: bool = Field(default=True)
+    reranker_model: str = Field(default="BAAI/bge-reranker-v2-m3", min_length=1)
 
 
 class PrestigeConfig(BaseModel):
@@ -66,6 +73,20 @@ class PrestigeConfig(BaseModel):
     fallback_neutral: float = Field(default=3.0, ge=1.0, le=5.0)
     user_agent_email: str = Field(default="")
     require_doi: bool = Field(default=False)
+    # --- Cold-start author-reputation prior --------------------------------
+    # A brand-new preprint has no field-normalized citation percentile yet, so
+    # citation prestige is structurally unavailable. When enabled, fall back to
+    # the authors' FIELD-NORMALIZED standing (median of their works' OpenAlex
+    # citation_normalized_percentile — the SAME signal the work-level prestige
+    # trusts, NOT raw h-index, which is field/career-biased per the Leiden
+    # Manifesto). The lift is asymmetric (can only raise above neutral, never
+    # demote) and capped (Matthew-effect dosage control). It applies ONLY at
+    # cold-start; once the paper accrues its own percentile, that takes over.
+    cold_start_author_lift: bool = Field(default=True)
+    cold_start_max_lift: float = Field(default=1.0, ge=0.0, le=2.0)
+    # Convexity of the percentile→lift map (p**gamma, gamma>=1): higher gamma
+    # means only genuinely top-standing authors approach the cap.
+    cold_start_gamma: float = Field(default=1.5, ge=1.0, le=4.0)
 
 
 class FullTextRefineConfig(BaseModel):

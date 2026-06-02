@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from zotero_summarizer.settings import Settings
-from zotero_summarizer.cli._helpers import _utc_iso_now
+from zotero_summarizer.cli._helpers import _utc_iso_now, progress_printer
 from zotero_summarizer.cli._goldenset_classify import register_goldenset_classify
 from zotero_summarizer.cli._goldenset_predict import register_goldenset_predict
 
@@ -53,9 +53,6 @@ def _goldenset_train_classifier(args: argparse.Namespace) -> int:
 
     output_dir = Path(args.output_dir) if args.output_dir else classifier_persistence.DEFAULT_MODEL_DIR
 
-    def _progress(done: int, total: int) -> None:
-        print(f"  featurising {done}/{total}", flush=True)
-
     if args.force:
         trained = classifier_persistence.train_and_save(
             golden_csv,
@@ -65,7 +62,7 @@ def _goldenset_train_classifier(args: argparse.Namespace) -> int:
             output_dir=output_dir,
             n_folds=args.folds,
             pca_dim=args.pca_dim,
-            progress_cb=_progress,
+            progress_cb=progress_printer("featurising"),
         )
     else:
         trained = classifier_persistence.load_or_train(
@@ -121,9 +118,6 @@ def _goldenset_eval_baseline(args: argparse.Namespace) -> int:
 
     timestamp = _utc_iso_now().replace(":", "").replace("-", "")[:15]
 
-    def _progress(done: int, total: int) -> None:
-        print(f"  featurising {done}/{total}", flush=True)
-
     if args.learning_curve:
         if args.learning_curve_fractions:
             fractions = tuple(
@@ -141,7 +135,7 @@ def _goldenset_eval_baseline(args: argparse.Namespace) -> int:
             n_bootstrap=args.n_bootstrap,
             pca_dim=args.pca_dim,
             seed=args.seed,
-            progress_cb=_progress,
+            progress_cb=progress_printer("featurising"),
         )
         out_path = Path(args.output or settings.data_dir / f"learning-curve-{timestamp}.json")
         payload = eval_baseline.learning_curve_to_dict(report)
@@ -156,7 +150,7 @@ def _goldenset_eval_baseline(args: argparse.Namespace) -> int:
             n_bootstrap=args.n_bootstrap,
             pca_dim=args.pca_dim,
             seed=args.seed,
-            progress_cb=_progress,
+            progress_cb=progress_printer("featurising"),
         )
         out_path = Path(args.output or settings.data_dir / f"eval-baseline-{timestamp}.json")
         payload = eval_baseline.report_to_dict(report)

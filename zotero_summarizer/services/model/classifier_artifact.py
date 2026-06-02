@@ -103,6 +103,66 @@ class TrainedClassifier:
 
     # ------------------------------------------------------------------ predict
 
+    def _build_predict_library(self):
+        """Reconstruct the PositiveLibrary from persisted centroids (LOO inert here:
+        persisted P has no item_keys, and a brand-new scored item is never in P)."""
+        from zotero_summarizer.services.model.library_features import PositiveLibrary
+
+        zero_centroid = np.zeros(classifier.EMBEDDING_DIM, dtype=np.float32)
+        if self.library_embeddings is not None and self.library_centroid is not None:
+            return PositiveLibrary(
+                embeddings=self.library_embeddings,
+                centroid=self.library_centroid,
+                recent_centroid=(
+                    self.library_recent_centroid
+                    if self.library_recent_centroid is not None
+                    else self.library_centroid
+                ),
+                item_keys=tuple(),
+                authors_lower=self.library_authors_lower or frozenset(),
+                raw_embeddings=self.library_embeddings,
+                recent_mask=np.zeros(self.library_embeddings.shape[0], dtype=bool),
+            )
+        return PositiveLibrary(
+            embeddings=np.zeros((0, classifier.EMBEDDING_DIM), dtype=np.float32),
+            centroid=zero_centroid,
+            recent_centroid=zero_centroid,
+            item_keys=tuple(),
+            authors_lower=frozenset(),
+            raw_embeddings=np.zeros((0, classifier.EMBEDDING_DIM), dtype=np.float32),
+            recent_mask=np.zeros((0,), dtype=bool),
+        )
+
+    def _shap_per_item(self, valid: list, X_new: Any, return_shap: bool) -> list:
+        """Per-item TreeSHAP contributions (LightGBM only); a list of Nones otherwise.
+
+        TreeSHAP must run on the SAME matrix the model was fit on — for a PCA-baked
+        model that's the reduced (n_pca + extras) matrix, so the embedding block
+        shrinks to n_pca accordingly.
+        """
+        shap_per_item: list[list[dict[str, float]] | None] = [None] * len(valid)
+        if not (return_shap and self.classifier_name == "lightgbm" and self.fitted_model is not None):
+            return shap_per_item
+        X_model = self._model_input(X_new)
+        emb_block = X_model.shape[1] - len(_EXTRA_FEATURE_NAMES)
+        contribs = classifier.predict_named(self.fitted_model, X_model, pred_contrib=True)
+        for i in range(len(valid)):
+            shap_per_item[i] = _format_shap(contribs[i], embedding_dim=emb_block)
+        return shap_per_item
+
+    @staticmethod
+    def _batch_embeddings(corpus_db_path: Path, valid: list, cache_keys: list) -> Any:
+        """Embed the whole batch in ONE (batched, GPU-accelerated) pass; cache hits reused."""
+        return classifier.get_or_compute_embeddings_batch(
+            corpus_db_path,
+            [
+                {"item_key": cache_keys[i],
+                 "title": (it.get("title") or "").strip(),
+                 "abstract": (it.get("abstract") or "").strip()}
+                for i, it in enumerate(valid)
+            ],
+        )
+
     def predict(
         self,
         items: list[dict[str, str]],
@@ -129,42 +189,11 @@ class TrainedClassifier:
             return []
 
         # 1. Featurise — same as the prediction path in predict_new_items.
-        embed_cache, openalex_client = classifier._build_aux_providers(
+        embed_cache, openalex_client, cold_start_policy = classifier._build_aux_providers(
             corpus_db_path, goals_config, allow_network=prestige_network,
         )
-        from zotero_summarizer.services.model.library_features import (
-            PositiveLibrary,
-            compute_library_features,
-        )
-        zero_centroid = np.zeros(classifier.EMBEDDING_DIM, dtype=np.float32)
-        if self.library_embeddings is not None and self.library_centroid is not None:
-            # Persisted P stores only normalised embeddings + centroids (no
-            # item_keys), so LOO is inert here — which is correct: a brand-new
-            # item being scored is never in P. raw_embeddings/recent_mask are
-            # unused on this path but required by the dataclass.
-            library = PositiveLibrary(
-                embeddings=self.library_embeddings,
-                centroid=self.library_centroid,
-                recent_centroid=(
-                    self.library_recent_centroid
-                    if self.library_recent_centroid is not None
-                    else self.library_centroid
-                ),
-                item_keys=tuple(),
-                authors_lower=self.library_authors_lower or frozenset(),
-                raw_embeddings=self.library_embeddings,
-                recent_mask=np.zeros(self.library_embeddings.shape[0], dtype=bool),
-            )
-        else:
-            library = PositiveLibrary(
-                embeddings=np.zeros((0, classifier.EMBEDDING_DIM), dtype=np.float32),
-                centroid=zero_centroid,
-                recent_centroid=zero_centroid,
-                item_keys=tuple(),
-                authors_lower=frozenset(),
-                raw_embeddings=np.zeros((0, classifier.EMBEDDING_DIM), dtype=np.float32),
-                recent_mask=np.zeros((0,), dtype=bool),
-            )
+        from zotero_summarizer.services.model.library_features import compute_library_features
+        library = self._build_predict_library()
         X_new = np.zeros((len(valid), self.feature_dim), dtype=np.float32)
         aux_contexts: list[dict[str, float]] = []
         # Embed the whole batch in ONE (batched, GPU-accelerated) pass instead of
@@ -174,15 +203,7 @@ class TrainedClassifier:
             str(it.get("item_key") or it.get("item_id") or f"item_{i}")
             for i, it in enumerate(valid)
         ]
-        embeddings = classifier.get_or_compute_embeddings_batch(
-            corpus_db_path,
-            [
-                {"item_key": cache_keys[i],
-                 "title": (it.get("title") or "").strip(),
-                 "abstract": (it.get("abstract") or "").strip()}
-                for i, it in enumerate(valid)
-            ],
-        )
+        embeddings = self._batch_embeddings(corpus_db_path, valid, cache_keys)
         # Aux (corpus affinity + OpenAlex prestige) is independent per item and
         # I/O-bound, so compute it for the whole batch CONCURRENTLY — overlaps the
         # OpenAlex network latency that dominates per-item cost. Safe: the caches
@@ -195,6 +216,7 @@ class TrainedClassifier:
                 abstract=(it.get("abstract") or "").strip(),
                 doi=(it.get("doi") or "").strip(),
                 year=int(yr) if yr.isdigit() else None,
+                cold_start_policy=cold_start_policy,
             )
 
         if len(valid) > 1 and (embed_cache is not None or openalex_client is not None):
@@ -233,19 +255,7 @@ class TrainedClassifier:
         p_raw = self._raw_predict(X_new)
 
         # 2b. SHAP (optional, LightGBM only — TreeSHAP via pred_contrib=True).
-        shap_per_item: list[list[dict[str, float]] | None] = [None] * len(valid)
-        if return_shap and self.classifier_name == "lightgbm" and self.fitted_model is not None:
-            # TreeSHAP must run on the SAME matrix the model was fit on. For a
-            # PCA-baked model that's the reduced (n_pca + extras) matrix, not
-            # the raw 780-wide one — otherwise pred_contrib raises a feature
-            # mismatch. The embedding block size shrinks to n_pca accordingly.
-            X_model = self._model_input(X_new)
-            emb_block = X_model.shape[1] - len(_EXTRA_FEATURE_NAMES)
-            contribs = classifier.predict_named(
-                self.fitted_model, X_model, pred_contrib=True
-            )
-            for i in range(len(valid)):
-                shap_per_item[i] = _format_shap(contribs[i], embedding_dim=emb_block)
+        shap_per_item = self._shap_per_item(valid, X_new, return_shap)
 
         # 3. Score → priority. Regression output is the continuous relevance
         # in [1, 5]; deterministic bucketing via `domain.score_to_priority`

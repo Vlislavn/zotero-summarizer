@@ -51,7 +51,7 @@ class _PagingReader(ZoteroItemsMixin):
         self._all = [{"item_key": f"K{i}", "title": f"t{i}"} for i in range(total_items)]
         self.offsets: list[int] = []
 
-    def get_items(self, *, collection_key=None, search=None, tag=None, limit=100, offset=0):
+    def get_items(self, *, collection_key=None, search=None, tag=None, limit=100, offset=0, include_abstract=True):
         self.offsets.append(offset)
         chunk = self._all[offset:offset + limit]
         return {"items": chunk, "total": len(self._all), "limit": limit, "offset": offset}
@@ -77,3 +77,22 @@ def test_get_all_items_empty_library():
     out = reader.get_all_items(page_size=2)
     assert out == {"items": [], "total": 0}
     assert reader.offsets == [0]
+
+
+def test_get_all_items_dedups_item_key_across_pages():
+    """A concurrent write can shift a row across a page boundary so the same
+    item_key appears on two pages — get_all_items must emit it AT MOST ONCE."""
+
+    class _DupReader(ZoteroItemsMixin):
+        def get_items(self, *, collection_key=None, search=None, tag=None, limit=100, offset=0, include_abstract=True):
+            pages = [
+                [{"item_key": "A"}, {"item_key": "B"}],
+                [{"item_key": "B"}, {"item_key": "C"}],  # B repeats (paging artifact)
+            ]
+            idx = offset // 2
+            chunk = pages[idx] if idx < len(pages) else []
+            return {"items": chunk, "total": 4, "limit": 2, "offset": offset}
+
+    out = _DupReader().get_all_items(page_size=2)
+    assert [it["item_key"] for it in out["items"]] == ["A", "B", "C"]  # B deduped
+    assert out["total"] == 3

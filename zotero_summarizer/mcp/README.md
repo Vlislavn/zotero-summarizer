@@ -12,7 +12,7 @@ AI agent ⇄ mcp/server.py (stdio)
 
 | file | responsibility |
 |---|---|
-| `server.py` | MCP server entrypoint over stdio (`zotero-summarizer mcp`) |
+| `server.py` | MCP server entrypoint over stdio (`zotero-summarizer mcp`); ships a no-op `FastMCP` fallback stub when the `mcp` package is absent |
 | `api_client.py` | thin httpx client with retry/backoff against the local API |
 | `config.py` | base URL, timeouts, retryable status/error codes |
 | `helpers.py` · `parsers.py` | request shaping + response normalization |

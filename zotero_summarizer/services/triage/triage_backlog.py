@@ -46,6 +46,10 @@ _STATE: dict[str, Any] = {
     "errors": 0,
     "ticks": 0,
     "quality_reviewed": 0,
+    # Set by the post-drain slate rescore so the UI can confirm Today was
+    # re-ranked under the current gate, not just that new rows were added.
+    "rescored": None,
+    "rescore_error": None,
     "error": None,
     "done": False,
 }
@@ -78,7 +82,8 @@ def _reset_and_claim() -> bool:
         _STATE.update(
             running=True, started_at=now_iso_z(), finished_at=None,
             fetched=0, triaged=0, gate_rejected=0, fast_rejected=0,
-            errors=0, ticks=0, quality_reviewed=0, error=None, done=False,
+            errors=0, ticks=0, quality_reviewed=0,
+            rescored=None, rescore_error=None, error=None, done=False,
         )
         return True
 
@@ -99,6 +104,32 @@ def _finish(error: str | None, done: bool) -> None:
         _STATE["finished_at"] = now_iso_z()
         _STATE["error"] = error
         _STATE["done"] = done
+
+
+def _rescore_after_drain() -> None:
+    """Re-score the Today slate with the live gate once a drain finishes.
+
+    A drain writes NEW ``triaged_pending`` rows at the gate's current scores, but
+    the rows ALREADY on the slate keep the scores they were given whenever they
+    were triaged. Re-scoring unifies the whole slate under the current gate so a
+    freshly-drained backlog ranks consistently against what was already there —
+    the user never has to press "Rescore slate" by hand after a backlog run.
+
+    Best-effort: the items are already triaged + persisted, so a rescore failure
+    is recorded in the job status (``rescore_error``) for the UI, never raised
+    (the documented background-worker boundary — there is no caller to receive
+    it). Lazy import mirrors the module's other deferred service imports.
+    """
+    try:
+        from zotero_summarizer.services.triage import rescore_slate
+        result = rescore_slate.rescore_slate()
+        with _LOCK:
+            _STATE["rescored"] = int(result.get("rescored", 0))
+        LOGGER.info("post-drain slate rescore: rescored=%d", int(result.get("rescored", 0)))
+    except Exception as exc:  # noqa: BLE001 — background-worker boundary; drain already done
+        LOGGER.exception("post-drain slate rescore failed (non-fatal)")
+        with _LOCK:
+            _STATE["rescore_error"] = f"{type(exc).__name__}: {exc}"
 
 
 def _drain_worker() -> None:
@@ -147,6 +178,11 @@ def _drain_worker() -> None:
                 # No more unread items fetched → backlog drained.
                 drained = True
                 break
+        # Re-score the slate so the freshly-drained rows rank consistently with
+        # what was already there under the current gate — whether we fully
+        # drained or hit the safety cap, new rows were added either way. (Skipped
+        # on the fatal-LLM early return above, where the gate may be unusable.)
+        _rescore_after_drain()
         if drained:
             _finish(error=None, done=True)
         else:

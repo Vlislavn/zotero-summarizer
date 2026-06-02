@@ -58,16 +58,21 @@ from zotero_summarizer.services.triage.feeds._gate import (  # noqa: F401
     _maybe_schedule_gate_retrain,
     _pack_review_payload,
     _synthesize_gate_only_candidate,
+    install_gate,
     schedule_gate_retrain_async,
+    schedule_slate_rescore_async,
 )
 from zotero_summarizer.services.triage.feeds._daily import (  # noqa: F401
-    _feed_payload_from_row,
-    _matched_collections_from_row,
     _refine_with_full_text,
     _should_run_daily_selection,
+    run_daily_selection,
+)
+from zotero_summarizer.services.triage.feeds._daily_materialize import (  # noqa: F401
+    _feed_payload_from_row,
+    _matched_collections_from_row,
     _summary_from_row,
     _tags_from_row,
-    run_daily_selection,
+    materialize_pick,
 )
 from zotero_summarizer.services.triage.feeds._outcomes import (  # noqa: F401
     _compute_outcome_from_membership,
@@ -75,8 +80,8 @@ from zotero_summarizer.services.triage.feeds._outcomes import (  # noqa: F401
     _relevance_from_weight,
     _resolve_due_outcomes,
 )
-from zotero_summarizer.services.triage.feeds._tick import (  # noqa: F401
+from zotero_summarizer.services.triage.feeds._tick import run_daemon_tick  # noqa: F401
+from zotero_summarizer.services.triage.feeds._tick_phases import (  # noqa: F401
     _pick_unread_batch_round_robin,
-    run_daemon_tick,
 )
 from zotero_summarizer.services.triage.feeds._loop import run_daemon_loop  # noqa: F401

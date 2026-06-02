@@ -32,6 +32,74 @@ def predict_named(model: Any, X: np.ndarray, **kwargs: Any):
     return model.predict(X, **kwargs)
 
 
+def _fit_tabpfn(
+    X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray,
+    *, objective: str = "regression", pca_dim: int = 100, return_train_probs: bool = False,
+) -> tuple[np.ndarray | None, np.ndarray]:
+    """Fit a TabPFN model on the PCA-reduced features (regression or classification)."""
+    X_train_red, X_val_red = _reduce_for_tabpfn(X_train, X_val, pca_dim=pca_dim)
+    if objective == "regression":
+        from tabpfn import TabPFNRegressor
+
+        reg = TabPFNRegressor(
+            n_estimators=8, device="auto", ignore_pretraining_limits=False, random_state=42,
+        )
+        reg.fit(X_train_red, y_train)
+        p_val = reg.predict(X_val_red)
+        p_train = reg.predict(X_train_red) if return_train_probs else None
+        return p_train, p_val
+    from tabpfn import TabPFNClassifier
+
+    clf = TabPFNClassifier(
+        n_estimators=8, device="auto", ignore_pretraining_limits=False, random_state=42,
+    )
+    clf.fit(X_train_red, y_train)
+    p_val = clf.predict_proba(X_val_red)[:, 1]
+    p_train = clf.predict_proba(X_train_red)[:, 1] if return_train_probs else None
+    return p_train, p_val
+
+
+def _fit_lightgbm(
+    X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray,
+    *, objective: str = "regression", lgbm_params: dict[str, Any] | None = None,
+    return_train_probs: bool = False, sample_weight: np.ndarray | None = None,
+) -> tuple[np.ndarray | None, np.ndarray]:
+    """Fit a LightGBM model (regression or balanced classification)."""
+    import lightgbm as lgb
+
+    if objective == "regression":
+        defaults = {
+            "objective": "regression",
+            "n_estimators": 200,
+            "num_leaves": 15,
+            "max_depth": 4,
+            "learning_rate": 0.05,
+            "min_child_samples": 10,
+            "reg_lambda": 1.0,
+            "verbose": -1,
+            "random_state": 42,
+            "n_jobs": 1,
+            "num_threads": 1,
+        }
+        if lgbm_params:
+            defaults.update(lgbm_params)
+        reg = lgb.LGBMRegressor(**defaults)
+        reg.fit(X_train, y_train, sample_weight=sample_weight)
+        p_val = predict_named(reg, X_val)
+        p_train = predict_named(reg, X_train) if return_train_probs else None
+        return p_train, p_val
+
+    clf = lgb.LGBMClassifier(
+        n_estimators=200, num_leaves=15, max_depth=4, learning_rate=0.05,
+        min_child_samples=10, reg_lambda=1.0, class_weight="balanced",
+        verbose=-1, random_state=42, n_jobs=1, num_threads=1,
+    )
+    clf.fit(X_train, y_train)
+    p_val = clf.predict_proba(X_val)[:, 1]
+    p_train = clf.predict_proba(X_train)[:, 1] if return_train_probs else None
+    return p_train, p_val
+
+
 def _fit_predict(
     classifier_name: str,
     X_train: np.ndarray,
@@ -86,75 +154,17 @@ def _fit_predict(
         return p_train, p_val
 
     if classifier_name == "tabpfn":
-        X_train_red, X_val_red = _reduce_for_tabpfn(X_train, X_val, pca_dim=pca_dim)
-        if objective == "regression":
-            from tabpfn import TabPFNRegressor
-
-            reg = TabPFNRegressor(
-                n_estimators=8,
-                device="auto",
-                ignore_pretraining_limits=False,
-                random_state=42,
-            )
-            reg.fit(X_train_red, y_train)
-            p_val = reg.predict(X_val_red)
-            p_train = reg.predict(X_train_red) if return_train_probs else None
-            return p_train, p_val
-        from tabpfn import TabPFNClassifier
-
-        clf = TabPFNClassifier(
-            n_estimators=8,
-            device="auto",
-            ignore_pretraining_limits=False,
-            random_state=42,
+        return _fit_tabpfn(
+            X_train, y_train, X_val,
+            objective=objective, pca_dim=pca_dim, return_train_probs=return_train_probs,
         )
-        clf.fit(X_train_red, y_train)
-        p_val = clf.predict_proba(X_val_red)[:, 1]
-        p_train = clf.predict_proba(X_train_red)[:, 1] if return_train_probs else None
-        return p_train, p_val
 
     if classifier_name == "lightgbm":
-        import lightgbm as lgb
-
-        if objective == "regression":
-            defaults = {
-                "objective": "regression",
-                "n_estimators": 200,
-                "num_leaves": 15,
-                "max_depth": 4,
-                "learning_rate": 0.05,
-                "min_child_samples": 10,
-                "reg_lambda": 1.0,
-                "verbose": -1,
-                "random_state": 42,
-                "n_jobs": 1,
-                "num_threads": 1,
-            }
-            if lgbm_params:
-                defaults.update(lgbm_params)
-            reg = lgb.LGBMRegressor(**defaults)
-            reg.fit(X_train, y_train, sample_weight=sample_weight)
-            p_val = predict_named(reg, X_val)
-            p_train = predict_named(reg, X_train) if return_train_probs else None
-            return p_train, p_val
-
-        clf = lgb.LGBMClassifier(
-            n_estimators=200,
-            num_leaves=15,
-            max_depth=4,
-            learning_rate=0.05,
-            min_child_samples=10,
-            reg_lambda=1.0,
-            class_weight="balanced",
-            verbose=-1,
-            random_state=42,
-            n_jobs=1,
-            num_threads=1,
+        return _fit_lightgbm(
+            X_train, y_train, X_val,
+            objective=objective, lgbm_params=lgbm_params,
+            return_train_probs=return_train_probs, sample_weight=sample_weight,
         )
-        clf.fit(X_train, y_train)
-        p_val = clf.predict_proba(X_val)[:, 1]
-        p_train = clf.predict_proba(X_train)[:, 1] if return_train_probs else None
-        return p_train, p_val
 
     raise ValueError(
         f"unknown classifier_name {classifier_name!r}; "

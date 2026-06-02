@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from zotero_summarizer.services.triage.feeds._tick import _pick_unread_batch_round_robin
+from zotero_summarizer.services.triage.feeds._tick_phases import _pick_unread_batch_round_robin
 
 
 class _FakeReader:

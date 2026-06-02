@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import uuid
 from typing import Any
@@ -110,6 +111,85 @@ def public_triage_job(job: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _collect_processed_keys(existing_results: list, existing_errors: list) -> set[str]:
+    """Item keys already handled (from prior results/errors), so a resume skips them."""
+    processed: set[str] = set()
+    for row in existing_results:
+        key = str((row or {}).get("item_key") or "").strip()
+        if key:
+            processed.add(key)
+    for row in existing_errors:
+        key = str((row or {}).get("item_key") or "").strip()
+        if key and key != "job":
+            processed.add(key)
+    return processed
+
+
+@dataclass
+class _TriageJobCtx:
+    job: dict[str, Any]
+    reader: Any
+    job_id: str
+    item_positions: dict[str, int]
+    total: int
+    queue_changes: bool
+
+
+async def _summarize_job_item(item_key: str, ctx: _TriageJobCtx) -> dict[str, Any]:
+    """Summarize one item for a triage job; returns its outcome dict (never raises)."""
+    if str(ctx.job.get("status") or "") == "cancelled":
+        return {"item_key": item_key, "cancelled": True}
+    if ctx.reader is None:
+        raise APIError(error="zotero_unavailable", message="Zotero reader is unavailable", status_code=503)
+
+    title = f"Item {item_key}"
+    try:
+        detail = await asyncio.to_thread(ctx.reader.get_item_detail, item_key)
+        if not detail:
+            raise APIError(error="not_found", message=f"Item {item_key} not found", status_code=404)
+
+        title = str(detail.get("title") or title)
+        pdf_path = str(detail.get("pdf_path") or "")
+        if not pdf_path:
+            raise ExtractionError("No local PDF attachment available for this item")
+
+        request = SummarizeRequest(
+            title=title,
+            doi=str(detail.get("doi") or "") or None,
+            pdf_path=pdf_path,
+            abstract=str(detail.get("abstract") or "") or None,
+        )
+        prefix = build_log_prefix(
+            request, item_id=item_key, batch_id=ctx.job_id,
+            index=ctx.item_positions.get(item_key), total=ctx.total,
+        )
+        summary = await asyncio.wait_for(
+            asyncio.to_thread(summarization.run_pipeline, request, prefix),
+            timeout=settings().summary_timeout_seconds,
+        )
+        await asyncio.to_thread(
+            triage_db.insert_result, item_key, title, summary.model_dump(),
+            None, None, None, None, None, pdf_path,
+        )
+
+        queued_change_count = 0
+        if ctx.queue_changes:
+            queued_change_count = await asyncio.to_thread(pending.queue_changes_for_item, item_key, title, summary)
+
+        return {
+            "item_key": item_key,
+            "title": title,
+            "ok": True,
+            "reading_priority": summary.reading_priority,
+            "relevance_score": summary.relevance_score,
+            "composite_relevance_score": summary.composite_relevance_score,
+            "queued_change_count": queued_change_count,
+        }
+    except Exception as exc:
+        LOGGER.warning("Job %s failed item=%s", ctx.job_id, item_key, exc_info=True)
+        return {"item_key": item_key, "title": title, "ok": False, "error": str(exc)}
+
+
 async def run_triage_job_worker(job_id: str, item_keys: list[str], queue_changes: bool) -> None:
     app_state = state()
     jobs: dict[str, dict[str, Any]] = app_state.triage_jobs
@@ -120,17 +200,9 @@ async def run_triage_job_worker(job_id: str, item_keys: list[str], queue_changes
     normalized_item_keys = unique_non_empty_strings(item_keys)
     item_positions = {item_key: idx + 1 for idx, item_key in enumerate(normalized_item_keys)}
 
-    existing_results = list(job.get("results") or [])
-    existing_errors = list(job.get("errors") or [])
-    processed_keys: set[str] = set()
-    for row in existing_results:
-        key = str((row or {}).get("item_key") or "").strip()
-        if key:
-            processed_keys.add(key)
-    for row in existing_errors:
-        key = str((row or {}).get("item_key") or "").strip()
-        if key and key != "job":
-            processed_keys.add(key)
+    processed_keys = _collect_processed_keys(
+        list(job.get("results") or []), list(job.get("errors") or []),
+    )
 
     remaining_keys = [item_key for item_key in normalized_item_keys if item_key not in processed_keys]
     effective_concurrency = _effective_concurrency(len(remaining_keys))
@@ -144,74 +216,12 @@ async def run_triage_job_worker(job_id: str, item_keys: list[str], queue_changes
     job["updated_at"] = now_iso()
     await asyncio.to_thread(triage_db.upsert_triage_job, _job_snapshot(job))
 
-    reader = None
-
-    async def process_item(item_key: str) -> dict[str, Any]:
-        if str(job.get("status") or "") == "cancelled":
-            return {"item_key": item_key, "cancelled": True}
-        if reader is None:
-            raise APIError(error="zotero_unavailable", message="Zotero reader is unavailable", status_code=503)
-
-        title = f"Item {item_key}"
-        try:
-            detail = await asyncio.to_thread(reader.get_item_detail, item_key)
-            if not detail:
-                raise APIError(error="not_found", message=f"Item {item_key} not found", status_code=404)
-
-            title = str(detail.get("title") or title)
-            pdf_path = str(detail.get("pdf_path") or "")
-            if not pdf_path:
-                raise ExtractionError("No local PDF attachment available for this item")
-
-            request = SummarizeRequest(
-                title=title,
-                doi=str(detail.get("doi") or "") or None,
-                pdf_path=pdf_path,
-                abstract=str(detail.get("abstract") or "") or None,
-            )
-            prefix = build_log_prefix(
-                request,
-                item_id=item_key,
-                batch_id=job_id,
-                index=item_positions.get(item_key),
-                total=len(normalized_item_keys),
-            )
-            summary = await asyncio.wait_for(
-                asyncio.to_thread(summarization.run_pipeline, request, prefix),
-                timeout=settings().summary_timeout_seconds,
-            )
-            await asyncio.to_thread(
-                triage_db.insert_result,
-                item_key,
-                title,
-                summary.model_dump(),
-                None,
-                None,
-                None,
-                None,
-                None,
-                pdf_path,
-            )
-
-            queued_change_count = 0
-            if queue_changes:
-                queued_change_count = await asyncio.to_thread(pending.queue_changes_for_item, item_key, title, summary)
-
-            return {
-                "item_key": item_key,
-                "title": title,
-                "ok": True,
-                "reading_priority": summary.reading_priority,
-                "relevance_score": summary.relevance_score,
-                "composite_relevance_score": summary.composite_relevance_score,
-                "queued_change_count": queued_change_count,
-            }
-        except Exception as exc:
-            LOGGER.warning("Job %s failed item=%s", job_id, item_key, exc_info=True)
-            return {"item_key": item_key, "title": title, "ok": False, "error": str(exc)}
-
     try:
         reader = get_zotero_reader_or_raise()
+        ctx = _TriageJobCtx(
+            job=job, reader=reader, job_id=job_id, item_positions=item_positions,
+            total=len(normalized_item_keys), queue_changes=queue_changes,
+        )
         cursor = 0
         while cursor < len(remaining_keys):
             if str(job.get("status") or "") == "cancelled":
@@ -219,7 +229,7 @@ async def run_triage_job_worker(job_id: str, item_keys: list[str], queue_changes
 
             batch = remaining_keys[cursor : cursor + effective_concurrency]
             cursor += len(batch)
-            tasks = [asyncio.create_task(process_item(item_key)) for item_key in batch]
+            tasks = [asyncio.create_task(_summarize_job_item(item_key, ctx)) for item_key in batch]
             for completed_task in asyncio.as_completed(tasks):
                 outcome = await completed_task
                 item_key = str(outcome.get("item_key") or "").strip()
@@ -307,9 +317,6 @@ async def run_triage_job(req: TriageRunRequest) -> TriageRunResponse:
         await asyncio.to_thread(triage_db.upsert_triage_job, _job_snapshot(job))
         asyncio.create_task(run_triage_job_worker(job_id, req.item_keys, req.queue_changes))
         return TriageRunResponse(job_id=job_id, status="running", total=len(req.item_keys))
-
-
-start_triage_job = run_triage_job
 
 
 async def list_triage_jobs(limit: int = 20) -> dict[str, Any]:

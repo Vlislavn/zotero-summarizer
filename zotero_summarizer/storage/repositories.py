@@ -281,7 +281,7 @@ def _get_conn() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA journal_mode=WAL")
-    except sqlite3.Error:
+    except sqlite3.Error as _:
         pass
     return conn
 

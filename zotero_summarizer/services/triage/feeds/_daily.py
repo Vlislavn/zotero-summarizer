@@ -6,26 +6,27 @@ the original triage tick.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
-from zotero_summarizer.models import SummarizeRequest, SummarizeResponse
-from zotero_summarizer.services.zotero import pending as pending_service
+from zotero_summarizer.models import SummarizeRequest
 from zotero_summarizer.services.triage import select as select_service
 from zotero_summarizer.services.triage.summarization import run_pipeline
 from zotero_summarizer.storage import feeds as feeds_storage
 from zotero_summarizer.services.triage.feeds._common import (
     LOGGER,
     _DEFAULT_BLACK_SWAN_TAG,
-    _generate_zotero_key,
-    _infer_item_type,
     _load_config,
     _triage_conn,
     get_settings,
     get_state,
+)
+from zotero_summarizer.services.triage.feeds._daily_materialize import (
+    _MaterializeCtx,
+    _PendingScoredRow,
+    materialize_pick,
 )
 from zotero_summarizer.services.triage.feeds._triage import _apply_prestige
 
@@ -84,20 +85,6 @@ def _should_run_daily_selection(feeds_cfg: dict[str, Any]) -> bool:
     except ValueError:
         return True
     return datetime.now(timezone.utc) - last_dt >= timedelta(hours=interval_h)
-
-
-@dataclass
-class _PendingScoredRow:
-    """Lightweight scored row used by plateau_select (compatible interface)."""
-
-    composite_score: float
-    surprise_score: float
-    is_black_swan: bool
-    row: dict[str, Any]
-    key: str
-    # Optional full-text-refined summary (Part 1.8 two-stage triage). When set,
-    # the materialization loop uses this in place of `_summary_from_row(...)`.
-    refined_summary: SummarizeResponse | None = None
 
 
 def _refine_with_full_text(
@@ -172,6 +159,71 @@ def _refine_with_full_text(
             )
 
 
+def _score_candidates(candidate_rows: list[dict[str, Any]]) -> list[_PendingScoredRow]:
+    """Wrap raw candidate rows as plateau-select-compatible scored rows."""
+    return [
+        _PendingScoredRow(
+            composite_score=float(r.get("composite_score") or 0.0),
+            surprise_score=float(r.get("surprise_score") or 0.0),
+            is_black_swan=False,
+            row=r,
+            key=f"{int(r.get('feed_library_id') or 0)}:{int(r.get('feed_item_id') or 0)}",
+        )
+        for r in candidate_rows
+    ]
+
+
+def _allocate_black_swan(
+    rejected_pool: list[_PendingScoredRow], *, bs_min_score: float, force: bool
+) -> list[_PendingScoredRow]:
+    """Flip in 0-1 high-surprise reject as a black-swan pick (force mode only).
+
+    With daily_max=2 the 10% rule yields 0 slots; ``force`` unconditionally
+    promotes the single highest-surprise rejected candidate above bs_min_score.
+    """
+    if not force:
+        return []
+    viable = [r for r in rejected_pool if r.surprise_score >= bs_min_score]
+    if not viable:
+        return []
+    viable.sort(key=lambda r: r.surprise_score, reverse=True)
+    picks = [viable[0]]
+    for p in picks:
+        p.is_black_swan = True
+    return picks
+
+
+def _reject_unselected(
+    scored: list[_PendingScoredRow],
+    final_inbox: list[_PendingScoredRow],
+    *,
+    decision_reason: str,
+    run_id: str,
+) -> int:
+    """Flip every non-selected candidate to rejected_daily_cutoff; return count."""
+    selected_keys = {p.key for p in final_inbox}
+    rejected_count = 0
+    with _triage_conn() as conn:
+        for pick in scored:
+            if pick.key in selected_keys:
+                continue
+            if feeds_storage.update_to_decision(
+                conn,
+                feed_library_id=int(pick.row.get("feed_library_id") or 0),
+                feed_item_id=int(pick.row.get("feed_item_id") or 0),
+                decision=feeds_storage.DECISION_REJECTED_DAILY_CUTOFF,
+                decision_reason=decision_reason,
+            ):
+                LOGGER.debug(
+                    "[%s] ✗ rejected: %r  composite=%.2f  reason=%s",
+                    run_id, str(pick.row.get("title") or "")[:60],
+                    pick.composite_score, decision_reason,
+                )
+                rejected_count += 1
+        conn.commit()
+    return rejected_count
+
+
 def run_daily_selection(
     *,
     reader: ZoteroReader | None = None,
@@ -227,16 +279,7 @@ def run_daily_selection(
         LOGGER.info("[%s] no triaged_pending rows in last %dh — skipping daily selection", run_id, daily_window_h)
         return {"run_id": run_id, "materialized": 0, "rejected": 0, "black_swans": 0, "errors": []}
 
-    scored = [
-        _PendingScoredRow(
-            composite_score=float(r.get("composite_score") or 0.0),
-            surprise_score=float(r.get("surprise_score") or 0.0),
-            is_black_swan=False,
-            row=r,
-            key=f"{int(r.get('feed_library_id') or 0)}:{int(r.get('feed_item_id') or 0)}",
-        )
-        for r in candidate_rows
-    ]
+    scored = _score_candidates(candidate_rows)
 
     # 2. Plateau-select top 1-2.
     selection = select_service.plateau_select(
@@ -249,17 +292,10 @@ def run_daily_selection(
     selected: list[_PendingScoredRow] = list(selection.selected)
     rejected_pool: list[_PendingScoredRow] = list(selection.rejected)
 
-    # 3. Black-swan allocation. With daily_max=2, the 10% rule yields 0 slots;
-    # `daily_force_black_swan_every_run` flips one in unconditionally if a
-    # rejected candidate exceeds bs_min_score.
-    bs_picks: list[_PendingScoredRow] = []
-    if daily_force_black_swan:
-        viable = [r for r in rejected_pool if r.surprise_score >= bs_min_score]
-        if viable:
-            viable.sort(key=lambda r: r.surprise_score, reverse=True)
-            bs_picks = [viable[0]]
-            for p in bs_picks:
-                p.is_black_swan = True
+    # 3. Black-swan allocation (0-1 high-surprise reject, force mode only).
+    bs_picks = _allocate_black_swan(
+        rejected_pool, bs_min_score=bs_min_score, force=daily_force_black_swan,
+    )
 
     final_inbox: list[_PendingScoredRow] = list(selected) + list(bs_picks)
     LOGGER.info(
@@ -282,99 +318,27 @@ def run_daily_selection(
     errors: list[dict[str, Any]] = []
     used_keys: set[str] = set()
     if not dry_run:
+        mat_ctx = _MaterializeCtx(
+            inbox_collection_name=inbox_collection_name,
+            black_swan_tag=black_swan_tag,
+            outcome_window_days=outcome_window_days,
+            decision_reason=selection.reason,
+        )
         for pick in final_inbox:
-            LOGGER.info(
-                "[%s] → inbox: %r  composite=%.2f%s",
-                run_id, str(pick.row.get("title") or "")[:60], pick.composite_score,
-                "  [black-swan]" if pick.is_black_swan else "",
+            err = materialize_pick(
+                pick, writer=writer, run_id=run_id, used_keys=used_keys, ctx=mat_ctx,
             )
-            try:
-                new_key = _generate_zotero_key(used_keys)
-                pick.row["planned_zotero_key"] = new_key
-                summary = pick.refined_summary or _summary_from_row(pick.row)
-                feed_payload = _feed_payload_from_row(pick.row)
-                matched = _matched_collections_from_row(pick.row)
-                tags = _tags_from_row(pick.row, is_black_swan=pick.is_black_swan, black_swan_tag=black_swan_tag)
-                note_html = pending_service.build_triage_note_html(
-                    title=str(pick.row.get("title") or ""),
-                    summary=summary,
-                    is_black_swan=pick.is_black_swan,
-                    surprise_score=pick.surprise_score if pick.is_black_swan else None,
-                    run_id=run_id,
-                )
-                writer.apply_feed_materialization(
-                    new_item_key=new_key,
-                    feed_payload=feed_payload,
-                    inbox_collection_name=inbox_collection_name,
-                    matched_collections=matched,
-                    tags=tags,
-                    note_title=f"Triage: {str(pick.row.get('title') or '')[:80]}",
-                    note_html=note_html,
-                    provenance_tag=pending_service.SYSTEM_TAG_FEEDS_V3,
-                    create_backup=False,
-                )
-                # Update processed_feed_items row.
-                decision = (
-                    feeds_storage.DECISION_BLACK_SWAN
-                    if pick.is_black_swan
-                    else feeds_storage.DECISION_SELECTED
-                )
-                with _triage_conn() as conn:
-                    feeds_storage.update_to_decision(
-                        conn,
-                        feed_library_id=int(pick.row.get("feed_library_id") or 0),
-                        feed_item_id=int(pick.row.get("feed_item_id") or 0),
-                        decision=decision,
-                        decision_reason=selection.reason if not pick.is_black_swan else "surprise_pick",
-                        is_black_swan=pick.is_black_swan,
-                        planned_zotero_key=new_key,
-                    )
-                    feeds_storage.record_materialization(
-                        conn,
-                        feed_library_id=int(pick.row.get("feed_library_id") or 0),
-                        feed_item_id=int(pick.row.get("feed_item_id") or 0),
-                        materialized_zotero_key=new_key,
-                        outcome_window_days=outcome_window_days,
-                    )
-                    conn.commit()
-                LOGGER.info(
-                    "[%s] materialized: %r  key=%s",
-                    run_id, str(pick.row.get("title") or "")[:60], new_key,
-                )
+            if err is None:
                 materialized_count += 1
-            except Exception as exc:
-                _exc_str = str(exc)
-                if "triaged_pending" in _exc_str or "database is locked" in _exc_str.lower():
-                    LOGGER.warning(
-                        "[%s] materialization deferred for key %s (DB locked — item queued for next selection run): %s",
-                        run_id, pick.key, exc,
-                    )
-                else:
-                    LOGGER.exception("[%s] materialization failed for key %s", run_id, pick.key)
-                errors.append({"key": pick.key, "error": _exc_str})
+            else:
+                errors.append(err)
 
     # 5. Flip all the rest to rejected_daily_cutoff.
     rejected_count = 0
     if not dry_run:
-        selected_keys = {p.key for p in final_inbox}
-        with _triage_conn() as conn:
-            for pick in scored:
-                if pick.key in selected_keys:
-                    continue
-                if feeds_storage.update_to_decision(
-                    conn,
-                    feed_library_id=int(pick.row.get("feed_library_id") or 0),
-                    feed_item_id=int(pick.row.get("feed_item_id") or 0),
-                    decision=feeds_storage.DECISION_REJECTED_DAILY_CUTOFF,
-                    decision_reason=selection.reason,
-                ):
-                    LOGGER.debug(
-                        "[%s] ✗ rejected: %r  composite=%.2f  reason=%s",
-                        run_id, str(pick.row.get("title") or "")[:60],
-                        pick.composite_score, selection.reason,
-                    )
-                    rejected_count += 1
-            conn.commit()
+        rejected_count = _reject_unselected(
+            scored, final_inbox, decision_reason=selection.reason, run_id=run_id,
+        )
 
     return {
         "run_id": run_id,
@@ -385,108 +349,3 @@ def run_daily_selection(
         "cutoff": selection.cutoff,
         "cutoff_reason": selection.reason,
     }
-
-
-def _summary_from_row(row: dict[str, Any]) -> SummarizeResponse:
-    """Reconstruct a minimal SummarizeResponse from a processed_feed_items row.
-
-    Phase 1.5 daily-selection happens hours after the triage tick that
-    scored the item, so we don't have the full SummarizeResponse in memory
-    any more. The row only stores the score + a few fields; we rebuild a
-    sparse SummarizeResponse so the note builder has something to render.
-    """
-    import json as _json
-    from zotero_summarizer.models import SummarizeResponse as SR
-
-    matched = _json.loads(row.get("matched_collections_json") or "[]")
-    return SR(
-        title=str(row.get("title") or ""),
-        doi=str(row.get("doi") or ""),
-        summary="",
-        relevance_score=int(round(float(row.get("composite_score") or 0))),
-        composite_relevance_score=float(row.get("composite_score") or 0.0),
-        reading_priority=str(row.get("reading_priority") or "could_read"),
-        tags=[],
-        triage_rationale="",
-        triage_confidence=0.0,
-        executive_summary="",
-        should_deep_read="",
-        key_sections_to_read=[],
-        relevance_to_research="",
-        controversial_points="",
-        industry_academy_impact="",
-        unknown_unknowns="",
-        implementation_quickstart="",
-        key_findings=[],
-        methods="",
-        limitations="",
-        suggested_collections=list(matched),
-        corpus_affinity_score=float(row.get("corpus_affinity") or 0.0),
-        matched_goal="",
-    )
-
-
-def _feed_payload_from_row(row: dict[str, Any]) -> dict[str, Any]:
-    """Build the create_item_from_feed payload from a stored row.
-
-    The original Zotero feed item still exists in Zotero's `feedItems` table —
-    we re-query it here for fresh metadata rather than storing the full
-    abstract in `processed_feed_items` (saves storage; lets users update feed
-    metadata between triage and materialization).
-    """
-    feed_library_id = int(row.get("feed_library_id") or 0)
-    feed_item_id = int(row.get("feed_item_id") or 0)
-    reader = ZoteroReader(get_settings().zotero_data_dir)
-    items = reader.get_feed_items(feed_library_id=feed_library_id, limit=5000)
-    match = next((i for i in items if int(i.get("item_id") or 0) == feed_item_id), None)
-    if not match:
-        # Item disappeared from Zotero (manually deleted from the feed?).
-        # Materialize with what's in our DB instead.
-        return {
-            "title": str(row.get("title") or "Untitled"),
-            "abstract": "",
-            "url": "",
-            "doi": str(row.get("doi") or ""),
-            "publication_date": "",
-            "publication_title": "",
-            "item_type": "journalArticle",
-        }
-    return {
-        "title": match.get("title") or row.get("title") or "Untitled",
-        "abstract": match.get("abstract") or "",
-        "url": match.get("url") or "",
-        "doi": match.get("doi") or row.get("doi") or "",
-        "publication_date": match.get("publication_date") or "",
-        "publication_title": match.get("publication_title") or "",
-        "authors": match.get("authors") or "",
-        "item_type": _infer_item_type(match),
-    }
-
-
-def _matched_collections_from_row(row: dict[str, Any]) -> list[str]:
-    import json as _json
-
-    try:
-        return _json.loads(row.get("matched_collections_json") or "[]")
-    except Exception:
-        return []
-
-
-def _tags_from_row(
-    row: dict[str, Any],
-    *,
-    is_black_swan: bool,
-    black_swan_tag: str,
-) -> list[str]:
-    """Build the tag list for a materialized item.
-
-    Includes the reading-priority `zs:<priority>` tag (Phase 1 convention),
-    and the black-swan tag if applicable. The provenance tag `/zs/feeds-v3`
-    is appended separately by `apply_feed_materialization` so it's
-    distinguishable in the dispatch layer.
-    """
-    priority = str(row.get("reading_priority") or "could_read")
-    tags = [f"zs:{priority}"]
-    if is_black_swan and black_swan_tag:
-        tags.append(black_swan_tag)
-    return tags

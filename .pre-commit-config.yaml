@@ -21,3 +21,50 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+
+      - id: dead-code-consumer
+        name: public symbols need a runtime consumer (orphans grandfathered)
+        entry: python3 tools/precommit/check_dead_code.py consumer-check
+        language: system
+        types: [python]
+
+      - id: dead-code-vulture
+        name: vulture dead-code sweep (path-anchored allowlist grandfathered)
+        # language: python so pre-commit builds an isolated env with vulture,
+        # independent of which python3 a bare `git commit` resolves to. The
+        # script invokes vulture via sys.executable, which is this env's python.
+        entry: python tools/precommit/check_dead_code.py vulture-sweep
+        language: python
+        # Pinned EXACT: Vulture findings shift between versions, so a floating
+        # range would silently change what the gate flags vs the committed
+        # allowlist. Bump deliberately (and regenerate the allowlist) in lockstep
+        # with the pyproject pin.
+        additional_dependencies: ["vulture==2.16"]
+        pass_filenames: false
+        always_run: true
+
+      - id: redundancy-transforms
+        name: redundant transforms blocked (new only; grandfathered)
+        entry: python3 tools/precommit/check_redundancy.py transforms-check
+        language: system
+        types: [python]
+
+      - id: redundancy-clones
+        name: near-duplicate function sweep (advisory)
+        entry: python3 tools/precommit/check_redundancy.py clones-sweep
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: slop-check
+        name: AI-slop blocked (new debug-leftovers; grandfathered)
+        entry: python3 tools/precommit/check_slop.py slop-check
+        language: system
+        types: [python]
+
+      - id: slop-sweep
+        name: AI-slop sweep (advisory)
+        entry: python3 tools/precommit/check_slop.py slop-sweep
+        language: system
+        pass_filenames: false
+        always_run: true

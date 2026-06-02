@@ -33,21 +33,6 @@ class EmojiSignal:
     score_delta: float
 
 
-# Tier labels are retained purely for the audit trail (``gold_signal_tier``
-# in the golden CSV) — they no longer drive label assignment. Score deltas
-# do that.
-TIER_ORDER: tuple[str, ...] = (
-    "strong_negative",
-    "boring",
-    "strong_positive",
-    "high_positive",
-    "medium_positive",
-    "critical_engagement",
-    "light_engagement",
-    "meta",
-)
-
-
 # Catalogue. score_delta is the additive contribution to the engagement
 # score (baseline 3.0 = neutral). Bounds: dont_read at ≤ 2.0, could_read
 # 2.0–3.5, should_read 3.5–4.5, must_read ≥ 4.5.

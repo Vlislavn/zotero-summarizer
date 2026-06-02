@@ -271,6 +271,13 @@ corpus:
   embedding_model: sentence-transformers/all-MiniLM-L6-v2
   similarity_threshold: -0.3
   stale_days_for_weak_negative: 30
+  # Hybrid Library search ("Meaning" mode): BM25 lexical + dense cosine fused,
+  # then a local cross-encoder reranks the top candidates. All local.
+  bm25_enabled: true
+  reranker_enabled: true
+  # Cross-encoder reranker; downloads once on the first semantic search. Set
+  # reranker_enabled: false to use BM25+dense fusion order only (no download).
+  reranker_model: BAAI/bge-reranker-v2-m3
 
 # --- OpenAlex author/venue prestige (Phase 1.8) -----------------------------
 # Looks up h-index, venue impact, and citation count to blend into the
@@ -282,6 +289,16 @@ prestige:
   fallback_neutral: 3.0              # score used when OpenAlex has no record
   user_agent_email: "you@example.com"  # polite-pool mailto; recommended (faster, fewer 429s)
   require_doi: false                 # if true, skip lookup for items without a DOI
+  # Cold-start author prior: a brand-new preprint has no field-normalized
+  # citation percentile yet, so citation prestige is unavailable. When on, fall
+  # back to the authors' FIELD-normalized standing (median of their works'
+  # OpenAlex citation_normalized_percentile — NOT raw h-index, which is field/
+  # career-biased per the Leiden Manifesto). The lift is asymmetric (raise only,
+  # never demote) and capped; it applies ONLY until the paper earns its own
+  # percentile. Set false to revert to pure citation-based prestige.
+  cold_start_author_lift: true
+  cold_start_max_lift: 1.0           # max points added above neutral (cap; 0–2)
+  cold_start_gamma: 1.5              # convexity: higher ⇒ only top authors near the cap
 
 # --- Two-stage triage with full-text PDF reading (Phase 1.8) ---------------
 # After plateau selection picks the top K items, fetch their OA PDFs via

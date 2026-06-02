@@ -115,7 +115,7 @@ def test_list_awaiting_parses_shap_and_aux_payload(patched_settings):
     db.commit()
     db.close()
 
-    items = review.list_awaiting()
+    items = review.list_by_state(fs.DECISION_AWAITING_REVIEW)
     assert len(items) == 1
     item = items[0]
     assert item["shap"] == [{"feature": "corpus_affinity", "contribution": 0.42}]
@@ -124,7 +124,7 @@ def test_list_awaiting_parses_shap_and_aux_payload(patched_settings):
 
 
 def test_list_awaiting_returns_empty_when_no_rows(patched_settings):
-    assert review.list_awaiting() == []
+    assert review.list_by_state(fs.DECISION_AWAITING_REVIEW) == []
 
 
 # ---------------------------------------------------------------------------

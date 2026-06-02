@@ -87,6 +87,24 @@ Install once: `pre-commit install`. CI runs the same checks plus the test suites
    service modules must live in a domain subpackage, not at `services/` top level.
 3. **Module READMEs** (`check_module_readme.py`) — every package has one, and editing
    a package's code requires staging its `README.md` in the same commit.
+4. **Redundancy** (`check_redundancy.py`) — new *provably* redundant transforms
+   (idempotent `f(f(x))`, faithful round-trips, identity comprehensions, involutions)
+   BLOCK; conditionally-redundant transforms and near-duplicate functions are advisory.
+   Existing findings frozen in `redundancy_allowlist.txt`.
+5. **AI-slop** (`check_slop.py`) — adopts [aislop](https://github.com/scanaislop/aislop)'s
+   deterministic slop/dead-code detectors (swallowed exceptions, debug leftovers, mutable
+   defaults, untracked TODOs, narrative/trivial comments, generic names, Long-Method
+   complexity). Only a committed `breakpoint()`/`pdb.set_trace()` BLOCKs; the rest are
+   advisory. Existing findings frozen in `slop_allowlist.txt`.
+
+**Seeing findings (advisory, not enforced):** two commands, differing only in scope —
+`make scan` (every detector across the whole tree) and `make scan-diff` (the same, scoped to
+the `.py` changed vs the base branch). Both always exit 0 and never block; `EMBED=1` adds the
+semantic code-model overlap pass, `BASE=<branch>` retargets the diff. The all-pairs **function-
+overlap audit** (`tools/precommit/check_overlaps.py`) runs inside them — every function against
+every function, ranked by a hybrid of a local code-embedding cosine + graded structural
+similarity + API-Jaccard — surfacing consolidation candidates whose intent overlaps even across
+different shapes; it degrades to deterministic-only when no embedding model is available.
 
 ## Verify a change
 

@@ -63,7 +63,7 @@ class EmbeddingCache(CorpusReadMixin):
         conn.row_factory = sqlite3.Row
         try:
             conn.execute("PRAGMA journal_mode=WAL")
-        except sqlite3.Error:
+        except sqlite3.Error as _:
             pass
         return conn
 
@@ -336,7 +336,7 @@ class EmbeddingCache(CorpusReadMixin):
             value = json.loads(raw or "[]")
             if isinstance(value, list):
                 return [float(v) for v in value]
-        except Exception:
+        except Exception as _:
             pass
         return [0.0] * EMBEDDING_DIM
 
@@ -349,7 +349,7 @@ class EmbeddingCache(CorpusReadMixin):
             value = json.loads(raw or "[]")
             if isinstance(value, list):
                 return [str(v) for v in value if str(v).strip()]
-        except Exception:
+        except Exception as _:
             pass
         return []
 

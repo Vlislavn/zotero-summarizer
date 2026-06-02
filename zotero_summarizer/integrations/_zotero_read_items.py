@@ -19,8 +19,14 @@ class ZoteroItemsMixin:
         tag: str | None = None,
         limit: int = 100,
         offset: int = 0,
+        include_abstract: bool = True,
     ) -> dict[str, Any]:
-        """Return paginated top-level library items with tags and PDF hints."""
+        """Return paginated top-level library items with tags and PDF hints.
+
+        ``include_abstract=False`` omits the (often large) abstract correlated
+        subquery and returns ``abstract=""`` — used by the whole-library display
+        and rank/tag write paths, which never read the abstract, to avoid hauling
+        ~megabytes of unused text per scan. The scoring path keeps it True."""
         safe_limit = max(1, min(limit, 500))
         safe_offset = max(0, offset)
         where_clauses = [
@@ -89,6 +95,19 @@ class ZoteroItemsMixin:
 
         where_sql = " AND ".join(where_clauses)
 
+        abstract_sql = (
+            """COALESCE((
+                    SELECT v.value
+                    FROM itemData id
+                    JOIN fields f ON f.fieldID = id.fieldID
+                    JOIN itemDataValues v ON v.valueID = id.valueID
+                    WHERE id.itemID = i.itemID AND f.fieldName = 'abstractNote'
+                    LIMIT 1
+                ), '')"""
+            if include_abstract
+            else "''"
+        )
+
         count_sql = f"""
             SELECT COUNT(*) AS total
             FROM items i
@@ -111,14 +130,7 @@ class ZoteroItemsMixin:
                     WHERE id.itemID = i.itemID AND f.fieldName = 'title'
                     LIMIT 1
                 ), '') AS title,
-                COALESCE((
-                    SELECT v.value
-                    FROM itemData id
-                    JOIN fields f ON f.fieldID = id.fieldID
-                    JOIN itemDataValues v ON v.valueID = id.valueID
-                    WHERE id.itemID = i.itemID AND f.fieldName = 'abstractNote'
-                    LIMIT 1
-                ), '') AS abstract,
+                {abstract_sql} AS abstract,
                 COALESCE((
                     SELECT v.value
                     FROM itemData id
@@ -175,7 +187,7 @@ class ZoteroItemsMixin:
             JOIN itemTypes it ON it.itemTypeID = i.itemTypeID
             LEFT JOIN deletedItems di ON di.itemID = i.itemID
             WHERE {where_sql}
-            ORDER BY i.dateModified DESC
+            ORDER BY i.dateModified DESC, i.itemID DESC
             LIMIT ? OFFSET ?
         """
 
@@ -221,22 +233,37 @@ class ZoteroItemsMixin:
         search: str | None = None,
         tag: str | None = None,
         page_size: int = 500,
+        include_abstract: bool = True,
     ) -> dict[str, Any]:
         """Every matching top-level item, paginating internally past ``get_items``'
         500-per-call clamp. Loops ``offset`` by the returned page length, using the
         reported ``total`` (or a short page) as the stop condition. Same row shape as
         ``get_items``; returns ``{items, total}``. Use for whole-library passes
-        (full-library scoring, the Zotero rank/tag writes)."""
+        (full-library scoring, the Zotero rank/tag writes).
+
+        Contract: deterministic order (dateModified DESC, itemID DESC tiebreaker)
+        and AT-MOST-ONCE per ``item_key`` — an item is de-duplicated across pages,
+        so a concurrent write that shifts a row between pages can't double-emit it
+        (completeness is best-effort under concurrent mutation; the at-most-once
+        guarantee is what keeps the resulting Zotero ranking unambiguous).
+        ``include_abstract=False`` skips the abstract subquery on every page."""
         safe_page = max(1, min(page_size, 500))
         out: list[dict[str, Any]] = []
+        seen: set[str] = set()
         offset = 0
         while True:
             page = self.get_items(
                 collection_key=collection_key, search=search, tag=tag,
-                limit=safe_page, offset=offset,
+                limit=safe_page, offset=offset, include_abstract=include_abstract,
             )
             rows = page.get("items") or []
-            out.extend(rows)
+            for row in rows:
+                key = str(row.get("item_key") or "")
+                if key and key in seen:
+                    continue  # paging artifact under a concurrent write — emit once
+                if key:
+                    seen.add(key)
+                out.append(row)
             offset += len(rows)
             total = int(page.get("total") or 0)
             if not rows or len(rows) < safe_page or offset >= total:
@@ -273,6 +300,76 @@ class ZoteroItemsMixin:
 
         return self._execute_read(_read)
 
+    @staticmethod
+    def _read_item_authors(conn: sqlite3.Connection, item_id: int) -> list[str]:
+        """Ordered author display names for an item."""
+        rows = conn.execute(
+            "SELECT c.firstName, c.lastName, c.fieldMode FROM itemCreators ic "
+            "JOIN creators c ON c.creatorID = ic.creatorID "
+            "WHERE ic.itemID = ? ORDER BY ic.orderIndex",
+            (item_id,),
+        ).fetchall()
+        authors = []
+        for row in rows:
+            last = str(row["lastName"] or "").strip()
+            first = str(row["firstName"] or "").strip()
+            name = last if int(row["fieldMode"] or 0) == 1 else f"{first} {last}".strip()
+            if name:
+                authors.append(name)
+        return authors
+
+    def _read_item_collections(self, conn: sqlite3.Connection, item_id: int) -> list[dict[str, Any]]:
+        """An item's collection memberships with resolved paths."""
+        rows = conn.execute(
+            "SELECT c.collectionID, c.key, c.collectionName FROM collectionItems ci "
+            "JOIN collections c ON c.collectionID = ci.collectionID WHERE ci.itemID = ?",
+            (item_id,),
+        ).fetchall()
+        collection_map = self._load_collection_map(conn)
+        return [
+            {
+                "key": str(row["key"]),
+                "name": str(row["collectionName"] or ""),
+                "path": self._collection_path(int(row["collectionID"]), collection_map),
+            }
+            for row in rows
+        ]
+
+    def _read_attachments(self, conn: sqlite3.Connection, item_id: int) -> tuple[list[dict[str, Any]], str | None]:
+        """Read an item's attachments; return (attachments, first resolved PDF path)."""
+        attachment_rows = conn.execute(
+            """
+            SELECT ai.key AS attachment_key, ai.dateAdded, ai.dateModified,
+                   ia.path, ia.contentType, ia.linkMode
+            FROM itemAttachments ia
+            JOIN items ai ON ai.itemID = ia.itemID
+            WHERE ia.parentItemID = ?
+            ORDER BY ai.dateAdded ASC
+            """,
+            (item_id,),
+        ).fetchall()
+        attachments: list[dict[str, Any]] = []
+        pdf_path: str | None = None
+        for row in attachment_rows:
+            attachment_key = str(row["attachment_key"] or "")
+            resolved_path = self._resolve_attachment_path(
+                attachment_key=attachment_key, stored_path=str(row["path"] or ""),
+            )
+            is_pdf = str(row["contentType"] or "").lower() == "application/pdf"
+            if is_pdf and resolved_path and pdf_path is None:
+                pdf_path = resolved_path
+            attachments.append({
+                "attachment_key": attachment_key,
+                "content_type": str(row["contentType"] or ""),
+                "link_mode": row["linkMode"],
+                "stored_path": str(row["path"] or ""),
+                "resolved_path": resolved_path,
+                "exists": bool(resolved_path and Path(resolved_path).exists()),
+                "date_added": str(row["dateAdded"] or ""),
+                "date_modified": str(row["dateModified"] or ""),
+            })
+        return attachments, pdf_path
+
     def get_item_detail(self, item_key: str) -> dict[str, Any] | None:
         """Return rich metadata, notes, tags, collections, and attachments for one item."""
 
@@ -306,24 +403,7 @@ class ZoteroItemsMixin:
             ).fetchall()
             fields = {str(row["fieldName"]): str(row["value"] or "") for row in fields_rows}
 
-            author_rows = conn.execute(
-                """
-                SELECT c.firstName, c.lastName, c.fieldMode
-                FROM itemCreators ic
-                JOIN creators c ON c.creatorID = ic.creatorID
-                WHERE ic.itemID = ?
-                ORDER BY ic.orderIndex
-                """,
-                (item_id,),
-            ).fetchall()
-            authors = []
-            for row in author_rows:
-                if int(row["fieldMode"] or 0) == 1:
-                    name = str(row["lastName"] or "").strip()
-                else:
-                    name = (f"{str(row['firstName'] or '').strip()} {str(row['lastName'] or '').strip()}").strip()
-                if name:
-                    authors.append(name)
+            authors = self._read_item_authors(conn, item_id)
 
             tag_rows = conn.execute(
                 """
@@ -337,61 +417,9 @@ class ZoteroItemsMixin:
             ).fetchall()
             tags = [str(row["name"] or "") for row in tag_rows if str(row["name"] or "").strip()]
 
-            collection_rows = conn.execute(
-                """
-                SELECT c.collectionID, c.key, c.collectionName
-                FROM collectionItems ci
-                JOIN collections c ON c.collectionID = ci.collectionID
-                WHERE ci.itemID = ?
-                """,
-                (item_id,),
-            ).fetchall()
-            collection_map = self._load_collection_map(conn)
-            collections = []
-            for row in collection_rows:
-                collection_id = int(row["collectionID"])
-                collections.append(
-                    {
-                        "key": str(row["key"]),
-                        "name": str(row["collectionName"] or ""),
-                        "path": self._collection_path(collection_id, collection_map),
-                    }
-                )
+            collections = self._read_item_collections(conn, item_id)
 
-            attachment_rows = conn.execute(
-                """
-                SELECT ai.key AS attachment_key, ai.dateAdded, ai.dateModified,
-                       ia.path, ia.contentType, ia.linkMode
-                FROM itemAttachments ia
-                JOIN items ai ON ai.itemID = ia.itemID
-                WHERE ia.parentItemID = ?
-                ORDER BY ai.dateAdded ASC
-                """,
-                (item_id,),
-            ).fetchall()
-            attachments = []
-            pdf_path = None
-            for row in attachment_rows:
-                attachment_key = str(row["attachment_key"] or "")
-                resolved_path = self._resolve_attachment_path(
-                    attachment_key=attachment_key,
-                    stored_path=str(row["path"] or ""),
-                )
-                is_pdf = str(row["contentType"] or "").lower() == "application/pdf"
-                if is_pdf and resolved_path and pdf_path is None:
-                    pdf_path = resolved_path
-                attachments.append(
-                    {
-                        "attachment_key": attachment_key,
-                        "content_type": str(row["contentType"] or ""),
-                        "link_mode": row["linkMode"],
-                        "stored_path": str(row["path"] or ""),
-                        "resolved_path": resolved_path,
-                        "exists": bool(resolved_path and Path(resolved_path).exists()),
-                        "date_added": str(row["dateAdded"] or ""),
-                        "date_modified": str(row["dateModified"] or ""),
-                    }
-                )
+            attachments, pdf_path = self._read_attachments(conn, item_id)
 
             note_rows = conn.execute(
                 """
@@ -462,10 +490,3 @@ class ZoteroItemsMixin:
             }
 
         return self._execute_read(_read)
-
-    def get_pdf_path(self, item_key: str) -> str | None:
-        """Return the first local PDF path for an item, if available."""
-        detail = self.get_item_detail(item_key)
-        if not detail:
-            return None
-        return str(detail.get("pdf_path") or "") or None

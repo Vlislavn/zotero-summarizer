@@ -1,13 +1,16 @@
 """Tag/note appliers + low-level write helpers of ZoteroWriter (mixin)."""
 from __future__ import annotations
 
-import random
 import re
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-from zotero_summarizer.integrations._zotero_write_common import ZoteroWriteError  # noqa: F401
+from zotero_summarizer.integrations._zotero_write_common import (  # noqa: F401
+    ZoteroWriteError,
+    generate_unique_key,
+    lookup_int_id,
+)
 
 
 class ZoteroTagMixin:
@@ -289,13 +292,9 @@ class ZoteroTagMixin:
 
     @staticmethod
     def _find_tag_id(conn: sqlite3.Connection, tag_name: str) -> int | None:
-        row = conn.execute(
-            "SELECT tagID FROM tags WHERE lower(name) = lower(?) LIMIT 1",
-            (tag_name,),
-        ).fetchone()
-        if not row:
-            return None
-        return int(row["tagID"])
+        return lookup_int_id(
+            conn, "SELECT tagID FROM tags WHERE lower(name) = lower(?) LIMIT 1", tag_name, "tagID"
+        )
 
     def _find_collection_id(
         self,
@@ -381,13 +380,9 @@ class ZoteroTagMixin:
 
     @staticmethod
     def _get_item_type_id(conn: sqlite3.Connection, type_name: str) -> int | None:
-        row = conn.execute(
-            "SELECT itemTypeID FROM itemTypes WHERE typeName = ? LIMIT 1",
-            (type_name,),
-        ).fetchone()
-        if not row:
-            return None
-        return int(row["itemTypeID"])
+        return lookup_int_id(
+            conn, "SELECT itemTypeID FROM itemTypes WHERE typeName = ? LIMIT 1", type_name, "itemTypeID"
+        )
 
     @staticmethod
     def _sqlite_timestamp_now() -> str:
@@ -420,12 +415,7 @@ class ZoteroTagMixin:
         )
 
     def _generate_unique_item_key(self, conn: sqlite3.Connection) -> str:
-        for _ in range(32):
-            key = "".join(random.choice(self._KEY_ALPHABET) for _ in range(8))
-            row = conn.execute("SELECT 1 FROM items WHERE key = ? LIMIT 1", (key,)).fetchone()
-            if row is None:
-                return key
-        raise ZoteroWriteError("Could not generate a unique Zotero item key")
+        return generate_unique_key(conn, "items", self._KEY_ALPHABET, "item")
 
     @staticmethod
     def _note_title_from_html(note_html: str) -> str:

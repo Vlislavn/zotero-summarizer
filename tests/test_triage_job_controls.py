@@ -258,6 +258,10 @@ def test_triage_job_marks_failed_when_any_item_errors(monkeypatch):
 def test_triage_job_marks_failed_when_reader_unavailable(monkeypatch):
     job_id = "job_reader_unavailable"
     item_keys = ["K1"]
+    # Pin concurrency (like the sibling tests) so _effective_concurrency doesn't
+    # resolve the feed-stage provider via app_state.config — this test stubs the
+    # reader, not the full RuntimeState, so app_state is None here.
+    monkeypatch.setattr(app_module, "TRIAGE_JOB_CONCURRENCY", 1)
     _state().triage_jobs = {job_id: _new_job(job_id, item_keys, status="running")}
 
     def fail_reader():

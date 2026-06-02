@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services.golden import goldenset
-from zotero_summarizer.services._common import read_config, settings as get_settings
+from zotero_summarizer.services._common import LOGGER, now_iso, read_config, settings as get_settings
 
 
 router = APIRouter()
@@ -49,17 +49,13 @@ _JOBS: dict[str, dict[str, Any]] = {}
 _RETRAIN_LOCK = threading.Lock()
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
 def _new_job(kind: str) -> dict[str, Any]:
     job_id = uuid.uuid4().hex[:12]
     job = {
         "job_id": job_id,
         "kind": kind,
         "status": "running",
-        "started_at": _now_iso(),
+        "started_at": now_iso(),
         "finished_at": None,
         "result": None,
         "error": None,
@@ -76,7 +72,7 @@ def _finish_job(job_id: str, *, result: dict[str, Any] | None, error: str | None
         if job is None:
             return
         job["status"] = "failed" if error else "succeeded"
-        job["finished_at"] = _now_iso()
+        job["finished_at"] = now_iso()
         job["result"] = result
         job["error"] = error
 
@@ -112,7 +108,7 @@ async def refresh_labels() -> dict[str, Any]:
     )
     return {
         "ok": True,
-        "finished_at": _now_iso(),
+        "finished_at": now_iso(),
         **result,
     }
 
@@ -172,6 +168,13 @@ def _retrain_worker(job_id: str, *, classifier_name: str, n_folds: int) -> None:
             _finish_job(job_id, result=None, error=f"{type(exc).__name__}: {exc}")
             return
 
+    # Hot-swap the freshly-trained gate into the live runtime + re-score the
+    # Today slate, so "Retrain" takes effect WITHOUT a server restart (the
+    # previous behaviour left the running gate on the old artifact until the
+    # next restart). Guarded on the gate being enabled — a disabled gate has no
+    # live slot to swap into, so we only persist to disk (loads on next start).
+    hot_swap = _hot_swap_after_retrain(trained) if config.classifier_gate.enabled else None
+
     _finish_job(
         job_id,
         result={
@@ -183,9 +186,37 @@ def _retrain_worker(job_id: str, *, classifier_name: str, n_folds: int) -> None:
                 "must": round(trained.t_must, 4),
                 "could": round(trained.t_could, 4),
             },
+            # Surface that the live gate + slate were refreshed (vs. disk-only),
+            # so the Settings UI can tell the user Today is already re-ranked.
+            "hot_swapped": bool(hot_swap and hot_swap.get("installed")),
+            "rescored": (hot_swap or {}).get("rescored"),
         },
         error=None,
     )
+
+
+def _hot_swap_after_retrain(trained: Any) -> dict[str, Any]:
+    """Install the just-trained gate live (atomic swap + slate rescore) via the
+    single shared ``feeds.install_gate`` path — the same call the daemon's
+    background retrain uses, so both retrain paths converge on one mechanism.
+
+    Installs the in-memory ``trained`` object directly (identical to the joblib
+    just written; this also matches the daemon worker, which installs its fresh
+    object without a reload — and avoids guessing the artifact filename when the
+    retrained classifier differs from the configured gate model_name).
+
+    Best-effort: the model is already trained + saved, so a swap/rescore failure
+    is reported in the job result, never raised — it must not turn a successful
+    retrain into a failed job.
+    """
+    from zotero_summarizer.services.triage import feeds
+
+    try:
+        result = feeds.install_gate(trained, reason="ui-retrain")
+        return {"installed": True, "rescored": (result or {}).get("rescored")}
+    except Exception as exc:  # noqa: BLE001 — best-effort; retrain already succeeded
+        LOGGER.exception("hot-swap after UI retrain failed (model saved to disk)")
+        return {"installed": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
 async def retrain(req: RetrainRequest) -> dict[str, Any]:

@@ -186,7 +186,7 @@ def test_load_golden_provenance_reads_csv(tmp_path):
     assert provs[1].is_direct_user_verdict is True
 
 
-def test_find_provenance_by_item_key():
+def test_compute_provenance_lookup_by_item_key():
     provs = [
         lp.compute_provenance(
             item_key=k, title="T",
@@ -195,20 +195,7 @@ def test_find_provenance_by_item_key():
         )
         for k in ("A", "B", "C")
     ]
-    p = lp.find_provenance(provs, "B")
-    assert p.item_key == "B"
-
-
-def test_find_provenance_missing_key_raises():
-    provs = [
-        lp.compute_provenance(
-            item_key="A", title="T",
-            tags=[], in_trash=False,
-            annotation_count=0, user_note_count=0, days_since_added=0,
-        )
-    ]
-    with pytest.raises(KeyError):
-        lp.find_provenance(provs, "Z")
+    assert [p.item_key for p in provs] == ["A", "B", "C"]
 
 
 def test_flag_summary_groups_by_flag():

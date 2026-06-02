@@ -44,7 +44,7 @@ async def run_daemon_loop(
         if sig is not None:
             try:
                 loop.add_signal_handler(sig, _on_signal)
-            except (NotImplementedError, RuntimeError):
+            except (NotImplementedError, RuntimeError) as _:
                 # Windows doesn't support add_signal_handler for SIGTERM.
                 pass
 

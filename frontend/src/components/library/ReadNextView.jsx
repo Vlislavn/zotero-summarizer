@@ -1,26 +1,47 @@
-import { useState } from 'react';
+import { startTransition, useEffect, useState } from 'react';
 import InlineAnnotate from './InlineAnnotate.jsx';
 import ScoreHistogram from './ScoreHistogram.jsx';
 import { StatusBanner, formatShortDate, truncateAuthors } from './shared.jsx';
 
-// Stage-2 "Read next": the single Library surface. Ranked unread queue with an
-// inline annotate panel (links, tags, per-paper deep review). Read/handled items
-// are hidden unless toggled. An opt-in "Select" mode reveals checkboxes for bulk
-// triage (the merged Browse/triage flow), kept secondary to the reading flow.
+// Stage-2 "Read next": the single Library surface. Ranked queue over the WHOLE
+// library with an inline annotate panel (links, tags, per-paper deep review).
+// Read/handled items are hidden unless toggled. An opt-in "Select" mode reveals
+// checkboxes for bulk triage (the merged Browse/triage flow), kept secondary.
+const REVEAL_STEP = 60;  // rows revealed initially and per "Show more" click
+
 export default function ReadNextView({
   items, loading, err, includeRead, onToggleIncludeRead,
-  readHidden, totalUnread, onSaved, status, modelReady, error, computedAt, scoresStale, distribution, onRescore,
+  readHidden, totalUnread, onSaved, status, modelReady, error, computedAt, scoresStale, distribution, onRescore, onReload,
   selectMode, onToggleSelectMode, selected, onToggleItem, onRunTriage, starting,
+  // Client-side smart filters (Library owns the state; `items` arrives already
+  // filtered). rawCount = pre-filter size, so we can tell "nothing fetched" apart
+  // from "filtered to zero". filterSig = serialized filters, to reset the reveal.
+  rawCount = 0, hasActiveFilters = false, onClearClientFilters, activeBands = [], onBandClick, filterSig = '',
+  // Hybrid "Meaning" search: `semantic` = the list is ranked by similarity to
+  // `searchQuery`; `rerankerLoading` = the cross-encoder is still downloading (we
+  // show fusion order meanwhile); `semanticUnavailable` = corpus off (text match).
+  semantic = false, searchQuery = '', rerankerLoading = false, semanticUnavailable = false,
 }) {
   const computing = status === 'computing';
   const errored = status === 'error';
   const [expandedKey, setExpandedKey] = useState(null);
+  // Incremental reveal: the backend returns the whole ranked library, but we only
+  // mount a bounded slice so a ~2,400-item list paints fast (Flow/Doherty) and
+  // stays scrollable (Miller's Law — chunk the long list rather than dump it).
+  const [visibleCount, setVisibleCount] = useState(REVEAL_STEP);
+  // A filter change should jump back to the top of the (now different) list — a
+  // client filter doesn't remount the view (server filters do, via the key), so
+  // reset the reveal here instead.
+  useEffect(() => { setVisibleCount(REVEAL_STEP); }, [filterSig]);
+  const shown = items.slice(0, visibleCount);
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
         <div className="text-xs text-slate-600">
-          <strong>{totalUnread}</strong> unread,{' '}
-          {modelReady ? 'ranked by relevance.' : 'ranked by recency (model not ready yet).'}
+          <strong>{totalUnread}</strong> papers,{' '}
+          {semantic
+            ? <>ranked by similarity to “{searchQuery}”.</>
+            : (modelReady ? 'ranked by relevance.' : 'ranked by recency (model not ready yet).')}
           {readHidden > 0 && !includeRead && (
             <span className="text-slate-400"> · {readHidden} read hidden</span>
           )}
@@ -76,7 +97,20 @@ export default function ReadNextView({
           </label>
         </div>
       </div>
-      {modelReady && <ScoreHistogram distribution={distribution} />}
+      {modelReady && (
+        <ScoreHistogram distribution={distribution} activeBands={activeBands} onBandClick={onBandClick} />
+      )}
+      {rerankerLoading && (
+        <div className="mb-2 flex items-center gap-2 text-xs text-slate-600">
+          <span aria-hidden="true" className="inline-block h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-teal-600 animate-spin" />
+          Downloading the reranker model (first semantic search only) — showing BM25 + embedding results meanwhile; search again shortly for the reranked order.
+        </div>
+      )}
+      {semanticUnavailable && (
+        <div className="mb-2 text-xs text-amber-700">
+          Semantic search needs the corpus enabled — showing exact text matches instead.
+        </div>
+      )}
       {computing && (
         <div className="mb-2 flex items-center gap-2 text-xs text-slate-600">
           <span aria-hidden="true" className="inline-block h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-teal-600 animate-spin" />
@@ -86,16 +120,51 @@ export default function ReadNextView({
       {errored && error && (
         <StatusBanner message={`Scoring failed: ${error}. Click Rescore to retry.`} isError />
       )}
-      {err && <StatusBanner message={`Failed to load queue: ${err.message || err}`} isError />}
-      {loading && items.length === 0 && <div className="p-4 text-center text-xs text-slate-500">Loading reading queue…</div>}
-      {!loading && items.length === 0 && !computing && !errored && (
-        <div className="p-6 text-center text-xs text-slate-500">
-          Nothing to read — add papers from Today, adjust filters, or turn on “Show already-read”.
-          {modelReady && !computedAt && <div className="mt-1">Click <strong>Rescore</strong> to rank by relevance.</div>}
+      {err && (
+        <div className="mb-2">
+          <StatusBanner
+            message={
+              err.status === 422
+                ? 'This view needs the updated backend — restart the app (the server has no auto-reload), then reload the page.'
+                : err.status === 503
+                  ? 'Zotero database was busy. Close Zotero if it’s open, then retry.'
+                  : `Failed to load queue: ${err.message || err}`
+            }
+            isError
+          />
+          {onReload && (
+            <button
+              type="button"
+              onClick={onReload}
+              className="mt-1 px-3 py-1 rounded-md border border-slate-300 text-xs text-slate-700 hover:bg-slate-50"
+            >
+              Retry
+            </button>
+          )}
         </div>
       )}
+      {loading && items.length === 0 && <div className="p-4 text-center text-xs text-slate-500">Loading reading queue…</div>}
+      {!loading && items.length === 0 && !computing && !errored && (
+        hasActiveFilters && rawCount > 0 ? (
+          <div className="p-6 text-center text-xs text-slate-500">
+            No papers match your filters.
+            <button
+              type="button"
+              onClick={onClearClientFilters}
+              className="ml-2 px-2 py-0.5 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 font-medium"
+            >
+              Clear filters
+            </button>
+          </div>
+        ) : (
+          <div className="p-6 text-center text-xs text-slate-500">
+            Nothing to read — add papers from Today, adjust filters, or turn on “Show already-read”.
+            {modelReady && !computedAt && <div className="mt-1">Click <strong>Rescore</strong> to rank by relevance.</div>}
+          </div>
+        )
+      )}
       <ol className="space-y-2">
-        {items.map((it, idx) => (
+        {shown.map((it, idx) => (
           <li key={it.item_key}>
             <div
               className={`w-full flex items-start gap-2 p-2.5 rounded-xl border bg-white hover:border-teal-300 hover:bg-teal-50/30 ${
@@ -122,9 +191,13 @@ export default function ReadNextView({
                   <span className="block text-xs text-slate-500 truncate">{truncateAuthors(it.authors)}</span>
                   {(typeof it.relevance_score === 'number' || it.why_reason || it.date_added) && (
                     <span className="mt-0.5 flex items-center gap-2 text-[11px]">
-                      {typeof it.relevance_score === 'number' && (
+                      {typeof it.relevance_score === 'number' ? (
                         <span className="font-semibold text-teal-700" title="Model relevance score (1–5)">
                           ★ {it.relevance_score.toFixed(1)}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400" title="Not scored yet — run Rescore to rank this paper">
+                          not scored yet
                         </span>
                       )}
                       {it.why_reason && (
@@ -156,6 +229,25 @@ export default function ReadNextView({
           </li>
         ))}
       </ol>
+      {items.length > shown.length && (
+        <div className="mt-3 flex items-center justify-center gap-3 text-xs text-slate-500">
+          <span>Showing {shown.length} of {items.length}</span>
+          <button
+            type="button"
+            onClick={() => setVisibleCount((v) => v + REVEAL_STEP * 4)}
+            className="px-3 py-1 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
+          >
+            Show more
+          </button>
+          <button
+            type="button"
+            onClick={() => startTransition(() => setVisibleCount(items.length))}
+            className="px-3 py-1 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
+          >
+            Show all ({items.length})
+          </button>
+        </div>
+      )}
     </div>
   );
 }

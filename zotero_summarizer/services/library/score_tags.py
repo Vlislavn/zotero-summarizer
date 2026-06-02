@@ -12,6 +12,7 @@ carrying the correct rel-tag are skipped.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from zotero_summarizer.domain import apply_prestige_floor, score_to_priority
@@ -50,7 +51,7 @@ def sync_rel_tags(*, force: bool = False) -> dict[str, Any]:
     # reserve must/should for high-prestige work; unknown prestige → kept.
     floor = reading_queue.prestige_floor([(e["prestige"], e["prestige_known"]) for e in scores.values()])
 
-    items = reader.get_all_items().get("items", [])  # whole library (annotations excluded)
+    items = reader.get_all_items(include_abstract=False).get("items", [])  # whole library (annotations excluded)
     changes: list[dict[str, Any]] = []
     by_band: dict[str, int] = {}
     for it in items:
@@ -91,6 +92,9 @@ def sync_rel_tags(*, force: bool = False) -> dict[str, Any]:
 # value identifiable as ours and zero-padding makes string-sort == rank order.
 _RANK_FIELD = "callNumber"
 _RANK_PREFIX = "zr"
+# Recognises a Call Number WE wrote (``zr`` + digits). Anything else in the field
+# is the user's own value (e.g. an LCC class mark) and must NEVER be overwritten.
+_RANK_RE = re.compile(rf"^{_RANK_PREFIX}\d+$")
 
 
 def sync_score_ranks(*, force: bool = False) -> dict[str, Any]:
@@ -101,28 +105,32 @@ def sync_score_ranks(*, force: bool = False) -> dict[str, Any]:
     (still numbered, so everything stays sortable). Run a Rescore first to build
     the global score cache — this step only writes.
 
-    Backup-first; ``set_field`` overwrites only the rank field (Call Number),
-    never tags/notes/other fields. Re-run after a Rescore to refresh ranks.
-    Returns ``{ranked, scored, unscored, field, backup_path, failed_count}`` or a
-    ``{requires_force: True}`` notice when Zotero is running."""
+    Backup-first; ``set_field`` overwrites only the rank field (Call Number) and
+    NEVER an item that already carries a non-``zr`` Call Number (a user's own
+    value — e.g. an LCC class mark — is preserved and reported as
+    ``skipped_user_callnumber``). Re-run after a Rescore to refresh ranks. Returns
+    ``{ranked, scored, unscored, skipped_user_callnumber, field, backup_path,
+    failed_count}`` or a ``{requires_force: True}`` notice when Zotero is
+    running."""
     scores = reading_queue.read_score_cache()  # global cache (whole library)
     if not scores:
         return {
-            "ranked": 0, "scored": 0, "unscored": 0, "field": _RANK_FIELD,
-            "backup_path": None,
+            "ranked": 0, "scored": 0, "unscored": 0, "skipped_user_callnumber": 0,
+            "field": _RANK_FIELD, "backup_path": None,
             "message": "No scored items — Rescore the whole library first.",
         }
 
     reader = get_zotero_reader_or_raise()
     writer = get_zotero_writer_or_raise()
-    if writer.is_connector_running() and not force:
+    if writer.is_connector_running() and not force:  # fast-fail before the big read
         return {
             "error": "zotero_running",
             "message": "Zotero appears to be running; close Zotero or confirm force apply.",
             "requires_force": True,
         }
 
-    items = reader.get_all_items().get("items", [])  # ALL papers (annotations excluded)
+    items = reader.get_all_items(include_abstract=False).get("items", [])  # ALL papers (abstract unused here)
+    existing_call = reader.get_field_values(_RANK_FIELD)  # {key: current Call Number}
     goal_sims = reading_queue._goal_affinity([str(it["item_key"]) for it in items])
     records: list[dict[str, Any]] = []
     for it in items:
@@ -140,20 +148,39 @@ def sync_score_ranks(*, force: bool = False) -> dict[str, Any]:
     reading_queue._blended_sort(records)
     scored = sum(1 for r in records if r["relevance_score"] is not None)
 
-    changes = [
-        {
+    # Build set_field changes, skipping items that carry a user's OWN Call Number
+    # (anything not matching ``zr\\d+``). Rank numbering stays dense over the items
+    # we actually write, so the zr-ranked papers sort contiguously in Zotero.
+    changes: list[dict[str, Any]] = []
+    skipped_user = 0
+    rank = 0
+    for r in records:
+        current = existing_call.get(r["item_key"], "")
+        if current and not _RANK_RE.match(current):
+            skipped_user += 1
+            continue  # preserve the user's own Call Number — never overwrite it
+        rank += 1
+        changes.append({
             "id": 0,
             "item_key": r["item_key"],
             "change_type": "set_field",
             "payload_json": {"field": _RANK_FIELD, "value": f"{_RANK_PREFIX}{rank:04d}"},
+        })
+
+    # Re-check the connector immediately before the write (TOCTOU: Zotero may have
+    # opened during the multi-second read/sort above).
+    if writer.is_connector_running() and not force:
+        return {
+            "error": "zotero_running",
+            "message": "Zotero appears to be running; close Zotero or confirm force apply.",
+            "requires_force": True,
         }
-        for rank, r in enumerate(records, start=1)
-    ]
     result = writer.apply_changes(changes, True)  # True = backup first
     return {
         "ranked": len(result.get("applied_ids") or []),
         "scored": scored,
         "unscored": len(records) - scored,
+        "skipped_user_callnumber": skipped_user,
         "field": _RANK_FIELD,
         "backup_path": result.get("backup_path"),
         "failed_count": len(result.get("failed") or []),

@@ -52,6 +52,41 @@ def test_get_item_pdf_404_when_item_missing(monkeypatch):
     assert excinfo.value.status_code == 404
 
 
+# --- reading-queue route: whole-library limit cap (the 422 the user hit) -------
+
+def test_reading_queue_status_route_registered():
+    paths = {getattr(route, "path", "") for route in create_app().routes}
+    assert "/api/library/reading-queue/status" in paths
+
+
+def test_get_reading_queue_rejects_over_cap():
+    with pytest.raises(APIError) as excinfo:
+        asyncio.run(library_routes.get_reading_queue(limit=10001))
+    assert excinfo.value.status_code == 422
+
+
+def test_get_reading_queue_rejects_below_one():
+    with pytest.raises(APIError) as excinfo:
+        asyncio.run(library_routes.get_reading_queue(limit=0))
+    assert excinfo.value.status_code == 422
+
+
+def test_get_reading_queue_accepts_whole_library_limit(monkeypatch):
+    # 1, the frontend's 5000, and the exact 10000 cap must all be accepted and
+    # passed through unchanged (guards a future re-tightening of the cap).
+    seen: dict = {}
+
+    def _stub(**kw):
+        seen.update(kw)
+        return {"items": [], "total_unread": 0, "status": "ready"}
+
+    monkeypatch.setattr(library_routes.reading_queue, "build_reading_queue", _stub)
+    for limit in (1, 5000, 10000):
+        out = asyncio.run(library_routes.get_reading_queue(limit=limit))
+        assert out["status"] == "ready"
+    assert seen["limit"] == 10000
+
+
 def test_app_uses_canonical_routes_only(tmp_path, monkeypatch):
     # _install_spa only registers "/" when frontend/dist/index.html exists.
     # Create a stub so the assertion holds on a clean checkout (no built dist).

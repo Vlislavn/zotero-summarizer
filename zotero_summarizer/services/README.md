@@ -29,7 +29,10 @@ bins via `domain` so label derivation == prediction),
 All LLM clients are constructed through `services/llm/factory`, which calls
 `build_llm` for `openai`-type providers), `lifecycle` (startup composition root — small `_init_*`
 builders wire each singleton onto `RuntimeState`; LLM clients are NOT built here,
-they resolve lazily per stage so startup never depends on a provider being reachable),
+they resolve lazily per stage so startup never depends on a provider being reachable;
+`_init_classifier_gate` schedules a background Today-slate rescore when it loads a
+cached gate with an unchanged golden sha, so an offline-trained model reflects on the
+next start without a manual `rescore-slate`),
 `run_log`, `config` (GET/PUT `/api/config`; PUT persists + invalidates stage clients,
 does not validate provider availability), `health`, `results`,
 `corpus` (embeddings/affinity), `emoji_signals`.

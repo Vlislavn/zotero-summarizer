@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from zotero_summarizer.settings import Settings
-from zotero_summarizer.cli._helpers import _resolve_feed_ids
+from zotero_summarizer.cli._helpers import _resolve_feed_ids, progress_printer
 
 
 def _goldenset_predict_feed(args: argparse.Namespace) -> int:
@@ -66,9 +66,6 @@ def _goldenset_predict_feed(args: argparse.Namespace) -> int:
         print(json.dumps({"error": "no unread items found", "feeds": feed_library_ids}, indent=2))
         return 1
 
-    def _progress(done: int, total: int) -> None:
-        print(f"  embedding training set: {done}/{total}", flush=True)
-
     from zotero_summarizer.services._common import read_config
     goals_config = read_config(settings.config_path)
 
@@ -80,7 +77,7 @@ def _goldenset_predict_feed(args: argparse.Namespace) -> int:
         pca_dim=args.pca_dim,
         n_folds=args.folds,
         goals_config=goals_config,
-        progress_cb=_progress,
+        progress_cb=progress_printer("embedding training set:"),
     )
 
     output_csv = Path(args.output or settings.data_dir / f"feed-predictions-{args.feeds or 'all'}.csv")
@@ -142,10 +139,7 @@ def _goldenset_analyze_notes(args: argparse.Namespace) -> int:
         flush=True,
     )
 
-    def _progress(done: int, total: int) -> None:
-        print(f"  classified {done}/{total}", flush=True)
-
-    analyses = note_analyzer.classify_notes(notes, llm, progress_cb=_progress)
+    analyses = note_analyzer.classify_notes(notes, llm, progress_cb=progress_printer("classified"))
     output_csv = Path(args.output or settings.data_dir / "note-analyses.csv")
     note_analyzer.write_analyses_csv(analyses, output_csv)
 

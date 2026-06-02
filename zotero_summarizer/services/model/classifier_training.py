@@ -17,6 +17,131 @@ from zotero_summarizer.services._common import atomic_write, now_iso_z
 LOGGER = logging.getLogger(__name__)
 
 
+def _featurize_training_matrix(
+    data: tuple,
+    library: Any,
+    *,
+    corpus_db_path: Path,
+    goals_config: Any,
+    progress_cb: Callable[[int, int], None] | None = None,
+) -> "np.ndarray":
+    """Batched-embedding feature matrix for the labelled training set."""
+    from zotero_summarizer.services.model.library_features import compute_library_features
+
+    keys, titles, abstracts, _y_cont, train_rows = data
+    embed_cache, openalex_client, cold_start_policy = classifier._build_aux_providers(
+        corpus_db_path, goals_config
+    )
+    n_train = len(keys)
+    X_train = np.zeros((n_train, classifier.FEATURE_DIM), dtype=np.float32)
+    # Embed the whole training set in batched (GPU) passes, not one-at-a-time.
+    embeddings = classifier.get_or_compute_embeddings_batch(
+        corpus_db_path,
+        [{"item_key": k, "title": t, "abstract": a} for k, t, a in zip(keys, titles, abstracts)],
+    )
+    for i, (k, t, a) in enumerate(zip(keys, titles, abstracts)):
+        emb = embeddings[i]
+        X_train[i, :classifier.EMBEDDING_DIM] = emb
+        year_str = (train_rows[i].get("year") or "").strip()
+        year_i = int(year_str[:4]) if year_str[:4].isdigit() else None
+        doi = (train_rows[i].get("doi") or "").strip()
+        affinity, prestige = classifier._compute_aux(
+            embed_cache, openalex_client,
+            title=t, abstract=a, doi=doi, year=year_i,
+            cold_start_policy=cold_start_policy,
+        )
+        authors_str = (train_rows[i].get("authors") or "").strip()
+        nearest, centroid, recent, drift, authors_overlap = compute_library_features(
+            emb, library, candidate_authors=authors_str, exclude_item_key=k,
+        )
+        X_train[i, classifier.EMBEDDING_DIM:] = classifier._extra_features(
+            train_rows[i], t, a,
+            corpus_affinity=affinity, prestige_score=prestige,
+            nearest_kept_cosine=nearest, positive_centroid_cosine=centroid,
+            recent_centroid_cosine=recent, topic_drift=drift,
+            author_overlap_count=authors_overlap,
+        )
+        if progress_cb is not None and (i + 1) % 50 == 0:
+            progress_cb(i + 1, n_train)
+    return X_train
+
+
+def _oof_quality_metrics(train_rows: list[dict], preds_oof: "np.ndarray") -> dict[str, Any]:
+    """Out-of-fold per-class precision/recall/F1 + confusion vs gold labels."""
+    from zotero_summarizer.domain import score_to_priority
+    from zotero_summarizer.services.model import golden_metrics as gm
+
+    gold_labels = [(r.get("gold_priority_final") or "").strip() for r in train_rows]
+    pred_labels = [score_to_priority(float(p)) for p in preds_oof]
+    return {
+        "total": len(gold_labels),
+        "accuracy": round(gm.accuracy(gold_labels, pred_labels), 4),
+        "per_class": {k: v.as_dict() for k, v in gm.compute_per_class(gold_labels, pred_labels).items()},
+        "binary": gm.compute_binary(gold_labels, pred_labels).as_dict(),
+        "confusion": gm.compute_confusion(gold_labels, pred_labels),
+    }
+
+
+def _fit_final_model(
+    classifier_name: str,
+    X_train: "np.ndarray",
+    y_train: "np.ndarray",
+    sw_all: "np.ndarray",
+    *,
+    pca_dim: int,
+    n_train: int,
+) -> tuple[Any, Any]:
+    """Fit the production regressor on the full training set; return (model, pca)."""
+    pca_object = None
+    fitted_model = None
+    if classifier_name == "tabpfn":
+        from sklearn.decomposition import PCA
+
+        actual_dim = min(pca_dim, n_train, classifier.EMBEDDING_DIM)
+        pca_object = PCA(n_components=actual_dim, random_state=42)
+        pca_object.fit(X_train[:, :classifier.EMBEDDING_DIM])
+        # No persistent fitted_model — TabPFN re-fits per predict (in-context).
+    elif classifier_name == "lightgbm":
+        import lightgbm as lgb
+        from zotero_summarizer.services.model.tune import load_tuned_params
+
+        # Sprint-3c: pick up Optuna-tuned params if present; missing file ⇒
+        # empty overrides ⇒ Sprint-1/2 default hyperparameters apply.
+        tuned_params, tuned_pca = load_tuned_params()
+        defaults = {
+            "objective": "regression",
+            "n_estimators": 200, "num_leaves": 15, "max_depth": 4,
+            "learning_rate": 0.05, "min_child_samples": 10, "reg_lambda": 1.0,
+            "verbose": -1, "random_state": 42, "n_jobs": 1, "num_threads": 1,
+        }
+        defaults.update(tuned_params)
+        if tuned_pca is not None and tuned_pca > 0:
+            # Sprint-3b: PCA reduction baked into the production model; store the
+            # PCA object so predict-time transforms new items the same way.
+            from sklearn.decomposition import PCA
+
+            actual_dim = min(tuned_pca, X_train.shape[0], classifier.EMBEDDING_DIM)
+            pca_object = PCA(n_components=actual_dim, random_state=42)
+            pca_object.fit(X_train[:, :classifier.EMBEDDING_DIM])
+            emb_red = pca_object.transform(X_train[:, :classifier.EMBEDDING_DIM])
+            X_train_used = np.concatenate(
+                [emb_red, X_train[:, classifier.EMBEDDING_DIM:]], axis=1
+            ).astype(np.float32)
+        else:
+            X_train_used = X_train
+
+        fitted_model = lgb.LGBMRegressor(**defaults)
+        fitted_model.fit(X_train_used, y_train, sample_weight=sw_all)
+    elif classifier_name == "logreg":
+        from sklearn.linear_model import Ridge
+
+        fitted_model = Ridge(alpha=1.0, random_state=42)
+        fitted_model.fit(X_train, y_train)
+    else:
+        raise ValueError(classifier_name)
+    return fitted_model, pca_object
+
+
 def train_and_save(
     golden_csv: Path,
     *,
@@ -60,66 +185,19 @@ def train_and_save(
         all_rows = hybrid_gt.apply_hybrid(all_rows, triage_db_path)
 
     # Hygiene cut: F5 (in_trash) + Sprint-1 tier filter (first_glance, meta).
-    from zotero_summarizer.domain import is_training_eligible, paper_group_id
+    from zotero_summarizer.domain import paper_group_id
+    from zotero_summarizer.services.model.library_features import load_positive_library_from_rows
 
-    keys, titles, abstracts, y_cont, train_rows = [], [], [], [], []
-    for r in all_rows:
-        if not is_training_eligible(r):
-            continue
-        gold = (r.get("gold_priority_final") or "").strip()
-        title = (r.get("title") or "").strip()
-        abstract = (r.get("abstract") or "").strip()
-        rel_str = (r.get("gold_inferred_relevance") or "").strip()
-        if not gold or not title or not abstract or not rel_str:
-            continue
-        rel = float(rel_str)
-        keys.append(r.get("item_key", ""))
-        titles.append(title)
-        abstracts.append(abstract)
-        y_cont.append(rel)
-        train_rows.append(r)
-    if len(y_cont) < n_folds * 2:
-        raise ValueError(
-            f"need at least {n_folds * 2} labeled rows for {n_folds}-fold CV; got {len(y_cont)}"
-        )
+    data = classifier._filter_train_rows(all_rows, n_folds=n_folds)
+    keys, titles, abstracts, y_cont, train_rows = data
 
     # 2. Featurise (reuses classifier helpers — no authors/venue now).
-    embed_cache, openalex_client = classifier._build_aux_providers(corpus_db_path, goals_config)
-    from zotero_summarizer.services.model.library_features import (
-        compute_library_features,
-        load_positive_library_from_rows,
-    )
     library = load_positive_library_from_rows(all_rows, corpus_db_path)
     n_train = len(y_cont)
-    X_train = np.zeros((n_train, classifier.FEATURE_DIM), dtype=np.float32)
-    # Embed the whole training set in batched (GPU) passes, not one-at-a-time.
-    embeddings = classifier.get_or_compute_embeddings_batch(
-        corpus_db_path,
-        [{"item_key": k, "title": t, "abstract": a} for k, t, a in zip(keys, titles, abstracts)],
+    X_train = _featurize_training_matrix(
+        data, library,
+        corpus_db_path=corpus_db_path, goals_config=goals_config, progress_cb=progress_cb,
     )
-    for i, (k, t, a) in enumerate(zip(keys, titles, abstracts)):
-        emb = embeddings[i]
-        X_train[i, :classifier.EMBEDDING_DIM] = emb
-        year_str = (train_rows[i].get("year") or "").strip()
-        year_i = int(year_str[:4]) if year_str[:4].isdigit() else None
-        doi = (train_rows[i].get("doi") or "").strip()
-        affinity, prestige = classifier._compute_aux(
-            embed_cache, openalex_client,
-            title=t, abstract=a, doi=doi, year=year_i,
-        )
-        authors_str = (train_rows[i].get("authors") or "").strip()
-        nearest, centroid, recent, drift, authors_overlap = compute_library_features(
-            emb, library, candidate_authors=authors_str, exclude_item_key=k,
-        )
-        X_train[i, classifier.EMBEDDING_DIM:] = classifier._extra_features(
-            train_rows[i], t, a,
-            corpus_affinity=affinity, prestige_score=prestige,
-            nearest_kept_cosine=nearest, positive_centroid_cosine=centroid,
-            recent_centroid_cosine=recent, topic_drift=drift,
-            author_overlap_count=authors_overlap,
-        )
-        if progress_cb is not None and (i + 1) % 50 == 0:
-            progress_cb(i + 1, n_train)
     y_train = np.asarray(y_cont, dtype=np.float64)
 
     # 3. K-fold OOF predictions → diagnostic Spearman ρ. No held-out
@@ -141,74 +219,14 @@ def train_and_save(
         LOGGER.info("train_and_save: fold %d/%d done", fold_idx, n_folds)
     oof_rho = float(spearmanr(y_train, preds_oof).statistic) if n_train > 2 else 0.0
 
-    # Out-of-fold per-class quality (honest — these predictions never saw their
-    # own fold). Bucket the OOF continuous scores to priorities via the same
-    # domain mapping the gate uses, then compare to gold. Reuses golden_metrics
-    # so the model card can render precision/recall/F1 + a confusion matrix.
-    from zotero_summarizer.domain import score_to_priority
-    from zotero_summarizer.services.model import golden_metrics as gm
-
-    gold_labels = [(r.get("gold_priority_final") or "").strip() for r in train_rows]
-    pred_labels = [score_to_priority(float(p)) for p in preds_oof]
-    oof_metrics = {
-        "total": len(gold_labels),
-        "accuracy": round(gm.accuracy(gold_labels, pred_labels), 4),
-        "per_class": {k: v.as_dict() for k, v in gm.compute_per_class(gold_labels, pred_labels).items()},
-        "binary": gm.compute_binary(gold_labels, pred_labels).as_dict(),
-        "confusion": gm.compute_confusion(gold_labels, pred_labels),
-    }
+    # Out-of-fold per-class quality (honest — predictions never saw their own
+    # fold), bucketed to priorities via the same domain mapping the gate uses.
+    oof_metrics = _oof_quality_metrics(train_rows, preds_oof)
 
     # 4. Final fit on FULL training set.
-    pca_object = None
-    fitted_model = None
-    if classifier_name == "tabpfn":
-        from sklearn.decomposition import PCA
-
-        actual_dim = min(pca_dim, n_train, classifier.EMBEDDING_DIM)
-        pca_object = PCA(n_components=actual_dim, random_state=42)
-        pca_object.fit(X_train[:, :classifier.EMBEDDING_DIM])
-        # No persistent fitted_model — TabPFN re-fits per predict via in-context learning.
-    elif classifier_name == "lightgbm":
-        import lightgbm as lgb
-        from zotero_summarizer.services.model.tune import load_tuned_params
-
-        # Sprint-3c: pick up Optuna-tuned params if a `optuna-best-params.json`
-        # is present in the cache dir. Missing file ⇒ empty overrides
-        # ⇒ Sprint-1/2 default hyperparameters apply.
-        tuned_params, tuned_pca = load_tuned_params()
-        defaults = {
-            "objective": "regression",
-            "n_estimators": 200, "num_leaves": 15, "max_depth": 4,
-            "learning_rate": 0.05, "min_child_samples": 10, "reg_lambda": 1.0,
-            "verbose": -1, "random_state": 42, "n_jobs": 1, "num_threads": 1,
-        }
-        defaults.update(tuned_params)
-        if tuned_pca is not None and tuned_pca > 0:
-            # Sprint-3b: PCA reduction baked into the production model.
-            # We materialise the reduced matrix once and store the PCA
-            # object alongside the model so predict-time can transform new
-            # items the same way.
-            from sklearn.decomposition import PCA
-
-            actual_dim = min(tuned_pca, X_train.shape[0], classifier.EMBEDDING_DIM)
-            pca_object = PCA(n_components=actual_dim, random_state=42)
-            pca_object.fit(X_train[:, :classifier.EMBEDDING_DIM])
-            emb_red = pca_object.transform(X_train[:, :classifier.EMBEDDING_DIM])
-            X_train_used = np.concatenate(
-                [emb_red, X_train[:, classifier.EMBEDDING_DIM:]], axis=1
-            ).astype(np.float32)
-        else:
-            X_train_used = X_train
-
-        fitted_model = lgb.LGBMRegressor(**defaults)
-        fitted_model.fit(X_train_used, y_train, sample_weight=sw_all)
-    elif classifier_name == "logreg":
-        from sklearn.linear_model import Ridge
-
-        fitted_model = Ridge(alpha=1.0, random_state=42)
-        fitted_model.fit(X_train, y_train)
-    else:
-        raise ValueError(classifier_name)
+    fitted_model, pca_object = _fit_final_model(
+        classifier_name, X_train, y_train, sw_all, pca_dim=pca_dim, n_train=n_train,
+    )
 
     # 5. Build the artefact.
     sha256 = run_log.file_sha256(golden_csv, prefix_len=64)

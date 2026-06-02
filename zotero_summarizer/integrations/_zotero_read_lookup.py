@@ -197,3 +197,25 @@ class ZoteroLookupMixin:
             ]
 
         return self._execute_read(_read)
+
+    def get_field_values(self, field_name: str) -> dict[str, str]:
+        """``{item_key: value}`` for ONE Zotero field across the whole library —
+        only items that actually carry the field. One JOIN query (no per-item IN
+        clause, so no SQL-variable-limit risk). Used to read current Call Numbers
+        before a rank write so we never overwrite a user's own (non-``zr``) value."""
+
+        def _read(conn: sqlite3.Connection) -> dict[str, str]:
+            rows = conn.execute(
+                """
+                SELECT i.key AS item_key, v.value AS value
+                FROM items i
+                JOIN itemData id ON id.itemID = i.itemID
+                JOIN fields f ON f.fieldID = id.fieldID
+                JOIN itemDataValues v ON v.valueID = id.valueID
+                WHERE f.fieldName = ?
+                """,
+                (field_name,),
+            ).fetchall()
+            return {str(row["item_key"]): str(row["value"] or "") for row in rows}
+
+        return self._execute_read(_read)

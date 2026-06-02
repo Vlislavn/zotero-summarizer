@@ -87,7 +87,7 @@ def featurize_golden(
             f"for repeated CV; got {n}"
         )
 
-    embed_cache, openalex_client = classifier._build_aux_providers(
+    embed_cache, openalex_client, cold_start_policy = classifier._build_aux_providers(
         corpus_db_path, goals_config,
     )
     from zotero_summarizer.services.model.library_features import (
@@ -105,6 +105,7 @@ def featurize_golden(
         affinity, prestige = classifier._compute_aux(
             embed_cache, openalex_client,
             title=t, abstract=a, doi=doi, year=year_i,
+            cold_start_policy=cold_start_policy,
         )
         authors_str = (selected[i].get("authors") or "").strip()
         nearest, centroid, recent, drift, authors_overlap = compute_library_features(

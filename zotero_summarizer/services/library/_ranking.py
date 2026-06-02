@@ -21,6 +21,11 @@ from zotero_summarizer.services._common import state as get_state
 # what I said I want." Set to 0.0 to disable.
 _GOAL_RERANK_WEIGHT = 0.4
 
+# Fallback ordering only (gate not ready): priority tier then recency.
+_PRIORITY_RANK: dict[str, int] = {
+    "must_read": 3, "should_read": 2, "could_read": 1, "": 0, "dont_read": -1,
+}
+
 
 def _content_key(rec: dict[str, Any]) -> str:
     """Normalized-full-title identity for de-duplication. The same paper imported
@@ -94,10 +99,36 @@ def _blended_sort(unread: list[dict[str, Any]]) -> None:
     unread.sort(key=key, reverse=True)
 
 
+def sort_unread(unread: list[dict[str, Any]], *, model_ready: bool) -> None:
+    """Order the unread queue IN PLACE (the queue's normal, non-search order).
+
+    Gate ready + goals set → goal-blended (attaches ``goal_sim`` per row); gate
+    ready + no goals → gate-score-then-recency; gate not ready → priority-tier
+    then recency. Only ORDER changes; banding stays from the gate score."""
+    if model_ready:
+        goal_sims = _goal_affinity([r["item_key"] for r in unread]) if _GOAL_RERANK_WEIGHT > 0 else {}
+        for r in unread:
+            r["goal_sim"] = goal_sims.get(r["item_key"])
+        if goal_sims:
+            _blended_sort(unread)
+        else:
+            unread.sort(
+                key=lambda c: (c["relevance_score"] is not None, c["relevance_score"] or 0.0, c["date_added"]),
+                reverse=True,
+            )
+    else:
+        unread.sort(
+            key=lambda c: (_PRIORITY_RANK.get(c["reading_priority"], 0), c["date_added"]),
+            reverse=True,
+        )
+
+
 __all__ = [
     "_GOAL_RERANK_WEIGHT",
+    "_PRIORITY_RANK",
     "_content_key",
     "_dedup_by_content",
     "_goal_affinity",
     "_blended_sort",
+    "sort_unread",
 ]

@@ -20,12 +20,17 @@ class ZoteroFieldWriteMixin:
         item_key: str,
         payload: dict[str, Any],
         item_data_columns: set[str],
+        item_columns: set[str],
     ) -> None:
         """Set (or clear) ONE Zotero item field by name on an EXISTING item.
 
         Upsert semantics: replaces any prior value for ``(item, field)``; an empty
         value clears it. Used to stamp the goal-blended queue rank into a sortable
-        field (Call Number) so the app's order is reproducible inside Zotero."""
+        field (Call Number) so the app's order is reproducible inside Zotero.
+
+        Bumps the parent item's ``dateModified``/``version``/``synced`` (via the
+        shared ``_touch_item``) like every other write path, so a running Zotero
+        notices the change and zotero.org sync doesn't revert it as a phantom edit."""
         field_name = str(payload.get("field") or "").strip()
         if not field_name:
             raise ZoteroWriteError("set_field payload requires 'field'")
@@ -48,3 +53,4 @@ class ZoteroFieldWriteMixin:
                 "INSERT INTO itemData (itemID, fieldID, valueID) VALUES (?, ?, ?)",
                 (item_id, field_id, value_id),
             )
+        self._touch_item(conn, item_id, item_columns)

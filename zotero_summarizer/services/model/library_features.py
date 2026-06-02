@@ -25,7 +25,6 @@ keeps the features in sync with the labels by construction.
 
 from __future__ import annotations
 
-import csv
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -192,18 +191,6 @@ def load_positive_library_from_rows(
     recent_mask = [_parse_days_since(row) <= RECENT_WINDOW_DAYS for row in valid]
     authors = _collect_author_tokens(rows)
     return _stack_library(keys, raw_embeddings, recent_mask, authors)
-
-
-def load_positive_library(
-    golden_csv: Path,
-    corpus_db_path: Path,
-) -> PositiveLibrary:
-    """Build the positive-engagement subset P from the golden CSV."""
-    if not golden_csv.exists():
-        raise FileNotFoundError(f"golden CSV missing for P-set: {golden_csv}")
-    with golden_csv.open("r", encoding="utf-8", newline="") as f:
-        rows = list(csv.DictReader(f))
-    return load_positive_library_from_rows(rows, corpus_db_path)
 
 
 def positive_library_from_embeddings(

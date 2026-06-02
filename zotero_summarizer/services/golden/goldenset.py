@@ -449,18 +449,21 @@ def _write_jsonl(samples: list[GoldenSample], path: Path) -> None:
     atomic_write(path, _write)
 
 
-def _class_distribution(samples: list[GoldenSample]) -> dict[str, int]:
+def _distribution(samples: list[GoldenSample], attr: str) -> dict[str, int]:
+    """Histogram of ``getattr(sample, attr)`` over ``samples``."""
     out: dict[str, int] = {}
     for s in samples:
-        out[s.gold_priority_inferred] = out.get(s.gold_priority_inferred, 0) + 1
+        key = getattr(s, attr)
+        out[key] = out.get(key, 0) + 1
     return out
+
+
+def _class_distribution(samples: list[GoldenSample]) -> dict[str, int]:
+    return _distribution(samples, "gold_priority_inferred")
 
 
 def _strength_distribution(samples: list[GoldenSample]) -> dict[str, int]:
-    out: dict[str, int] = {}
-    for s in samples:
-        out[s.gold_signal_strength] = out.get(s.gold_signal_strength, 0) + 1
-    return out
+    return _distribution(samples, "gold_signal_strength")
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,13 @@
+# Grandfathered slop findings — frozen so only NEW slop surfaces (Tier 7).
+#
+# Key format: <path>:<line>:<rule>  (one per line; `#` starts a comment).
+# Same rule as the other gate allowlists: an entry may be REMOVED (clean the code)
+# but a NEW entry needs a one-line justification. Goal: shrink to empty.
+#
+# Regenerate after a deliberate change:
+#   python3 tools/precommit/check_slop.py dump > tools/precommit/slop_allowlist.txt
+#   # then re-add this header
+#
+# Current contents: 0 blocking findings (debug-leftover path is clean). The advisory
+# entries below are pre-existing — long functions, the WAL-pragma / best-effort
+# `except: pass` idiom, a few long param lists — frozen as known debt, never blocking.

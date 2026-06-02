@@ -10,13 +10,9 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Protocol
+from typing import Any, Iterable
 
 logger = logging.getLogger(__name__)
-
-
-class _Scored(Protocol):
-    composite_score: float
 
 
 @dataclass(frozen=True)

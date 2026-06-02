@@ -1,11 +1,13 @@
 """Collection add/remove methods of ZoteroWriter (mixin)."""
 from __future__ import annotations
 
-import random
 import sqlite3
 from typing import Any
 
-from zotero_summarizer.integrations._zotero_write_common import ZoteroWriteError  # noqa: F401
+from zotero_summarizer.integrations._zotero_write_common import (  # noqa: F401
+    ZoteroWriteError,
+    generate_unique_key,
+)
 
 
 class ZoteroCollectionMixin:
@@ -57,12 +59,7 @@ class ZoteroCollectionMixin:
         return int(cursor.lastrowid)
 
     def _generate_unique_collection_key(self, conn: sqlite3.Connection) -> str:
-        for _ in range(32):
-            key = "".join(random.choice(self._KEY_ALPHABET) for _ in range(8))
-            row = conn.execute("SELECT 1 FROM collections WHERE key = ? LIMIT 1", (key,)).fetchone()
-            if row is None:
-                return key
-        raise ZoteroWriteError("Could not generate a unique Zotero collection key")
+        return generate_unique_key(conn, "collections", self._KEY_ALPHABET, "collection")
 
     def _apply_collection_change(
         self,
@@ -147,7 +144,7 @@ class ZoteroCollectionMixin:
             conn.execute("PRAGMA foreign_keys=ON")
             try:
                 conn.execute("PRAGMA journal_mode=WAL")
-            except sqlite3.Error:
+            except sqlite3.Error as _:
                 pass
 
             if root_only:

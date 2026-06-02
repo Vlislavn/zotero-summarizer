@@ -5,20 +5,22 @@ import re
 import sqlite3
 from typing import Any
 
-from zotero_summarizer.integrations._zotero_write_common import LOGGER, ZoteroWriteError  # noqa: F401
+from zotero_summarizer.integrations._zotero_write_common import (  # noqa: F401
+    LOGGER,
+    WriteColumns,
+    ZoteroWriteError,
+    read_write_columns,
+)
 
 
 class ZoteroItemWriteMixin:
     def _apply_create_item_from_feed(
         self,
         conn: sqlite3.Connection,
+        *,
         new_item_key: str,
         payload: dict[str, Any],
-        item_columns: set[str],
-        item_data_columns: set[str],
-        item_data_value_columns: set[str],
-        creators_columns: set[str],
-        item_creators_columns: set[str],
+        cols: WriteColumns,
     ) -> None:
         """Create a top-level Zotero item from a feed payload.
 
@@ -30,6 +32,11 @@ class ZoteroItemWriteMixin:
         collections, tag_changes, add_note) are queued separately by the
         orchestrator and reference the same `new_item_key`.
         """
+        item_columns = cols.items
+        item_data_columns = cols.item_data
+        item_data_value_columns = cols.item_data_values
+        creators_columns = cols.creators
+        item_creators_columns = cols.item_creators
         title = str(payload.get("title") or "").strip()
         if not title:
             raise ZoteroWriteError("Feed item payload missing title")
@@ -275,7 +282,7 @@ class ZoteroItemWriteMixin:
             try:
                 try:
                     conn.execute("PRAGMA journal_mode=WAL")
-                except sqlite3.Error:
+                except sqlite3.Error as _:
                     pass
                 conn.execute("PRAGMA busy_timeout=15000")
                 placeholders = ",".join("?" for _ in feed_item_ids)
@@ -301,16 +308,53 @@ class ZoteroItemWriteMixin:
         except sqlite3.Error as exc:
             raise ZoteroWriteError(f"Failed to mark feed items read: {exc}") from exc
 
+    def _add_matched_collections(
+        self, conn: sqlite3.Connection, *, new_item_key: str,
+        matched_collections: list[str] | None, inbox_collection_name: str, cols: WriteColumns,
+    ) -> list[str]:
+        """Add the item to each matched user collection (best-effort). Returns step labels."""
+        steps: list[str] = []
+        seen_paths = {inbox_collection_name.casefold()}
+        for path in matched_collections or []:
+            clean = str(path or "").strip()
+            if not clean or clean.casefold() in seen_paths:
+                continue
+            seen_paths.add(clean.casefold())
+            try:
+                self._apply_collection_change(
+                    conn, item_key=new_item_key, payload={"collection_path": clean},
+                    item_columns=cols.items, collection_columns=cols.collections,
+                    collection_item_columns=cols.collection_items,
+                )
+                steps.append(f"add_to_collection:{clean}")
+            except ZoteroWriteError as _:
+                # Don't fail materialization for missing user collections.
+                pass
+        return steps
+
+    def _apply_materialization_tags(
+        self, conn: sqlite3.Connection, *, new_item_key: str,
+        tags: list[str], provenance_tag: str | None, cols: WriteColumns,
+    ) -> None:
+        """Apply the item's tags, appending the provenance auto-tag when provided."""
+        all_tags = list(self._normalize_tags(tags))
+        if provenance_tag and provenance_tag not in all_tags:
+            all_tags.append(provenance_tag)
+        self._apply_tag_change(
+            conn, item_key=new_item_key, payload={"add_tags": all_tags, "remove_tags": []},
+            item_columns=cols.items, tag_columns=cols.tags, item_tag_columns=cols.item_tags,
+        )
+
     def apply_feed_materialization(
         self,
         *,
         new_item_key: str,
         feed_payload: dict[str, Any],
         inbox_collection_name: str,
-        matched_collections: list[str],
         tags: list[str],
         note_title: str,
         note_html: str,
+        matched_collections: list[str] | None = None,
         provenance_tag: str | None = None,
         create_backup: bool = False,
     ) -> dict[str, Any]:
@@ -349,34 +393,20 @@ class ZoteroItemWriteMixin:
                 conn.execute("PRAGMA foreign_keys=ON")
                 try:
                     conn.execute("PRAGMA journal_mode=WAL")
-                except sqlite3.Error:
+                except sqlite3.Error as _:
                     pass
                 conn.execute("PRAGMA busy_timeout=15000")
 
-                item_columns = self._table_columns(conn, "items")
-                tag_columns = self._table_columns(conn, "tags")
-                item_tag_columns = self._table_columns(conn, "itemTags")
-                note_columns = self._table_columns(conn, "itemNotes")
-                collection_columns = self._table_columns(conn, "collections")
-                collection_item_columns = self._table_columns(conn, "collectionItems")
-                item_data_columns = self._table_columns(conn, "itemData")
-                item_data_value_columns = self._table_columns(conn, "itemDataValues")
-                creators_columns = self._table_columns(conn, "creators")
-                item_creators_columns = self._table_columns(conn, "itemCreators")
+                cols = read_write_columns(lambda t: self._table_columns(conn, t))
+                item_columns = cols.items
+                note_columns = cols.item_notes
+                collection_columns = cols.collections
+                collection_item_columns = cols.collection_items
 
                 applied_steps: list[str] = []
 
                 # 1. Create the top-level item.
-                self._apply_create_item_from_feed(
-                    conn,
-                    new_item_key=new_item_key,
-                    payload=feed_payload,
-                    item_columns=item_columns,
-                    item_data_columns=item_data_columns,
-                    item_data_value_columns=item_data_value_columns,
-                    creators_columns=creators_columns,
-                    item_creators_columns=item_creators_columns,
-                )
+                self._apply_create_item_from_feed(conn, new_item_key=new_item_key, payload=feed_payload, cols=cols)
                 applied_steps.append("create_item")
 
                 # 2. Inbox collection.
@@ -404,37 +434,14 @@ class ZoteroItemWriteMixin:
                     applied_steps.append("add_to_inbox_after_autocreate")
 
                 # 3. Matched user collections (best-effort: skip ones that don't exist).
-                seen_paths = {inbox_collection_name.casefold()}
-                for path in matched_collections or []:
-                    clean = str(path or "").strip()
-                    if not clean or clean.casefold() in seen_paths:
-                        continue
-                    seen_paths.add(clean.casefold())
-                    try:
-                        self._apply_collection_change(
-                            conn,
-                            item_key=new_item_key,
-                            payload={"collection_path": clean},
-                            item_columns=item_columns,
-                            collection_columns=collection_columns,
-                            collection_item_columns=collection_item_columns,
-                        )
-                        applied_steps.append(f"add_to_collection:{clean}")
-                    except ZoteroWriteError:
-                        # Don't fail materialization for missing user collections.
-                        pass
+                applied_steps.extend(self._add_matched_collections(
+                    conn, new_item_key=new_item_key, matched_collections=matched_collections,
+                    inbox_collection_name=inbox_collection_name, cols=cols,
+                ))
 
                 # 4. Tags (+ provenance tag with auto-tag type if provided).
-                all_tags = list(self._normalize_tags(tags))
-                if provenance_tag and provenance_tag not in all_tags:
-                    all_tags.append(provenance_tag)
-                self._apply_tag_change(
-                    conn,
-                    item_key=new_item_key,
-                    payload={"add_tags": all_tags, "remove_tags": []},
-                    item_columns=item_columns,
-                    tag_columns=tag_columns,
-                    item_tag_columns=item_tag_columns,
+                self._apply_materialization_tags(
+                    conn, new_item_key=new_item_key, tags=tags, provenance_tag=provenance_tag, cols=cols,
                 )
                 applied_steps.append("apply_tags")
 

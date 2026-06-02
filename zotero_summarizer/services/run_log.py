@@ -29,9 +29,6 @@ from typing import Any
 LOGGER = logging.getLogger(__name__)
 
 
-DEFAULT_LOG_NAME = "classifier-runs.jsonl"
-
-
 def make_run_id(classifier_name: str, *, now: datetime | None = None) -> str:
     """Compact unique identifier: ``YYYYMMDD_HHMMSS_<classifier>``."""
     now = now or datetime.now(timezone.utc)

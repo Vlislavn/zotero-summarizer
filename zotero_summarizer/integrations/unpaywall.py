@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 
+from zotero_summarizer.domain import normalize_doi
 from zotero_summarizer.integrations.openalex_cache import OpenAlexCache
 
 
@@ -34,7 +35,7 @@ class UnpaywallClient:
         self._http = http_client or httpx.Client(timeout=_TIMEOUT_SECS)
 
     def find_oa_pdf_url(self, doi: str) -> str | None:
-        doi_norm = _normalize_doi(doi)
+        doi_norm = normalize_doi(doi)
         if not doi_norm:
             return None
         if not self.email:
@@ -64,13 +65,3 @@ class UnpaywallClient:
         pdf_url = ((payload.get("best_oa_location") or {}).get("url_for_pdf")) or None
         self.cache.set(key, {"pdf_url": pdf_url})
         return pdf_url
-
-
-def _normalize_doi(doi: str) -> str:
-    d = (doi or "").strip().lower()
-    if not d:
-        return ""
-    for prefix in ("https://doi.org/", "http://doi.org/", "doi:"):
-        if d.startswith(prefix):
-            d = d[len(prefix):]
-    return d.strip("/")

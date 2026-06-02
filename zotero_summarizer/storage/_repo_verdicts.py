@@ -34,9 +34,9 @@ def insert_role_value_verdict(
     item_key: str,
     role: str,
     verdict: str,
-    composite_score: float | None,
-    surprise_score: float | None,
-    corpus_affinity: float | None,
+    composite_score: float | None = None,
+    surprise_score: float | None = None,
+    corpus_affinity: float | None = None,
 ) -> int:
     """Record one role-value verdict (one row per item_key+role); returns its id.
 

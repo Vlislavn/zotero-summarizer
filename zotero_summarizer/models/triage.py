@@ -16,8 +16,6 @@ __all__ = [
     "PaperDigest",
     "RefinedSummary",
     "SummarizeResponse",
-    "BatchSummarizeItemResponse",
-    "BatchFailure",
     "CorpusItem",
     "CorpusImportRequest",
     "TriageFeedbackRequest",
@@ -25,7 +23,6 @@ __all__ = [
     "TriageDimensionOverrideRequest",
     "CalibrationPeriodMetrics",
     "CalibrationMetricsResponse",
-    "BatchSummarizeResponse",
 ]
 
 
@@ -212,22 +209,6 @@ class SummarizeResponse(BaseModel):
     prestige_venue: str = ""
 
 
-class BatchSummarizeItemResponse(BaseModel):
-    batch_id: str | None = None
-    item_id: str
-    title: str
-    summary: SummarizeResponse
-    normalized_score: float = Field(default=0.0, ge=0.0, le=100.0)
-    percentile: float = Field(default=0.0, ge=0.0, le=100.0)
-    rank: int = Field(default=0, ge=0)
-    forced_priority: str = Field(default=ReadingPriority.COULD_READ.value)
-
-
-class BatchFailure(BaseModel):
-    item_id: str
-    error: str
-
-
 class CorpusItem(BaseModel):
     item_id: str = Field(..., min_length=1)
     title: str = Field(..., min_length=1)
@@ -276,20 +257,6 @@ class TriageDimensionOverrideRequest(BaseModel):
             raise ValueError("at least one triage dimension override is required")
         return self
 
-    def to_partial_dimensions(self) -> Dict[str, int]:
-        payload: Dict[str, int] = {}
-        if self.goal_alignment is not None:
-            payload["goal_alignment"] = int(self.goal_alignment)
-        if self.novelty_for_goals is not None:
-            payload["novelty_for_goals"] = int(self.novelty_for_goals)
-        if self.methodological_rigor is not None:
-            payload["methodological_rigor"] = int(self.methodological_rigor)
-        if self.actionability is not None:
-            payload["actionability"] = int(self.actionability)
-        if self.evidence_strength is not None:
-            payload["evidence_strength"] = int(self.evidence_strength)
-        return payload
-
 
 class CalibrationPeriodMetrics(BaseModel):
     total_feedback: int = Field(default=0, ge=0)
@@ -309,10 +276,3 @@ class CalibrationPeriodMetrics(BaseModel):
 
 class CalibrationMetricsResponse(BaseModel):
     periods: Dict[str, CalibrationPeriodMetrics] = Field(default_factory=dict)
-
-
-class BatchSummarizeResponse(BaseModel):
-    batch_id: str | None = None
-    total_items: int = Field(..., ge=0)
-    ranked_items: List[BatchSummarizeItemResponse] = Field(default_factory=list)
-    failed_items: List[BatchFailure] = Field(default_factory=list)

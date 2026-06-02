@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 from zotero_summarizer.integrations.openalex import OpenAlexClient
 from zotero_summarizer.integrations.openalex_cache import OpenAlexCache
@@ -195,8 +196,13 @@ def _init_classifier_gate(app_state: RuntimeState, config: GoalsConfig, current_
             config.classifier_gate.drop_priorities,
         )
         # No-op if the golden sha is unchanged; background retrain if it drifted
-        # (e.g. after Refresh-labels re-exported the CSV).
-        feeds.schedule_gate_retrain_async("startup")
+        # (e.g. after Refresh-labels re-exported the CSV). A drift retrain swaps
+        # AND re-scores the slate via install_gate; when nothing drifts, the
+        # loaded cached gate is final, so re-score the slate ourselves — a model
+        # trained offline (CLI) then loaded on this restart would otherwise leave
+        # Today on whatever scores each row got at triage time.
+        if not feeds.schedule_gate_retrain_async("startup"):
+            feeds.schedule_slate_rescore_async("startup-cached-gate")
     else:
         # No usable cached model (missing, or rejected as stale above).
         LOGGER.info(
@@ -261,6 +267,10 @@ def _resume_interrupted_jobs(app_state: RuntimeState, loop: asyncio.AbstractEven
 def startup(override_model: str | None = None) -> None:
     current_settings = settings()
     setup_logging()
+
+    if os.getenv("HF_HUB_OFFLINE") == "1":
+        LOGGER.info("Offline mode: HuggingFace hub disabled — models load cache-only "
+                    "(run `zotero-summarizer prefetch-models` online once to populate the cache)")
 
     config = _load_config(current_settings, override_model)
     app_state = state()

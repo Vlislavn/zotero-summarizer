@@ -35,6 +35,8 @@ import {
   GroundTruthOneLiner,
   EffectiveLabelsStrip,
   TriageProgress,
+  AnnotateHintBanner,
+  readAnnotateHintDismissed,
 } from './AnnotationVerdict_helpers.jsx';
 
 // Flatten the Zotero collection tree into indented <option>s for a compact
@@ -111,6 +113,7 @@ export default function AnnotationVerdict() {
   // optimistic auto-advance on verdict save, flashStatus for keyboard feedback.
   const [flashStatus, setFlashStatus] = useState(null);
   const [sortOrder, setSortOrder] = useState('score_desc');
+  const [hintDismissed, setHintDismissed] = useState(readAnnotateHintDismissed);
   const listRef = useRef(null);
 
   // ---------- List query ----------
@@ -512,8 +515,18 @@ export default function AnnotationVerdict() {
     );
   }
 
+  // Plain-language name of the active filter, for the empty state (Selective
+  // Attention: tell the user which slice came up empty, not just "no match").
+  const activeFilterLabel = isBorderMode
+    ? '🎯 border'
+    : (PRIORITY_FILTERS.find((p) => p.key === priorityFilter)?.label ?? 'these filters');
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+    <>
+      {!hintDismissed && (
+        <AnnotateHintBanner onDismiss={() => setHintDismissed(true)} />
+      )}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
       {/* ---------- Left column: paper list ---------- */}
       <aside
         ref={listRef}
@@ -650,7 +663,11 @@ export default function AnnotationVerdict() {
           {!(listQuery.isLoading || borderQuery.isLoading)
             && borderStatus !== 'computing'
             && filteredItems.length === 0 && (
-            <li className="text-xs text-slate-500 p-3">No papers match these filters.</li>
+            <li className="text-xs text-slate-500 p-3">
+              No <span className="font-semibold">{activeFilterLabel}</span> papers
+              {(search || selectedCollection || selectedTag || flagFilter) ? ' for this search/filter' : ''}.
+              {' '}Try another filter above.
+            </li>
           )}
           {filteredItems.map((it) => (
             <PaperListItem
@@ -666,6 +683,7 @@ export default function AnnotationVerdict() {
 
       {/* ---------- Right column: paper detail ---------- */}
       {detailContent}
-    </div>
+      </div>
+    </>
   );
 }

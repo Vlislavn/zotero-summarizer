@@ -1,0 +1,26 @@
+# Grandfathered Vulture findings — path-anchored so a name acknowledged here
+# never masks a genuinely-dead symbol of the SAME name in another module (the
+# old bare-name `vulture_whitelist.py` had that collision hole), and name-based
+# (not line-based) so an entry survives line drift.
+#
+# Key format: <path>:<flagged-name>   (one per line; `#` starts a comment).
+# Pydantic / @dataclass FIELD declarations are auto-suppressed by a structural
+# guard (see check_dead_code.py:model_field_keys), so they need NO entry here —
+# only the genuinely-ambiguous residue is listed. Same rule as the other gate
+# allowlists: an entry may be REMOVED (delete the symbol, or wire a consumer) but
+# a NEW entry needs a one-line justification. Goal: shrink to empty.
+#
+# Regenerate after a deliberate change:
+#   python3 tools/precommit/check_dead_code.py make-allowlist > tools/precommit/vulture_allowlist.txt
+#   # then re-add this header
+#
+# Current residue: five public helpers exercised ONLY by tests (no runtime
+# consumer — kept as a deliberate, test-covered API surface) and one model-field
+# attribute set via assignment (read later through a dict, invisible to Vulture).
+
+zotero_summarizer/integrations/zotero_read.py:get_user_library_id   # test-only public reader (test_feed_items_read)
+zotero_summarizer/services/triage/feeds/_triage.py:prestige_venue   # SummarizeResponse field set here, read later via dict
+zotero_summarizer/services/triage/triage_jobs.py:public_job         # test-only converter (test_modular_services)
+zotero_summarizer/storage/feeds_history.py:get_run_summary          # test-only storage query (test_idempotency)
+zotero_summarizer/storage/feeds_history.py:list_recent_decisions    # test-only storage query (test_idempotency)
+zotero_summarizer/storage/repositories.py:init                      # test-only DB-init wrapper (test_modular_services)

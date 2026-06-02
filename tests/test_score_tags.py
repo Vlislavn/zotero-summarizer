@@ -52,10 +52,15 @@ class _Writer:
         return {"applied_ids": list(range(len(changes))), "failed": [], "backup_path": "/tmp/zotero.bak"}
 
 
-def _reader(items):
+def _reader(items, call_numbers=None):
     # Both sync_rel_tags and sync_score_ranks now read the WHOLE library via
     # get_all_items (which paginates past the 500 clamp; annotations excluded).
-    return SimpleNamespace(get_all_items=lambda **kw: {"items": items, "total": len(items)})
+    # get_field_values returns the current Call Numbers (so a rank write can skip
+    # items carrying a user's own value).
+    return SimpleNamespace(
+        get_all_items=lambda **kw: {"items": items, "total": len(items)},
+        get_field_values=lambda field: dict(call_numbers or {}),
+    )
 
 
 def _cache(*entries):
@@ -182,6 +187,30 @@ def test_sync_score_ranks_no_dedup_every_item_numbered(monkeypatch):
     assert out["ranked"] == 2
     changes, _ = writer.calls[0]
     assert sorted(c["payload_json"]["value"] for c in changes) == ["zr0001", "zr0002"]
+
+
+def test_sync_score_ranks_skips_user_call_number(monkeypatch):
+    # A paper carrying a user's OWN Call Number (an LCC class mark, not zr####)
+    # must be PRESERVED — never overwritten — and reported as skipped. The other
+    # papers still get dense zr#### ranks.
+    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache",
+                        lambda: _cache(("A", 4.5, None, False), ("B", 3.9, None, False)))
+    monkeypatch.setattr(score_tags.reading_queue, "_goal_affinity", lambda keys: {})
+    items = [{"item_key": "A", "date_added": "2026-01-01"},
+             {"item_key": "B", "date_added": "2026-01-02"}]
+    # A holds a hand-typed LCC value; B holds a prior zr rank (ours → overwritable).
+    call_numbers = {"A": "RC268.4 .P425 2016", "B": "zr0007"}
+    writer = _Writer(running=False)
+    monkeypatch.setattr(score_tags, "get_zotero_reader_or_raise", lambda: _reader(items, call_numbers))
+    monkeypatch.setattr(score_tags, "get_zotero_writer_or_raise", lambda: writer)
+
+    out = score_tags.sync_score_ranks()
+
+    assert out["skipped_user_callnumber"] == 1
+    changes, _ = writer.calls[0]
+    written = {c["item_key"]: c["payload_json"]["value"] for c in changes}
+    assert "A" not in written           # user's LCC Call Number preserved (not written)
+    assert written == {"B": "zr0001"}   # dense numbering over the items we DO write
 
 
 def test_sync_score_ranks_requires_force_when_zotero_running(monkeypatch):

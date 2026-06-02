@@ -106,7 +106,7 @@ def extract_json_blob(text: str) -> dict[str, Any]:
         parsed = json.loads(stripped)
         if isinstance(parsed, dict):
             return parsed
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as _:
         pass
 
     fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", stripped, flags=re.DOTALL | re.IGNORECASE)
@@ -115,7 +115,7 @@ def extract_json_blob(text: str) -> dict[str, Any]:
             parsed = json.loads(fenced.group(1))
             if isinstance(parsed, dict):
                 return parsed
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as _:
             pass
 
     decoder = json.JSONDecoder()

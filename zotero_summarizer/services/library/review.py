@@ -45,11 +45,6 @@ def _conn() -> Iterator[sqlite3.Connection]:
 # ---------------------------------------------------------------------------
 
 
-def list_awaiting(since_hours: int = 720, limit: int = 1000) -> list[dict[str, Any]]:
-    """Return every ``awaiting_review`` row enriched with parsed SHAP/aux/summary."""
-    return list_by_state(feeds_storage.DECISION_AWAITING_REVIEW, since_hours, limit)
-
-
 def list_by_state(state: str, since_hours: int = 720, limit: int = 1000) -> list[dict[str, Any]]:
     """Return every row with ``decision == state`` enriched with parsed payload.
 

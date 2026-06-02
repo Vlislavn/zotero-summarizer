@@ -31,6 +31,57 @@ export const PRIORITY_BY_KEY = {
   4: 'dont_read',
 };
 
+// Orientation banner — Annotate's equivalent of Today's HintBanner (Jakob's
+// Law: same dismissible pattern, same localStorage key shape). It owns the
+// "what is this surface + why label + how" explanation so a researcher landing
+// here from the nav never has to infer the workflow (Mental Model / Paradox of
+// the Active User), and it names the full consequence of a label so the
+// retrain→Zotero loop lives in the copy, not the user's head (Tesler's Law).
+const ANNOTATE_HINT_KEY = 'annotate_hint_dismissed_v1';
+const ANNOTATE_HINT_TEXT =
+  'Annotate = label what you’ve read. Set must / should / could / don’t '
+  + '(keys 1–4 · j/k to move between papers) on papers you’ve read. Your verdict '
+  + 'becomes ground truth: it retrains the model and is mirrored to Zotero as a note.';
+
+export function readAnnotateHintDismissed() {
+  try {
+    return window.localStorage.getItem(ANNOTATE_HINT_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeAnnotateHintDismissed() {
+  try {
+    window.localStorage.setItem(ANNOTATE_HINT_KEY, '1');
+  } catch {
+    /* no-op: incognito / disabled storage */
+  }
+}
+
+export function AnnotateHintBanner({ onDismiss }) {
+  return (
+    <div
+      role="note"
+      className="mb-3 flex items-start gap-3 p-3 rounded-xl border border-teal-200 bg-teal-50 text-sm text-teal-900"
+    >
+      <span className="flex-1 leading-snug">{ANNOTATE_HINT_TEXT}</span>
+      <button
+        type="button"
+        onClick={() => {
+          writeAnnotateHintDismissed();
+          onDismiss();
+        }}
+        aria-label="Dismiss hint"
+        title="Dismiss"
+        className="text-teal-700 hover:text-teal-900 leading-none px-1.5 py-0.5 rounded hover:bg-teal-100"
+      >
+        {'×'}
+      </button>
+    </div>
+  );
+}
+
 export function FilterChip({ active, onClick, children, activeCls }) {
   return (
     <button

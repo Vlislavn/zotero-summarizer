@@ -21,12 +21,12 @@ Key design points (see the plan):
 from __future__ import annotations
 
 import json
-import threading
 from typing import Any
 
 from zotero_summarizer.services._common import now_iso_z
 
 from zotero_summarizer.services._common import settings as get_settings
+from zotero_summarizer.services.library import _flight
 from zotero_summarizer.services._common import state as get_state
 from zotero_summarizer.services.emoji_signals import ALL_EMOJIS, HARD_VETO_EMOJIS
 from zotero_summarizer.services.library._ranking import (  # noqa: F401 — re-export the seam
@@ -35,6 +35,7 @@ from zotero_summarizer.services.library._ranking import (  # noqa: F401 — re-e
     _content_key,
     _dedup_by_content,
     _goal_affinity,
+    sort_unread,
 )
 from zotero_summarizer.services.library._score_distribution import (
     _HIST_EDGES,  # noqa: F401 — re-export for the stable public seam
@@ -46,13 +47,6 @@ from zotero_summarizer.services.library._score_distribution import (
 # "Read / handled" = engaged-with (any signal emoji) or vetoed.
 _HANDLED_EMOJIS: frozenset[str] = frozenset(ALL_EMOJIS) | HARD_VETO_EMOJIS
 
-# Fallback ordering only (model not ready): priority tier then recency.
-_PRIORITY_RANK: dict[str, int] = {
-    "must_read": 3, "should_read": 2, "could_read": 1, "": 0, "dont_read": -1,
-}
-
-# get_items clamps its limit to 500; that's the scan window ("most-recent 500").
-_SCAN_LIMIT = 500
 _CACHE_FILENAME = "reading_queue.json"
 
 # Human labels for the top SHAP reason — mirrors PrestigeWaterfall.featureLabel.
@@ -75,40 +69,26 @@ _FRIENDLY: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Single-flight background-job state (separate from border_cache's).
 # ---------------------------------------------------------------------------
-_LOCK = threading.Lock()
-_RUNNING = False
-_LAST_ERROR: str | None = None
+_LATCH = _flight.FlightLatch()
 
 
 def is_running() -> bool:
-    with _LOCK:
-        return _RUNNING
+    return _LATCH.is_running()
 
 
 def last_error() -> str | None:
-    with _LOCK:
-        return _LAST_ERROR
+    return _LATCH.last_error()
 
 
 def try_start() -> bool:
-    global _RUNNING, _LAST_ERROR
-    with _LOCK:
-        if _RUNNING:
-            return False
-        _RUNNING = True
-        _LAST_ERROR = None
-        return True
+    return _LATCH.try_start()
 
 
 def finish(error: str | None = None) -> None:
-    global _RUNNING, _LAST_ERROR
-    with _LOCK:
-        _RUNNING = False
-        _LAST_ERROR = error
+    _LATCH.finish(error)
 
 
-def run_in_background(target) -> None:
-    threading.Thread(target=target, daemon=True).start()
+run_in_background = _flight.run_in_background
 
 
 # ---------------------------------------------------------------------------
@@ -187,18 +167,25 @@ def scoring_from_prediction(pred: Any) -> dict[str, Any]:
 
     aux = pred.aux_context or {}
     # Prestige = field+year-normalized citation percentile mapped to [1,5] via the
-    # SAME function the gate feature uses (single source). None percentile
-    # (cold-start / uncited) → prestige None, so the floor treats it as UNKNOWN
-    # and never demotes it — h-index/venue/cites are kept only for the "why" panel.
+    # SAME function the gate feature uses (single source). With no percentile yet
+    # (cold-start / uncited) we fall back to the provisional author-reputation
+    # prior (``cold_start_prestige``, computed once in _compute_aux_with_context);
+    # that may itself be None when the lift is off or no author signal exists.
+    # Either way ``citation_percentile`` stays None, so _entry_prestige reports
+    # the paper as UNKNOWN and the quality floor never demotes it — raw
+    # h-index/venue/cites remain "why" panel context only.
     pct = aux.get("citation_percentile")
-    prestige = percentile_to_score(pct) if pct is not None else None
+    prestige = percentile_to_score(pct) if pct is not None else aux.get("cold_start_prestige")
     shap_top = [
         {"feature": str(c.get("feature") or ""), "value": float(c.get("contribution") or 0.0)}
         for c in (pred.shap_contribs or [])
     ]
     prestige_inputs = {
         k: aux[k]
-        for k in ("citation_percentile", "max_author_h_index", "venue_works_count", "cited_by_count")
+        for k in (
+            "citation_percentile", "max_author_h_index", "venue_works_count",
+            "cited_by_count", "max_author_field_percentile", "cold_start_prestige",
+        )
         if aux.get(k) is not None
     }
     return {
@@ -367,23 +354,29 @@ def build_reading_queue(
     collection: str = "",
     tag: str = "",
     search: str = "",
+    semantic: bool = False,
 ) -> dict[str, Any]:
-    """Ranked read-next queue. Read/handled status is applied live; scores come
-    from the background cache. Scoring is NEVER auto-triggered on open — it runs
-    only on an explicit ``refresh`` (the Rescore button), so opening is instant
-    even right after a gate retrain (stale scores show with ``scores_stale``).
+    """Ranked queue over the WHOLE library. Read/handled status is applied live;
+    scores come from the background cache. Scoring is NEVER auto-triggered on open
+    — it runs only on an explicit ``refresh`` (the Rescore button), so opening just
+    reads + ranks the library (no scoring) even right after a gate retrain (stale
+    scores show with ``scores_stale``). ``limit`` caps the returned list (the
+    frontend requests the whole library and reveals it incrementally).
 
-    ``collection``/``tag``/``search`` filter the displayed rows via the reader's
-    own filtering; the score cache stays global (a Rescore scans the whole
-    library), so filters only select which cached scores appear.
+    ``collection``/``tag``/``search`` filter the rows via the reader's own
+    filtering; the score cache is global (a Rescore scans the whole library), so
+    filters only select which cached scores appear.
 
     Returns ``{status, items, total_unread, read_hidden, model_ready, error,
     computed_at, scores_stale}``."""
-    rows = _reader().get_items(
+    # "Meaning" search ranks the WHOLE (collection/tag-scoped) library by hybrid
+    # relevance, so the substring filter is bypassed; "Exact" keeps it.
+    semantic_requested = bool(semantic and str(search or "").strip())
+    rows = _reader().get_all_items(
         collection_key=collection or None,
         tag=tag or None,
-        search=search or None,
-        limit=_SCAN_LIMIT,
+        search=None if semantic_requested else (search or None),
+        include_abstract=False,  # the queue never displays the abstract
     ).get("items", [])
     gate_sha = _gate_sha()
     model_ready = gate_sha is not None
@@ -419,29 +412,26 @@ def build_reading_queue(
         else:
             unread.append(rec)
 
-    if model_ready:
-        # Goal-aware re-rank: blend the gate's relevance with similarity to the
-        # user's stated goals so on-goal papers the gate under-ranks float up
-        # (the gate alone over-weights "like what I saved"). Banding is untouched.
-        goal_sims = _goal_affinity([r["item_key"] for r in unread]) if _GOAL_RERANK_WEIGHT > 0 else {}
-        for r in unread:
-            r["goal_sim"] = goal_sims.get(r["item_key"])
-        if goal_sims:
-            _blended_sort(unread)
-        else:
-            unread.sort(
-                key=lambda c: (c["relevance_score"] is not None, c["relevance_score"] or 0.0, c["date_added"]),
-                reverse=True,
-            )
-    else:
-        unread.sort(
-            key=lambda c: (_PRIORITY_RANK.get(c["reading_priority"], 0), c["date_added"]),
-            reverse=True,
-        )
+    # "Meaning" search: hybrid (BM25 + dense + cross-encoder rerank) re-ranks the
+    # unread set and replaces it with the ranked top-N — order only, scores/banding
+    # untouched. Falls back to the normal order when the corpus is off / no match.
+    search_flags: dict[str, Any] = {}
+    if semantic_requested:
+        from zotero_summarizer.services.library import _search
+        unread, search_flags = _search.order_unread_semantic(search, unread)
+    if not search_flags.get("semantic"):
+        # Normal queue order (goal-blended when the gate is ready; else recency).
+        sort_unread(unread, model_ready=model_ready)
 
     # Collapse duplicate library items (same paper imported twice) AFTER the sort
     # so the best-scored copy survives — duplicates were wasting top slots.
     unread = _dedup_by_content(unread)
+    # Dedup `read` too, AND drop any read copy whose paper already survives in
+    # `unread` — otherwise a paper with one read + one unread copy would show in
+    # BOTH lists under include_read (now routine with the whole-library read). The
+    # actionable unread copy wins; titleless rows (empty key) are never merged.
+    _unread_keys = {k for r in unread if (k := _content_key(r))}
+    read = [r for r in _dedup_by_content(read) if _content_key(r) not in _unread_keys]
 
     # Compute ONLY on an explicit refresh (Rescore). A prior crash (last_error
     # set) is surfaced and not auto-retried — Rescore clears it.
@@ -471,6 +461,11 @@ def build_reading_queue(
         "error": err if status == "error" else None,
         "computed_at": computed_at,
         "scores_stale": bool(stale and cached),
+        # Hybrid-search flags for the UI (absent/False in normal/Exact mode).
+        "semantic": bool(search_flags.get("semantic")),
+        "reranked": bool(search_flags.get("reranked")),
+        "reranker_loading": bool(search_flags.get("reranker_loading")),
+        "semantic_unavailable": bool(semantic_requested and not search_flags.get("semantic")),
         # Distribution over the full unread queue (not just the shown slice), so
         # the histogram reflects everything the current filter selects. The
         # prestige floor (median of the library's KNOWN prestige) gates the
