@@ -47,6 +47,17 @@ def test_normalize_doi_collapses_variants():
     assert normalize_doi("") == ""
 
 
+def test_normalize_arxiv_id_collapses_pdf_and_version_variants():
+    from zotero_summarizer.domain import normalize_arxiv_id
+
+    bare = "2401.01234"
+    assert normalize_arxiv_id("arXiv:2401.01234v2") == bare
+    assert normalize_arxiv_id("https://arxiv.org/abs/2401.01234") == bare
+    assert normalize_arxiv_id("https://arxiv.org/pdf/2401.01234v2.pdf") == bare
+    assert normalize_arxiv_id("arxiv.org/pdf/2401.01234.pdf") == bare
+    assert normalize_arxiv_id("") == ""
+
+
 # --- #6 clamp surfaces NaN instead of silently returning the high bound -----
 def test_clamp_raises_on_nan():
     from zotero_summarizer.services._common import clamp

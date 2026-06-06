@@ -21,7 +21,6 @@ queues suggested Zotero changes for you to approve.
 
   mcp/  is a separate process: an HTTP client of api/ (imports none of the above).
 ```
-
 ## Top-level modules
 
 | file | responsibility |
