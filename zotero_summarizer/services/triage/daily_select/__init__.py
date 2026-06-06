@@ -6,8 +6,11 @@ Public API:
   * :class:`DailySlate` — the assembled slate plus metadata.
   * :func:`assemble_daily_slate` — entry point used by the ``/api/daily`` route.
 
-Composition: 3 model + 1 surprise + 1 diversity, with a 25-item backlog cap
-and 168 h lookback by default. The former ``audit`` slot (gate-rejected
+Composition: (K-2) model + 1 surprise + 1 diversity (default K=5 -> 3/1/1), with
+a 25-item backlog cap and 168 h lookback by default. The model quota scales with
+K so a larger K actually yields more cards (surprise/diversity stay at 1 each);
+without this the fixed 3/1/1 roles capped every slate at 5 regardless of K. The
+former ``audit`` slot (gate-rejected
 spot-check) was removed from the in-queue slate because an empty primary pool
 let it degenerate into an endless one-at-a-time stream of rejected papers;
 spot-check now lives in its own labeled Today section + the Review page. The
@@ -20,10 +23,12 @@ import random
 from datetime import datetime, timezone
 from pathlib import Path
 
+from zotero_summarizer.domain import normalize_arxiv_id, normalize_doi
 from zotero_summarizer.services.triage.daily_select._allocation import allocate
 from zotero_summarizer.services.triage.daily_select._candidate import dedup_keep_newest
 from zotero_summarizer.services.triage.daily_select._dataclasses import DailySlate, SlatePaper
 from zotero_summarizer.services.triage.daily_select._querying import (
+    fetch_decided_content_keys,
     fetch_handled_keys,
     fetch_recent_rows_by_decisions,
     fetch_rows_by_decisions,
@@ -38,6 +43,19 @@ LOGGER = logging.getLogger(__name__)
 _DECISION_AWAITING_REVIEW = "awaiting_review"
 _DECISION_TRIAGED_PENDING = "triaged_pending"
 _DECISION_GATE_REJECTED = "gate_rejected"
+
+# "Blocking" states for the content-dedup guard: a paper the user already
+# decided on (added/trashed) or that the daemon already filtered as a library /
+# processed duplicate. A live awaiting card whose DOI/arXiv matches one of these
+# is a duplicate the user has effectively already handled, so the slate drops it.
+_BLOCKING_DECISIONS = [
+    "selected",                 # kept into the Inbox by daily selection
+    "black_swan",               # kept as a surprise pick
+    "user_approved",            # kept via the Review UI
+    "user_rejected",            # trashed from Today (strong negative)
+    "rejected_dedup_library",   # daemon saw it was already in the library
+    "rejected_dedup_processed", # daemon saw an earlier copy of this paper
+]
 
 _DEFAULT_ROLES: dict[str, int] = {
     "model": 3,
@@ -71,6 +89,39 @@ def _drop_handled(
     return out
 
 
+def _drop_content_dupes(
+    rows: list[dict],
+    *,
+    blocked_doi: set[str],
+    blocked_arxiv: set[str],
+) -> list[dict]:
+    """Drop awaiting cards that duplicate (by DOI/arXiv) a paper already decided
+    on / in the library, and collapse same-paper copies that arrived under
+    different GUIDs (keep newest by ``created_at``).
+
+    DOI/arXiv-only: a row carrying neither id is never dropped, so a genuinely
+    distinct paper can never be filtered out by mistake. This is the slate-side
+    guard for the gap the daemon's identity dedup leaves — a paper re-entering
+    under a new GUID, or one added to the library after it was already triaged.
+    """
+    survivors: list[dict] = []
+    seen_doi: set[str] = set()
+    seen_arxiv: set[str] = set()
+    for row in sorted(rows, key=lambda r: str(r.get("created_at") or ""), reverse=True):
+        doi = normalize_doi(str(row.get("doi") or ""))
+        arxiv = normalize_arxiv_id(str(row.get("arxiv_id") or ""))
+        if (doi and doi in blocked_doi) or (arxiv and arxiv in blocked_arxiv):
+            continue
+        if (doi and doi in seen_doi) or (arxiv and arxiv in seen_arxiv):
+            continue
+        if doi:
+            seen_doi.add(doi)
+        if arxiv:
+            seen_arxiv.add(arxiv)
+        survivors.append(row)
+    return survivors
+
+
 def _fetch_primary_unhandled(
     conn,
     *,
@@ -79,26 +130,33 @@ def _fetch_primary_unhandled(
     now: datetime,
 ) -> tuple[list[dict], bool]:
     """Primary-pool rows (awaiting_review + triaged_pending) within the window,
-    minus papers the user already acted on, with the never-empty recent
-    fallback. Returns ``(rows, fellback_to_recent)``.
+    minus papers the user already acted on AND minus content duplicates (by
+    DOI/arXiv) of a paper already decided on / in the library, with the
+    never-empty recent fallback. Returns ``(rows, fellback_to_recent)``.
 
     The single source of truth for "what's genuinely awaiting the user" — both
     the slate and the header counter consume this so they never disagree.
     """
     handled_guids, handled_label_keys = fetch_handled_keys(conn)
+    blocked_doi, blocked_arxiv = fetch_decided_content_keys(
+        conn, blocking_decisions=_BLOCKING_DECISIONS,
+    )
 
-    def _unhandled(rows: list[dict]) -> list[dict]:
-        return _drop_handled(
+    def _clean(rows: list[dict]) -> list[dict]:
+        rows = _drop_handled(
             rows, handled_guids=handled_guids, handled_label_keys=handled_label_keys,
+        )
+        return _drop_content_dupes(
+            rows, blocked_doi=blocked_doi, blocked_arxiv=blocked_arxiv,
         )
 
     primary_decisions = [_DECISION_AWAITING_REVIEW, _DECISION_TRIAGED_PENDING]
-    rows = _unhandled(fetch_rows_by_decisions(
+    rows = _clean(fetch_rows_by_decisions(
         conn, decisions=primary_decisions, lookback_hours=lookback_hours, now=now,
     ))
     fellback = False
     if not rows:
-        rows = _unhandled(fetch_recent_rows_by_decisions(
+        rows = _clean(fetch_recent_rows_by_decisions(
             conn, decisions=primary_decisions, limit=backlog_cap,
         ))
         fellback = bool(rows)
@@ -159,7 +217,14 @@ def assemble_daily_slate(
         raise ValueError(f"backlog_cap must be positive; got {backlog_cap}")
     if lookback_hours <= 0:
         raise ValueError(f"lookback_hours must be positive; got {lookback_hours}")
-    effective_roles = dict(roles) if roles is not None else dict(_DEFAULT_ROLES)
+    if roles is not None:
+        effective_roles = dict(roles)
+    else:
+        # Scale the model quota with K so a larger K yields more cards; without
+        # this the fixed 3/1/1 default capped every slate at 5 (allocate() fills
+        # each role once). surprise/diversity stay at 1. K=5 -> {3,1,1} (legacy).
+        effective_roles = dict(_DEFAULT_ROLES)
+        effective_roles["model"] = max(_DEFAULT_ROLES["model"], K - 2)
     effective_now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
 
     conn = open_ro(db_path)

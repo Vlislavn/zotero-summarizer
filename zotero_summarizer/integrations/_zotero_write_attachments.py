@@ -22,7 +22,10 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from zotero_summarizer.integrations._zotero_write_common import ZoteroWriteError
+from zotero_summarizer.integrations._zotero_write_common import (
+    ZoteroWriteError,
+    resolve_user_library_item_id,
+)
 
 _ATTACHMENT_TYPE = "attachment"
 _LINK_MODE_IMPORTED_URL = 1
@@ -51,10 +54,9 @@ class ZoteroAttachmentWriteMixin:
         if not {"itemID", "fieldID", "valueID"}.issubset(item_data_columns):
             raise ZoteroWriteError("Unsupported Zotero schema: required itemData columns missing")
 
-        parent = conn.execute("SELECT itemID FROM items WHERE key = ? LIMIT 1", (item_key,)).fetchone()
-        if parent is None:
-            raise ZoteroWriteError(f"add_attachment: parent item {item_key} not found")
-        parent_id = int(parent["itemID"])
+        # Guard: the parent must be a user-library item. A feed item's key here
+        # would graft a user-library PDF onto a feed parent (cross-library 403s).
+        parent_id = resolve_user_library_item_id(conn, item_key)
 
         type_id = self._get_item_type_id(conn, _ATTACHMENT_TYPE)
         if type_id is None:

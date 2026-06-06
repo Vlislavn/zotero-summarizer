@@ -55,6 +55,42 @@ def lookup_int_id(conn: sqlite3.Connection, sql: str, param: str, column: str) -
     return int(row[column])
 
 
+def resolve_user_library_item_id(
+    conn: sqlite3.Connection, item_key: str, *, required: bool = True
+) -> int | None:
+    """Resolve an EXISTING **user-library** item's ``itemID`` by key.
+
+    The single guard for every write that mutates an item identified by key.
+    Zotero stores the user's library alongside ~dozens of RSS feed libraries
+    (and optional group libraries) in the same ``items`` table, so a bare
+    ``WHERE key=?`` lookup can resolve a *feed* item and let a user-library
+    mutation (tag/note/field/collection/attachment) graft onto it — the
+    cross-library leak that produced 403 attachments. All app writes operate on
+    the user's personal library only, so resolution is scoped to ``type='user'``
+    (this also disambiguates the rare cross-library key collision, since Zotero
+    keys are unique per-library, not globally).
+
+    ``required=True`` (default) raises ``ZoteroWriteError`` when the key is
+    absent or belongs to another library — the fail-fast contract every
+    single-item applier wants. ``required=False`` returns ``None`` instead, for
+    the pre-existing best-effort batch path (``remove_items_from_collection``)
+    that skips unknown keys rather than aborting the whole batch.
+    """
+    row = conn.execute(
+        "SELECT i.itemID FROM items i "
+        "JOIN libraries l ON l.libraryID = i.libraryID "
+        "WHERE i.key = ? AND l.type = 'user' LIMIT 1",
+        (item_key,),
+    ).fetchone()
+    if row is None:
+        if required:
+            raise ZoteroWriteError(
+                f"{item_key!r} is not a user-library item — cross-library write rejected"
+            )
+        return None
+    return int(row["itemID"])
+
+
 def generate_unique_key(
     conn: sqlite3.Connection, table: str, alphabet: str, label: str
 ) -> str:

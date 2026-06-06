@@ -16,6 +16,18 @@ class ZoteroReadError(RuntimeError):
 _NON_BIBLIOGRAPHIC_TYPES_SQL = "'attachment', 'note', 'annotation'"
 
 
+# Zotero keeps the user's personal library AND ~dozens of RSS feed libraries
+# (type='feed'), plus optional group libraries, all in the SAME `items` table.
+# Only the user library is "the library" the app reads/ranks/writes — so every
+# whole-library read MUST scope to it, or feed items leak into the corpus, the
+# ranker, tag/Call-Number writes, and the full-text path (a leak that produced
+# cross-library 403 attachments). Single source of truth (mirrors how
+# `_NON_BIBLIOGRAPHIC_TYPES_SQL` is centralized): the alias stays inline as
+# ``... <alias>.libraryID = ({_USER_LIBRARY_ID_SELECT}) ...``; the bare SELECT
+# (no parens) is also executed directly where the id is fetched in Python.
+_USER_LIBRARY_ID_SELECT = "SELECT libraryID FROM libraries WHERE type='user' LIMIT 1"
+
+
 # Strip C0/C1 control chars (preserving tab/newline/cr) plus Unicode tag chars
 # (U+E0000-U+E007F). The tag-char range was infamously used to smuggle invisible
 # prompt-injection payloads in 2024 — see Greshake et al. USENIX Security 2024

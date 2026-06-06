@@ -2,6 +2,7 @@ import { startTransition, useEffect, useState } from 'react';
 import InlineAnnotate from './InlineAnnotate.jsx';
 import ScoreHistogram from './ScoreHistogram.jsx';
 import { StatusBanner, formatShortDate, truncateAuthors } from './shared.jsx';
+import { isHighPrestige } from '../../utils/relevanceBands.js';
 
 // Stage-2 "Read next": the single Library surface. Ranked queue over the WHOLE
 // library with an inline annotate panel (links, tags, per-paper deep review).
@@ -21,6 +22,9 @@ export default function ReadNextView({
   // `searchQuery`; `rerankerLoading` = the cross-encoder is still downloading (we
   // show fusion order meanwhile); `semanticUnavailable` = corpus off (text match).
   semantic = false, searchQuery = '', rerankerLoading = false, semanticUnavailable = false,
+  // Library quality floor (median of known prestige) — drives the per-card "top
+  // author/venue" badge so the highest-quality papers are visibly marked.
+  prestigeFloor = null,
 }) {
   const computing = status === 'computing';
   const errored = status === 'error';
@@ -41,7 +45,13 @@ export default function ReadNextView({
           <strong>{totalUnread}</strong> papers,{' '}
           {semantic
             ? <>ranked by similarity to “{searchQuery}”.</>
-            : (modelReady ? 'ranked by relevance.' : 'ranked by recency (model not ready yet).')}
+            : (modelReady
+              ? (
+                <span title="Best first: ranked by a blend of model relevance to you, goal match, and author/venue prestige — high-quality papers from strong authors/venues float to the top. Bands stay from the relevance score.">
+                  ranked best-first — relevance &amp; quality.
+                </span>
+              )
+              : 'ranked by recency (model not ready yet).')}
           {readHidden > 0 && !includeRead && (
             <span className="text-slate-400"> · {readHidden} read hidden</span>
           )}
@@ -198,6 +208,19 @@ export default function ReadNextView({
                       ) : (
                         <span className="text-slate-400" title="Not scored yet — run Rescore to rank this paper">
                           not scored yet
+                        </span>
+                      )}
+                      {/* Von Restorff: mark the "best of the best" — high author/
+                          venue prestige (≥ the library's quality floor) — so the
+                          top-quality papers the blend floats up are identifiable.
+                          Distinct ◆/violet from the ★/teal relevance score, and
+                          from the full-text A–D Quality grade. */}
+                      {isHighPrestige(it, prestigeFloor) && (
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full bg-violet-50 text-violet-800 border border-violet-200 font-semibold"
+                          title="High author/venue prestige — citation percentile at or above your library's median. A quality signal that floats this paper toward the top; distinct from the full-text Quality grade."
+                        >
+                          ◆ top author/venue
                         </span>
                       )}
                       {it.why_reason && (

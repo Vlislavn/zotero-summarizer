@@ -10,6 +10,7 @@ from zotero_summarizer.integrations._zotero_write_common import (  # noqa: F401
     ZoteroWriteError,
     generate_unique_key,
     lookup_int_id,
+    resolve_user_library_item_id,
 )
 
 
@@ -23,14 +24,7 @@ class ZoteroTagMixin:
         tag_columns: set[str],
         item_tag_columns: set[str],
     ) -> None:
-        row = conn.execute(
-            "SELECT itemID FROM items WHERE key = ? LIMIT 1",
-            (item_key,),
-        ).fetchone()
-        if not row:
-            raise ZoteroWriteError(f"Item not found: {item_key}")
-
-        item_id = int(row["itemID"])
+        item_id = resolve_user_library_item_id(conn, item_key)
         add_tags = self._normalize_tags(payload.get("add_tags", []))
         remove_tags = self._normalize_tags(payload.get("remove_tags", []))
 
@@ -60,15 +54,15 @@ class ZoteroTagMixin:
         item_columns: set[str],
         note_columns: set[str],
     ) -> None:
-        parent_row = conn.execute(
-            "SELECT itemID, libraryID FROM items WHERE key = ? LIMIT 1",
-            (item_key,),
-        ).fetchone()
-        if not parent_row:
-            raise ZoteroWriteError(f"Parent item not found: {item_key}")
-
-        parent_item_id = int(parent_row["itemID"])
-        library_id = int(parent_row["libraryID"])
+        parent_item_id = resolve_user_library_item_id(conn, item_key)
+        # The note lands in the parent's library, which the guard pins to the
+        # user library; fetch it by the resolved id for the items INSERT below.
+        library_id = int(
+            conn.execute(
+                "SELECT libraryID FROM items WHERE itemID = ? LIMIT 1",
+                (parent_item_id,),
+            ).fetchone()["libraryID"]
+        )
 
         note_html = str(payload.get("note_html") or "").strip()
         if not note_html:
@@ -154,12 +148,7 @@ class ZoteroTagMixin:
         if not note_html:
             raise ZoteroWriteError("Note payload is empty")
 
-        parent_row = conn.execute(
-            "SELECT itemID FROM items WHERE key = ? LIMIT 1", (item_key,)
-        ).fetchone()
-        if not parent_row:
-            raise ZoteroWriteError(f"Parent item not found: {item_key}")
-        parent_item_id = int(parent_row["itemID"])
+        parent_item_id = resolve_user_library_item_id(conn, item_key)
 
         existing = None
         if marker:

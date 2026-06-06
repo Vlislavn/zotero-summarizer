@@ -88,6 +88,9 @@ def _insert(
     feed_item_id: int | None = None,
     title: str = "Test paper",
     feed_name: str = "",
+    doi: str | None = None,
+    arxiv_id: str | None = None,
+    materialized_zotero_key: str | None = None,
 ) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
@@ -104,17 +107,19 @@ def _insert(
         conn.execute(
             """
             INSERT INTO processed_feed_items (
-                feed_library_id, feed_item_id, guid, title, feed_name, decision,
-                composite_score, surprise_score, corpus_affinity, run_id,
-                shap_contribs_json, created_at, updated_at
+                feed_library_id, feed_item_id, guid, title, doi, arxiv_id, feed_name,
+                decision, composite_score, surprise_score, corpus_affinity, run_id,
+                shap_contribs_json, materialized_zotero_key, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 1,
                 next_id,
                 item_key,
                 title,
+                doi,
+                arxiv_id,
                 feed_name,
                 decision,
                 float(composite_score),
@@ -122,6 +127,7 @@ def _insert(
                 None if corpus_affinity is None else float(corpus_affinity),
                 "test-run",
                 shap_json,
+                materialized_zotero_key,
                 created_str,
                 created_str,
             ),

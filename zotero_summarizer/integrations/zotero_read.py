@@ -13,6 +13,7 @@ from zotero_summarizer.integrations._zotero_read_common import (  # noqa: F401  
     ZoteroReadError,
     _INJECTION_CHAR_PATTERN,
     _NON_BIBLIOGRAPHIC_TYPES_SQL,
+    _USER_LIBRARY_ID_SELECT,
 )
 from zotero_summarizer.integrations._zotero_read_feeds import ZoteroFeedsMixin
 from zotero_summarizer.integrations._zotero_read_items import ZoteroItemsMixin
@@ -51,6 +52,7 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
             JOIN itemTypes it ON it.itemTypeID = i.itemTypeID
             LEFT JOIN deletedItems di ON di.itemID = i.itemID
             WHERE di.itemID IS NULL
+              AND i.libraryID = ({_USER_LIBRARY_ID_SELECT})
               AND it.typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL})
         """
         query_collections = "SELECT COUNT(*) AS value FROM collections"
@@ -64,6 +66,7 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
             WHERE ia.parentItemID IS NOT NULL
               AND lower(COALESCE(ia.contentType, '')) = 'application/pdf'
               AND di.itemID IS NULL
+              AND parent.libraryID = ({_USER_LIBRARY_ID_SELECT})
               AND it.typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL})
         """
 
@@ -142,9 +145,7 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
         """Return the libraryID of the user's personal library (type='user')."""
 
         def _read(conn: sqlite3.Connection) -> int:
-            row = conn.execute(
-                "SELECT libraryID FROM libraries WHERE type='user' LIMIT 1"
-            ).fetchone()
+            row = conn.execute(_USER_LIBRARY_ID_SELECT).fetchone()
             if not row:
                 raise ZoteroReadError("No user library found in Zotero database")
             return int(row["libraryID"])

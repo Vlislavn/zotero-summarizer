@@ -7,6 +7,7 @@ from typing import Any
 from zotero_summarizer.integrations._zotero_write_common import (  # noqa: F401
     ZoteroWriteError,
     generate_unique_key,
+    resolve_user_library_item_id,
 )
 
 
@@ -70,14 +71,7 @@ class ZoteroCollectionMixin:
         collection_columns: set[str],
         collection_item_columns: set[str],
     ) -> None:
-        row = conn.execute(
-            "SELECT itemID FROM items WHERE key = ? LIMIT 1",
-            (item_key,),
-        ).fetchone()
-        if not row:
-            raise ZoteroWriteError(f"Item not found: {item_key}")
-
-        item_id = int(row["itemID"])
+        item_id = resolve_user_library_item_id(conn, item_key)
         if not {"itemID", "collectionID"}.issubset(collection_item_columns):
             raise ZoteroWriteError("Unsupported Zotero schema: required collectionItems columns missing")
 
@@ -105,14 +99,7 @@ class ZoteroCollectionMixin:
         item_columns: set[str],
         collection_columns: set[str],
     ) -> None:
-        row = conn.execute(
-            "SELECT itemID FROM items WHERE key = ? LIMIT 1",
-            (item_key,),
-        ).fetchone()
-        if not row:
-            raise ZoteroWriteError(f"Item not found: {item_key}")
-
-        item_id = int(row["itemID"])
+        item_id = resolve_user_library_item_id(conn, item_key)
         collection_key = str(payload.get("collection_key") or "").strip()
         collection_path = str(payload.get("collection_path") or payload.get("collection_name") or "").strip()
         if not collection_key and not collection_path:
@@ -177,13 +164,9 @@ class ZoteroCollectionMixin:
                 safe_key = str(item_key).strip()
                 if not safe_key:
                     continue
-                item_row = conn.execute(
-                    "SELECT itemID FROM items WHERE key = ? LIMIT 1",
-                    (safe_key,),
-                ).fetchone()
-                if not item_row:
+                item_id = resolve_user_library_item_id(conn, safe_key, required=False)
+                if item_id is None:
                     continue
-                item_id = int(item_row["itemID"])
                 cursor = conn.execute(
                     "DELETE FROM collectionItems WHERE itemID = ? AND collectionID = ?",
                     (item_id, collection_id),

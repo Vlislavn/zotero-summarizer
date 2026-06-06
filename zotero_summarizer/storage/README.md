@@ -24,7 +24,7 @@ services/ ─call→ storage/
 | `corpus_bm25.py` | `CorpusBM25` — in-memory `rank_bm25` (Okapi) index over corpus title+abstract+tags; the LEXICAL leg of Library hybrid search. Rebuilt only on corpus change (count + `MAX(updated_at)`); process-level singleton (`get_corpus_bm25`); `texts_for` feeds the rerank stage. No DB migration |
 | `feeds.py` | facade for `processed_feed_items`: schema + decision/materialization writes (re-exports below); stores `abstract` and `pub_year` from feed item at insert time; `update_scores` rewrites only the gate-derived fields by PK (slate re-score after a model upgrade) without touching the decision/read status |
 | `feeds_history.py` | selection + outcome/history queries (re-exported by `feeds`) |
-| `feeds_schema.py` · `feeds_constants.py` · `feeds_lookup.py` | schema / decision+outcome enums / single-row lookups |
+| `feeds_schema.py` · `feeds_constants.py` · `feeds_lookup.py` | schema / decision+outcome enums / single-row lookups + `fetch_processed_content_pairs` (raw `(doi, arxiv_id)` for content dedup — the same paper under a different GUID; callers normalize via `domain`) |
 | `migrations.py` | `migrate_existing()` + `run_migrations()` — ordered, version-gated steps recorded in `schema_migrations`. Add a schema change as a new numbered `Migration`, never an inline ALTER. `repositories.apply_schema` is the v1 baseline. |
 
 **Boundaries:** must NOT import `services/` or `api/` (enforced). Connection

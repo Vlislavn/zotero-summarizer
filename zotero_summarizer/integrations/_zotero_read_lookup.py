@@ -5,7 +5,10 @@ import sqlite3  # noqa: F401  (type hints)
 from typing import Any  # noqa: F401
 
 from zotero_summarizer.domain import normalize_doi
-from zotero_summarizer.integrations._zotero_read_common import _NON_BIBLIOGRAPHIC_TYPES_SQL
+from zotero_summarizer.integrations._zotero_read_common import (
+    _NON_BIBLIOGRAPHIC_TYPES_SQL,
+    _USER_LIBRARY_ID_SELECT,
+)
 
 
 class ZoteroLookupMixin:
@@ -22,9 +25,7 @@ class ZoteroLookupMixin:
             return None
 
         def _read(conn: sqlite3.Connection) -> str | None:
-            user_lib_row = conn.execute(
-                "SELECT libraryID FROM libraries WHERE type='user' LIMIT 1"
-            ).fetchone()
+            user_lib_row = conn.execute(_USER_LIBRARY_ID_SELECT).fetchone()
             if not user_lib_row:
                 return None
             user_lib_id = int(user_lib_row["libraryID"])
@@ -110,7 +111,8 @@ class ZoteroLookupMixin:
 
         def _read(conn: sqlite3.Connection) -> dict[str, Any]:
             row = conn.execute(
-                "SELECT itemID FROM items WHERE key = ? LIMIT 1",
+                f"SELECT itemID FROM items "
+                f"WHERE key = ? AND libraryID = ({_USER_LIBRARY_ID_SELECT}) LIMIT 1",
                 (item_key,),
             ).fetchone()
             if not row:
@@ -181,6 +183,7 @@ class ZoteroLookupMixin:
                 JOIN itemTypes typ ON typ.itemTypeID = i.itemTypeID
                 LEFT JOIN deletedItems di ON di.itemID = i.itemID
                 WHERE di.itemID IS NULL
+                  AND i.libraryID = ({_USER_LIBRARY_ID_SELECT})
                   AND typ.typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL})
                 GROUP BY t.tagID
                 ORDER BY item_count DESC, t.name ASC
@@ -206,13 +209,14 @@ class ZoteroLookupMixin:
 
         def _read(conn: sqlite3.Connection) -> dict[str, str]:
             rows = conn.execute(
-                """
+                f"""
                 SELECT i.key AS item_key, v.value AS value
                 FROM items i
                 JOIN itemData id ON id.itemID = i.itemID
                 JOIN fields f ON f.fieldID = id.fieldID
                 JOIN itemDataValues v ON v.valueID = id.valueID
                 WHERE f.fieldName = ?
+                  AND i.libraryID = ({_USER_LIBRARY_ID_SELECT})
                 """,
                 (field_name,),
             ).fetchall()

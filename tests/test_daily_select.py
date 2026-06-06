@@ -396,3 +396,73 @@ def test_handled_paper_excluded_from_recent_fallback(triage_db: Path) -> None:
     assert slate.fellback_to_recent is True
     assert "http://arxiv.org/abs/E" not in keys
     assert "http://arxiv.org/abs/F" in keys
+
+
+# ---------------------------------------------------------------------------
+# More cards: the model quota scales with K (was capped at 5 by 3/1/1 default)
+# ---------------------------------------------------------------------------
+
+
+def test_assemble_daily_slate_more_cards_at_high_K(triage_db: Path) -> None:
+    # 20 plain awaiting rows (no surprise / negative affinity), so surprise +
+    # diversity fall through to model_fallback. K=15 must return 15, not 5.
+    for i in range(20):
+        _insert(
+            triage_db,
+            item_key=f"M{i:02d}",
+            decision="awaiting_review",
+            composite_score=1.0 + 0.2 * i,
+            corpus_affinity=0.3,
+        )
+    slate = assemble_daily_slate(db_path=triage_db, K=15, now=_DEFAULT_NOW)
+    assert len(slate.papers) == 15  # > 5 (old fixed 3/1/1 cap)
+
+
+def test_assemble_daily_slate_K5_still_three_model(triage_db: Path) -> None:
+    # Back-compat: K=5 reproduces the legacy 3 model + 1 surprise + 1 diversity.
+    for i in range(10):
+        _insert(triage_db, item_key=f"B{i:02d}", decision="awaiting_review",
+                composite_score=1.0 + 0.3 * i, corpus_affinity=0.3)
+    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    assert len(slate.papers) == 5
+
+
+# ---------------------------------------------------------------------------
+# "Why it matters" chips flow onto SlatePaper
+# ---------------------------------------------------------------------------
+
+
+def test_why_chips_strong_goal_match(triage_db: Path) -> None:
+    _insert(triage_db, item_key="W-goal", decision="awaiting_review",
+            composite_score=4.7, corpus_affinity=0.42)
+    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    paper = next(p for p in slate.papers if p.item_key == "W-goal")
+    assert paper.why[0] == "Strong goal match"
+    assert len(paper.why) <= 3
+
+
+def test_why_chips_off_track_for_diversity(triage_db: Path) -> None:
+    _insert(triage_db, item_key="W-div", decision="awaiting_review",
+            composite_score=2.0, corpus_affinity=-0.4)
+    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    paper = next(p for p in slate.papers if p.item_key == "W-div")
+    assert "Off your usual track" in paper.why
+
+
+def test_why_chips_surprising(triage_db: Path) -> None:
+    _insert(triage_db, item_key="W-surp", decision="awaiting_review",
+            composite_score=2.0, surprise_score=0.85, corpus_affinity=0.0)
+    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    paper = next(p for p in slate.papers if p.item_key == "W-surp")
+    assert "Surprising" in paper.why
+
+
+def test_why_chips_built_without_shap_blob(triage_db: Path) -> None:
+    # Older rows predate the SHAP blob — `why` must still build from the
+    # dedicated columns (proves gate-independence: no LightGBM SHAP needed).
+    _insert(triage_db, item_key="W-noshap", decision="awaiting_review",
+            composite_score=4.6, corpus_affinity=0.5, shap_contribs_json="")
+    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    paper = next(p for p in slate.papers if p.item_key == "W-noshap")
+    assert paper.why[0] == "Strong goal match"
+    assert "High model relevance" in paper.why

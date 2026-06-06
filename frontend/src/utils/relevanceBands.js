@@ -57,6 +57,18 @@ export function isFilterActive(f) {
   );
 }
 
+// "High prestige" = a KNOWN author/venue reputation at/above the library's
+// quality floor (median of known prestige; falls back to the neutral 3.0 on the
+// 1–5 scale when no floor is supplied). Single source of the "high prestige"
+// rule — used by both the Prestige filter and the card's quality badge so they
+// agree. A cold-start / uncited / no-OpenAlex row (prestige_known false) is
+// NOT high (no evidence) — never penalised, just unlabelled.
+export function isHighPrestige(it, floor = null) {
+  const known = it?.prestige_known === true && typeof it.prestige_score === 'number';
+  if (!known) return false;
+  return floor == null ? it.prestige_score >= 3 : it.prestige_score >= floor;
+}
+
 // Keys of the top (1 - pct) fraction by goal_sim, among rows that HAVE a numeric
 // goal_sim. Returns an empty Set when no row carries goal_sim (corpus disabled,
 // or only read rows present) — callers then hide the goal control entirely.
@@ -86,11 +98,10 @@ export function buildPredicate(filters, ctx) {
 
     if (f.prestige !== 'any') {
       const known = it.prestige_known === true && typeof it.prestige_score === 'number';
+      const high = isHighPrestige(it, floor);   // single source — matches the card badge
       if (f.prestige === 'new' && known) return false;
-      if (f.prestige === 'high'
-        && !(known && (floor == null ? it.prestige_score >= 3 : it.prestige_score >= floor))) return false;
-      if (f.prestige === 'low'
-        && !(known && (floor == null ? it.prestige_score < 3 : it.prestige_score < floor))) return false;
+      if (f.prestige === 'high' && !high) return false;
+      if (f.prestige === 'low' && !(known && !high)) return false;
     }
 
     // goal_sim only exists on scored unread rows; rows without it match neither

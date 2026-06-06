@@ -38,6 +38,7 @@ def _to_slate_paper(cand: dict[str, Any], *, role: str) -> SlatePaper:
         quality=cand.get("quality") or {},
         abstract=cand.get("abstract", ""),
         pub_year=cand.get("pub_year"),
+        why=cand.get("why", []),
     )
 
 

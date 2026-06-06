@@ -39,13 +39,16 @@ async function request(path, options = {}) {
 
 /**
  * GET /api/daily
- * Returns the daily slate with up to K papers.
+ * Returns the daily slate with up to K papers (Today defaults to K=15; the API
+ * accepts 5..20 and scales the model role quota with K).
  * Response shape: { papers, pool_size, capped_at, lookback_hours,
- *   empty_role_events }
+ *   empty_role_events, awaiting_review_total, showing, fellback_to_recent }
  *
  * Each paper carries: item_key, item_id, title, authors (string), venue,
  * role, composite_score, surprise_score, corpus_affinity, prestige_score,
- * rationale, shap_top, decision.
+ * rationale, shap_top, decision, max_author_h_index, feed_name, quality,
+ * abstract, pub_year, and `why` (heuristic plain-language reason chips, []
+ * when no signal cleared a threshold).
  */
 export async function fetchDailySlate({ K = 5, lookback_hours = 168 } = {}) {
   const qs = new URLSearchParams({

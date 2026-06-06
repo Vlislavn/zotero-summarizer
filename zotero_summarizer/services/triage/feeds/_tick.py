@@ -27,6 +27,7 @@ from zotero_summarizer.services.triage.feeds._outcomes import _resolve_due_outco
 from zotero_summarizer.services.triage.feeds._tick_phases import (
     _TickResults,
     dedup_against_library,
+    dedup_against_processed,
     mark_processed_read,
     maybe_run_daily,
     pick_and_log,
@@ -93,6 +94,10 @@ def run_daemon_tick(
     # batch_size semantics: None = unlimited (feeds run full-exhaust); int = bounded.
     effective_batch: int | None = batch_size
     dedup_enabled = bool(feeds_cfg.get("dedup_against_library", True))
+    # Content dedup against already-processed papers (different GUID / re-post /
+    # another feed). Defaults to the library-dedup flag so a config that turned
+    # off duplicate protection stays off, but is independently switchable.
+    processed_dedup_enabled = bool(feeds_cfg.get("dedup_against_processed", dedup_enabled))
     mark_processed_as_read = bool(feeds_cfg.get("mark_processed_as_read", True))
     outcome_check_per_tick = int(feeds_cfg.get("outcome_check_per_tick") or 3)
     # Non-paper feeds (e.g. GitHub releases) the user marked as not-scholarly
@@ -111,8 +116,12 @@ def run_daemon_tick(
     )
     fetched = len(raw)
 
-    # 2. Dedup against processed_feed_items, then against the library.
+    # 2. Dedup: same-RSS-item (identity), then same-paper-by-content (different
+    #    GUID / re-post / already decided), then against the Zotero library.
     unprocessed, skipped_processed, stale_to_mark = prepare_unprocessed(raw, tick_id=tick_id)
+    unprocessed, processed_dup_skipped = dedup_against_processed(
+        unprocessed, tick_id=tick_id, enabled=processed_dedup_enabled,
+    )
     to_triage, library_skipped = dedup_against_library(
         unprocessed, reader=reader, tick_id=tick_id, enabled=dedup_enabled,
     )
@@ -132,6 +141,7 @@ def run_daemon_tick(
         errors=errors_results,
         gate_rejected=gate_rejected,
         library_skipped=library_skipped,
+        processed_dup_skipped=processed_dup_skipped,
     )
 
     # 4. Record decisions.
@@ -164,6 +174,7 @@ def run_daemon_tick(
         tick_id=tick_id,
         fetched=fetched,
         skipped_already_processed=skipped_processed,
+        skipped_processed_dedup=len(processed_dup_skipped),
         skipped_library_dedup=len(library_skipped),
         triaged=len(triaged_results),
         fast_rejected=len(fast_rejected_results),

@@ -9,7 +9,10 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from zotero_summarizer.integrations._zotero_write_common import ZoteroWriteError
+from zotero_summarizer.integrations._zotero_write_common import (
+    ZoteroWriteError,
+    resolve_user_library_item_id,
+)
 
 
 class ZoteroFieldWriteMixin:
@@ -36,10 +39,7 @@ class ZoteroFieldWriteMixin:
             raise ZoteroWriteError("set_field payload requires 'field'")
         if not {"itemID", "fieldID", "valueID"}.issubset(item_data_columns):
             raise ZoteroWriteError("Unsupported Zotero schema: required itemData columns missing")
-        row = conn.execute("SELECT itemID FROM items WHERE key = ? LIMIT 1", (item_key,)).fetchone()
-        if row is None:
-            raise ZoteroWriteError(f"set_field: item {item_key} not found")
-        item_id = int(row["itemID"])
+        item_id = resolve_user_library_item_id(conn, item_key)
         field_id = self._get_field_id(conn, field_name)
         if field_id is None:
             raise ZoteroWriteError(f"set_field: unknown Zotero field {field_name!r}")

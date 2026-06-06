@@ -11,6 +11,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
+from zotero_summarizer.domain import normalize_arxiv_id, normalize_doi
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.storage import feeds as feeds_storage
@@ -40,6 +41,7 @@ class _TickResults:
     errors: list[tuple[dict[str, Any], str]]
     gate_rejected: list[tuple[dict[str, Any], Any]]
     library_skipped: list[dict[str, Any]]
+    processed_dup_skipped: list[dict[str, Any]]
 
 
 def _pick_unread_batch_round_robin(
@@ -172,6 +174,72 @@ def prepare_unprocessed(
     return unprocessed, skipped_processed, stale_to_mark
 
 
+def _partition_by_content(
+    items: list[dict[str, Any]], *, seen_doi: set[str], seen_arxiv: set[str]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Pure split of items into ``(to_keep, duplicates)`` by normalised DOI/arXiv.
+
+    ``seen_doi``/``seen_arxiv`` are the already-known content keys; an item that
+    matches either is a duplicate. The seen-sets grow as we keep items, so a
+    second copy of the same paper *within this batch* is also caught. Items with
+    neither id are always kept (DOI/arXiv-only — no false positives). Copies the
+    caller's sets rather than mutating them.
+    """
+    seen_d = set(seen_doi)
+    seen_a = set(seen_arxiv)
+    to_keep: list[dict[str, Any]] = []
+    duplicates: list[dict[str, Any]] = []
+    for item in items:
+        doi = normalize_doi(item.get("doi") or "")
+        arxiv = normalize_arxiv_id(item.get("arxiv_id") or "")
+        if (doi and doi in seen_d) or (arxiv and arxiv in seen_a):
+            duplicates.append(item)
+            continue
+        if doi:
+            seen_d.add(doi)
+        if arxiv:
+            seen_a.add(arxiv)
+        to_keep.append(item)
+    return to_keep, duplicates
+
+
+def dedup_against_processed(
+    unprocessed: list[dict[str, Any]], *, tick_id: str, enabled: bool
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split items into ``(to_triage, content_duplicates)`` by DOI/arXiv.
+
+    Identity dedup (:func:`prepare_unprocessed`) only catches the *same* RSS
+    item. A paper that re-arrives under a different GUID or from another feed is
+    a fresh ``(feed_library_id, feed_item_id)`` and slips through — so a paper
+    the user already trashed/added (or that is merely awaiting their decision)
+    comes back. Here we reject, by content, any item whose DOI/arXiv already
+    exists in ``processed_feed_items`` (or earlier in this same batch). The
+    duplicate is recorded as ``rejected_dedup_processed`` so it never re-enters
+    triage or the Today slate — without burning an LLM call on a known paper.
+    ``skipped_error`` rows are retryable (never scored) and excluded from the
+    existing-content set so a transient failure can't permanently block a paper.
+    """
+    if not enabled:
+        return list(unprocessed), []
+    with _triage_conn() as conn:
+        pairs = feeds_storage.fetch_processed_content_pairs(
+            conn, exclude_decisions=(feeds_storage.DECISION_SKIPPED_ERROR,),
+        )
+    seen_doi = {normalize_doi(doi) for doi, _ in pairs}
+    seen_arxiv = {normalize_arxiv_id(arxiv) for _, arxiv in pairs}
+    seen_doi.discard("")
+    seen_arxiv.discard("")
+    to_triage, duplicates = _partition_by_content(
+        unprocessed, seen_doi=seen_doi, seen_arxiv=seen_arxiv,
+    )
+    for item in duplicates:
+        LOGGER.info(
+            "[%s] skip dedup: %r (duplicate of an already-processed paper)",
+            tick_id, (item.get("title") or "")[:60],
+        )
+    return to_triage, duplicates
+
+
 def dedup_against_library(
     unprocessed: list[dict[str, Any]], *, reader: ZoteroReader, tick_id: str, enabled: bool
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -277,6 +345,12 @@ def record_tick_decisions(results: _TickResults, *, tick_id: str, review_mode: b
                 reading_priority=cand.summary.reading_priority,
                 shap_contribs_json=_pack_review_payload(item, summary=cand.summary),
             )
+        for item in results.processed_dup_skipped:
+            feeds_storage.record_decision(
+                conn, run_id=tick_id, feed_item=item,
+                decision=feeds_storage.DECISION_REJECTED_DEDUP_PROCESSED,
+                decision_reason="duplicate_of_processed",
+            )
         for item in results.library_skipped:
             feeds_storage.record_decision(
                 conn, run_id=tick_id, feed_item=item,
@@ -324,7 +398,7 @@ def mark_processed_read(
     processed_ids: list[int] = []
     for item, _cand in results.triaged + results.fast_rejected:
         processed_ids.append(int(item.get("item_id") or 0))
-    for item in results.library_skipped:
+    for item in results.library_skipped + results.processed_dup_skipped:
         processed_ids.append(int(item.get("item_id") or 0))
     for item, _pred in results.gate_rejected:
         processed_ids.append(int(item.get("item_id") or 0))
@@ -343,7 +417,7 @@ def mark_processed_read(
                     feed_library_id=int(item.get("feed_library_id") or 0),
                     feed_item_id=int(item.get("item_id") or 0),
                 )
-            for item in results.library_skipped:
+            for item in results.library_skipped + results.processed_dup_skipped:
                 feeds_storage.record_read_marked(
                     conn,
                     feed_library_id=int(item.get("feed_library_id") or 0),

@@ -13,8 +13,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import AuthorByline from '../components/AuthorByline.jsx';
 import PipelineFunnel from '../components/PipelineFunnel.jsx';
+import PaperCard from '../components/today/PaperCard.jsx';
 import {
   fetchDailySlate,
   addToLibrary,
@@ -30,24 +30,6 @@ const HINT_TEXT =
   'Today = cull. Read the abstract, tick the papers worth reading, then ' +
   'Add to library (or Trash). You give the real labels later, in Library → Read next.';
 
-// Plain-language label + tooltip for why a card is in the slate (paper.role).
-// The user should never have to decode internal allocation-role names.
-const BUCKET_LABEL = {
-  model: 'top match',
-  model_fallback: 'top match',
-  surprise: 'surprise',
-  audit: 'spot-check',
-  diversity: 'wildcard',
-};
-const ROLE_HINT = {
-  model: 'Best match to your interests (model + corpus + author/venue prestige).',
-  model_fallback: 'Best match to your interests (model + corpus + author/venue prestige).',
-  surprise: 'A high-surprise pick outside your usual reading pattern.',
-  audit: 'The filter rejected this — shown so you can rescue a wrong reject. '
-    + 'Marked read in Zotero, not added to your library.',
-  diversity: 'Deliberately different from your library (low corpus affinity).',
-};
-
 // ---------------------------------------------------------------------------
 // Small shared building blocks
 // ---------------------------------------------------------------------------
@@ -60,35 +42,6 @@ function ErrorBanner({ error, title = 'Error' }) {
       {error.message || String(error)}
     </div>
   );
-}
-
-function Badge({ label, value, tone = 'slate', title }) {
-  const tones = {
-    slate: 'bg-slate-100 text-slate-700 border-slate-200',
-    teal: 'bg-teal-50 text-teal-800 border-teal-200',
-    violet: 'bg-violet-50 text-violet-800 border-violet-200',
-    amber: 'bg-amber-50 text-amber-800 border-amber-200',
-    sky: 'bg-sky-50 text-sky-800 border-sky-200',
-  };
-  const cls = tones[tone] || tones.slate;
-  return (
-    <span
-      title={title || label}
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] ${cls}`}
-    >
-      <span className="uppercase tracking-wider font-semibold">{label}</span>
-      {value !== '' && value != null && <span className="mono font-bold">{value}</span>}
-    </span>
-  );
-}
-
-function parseAuthorsString(s) {
-  if (!s || typeof s !== 'string') return [];
-  return s
-    .split(',')
-    .map((name) => name.trim())
-    .filter(Boolean)
-    .map((name) => ({ name, h_index: null }));
 }
 
 function readHintDismissed() {
@@ -124,160 +77,6 @@ function HintBanner({ onDismiss }) {
         {'×'}
       </button>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Quality — full-text peer-review assessment (services.quality_review), shown
-// SEPARATELY from relevance. Grade + verdict inline; rubric on expand.
-// ---------------------------------------------------------------------------
-
-const GRADE_CLS = {
-  A: 'bg-emerald-100 text-emerald-800 border-emerald-300',
-  B: 'bg-teal-100 text-teal-800 border-teal-300',
-  C: 'bg-amber-100 text-amber-800 border-amber-300',
-  D: 'bg-rose-100 text-rose-800 border-rose-300',
-};
-
-function QualityBar({ label, value }) {
-  const v = Math.max(0, Math.min(5, Number(value) || 0));
-  return (
-    <div className="flex items-center gap-2 text-[11px]">
-      <span className="w-28 shrink-0 text-slate-500">{label}</span>
-      <span className="flex-1 h-1.5 rounded bg-slate-100 overflow-hidden">
-        <span className="block h-full bg-teal-500" style={{ width: `${(v / 5) * 100}%` }} />
-      </span>
-      <span className="w-4 text-right text-slate-600 mono">{v}</span>
-    </div>
-  );
-}
-
-function QualityBlock({ quality }) {
-  const q = quality || {};
-  const grade = q.grade || '';
-  if (!grade) {
-    const why = q.basis === 'not_assessed' ? 'no open-access PDF' : 'not in the top-K reviewed set';
-    return (
-      <div className="mt-1.5 text-[11px] text-slate-400">
-        <span className="uppercase tracking-wider font-semibold text-slate-500">Quality</span>{' '}
-        not assessed <span className="text-slate-300">({why})</span>
-      </div>
-    );
-  }
-  const gradeCls = GRADE_CLS[grade] || 'bg-slate-100 text-slate-700 border-slate-300';
-  return (
-    <div className="mt-1.5">
-      <div className="flex items-start gap-2 text-xs">
-        <span className="uppercase tracking-wider font-semibold text-slate-500 mt-0.5">Quality</span>
-        <span
-          className={`shrink-0 px-1.5 py-0.5 rounded-md border text-[11px] font-bold ${gradeCls}`}
-          title="Full-text peer-review grade (A best – D weak), independent of relevance to you"
-        >
-          {grade}
-        </span>
-        {q.verdict && <span className="text-slate-700 italic">{q.verdict}</span>}
-      </div>
-      <details className="group mt-1">
-        <summary className="cursor-pointer text-[11px] uppercase tracking-wider font-semibold text-slate-500 hover:text-slate-700 select-none">
-          Quality review <span className="text-slate-400 normal-case font-normal">· from full text</span>
-        </summary>
-        <div className="mt-1.5 space-y-1">
-          <QualityBar label="soundness" value={q.soundness} />
-          <QualityBar label="novelty" value={q.novelty} />
-          <QualityBar label="significance" value={q.significance} />
-          <QualityBar label="reproducibility" value={q.reproducibility} />
-          <QualityBar label="clarity" value={q.clarity} />
-          {q.key_strength && <p className="text-[11px] text-emerald-800 mt-1">＋ {q.key_strength}</p>}
-          {q.key_weakness && <p className="text-[11px] text-rose-800">－ {q.key_weakness}</p>}
-        </div>
-      </details>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Paper card — read the abstract, then tick the checkbox.
-// ---------------------------------------------------------------------------
-
-function PaperCard({ paper, selected, onToggleSelect }) {
-  const authors = parseAuthorsString(paper.authors);
-  if (authors.length > 0 && typeof paper.max_author_h_index === 'number') {
-    authors[0] = { ...authors[0], h_index: paper.max_author_h_index };
-  }
-  const compositeStr =
-    typeof paper.composite_score === 'number' ? paper.composite_score.toFixed(2) : '—';
-  const prestigeStr =
-    typeof paper.prestige_score === 'number' ? paper.prestige_score.toFixed(2) : '—';
-  const bucket = BUCKET_LABEL[paper.role] || paper.role || '—';
-
-  const titleNode = paper.url || paper.doi
-    ? (
-      <a
-        href={paper.url || `https://doi.org/${paper.doi}`}
-        target="_blank"
-        rel="noreferrer noopener"
-        className="text-sm font-bold text-slate-900 hover:text-teal-700 underline-offset-2 hover:underline"
-      >
-        {paper.title || '(untitled)'}
-      </a>
-    )
-    : <span className="text-sm font-bold text-slate-900">{paper.title || '(untitled)'}</span>;
-
-  return (
-    <article
-      className={`border rounded-xl p-3 bg-white shadow-sm transition-colors ${
-        selected ? 'border-teal-400 ring-1 ring-teal-300 bg-teal-50/30' : 'border-slate-200'
-      }`}
-    >
-      <div className="flex items-start gap-3">
-        <input
-          type="checkbox"
-          checked={selected}
-          onChange={() => onToggleSelect(paper.item_id)}
-          aria-label={`Select ${paper.title || 'paper'}`}
-          className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300 text-teal-600 focus:ring-teal-500 cursor-pointer"
-        />
-        <div className="min-w-0 flex-1">
-          <header className="mb-2">
-            <div className="leading-snug">{titleNode}</div>
-            <div className="mt-1">
-              <AuthorByline authors={authors} source="feed" quiet />
-            </div>
-            <div className="text-[11px] text-slate-500 mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-              {paper.venue && <span className="italic">{paper.venue}</span>}
-              {paper.year && <span>{paper.year}</span>}
-              {/* Provenance: why this pick is here + which feed it came from. */}
-              <Badge label={bucket} tone="amber" title={ROLE_HINT[paper.role] || 'Why this paper is here'} />
-              {paper.feed_name && (
-                <Badge label="feed" value={paper.feed_name} tone="sky" title="Source RSS feed" />
-              )}
-              <Badge label="relevance" value={compositeStr} tone="teal" title="Relevance to you (model + corpus + prestige) — not a quality judgment" />
-              <Badge label="prestige" value={prestigeStr} tone="violet" title="Author / venue reputation (0–1) — not paper quality" />
-            </div>
-          </header>
-
-          <QualityBlock quality={paper.quality} />
-
-          {paper.abstract && (
-            <p className="mb-2 text-xs text-slate-600 line-clamp-3 leading-relaxed">
-              {paper.abstract}
-            </p>
-          )}
-
-          {paper.rationale && (
-            <details className="mb-2 group">
-              <summary className="cursor-pointer text-[11px] uppercase tracking-wider font-semibold text-slate-500 hover:text-slate-700 select-none">
-                Triage rationale
-              </summary>
-              <p className="mt-1.5 text-xs text-slate-700 italic whitespace-pre-line">
-                {paper.rationale}
-              </p>
-            </details>
-          )}
-
-        </div>
-      </div>
-    </article>
   );
 }
 
@@ -411,9 +210,12 @@ export default function Today() {
   const [actionMsg, setActionMsg] = useState('');
   const triageKicked = useRef(false);
 
+  // K=15 (API ceiling 20): show MORE cards so the queue isn't drip-fed 5 at a
+  // time. The model role quota scales with K server-side, so this actually
+  // returns up to 15 (was capped at 5 by the fixed 3/1/1 role default).
   const slateQuery = useQuery({
-    queryKey: ['daily-slate', { K: 5, lookback_hours: 168 }],
-    queryFn: () => fetchDailySlate({ K: 5, lookback_hours: 168 }),
+    queryKey: ['daily-slate', { K: 15, lookback_hours: 168 }],
+    queryFn: () => fetchDailySlate({ K: 15, lookback_hours: 168 }),
   });
 
   const addMutation = useMutation({ mutationFn: addToLibrary });
@@ -439,7 +241,6 @@ export default function Today() {
 
   const slate = slateQuery.data;
   const papers = slate?.papers || [];
-  const isStale = Boolean(slate?.fellback_to_recent);
 
   const toggleSelect = useCallback((id) => {
     setSelectedIds((prev) => {

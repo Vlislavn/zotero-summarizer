@@ -23,6 +23,8 @@ import json
 import math
 from typing import Any
 
+from zotero_summarizer.services.triage.daily_select._relevance import build_why
+
 
 def parse_payload(row: dict[str, Any]) -> dict[str, Any]:
     """Parse ``shap_contribs_json``. Empty -> stub; corrupt -> raise."""
@@ -207,6 +209,17 @@ def row_top_author_h_index(payload: dict[str, Any]) -> int | None:
     return int(h)
 
 
+def row_citation_percentile(payload: dict[str, Any]) -> float | None:
+    """OpenAlex field+year-normalized citation percentile in [0, 1].
+
+    Returns ``None`` when no OpenAlex match / citation data exists yet — the
+    "Highly cited" why-chip is then simply omitted (documented no-data contract).
+    """
+    aux = _aux_dict(payload)
+    pct = aux.get("citation_percentile")
+    return float(pct) if pct is not None else None
+
+
 def make_candidate(row: dict[str, Any]) -> dict[str, Any]:
     """Normalise a DB row into the candidate dict used during allocation."""
     payload = parse_payload(row)
@@ -215,29 +228,41 @@ def make_candidate(row: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("processed_feed_items row missing id")
     composite = row.get("composite_score")
     surprise = row.get("surprise_score")
+    # NULL scores sink to the bottom of sort — that's the right semantic for
+    # items without scoring (shouldn't happen for queried decisions, but
+    # defensive). NOT error masking: composite/surprise are numeric signals
+    # where "absent" naturally maps to 0.
+    composite_f = 0.0 if composite is None else float(composite)
+    surprise_f = 0.0 if surprise is None else float(surprise)
+    corpus_affinity = row_corpus_affinity(row, payload)
+    h_index = row_top_author_h_index(payload)
     return {
         "id": int(row_id),
         "item_key": _row_item_key(row),
         "title": str(row.get("title") or ""),
         "decision": str(row.get("decision") or ""),
-        # NULL scores sink to the bottom of sort — that's the right semantic
-        # for items without scoring (shouldn't happen for queried decisions,
-        # but defensive). NOT error masking: composite/surprise are numeric
-        # signals where "absent" naturally maps to 0.
-        "composite_score": 0.0 if composite is None else float(composite),
-        "surprise_score": 0.0 if surprise is None else float(surprise),
-        "corpus_affinity": row_corpus_affinity(row, payload),
+        "composite_score": composite_f,
+        "surprise_score": surprise_f,
+        "corpus_affinity": corpus_affinity,
         "prestige_score": row_prestige(row, payload),
         "authors": row_authors(payload),
         "venue": row_venue(payload),
         "rationale": row_rationale(payload),
         "quality": row_quality(row),
         "shap_top": shap_top3(payload),
-        "max_author_h_index": row_top_author_h_index(payload),
+        "max_author_h_index": h_index,
         "feed_name": str(row.get("feed_name") or ""),
         "created_at": str(row.get("created_at") or ""),
         "abstract": row_abstract(row),
         "pub_year": row_pub_year(row),
+        # Heuristic, no-LLM plain-language reason chips for the card (Today UI).
+        "why": build_why(
+            composite_score=composite_f,
+            corpus_affinity=corpus_affinity,
+            surprise_score=surprise_f,
+            h_index=h_index,
+            citation_percentile=row_citation_percentile(payload),
+        ),
     }
 
 
@@ -266,4 +291,5 @@ __all__ = [
     "row_quality",
     "row_abstract",
     "row_pub_year",
+    "row_citation_percentile",
 ]

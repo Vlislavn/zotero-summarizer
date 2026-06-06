@@ -13,6 +13,7 @@ import {
 } from '../api/libraryApi.js';
 import ReadNextView from '../components/library/ReadNextView.jsx';
 import LibraryFilterBar from '../components/library/LibraryFilterBar.jsx';
+import ZoteroActionsMenu from '../components/library/ZoteroActionsMenu.jsx';
 import { StatusBanner } from '../components/library/shared.jsx';
 import {
   EMPTY_FILTERS, buildPredicate, goalHighKeys, isFilterActive,
@@ -466,33 +467,29 @@ export default function Library() {
               Clear
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => handleFetchFulltext(false)}
-            disabled={fetchingFulltext}
-            title="Download the arXiv full-text PDF for every library paper that has an arXiv link but no PDF, and attach it natively to Zotero. Skips papers that already have a PDF. Backs up first; runs with Zotero closed; PDFs upload to zotero.org on the next sync."
-            className="ml-auto px-3 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm hover:bg-slate-50 disabled:opacity-50"
-          >
-            {fetchingFulltext ? 'Fetching…' : 'Fetch full text → Zotero'}
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSyncRelTags(false)}
+          {/* Hick's/Miller's Law: the three heavy whole-library Zotero WRITE
+              actions live in one grouped disclosure instead of crowding the
+              search row. */}
+          <ZoteroActionsMenu
             disabled={syncingTags || syncingRanks}
-            title="Write zs:rel/<band> tags onto scored library items so you can FILTER by ML relevance in Zotero. Backs up first; doesn't touch your priority/manual tags."
-            className="px-3 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm hover:bg-slate-50 disabled:opacity-50"
-          >
-            {syncingTags ? 'Syncing…' : 'Sync relevance tags → Zotero'}
-          </button>
-          <button
-            type="button"
-            onClick={() => handleSyncScoreRanks(false)}
-            disabled={syncingTags || syncingRanks}
-            title="Stamp a whole-library rank into every paper's Zotero Call Number (zr0001…) — scorable papers first, no-abstract ones last — so you can SORT your ENTIRE library by relevance in Zotero. Run Rescore first for complete scores. Add the Call Number column and sort ascending. Backs up first."
-            className="px-3 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm hover:bg-slate-50 disabled:opacity-50"
-          >
-            {syncingRanks ? 'Writing…' : 'Sort ranks → Zotero'}
-          </button>
+            actions={[
+              {
+                label: 'Fetch full text', busy: fetchingFulltext, busyLabel: 'Fetching…',
+                disabled: fetchingFulltext, onClick: () => handleFetchFulltext(false),
+                title: 'Download the arXiv full-text PDF for every library paper that has an arXiv link but no PDF, and attach it natively to Zotero. Skips papers that already have a PDF. Backs up first; runs with Zotero closed; PDFs upload to zotero.org on the next sync.',
+              },
+              {
+                label: 'Sync relevance tags', busy: syncingTags, busyLabel: 'Syncing…',
+                onClick: () => handleSyncRelTags(false),
+                title: 'Write zs:rel/<band> tags onto scored library items so you can FILTER by ML relevance in Zotero. Backs up first; doesn\'t touch your priority/manual tags.',
+              },
+              {
+                label: 'Sort ranks (Call Number)', busy: syncingRanks, busyLabel: 'Writing…',
+                onClick: () => handleSyncScoreRanks(false),
+                title: 'Stamp a whole-library rank into every paper\'s Zotero Call Number (zr0001…) — scorable papers first, no-abstract ones last — so you can SORT your ENTIRE library by relevance in Zotero. Run Rescore first for complete scores. Add the Call Number column and sort ascending. Backs up first.',
+              },
+            ]}
+          />
         </div>
 
         <StatusBanner message={message} isError={isError} />
@@ -550,6 +547,7 @@ export default function Library() {
           searchQuery={search}
           rerankerLoading={queueMeta.reranker_loading}
           semanticUnavailable={queueMeta.semantic_unavailable}
+          prestigeFloor={filterCtx.prestigeFloor}
         />
       </div>
     </div>

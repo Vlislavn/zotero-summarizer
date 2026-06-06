@@ -118,6 +118,38 @@ def normalize_doi(doi: str) -> str:
     return value.rstrip("/")
 
 
+_ARXIV_PREFIXES = (
+    "arxiv:",
+    "https://arxiv.org/abs/",
+    "http://arxiv.org/abs/",
+    "https://arxiv.org/pdf/",
+    "http://arxiv.org/pdf/",
+    "arxiv.org/abs/",
+)
+
+
+def normalize_arxiv_id(arxiv_id: str) -> str:
+    """Canonicalise an arXiv id to its bare, version-stripped, lower-cased form.
+
+    Strips the common URL/scheme prefixes and a trailing ``vN`` version so that
+    ``arXiv:2401.01234v2``, ``https://arxiv.org/abs/2401.01234`` and
+    ``2401.01234`` all compare equal — a newer version of the same preprint is
+    the same paper for dedup. Returns "" for empty/blank input. Single source of
+    truth for arXiv comparison (mirrors :func:`normalize_doi` for DOIs).
+    """
+    value = (arxiv_id or "").strip().lower()
+    for prefix in _ARXIV_PREFIXES:
+        if value.startswith(prefix):
+            value = value[len(prefix):].strip()
+            break
+    value = value.rstrip("/")
+    # Strip a trailing version suffix (``v1``/``v2``/…): same preprint, newer rev.
+    head, sep, tail = value.rpartition("v")
+    if sep and head and tail.isdigit():
+        value = head
+    return value
+
+
 def paper_group_id(row: dict[str, str]) -> str:
     """Stable per-paper identity for grouped cross-validation.
 

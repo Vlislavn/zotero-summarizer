@@ -83,6 +83,17 @@ def build_zotero_db(target_dir: Path) -> Path:
             path TEXT,
             syncState INT DEFAULT 0
         );
+        CREATE TABLE itemAnnotations (
+            itemID INTEGER PRIMARY KEY,
+            parentItemID INT,
+            type INT,
+            text TEXT,
+            comment TEXT,
+            color TEXT,
+            pageLabel TEXT,
+            sortIndex TEXT,
+            position TEXT
+        );
         CREATE TABLE deletedItems (itemID INTEGER PRIMARY KEY, dateDeleted TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE feeds (
             libraryID INTEGER PRIMARY KEY,

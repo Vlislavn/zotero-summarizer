@@ -8,14 +8,64 @@ from zotero_summarizer.services.library import _ranking
 from zotero_summarizer.storage.corpus import EmbeddingCache
 
 
-def _rec(key, rel, goal):
-    return {"item_key": key, "relevance_score": rel, "goal_sim": goal, "date_added": "2026-05-01"}
+def _rec(key, rel, goal, *, prestige=None, known=False):
+    # prestige_score (1–5) + prestige_known mirror the reading-queue rec shape; an
+    # unset prestige (known=False) carries no quality evidence, so the prestige
+    # term in the blend stays inert for that row.
+    return {
+        "item_key": key, "relevance_score": rel, "goal_sim": goal,
+        "date_added": "2026-05-01", "prestige_score": prestige, "prestige_known": known,
+    }
 
 
 def test_blended_sort_floats_on_goal_item_above_higher_relevance():
     # item B has mid relevance but the strongest goal match; with the 0.4 goal
     # weight it should outrank A (highest relevance, off-goal). C (low both) last.
     recs = [_rec("A", 4.0, 0.0), _rec("B", 3.0, 0.5), _rec("C", 2.0, 0.1)]
+    _ranking._blended_sort(recs)
+    assert [r["item_key"] for r in recs] == ["B", "A", "C"]
+
+
+def test_blended_sort_prestige_lifts_equal_relevance_paper():
+    # Equal relevance, no goal signal → prestige is the only differentiator: the
+    # high-prestige paper (strong author/venue) floats above the low-prestige one.
+    recs = [_rec("LOW", 3.0, None, prestige=1.0, known=True),
+            _rec("HIGH", 3.0, None, prestige=5.0, known=True)]
+    _ranking._blended_sort(recs)
+    assert [r["item_key"] for r in recs] == ["HIGH", "LOW"]
+
+
+def test_blended_sort_unknown_prestige_treated_as_typical_not_penalised():
+    # Cold-start / uncited work (no KNOWN prestige) must rank as TYPICAL — above a
+    # genuinely low-prestige known paper, never penalised for missing evidence.
+    recs = [
+        _rec("HIGH", 3.0, None, prestige=5.0, known=True),
+        _rec("UNKNOWN", 3.0, None, prestige=None, known=False),
+        _rec("LOW", 3.0, None, prestige=1.0, known=True),
+        _rec("MID", 3.0, None, prestige=3.0, known=True),
+    ]
+    _ranking._blended_sort(recs)
+    order = [r["item_key"] for r in recs]
+    assert order[0] == "HIGH"                            # best quality on top
+    assert order[-1] == "LOW"                            # known-low sinks
+    assert order.index("UNKNOWN") < order.index("LOW")   # cold-start NOT penalised
+
+
+def test_blended_sort_prestige_stays_secondary_to_relevance():
+    # A much higher-relevance low-prestige paper still beats a low-relevance
+    # high-prestige one — prestige is a lift, not a takeover (relevance primary).
+    recs = [_rec("HIREL", 5.0, None, prestige=1.0, known=True),
+            _rec("HIPRES", 1.0, None, prestige=5.0, known=True)]
+    _ranking._blended_sort(recs)
+    assert [r["item_key"] for r in recs] == ["HIREL", "HIPRES"]
+
+
+def test_blended_sort_all_unknown_prestige_equals_goal_blend():
+    # Prestige fields present but all unknown → term inert; identical to the pure
+    # goal-blend order (the measured baseline), so prestige never changes a library
+    # with no OpenAlex coverage.
+    recs = [_rec("A", 4.0, 0.0, known=False), _rec("B", 3.0, 0.5, known=False),
+            _rec("C", 2.0, 0.1, known=False)]
     _ranking._blended_sort(recs)
     assert [r["item_key"] for r in recs] == ["B", "A", "C"]
 

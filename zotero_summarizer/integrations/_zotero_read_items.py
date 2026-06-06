@@ -8,6 +8,7 @@ from typing import Any  # noqa: F401
 from zotero_summarizer.integrations._zotero_read_common import (
     _ANNOTATION_TYPE_NAMES,
     _NON_BIBLIOGRAPHIC_TYPES_SQL,
+    _USER_LIBRARY_ID_SELECT,
 )
 
 
@@ -30,6 +31,7 @@ class ZoteroItemsMixin:
         safe_limit = max(1, min(limit, 500))
         safe_offset = max(0, offset)
         where_clauses = [
+            f"i.libraryID = ({_USER_LIBRARY_ID_SELECT})",
             "di.itemID IS NULL",
             f"it.typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL})",
         ]
@@ -274,7 +276,11 @@ class ZoteroItemsMixin:
         """Return child notes for a specific parent item key."""
 
         def _read(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-            parent = conn.execute("SELECT itemID FROM items WHERE key = ?", (item_key,)).fetchone()
+            parent = conn.execute(
+                f"SELECT itemID FROM items "
+                f"WHERE key = ? AND libraryID = ({_USER_LIBRARY_ID_SELECT})",
+                (item_key,),
+            ).fetchone()
             if not parent:
                 return []
             parent_item_id = int(parent["itemID"])
@@ -381,6 +387,7 @@ class ZoteroItemsMixin:
                 JOIN itemTypes it ON it.itemTypeID = i.itemTypeID
                 LEFT JOIN deletedItems di ON di.itemID = i.itemID
                 WHERE i.key = ?
+                  AND i.libraryID = ({_USER_LIBRARY_ID_SELECT})
                   AND di.itemID IS NULL
                   AND it.typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL})
                 LIMIT 1

@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from zotero_summarizer.domain import normalize_arxiv_id, normalize_doi
 from zotero_summarizer.services._common import connect_sqlite_ro
 
 
@@ -83,6 +84,39 @@ def fetch_handled_keys(conn: sqlite3.Connection) -> tuple[set[str], set[str]]:
     )
 
 
+def fetch_decided_content_keys(
+    conn: sqlite3.Connection, *, blocking_decisions: list[str]
+) -> tuple[set[str], set[str]]:
+    """Normalised ``(DOI, arXiv-id)`` sets for papers the user has already acted
+    on, or that already live in the library.
+
+    A live ``awaiting_review`` card whose DOI/arXiv matches one of these is a
+    duplicate of something the user already decided about (added / trashed) or a
+    paper already in their library — so the slate drops it instead of showing the
+    same paper again. A row qualifies when its decision is in ``blocking_decisions``
+    OR it carries a ``materialized_zotero_key`` (added to Zotero through the app).
+    Normalisation goes through ``domain`` (the single source of truth) so the
+    feed-side raw values and these compare equal. Empty strings are discarded.
+    """
+    if not blocking_decisions:
+        raise ValueError("blocking_decisions must be non-empty")
+    placeholders = ",".join("?" * len(blocking_decisions))
+    rows = conn.execute(
+        f"""
+        SELECT doi, arxiv_id
+        FROM processed_feed_items
+        WHERE (doi IS NOT NULL OR arxiv_id IS NOT NULL)
+          AND (decision IN ({placeholders}) OR materialized_zotero_key IS NOT NULL)
+        """,
+        tuple(blocking_decisions),
+    ).fetchall()
+    dois = {normalize_doi(str(r["doi"] or "")) for r in rows}
+    arxiv_ids = {normalize_arxiv_id(str(r["arxiv_id"] or "")) for r in rows}
+    dois.discard("")
+    arxiv_ids.discard("")
+    return dois, arxiv_ids
+
+
 def fetch_recent_rows_by_decisions(
     conn: sqlite3.Connection,
     *,
@@ -119,4 +153,5 @@ __all__ = [
     "fetch_rows_by_decisions",
     "fetch_recent_rows_by_decisions",
     "fetch_handled_keys",
+    "fetch_decided_content_keys",
 ]

@@ -60,6 +60,7 @@ class DaemonTickReport:
     daily_materialized: int = 0
     daily_rejected: int = 0
     gate_rejected: int = 0       # Phase 1.13: classifier gate fast-rejects
+    skipped_processed_dedup: int = 0  # content dupes (different GUID / re-post)
     fatal_llm_error: bool = False  # an LLM endpoint/auth error that will recur
     elapsed_seconds: float = 0.0
 
@@ -68,6 +69,7 @@ class DaemonTickReport:
             "tick_id": self.tick_id,
             "fetched": self.fetched,
             "skipped_already_processed": self.skipped_already_processed,
+            "skipped_processed_dedup": self.skipped_processed_dedup,
             "skipped_library_dedup": self.skipped_library_dedup,
             "triaged": self.triaged,
             "fast_rejected": self.fast_rejected,

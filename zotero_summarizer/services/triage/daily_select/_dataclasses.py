@@ -41,6 +41,11 @@ class SlatePaper:
     # feedItems. Empty string / None for rows predating this column rollout.
     abstract: str = ""
     pub_year: int | None = None
+    # Heuristic, no-LLM plain-language reason chips ("why it matters"), built by
+    # ``_relevance.build_why`` from signals already on the card (goal match,
+    # model relevance, author prestige, citations, surprise). Empty list when no
+    # signal cleared a threshold; the UI hides the row then.
+    why: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
