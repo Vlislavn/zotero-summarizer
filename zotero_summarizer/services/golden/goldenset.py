@@ -20,8 +20,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from zotero_summarizer.domain import LABEL_TAG_PREFIX
 from zotero_summarizer.services import emoji_signals
 from zotero_summarizer.services._common import atomic_write, connect_sqlite_ro
+from zotero_summarizer.services.golden import user_labels
 
 
 LOGGER = logging.getLogger(__name__)
@@ -79,7 +81,8 @@ def export_golden_dataset(
     When ``triage_db_path`` is given, rows for user-verdicted items are preserved
     across the re-export, so a verdict on a materialized library item (e.g. a
     paper added from Today then marked ``dont_read``) isn't dropped when
-    "Refresh labels" regenerates the engagement-derived rows.
+    "Refresh labels" regenerates the engagement-derived rows. It also reconciles
+    ``label_verdicts`` from the Zotero ``label:*`` tags (Zotero wins; a removed tag retracts).
     """
     db_path = Path(zotero_data_dir) / "zotero.sqlite"
     if not db_path.exists():
@@ -87,9 +90,11 @@ def export_golden_dataset(
     samples = _pull_samples(db_path, abstract_chars=abstract_chars)
 
     preserve_keys: frozenset[str] = frozenset()
+    label_counts = user_labels.ReconcileCounts(0, 0, 0)
     if triage_db_path is not None:
         from zotero_summarizer.storage import repositories
 
+        label_counts = user_labels.reconcile_label_verdicts(samples, db_path, triage_db_path)
         # ALL verdict keys, uncapped: a capped/paginated fetch would silently
         # drop manual verdicts from preserve_keys, losing them on re-export.
         preserve_keys = frozenset(repositories.list_label_verdict_keys(triage_db_path))
@@ -103,6 +108,9 @@ def export_golden_dataset(
         "total": len(samples),
         "by_class": _class_distribution(samples),
         "by_strength": _strength_distribution(samples),
+        "user_labels_synced": label_counts.synced,
+        "user_labels_changed": label_counts.changed,
+        "user_labels_removed": label_counts.removed,
         "csv_path": str(output_csv),
         "jsonl_path": str(output_jsonl),
     }
@@ -158,6 +166,9 @@ WITH engaged AS (
         EXISTS (SELECT 1 FROM itemTags it JOIN tags t ON t.tagID = it.tagID
                 WHERE it.itemID = i.itemID
                   AND ({_build_emoji_like_clause()}))
+        OR EXISTS (SELECT 1 FROM itemTags it JOIN tags t ON t.tagID = it.tagID
+                   WHERE it.itemID = i.itemID
+                     AND t.name LIKE '{LABEL_TAG_PREFIX}%')
         OR EXISTS (SELECT 1 FROM itemNotes n WHERE n.parentItemID = i.itemID)
         OR EXISTS (SELECT 1 FROM itemAnnotations a
                    JOIN itemAttachments att ON att.itemID = a.parentItemID
@@ -334,6 +345,8 @@ def _infer_label(
     weight; year-old labels weigh ~1/4.
 
     Hard short-circuits (irrevocable, applied BEFORE scoring):
+      * Explicit ``label:<priority>`` tag → that class wins (top precedence,
+        above trash; user-confirmed 2026-06: labels beat machine signals).
       * ``in_trash`` → dont_read (1.0).
       * Any hard-veto emoji (🥱 / 👎 / ❌) → dont_read (1.0).
 
@@ -341,6 +354,11 @@ def _infer_label(
     fourth return value is the ``|``-joined list of tiers that contributed
     (for the ``gold_signal_tier`` audit column).
     """
+    explicit = user_labels.detect_label(tags)
+    if explicit is not None:
+        relevance = round(float(_PRIORITY_TO_RELEVANCE[explicit]), 2)
+        return explicit, "high", relevance, "user_label"
+
     if in_trash:
         return "dont_read", "high", 1.0, "trash"
 

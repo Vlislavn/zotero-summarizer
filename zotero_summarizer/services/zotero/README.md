@@ -13,9 +13,9 @@ note_analyzer  : interpret user-written Zotero notes as golden labels
 
 | file | responsibility |
 |---|---|
-| `pending.py` | `PendingChangePlanner` builds, `queue_changes_for_item` queues, `apply_pending_changes` applies pending tag/note/collection changes; band-tag builders — `build_priority_tag_change` (`zs:<band>`) and `build_rel_tag_change` (`zs:rel/<band>` ML-relevance, distinct namespace) |
+| `pending.py` | `PendingChangePlanner` builds, `queue_changes_for_item` queues, `apply_pending_changes` applies pending tag/note/collection changes; tag builders — `build_label_tag_change` (`label:<band>`, the human ground truth) and `build_rel_tag_change` (`zs:rel/<band>` ML-relevance, distinct namespace). Triage no longer auto-writes a machine `zs:<priority>` tag (retired — `label:*` is the single priority namespace) |
 | `_notes.py` | Zotero-safe note HTML builders (triage/verdict/digest) — re-exported by `pending` |
-| `zotero.py` | read-side helpers + the reader/writer accessors for routes |
+| `zotero.py` | read-side helpers + the reader/writer accessors for routes; `zotero_set_label_tag` (direct, instant `label:<priority>` write mirroring the verdict-note write); `zotero_set_item_priority` route writes the `label:*` tag |
 | `note_analyzer.py` | classify user notes into priorities for the golden set |
 
 **Boundaries:** imports `integrations.zotero_write/read`, `corpus`; standard

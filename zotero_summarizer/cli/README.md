@@ -10,7 +10,9 @@ __init__.build_parser()
    ├─ register_feeds(subparsers)      # _feeds.py:   feeds run/list/serve/tick/preview/select-daily
    └─ register_goldenset(subparsers)  # _goldenset.py: export · train · eval-baseline · tune · suggest
           ├─ register_goldenset_classify(gs_sub)  # _goldenset_classify.py: classify · classify-llm
-          └─ register_goldenset_predict(gs_sub)   # _goldenset_predict.py:  predict-feed · analyze-notes · compare
+          ├─ register_goldenset_predict(gs_sub)   # _goldenset_predict.py:  predict-feed · analyze-notes · compare
+          ├─ register_goldenset_migrate(gs_sub)   # _goldenset_migrate.py:  migrate-verdicts-to-zotero
+          └─ register_goldenset_setup_tag_colors(gs_sub)  # _goldenset_setup_colors.py: setup-tag-colors
 main() = build_parser().parse_args(argv).func(args)
 ```
 
@@ -23,5 +25,7 @@ main() = build_parser().parse_args(argv).func(args)
 | `_feeds.py` | the `feeds` subcommands (drive the RSS daemon) |
 | `_goldenset.py` | golden-set export + ML lifecycle (train/eval/tune/suggest) + group wiring |
 | `_goldenset_classify.py` · `_goldenset_predict.py` | the heavier classify/predict/analyze commands (`classify-llm` runs any OpenAI-compatible model) |
+| `_goldenset_migrate.py` | `migrate-verdicts-to-zotero` — one-time transfer of in-app verdicts (`label_verdicts`) into Zotero `label:<priority>` tags (`--dry-run`, idempotent, library items only, single batch backup) |
+| `_goldenset_setup_colors.py` | `setup-tag-colors` — prints the one-time Zotero setup (colors + number keys 1-4 for the four `label:<priority>` tags) for native keypress labeling. Non-destructive (prints the plan; writes nothing into your synced Zotero settings); `--json` for machine output |
 
 Handlers use lazy imports inside the function bodies to keep CLI startup fast.

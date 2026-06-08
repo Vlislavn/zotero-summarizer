@@ -69,7 +69,7 @@ def test_zotero_set_item_priority_applies_tag_change():
         {
             "item_key": "ABCD1234",
             "title": "Priority Paper",
-            "tags": ["zs:could_read", "topic:test"],
+            "tags": ["label:could_read", "topic:test"],
             "reading_priority": "could_read",
         }
     )
@@ -87,8 +87,10 @@ def test_zotero_set_item_priority_applies_tag_change():
         assert writer.last_create_backup is True
         assert writer.last_changes
         payload = writer.last_changes[0]["payload_json"]
-        assert payload["add_tags"] == ["zs:must_read"]
-        assert payload["remove_tags"] == ["zs:could_read"]
+        # Set-priority now writes the human ground-truth `label:<priority>` tag,
+        # mutually exclusive within the `label:*` namespace (zs:<priority> retired).
+        assert payload["add_tags"] == ["label:must_read"]
+        assert payload["remove_tags"] == ["label:could_read"]
 
     asyncio.run(_run())
 

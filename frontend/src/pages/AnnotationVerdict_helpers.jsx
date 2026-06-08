@@ -204,6 +204,7 @@ export function EffectiveLabelsStrip({ summary }) {
   const confirmed = summary.user_confirmed_derivation ?? 0;
   const yours = summary.user_verdicts ?? changed + confirmed;
   const autoDerived = Math.max(total - yours, 0);
+  const coverage = total > 0 ? Math.round((yours / total) * 100) : 0;
   return (
     <div
       className="mb-2 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-[12px] text-slate-700"
@@ -211,7 +212,7 @@ export function EffectiveLabelsStrip({ summary }) {
       aria-label="Training-label summary"
       title={
         `${total.toLocaleString()} labels train the model. `
-        + `${yours.toLocaleString()} carry your verdict `
+        + `${yours.toLocaleString()} (${coverage}%) carry your explicit verdict `
         + `(${changed} changed the model's guess, ${confirmed} confirmed it); `
         + `the other ${autoDerived.toLocaleString()} are auto-derived.`
       }
@@ -219,7 +220,7 @@ export function EffectiveLabelsStrip({ summary }) {
       <span className="font-semibold text-slate-900">{total.toLocaleString()}</span>{' '}
       training labels ·{' '}
       <span className="text-emerald-800 font-semibold">{yours.toLocaleString()}</span>{' '}
-      yours{' '}
+      yours <span className="text-emerald-800 font-semibold">({coverage}%)</span>{' '}
       <span className="text-slate-500">
         ({changed} changed · {confirmed} confirmed)
       </span>

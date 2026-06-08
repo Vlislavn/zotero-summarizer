@@ -104,6 +104,7 @@ def _suggestion_to_dict(s: Any) -> dict[str, Any]:
         "current_priority": s.current_priority,
         "border_distance": round(s.border_distance, 4),
         "disagrees": s.disagrees,
+        "has_label": s.has_label,
     }
 
 
@@ -132,6 +133,7 @@ def _compute_border_into_cache(golden_sha: str, top_k: int) -> None:
             golden_csv=csv_path,
             classifier_name="lightgbm",
             top_k=max(int(top_k), 200),  # cache a generous slice; UI slices further
+            db_path=settings.triage_db_path,  # anchor disagreement to label:* truth
         )
         border_cache.write_cache(
             DEFAULT_MODEL_DIR, golden_sha,

@@ -27,7 +27,7 @@ golden CSV ─featurize→ SPECTER2 embeds + library/prestige features
 | `label_weights.py` | per-row training weights |
 | `golden_metrics.py` | accuracy / per-class / confusion for eval |
 | `library_features.py` | features conditioned on your positive-engagement set |
-| `active_learning.py` | border-case picks that would most improve the model |
+| `active_learning.py` | border-case picks that would most improve the model. Disagreement is judged against your EFFECTIVE label (`label:*`-aware via `hybrid_gt.load_hybrid_labels`) — "the gate disagrees with what *you* decided", not a noisy derived guess; `has_label` flags rows where the truth is your explicit verdict. Pure `_ground_truth` resolver keeps it unit-testable |
 | `tune.py` | Optuna hyperparameter search |
 | `eval_baseline/` | 5×5 CV baseline + learning curve with bootstrap CIs |
 

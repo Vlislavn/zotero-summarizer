@@ -11,7 +11,6 @@ def test_pending_change_planner_builds_review_queue_changes():
     changes = planner.triage_changes(
         item_key="ITEM1",
         item_title="Paper",
-        reading_priority="must_read",
         tags=["topic:agents", "topic:agents"],
         note_html="<p>Summary</p>",
         suggested_collections=["Inbox", "Inbox"],
@@ -22,7 +21,9 @@ def test_pending_change_planner_builds_review_queue_changes():
         "add_note",
         "add_to_collection",
     ]
-    assert changes[0].payload["add_tags"] == ["zs:must_read", "topic:agents"]
+    # Triage no longer auto-writes a machine `zs:<priority>` tag — only the
+    # LLM topical tags. The human `label:<priority>` is the sole priority tag.
+    assert changes[0].payload["add_tags"] == ["topic:agents"]
     assert PendingChangePlanner.to_repository_rows(changes)[0]["change_type"] == "tag_changes"
 
 

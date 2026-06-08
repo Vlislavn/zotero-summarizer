@@ -71,6 +71,47 @@ PRIORITY_TO_RELEVANCE: dict[str, float] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Explicit human label tags — Zotero-native ground truth.
+#
+# The user's deliberate reading verdict lives as a Zotero tag
+# ``label:<priority>`` — a DISTINCT namespace from the app's machine-written
+# ``zs:rel/<band>`` (gate score). It is the highest-precedence ground-truth
+# signal: present on a library item → it wins over emoji-derived engagement
+# scoring (see ``services.golden.goldenset._infer_label``). Single source of
+# truth for the prefix + parse/format so the read path (``services.golden``)
+# and the write path (``services.zotero``) can never diverge.
+# ---------------------------------------------------------------------------
+LABEL_TAG_PREFIX = "label:"
+
+
+def label_tag_for_priority(priority: str) -> str:
+    """``"could_read" -> "label:could_read"``. Raises on an unknown priority."""
+    if priority not in READING_PRIORITY_VALUES:
+        raise ValueError(f"unknown reading priority: {priority!r}")
+    return f"{LABEL_TAG_PREFIX}{priority}"
+
+
+def priority_from_label_tag(tag: str) -> str | None:
+    """``"label:could_read" -> "could_read"``; ``None`` for any non-label tag.
+
+    Case-insensitive on the prefix; the priority must be one of the 4 valid
+    classes (a stray ``label:foo`` returns ``None``, never a bogus class).
+    """
+    text = str(tag or "").strip()
+    if len(text) <= len(LABEL_TAG_PREFIX):
+        return None
+    if text[: len(LABEL_TAG_PREFIX)].casefold() != LABEL_TAG_PREFIX:
+        return None
+    candidate = text[len(LABEL_TAG_PREFIX):].strip().casefold()
+    return candidate if candidate in READING_PRIORITY_VALUES else None
+
+
+LABEL_TAG_CASEFOLDED = frozenset(
+    label_tag_for_priority(p).casefold() for p in READING_PRIORITY_VALUES
+)
+
+
 # Training-row filter — Sprint 3+ (May 2026). Drop only `meta` (library
 # items with zero positive engagement; truly no signal) and `in_trash`
 # (user explicitly removed). `first_glance` rows used to be dropped as

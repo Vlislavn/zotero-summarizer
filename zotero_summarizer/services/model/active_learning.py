@@ -6,12 +6,14 @@ Two reasons a row is "high information":
      threshold (4.5 / 3.6 / 2.6). One additional label there moves the
      decision boundary.
   2. **Disagreement** — the model's predicted priority differs from the
-     currently-derived `gold_priority_final`. The user's "ground truth"
-     for that row is implicitly weak (no clean engagement signal).
+     user's EFFECTIVE label: their explicit ``label:*`` verdict when set, else
+     the derived `gold_priority_final`. Anchoring to the effective label (via
+     the hybrid map) means "the gate disagrees with what *you* decided", not
+     with a noisy derived guess.
 
 We rank by a single score: distance to the nearest threshold, smaller is
 better. A side-channel boost is given to rows whose model prediction and
-derived priority disagree.
+effective priority disagree.
 """
 
 from __future__ import annotations
@@ -51,11 +53,31 @@ class LabelSuggestion:
     current_priority: str
     border_distance: float
     disagrees: bool
+    has_label: bool  # True when current_priority came from an explicit label:* verdict
 
 
 def _distance_to_nearest_threshold(score: float) -> float:
     """Return the absolute distance to the nearest priority boundary."""
     return float(min(abs(score - t) for t in _THRESHOLDS))
+
+
+def _ground_truth(
+    key: str, row: dict[str, str], effective: dict[str, dict] | None,
+) -> tuple[str, bool]:
+    """The ``(current_priority, has_explicit_label)`` a suggestion is judged on.
+
+    With the hybrid map the disagreement signal is measured against the user's
+    EFFECTIVE label — their explicit ``label:*`` verdict when set, else the
+    derived label. Falls back to the CSV's derived ``gold_priority_final`` when
+    there is no hybrid entry / no db. Pure (no I/O) so it's unit-testable without
+    a trained model.
+    """
+    derived = (row.get("gold_priority_final") or "").strip() or "unknown"
+    if effective is not None:
+        entry = effective.get(key)
+        if entry is not None:
+            return (entry.get("effective_priority") or derived), entry.get("source") == "user"
+    return derived, False
 
 
 def suggest_border_labels(
@@ -67,6 +89,7 @@ def suggest_border_labels(
     classifier_name: str = "lightgbm",
     top_k: int = 20,
     abstract_preview_chars: int = 220,
+    db_path: Path | None = None,
 ) -> list[LabelSuggestion]:
     """Score every library row, return top-K closest to a class border.
 
@@ -118,6 +141,13 @@ def suggest_border_labels(
         goals_config=goals_config,
     )
 
+    # Anchor disagreement to the user's EFFECTIVE label (label:*-aware) when the
+    # verdict store is available; else fall back to the derived CSV label.
+    effective: dict[str, dict] | None = None
+    if db_path is not None:
+        from zotero_summarizer.services.golden import hybrid_gt
+        effective = hybrid_gt.load_hybrid_labels(golden_csv, db_path)
+
     by_key = {p.item_key: p for p in predictions}
     suggestions: list[LabelSuggestion] = []
     for it in library_items:
@@ -125,7 +155,7 @@ def suggest_border_labels(
         pred = by_key.get(key)
         if pred is None:
             continue
-        current = (it.get("gold_priority_final") or "").strip() or "unknown"
+        current, has_label = _ground_truth(key, it, effective)
         d = _distance_to_nearest_threshold(pred.raw_score)
         disagrees = pred.predicted_priority != current
         suggestions.append(LabelSuggestion(
@@ -139,6 +169,7 @@ def suggest_border_labels(
             current_priority=current,
             border_distance=d,
             disagrees=disagrees,
+            has_label=has_label,
         ))
 
     # Rank: closest to threshold first; tie-break by disagreement (those go up).

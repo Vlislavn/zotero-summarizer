@@ -129,19 +129,19 @@ def _matched_collections_from_row(row: dict[str, Any]) -> list[str]:
 
 
 def _tags_from_row(
-    row: dict[str, Any],
     *,
     is_black_swan: bool,
     black_swan_tag: str,
 ) -> list[str]:
     """Build the tag list for a materialized item.
 
-    Includes the reading-priority ``zs:<priority>`` tag (Phase 1 convention) and
-    the black-swan tag if applicable. The provenance tag ``/zs/feeds-v3`` is
+    The machine no longer stamps a ``zs:<priority>`` tag — the human
+    ``label:<priority>`` is the only priority namespace now (retired 2026-06), and
+    the daemon must not set the user's ground-truth label. Adds just the
+    black-swan tag when applicable; the provenance tag ``/zs/feeds-v3`` is
     appended separately by ``apply_feed_materialization``.
     """
-    priority = str(row.get("reading_priority") or "could_read")
-    tags = [f"zs:{priority}"]
+    tags: list[str] = []
     if is_black_swan and black_swan_tag:
         tags.append(black_swan_tag)
     return tags
@@ -173,7 +173,7 @@ def materialize_pick(
         summary = pick.refined_summary or _summary_from_row(pick.row)
         feed_payload = _feed_payload_from_row(pick.row)
         matched = _matched_collections_from_row(pick.row)
-        tags = _tags_from_row(pick.row, is_black_swan=pick.is_black_swan, black_swan_tag=ctx.black_swan_tag)
+        tags = _tags_from_row(is_black_swan=pick.is_black_swan, black_swan_tag=ctx.black_swan_tag)
         note_html = pending_service.build_triage_note_html(
             title=str(pick.row.get("title") or ""),
             summary=summary,

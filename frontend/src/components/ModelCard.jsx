@@ -145,7 +145,7 @@ function ModelDetails({ model }) {
               ? Number(model.oof_spearman).toFixed(4)
               : '—'
           }
-          title="Out-of-fold Spearman correlation against the relevance label [1, 5]. Closer to 1 is better."
+          title="Out-of-fold Spearman correlation, evaluated against your effective labels — your explicit label:* verdict where you set one, else the derived label — on the [1, 5] relevance scale. Closer to 1 is better."
         />
         <Field
           label="Binary AUC"

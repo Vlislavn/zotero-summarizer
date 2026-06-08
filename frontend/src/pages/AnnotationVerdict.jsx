@@ -326,10 +326,13 @@ export default function AnnotationVerdict() {
         { item_key: itemKey, user_priority, comment },
         {
           onSuccess: (data) => {
-            // Comment is mirrored to Zotero as a note; flag a soft failure
-            // (e.g. Zotero open) without undoing the saved verdict.
-            if (data?.note_error) {
-              setFlashStatus(`Saved ${itemKey} → ${user_priority} (note not written: ${data.note_error})`);
+            // The verdict is mirrored to Zotero as a `label:<priority>` tag (the
+            // ground truth) and the comment as a note. Flag a soft failure on
+            // either (e.g. Zotero open) without undoing the saved verdict.
+            const soft = data?.label_error || data?.note_error;
+            if (soft) {
+              const what = data?.label_error ? 'label not written' : 'note not written';
+              setFlashStatus(`Saved ${itemKey} → ${user_priority} (${what}: ${soft})`);
               setTimeout(() => setFlashStatus(null), 4000);
             }
           },

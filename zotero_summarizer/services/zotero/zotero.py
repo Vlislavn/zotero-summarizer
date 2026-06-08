@@ -17,7 +17,7 @@ from zotero_summarizer.models import (
 from zotero_summarizer.services._common import settings, state
 from zotero_summarizer.services.corpus import refresh_corpus_items_by_keys
 from zotero_summarizer.services.zotero.pending import (
-    build_priority_tag_change,
+    build_label_tag_change,
     effective_tag_payload,
     normalize_pending_tag_payload,
 )
@@ -121,14 +121,14 @@ async def zotero_set_item_priority(item_key: str, req: ZoteroItemPriorityUpdateR
         }
 
     current_tags = [str(tag or "").strip() for tag in (detail.get("tags") or []) if str(tag or "").strip()]
-    payload = build_priority_tag_change(current_tags, req.priority)
+    payload = build_label_tag_change(current_tags, req.priority)
     if not payload["add_tags"] and not payload["remove_tags"]:
         refreshed_detail = await asyncio.to_thread(reader.get_item_detail, safe_item_key)
         return {
             "updated": 0,
             "item_key": safe_item_key,
             "priority": req.priority,
-            "message": "Priority tag already set",
+            "message": "Label tag already set",
             "item": refreshed_detail,
         }
 
@@ -237,6 +237,41 @@ def zotero_upsert_verdict_note(item_key: str, user_priority: str, comment: str) 
     failed = list(result.get("failed") or [])
     if failed:
         raise ZoteroWriteError(str(failed[0].get("error") or "verdict note write failed"))
+
+
+def zotero_set_label_tag(item_key: str, priority: str) -> None:
+    """Write the user's explicit ``label:<priority>`` ground-truth tag to Zotero.
+
+    Direct write — mirrors :func:`zotero_upsert_verdict_note` so a verdict cast in
+    the app lands in Zotero instantly (the user labels in the app OR Zotero;
+    Zotero is the source of truth, reconciled on the next export). Mutually
+    exclusive within the ``label:*`` namespace. Raises on failure so the caller
+    can report it; the verdict itself is already saved upstream and must not be
+    blocked by this. Refuses while Zotero is open (DB-lock risk). No-op when the
+    label is already set (idempotent)."""
+    reader = get_zotero_reader_or_raise()
+    writer = get_zotero_writer_or_raise()
+    if writer.is_connector_running():
+        raise ZoteroWriteError("Zotero is open; close it to save the label tag.")
+    detail = reader.get_item_detail(item_key)
+    if detail is None:
+        raise ZoteroWriteError(f"item {item_key!r} not found in Zotero")
+    current_tags = [str(t or "").strip() for t in (detail.get("tags") or []) if str(t or "").strip()]
+    payload = build_label_tag_change(current_tags, priority)
+    if not payload["add_tags"] and not payload["remove_tags"]:
+        return
+    result = writer.apply_changes(
+        [{
+            "id": 0,
+            "item_key": item_key,
+            "change_type": "tag_changes",
+            "payload_json": payload,
+        }],
+        False,
+    )
+    failed = list(result.get("failed") or [])
+    if failed:
+        raise ZoteroWriteError(str(failed[0].get("error") or "label tag write failed"))
 
 
 def zotero_upsert_digest_note(item_key: str, digest: Any) -> None:

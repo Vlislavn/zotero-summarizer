@@ -26,7 +26,10 @@ from pydantic import BaseModel, Field
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services.golden import hybrid_gt, label_provenance
 from zotero_summarizer.services.library import review_detail as review_detail_svc
-from zotero_summarizer.services.zotero.zotero import zotero_upsert_verdict_note
+from zotero_summarizer.services.zotero.zotero import (
+    zotero_set_label_tag,
+    zotero_upsert_verdict_note,
+)
 from zotero_summarizer.storage import repositories
 from zotero_summarizer.api.routes._golden_helpers import (
     _append_verdict_golden,
@@ -299,6 +302,23 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
         )
     except Exception as exc:  # noqa: BLE001 — verdict save must not fail on enrichment
         LOGGER.warning("golden append for verdict %s failed: %s", req.item_key, exc)
+
+    # The verdict IS the user's explicit label — write it to Zotero as a
+    # `label:<priority>` tag so the ground truth lives in Zotero (source of truth,
+    # reconciled back on the next export). Library items only: feed:/note: keys
+    # have no Zotero item to tag yet and keep the label_verdicts path. Non-blocking
+    # + reported-not-raised, exactly like the verdict note below — the verdict is
+    # ALREADY durable above. The user authorized "keep my labels inside Zotero".
+    label_written = False
+    label_error: str | None = None
+    source = review_detail_svc.classify_item_key(req.item_key)
+    if source not in (review_detail_svc.SOURCE_FEED, review_detail_svc.SOURCE_NOTE):
+        try:
+            await asyncio.to_thread(zotero_set_label_tag, req.item_key, req.user_priority)
+            label_written = True
+        except Exception as exc:  # noqa: BLE001 — label write must not block the verdict
+            label_error = f"{type(exc).__name__}: {exc}"
+            LOGGER.warning("verdict label tag write for %s failed: %s", req.item_key, exc)
     # Save the comment to Zotero as a single (upserted) note. Direct write, but
     # the verdict is ALREADY durable above — a note failure (e.g. Zotero open)
     # must never block it, so it's reported, not raised. The user authorized
@@ -325,6 +345,8 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
         "created_at": stored["created_at"],
         "note_written": note_written,
         "note_error": note_error,
+        "label_written": label_written,
+        "label_error": label_error,
     }
 
 

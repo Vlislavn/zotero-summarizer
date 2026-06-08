@@ -7,7 +7,9 @@ from pathlib import Path
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.cli._helpers import _utc_iso_now, progress_printer
 from zotero_summarizer.cli._goldenset_classify import register_goldenset_classify
+from zotero_summarizer.cli._goldenset_migrate import register_goldenset_migrate
 from zotero_summarizer.cli._goldenset_predict import register_goldenset_predict
+from zotero_summarizer.cli._goldenset_setup_colors import register_goldenset_setup_tag_colors
 
 
 def _goldenset_export(args: argparse.Namespace) -> int:
@@ -222,8 +224,10 @@ def _goldenset_suggest_labels(args: argparse.Namespace) -> int:
         rows,
         corpus_db_path=settings.corpus_db_path,
         goals_config=goals_config,
+        golden_csv=input_csv,
         classifier_name=args.classifier,
         top_k=args.top_k,
+        db_path=settings.triage_db_path,  # anchor disagreement to label:* truth
     )
     print(format_suggestions_markdown(suggestions))
     print()
@@ -436,3 +440,5 @@ def register_goldenset(subparsers) -> None:
 
     register_goldenset_classify(gs_sub)
     register_goldenset_predict(gs_sub)
+    register_goldenset_migrate(gs_sub)
+    register_goldenset_setup_tag_colors(gs_sub)
