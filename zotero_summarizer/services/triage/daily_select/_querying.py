@@ -85,7 +85,10 @@ def fetch_handled_keys(conn: sqlite3.Connection) -> tuple[set[str], set[str]]:
 
 
 def fetch_decided_content_keys(
-    conn: sqlite3.Connection, *, blocking_decisions: list[str]
+    conn: sqlite3.Connection,
+    *,
+    blocking_decisions: list[str],
+    blocking_outcomes: list[str],
 ) -> tuple[set[str], set[str]]:
     """Normalised ``(DOI, arXiv-id)`` sets for papers the user has already acted
     on, or that already live in the library.
@@ -94,27 +97,68 @@ def fetch_decided_content_keys(
     duplicate of something the user already decided about (added / trashed) or a
     paper already in their library — so the slate drops it instead of showing the
     same paper again. A row qualifies when its decision is in ``blocking_decisions``
-    OR it carries a ``materialized_zotero_key`` (added to Zotero through the app).
-    Normalisation goes through ``domain`` (the single source of truth) so the
-    feed-side raw values and these compare equal. Empty strings are discarded.
+    OR its ``final_outcome`` is in ``blocking_outcomes`` (e.g. trashed inside
+    Zotero) OR it carries a ``materialized_zotero_key`` (added to Zotero through
+    the app). Normalisation goes through ``domain`` (the single source of truth)
+    so the feed-side raw values and these compare equal. Empty strings discarded.
     """
     if not blocking_decisions:
         raise ValueError("blocking_decisions must be non-empty")
-    placeholders = ",".join("?" * len(blocking_decisions))
+    if not blocking_outcomes:
+        raise ValueError("blocking_outcomes must be non-empty")
+    dec_ph = ",".join("?" * len(blocking_decisions))
+    out_ph = ",".join("?" * len(blocking_outcomes))
     rows = conn.execute(
         f"""
         SELECT doi, arxiv_id
         FROM processed_feed_items
         WHERE (doi IS NOT NULL OR arxiv_id IS NOT NULL)
-          AND (decision IN ({placeholders}) OR materialized_zotero_key IS NOT NULL)
+          AND (decision IN ({dec_ph})
+               OR final_outcome IN ({out_ph})
+               OR materialized_zotero_key IS NOT NULL)
         """,
-        tuple(blocking_decisions),
+        (*blocking_decisions, *blocking_outcomes),
     ).fetchall()
     dois = {normalize_doi(str(r["doi"] or "")) for r in rows}
     arxiv_ids = {normalize_arxiv_id(str(r["arxiv_id"] or "")) for r in rows}
     dois.discard("")
     arxiv_ids.discard("")
     return dois, arxiv_ids
+
+
+def fetch_trashed_guids(
+    conn: sqlite3.Connection,
+    *,
+    trashed_decisions: list[str],
+    trashed_outcomes: list[str],
+) -> set[str]:
+    """Stable GUIDs of papers the user explicitly threw away — the durable
+    "never show again" key.
+
+    A trashed paper re-arrives under a *fresh* ``feed_item_id`` (Zotero reassigns
+    feed-item ids on rollover / second feed), so the per-item ``feed:<id>`` trash
+    label and the ``user_rejected`` decision both sit on the *old* row and miss
+    the re-arrival; an id-less journal/news item also escapes DOI/arXiv dedup.
+    The GUID survives re-ingestion, so matching on it makes trash memory
+    permanent. A row qualifies when its decision is in ``trashed_decisions``
+    (trashed from Today) OR its ``final_outcome`` is in ``trashed_outcomes``
+    (trashed/deleted inside Zotero). Empty GUIDs discarded.
+    """
+    if not trashed_decisions:
+        raise ValueError("trashed_decisions must be non-empty")
+    if not trashed_outcomes:
+        raise ValueError("trashed_outcomes must be non-empty")
+    dec_ph = ",".join("?" * len(trashed_decisions))
+    out_ph = ",".join("?" * len(trashed_outcomes))
+    rows = conn.execute(
+        f"""
+        SELECT DISTINCT guid
+        FROM processed_feed_items
+        WHERE decision IN ({dec_ph}) OR final_outcome IN ({out_ph})
+        """,
+        (*trashed_decisions, *trashed_outcomes),
+    ).fetchall()
+    return {str(r["guid"]).strip() for r in rows if str(r["guid"] or "").strip()}
 
 
 def fetch_recent_rows_by_decisions(
@@ -154,4 +198,5 @@ __all__ = [
     "fetch_recent_rows_by_decisions",
     "fetch_handled_keys",
     "fetch_decided_content_keys",
+    "fetch_trashed_guids",
 ]

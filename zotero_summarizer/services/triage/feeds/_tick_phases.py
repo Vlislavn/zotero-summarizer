@@ -11,7 +11,6 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
-from zotero_summarizer.domain import normalize_arxiv_id, normalize_doi
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.storage import feeds as feeds_storage
@@ -172,110 +171,6 @@ def prepare_unprocessed(
             conn.commit()
             LOGGER.info("[%s] cleared %d stale error row(s) for retry", tick_id, cleared)
     return unprocessed, skipped_processed, stale_to_mark
-
-
-def _partition_by_content(
-    items: list[dict[str, Any]], *, seen_doi: set[str], seen_arxiv: set[str]
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Pure split of items into ``(to_keep, duplicates)`` by normalised DOI/arXiv.
-
-    ``seen_doi``/``seen_arxiv`` are the already-known content keys; an item that
-    matches either is a duplicate. The seen-sets grow as we keep items, so a
-    second copy of the same paper *within this batch* is also caught. Items with
-    neither id are always kept (DOI/arXiv-only — no false positives). Copies the
-    caller's sets rather than mutating them.
-    """
-    seen_d = set(seen_doi)
-    seen_a = set(seen_arxiv)
-    to_keep: list[dict[str, Any]] = []
-    duplicates: list[dict[str, Any]] = []
-    for item in items:
-        doi = normalize_doi(item.get("doi") or "")
-        arxiv = normalize_arxiv_id(item.get("arxiv_id") or "")
-        if (doi and doi in seen_d) or (arxiv and arxiv in seen_a):
-            duplicates.append(item)
-            continue
-        if doi:
-            seen_d.add(doi)
-        if arxiv:
-            seen_a.add(arxiv)
-        to_keep.append(item)
-    return to_keep, duplicates
-
-
-def dedup_against_processed(
-    unprocessed: list[dict[str, Any]], *, tick_id: str, enabled: bool
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Split items into ``(to_triage, content_duplicates)`` by DOI/arXiv.
-
-    Identity dedup (:func:`prepare_unprocessed`) only catches the *same* RSS
-    item. A paper that re-arrives under a different GUID or from another feed is
-    a fresh ``(feed_library_id, feed_item_id)`` and slips through — so a paper
-    the user already trashed/added (or that is merely awaiting their decision)
-    comes back. Here we reject, by content, any item whose DOI/arXiv already
-    exists in ``processed_feed_items`` (or earlier in this same batch). The
-    duplicate is recorded as ``rejected_dedup_processed`` so it never re-enters
-    triage or the Today slate — without burning an LLM call on a known paper.
-    ``skipped_error`` rows are retryable (never scored) and excluded from the
-    existing-content set so a transient failure can't permanently block a paper.
-    """
-    if not enabled:
-        return list(unprocessed), []
-    with _triage_conn() as conn:
-        pairs = feeds_storage.fetch_processed_content_pairs(
-            conn, exclude_decisions=(feeds_storage.DECISION_SKIPPED_ERROR,),
-        )
-    seen_doi = {normalize_doi(doi) for doi, _ in pairs}
-    seen_arxiv = {normalize_arxiv_id(arxiv) for _, arxiv in pairs}
-    seen_doi.discard("")
-    seen_arxiv.discard("")
-    to_triage, duplicates = _partition_by_content(
-        unprocessed, seen_doi=seen_doi, seen_arxiv=seen_arxiv,
-    )
-    for item in duplicates:
-        LOGGER.info(
-            "[%s] skip dedup: %r (duplicate of an already-processed paper)",
-            tick_id, (item.get("title") or "")[:60],
-        )
-    return to_triage, duplicates
-
-
-def dedup_against_library(
-    unprocessed: list[dict[str, Any]], *, reader: ZoteroReader, tick_id: str, enabled: bool
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Split unprocessed items into (to_triage, already_in_library).
-
-    A failed dedup LOOKUP must NOT be read as "not in library" — that would
-    re-materialize an existing paper — so the item is skipped this tick and
-    retried next tick once the read succeeds.
-    """
-    if not enabled:
-        return list(unprocessed), []
-    library_skipped: list[dict[str, Any]] = []
-    to_triage: list[dict[str, Any]] = []
-    for item in unprocessed:
-        doi = (item.get("doi") or "").strip()
-        arxiv = (item.get("arxiv_id") or "").strip()
-        if not doi and not arxiv:
-            to_triage.append(item)
-            continue
-        try:
-            existing = reader.find_by_external_id(doi=doi or None, arxiv_id=arxiv or None)
-        except Exception as exc:  # noqa: BLE001 — external Zotero-read boundary
-            LOGGER.warning(
-                "[%s] dedup lookup failed for %r; skipping this tick: %s",
-                tick_id, (item.get("title") or "")[:60], exc,
-            )
-            continue
-        if existing:
-            LOGGER.info(
-                "[%s] skip dedup: %r (already in library)",
-                tick_id, (item.get("title") or "")[:60],
-            )
-            library_skipped.append(item)
-        else:
-            to_triage.append(item)
-    return to_triage, library_skipped
 
 
 def run_triage_stage(

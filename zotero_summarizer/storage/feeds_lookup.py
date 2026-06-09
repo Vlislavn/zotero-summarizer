@@ -87,3 +87,47 @@ def fetch_processed_content_pairs(
         params,
     ).fetchall()
     return [(str(r[0] or ""), str(r[1] or "")) for r in rows]
+
+
+def fetch_trashed_guids(
+    conn: sqlite3.Connection,
+    *,
+    decisions: tuple[str, ...],
+    outcomes: tuple[str, ...],
+) -> set[str]:
+    """GUIDs of papers the user explicitly threw away — the durable key for
+    "never show this again".
+
+    A trashed paper re-arrives from the feed under a *fresh*
+    ``(feed_library_id, feed_item_id)`` (Zotero reassigns feed-item ids when an
+    item rolls over / re-posts / comes from a second feed), so the per-item
+    ``feed:<id>`` trash label and the ``user_rejected`` decision both sit on the
+    *old* row and miss the re-arrival. DOI/arXiv content-dedup only helps papers
+    that carry an external id (journal/news RSS items often carry neither). The
+    GUID — the feed item's stable URL/id — survives across re-ingestions, so it
+    is the content-addressed key that makes trash memory permanent.
+
+    Returns the set of non-empty GUIDs whose row carries a trashing ``decision``
+    (e.g. ``user_rejected`` — trashed from Today) OR a trashing ``final_outcome``
+    (e.g. ``trashed`` / ``deleted_all`` — thrown away inside Zotero). Both
+    taxonomies are passed in by the caller so this stays pure SQL with no import
+    of the constants module.
+    """
+    clauses: list[str] = []
+    params: list[Any] = []
+    if decisions:
+        placeholders = ",".join("?" * len(decisions))
+        clauses.append(f"decision IN ({placeholders})")
+        params.extend(decisions)
+    if outcomes:
+        placeholders = ",".join("?" * len(outcomes))
+        clauses.append(f"final_outcome IN ({placeholders})")
+        params.extend(outcomes)
+    if not clauses:
+        return set()
+    where = " OR ".join(clauses)
+    rows = conn.execute(
+        f"SELECT DISTINCT guid FROM processed_feed_items WHERE {where}",
+        params,
+    ).fetchall()
+    return {str(r[0]).strip() for r in rows if str(r[0] or "").strip()}

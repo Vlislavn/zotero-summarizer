@@ -32,6 +32,7 @@ from zotero_summarizer.services.triage.daily_select._querying import (
     fetch_handled_keys,
     fetch_recent_rows_by_decisions,
     fetch_rows_by_decisions,
+    fetch_trashed_guids,
     open_ro,
 )
 
@@ -56,6 +57,18 @@ _BLOCKING_DECISIONS = [
     "rejected_dedup_library",   # daemon saw it was already in the library
     "rejected_dedup_processed", # daemon saw an earlier copy of this paper
 ]
+
+# Outcome strings (mirror storage.feeds_constants.OUTCOME_*) for papers thrown
+# away inside Zotero — kept in lock-step with that module, duplicated here so the
+# package stays free of a storage.feeds import (see the decision-strings note).
+_BLOCKING_OUTCOMES = ["trashed", "deleted_all"]
+
+# A paper the user *threw away* — its stable GUID is suppressed from the slate
+# forever ("trash → never show again"), regardless of whether it carries a
+# DOI/arXiv to content-dedup on. ``user_rejected`` = trashed from Today;
+# the outcomes = trashed/deleted inside Zotero.
+_TRASH_DECISIONS = ["user_rejected"]
+_TRASH_OUTCOMES = _BLOCKING_OUTCOMES
 
 _DEFAULT_ROLES: dict[str, int] = {
     "model": 3,
@@ -84,6 +97,26 @@ def _drop_handled(
             continue
         fid = row.get("feed_item_id")
         if fid is not None and f"feed:{int(fid)}" in handled_label_keys:
+            continue
+        out.append(row)
+    return out
+
+
+def _drop_trashed_guids(rows: list[dict], *, trashed_guids: set[str]) -> list[dict]:
+    """Drop rows whose stable GUID matches a paper the user explicitly trashed.
+
+    The durable "trash → never show again" guard: it catches a re-arrival of a
+    thrown-away paper even when it carries no DOI/arXiv (so ``_drop_content_dupes``
+    can't see it) and arrived under a fresh ``feed_item_id`` (so ``_drop_handled``
+    can't see it either). The GUID is the one identifier that survives Zotero
+    reassigning feed-item ids across re-ingestions.
+    """
+    if not trashed_guids:
+        return rows
+    out: list[dict] = []
+    for row in rows:
+        guid = str(row.get("guid") or "").strip()
+        if guid and guid in trashed_guids:
             continue
         out.append(row)
     return out
@@ -139,10 +172,18 @@ def _fetch_primary_unhandled(
     """
     handled_guids, handled_label_keys = fetch_handled_keys(conn)
     blocked_doi, blocked_arxiv = fetch_decided_content_keys(
-        conn, blocking_decisions=_BLOCKING_DECISIONS,
+        conn,
+        blocking_decisions=_BLOCKING_DECISIONS,
+        blocking_outcomes=_BLOCKING_OUTCOMES,
+    )
+    trashed_guids = fetch_trashed_guids(
+        conn,
+        trashed_decisions=_TRASH_DECISIONS,
+        trashed_outcomes=_TRASH_OUTCOMES,
     )
 
     def _clean(rows: list[dict]) -> list[dict]:
+        rows = _drop_trashed_guids(rows, trashed_guids=trashed_guids)
         rows = _drop_handled(
             rows, handled_guids=handled_guids, handled_label_keys=handled_label_keys,
         )

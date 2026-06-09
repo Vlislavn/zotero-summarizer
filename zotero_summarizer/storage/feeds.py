@@ -72,6 +72,7 @@ from zotero_summarizer.storage.feeds_schema import (
 )
 from zotero_summarizer.storage.feeds_lookup import (  # noqa: F401  (re-exported)
     fetch_processed_content_pairs,
+    fetch_trashed_guids,
     get_processed_feed_item_by_id,
     get_processed_feed_item_by_pk,
 )

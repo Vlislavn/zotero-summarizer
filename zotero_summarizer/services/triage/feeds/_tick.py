@@ -24,10 +24,12 @@ from zotero_summarizer.services.triage.feeds._gate import (
     _maybe_schedule_gate_retrain,
 )
 from zotero_summarizer.services.triage.feeds._outcomes import _resolve_due_outcomes
-from zotero_summarizer.services.triage.feeds._tick_phases import (
-    _TickResults,
+from zotero_summarizer.services.triage.feeds._tick_dedup import (
     dedup_against_library,
     dedup_against_processed,
+)
+from zotero_summarizer.services.triage.feeds._tick_phases import (
+    _TickResults,
     mark_processed_read,
     maybe_run_daily,
     pick_and_log,

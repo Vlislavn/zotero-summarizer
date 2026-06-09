@@ -91,6 +91,7 @@ def _insert(
     doi: str | None = None,
     arxiv_id: str | None = None,
     materialized_zotero_key: str | None = None,
+    final_outcome: str | None = None,
 ) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
@@ -109,9 +110,10 @@ def _insert(
             INSERT INTO processed_feed_items (
                 feed_library_id, feed_item_id, guid, title, doi, arxiv_id, feed_name,
                 decision, composite_score, surprise_score, corpus_affinity, run_id,
-                shap_contribs_json, materialized_zotero_key, created_at, updated_at
+                shap_contribs_json, materialized_zotero_key, final_outcome,
+                created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 1,
@@ -128,6 +130,7 @@ def _insert(
                 "test-run",
                 shap_json,
                 materialized_zotero_key,
+                final_outcome,
                 created_str,
                 created_str,
             ),

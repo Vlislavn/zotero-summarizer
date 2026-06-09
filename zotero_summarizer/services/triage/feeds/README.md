@@ -6,7 +6,7 @@ is a facade (`__init__.py`); each concern lives in a private sub-module.
 
 ```
 run_daemon_loop ─every N s→ run_daemon_tick (_tick)
-   pick round-robin → dedup(identity → content → library) → gate(_gate) ─reject──> recorded
+   pick round-robin → dedup(identity → trashed-GUID → content → library) → gate(_gate) ─reject──> recorded
                                   └─keep──> _triage (LLM score) ─> triaged_pending
    mark read in Zotero · resolve due outcomes (_outcomes) → user_feedback
         once/day ▼
@@ -23,7 +23,8 @@ run_daemon_loop ─every N s→ run_daemon_tick (_tick)
 | `_daily.py` | daily plateau selection: candidate scoring, plateau-pick, black-swan allocation, full-text refine, reject-cutoff |
 | `_daily_materialize.py` | the write half of daily selection: row→payload/note/tags reconstruction (`processed_feed_items` row → Zotero) + `materialize_pick` (one pick → Inbox + DB decision) + `_PendingScoredRow`. No longer stamps a machine `zs:<priority>` tag (retired — the human `label:<priority>` is the only priority namespace) |
 | `_tick.py` | the thin daemon-tick orchestrator — sequences the phases below for one tick; `allow_daily_selection` gates auto-materialization |
-| `_tick_phases.py` | the tick's phases: round-robin pick, dedup-prep, **content dedup** (`dedup_against_processed`), library dedup, triage stage, record decisions, mark-read, daily trigger + `_TickResults`. Auto-resolved feeds are filtered by `feeds.exclude_feeds` (non-paper feed NAMES, e.g. GitHub releases — never scored/materialised); library dedup normalises DOIs (URL/prefix variants) and skips an item on a lookup error (never re-materialises a dupe). `dedup_against_processed` rejects (→ `rejected_dedup_processed`) any incoming item whose DOI/arXiv already exists in `processed_feed_items` — the same paper re-arriving under a different GUID / from another feed / already trashed — so it never burns an LLM call or returns to Today (gated by `feeds.dedup_against_processed`, default = the library-dedup flag) |
+| `_tick_phases.py` | the tick's non-dedup phases: round-robin pick, dedup-prep + **identity dedup** (`prepare_unprocessed`, same `feed_item_id`), triage stage, record decisions, mark-read, daily trigger + `_TickResults`. Auto-resolved feeds are filtered by `feeds.exclude_feeds` (non-paper feed NAMES, e.g. GitHub releases — never scored/materialised) |
+| `_tick_dedup.py` | the tick's **content/trash dedup** phases (split out of `_tick_phases` for file-size + single responsibility). `dedup_against_processed` runs two guards, both recorded `rejected_dedup_processed` (no LLM call, never returns to Today): **trashed-GUID suppression** (always on — drops any re-arrival whose stable GUID matches a paper the user threw away via `user_rejected` / Zotero `trashed`/`deleted_all`; catches id-less items DOI/arXiv can't, and re-arrivals under a fresh `feed_item_id`) and **content dedup** (DOI/arXiv vs `processed_feed_items`, gated by `feeds.dedup_against_processed`, default = the library-dedup flag). `dedup_against_library` normalises DOIs (URL/prefix variants) and skips an item on a lookup error (never re-materialises a dupe) |
 | `_outcomes.py` | outcome detection: what the user did with a materialized item → feedback |
 | `_loop.py` | the long-running asyncio loop driving `run_daemon_tick` |
 
