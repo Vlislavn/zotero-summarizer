@@ -208,6 +208,24 @@ def test_reconcile_never_retracts_feed_or_note_verdicts(tmp_path):
     assert get_label_verdict(db_path, "note:ABCD1234:7") is not None
 
 
+def test_reconcile_never_retracts_app_typed_verdict(tmp_path):
+    # A verdict typed in the Annotate UI carries its DERIVED original (not the
+    # ZOTERO_LABEL_ORIGIN marker), so it must survive even on a present, tag-free
+    # item — these are the hundreds of in-app verdicts that must never be wiped
+    # just because they were never pushed out as Zotero tags.
+    db_path = _verdict_db(tmp_path)
+    zdb = build_zotero_db(tmp_path / "zotero")
+    add_library_item(zdb, item_key="APPONLY1", title="typed in app")  # present, no label tag
+    insert_or_update_label_verdict(
+        db_path, item_key="APPONLY1",
+        original_derived_priority="could_read",  # Annotate-UI origin, NOT 'zotero_label'
+        user_priority="must_read", comment="",
+    )
+    counts = user_labels.reconcile_label_verdicts([], zdb, db_path)
+    assert counts.removed == 0
+    assert get_label_verdict(db_path, "APPONLY1") is not None
+
+
 # --- migration CLI ---------------------------------------------------------
 
 

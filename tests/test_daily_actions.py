@@ -134,6 +134,39 @@ def test_add_to_library_records_original_gate_priority_not_add_label(env, monkey
     assert verdict["original_derived_priority"] == "dont_read"  # the gate's verdict, preserved
 
 
+def test_add_to_library_runs_real_materialize_row(tmp_path, monkeypatch):
+    """Regression: the REAL ``review.materialize_row`` path must succeed.
+
+    Retiring the ``zs:<priority>`` write made ``feeds._tags_from_row`` keyword-
+    only, but this caller still passed ``row`` positionally → ``add_to_library``
+    silently returned ``added: 0`` (the "Added 0 papers" the user hit). Every
+    OTHER add_to_library test mocks ``materialize_row``, so only a test that runs
+    the real body — with a capturing Zotero writer — catches it.
+    """
+    db = _build_db(tmp_path)
+    pk = _record(db, 400, reading_priority="dont_read")
+    fake = _FakeSettings(db, tmp_path / "zot")
+    captured: dict = {}
+
+    class _MatWriter:
+        def __init__(self, *a, **k):
+            pass
+
+        def apply_feed_materialization(self, **kw):
+            captured.update(kw)
+            return {"item_key": kw["new_item_key"]}
+
+    monkeypatch.setattr(daily_actions, "get_settings", lambda: fake)
+    monkeypatch.setattr(daily_actions, "ZoteroWriter", _MatWriter)
+    monkeypatch.setattr(review, "get_settings", lambda: fake)            # materialize_row._conn
+    monkeypatch.setattr(review, "append_to_golden", lambda *a, **k: True)
+    monkeypatch.setattr(daily_actions, "_attach_fulltext_best_effort", lambda keys: {"attached": 0})
+
+    res = daily_actions.add_to_library([pk])
+    assert res["added"] == 1, res.get("failed")          # NOT the silent "added: 0"
+    assert isinstance(captured.get("tags"), list)        # _tags_from_row ran without a positional crash
+
+
 def test_batch_handles_multiple_ids(env, monkeypatch):
     db, appended = env
     monkeypatch.setattr(review, "materialize_row", lambda row, **k: "K")

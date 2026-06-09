@@ -260,11 +260,16 @@ class TrainedClassifier:
         # 3. Score → priority. Regression output is the continuous relevance
         # in [1, 5]; deterministic bucketing via `domain.score_to_priority`
         # produces the four-class label kept for UI / Zotero-note compat.
+        # The optional monotone band calibrator is applied to the BAND ONLY —
+        # raw_score / calibrated_score (which feed ranking + the gate composite)
+        # are untouched, so ordering is identical with or without it.
         from zotero_summarizer.domain import score_to_priority
+        from zotero_summarizer.services.model.band_calibration import apply_band_calibration
 
         p_clip = np.clip(p_raw, 1.0, 5.0)
+        p_band = apply_band_calibration(self.calibrator, p_clip)
         predictions: list[classifier.FeedPrediction] = []
-        for i, (it, raw, score) in enumerate(zip(valid, p_raw, p_clip)):
+        for i, (it, raw, score, band) in enumerate(zip(valid, p_raw, p_clip, p_band)):
             title = (it.get("title") or "").strip()
             abstract = (it.get("abstract") or "").strip()
             preview = abstract[:200].rstrip()
@@ -280,7 +285,7 @@ class TrainedClassifier:
                 abstract_preview=preview,
                 raw_score=float(raw),
                 calibrated_score=s / 5.0,
-                predicted_priority=score_to_priority(s),
+                predicted_priority=score_to_priority(float(band)),
                 shap_contribs=shap_per_item[i],
                 aux_context=aux_contexts[i],
             ))
@@ -313,7 +318,7 @@ class TrainedClassifier:
                 [X_new_red, X_new[:, classifier.EMBEDDING_DIM:]], axis=1
             ).astype(np.float32)
             reg = TabPFNRegressor(
-                n_estimators=8, device="auto",
+                n_estimators=8, device=classifier.TABPFN_DEVICE,
                 ignore_pretraining_limits=False, random_state=42,
             )
             reg.fit(X_train_full, self.y_train)

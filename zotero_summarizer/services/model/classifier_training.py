@@ -157,10 +157,13 @@ def train_and_save(
 ) -> TrainedClassifier:
     """Train regressor on `gold_inferred_relevance` and persist to disk.
 
-    Sprint-1 redesign (May 2026). The model now predicts a continuous
-    relevance score in [1, 5]; the legacy isotonic-calibrator + Youden's-J
-    + quantile-bin stack has been removed. Threshold mapping at predict
-    time uses the constants in :mod:`zotero_summarizer.domain`.
+    Sprint-1 redesign (May 2026). The model predicts a continuous relevance
+    score in [1, 5]; the legacy Youden's-J + quantile-bin stack was removed and
+    band thresholds are the constants in :mod:`zotero_summarizer.domain`. A
+    lightweight, OOF-fit MONOTONE band calibrator (``band_calibration``) is then
+    layered on the BAND ONLY — it makes the compressed top reachable
+    (``must_read`` recall) without touching the scores used for ranking, and is
+    kept only when it improves OOF must+should F1.
 
     Writes ``{output_dir}/{classifier_name}.joblib`` + ``.json`` (FAIR
     persistence).
@@ -219,9 +222,21 @@ def train_and_save(
         LOGGER.info("train_and_save: fold %d/%d done", fold_idx, n_folds)
     oof_rho = float(spearmanr(y_train, preds_oof).statistic) if n_train > 2 else 0.0
 
+    # 3b. Top-band calibration: fit a MONOTONE raw→relevance map on the OOF
+    # predictions so the compressed top is reachable (must_read recall collapses
+    # otherwise). Monotone ⇒ ranking untouched; applied to the BAND only. Kept
+    # only if it lifts OOF must+should F1 (else identity), so it can never make
+    # the banding worse and won't manufacture false must_reads when great papers
+    # are genuinely scarce.
+    from zotero_summarizer.services.model import band_calibration
+
+    gold_labels = [(r.get("gold_priority_final") or "").strip() for r in train_rows]
+    calibrator, cal_diag = band_calibration.fit_band_calibrator(preds_oof, y_train, gold_labels)
+    eff_oof = band_calibration.apply_band_calibration(calibrator, preds_oof)
+
     # Out-of-fold per-class quality (honest — predictions never saw their own
-    # fold), bucketed to priorities via the same domain mapping the gate uses.
-    oof_metrics = _oof_quality_metrics(train_rows, preds_oof)
+    # fold), on the EFFECTIVE (post-calibration) bins the shipped gate will assign.
+    oof_metrics = _oof_quality_metrics(train_rows, eff_oof)
 
     # 4. Final fit on FULL training set.
     fitted_model, pca_object = _fit_final_model(
@@ -239,7 +254,7 @@ def train_and_save(
         y_train=y_train,
         pca_object=pca_object,
         fitted_model=fitted_model,
-        calibrator=None,
+        calibrator=calibrator,
         t_keep=0.0,
         t_must=0.0,
         t_could=0.0,
@@ -253,6 +268,7 @@ def train_and_save(
             "objective": "regression",
             "oof_spearman": round(oof_rho, 4),
             "oof_metrics_vs_gold": oof_metrics,
+            "band_calibration": cal_diag,
             "trained_at": now_iso_z(),
             "git_commit": run_log.short_git_commit(),
         },

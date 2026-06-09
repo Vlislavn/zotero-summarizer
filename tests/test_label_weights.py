@@ -16,6 +16,14 @@ def test_feed_user_label_unchanged():
     assert lw._tier_weight("feed_user_label", 0, 0) == lw.WEIGHT_REVIEW == 0.5
 
 
+def test_explicit_user_label_is_full_weight():
+    # An explicit label:<priority> verdict is the user's deliberate ground truth:
+    # it must weigh at the top tier, never the 0.7 medium fall-through it used to
+    # get (which under-counted the cleanest signal we have).
+    assert lw._tier_weight("user_label", 0, 0) == lw.WEIGHT_HIGH == 1.0
+    assert lw._tier_weight("user_label", 0, 0) > lw.WEIGHT_MED
+
+
 def test_interest_is_dominated_by_real_engagement():
     # The whole point: a stronger real signal outweighs the soft interest one.
     assert lw._tier_weight("strong_positive", 0, 0) == lw.WEIGHT_HIGH

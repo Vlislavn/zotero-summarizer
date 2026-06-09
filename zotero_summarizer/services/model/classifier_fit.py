@@ -42,7 +42,7 @@ def _fit_tabpfn(
         from tabpfn import TabPFNRegressor
 
         reg = TabPFNRegressor(
-            n_estimators=8, device="auto", ignore_pretraining_limits=False, random_state=42,
+            n_estimators=8, device=TABPFN_DEVICE, ignore_pretraining_limits=False, random_state=42,
         )
         reg.fit(X_train_red, y_train)
         p_val = reg.predict(X_val_red)
@@ -51,7 +51,7 @@ def _fit_tabpfn(
     from tabpfn import TabPFNClassifier
 
     clf = TabPFNClassifier(
-        n_estimators=8, device="auto", ignore_pretraining_limits=False, random_state=42,
+        n_estimators=8, device=TABPFN_DEVICE, ignore_pretraining_limits=False, random_state=42,
     )
     clf.fit(X_train_red, y_train)
     p_val = clf.predict_proba(X_val_red)[:, 1]

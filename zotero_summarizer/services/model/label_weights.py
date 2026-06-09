@@ -42,6 +42,10 @@ def _tier_weight(tier: str, ann_count: int, note_count: int) -> float:
     """Derive a single weight from the audit string + counts.
 
     Precedence (first match wins):
+      * user_label     → WEIGHT_HIGH (explicit ``label:<priority>`` verdict —
+                          your deliberate, decay-immune ground truth; it must
+                          weigh at least as much as any engagement signal, never
+                          the 0.7 fall-through it used to get)
       * hard_veto      → WEIGHT_VETO
       * feed_user_label → WEIGHT_REVIEW
       * feed_interest  → WEIGHT_INTEREST (soft "Add to library" pre-read signal)
@@ -52,6 +56,8 @@ def _tier_weight(tier: str, ann_count: int, note_count: int) -> float:
       * any other positive engagement marker → WEIGHT_MED
       * empty tier (legacy CSV row) → WEIGHT_MED
     """
+    if tier == "user_label":
+        return WEIGHT_HIGH
     if tier == "hard_veto":
         return WEIGHT_VETO
     if tier == "feed_user_label":

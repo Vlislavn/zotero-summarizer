@@ -22,7 +22,7 @@ unread library items ─reading_queue→ ranked "Read next" (gate score + reason
 | `deep_review.py` | on-demand full-text deep review of top picks |
 | `quality_review.py` | full-text, peer-review-style quality assessment |
 | `border_cache.py` | disk cache + job state for active-learning border picks |
-| `review.py` | Phase 1.14 feed-review service: approve/reject/relabel/apply |
+| `review.py` | Phase 1.14 feed-review service: approve/reject/relabel/apply. `materialize_row` is the shared "feed row → Zotero Inbox" write used by both the review UI and Today's *add-to-library* (it calls `feeds._tags_from_row` keyword-only — no machine priority tag) |
 | `review_summary.py` | summary reconstruction + golden-CSV append helpers (re-exported by `review`) |
 | `review_detail.py` | compose the unified review-detail payload |
 

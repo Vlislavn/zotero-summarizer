@@ -34,6 +34,19 @@ FEATURE_DIM = EMBEDDING_DIM + N_EXTRA_FEATURES
 POSITIVE_CLASSES = frozenset({"must_read", "should_read"})
 CURRENT_YEAR = 2026          # for `year_recency` feature; bump or compute dynamically
 
+# TabPFN runs on CPU, never the shared GPU pool. Unlike the persistent ~0.5 GB
+# SPECTER2 encoder (which earns its MPS slot — see classifier_embed._select_device),
+# TabPFN is re-fit in-context on *every* predict, so there is no warm GPU model to
+# amortise, over a tiny context (~500 rows × ~112 PCA feats) that costs only ~3–4 s
+# on CPU. Meanwhile the encoder + bge reranker already saturate the Apple-Silicon
+# MPS pool, so a `device="auto"` TabPFN became the third uncoordinated claimant and
+# OOM'd mid-scoring (TabPFNMPSOutOfMemoryError) even with its own memory_saving_mode
+# batching active. Pinning CPU removes the contention outright — no fixed memory
+# ceiling to overrun, deterministic, fast enough at this scale, and covering both
+# the regressor and classifier constructors. (Longer term: a shared device-policy
+# primitive all three local models route through.)
+TABPFN_DEVICE = "cpu"
+
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS specter2_embeddings (
@@ -101,6 +114,7 @@ __all__ = [
     "FEATURE_DIM",
     "POSITIVE_CLASSES",
     "CURRENT_YEAR",
+    "TABPFN_DEVICE",
     "_SCHEMA",
     "ClassifierReport",
     "FeedPrediction",

@@ -26,6 +26,13 @@ from zotero_summarizer.domain import (
 # SQLite default parameter cap is 999; chunk key lookups well under it.
 _KEY_BATCH = 400
 
+# Marker stored in ``label_verdicts.original_derived_priority`` for verdicts that
+# ORIGINATED from a Zotero ``label:*`` tag (created by reconcile). ONLY these are
+# governed by the tag and may be retracted when it's removed — a verdict typed in
+# the Annotate UI carries its derived original and is never auto-deleted, so the
+# user's in-app labels can't be wiped just because they lack a Zotero tag.
+ZOTERO_LABEL_ORIGIN = "zotero_label"
+
 
 class ReconcileCounts(NamedTuple):
     """Result of one ``reconcile_label_verdicts`` pass.
@@ -96,7 +103,7 @@ def reconcile_label_verdicts(
             triage_db_path,
             item_key=sample.item_key,
             original_derived_priority=(
-                existing["original_derived_priority"] if existing is not None else "zotero_label"
+                existing["original_derived_priority"] if existing is not None else ZOTERO_LABEL_ORIGIN
             ),
             user_priority=sample.gold_priority_inferred,
             comment=existing["comment"] if existing is not None else "",
@@ -110,11 +117,13 @@ def reconcile_label_verdicts(
 def _retract_removed_labels(zotero_db_path: Path, triage_db_path: Path) -> int:
     """Delete verdicts whose ``label:*`` tag was removed in Zotero — safely.
 
-    Iterates the EXISTING library verdict keys (not just this export's samples:
-    an item whose only signal was the now-deleted label drops out of the engaged
-    scan entirely, so sample-based reconcile would never see it). For each, checks
-    the item's CURRENT Zotero state in one batched query and retracts only when it
-    is present, live and tag-free. feed:/note: keys are skipped.
+    Scoped to **tag-sourced** verdicts only (``original_derived_priority ==
+    ZOTERO_LABEL_ORIGIN`` — created by reconcile FROM a Zotero tag). A verdict
+    typed in the Annotate UI carries its derived original and is NEVER deleted
+    here, so the user's hundreds of in-app verdicts can't be wiped just because
+    they were never pushed out as Zotero tags. Within that scope, retract only
+    when the item is present, live (libraryID=1, not trashed) and tag-free; a
+    missing/unreadable/trashed item is left alone. feed:/note: keys are skipped.
     """
     from zotero_summarizer.services.library.review_detail import (
         SOURCE_FEED,
@@ -123,14 +132,19 @@ def _retract_removed_labels(zotero_db_path: Path, triage_db_path: Path) -> int:
     )
     from zotero_summarizer.storage import repositories
 
-    all_keys = repositories.list_label_verdict_keys(triage_db_path)
-    library_keys = {k for k in all_keys if classify_item_key(k) not in (SOURCE_FEED, SOURCE_NOTE)}
-    if not library_keys:
+    verdicts = repositories.list_label_verdicts(triage_db_path, limit=5000)
+    tag_sourced = {
+        v["item_key"]
+        for v in verdicts
+        if v.get("original_derived_priority") == ZOTERO_LABEL_ORIGIN
+        and classify_item_key(v["item_key"]) not in (SOURCE_FEED, SOURCE_NOTE)
+    }
+    if not tag_sourced:
         return 0
 
-    live_has_label = _live_label_state(zotero_db_path, library_keys)
+    live_has_label = _live_label_state(zotero_db_path, tag_sourced)
     removed = 0
-    for key in library_keys:
+    for key in tag_sourced:
         has_label = live_has_label.get(key)
         if has_label is None or has_label:
             # missing / unreadable / trashed (keep — safe), or tag still present.

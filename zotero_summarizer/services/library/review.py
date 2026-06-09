@@ -304,7 +304,7 @@ def materialize_row(
     stored = _pick_summary_for_apply(row)
     summary = stored if stored is not None else _summary_from_row(row)
     feed_payload = _feed_payload_from_row(row)
-    tags = _tags_from_row(row, is_black_swan=False, black_swan_tag="")
+    tags = _tags_from_row(is_black_swan=False, black_swan_tag="")
     note_html = pending_service.build_triage_note_html(
         title=str(row.get("title") or ""),
         summary=summary,
