@@ -31,7 +31,14 @@ def sync_rel_tags(*, force: bool = False) -> dict[str, Any]:
     ``{requires_force: True}`` notice when Zotero is running (writing while the
     connector is live can corrupt the DB) unless ``force`` is set.
     """
-    scores = reading_queue.read_score_cache()
+    scores, stale = reading_queue.read_score_cache_with_staleness()
+    if stale:
+        # Sequencing guard (Tesler: the system owns the retrain→rescore→sync
+        # order): never stamp bands computed by a PREVIOUS model into Zotero.
+        return {
+            "tagged": 0, "by_band": {}, "backup_path": None, "stale": True,
+            "message": "Scores are from a previous model — Rescore the library first, then sync.",
+        }
     if not scores:
         return {
             "tagged": 0, "by_band": {}, "backup_path": None,
@@ -112,7 +119,15 @@ def sync_score_ranks(*, force: bool = False) -> dict[str, Any]:
     ``{ranked, scored, unscored, skipped_user_callnumber, field, backup_path,
     failed_count}`` or a ``{requires_force: True}`` notice when Zotero is
     running."""
-    scores = reading_queue.read_score_cache()  # global cache (whole library)
+    scores, stale = reading_queue.read_score_cache_with_staleness()  # whole library
+    if stale:
+        # Same sequencing guard as sync_rel_tags: ranks from a previous model
+        # must never reach Zotero's Call Number column.
+        return {
+            "ranked": 0, "scored": 0, "unscored": 0, "skipped_user_callnumber": 0,
+            "field": _RANK_FIELD, "backup_path": None, "stale": True,
+            "message": "Scores are from a previous model — Rescore the library first, then sync.",
+        }
     if not scores:
         return {
             "ranked": 0, "scored": 0, "unscored": 0, "skipped_user_callnumber": 0,
@@ -140,11 +155,18 @@ def sync_score_ranks(*, force: bool = False) -> dict[str, Any]:
             "item_key": key,
             "relevance_score": entry["relevance"] if entry else None,  # None → bottom
             "goal_sim": goal_sims.get(key),
+            # Prestige must reach the blend: without these two fields every row
+            # read as "prestige unknown", the prestige weight folded back into
+            # relevance, and the stamped Zotero order silently DIVERGED from the
+            # Library queue's relevance × goal × prestige order (found 2026-06).
+            "prestige_score": entry["prestige"] if entry else None,
+            "prestige_known": entry["prestige_known"] if entry else False,
             "date_added": it.get("date_added") or "",
         })
-    # Global order: scorable papers first by the goal-blend, no-abstract (None
-    # relevance) papers sink to the bottom by date. NO dedup — every item must get
-    # a number so the whole library is sortable in Zotero.
+    # Global order: scorable papers first by the SAME relevance × goal × prestige
+    # blend the Library queue displays, no-abstract (None relevance) papers sink
+    # to the bottom by date. NO dedup — every item must get a number so the whole
+    # library is sortable in Zotero.
     reading_queue._blended_sort(records)
     scored = sum(1 for r in records if r["relevance_score"] is not None)
 

@@ -5,6 +5,7 @@ import { queueRejectTag } from '../../api/libraryApi.js';
 import VerdictPanel from '../VerdictPanel.jsx';
 import LinksRow from '../paper/LinksRow.jsx';
 import TagOfInterestEditor from '../paper/TagOfInterestEditor.jsx';
+import CollectionEditor from '../paper/CollectionEditor.jsx';
 import DeepReviewSection from '../paper/DeepReviewSection.jsx';
 import { StatusBanner } from './shared.jsx';
 
@@ -14,7 +15,7 @@ import { StatusBanner } from './shared.jsx';
 // DeepReviewSection) with the Annotate page. onSaved collapses + refetches (a
 // verdicted/engagement-tagged paper drops out); onQueueRefresh refetches
 // without collapsing (free-text tag).
-export default function InlineAnnotate({ itemKey, onSaved, onQueueRefresh }) {
+export default function InlineAnnotate({ itemKey, collections = [], onSaved, onQueueRefresh }) {
   const queryClient = useQueryClient();
   const detailQuery = useQuery({
     queryKey: ['review-detail', itemKey],
@@ -58,6 +59,13 @@ export default function InlineAnnotate({ itemKey, onSaved, onQueueRefresh }) {
           <TagOfInterestEditor
             itemKey={itemKey}
             tags={detail.tags}
+            onChanged={() => { refreshDetail(); onQueueRefresh?.(); }}
+          />
+
+          <CollectionEditor
+            itemKey={itemKey}
+            current={detail.collections}
+            collections={collections}
             onChanged={() => { refreshDetail(); onQueueRefresh?.(); }}
           />
 

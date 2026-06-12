@@ -72,8 +72,8 @@ def _cache(*entries):
 
 
 def test_sync_rel_tags_batches_with_one_backup_and_counts_bands(monkeypatch):
-    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache",
-                        lambda: _cache(("K1", 4.8, None, False), ("K2", 1.2, None, False)))
+    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache_with_staleness",
+                        lambda: (_cache(("K1", 4.8, None, False), ("K2", 1.2, None, False)), False))
     items = [
         {"item_key": "K1", "tags": []},                       # 4.8 → must_read (add)
         {"item_key": "K2", "tags": ["zs:rel/must_read"]},     # 1.2 → dont_read (swap)
@@ -101,11 +101,11 @@ def test_sync_rel_tags_demotes_low_prestige_top_item(monkeypatch):
     # Quality floor = median of KNOWN prestige [0.1, 0.5, 0.9] = 0.5. The
     # high-relevance item with prestige 0.1 (< floor) is demoted must→should;
     # the 0.9 one is kept must_read. Unknown prestige is never demoted.
-    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache", lambda: _cache(
+    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache_with_staleness", lambda: (_cache(
         ("HI", 4.8, 0.1, True),    # top relevance, KNOWN low prestige → demote
         ("REF", 4.8, 0.9, True),   # top relevance, high prestige → keep must_read
         ("LOW", 1.0, 0.5, True),   # anchors the median; dont_read regardless
-    ))
+    ), False))
     items = [
         {"item_key": "HI", "tags": []},
         {"item_key": "REF", "tags": []},
@@ -124,8 +124,8 @@ def test_sync_rel_tags_demotes_low_prestige_top_item(monkeypatch):
 
 
 def test_sync_rel_tags_requires_force_when_zotero_running(monkeypatch):
-    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache",
-                        lambda: _cache(("K1", 4.8, None, False)))
+    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache_with_staleness",
+                        lambda: (_cache(("K1", 4.8, None, False)), False))
     monkeypatch.setattr(score_tags, "get_zotero_reader_or_raise", lambda: _reader([{"item_key": "K1", "tags": []}]))
     monkeypatch.setattr(score_tags, "get_zotero_writer_or_raise", lambda: _Writer(running=True))
     out = score_tags.sync_rel_tags(force=False)
@@ -133,7 +133,8 @@ def test_sync_rel_tags_requires_force_when_zotero_running(monkeypatch):
 
 
 def test_sync_rel_tags_noop_without_scores(monkeypatch):
-    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache", lambda: {})
+    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache_with_staleness",
+                        lambda: ({}, False))
     out = score_tags.sync_rel_tags()
     assert out["tagged"] == 0
 
@@ -144,8 +145,8 @@ def test_sync_score_ranks_numbers_every_item_scored_first(monkeypatch):
     # Whole-library rank: scorable papers (in the global cache) rank on top by the
     # blend; a no-abstract paper (absent from the cache → relevance None) sinks to
     # the bottom but is STILL numbered. Every item gets a zr####; none excluded.
-    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache",
-                        lambda: _cache(("A", 4.5, None, False), ("B", 3.9, None, False)))
+    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache_with_staleness",
+                        lambda: (_cache(("A", 4.5, None, False), ("B", 3.9, None, False)), False))
     monkeypatch.setattr(score_tags.reading_queue, "_goal_affinity", lambda keys: {})
     items = [
         {"item_key": "B", "date_added": "2026-01-02"},   # scored 3.9
@@ -174,8 +175,8 @@ def test_sync_score_ranks_numbers_every_item_scored_first(monkeypatch):
 def test_sync_score_ranks_no_dedup_every_item_numbered(monkeypatch):
     # The whole-library write does NOT dedup — two items both receive a distinct
     # number, so the entire library is sortable in Zotero.
-    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache",
-                        lambda: _cache(("A", 4.5, None, False), ("B", 4.5, None, False)))
+    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache_with_staleness",
+                        lambda: (_cache(("A", 4.5, None, False), ("B", 4.5, None, False)), False))
     monkeypatch.setattr(score_tags.reading_queue, "_goal_affinity", lambda keys: {})
     items = [{"item_key": "A", "date_added": "2026-01-01"},
              {"item_key": "B", "date_added": "2026-01-02"}]
@@ -193,8 +194,8 @@ def test_sync_score_ranks_skips_user_call_number(monkeypatch):
     # A paper carrying a user's OWN Call Number (an LCC class mark, not zr####)
     # must be PRESERVED — never overwritten — and reported as skipped. The other
     # papers still get dense zr#### ranks.
-    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache",
-                        lambda: _cache(("A", 4.5, None, False), ("B", 3.9, None, False)))
+    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache_with_staleness",
+                        lambda: (_cache(("A", 4.5, None, False), ("B", 3.9, None, False)), False))
     monkeypatch.setattr(score_tags.reading_queue, "_goal_affinity", lambda keys: {})
     items = [{"item_key": "A", "date_added": "2026-01-01"},
              {"item_key": "B", "date_added": "2026-01-02"}]
@@ -214,8 +215,8 @@ def test_sync_score_ranks_skips_user_call_number(monkeypatch):
 
 
 def test_sync_score_ranks_requires_force_when_zotero_running(monkeypatch):
-    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache",
-                        lambda: _cache(("A", 4.0, None, False)))
+    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache_with_staleness",
+                        lambda: (_cache(("A", 4.0, None, False)), False))
     monkeypatch.setattr(score_tags.reading_queue, "_goal_affinity", lambda keys: {})
     monkeypatch.setattr(score_tags, "get_zotero_reader_or_raise",
                         lambda: _reader([{"item_key": "A", "date_added": ""}]))
@@ -225,6 +226,59 @@ def test_sync_score_ranks_requires_force_when_zotero_running(monkeypatch):
 
 
 def test_sync_score_ranks_noop_without_scores(monkeypatch):
-    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache", lambda: {})
+    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache_with_staleness",
+                        lambda: ({}, False))
     out = score_tags.sync_score_ranks()
     assert out["ranked"] == 0 and "Rescore" in out["message"]
+
+
+# --- staleness guard + blend parity (June 2026) -------------------------------
+
+
+def test_sync_rel_tags_refuses_stale_scores(monkeypatch):
+    """After a retrain (cache sha != live gate sha) the sync must refuse and
+    tell the user to Rescore — never stamp a previous model's bands."""
+    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache_with_staleness",
+                        lambda: (_cache(("K1", 4.8, None, False)), True))
+    out = score_tags.sync_rel_tags()
+    assert out["tagged"] == 0
+    assert out["stale"] is True
+    assert "Rescore" in out["message"]
+
+
+def test_sync_score_ranks_refuses_stale_scores(monkeypatch):
+    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache_with_staleness",
+                        lambda: (_cache(("K1", 4.8, None, False)), True))
+    out = score_tags.sync_score_ranks()
+    assert out["ranked"] == 0
+    assert out["stale"] is True
+    assert "Rescore" in out["message"]
+
+
+def test_sync_score_ranks_blend_includes_prestige(monkeypatch):
+    """Blend parity with the Library queue: equal relevance + no goal signal,
+    KNOWN high prestige must outrank unknown prestige (it used to be dropped —
+    the Zotero Call Number order silently diverged from the app's order)."""
+    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache_with_staleness",
+                        lambda: (_cache(
+                            ("PLAIN", 4.0, None, False),   # unknown → median-of-known (0.5)
+                            ("STAR", 4.0, 0.95, True),     # known high prestige → top
+                            ("MID", 4.0, 0.5, True),       # anchors the median at 0.5
+                            ("WEAK", 4.0, 0.05, True),     # known low prestige → bottom
+                        ), False))
+    monkeypatch.setattr(score_tags.reading_queue, "_goal_affinity", lambda keys: {})
+    items = [
+        {"item_key": "PLAIN", "date_added": "2026-01-02"},
+        {"item_key": "STAR", "date_added": "2026-01-01"},
+        {"item_key": "MID", "date_added": "2026-01-04"},
+        {"item_key": "WEAK", "date_added": "2026-01-03"},
+    ]
+    writer = _Writer(running=False)
+    monkeypatch.setattr(score_tags, "get_zotero_reader_or_raise", lambda: _reader(items))
+    monkeypatch.setattr(score_tags, "get_zotero_writer_or_raise", lambda: writer)
+
+    score_tags.sync_score_ranks()
+    changes, _ = writer.calls[0]
+    ranks = {c["item_key"]: c["payload_json"]["value"] for c in changes}
+    assert ranks["STAR"] == "zr0001"   # known high prestige on top
+    assert ranks["WEAK"] == "zr0004"   # known low prestige at the bottom

@@ -543,6 +543,13 @@ export default function AnnotationVerdict() {
             Showing {filteredItems.length} of {totalMatched}
           </span>
         </div>
+        {/* Persistent one-liner (the hint banner above is dismissible and never
+            returns): a cold visit must still explain what this tab is FOR. */}
+        <p className="text-[11px] text-slate-500 mb-2 leading-snug">
+          Teach the model: confirm or fix a paper’s priority (keys 1–4). Your verdicts
+          become training ground truth at the next retrain — same as a{' '}
+          <code className="text-[10px]">label:*</code> tag in Zotero.
+        </p>
 
         <TriageProgress labeled={labeledCount} total={filteredItems.length} />
 

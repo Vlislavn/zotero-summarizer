@@ -128,10 +128,21 @@ function RetrainCard() {
   const [lastFinishedAt, setLastFinishedAt] = useState(null);
   // Surface 409 "another retrain running" and similar POST-time failures.
   const [startError, setStartError] = useState(null);
+  // 'refreshing' (labels export from Zotero, 2-30s) → 'starting' (POST retrain).
+  const [startPhase, setStartPhase] = useState(null);
 
   const startMutation = useMutation({
-    mutationFn: ({ classifier_name }) =>
-      retrain({ classifier_name, n_folds: 5 }),
+    // Retrain ALWAYS pulls fresh labels first (Tesler: the system owns the
+    // label→train sequence). Without this, a `label:must_read` tag typed in
+    // Zotero minutes ago reaches NEITHER the golden CSV NOR label_verdicts
+    // (the tag→verdict reconcile runs during export), so the retrain the user
+    // just asked for would silently train without their newest ground truth.
+    mutationFn: async ({ classifier_name }) => {
+      setStartPhase('refreshing');
+      await refreshLabels();
+      setStartPhase('starting');
+      return retrain({ classifier_name, n_folds: 5 });
+    },
     onMutate: () => {
       setStartError(null);
     },
@@ -142,6 +153,7 @@ function RetrainCard() {
       setStartError(err?.message || String(err));
       setJobId(null);
     },
+    onSettled: () => setStartPhase(null),
   });
 
   // Poll the job every 2s while it's running. React Query handles the
@@ -223,16 +235,17 @@ function RetrainCard() {
           className="px-4 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-semibold hover:bg-slate-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
         >
           {starting
-            ? 'Starting…'
+            ? (startPhase === 'refreshing' ? 'Refreshing labels…' : 'Starting…')
             : running
               ? 'Training…'
-              : 'Retrain model with current labels'}
+              : 'Retrain model'}
         </button>
       </div>
 
       <p className="text-xs text-slate-500">
-        Re-trains the feed gate using your verdicts. Click after you've
-        labeled at least 20 papers in Annotate. Takes 1-5 minutes.
+        Pulls your latest labels from Zotero (label:* tags, emojis, notes) and
+        re-trains the feed gate on them — one click, nothing to refresh first.
+        Takes 1-5 minutes.
       </p>
 
       {/* Running state — progress bar + one-line status. */}

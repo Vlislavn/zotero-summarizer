@@ -178,3 +178,29 @@ export async function syncScoreRanks({ force = false } = {}) {
     body: JSON.stringify({ force }),
   });
 }
+
+/**
+ * POST /api/zotero/items/{itemKey}/collections { add, remove, force }
+ * Change ONE existing library item's Zotero collection memberships in a single
+ * local-sqlite write (backup-first, connector-guarded — same force handshake as
+ * the syncs). `add`/`remove` are arrays of collection keys; the backend needs at
+ * least one of them. Powers both the per-paper collection editor (expanded row)
+ * and the bulk "Add to collection" action — so filing a Meaning-search result
+ * never means leaving the app and re-finding the paper in Zotero.
+ * Resolves to { updated, item_key, added, removed } | { requires_force, message }.
+ */
+export async function updateItemCollections(itemKey, { add = [], remove = [], force = false }) {
+  return request(`/api/zotero/items/${encodeURIComponent(itemKey)}/collections`, {
+    method: 'POST',
+    body: JSON.stringify({
+      add: add.map((collection_key) => ({ collection_key })),
+      remove: remove.map((collection_key) => ({ collection_key })),
+      force,
+    }),
+  });
+}
+
+/** Thin "add to one collection" wrapper over {@link updateItemCollections} (bulk path). */
+export async function addItemToCollection(itemKey, { collectionKey, force = false }) {
+  return updateItemCollections(itemKey, { add: [collectionKey], force });
+}

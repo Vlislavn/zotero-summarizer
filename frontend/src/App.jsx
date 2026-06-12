@@ -15,7 +15,9 @@ export default function App() {
       <NavBar />
       <main>
         <Routes>
-          <Route path="/" element={<Navigate to="/today" replace />} />
+          {/* Land on Read next (the Library reading queue) — the user's most
+              frequent entry; saves a Today→Library click every session. */}
+          <Route path="/" element={<Navigate to="/library" replace />} />
           <Route path="/today" element={<Today />} />
           <Route path="/annotate" element={<AnnotationVerdict />} />
           <Route path="/settings" element={<Settings />} />
@@ -24,7 +26,7 @@ export default function App() {
           <Route path="/review" element={<Review />} />
           <Route path="/pending" element={<Pending />} />
           <Route path="/audit" element={<Audit />} />
-          <Route path="*" element={<Navigate to="/today" replace />} />
+          <Route path="*" element={<Navigate to="/library" replace />} />
         </Routes>
       </main>
     </div>

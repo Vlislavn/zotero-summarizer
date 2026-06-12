@@ -6,6 +6,7 @@ import {
   startTriage,
   fetchReadingQueue,
   fetchReadingQueueStatus,
+  addItemToCollection,
   fetchFulltext,
   fetchFulltextStatus,
   syncRelTags,
@@ -14,7 +15,7 @@ import {
 import ReadNextView from '../components/library/ReadNextView.jsx';
 import LibraryFilterBar from '../components/library/LibraryFilterBar.jsx';
 import ZoteroActionsMenu from '../components/library/ZoteroActionsMenu.jsx';
-import { StatusBanner } from '../components/library/shared.jsx';
+import { StatusBanner, formatShortDate } from '../components/library/shared.jsx';
 import {
   EMPTY_FILTERS, buildPredicate, goalHighKeys, isFilterActive,
   serializeFilters, hydrateFilters,
@@ -70,6 +71,22 @@ export default function Library() {
   const [starting, setStarting] = useState(false);
   const [syncingTags, setSyncingTags] = useState(false);
   const [syncingRanks, setSyncingRanks] = useState(false);
+  const [addingToCollection, setAddingToCollection] = useState(false);
+  const [syncingAll, setSyncingAll] = useState(false);
+  // When each Zotero export last ran (tags / Call-Number ranks) — local-only
+  // convenience so "did I already sync after that retrain?" never depends on
+  // the user's memory. Recorded only on a run that actually synced (or
+  // confirmed everything up to date), never on a stale/cancelled attempt.
+  const [zoteroSyncedAt, setZoteroSyncedAt] = useState(() => ({
+    tags: localStorage.getItem('zs:lastTagSyncAt') || '',
+    ranks: localStorage.getItem('zs:lastRankSyncAt') || '',
+  }));
+
+  function recordZoteroSync(kind) {
+    const now = new Date().toISOString();
+    localStorage.setItem(kind === 'tags' ? 'zs:lastTagSyncAt' : 'zs:lastRankSyncAt', now);
+    setZoteroSyncedAt((prev) => ({ ...prev, [kind]: now }));
+  }
   const [fetchingFulltext, setFetchingFulltext] = useState(false);
   const ftPollRef = useRef(null);
   const [message, setMessage] = useState('');
@@ -230,6 +247,45 @@ export default function Library() {
     });
   }
 
+  // Bulk "Add to collection": send every selected (e.g. Meaning-search) result
+  // into a Zotero collection without leaving the app — the old flow forced the
+  // user to MEMORIZE titles and re-find them inside Zotero (Working Memory).
+  // Per-item POSTs to the existing backup-first, connector-guarded write route;
+  // one force-confirm covers the whole batch. Fails loud on the first error
+  // (reports how many landed), never silently skips.
+  async function handleAddToCollection(collectionKey, force = false) {
+    if (!selected.size || !collectionKey) return;
+    const name = flatCollections.find((c) => c.key === collectionKey)?.name || collectionKey;
+    setAddingToCollection(true);
+    setMessage('');
+    let added = 0;
+    try {
+      for (const key of selected) {
+        const data = await addItemToCollection(key, { collectionKey, force });
+        if (data?.requires_force) {
+          setAddingToCollection(false);
+          if (window.confirm('Zotero appears to be running. Add anyway? (a backup is taken first)')) {
+            return await handleAddToCollection(collectionKey, true);
+          }
+          setMessage(`Cancelled — ${added} of ${selected.size} added to “${name}”. Close Zotero, then retry.`);
+          setIsError(false);
+          return;
+        }
+        added += 1;
+      }
+      localStorage.setItem('zs:lastCollectionKey', collectionKey);
+      setMessage(`Added ${added} paper${added === 1 ? '' : 's'} to “${name}” in Zotero.`);
+      setIsError(false);
+      setSelected(new Set());
+      setSelectMode(false);
+    } catch (err) {
+      setMessage(`Add to “${name}” failed after ${added} of ${selected.size}: ${err.message || err}`);
+      setIsError(true);
+    } finally {
+      setAddingToCollection(false);
+    }
+  }
+
   async function handleRunTriage() {
     if (!selected.size) return;
     setStarting(true);
@@ -260,6 +316,11 @@ export default function Library() {
         setIsError(false);
         return;
       }
+      if (data?.stale) {
+        setMessage(data.message);
+        setIsError(false);
+        return;
+      }
       const bands = Object.entries(data?.by_band || {}).map(([b, n]) => `${b}: ${n}`).join(', ');
       setMessage(
         `Tagged ${data?.tagged || 0} item(s)${bands ? ` (${bands})` : ''}.`
@@ -267,6 +328,9 @@ export default function Library() {
         + (data?.message ? ` ${data.message}` : ''),
       );
       setIsError(false);
+      // Synced (wrote tags, or confirmed all up to date) — a "no scores yet"
+      // no-op still carries a Rescore-first message and must not count.
+      if (!/Rescore/.test(data?.message || '')) recordZoteroSync('tags');
     } catch (err) {
       setMessage(`Failed to sync relevance tags: ${err.message || err}`);
       setIsError(true);
@@ -288,6 +352,13 @@ export default function Library() {
         setIsError(false);
         return;
       }
+      if (data?.stale) {
+        // Stale refusal (model retrained since the cached scores): show ONLY the
+        // sequencing message, not a noisy "Ranked 0 papers…" success template.
+        setMessage(data.message);
+        setIsError(false);
+        return;
+      }
       setMessage(
         `Ranked ${data?.ranked || 0} papers across your whole library into Zotero "Call Number" (zr0001…)`
         + (data?.unscored ? ` — ${data.scored} scored, ${data.unscored} not-yet-scored at the bottom (Rescore for a complete ranking)` : '')
@@ -296,6 +367,7 @@ export default function Library() {
         + (data?.message ? ` ${data.message}` : ''),
       );
       setIsError(false);
+      if (!/Rescore/.test(data?.message || '')) recordZoteroSync('ranks');
     } catch (err) {
       setMessage(`Failed to sync score ranks: ${err.message || err}`);
       setIsError(true);
@@ -325,6 +397,71 @@ export default function Library() {
       );
       setIsError(false);
     }).catch(() => { ftPollRef.current = setTimeout(pollFulltext, 6000); });  // transient — keep polling
+  }
+
+  // One-click Zotero export chain (Tesler: the system owns the rescore→tags→
+  // ranks sequence the user previously had to remember and order correctly):
+  // 1. rescore the library IF the cached scores predate the current model (or
+  //    were never computed), waiting on the cheap status poll;
+  // 2. write zs:rel/<band> tags;  3. stamp Call-Number ranks.
+  // Staleness is re-checked from the SERVER at every entry (not the closure),
+  // so the force-retry recursion never re-runs a rescore that just finished.
+  async function handleSyncAll(force = false) {
+    setSyncingAll(true);
+    setMessage('');
+    try {
+      const meta = await fetchReadingQueue({ limit: 1, refresh: false });
+      if (meta?.scores_stale || !meta?.computed_at) {
+        setMessage('Step 1/3 — rescoring the library against the current model (a few minutes; progress streams in)…');
+        await fetchReadingQueue({ limit: 1, refresh: true });
+        let running = true;
+        for (let i = 0; running && i < 120; i += 1) {  // bail after ~16 min
+          await new Promise((r) => setTimeout(r, 8000));
+          running = Boolean((await fetchReadingQueueStatus())?.running);
+        }
+        if (running) throw new Error('rescore did not finish — check the server log, then retry');
+      }
+      setMessage('Step 2/3 — writing relevance tags to Zotero…');
+      const tags = await syncRelTags({ force });
+      if (tags?.requires_force) {
+        setSyncingAll(false);
+        if (window.confirm('Zotero appears to be running. Sync anyway? (a backup is taken first)')) {
+          return await handleSyncAll(true);
+        }
+        setMessage('Sync cancelled — close Zotero, then retry.');
+        setIsError(false);
+        return;
+      }
+      if (tags?.stale) { setMessage(tags.message); setIsError(false); return; }  // raced a retrain
+      recordZoteroSync('tags');
+      setMessage('Step 3/3 — stamping Call-Number ranks…');
+      const ranks = await syncScoreRanks({ force });
+      if (ranks?.requires_force) {
+        // Zotero opened BETWEEN the steps; the tag step is idempotent, so a
+        // forced rerun of the whole chain is safe and keeps the code one path.
+        setSyncingAll(false);
+        if (window.confirm('Zotero opened mid-sync. Finish anyway? (a backup is taken first)')) {
+          return await handleSyncAll(true);
+        }
+        setMessage('Tags synced; rank stamping cancelled — close Zotero, then run “Sort ranks”.');
+        setIsError(false);
+        return;
+      }
+      if (ranks?.stale) { setMessage(ranks.message); setIsError(false); return; }
+      recordZoteroSync('ranks');
+      setMessage(
+        `Zotero is up to date — ${tags?.tagged || 0} relevance tag(s) refreshed, `
+        + `${ranks?.ranked || 0} papers ranked into Call Number. `
+        + 'In Zotero, sort the Call Number column ascending to read best-first.',
+      );
+      setIsError(false);
+      loadQueue(false);
+    } catch (err) {
+      setMessage(`Sync-all failed: ${err.message || err}`);
+      setIsError(true);
+    } finally {
+      setSyncingAll(false);
+    }
   }
 
   async function handleFetchFulltext(force = false) {
@@ -471,8 +608,13 @@ export default function Library() {
               actions live in one grouped disclosure instead of crowding the
               search row. */}
           <ZoteroActionsMenu
-            disabled={syncingTags || syncingRanks}
+            disabled={syncingTags || syncingRanks || syncingAll}
             actions={[
+              {
+                label: 'Sync all → Zotero', busy: syncingAll, busyLabel: 'Syncing…',
+                onClick: () => handleSyncAll(false),
+                title: 'One click, whole chain: rescore the library if the model changed since, then write zs:rel/<band> relevance tags AND stamp the Call-Number ranks (zr0001…) into Zotero. Backup-first; needs Zotero closed (you\'ll be asked to force otherwise). Then just sort the Call Number column in Zotero.',
+              },
               {
                 label: 'Fetch full text', busy: fetchingFulltext, busyLabel: 'Fetching…',
                 disabled: fetchingFulltext, onClick: () => handleFetchFulltext(false),
@@ -491,6 +633,21 @@ export default function Library() {
             ]}
           />
         </div>
+
+        {/* Sequencing nudge (Tesler): after a retrain the cached scores — and any
+            tags/ranks synced from them — are from the OLD model. The backend now
+            refuses a stale sync; this line says so before the user even tries. */}
+        {queueMeta.scores_stale && (
+          <p className="mb-2 text-[11px] text-amber-700 font-medium">
+            ⚠ The model was retrained since these scores. Rescore first — then “Sync relevance tags” / “Sort ranks” to update Zotero.
+          </p>
+        )}
+        {(zoteroSyncedAt.tags || zoteroSyncedAt.ranks) && (
+          <p className="mb-2 text-[11px] text-slate-400">
+            Zotero last synced — relevance tags: {formatShortDate(zoteroSyncedAt.tags) || 'never'} ·
+            Call-Number ranks: {formatShortDate(zoteroSyncedAt.ranks) || 'never'}
+          </p>
+        )}
 
         <StatusBanner message={message} isError={isError} />
 
@@ -537,6 +694,9 @@ export default function Library() {
           onToggleItem={toggleItem}
           onRunTriage={handleRunTriage}
           starting={starting}
+          collections={flatCollections}
+          onAddToCollection={handleAddToCollection}
+          addingToCollection={addingToCollection}
           rawCount={queue.length}
           hasActiveFilters={queueMeta.model_ready && filtersActive}
           onClearClientFilters={clearClientFilters}

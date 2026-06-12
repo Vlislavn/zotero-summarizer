@@ -1,17 +1,20 @@
 import { NavLink, useLocation } from 'react-router-dom';
 
-// Primary tabs: Today / Annotate / Settings. Everything else hides
-// behind a "More" disclosure (Hick's Law — the daily flow stays at 3
-// choices). When the user is on a power-tool route the bar tags it
-// with a breadcrumb so they don't feel lost.
+// Primary tabs: Library / Today / Annotate / Settings — Library (Read next) is
+// the landing surface and the leftmost "home" tab (Serial Position / Jakob's
+// Law: the default view IS the first tab), since it carries both daily
+// workflows (Read-next queue + Meaning search). Today (feed cull) sits next;
+// everything else hides behind a "More" disclosure (Hick's Law — the daily flow
+// stays at 4 choices). When on a power-tool route the bar tags it with a
+// breadcrumb.
 const PRIMARY = [
+  { to: '/library', label: 'Library' },
   { to: '/today', label: 'Today' },
   { to: '/annotate', label: 'Annotate' },
   { to: '/settings', label: 'Settings' },
 ];
 
 const POWER_TOOLS = [
-  { to: '/library', label: 'Library' },
   { to: '/triage', label: 'Triage' },
   { to: '/review', label: 'Feed Review' },
   { to: '/pending', label: 'Pending' },

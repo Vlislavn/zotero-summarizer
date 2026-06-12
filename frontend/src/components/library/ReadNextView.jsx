@@ -14,6 +14,10 @@ export default function ReadNextView({
   items, loading, err, includeRead, onToggleIncludeRead,
   readHidden, totalUnread, onSaved, status, modelReady, error, computedAt, scoresStale, distribution, onRescore, onReload,
   selectMode, onToggleSelectMode, selected, onToggleItem, onRunTriage, starting,
+  // Bulk "Add to collection" (the Meaning-search → Zotero collection shortcut):
+  // flat collection list + handler from Library; last target remembered so the
+  // common "send to my reading collection" case is one click (Working Memory).
+  collections = [], onAddToCollection, addingToCollection = false,
   // Client-side smart filters (Library owns the state; `items` arrives already
   // filtered). rawCount = pre-filter size, so we can tell "nothing fetched" apart
   // from "filtered to zero". filterSig = serialized filters, to reset the reveal.
@@ -29,6 +33,13 @@ export default function ReadNextView({
   const computing = status === 'computing';
   const errored = status === 'error';
   const [expandedKey, setExpandedKey] = useState(null);
+  // Target for the bulk "Add to collection" action. Defaults to the last-used
+  // collection (validated against the current list) so the routine "send picks
+  // to my reading collection" is select → one click.
+  const [targetCollection, setTargetCollection] = useState(
+    () => localStorage.getItem('zs:lastCollectionKey') || '',
+  );
+  const targetValid = collections.some((c) => c.key === targetCollection);
   // Incremental reveal: the backend returns the whole ranked library, but we only
   // mount a bounded slice so a ~2,400-item list paints fast (Flow/Doherty) and
   // stays scrollable (Miller's Law — chunk the long list rather than dump it).
@@ -86,7 +97,7 @@ export default function ReadNextView({
             className={`px-2 py-0.5 rounded-md text-[11px] font-medium border ${
               selectMode ? 'bg-teal-600 text-white border-teal-600' : 'border-slate-300 text-slate-700 hover:bg-slate-50'
             }`}
-            title="Select papers to send to triage"
+            title="Select multiple papers for a bulk action: add them all to a Zotero collection, or send to triage. (To file a single paper, just expand its row.)"
           >
             {selectMode ? 'Done selecting' : 'Select'}
           </button>
@@ -99,6 +110,32 @@ export default function ReadNextView({
             >
               {starting ? 'Starting…' : `Run triage (${selected?.size || 0})`}
             </button>
+          )}
+          {selectMode && collections.length > 0 && onAddToCollection && (
+            <span className="inline-flex items-center gap-1">
+              <select
+                value={targetValid ? targetCollection : ''}
+                onChange={(e) => setTargetCollection(e.target.value)}
+                className="max-w-[180px] px-1.5 py-0.5 rounded-md border border-slate-300 text-[11px] text-slate-700 bg-white"
+                title="Target Zotero collection for the selected papers"
+              >
+                <option value="">Collection…</option>
+                {collections.map((c) => (
+                  <option key={c.key} value={c.key}>
+                    {`${' '.repeat(c.depth * 2)}${c.name}`}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => onAddToCollection(targetCollection)}
+                disabled={!selected?.size || !targetValid || addingToCollection}
+                className="px-3 py-0.5 rounded-md bg-slate-700 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:bg-slate-300 disabled:text-slate-500"
+                title="Add the selected papers to this Zotero collection (backup-first; no more memorizing titles and re-finding them in Zotero)"
+              >
+                {addingToCollection ? 'Adding…' : `Add to collection (${selected?.size || 0})`}
+              </button>
+            </span>
           )}
           <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
             <input type="checkbox" checked={includeRead} onChange={onToggleIncludeRead}
@@ -245,6 +282,7 @@ export default function ReadNextView({
             {expandedKey === it.item_key && (
               <InlineAnnotate
                 itemKey={it.item_key}
+                collections={collections}
                 onSaved={() => { setExpandedKey(null); onSaved?.(); }}
                 onQueueRefresh={() => onSaved?.()}
               />

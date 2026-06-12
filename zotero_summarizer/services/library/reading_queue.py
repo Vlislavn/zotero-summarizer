@@ -315,15 +315,21 @@ def live_scoring(item: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def read_score_cache() -> dict[str, dict[str, Any]]:
-    """The current gate's cached scores, keyed by item_key (scored entries only):
-    ``{relevance, prestige, prestige_known}``. Empty when the gate is off or
-    nothing is scored yet. Public seam for the relevance-tag sync so it reads the
-    cache once (relevance for the band, prestige for the quality floor)."""
+    """Scored entries only, keyed by item_key — see the staleness variant below."""
+    return read_score_cache_with_staleness()[0]
+
+
+def read_score_cache_with_staleness() -> tuple[dict[str, dict[str, Any]], bool]:
+    """``(scores, stale)`` — per-item ``{relevance, prestige, prestige_known}``;
+    ``stale`` is True when the cache was computed against a DIFFERENT gate than
+    the loaded one (retrained since the last Rescore). The Zotero sync writers
+    guard on this so stale bands/ranks are never stamped into Zotero."""
     gate_sha = _gate_sha()
     if gate_sha is None:
-        return {}
+        return {}, False
+    cached, _computed_at, stale = _read_cache_with_meta(gate_sha)
     out: dict[str, dict[str, Any]] = {}
-    for key, entry in _read_cache(gate_sha).items():
+    for key, entry in cached.items():
         score = entry.get("relevance_score")
         if score is None:
             continue
@@ -333,7 +339,7 @@ def read_score_cache() -> dict[str, dict[str, Any]]:
             "prestige": prestige_score,
             "prestige_known": prestige_known,
         }
-    return out
+    return out, bool(stale and out)
 
 
 def get_cached_scoring(item_key: str) -> dict[str, Any] | None:
