@@ -30,7 +30,6 @@ from zotero_summarizer.services.library import _flight
 from zotero_summarizer.services._common import state as get_state
 from zotero_summarizer.services.emoji_signals import ALL_EMOJIS, HARD_VETO_EMOJIS
 from zotero_summarizer.services.library._ranking import (  # noqa: F401 — re-export the seam
-    _GOAL_RERANK_WEIGHT,
     _blended_sort,
     _content_key,
     _dedup_by_content,
@@ -49,10 +48,14 @@ _HANDLED_EMOJIS: frozenset[str] = frozenset(ALL_EMOJIS) | HARD_VETO_EMOJIS
 
 _CACHE_FILENAME = "reading_queue.json"
 
-# Human labels for the top SHAP reason — mirrors PrestigeWaterfall.featureLabel.
+# Human labels for the top SHAP reason. (A long-gone PrestigeWaterfall frontend
+# component used to mirror this map; the queue card's "why" text is now the only
+# consumer.) ``corpus_affinity`` is the ENGAGEMENT signal (pos−neg cosine to the
+# library you saved) — the goal-text signal is ``goal_sim``, which is not a SHAP
+# feature; labeling affinity "Goal match" here was the label-drift bug.
 _FRIENDLY: dict[str, str] = {
     "semantic_match_specter2": "Topic match",
-    "corpus_affinity": "Goal match",
+    "corpus_affinity": "Library affinity",
     "prestige_score": "Prestige",
     "nearest_kept_cosine": "Like papers you kept",
     "positive_centroid_cosine": "Like your library",
@@ -246,9 +249,15 @@ def _compute_scores_into_cache(gate_sha: str, *, full: bool = False) -> None:
 
     Every *attempted* item gets a cache entry — a real score or an
     ``_UNSCORABLE`` sentinel — so an item the gate can't score is recorded once
-    and never re-triggers the pass. ``full=True`` (manual Rescore) rebuilds from
-    scratch, re-attempting prior sentinels. Batched with a flush after each so
-    partial results appear while a large run is still in progress.
+    and never re-triggers the pass. ``full=True`` (manual Rescore) re-attempts
+    EVERY item (including prior sentinels) but starts from the EXISTING cache
+    and overwrites entries batch by batch — mid-run readers (the queue, the
+    rank/tag syncs) see "old score until replaced by new score", and a mid-run
+    crash keeps the old scores. The old wipe-up-front semantics left the cache
+    near-empty for the minutes a whole-library pass takes and truncated on a
+    crash. Entries for items that left the library are purged only after the
+    pass COMPLETES (what the wipe used to provide). Batched with a flush after
+    each so partial results appear while a large run is still in progress.
     """
     try:
         # Whole-library scan (read AND unread) so every scorable paper gets a
@@ -256,12 +265,12 @@ def _compute_scores_into_cache(gate_sha: str, *, full: bool = False) -> None:
         # routes read items aside separately; here we score them too. No-abstract
         # items are skipped (the gate needs an abstract) and handled at rank time.
         page = _reader().get_all_items()
-        cached = {} if full else _read_cache(gate_sha)
-        todo = [
+        items = [
             it for it in page.get("items", [])
             if (it.get("abstract") or "").strip()
-            and it["item_key"] not in cached
         ]
+        cached = _read_cache(gate_sha)
+        todo = items if full else [it for it in items if it["item_key"] not in cached]
         for start in range(0, len(todo), _SCORE_BATCH):
             chunk = todo[start:start + _SCORE_BATCH]
             preds = _score_items(chunk, return_shap=True)
@@ -277,6 +286,11 @@ def _compute_scores_into_cache(gate_sha: str, *, full: bool = False) -> None:
                     "scoring": scoring,
                 }
             _write_cache(gate_sha, cached)
+        if full:
+            # Complete pass: now (and only now) drop entries for items no longer
+            # in the library, so deletions don't linger in the cache forever.
+            current_keys = {it["item_key"] for it in items}
+            cached = {k: v for k, v in cached.items() if k in current_keys}
         # Persist once more so a full rebuild with an empty todo still lands.
         _write_cache(gate_sha, cached)
     except Exception as exc:  # noqa: BLE001 — surfaced via last_error + re-raised
@@ -339,11 +353,14 @@ def _verdicted_keys() -> frozenset[str]:
     These are "handled" — read AND labelled — so they drop out of Read next
     (e.g. a paper you marked ``dont_read`` must not reappear), mirroring the
     Today slate's handled-filter. Any verdict counts, not just ``dont_read``.
+
+    Uses the UNCAPPED key reader: a paged fetch with a fixed limit silently
+    un-hides handled papers once the table outgrows it — the same failure
+    class as the 500-cap training bug fixed in June 2026.
     """
     from zotero_summarizer.storage import repositories
 
-    rows = repositories.list_label_verdicts(get_settings().triage_db_path, limit=5000)
-    return frozenset(str(r["item_key"]) for r in rows if r.get("item_key"))
+    return frozenset(repositories.list_label_verdict_keys(get_settings().triage_db_path))
 
 
 def build_reading_queue(

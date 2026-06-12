@@ -41,7 +41,15 @@ _MED_TIER_SUBSTRINGS = ("high_positive", "medium_positive", "notes=", "ann=")
 def _tier_weight(tier: str, ann_count: int, note_count: int) -> float:
     """Derive a single weight from the audit string + counts.
 
+    The audit string is pipe-joined segments (``goldenset._format_tier_audit``
+    convention, e.g. ``"medium_positive|notes=1"``). Exact-match tiers are
+    checked against the FIRST segment, so a suffixed tier inherits its base
+    weight instead of falling through to the 0.7 legacy default.
+
     Precedence (first match wins):
+      * any ``outcome_*`` segment → WEIGHT_REVIEW (the 7-day materialization
+        outcome resolved — an observed behaviour is as informative as a
+        deliberate Review click; see ``services.golden.hybrid_gt``)
       * user_label     → WEIGHT_HIGH (explicit ``label:<priority>`` verdict —
                           your deliberate, decay-immune ground truth; it must
                           weigh at least as much as any engagement signal, never
@@ -56,15 +64,19 @@ def _tier_weight(tier: str, ann_count: int, note_count: int) -> float:
       * any other positive engagement marker → WEIGHT_MED
       * empty tier (legacy CSV row) → WEIGHT_MED
     """
-    if tier == "user_label":
-        return WEIGHT_HIGH
-    if tier == "hard_veto":
-        return WEIGHT_VETO
-    if tier == "feed_user_label":
+    parts = [p for p in tier.split("|") if p]
+    if any(p.startswith("outcome_") for p in parts):
         return WEIGHT_REVIEW
-    if tier == "feed_interest":
+    base = parts[0] if parts else ""
+    if base == "user_label":
+        return WEIGHT_HIGH
+    if base == "hard_veto":
+        return WEIGHT_VETO
+    if base == "feed_user_label":
+        return WEIGHT_REVIEW
+    if base == "feed_interest":
         return WEIGHT_INTEREST
-    if tier in ("first_glance", "meta", "trash"):
+    if base in ("first_glance", "meta", "trash"):
         return WEIGHT_GLANCE
     if ann_count >= 3 or note_count >= 2:
         return WEIGHT_HIGH
@@ -98,3 +110,13 @@ def compute_row_weights(
         notes = _safe_int(r.get("note_count"))
         out.append(_tier_weight(tier, ann, notes))
     return np.asarray(out, dtype=np.float32)
+
+
+# Band balance was TRIED here (June 2026) and deliberately NOT shipped:
+# inverse-sqrt band-frequency multipliers (sklearn class_weight='balanced'
+# smoothed à la Mahajan 2018, alpha=0.5, cap 4.0, fold-train counts) did NOT
+# move OOF must_read recall (stuck at ~2% — with ~53 rows the regressor simply
+# never emits >4.5) and CUT dont_read recall 0.80 → 0.72, i.e. ~9 pts more
+# junk through the live gate. Measured on the full golden CSV, 5-fold grouped
+# OOF, 2026-06-12. The top band is label-starved, not gradient-starved — the
+# lever is gathering more explicit must_read verdicts, not loss reweighting.

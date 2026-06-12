@@ -3,8 +3,8 @@
 Strategy: seed an in-memory-like sqlite DB (file-backed in ``tmp_path``)
 directly with synthetic ``processed_feed_items`` rows. This avoids any
 SPECTER2 / OpenAlex / LLM round-trips. The role-allocation logic, the
-backlog cap, the surprise floor, and the day-stable RNG can all be exercised
-with crafted rows.
+blended ordering (rank_blend), the un-truncated picker pool, the surprise
+floor, and the day-stable RNG can all be exercised with crafted rows.
 """
 
 from __future__ import annotations
@@ -41,7 +41,6 @@ def test_assemble_daily_slate_empty_pool_returns_empty(triage_db: Path) -> None:
     assert isinstance(slate, DailySlate)
     assert slate.papers == []
     assert slate.pool_size == 0
-    assert slate.capped_at == 0
 
 
 def test_assemble_daily_slate_basic_K5_with_full_pool(triage_db: Path) -> None:
@@ -73,7 +72,7 @@ def test_assemble_daily_slate_basic_K5_with_full_pool(triage_db: Path) -> None:
     for paper in slate.papers:
         assert isinstance(paper, SlatePaper)
         assert paper.item_key
-        assert paper.role in {"model", "surprise", "audit", "diversity", "model_fallback"}
+        assert paper.role in {"model", "surprise", "diversity", "model_fallback"}
 
 
 def test_assemble_daily_slate_respects_lookback_hours(triage_db: Path) -> None:
@@ -128,22 +127,137 @@ def test_assemble_daily_slate_dedupes_by_item_key(triage_db: Path) -> None:
     assert slate.papers[0].composite_score == pytest.approx(4.0)
 
 
-def test_assemble_daily_slate_backlog_cap(triage_db: Path) -> None:
+def test_assemble_daily_slate_no_pretruncation(triage_db: Path) -> None:
+    """The regression the cap removal fixed: a strongly off-library paper
+    ranked outside the old top-``backlog_cap`` by composite must STILL be
+    reachable by the diversity picker — the role pool is no longer truncated
+    before allocation (``backlog_cap`` only bounds the fallback fetch)."""
     for i in range(100):
         _insert(
             triage_db,
             item_key=f"P{i:03d}",
             decision="awaiting_review",
             composite_score=float(i) / 20.0,  # 0..5
+            corpus_affinity=0.3,
         )
+    # Composite 1.0 — far below the top-10 cutoff — but negative affinity:
+    # the only diversity-eligible row in the pool.
+    _insert(
+        triage_db,
+        item_key="OFF-TRACK",
+        decision="awaiting_review",
+        composite_score=1.0,
+        corpus_affinity=-0.5,
+        shap_contribs_json=_make_shap_json(affinity=-0.5, prestige=4.2),
+    )
     slate = assemble_daily_slate(
         db_path=triage_db, K=5, backlog_cap=10, now=_DEFAULT_NOW
     )
-    assert slate.pool_size == 100
-    assert slate.capped_at == 10
-    # Top 10 by composite_score should still be chosen at the head.
+    assert slate.pool_size == 101
+    # Model picks still come from the top of the pool.
     top_paper = max(slate.papers, key=lambda p: p.composite_score)
     assert top_paper.composite_score >= 4.0
+    # The off-track paper is found by diversity despite its rank (#101).
+    diversity = [p for p in slate.papers if p.role == "diversity"]
+    assert [p.item_key for p in diversity] == ["OFF-TRACK"]
+
+
+def test_goal_sim_lifts_on_goal_paper_into_model_picks(triage_db: Path) -> None:
+    """The headline routing fix: a paper the gate under-scores but that
+    strongly matches the stated research goals must outrank a slightly
+    higher-composite paper with no goal evidence (the validated Library
+    blend, now applied to the slate)."""
+    _insert(
+        triage_db,
+        item_key="GATE-FAV",
+        decision="awaiting_review",
+        composite_score=5.0,
+        corpus_affinity=0.3,
+        goal_sims={"clinical agents": 0.05},
+    )
+    _insert(
+        triage_db,
+        item_key="ON-GOAL",
+        decision="awaiting_review",
+        composite_score=4.5,
+        corpus_affinity=0.3,
+        goal_sims={"clinical agents": 0.85},
+    )
+    _insert(
+        triage_db,
+        item_key="FILLER",
+        decision="awaiting_review",
+        composite_score=1.0,
+        corpus_affinity=0.3,
+        goal_sims={"clinical agents": 0.2},
+    )
+    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    model_keys = [p.item_key for p in slate.papers if p.role == "model"]
+    assert model_keys[0] == "ON-GOAL"  # goal blend beats raw composite order
+    on_goal = next(p for p in slate.papers if p.item_key == "ON-GOAL")
+    assert on_goal.goal_sim == pytest.approx(0.85)
+
+
+def test_no_goal_signal_preserves_composite_order(triage_db: Path) -> None:
+    """Fold-back contract: with no goal_sims anywhere in the cohort the slate
+    order is exactly the old composite-descending order."""
+    for i in range(6):
+        _insert(triage_db, item_key=f"C{i}", decision="awaiting_review",
+                composite_score=1.0 + 0.5 * i, corpus_affinity=0.3)
+    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    model_papers = [p for p in slate.papers if p.role in {"model", "model_fallback"}]
+    scores = [p.composite_score for p in model_papers]
+    assert scores == sorted(scores, reverse=True)
+    assert model_papers[0].item_key == "C5"
+
+
+def test_model_role_floors_out_dont_band(triage_db: Path) -> None:
+    """The relevance-floor fix: a dont_read-band paper (composite < 2.0) must
+    NEVER appear as a model / model_fallback pick — on a weak feed week the
+    top-K-by-blend would otherwise pad Today with below-the-bar papers."""
+    # 3 could+ papers and 4 dont-band ones; corpus_affinity >= 0 so the diversity
+    # picker (which is deliberately NOT floored) can't pull the weak ones in.
+    for i, score in enumerate((2.1, 2.6, 3.1)):
+        _insert(triage_db, item_key=f"OK{i}", decision="awaiting_review",
+                composite_score=score, corpus_affinity=0.2)
+    for i in range(4):
+        _insert(triage_db, item_key=f"WEAK{i}", decision="awaiting_review",
+                composite_score=1.0 + 0.2 * i, corpus_affinity=0.2)  # all < 2.0
+    slate = assemble_daily_slate(db_path=triage_db, K=15, now=_DEFAULT_NOW)
+    model_keys = {p.item_key for p in slate.papers if p.role in {"model", "model_fallback"}}
+    assert model_keys == {"OK0", "OK1", "OK2"}
+    assert not any(k.startswith("WEAK") for k in model_keys)
+    # The 4 hidden dont-band papers are reported for the honest banner.
+    assert slate.low_relevance_hidden == 4
+    # No should_read-or-better candidate anywhere → weak-slate flag set.
+    assert slate.weak_slate is True
+
+
+def test_diversity_still_surfaces_floored_off_track_paper(triage_db: Path) -> None:
+    """The floor is model-role only: an off-library (corpus_affinity < 0) paper
+    below the band is STILL reachable by the diversity picker (Q2: surprise /
+    diversity intentionally left un-floored)."""
+    for i in range(3):
+        _insert(triage_db, item_key=f"OK{i}", decision="awaiting_review",
+                composite_score=2.5 + 0.1 * i, corpus_affinity=0.2)
+    _insert(triage_db, item_key="WILD", decision="awaiting_review",
+            composite_score=1.2, corpus_affinity=-0.5)  # dont-band AND off-track
+    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    diversity = [p.item_key for p in slate.papers if p.role == "diversity"]
+    assert diversity == ["WILD"]                       # diversity ignores the floor
+    model_keys = {p.item_key for p in slate.papers if p.role in {"model", "model_fallback"}}
+    assert "WILD" not in model_keys                    # but the model role won't pick it
+
+
+def test_strong_pool_is_not_flagged_weak(triage_db: Path) -> None:
+    """weak_slate is False and nothing is hidden when the pool has a should+ paper."""
+    _insert(triage_db, item_key="STRONG", decision="awaiting_review",
+            composite_score=4.0, corpus_affinity=0.3)
+    _insert(triage_db, item_key="MID", decision="awaiting_review",
+            composite_score=2.5, corpus_affinity=0.3)
+    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    assert slate.weak_slate is False
+    assert slate.low_relevance_hidden == 0
 
 
 def test_assemble_daily_slate_surprise_floor(triage_db: Path) -> None:
@@ -179,40 +293,11 @@ def test_assemble_daily_slate_diversity_requires_negative_affinity(
     assert all(p.role != "diversity" for p in slate.papers)
 
 
-def test_assemble_daily_slate_audit_pool_from_gate_rejected(triage_db: Path) -> None:
-    for i in range(5):
-        _insert(
-            triage_db,
-            item_key=f"R{i}",
-            decision="awaiting_review",
-            composite_score=3.0 + 0.2 * i,
-        )
-    for i in range(3):
-        _insert(
-            triage_db,
-            item_key=f"G{i}",
-            decision="gate_rejected",
-            composite_score=1.0,
-            shap_contribs_json=_make_shap_json(affinity=0.0, prestige=4.5),
-        )
-    # The audit role is no longer in the default slate (it degenerated into an
-    # endless one-at-a-time stream when the primary pool was empty); callers can
-    # still opt in by passing roles explicitly, which is what we exercise here.
-    slate = assemble_daily_slate(
-        db_path=triage_db,
-        K=5,
-        roles={"model": 2, "surprise": 1, "audit": 1, "diversity": 1},
-        now=_DEFAULT_NOW,
-    )
-    audit_papers = [p for p in slate.papers if p.role == "audit"]
-    assert len(audit_papers) == 1
-    assert audit_papers[0].item_key.startswith("G")
-    assert audit_papers[0].decision == "gate_rejected"
-
-
-def test_assemble_daily_slate_default_has_no_audit(triage_db: Path) -> None:
-    """The default slate must never allocate the audit role — that was the
-    source of the endless 'spot-check forever' stream when the queue emptied."""
+def test_assemble_daily_slate_ignores_gate_rejected(triage_db: Path) -> None:
+    """gate_rejected rows never enter the slate — the former audit role is gone
+    entirely (it degenerated into an endless 'spot-check forever' stream when
+    the queue emptied); spot-check lives in the Review page + Today's SpotCheck
+    section (services/library/review.list_by_state)."""
     for i in range(3):
         _insert(
             triage_db,
@@ -222,35 +307,8 @@ def test_assemble_daily_slate_default_has_no_audit(triage_db: Path) -> None:
             shap_contribs_json=_make_shap_json(affinity=0.0, prestige=4.5),
         )
     slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
-    assert [p for p in slate.papers if p.role == "audit"] == []
-    assert slate.papers == []  # gate_rejected alone no longer fills the slate
-
-
-def test_assemble_daily_slate_audit_deterministic_within_day(triage_db: Path) -> None:
-    # Seed enough primary rows so model/surprise/diversity don't consume audit fallback.
-    for i in range(5):
-        _insert(
-            triage_db,
-            item_key=f"R{i}",
-            decision="awaiting_review",
-            composite_score=3.0 + 0.2 * i,
-        )
-    # 8 gate_rejected candidates so the audit RNG actually picks one of many.
-    for i in range(8):
-        _insert(
-            triage_db,
-            item_key=f"G{i}",
-            decision="gate_rejected",
-            composite_score=1.0,
-            shap_contribs_json=_make_shap_json(affinity=0.0, prestige=4.5),
-        )
-    roles = {"model": 2, "surprise": 1, "audit": 1, "diversity": 1}
-    slate_a = assemble_daily_slate(db_path=triage_db, K=5, roles=roles, now=_DEFAULT_NOW)
-    slate_b = assemble_daily_slate(db_path=triage_db, K=5, roles=roles, now=_DEFAULT_NOW)
-    audit_a = [p.item_key for p in slate_a.papers if p.role == "audit"]
-    audit_b = [p.item_key for p in slate_b.papers if p.role == "audit"]
-    assert audit_a == audit_b
-    assert audit_a  # non-empty
+    assert slate.papers == []  # gate_rejected alone never fills the slate
+    assert slate.pool_size == 0
 
 
 def test_assemble_daily_slate_K_smaller_than_pool(triage_db: Path) -> None:
@@ -283,14 +341,12 @@ def test_assemble_daily_slate_K_larger_than_pool(triage_db: Path) -> None:
     slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
     # 2 papers from a pool of 2, multiple empty_role_events because the third
     # model slot + surprise + diversity all fall through to model_fallback which
-    # itself runs out of candidates. (audit is no longer a default role.)
+    # itself runs out of candidates.
     assert len(slate.papers) == 2
     # Surprise should be in empty roles (no surprise_score >= 0.30).
     assert "surprise" in slate.empty_role_events
     # Diversity also empty (no negative-affinity rows).
     assert "diversity" in slate.empty_role_events
-    # audit is not a default role anymore, so it must not appear.
-    assert "audit" not in slate.empty_role_events
 
 
 def test_assemble_daily_slate_rejects_invalid_K(triage_db: Path) -> None:
@@ -303,166 +359,3 @@ def test_assemble_daily_slate_missing_db_raises(tmp_path: Path) -> None:
         assemble_daily_slate(
             db_path=tmp_path / "does_not_exist.db", K=5, now=_DEFAULT_NOW
         )
-
-
-# ---------------------------------------------------------------------------
-# Handled papers (rated or labeled) drop out of the slate
-# ---------------------------------------------------------------------------
-
-
-def test_feed_name_flows_to_slate_paper(triage_db: Path) -> None:
-    # Provenance: feed_name on the row must reach SlatePaper for the card badge.
-    _insert(triage_db, item_key="http://arxiv.org/abs/N", decision="triaged_pending",
-            composite_score=4.0, feed_item_id=900, feed_name="bioRxiv")
-    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
-    paper = next(p for p in slate.papers if p.item_key == "http://arxiv.org/abs/N")
-    assert paper.feed_name == "bioRxiv"
-    assert paper.role  # bucket is set
-
-
-def test_rated_paper_excluded_from_slate(triage_db: Path) -> None:
-    # Two fresh model candidates; one gets an after-reading rating.
-    _insert(triage_db, item_key="http://arxiv.org/abs/A", decision="triaged_pending",
-            composite_score=4.0, feed_item_id=501)
-    _insert(triage_db, item_key="http://arxiv.org/abs/B", decision="triaged_pending",
-            composite_score=3.0, feed_item_id=502)
-    repo.insert_role_value_verdict(
-        triage_db, item_key="http://arxiv.org/abs/A", role="model",
-        verdict="waste", composite_score=4.0, surprise_score=None, corpus_affinity=None,
-    )
-    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
-    keys = {p.item_key for p in slate.papers}
-    assert "http://arxiv.org/abs/A" not in keys
-    assert "http://arxiv.org/abs/B" in keys
-
-
-def test_labeled_paper_excluded_from_slate(triage_db: Path) -> None:
-    _insert(triage_db, item_key="http://arxiv.org/abs/C", decision="triaged_pending",
-            composite_score=4.0, feed_item_id=601)
-    _insert(triage_db, item_key="http://arxiv.org/abs/D", decision="triaged_pending",
-            composite_score=3.0, feed_item_id=602)
-    repo.insert_or_update_label_verdict(
-        triage_db, item_key="feed:601",
-        original_derived_priority="could_read", user_priority="must_read", comment="",
-    )
-    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
-    keys = {p.item_key for p in slate.papers}
-    assert "http://arxiv.org/abs/C" not in keys
-    assert "http://arxiv.org/abs/D" in keys
-
-
-def test_count_awaiting_unhandled_excludes_handled(triage_db: Path) -> None:
-    # Two pending papers; one already labeled (handled). The honest counter the
-    # Today header now uses must report 1, not 2 (the old raw count returned 2
-    # and disagreed with the slate).
-    _insert(triage_db, item_key="http://arxiv.org/abs/X", decision="triaged_pending",
-            composite_score=4.0, feed_item_id=801)
-    _insert(triage_db, item_key="http://arxiv.org/abs/Y", decision="triaged_pending",
-            composite_score=3.0, feed_item_id=802)
-    repo.insert_or_update_label_verdict(
-        triage_db, item_key="feed:801",
-        original_derived_priority="could_read", user_priority="dont_read", comment="",
-    )
-    assert count_awaiting_unhandled(triage_db) == 1
-    # Matches the slate's own count exactly (single source of truth).
-    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
-    assert count_awaiting_unhandled(triage_db) == len(slate.papers)
-
-
-def test_count_awaiting_unhandled_zero_when_all_handled(triage_db: Path) -> None:
-    _insert(triage_db, item_key="http://arxiv.org/abs/Z", decision="triaged_pending",
-            composite_score=4.0, feed_item_id=811)
-    repo.insert_or_update_label_verdict(
-        triage_db, item_key="feed:811",
-        original_derived_priority="could_read", user_priority="must_read", comment="",
-    )
-    assert count_awaiting_unhandled(triage_db) == 0
-
-
-def test_handled_paper_excluded_from_recent_fallback(triage_db: Path) -> None:
-    # Old rows (outside the 168h window) so the slate must use the recent
-    # fallback; the labeled one is still excluded there too.
-    old = _DEFAULT_NOW - timedelta(days=30)
-    _insert(triage_db, item_key="http://arxiv.org/abs/E", decision="triaged_pending",
-            composite_score=4.0, feed_item_id=701, created_at=old)
-    _insert(triage_db, item_key="http://arxiv.org/abs/F", decision="triaged_pending",
-            composite_score=3.0, feed_item_id=702, created_at=old)
-    repo.insert_role_value_verdict(
-        triage_db, item_key="http://arxiv.org/abs/E", role="model",
-        verdict="worth", composite_score=4.0, surprise_score=None, corpus_affinity=None,
-    )
-    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
-    keys = {p.item_key for p in slate.papers}
-    assert slate.fellback_to_recent is True
-    assert "http://arxiv.org/abs/E" not in keys
-    assert "http://arxiv.org/abs/F" in keys
-
-
-# ---------------------------------------------------------------------------
-# More cards: the model quota scales with K (was capped at 5 by 3/1/1 default)
-# ---------------------------------------------------------------------------
-
-
-def test_assemble_daily_slate_more_cards_at_high_K(triage_db: Path) -> None:
-    # 20 plain awaiting rows (no surprise / negative affinity), so surprise +
-    # diversity fall through to model_fallback. K=15 must return 15, not 5.
-    for i in range(20):
-        _insert(
-            triage_db,
-            item_key=f"M{i:02d}",
-            decision="awaiting_review",
-            composite_score=1.0 + 0.2 * i,
-            corpus_affinity=0.3,
-        )
-    slate = assemble_daily_slate(db_path=triage_db, K=15, now=_DEFAULT_NOW)
-    assert len(slate.papers) == 15  # > 5 (old fixed 3/1/1 cap)
-
-
-def test_assemble_daily_slate_K5_still_three_model(triage_db: Path) -> None:
-    # Back-compat: K=5 reproduces the legacy 3 model + 1 surprise + 1 diversity.
-    for i in range(10):
-        _insert(triage_db, item_key=f"B{i:02d}", decision="awaiting_review",
-                composite_score=1.0 + 0.3 * i, corpus_affinity=0.3)
-    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
-    assert len(slate.papers) == 5
-
-
-# ---------------------------------------------------------------------------
-# "Why it matters" chips flow onto SlatePaper
-# ---------------------------------------------------------------------------
-
-
-def test_why_chips_strong_goal_match(triage_db: Path) -> None:
-    _insert(triage_db, item_key="W-goal", decision="awaiting_review",
-            composite_score=4.7, corpus_affinity=0.42)
-    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
-    paper = next(p for p in slate.papers if p.item_key == "W-goal")
-    assert paper.why[0] == "Strong goal match"
-    assert len(paper.why) <= 3
-
-
-def test_why_chips_off_track_for_diversity(triage_db: Path) -> None:
-    _insert(triage_db, item_key="W-div", decision="awaiting_review",
-            composite_score=2.0, corpus_affinity=-0.4)
-    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
-    paper = next(p for p in slate.papers if p.item_key == "W-div")
-    assert "Off your usual track" in paper.why
-
-
-def test_why_chips_surprising(triage_db: Path) -> None:
-    _insert(triage_db, item_key="W-surp", decision="awaiting_review",
-            composite_score=2.0, surprise_score=0.85, corpus_affinity=0.0)
-    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
-    paper = next(p for p in slate.papers if p.item_key == "W-surp")
-    assert "Surprising" in paper.why
-
-
-def test_why_chips_built_without_shap_blob(triage_db: Path) -> None:
-    # Older rows predate the SHAP blob — `why` must still build from the
-    # dedicated columns (proves gate-independence: no LightGBM SHAP needed).
-    _insert(triage_db, item_key="W-noshap", decision="awaiting_review",
-            composite_score=4.6, corpus_affinity=0.5, shap_contribs_json="")
-    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
-    paper = next(p for p in slate.papers if p.item_key == "W-noshap")
-    assert paper.why[0] == "Strong goal match"
-    assert "High model relevance" in paper.why

@@ -229,6 +229,7 @@ CREATE TABLE IF NOT EXISTS label_verdicts (
     )),
     comment                    TEXT NOT NULL,
     created_at                 TEXT NOT NULL,
+    source                     TEXT NOT NULL DEFAULT 'user',
     UNIQUE(item_key)
 );
 """
@@ -312,6 +313,23 @@ def apply_schema(conn: sqlite3.Connection) -> None:
     conn.execute(_CREATE_WEEKLY_AB_VERDICTS_TABLE)
     conn.execute(_CREATE_LABEL_VERDICTS_TABLE)
     feeds_storage.init_feeds_schema(conn)
+
+    # June 2026 — verdict provenance. Pre-existing DBs get the column via the
+    # established column-presence ALTER pattern (same as init_feeds_schema).
+    # The backfill runs ONLY when the column is first added: verdicts written
+    # by the "Add to library" path carry the frozen historical comment marker
+    # below (daily_actions wrote that literal before `source` existed); the
+    # comment is UPSERT-overwritten on any later deliberate relabel, so rows
+    # still matching it are exactly the never-revisited machine adds.
+    verdict_columns = _get_columns(conn, "label_verdicts")
+    if "source" not in verdict_columns:
+        conn.execute(
+            "ALTER TABLE label_verdicts ADD COLUMN source TEXT NOT NULL DEFAULT 'user'"
+        )
+        conn.execute(
+            "UPDATE label_verdicts SET source = 'machine_add'"
+            " WHERE comment = 'added from Today'"
+        )
 
     columns = _get_columns(conn, "triage_results")
     if "batch_id" not in columns:

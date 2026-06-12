@@ -90,7 +90,7 @@ def _isolate(monkeypatch, tmp_path):
         reading_queue, "get_settings",
         lambda: SimpleNamespace(corpus_db_path=tmp_path / "c.db", triage_db_path=tmp_path / "t.db"),
     )
-    monkeypatch.setattr(repositories, "list_label_verdicts", lambda db_path, **k: [])
+    monkeypatch.setattr(repositories, "list_label_verdict_keys", lambda db_path: set())
     yield
     reading_queue.finish(error=None)
 
@@ -165,8 +165,8 @@ def test_excludes_items_with_a_user_verdict(monkeypatch):
     _patch_state(monkeypatch, _FakeReader([_item("A"), _item("V")]), _FakeGate("sha1"))
     _seed("sha1", A=3.0, V=4.0)
     monkeypatch.setattr(
-        repositories, "list_label_verdicts",
-        lambda db_path, **k: [{"item_key": "V", "user_priority": "dont_read"}],
+        repositories, "list_label_verdict_keys",
+        lambda db_path: {"V"},
     )
     res = reading_queue.build_reading_queue()
     keys = [i["item_key"] for i in res["items"]]
@@ -301,6 +301,41 @@ def test_no_abstract_item_never_enters_cache(monkeypatch):
     cached = reading_queue._read_cache("sha1")
     assert "A" in cached
     assert "N" not in cached  # no abstract → skipped entirely
+
+
+def test_full_rescore_preserves_old_scores_on_crash(monkeypatch):
+    """A full Rescore must START FROM the existing cache and overwrite in place
+    — never wipe up front. If the gate dies mid-run, the old scores survive on
+    disk (the old semantics left a truncated, near-empty cache) and the error
+    is surfaced via last_error."""
+
+    class _ExplodingGate(_FakeGate):
+        def predict(self, items, **kwargs):
+            raise RuntimeError("OpenAlex melted")
+
+    _patch_state(monkeypatch, _FakeReader([_item("A"), _item("B")]), _ExplodingGate("sha1"))
+    _seed("sha1", A=2.5, B=4.5)
+    reading_queue.try_start()
+    with pytest.raises(RuntimeError, match="OpenAlex melted"):
+        reading_queue._compute_scores_into_cache("sha1", full=True)
+    cached = reading_queue._read_cache("sha1")
+    assert cached["A"]["relevance_score"] == 2.5  # old scores intact
+    assert cached["B"]["relevance_score"] == 4.5
+    assert "OpenAlex melted" in (reading_queue.last_error() or "")
+
+
+def test_full_rescore_reattempts_everything_and_purges_departed(monkeypatch):
+    """full=True re-attempts EVERY item (stale scores get replaced, prior
+    sentinels retried) and — only after the pass completes — purges cache
+    entries for items that left the library, so deletions don't linger."""
+    reader = _FakeReader([_item("A"), _item("B")])
+    _patch_state(monkeypatch, reader, _FakeGate("sha1", {"A": 3.7, "B": 4.1}))
+    _seed("sha1", A=1.0, GONE=2.0)  # stale score for A; GONE left the library
+    reading_queue._compute_scores_into_cache("sha1", full=True)
+    cached = reading_queue._read_cache("sha1")
+    assert cached["A"]["relevance_score"] == 3.7  # re-attempted, not kept stale
+    assert cached["B"]["relevance_score"] == 4.1
+    assert "GONE" not in cached  # purged after the successful pass
 
 
 def test_blended_sort_sinks_unscored_to_bottom():

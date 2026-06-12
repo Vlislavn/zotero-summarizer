@@ -112,6 +112,18 @@ LABEL_TAG_CASEFOLDED = frozenset(
 )
 
 
+# Provenance of a ``label_verdicts`` row (June 2026). Distinguishes the user's
+# deliberate verdicts (Annotate UI, Review relabel, trash, Zotero ``label:*``
+# reconcile) from the machine-written PROVISIONAL verdict that "Add to
+# library" records before the paper has been read. Only ``machine_add``
+# verdicts may be superseded by an observed 7-day materialization outcome at
+# training time (see ``services.golden.hybrid_gt``); explicit user verdicts
+# always win. Single source of truth so the write path (``services.triage``)
+# and the read path (``services.golden``, ``storage``) can never diverge.
+VERDICT_SOURCE_USER = "user"
+VERDICT_SOURCE_MACHINE_ADD = "machine_add"
+
+
 # Training-row filter — Sprint 3+ (May 2026). Drop only `meta` (library
 # items with zero positive engagement; truly no signal) and `in_trash`
 # (user explicitly removed). `first_glance` rows used to be dropped as

@@ -127,6 +127,47 @@ def test_list_awaiting_returns_empty_when_no_rows(patched_settings):
     assert review.list_by_state(fs.DECISION_AWAITING_REVIEW) == []
 
 
+def test_gate_rejected_listing_suppresses_trashed_rearrival(patched_settings):
+    """Regression: a paper the user trashed must NOT reappear in the
+    gate_rejected listing (the Today SpotCheck source) when it re-arrives under a
+    fresh feed_item_id sharing the trashed paper's stable GUID. The slate already
+    suppressed this; the review listing did not, so trashed papers kept coming
+    back in the spot-check section."""
+    db = sqlite3.connect(str(patched_settings / "triage.db"))
+    db.row_factory = sqlite3.Row
+    shared_guid = "https://example.org/feed/item-xyz"
+    # 1) the original copy the user TRASHED from Today (user_rejected).
+    fs.record_decision(
+        db, run_id="r",
+        feed_item={"feed_library_id": 2, "item_id": 500, "guid": shared_guid, "title": "Trashed paper"},
+        decision=fs.DECISION_USER_REJECTED, decision_reason="trashed_from_today",
+        composite_score=1.0, reading_priority="dont_read",
+    )
+    # 2) a re-arrival of the SAME paper (same GUID, new feed_item_id) the gate
+    #    rejected this time round.
+    fs.record_decision(
+        db, run_id="r",
+        feed_item={"feed_library_id": 2, "item_id": 999, "guid": shared_guid, "title": "Trashed paper"},
+        decision=fs.DECISION_GATE_REJECTED, decision_reason="gate",
+        composite_score=1.1, reading_priority="dont_read",
+    )
+    # 3) an unrelated gate_rejected paper that MUST still show.
+    fs.record_decision(
+        db, run_id="r",
+        feed_item={"feed_library_id": 2, "item_id": 1001, "guid": "guid-keep", "title": "Keep me"},
+        decision=fs.DECISION_GATE_REJECTED, decision_reason="gate",
+        composite_score=1.2, reading_priority="dont_read",
+    )
+    db.commit()
+    db.close()
+
+    items = review.list_by_state(fs.DECISION_GATE_REJECTED)
+    guids = {i["guid"] for i in items}
+    assert shared_guid not in guids        # the trashed re-arrival is suppressed
+    assert "guid-keep" in guids            # genuine gate_rejected still listed
+    assert len(items) == 1
+
+
 # ---------------------------------------------------------------------------
 # approve / reject / relabel
 # ---------------------------------------------------------------------------

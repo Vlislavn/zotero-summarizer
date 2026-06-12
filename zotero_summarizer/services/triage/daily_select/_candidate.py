@@ -23,7 +23,7 @@ import json
 import math
 from typing import Any
 
-from zotero_summarizer.services.triage.daily_select._relevance import build_why
+from zotero_summarizer.services.model.rank_blend import blend_scores
 
 
 def parse_payload(row: dict[str, Any]) -> dict[str, Any]:
@@ -99,6 +99,27 @@ def row_corpus_affinity(row: dict[str, Any], payload: dict[str, Any]) -> float:
     if "corpus_affinity" in aux:
         return float(aux["corpus_affinity"] or 0.0)
     return 0.0
+
+
+def row_goal_sim(payload: dict[str, Any]) -> float | None:
+    """Goal-text similarity for the card: max over ``aux_context.goal_sims``
+    (``{goal text: cosine}``, written by the gate's aux pass and refreshed by
+    every slate rescore). ``None`` = signal unavailable (no goals configured,
+    corpus off, or a row not yet rescored since the signal shipped) — the rank
+    blend then folds the goal weight back into relevance; never a fake 0.0.
+
+    Deliberately NOT read from ``summary.matched_goal_similarity``: that LLM-lane
+    field is clamped to ``ge=0`` and embeds a full-text seed, so it is a
+    different (incomparable) number than the title+abstract cosine used here.
+    """
+    aux = _aux_dict(payload)
+    sims = aux.get("goal_sims")
+    if sims is None:
+        return None
+    if not isinstance(sims, dict):
+        raise ValueError("payload.aux_context.goal_sims must be a JSON object or null")
+    vals = [float(v) for v in sims.values() if v is not None]
+    return max(vals) if vals else None
 
 
 def row_prestige(row: dict[str, Any], payload: dict[str, Any]) -> float:
@@ -255,14 +276,21 @@ def make_candidate(row: dict[str, Any]) -> dict[str, Any]:
         "created_at": str(row.get("created_at") or ""),
         "abstract": row_abstract(row),
         "pub_year": row_pub_year(row),
-        # Heuristic, no-LLM plain-language reason chips for the card (Today UI).
-        "why": build_why(
-            composite_score=composite_f,
-            corpus_affinity=corpus_affinity,
-            surprise_score=surprise_f,
-            h_index=h_index,
-            citation_percentile=row_citation_percentile(payload),
-        ),
+        # Goal-text similarity (None = unavailable) + KNOWN-prestige evidence
+        # ([0,1] citation percentile, None = no OpenAlex match) — the rank
+        # blend's inputs. ``prestige_score`` above keeps its fallback ladder for
+        # DISPLAY, but the blend must only ever see real evidence (its last-resort
+        # composite/5 fallback would be circular as a ranking input).
+        "goal_sim": row_goal_sim(payload),
+        "citation_percentile": row_citation_percentile(payload),
+        # Order key for the slate + model/diversity pickers. Assembly overwrites
+        # this with the shared relevance×goal×prestige blend (rank_blend) once
+        # the whole cohort is known; the composite default keeps direct callers
+        # of make_candidate orderable.
+        "rank_score": composite_f,
+        # Reason chips are pool-relative (goal bands = cohort terciles), so
+        # assembly attaches them after the cohort exists (_relevance.attach_why).
+        "why": [],
     }
 
 
@@ -278,12 +306,34 @@ def dedup_keep_newest(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(grouped.values())
 
 
+def attach_rank_scores(candidates: list[dict[str, Any]]) -> None:
+    """Overwrite each candidate's ``rank_score`` IN PLACE with the shared
+    relevance × goal × prestige blend (``services/model/rank_blend``) — the
+    same primitive the Library queue orders by, adapted to slate candidates:
+    relevance = ``composite_score``, goal = ``goal_sim`` (None folds the goal
+    weight back into relevance), prestige = the KNOWN ``citation_percentile``
+    only (cohort min-max makes its [0,1] scale equivalent to the library's
+    [1,5] mapping order-wise; the display ladder's circular composite fallback
+    is deliberately excluded)."""
+    if not candidates:
+        return
+    keys = blend_scores(
+        [c["composite_score"] for c in candidates],
+        [c["goal_sim"] for c in candidates],
+        [c["citation_percentile"] for c in candidates],
+    )
+    for cand, key in zip(candidates, keys):
+        cand["rank_score"] = key
+
+
 __all__ = [
     "parse_payload",
     "shap_top3",
     "make_candidate",
     "dedup_keep_newest",
+    "attach_rank_scores",
     "row_corpus_affinity",
+    "row_goal_sim",
     "row_prestige",
     "row_authors",
     "row_venue",

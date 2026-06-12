@@ -7,26 +7,39 @@ Public API:
   * :func:`assemble_daily_slate` — entry point used by the ``/api/daily`` route.
 
 Composition: (K-2) model + 1 surprise + 1 diversity (default K=5 -> 3/1/1), with
-a 25-item backlog cap and 168 h lookback by default. The model quota scales with
-K so a larger K actually yields more cards (surprise/diversity stay at 1 each);
-without this the fixed 3/1/1 roles capped every slate at 5 regardless of K. The
-former ``audit`` slot (gate-rejected
-spot-check) was removed from the in-queue slate because an empty primary pool
-let it degenerate into an endless one-at-a-time stream of rejected papers;
-spot-check now lives in its own labeled Today section + the Review page. The
-``audit`` role + ``audit_pool`` plumbing remain for callers that opt in.
+a 168 h lookback by default. Candidates are ordered by the shared relevance ×
+goal-text × prestige blend (``services/model/rank_blend``) and the WHOLE pool is
+offered to the role pickers — ``backlog_cap`` only bounds the never-empty
+fallback fetch, never the picker pool (a pre-pick cap starved the
+surprise/diversity roles of the off-mainstream papers they exist to find). The
+model quota scales with K so a larger K actually yields more cards
+(surprise/diversity stay at 1 each); without this the fixed 3/1/1 roles capped
+every slate at 5 regardless of K. The former ``audit`` role (gate-rejected
+spot-check) is gone entirely: in-slate it degenerated into an endless
+one-at-a-time stream of rejected papers when the primary pool emptied, and the
+spot-check now lives in its own labeled Today section + the Review page
+(``services/library/review.list_by_state``). The slate never reads
+``gate_rejected`` rows.
 """
 from __future__ import annotations
 
 import logging
-import random
 from datetime import datetime, timezone
 from pathlib import Path
 
-from zotero_summarizer.domain import normalize_arxiv_id, normalize_doi
+from zotero_summarizer.domain import (
+    PRIORITY_COULD_READ_THRESHOLD,
+    PRIORITY_SHOULD_READ_THRESHOLD,
+    normalize_arxiv_id,
+    normalize_doi,
+)
 from zotero_summarizer.services.triage.daily_select._allocation import allocate
-from zotero_summarizer.services.triage.daily_select._candidate import dedup_keep_newest
+from zotero_summarizer.services.triage.daily_select._candidate import (
+    attach_rank_scores,
+    dedup_keep_newest,
+)
 from zotero_summarizer.services.triage.daily_select._dataclasses import DailySlate, SlatePaper
+from zotero_summarizer.services.triage.daily_select._relevance import attach_why
 from zotero_summarizer.services.triage.daily_select._querying import (
     fetch_decided_content_keys,
     fetch_handled_keys,
@@ -43,7 +56,6 @@ LOGGER = logging.getLogger(__name__)
 # with storage/feeds.py's DECISION_* constants.
 _DECISION_AWAITING_REVIEW = "awaiting_review"
 _DECISION_TRIAGED_PENDING = "triaged_pending"
-_DECISION_GATE_REJECTED = "gate_rejected"
 
 # "Blocking" states for the content-dedup guard: a paper the user already
 # decided on (added/trashed) or that the daemon already filtered as a library /
@@ -244,8 +256,15 @@ def assemble_daily_slate(
       1. Fetch ``awaiting_review`` + ``triaged_pending`` rows from the last
          ``lookback_hours``.
       2. Dedup by ``item_key`` keeping newest by ``created_at``.
-      3. Cap to ``backlog_cap`` by composite_score desc -> candidate pool.
-      4. Fetch ``gate_rejected`` rows separately for the audit role.
+      3. Order the WHOLE pool by ``rank_score`` — the shared relevance ×
+         goal-text × prestige blend (``services/model/rank_blend``, same
+         primitive the Library queue uses). No pre-allocation truncation:
+         the surprise/diversity pickers see every candidate, so an
+         off-mainstream paper the composite ranks low is still reachable by
+         the role built to find it. ``backlog_cap`` only bounds the
+         never-empty fallback FETCH (step 1's recent-rows query), not the
+         picker pool.
+      4. Attach pool-relative ``why`` chips (goal bands = cohort terciles).
       5. Greedy role allocation with model_fallback rolling for empty roles.
 
     Empty pool is a *valid* domain state: the function returns a
@@ -270,70 +289,60 @@ def assemble_daily_slate(
 
     conn = open_ro(db_path)
     try:
-        handled_guids, handled_label_keys = fetch_handled_keys(conn)
-
-        def _unhandled(rows: list[dict]) -> list[dict]:
-            return _drop_handled(
-                rows,
-                handled_guids=handled_guids,
-                handled_label_keys=handled_label_keys,
-            )
-
         primary_rows, fellback_to_recent = _fetch_primary_unhandled(
             conn, lookback_hours=lookback_hours, backlog_cap=backlog_cap, now=effective_now,
         )
-        # Audit pool (gate_rejected) is fetched for callers that opt into the
-        # audit role; the default slate no longer allocates it (spot-check now
-        # lives in its own clearly-labeled Today section + the Review page).
-        audit_rows = _unhandled(fetch_rows_by_decisions(
-            conn,
-            decisions=[_DECISION_GATE_REJECTED],
-            lookback_hours=lookback_hours,
-            now=effective_now,
-        ))
-        if not audit_rows:
-            audit_rows = _unhandled(fetch_recent_rows_by_decisions(
-                conn, decisions=[_DECISION_GATE_REJECTED], limit=backlog_cap,
-            ))
     finally:
         conn.close()
 
     deduped = dedup_keep_newest(primary_rows)
-    audit_pool = dedup_keep_newest(audit_rows)
     pool_size = len(deduped)
 
-    deduped.sort(key=lambda c: c["composite_score"], reverse=True)
-    capped = deduped[:backlog_cap]
-    capped_at = len(capped)
-
-    # Day-stable RNG so the audit pick is reproducible within a calendar day
-    # (plan requirement: "stable within a day" for the gate_rejected sample).
-    rng = random.Random(int(effective_now.timestamp() // 86400))
+    # Shared relevance × goal × prestige blend (rank_blend) — the same order
+    # the Library queue uses; degrades to composite-only when those signals
+    # are absent. The full pool goes to the allocator: a cap here would starve
+    # the surprise/diversity pickers of exactly the papers they exist to find.
+    attach_rank_scores(deduped)
+    deduped.sort(key=lambda c: c["rank_score"], reverse=True)
+    attach_why(deduped)
 
     papers, empty_role_events = allocate(
-        candidate_pool=capped,
-        audit_pool=audit_pool,
+        candidate_pool=deduped,
         roles=effective_roles,
         K=K,
-        rng=rng,
+    )
+
+    # Honest "weak feed week" signals for the Today banner. The model role hides
+    # dont_read-band papers (``_allocation.MODEL_RELEVANCE_FLOOR``); count those
+    # no role surfaced so the UI can say "N below your bar were hidden", and flag
+    # a slate with NO should_read-or-better candidate as weak (nudge a re-triage).
+    shown_ids = {p.item_id for p in papers}
+    low_relevance_hidden = sum(
+        1 for c in deduped
+        if c["composite_score"] < PRIORITY_COULD_READ_THRESHOLD and c["id"] not in shown_ids
+    )
+    weak_slate = bool(deduped) and not any(
+        c["composite_score"] >= PRIORITY_SHOULD_READ_THRESHOLD for c in deduped
     )
 
     LOGGER.info(
-        "daily_slate: pool=%d capped=%d K=%d papers=%d empty_roles=%s",
+        "daily_slate: pool=%d K=%d papers=%d hidden_weak=%d weak=%s empty_roles=%s",
         pool_size,
-        capped_at,
         K,
         len(papers),
+        low_relevance_hidden,
+        weak_slate,
         empty_role_events,
     )
 
     return DailySlate(
         papers=papers,
         pool_size=pool_size,
-        capped_at=capped_at,
         lookback_hours=lookback_hours,
         empty_role_events=empty_role_events,
         fellback_to_recent=fellback_to_recent,
+        low_relevance_hidden=low_relevance_hidden,
+        weak_slate=weak_slate,
     )
 
 

@@ -20,15 +20,12 @@ const BUCKET_LABEL = {
   model: 'top match',
   model_fallback: 'top match',
   surprise: 'surprise',
-  audit: 'spot-check',
   diversity: 'wildcard',
 };
 const ROLE_HINT = {
   model: 'Best match to your interests (model + corpus + author/venue prestige).',
   model_fallback: 'Best match to your interests (model + corpus + author/venue prestige).',
   surprise: 'A high-surprise pick outside your usual reading pattern.',
-  audit: 'The filter rejected this — shown so you can rescue a wrong reject. '
-    + 'Marked read in Zotero, not added to your library.',
   diversity: 'Deliberately different from your library (low corpus affinity).',
 };
 

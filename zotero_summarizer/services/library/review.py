@@ -51,6 +51,9 @@ def list_by_state(state: str, since_hours: int = 720, limit: int = 1000) -> list
     The review UI uses this for both ``awaiting_review`` (the LLM-or-gate-only
     triage queue) and ``gate_rejected`` (items the classifier dropped before
     LLM — exposed so the user can spot-check false negatives and relabel).
+
+    Trashed re-arrivals are suppressed by stable GUID (the same guard the Today
+    slate applies) so a paper the user already threw away never reappears here.
     """
     with _conn() as conn:
         rows = feeds_storage.select_by_decisions(
@@ -59,6 +62,7 @@ def list_by_state(state: str, since_hours: int = 720, limit: int = 1000) -> list
             since_hours=since_hours,
             limit=limit,
         )
+        rows = _drop_trashed_rearrivals(conn, rows)
     return [_decorate_row(r) for r in rows]
 
 
@@ -471,6 +475,7 @@ def _require_actionable(row: dict[str, Any]) -> None:
 
 from zotero_summarizer.services.library.review_summary import (  # noqa: E402,F401  (re-export)
     _build_summary_for_queue,
+    _drop_trashed_rearrivals,
     _fetch_feed_metadata,
     _unpack_summary,
     _write_golden_sample,

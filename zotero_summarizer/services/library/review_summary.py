@@ -6,6 +6,7 @@ from __future__ import annotations
 import csv as _csv
 import json as _json
 import logging
+import sqlite3
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -13,10 +14,38 @@ from typing import Any
 from zotero_summarizer.models import SummarizeResponse
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.golden.goldenset import GoldenSample, _PRIORITY_TO_RELEVANCE
+from zotero_summarizer.storage import feeds as feeds_storage
 
 LOGGER = logging.getLogger(__name__)
 
 _RELEVANCE_INT = {"must_read": 5, "should_read": 4, "could_read": 3, "dont_read": 1}
+
+# Trash taxonomy — the SAME "never show again" key the Today slate and the ingest
+# dedup use (``daily_select`` / ``_tick_dedup``). A paper the user threw away
+# (``user_rejected`` from Today, or ``trashed`` / ``deleted_all`` inside Zotero)
+# re-arrives under a fresh feed_item_id, slipping past identity dedup.
+_TRASH_DECISIONS = (feeds_storage.DECISION_USER_REJECTED,)
+_TRASH_OUTCOMES = (feeds_storage.OUTCOME_TRASHED, feeds_storage.OUTCOME_DELETED_ALL)
+
+
+def _drop_trashed_rearrivals(
+    conn: sqlite3.Connection, rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Drop rows whose stable GUID matches a paper the user explicitly trashed.
+
+    The review-listing counterpart to ``daily_select._drop_trashed_guids``: the
+    Today *slate* already suppresses trashed re-arrivals, but the ``gate_rejected``
+    spot-check (and the Review page) listed straight from the table, so a paper
+    the user trashed kept resurfacing under a new feed_item_id. Matching on the
+    GUID — the one id that survives re-ingestion — makes the never-show-again
+    guard uniform across every Today surface. Re-exported by ``review``.
+    """
+    trashed_guids = feeds_storage.fetch_trashed_guids(
+        conn, decisions=_TRASH_DECISIONS, outcomes=_TRASH_OUTCOMES,
+    )
+    if not trashed_guids:
+        return rows
+    return [r for r in rows if str(r.get("guid") or "").strip() not in trashed_guids]
 
 
 def _unpack_summary(row: dict[str, Any]) -> SummarizeResponse:

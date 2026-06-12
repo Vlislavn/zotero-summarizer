@@ -2,7 +2,12 @@
 
 Assembles the daily "Today" slate: a small, role-mixed set of feed papers
 (`GET /api/daily`). Reads scored rows, normalizes them to candidates, then
-greedily allocates K slots across roles so the slate isn't all one flavor.
+greedily allocates K slots across roles (model / surprise / diversity) so the
+slate isn't all one flavor. The slate never reads `gate_rejected` rows: the
+former `audit` role (random gate-rejected spot-check, day-stable RNG) was
+removed entirely — it degenerated into an endless one-at-a-time stream when
+the primary pool emptied, and the spot-check now lives in the Review page +
+Today's SpotCheck section (`services/library/review.list_by_state`).
 
 ```
 processed_feed_items ─_querying.open_ro→ rows ─drop handled ─drop trashed-GUID ─drop content dupes─┐
@@ -38,11 +43,38 @@ The `model` quota scales with `K` (`assemble_daily_slate`: `model = max(3, K-2)`
 surprise/diversity stay at 1), so a larger `K` actually returns more cards — the
 old fixed 3/1/1 default capped every slate at 5 regardless of `K`.
 
+**Ordering: the shared rank blend.** Candidates are ordered by `rank_score` —
+the relevance × goal-text × prestige blend from `services/model/rank_blend`
+(the SAME primitive the Library queue uses, so the two surfaces can't drift):
+relevance = `composite_score`, goal = `goal_sim` (max cosine to the research
+goals, read from `aux_context.goal_sims`; `None` folds the goal weight back
+into relevance), prestige = KNOWN `citation_percentile` only (the display
+ladder's composite fallback is circular and never feeds the blend). The WHOLE
+deduped pool goes to the allocator — `backlog_cap` only bounds the never-empty
+fallback *fetch*, never the picker pool (a pre-pick cap starved the
+surprise/diversity roles of exactly the off-mainstream papers they exist to
+find). Cards are therefore intentionally NOT in displayed-composite order.
+`goal_sim` staleness: rescore-on-retrain/startup/drain plus a goals-save hook
+(`services/config.update_runtime_config` → `schedule_slate_rescore_async`);
+abstract-less rows are never rescored and keep `goal_sim=None` (honest absence,
+ranked by composite alone). The Library lane is immune (it reads goal affinity
+live at queue build).
+
+**Relevance floor (model role only).** The `model` role and its `model_fallback`
+never surface a `dont_read`-band paper (composite < `PRIORITY_COULD_READ_THRESHOLD`
+= 2.0, the canonical `domain` band edge) — see `_allocation.MODEL_RELEVANCE_FLOOR`
+— so a weak feed week doesn't pad Today with below-the-bar picks. `surprise` and
+`diversity` are deliberately NOT floored (they exist to surface off-pattern /
+off-library papers and own their predicates). `DailySlate` carries two honest
+banner signals: `low_relevance_hidden` (count of dont-band candidates no role
+surfaced) and `weak_slate` (no candidate reached the `should_read` band) — the
+Today UI shows a "light week — trigger a fresh triage" note.
+
 | file | responsibility |
 |---|---|
-| `__init__.py` | public surface: `assemble_daily_slate` (K-scaled model quota), `count_awaiting_unhandled`; `_drop_handled` + `_drop_content_dupes` (DOI/arXiv guard, `_BLOCKING_DECISIONS`) + `_drop_trashed_guids` (stable-GUID "never show again" guard, `_TRASH_DECISIONS`/`_TRASH_OUTCOMES`) |
+| `__init__.py` | public surface: `assemble_daily_slate` (K-scaled model quota, blend-ordered full pool), `count_awaiting_unhandled`; `_drop_handled` + `_drop_content_dupes` (DOI/arXiv guard, `_BLOCKING_DECISIONS`) + `_drop_trashed_guids` (stable-GUID "never show again" guard, `_TRASH_DECISIONS`/`_TRASH_OUTCOMES`) |
 | `_querying.py` | read-only SQLite access (delegates to `_common.connect_sqlite_ro`); `fetch_decided_content_keys` returns normalized DOI/arXiv sets for decided / in-library papers (now also blocks on a trashing `final_outcome`, not just `decision`) + `fetch_trashed_guids` returns the stable GUIDs of explicitly-trashed papers for the never-show-again guard |
-| `_candidate.py` | raw DB row → normalized candidate dict (scores, provenance, `why` chips); `row_*` string accessors share `_row_str`/`_obj_field`; `row_prestige` prefers OpenAlex field-normalized `citation_percentile` (already [0,1]) → LLM prestige → h-index → composite |
-| `_relevance.py` | heuristic, no-LLM `build_why` — plain-language "why it matters" reason chips from goal match / model relevance / author prestige / citations / surprise (thresholds reuse `domain`/`surprise` constants) |
-| `_allocation.py` | greedy role allocator (model / surprise / diversity slots) |
-| `_dataclasses.py` | frozen result types (`DailySlate`, `SlatePaper` — includes `abstract`, `pub_year`, and `why` chips for the Today card) |
+| `_candidate.py` | raw DB row → normalized candidate dict (scores, provenance, `goal_sim` via `row_goal_sim` = max over `aux_context.goal_sims`, KNOWN `citation_percentile`, `rank_score`); `attach_rank_scores` adapts the cohort to `rank_blend.blend_scores`; `row_*` string accessors share `_row_str`/`_obj_field`; `row_prestige` (display only) prefers OpenAlex field-normalized `citation_percentile` (already [0,1]) → LLM prestige → h-index → composite |
+| `_relevance.py` | heuristic, no-LLM reason chips. `attach_why` labels a whole cohort: goal chips key on the REAL `goal_sim` with pool-relative tercile bands (self-calibrating — mirrors the frontend `goalHighKeys` idiom; no absolute cosine constant). `goal_bands` requires ≥ 3 present positive goal_sims (a tercile needs 3 points) — with fewer the bands degenerate and a lone weak value (e.g. 0.2) would read "Strong goal match" right under the `weak_slate` "Light week" banner; below 3 it returns `(None, None)`, which suppresses goal chips entirely. Library chips key on `corpus_affinity` (engagement, labeled honestly: "Like papers you've saved" / "Off your usual track"); other thresholds reuse `domain`/`surprise` constants |
+| `_allocation.py` | greedy role allocator (model / surprise / diversity slots); model + diversity picks order by `rank_score`; the model role + its fallback apply `MODEL_RELEVANCE_FLOOR` (no dont_read-band picks), surprise/diversity are un-floored |
+| `_dataclasses.py` | frozen result types (`DailySlate` — incl. `low_relevance_hidden`/`weak_slate` weak-week banner signals; `SlatePaper` — includes `abstract`, `pub_year`, `goal_sim`, and `why` chips for the Today card) |

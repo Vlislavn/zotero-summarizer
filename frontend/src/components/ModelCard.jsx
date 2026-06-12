@@ -148,6 +148,15 @@ function ModelDetails({ model }) {
           title="Out-of-fold Spearman correlation, evaluated against your effective labels — your explicit label:* verdict where you set one, else the derived label — on the [1, 5] relevance scale. Closer to 1 is better."
         />
         <Field
+          label="Forward ρ (temporal)"
+          value={
+            model.temporal_spearman != null
+              ? Number(model.temporal_spearman).toFixed(4)
+              : '—'
+          }
+          title={`Honest forward-looking Spearman: trained on the oldest 80% of labels, scored on the newest 20%${model.temporal_holdout_n ? ` (${model.temporal_holdout_n} rows)` : ''} — what the gate actually delivers on tomorrow's feed. Expect it well below the OOF number (shuffled folds peek across time); watch its trend across retrains rather than the absolute value.`}
+        />
+        <Field
           label="Binary AUC"
           value={auc != null ? auc.toFixed(4) : '—'}
           title="From the FAIR run-log. Computed during the keep/skip CV pass."

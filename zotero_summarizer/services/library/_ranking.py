@@ -12,28 +12,11 @@ from typing import Any
 
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services._common import state as get_state
+from zotero_summarizer.services.model.rank_blend import GOAL_BLEND_WEIGHT, blend_scores
 
-# Blend weight for goal-text similarity vs the gate score in the queue ORDER
-# (NOT banding). Measured on the blind-judge benchmark: 0.6·gate + 0.4·goal lifts
-# NDCG@10 0.38→0.72 and P@10 50%→100%, floating on-goal clinical-agentic papers
-# the gate buries (goal_sim Spearman-vs-judgment 0.72 vs the gate's 0.40). The
-# gate alone over-weights "similar to what I've saved"; this adds "similar to
-# what I said I want." Set to 0.0 to disable.
-_GOAL_RERANK_WEIGHT = 0.4
-
-# Blend weight for author/venue PRESTIGE in the queue ORDER (NOT banding) — the
-# "best of the best on top" lever. Prestige = the field+year-normalized citation
-# percentile mapped to [1,5] (``percentile_to_score``, same signal the gate uses
-# and the quality floor uses). It floats high-quality work from strong
-# authors/venues up *within* the relevance×goal order rather than replacing it,
-# so the wanted library-anchored/goal pull is preserved (kept smaller than the
-# goal weight, which Spearman-dominates). Crucially it never PENALISES missing
-# evidence: a cold-start / uncited / no-OpenAlex paper (``prestige_known`` False)
-# is treated as MEDIAN-quality, mirroring the median-of-known ``prestige_floor``
-# and the cold-start "neutral 3.0" policy — young work is not pushed down. When
-# no row has known prestige the term is inert and the order is exactly the
-# goal-blend (the measured behaviour). Set to 0.0 to disable.
-_PRESTIGE_RERANK_WEIGHT = 0.15
+# The blend math + weights (0.4 goal / 0.15 prestige, blind-judge provenance)
+# live in ``services/model/rank_blend`` — shared with the Today slate: same
+# primitive, two consumers, so the surfaces can never drift.
 
 # Fallback ordering only (gate not ready): priority tier then recency.
 _PRIORITY_RANK: dict[str, int] = {
@@ -97,52 +80,27 @@ def _known_prestige(rec: dict[str, Any]) -> float | None:
     return float(val) if isinstance(val, (int, float)) else None
 
 
-def _median(vals: list[float]) -> float:
-    s = sorted(vals)
-    return s[len(s) // 2]
-
-
 def _blended_sort(unread: list[dict[str, Any]]) -> None:
-    """Sort the unread queue in place by a blend of the gate's relevance,
-    goal-text similarity, and author/venue prestige (each min-max normalized over
-    the scored set), so on-goal AND high-quality papers the gate under-ranks rise.
-    Unscored items sink to the bottom; banding is untouched (computed elsewhere
-    from the gate score). See ``_GOAL_RERANK_WEIGHT`` / ``_PRESTIGE_RERANK_WEIGHT``.
-
-    The prestige term never penalises missing evidence: a row with no KNOWN
-    prestige is scored at the MEDIAN of the known set (= "typical quality"), so
-    cold-start/uncited work is neither lifted as a treasure nor pushed down as
-    trash. When no row has known prestige the term is inert and its weight folds
-    back into relevance — i.e. the order is exactly the goal-blend."""
+    """Sort the unread queue in place by the shared relevance × goal × prestige
+    blend (``services/model/rank_blend.blend_scores`` — min-max per cohort,
+    weight fold-back for absent signals, median-of-known for unknown prestige),
+    so on-goal AND high-quality papers the gate under-ranks rise. Unscored items
+    sink to the bottom; banding is untouched (computed elsewhere from the gate
+    score). This module only ADAPTS library records to the blend: relevance =
+    gate score, goal = ``goal_sim``, prestige = KNOWN evidence via
+    ``_known_prestige`` (never a derived fallback), tie-break = ``date_added``."""
     scored = [r for r in unread if r["relevance_score"] is not None]
-    rels = [float(r["relevance_score"]) for r in scored]
-    gss = [float(r["goal_sim"]) for r in scored if r.get("goal_sim") is not None]
-    prs = [p for r in scored if (p := _known_prestige(r)) is not None]
-    rlo, rhi = (min(rels), max(rels)) if rels else (0.0, 1.0)
-    glo, ghi = (min(gss), max(gss)) if gss else (0.0, 1.0)
-    plo, phi = (min(prs), max(prs)) if prs else (0.0, 1.0)
-    pmed = _median(prs) if prs else None  # "typical quality" for unknown rows
-
-    # Each optional term's weight folds back into relevance when its signal is
-    # absent, so the blend degrades cleanly: goals+prestige → 0.45/0.40/0.15;
-    # goals only → 0.60/0.40 (the measured baseline + existing tests); prestige
-    # only → 0.85/—/0.15; neither → pure relevance.
-    w_goal = _GOAL_RERANK_WEIGHT if gss else 0.0
-    w_prest = _PRESTIGE_RERANK_WEIGHT if pmed is not None else 0.0
-    w_rel = 1.0 - w_goal - w_prest
-
-    def _norm(v: float, lo: float, hi: float) -> float:
-        return (v - lo) / (hi - lo) if hi > lo else 0.5
+    keys = blend_scores(
+        [float(r["relevance_score"]) for r in scored],
+        [None if r.get("goal_sim") is None else float(r["goal_sim"]) for r in scored],
+        [_known_prestige(r) for r in scored],
+    )
+    blended = {id(r): k for r, k in zip(scored, keys)}
 
     def key(r: dict[str, Any]) -> tuple[int, float, str]:
         if r["relevance_score"] is None:
             return (0, 0.0, r["date_added"])  # unscored → bottom
-        rn = _norm(float(r["relevance_score"]), rlo, rhi)
-        gn = _norm(float(r["goal_sim"]), glo, ghi) if r.get("goal_sim") is not None else 0.0
-        # Unknown prestige → median (typical), so it is never demoted below peers.
-        pv = _known_prestige(r)
-        pn = _norm(pv if pv is not None else pmed, plo, phi) if pmed is not None else 0.0
-        return (1, w_rel * rn + w_goal * gn + w_prest * pn, r["date_added"])
+        return (1, blended[id(r)], r["date_added"])
 
     unread.sort(key=key, reverse=True)
 
@@ -154,9 +112,9 @@ def sort_unread(unread: list[dict[str, Any]], *, model_ready: bool) -> None:
     each optional term folds into relevance when its signal is absent, so with no
     goals AND no known prestige this is gate-score-then-recency). Gate not ready →
     priority-tier then recency. Only ORDER changes; banding stays from the gate
-    score. See ``_blended_sort`` / ``_GOAL_RERANK_WEIGHT`` / ``_PRESTIGE_RERANK_WEIGHT``."""
+    score. See ``_blended_sort`` / ``rank_blend.GOAL_BLEND_WEIGHT``."""
     if model_ready:
-        goal_sims = _goal_affinity([r["item_key"] for r in unread]) if _GOAL_RERANK_WEIGHT > 0 else {}
+        goal_sims = _goal_affinity([r["item_key"] for r in unread]) if GOAL_BLEND_WEIGHT > 0 else {}
         for r in unread:
             r["goal_sim"] = goal_sims.get(r["item_key"])
         # One ordering path: the blend self-degrades to pure relevance when no
@@ -171,8 +129,6 @@ def sort_unread(unread: list[dict[str, Any]], *, model_ready: bool) -> None:
 
 
 __all__ = [
-    "_GOAL_RERANK_WEIGHT",
-    "_PRESTIGE_RERANK_WEIGHT",
     "_PRIORITY_RANK",
     "_content_key",
     "_dedup_by_content",

@@ -144,6 +144,11 @@ def _compute_aux_with_context(
         (only populated at cold-start; the cold-start prior's input)
       ``cold_start_prestige`` — provisional author-based prestige [1,5] for a
         cold-start paper (None unless the lift fired), surfaced in the badge
+      ``goal_sims`` — ``{research-goal text: cosine}`` for THIS candidate's
+        title+abstract (None = no goals stored / corpus off). The goal-anchored
+        signal the slate/queue blend orders by; NOT a model feature (kept out of
+        the feature vector on purpose — the gate is engagement-trained and would
+        re-weight it back toward "similar to what I've saved").
 
     Missing fields default to ``0`` (not "neutral"), so the UI can distinguish
     "OpenAlex said zero" from "we didn't ask".
@@ -159,13 +164,19 @@ def _compute_aux_with_context(
         "citation_percentile": None,
         "max_author_field_percentile": None,
         "cold_start_prestige": None,
+        "goal_sims": None,
     }
     if embed_cache is not None:
         try:
             # Fast vectorized affinity (cached corpus matrix) — the gate scores
             # every item, so the per-item Python cosine loop in match_candidate
-            # was the bottleneck. affinity_only returns the same number.
-            affinity = float(embed_cache.affinity_only(title, abstract, stale_days_for_weak_negative=stale_days))
+            # was the bottleneck. ONE embed yields both corpus signals: the
+            # engagement affinity (feature) and the per-goal cosines (aux-only).
+            affinity_f, goal_sims = embed_cache.affinity_and_goals(
+                title, abstract, stale_days_for_weak_negative=stale_days
+            )
+            affinity = float(affinity_f)
+            ctx["goal_sims"] = goal_sims
         except Exception as exc:
             LOGGER.debug("corpus affinity failed: %s", exc)
     if openalex_client is not None:

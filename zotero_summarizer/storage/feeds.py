@@ -56,6 +56,7 @@ from zotero_summarizer.storage.feeds_constants import (  # noqa: F401  (re-expor
     DECISION_TRIAGED_PENDING,
     DECISION_USER_APPROVED,
     DECISION_USER_REJECTED,
+    BEHAVIORAL_OUTCOMES,
     OUTCOME_DELETED_ALL,
     OUTCOME_ENGAGED,
     OUTCOME_KEPT_INBOX,
@@ -64,6 +65,7 @@ from zotero_summarizer.storage.feeds_constants import (  # noqa: F401  (re-expor
     OUTCOME_TRASHED,
     OUTCOME_UNKNOWN,
     OUTCOME_WEIGHT,
+    relevance_from_signal_weight,
 )
 from zotero_summarizer.storage.feeds_schema import (
     CREATE_TABLE as _CREATE_TABLE,
@@ -72,6 +74,7 @@ from zotero_summarizer.storage.feeds_schema import (
 )
 from zotero_summarizer.storage.feeds_lookup import (  # noqa: F401  (re-exported)
     fetch_processed_content_pairs,
+    fetch_resolved_outcomes,
     fetch_trashed_guids,
     get_processed_feed_item_by_id,
     get_processed_feed_item_by_pk,

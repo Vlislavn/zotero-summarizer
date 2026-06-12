@@ -131,3 +131,32 @@ def fetch_trashed_guids(
         params,
     ).fetchall()
     return {str(r[0]).strip() for r in rows if str(r[0] or "").strip()}
+
+
+def fetch_resolved_outcomes(
+    conn: sqlite3.Connection,
+    *,
+    outcomes: tuple[str, ...],
+) -> dict[int, str]:
+    """``{feed_item_id: final_outcome}`` for materialized rows whose 7-day
+    outcome check resolved to one of ``outcomes``.
+
+    The caller passes the outcome subset it considers meaningful (e.g. the
+    behavioural taxonomy, excluding ``pending``/``unknown``) so this stays pure
+    SQL with no import of the constants module — same contract as
+    :func:`fetch_trashed_guids`. Rows with ``feed_item_id <= 0`` are skipped:
+    they key their golden row as ``processed:<pk>`` and can't be joined here.
+    """
+    if not outcomes:
+        return {}
+    placeholders = ",".join("?" * len(outcomes))
+    rows = conn.execute(
+        f"""
+        SELECT feed_item_id, final_outcome FROM processed_feed_items
+        WHERE outcome_detected_at IS NOT NULL
+          AND final_outcome IN ({placeholders})
+          AND feed_item_id > 0
+        """,
+        tuple(outcomes),
+    ).fetchall()
+    return {int(r[0]): str(r[1]) for r in rows}

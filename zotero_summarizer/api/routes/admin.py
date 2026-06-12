@@ -366,6 +366,10 @@ async def model_card() -> dict[str, Any]:
             "feature_dim": twin.get("feature_dim"),
             "objective": twin.get("objective"),
             "oof_spearman": twin.get("oof_spearman"),
+            # Forward-looking (train-past/test-future) Spearman; null on models
+            # trained before June 2026 or when the holdout was too small.
+            "temporal_spearman": twin.get("temporal_spearman"),
+            "temporal_holdout_n": twin.get("temporal_holdout_n"),
             "golden_csv_sha256_prefix": str(twin.get("golden_csv_sha256") or "")[:12],
             "thresholds": twin.get("thresholds") or {},
             "joblib_path": str(joblib_path),

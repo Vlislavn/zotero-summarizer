@@ -64,33 +64,64 @@ class CorpusReadMixin:
         }
         return matrix, weights
 
-    def affinity_only(
+    def affinity_and_goals(
         self, title: str, abstract: str, stale_days_for_weak_negative: int = 30
-    ) -> float:
-        """Fast corpus affinity (``positive_similarity - negative_similarity``) —
-        the gate's per-item feature, vectorized over the cached corpus matrix.
+    ) -> tuple[float, dict[str, float] | None]:
+        """ONE candidate embed → ``(engagement affinity, per-goal cosines)``.
 
-        Identical math to :meth:`match_candidate`'s affinity but ~1000× cheaper at
-        scale (one numpy matmul vs a Python cosine loop over the whole corpus with
-        a JSON re-parse each call). The full ``match_candidate`` (collections /
-        goals / top items) stays for the review UI."""
+        The single computational definition of both per-candidate corpus
+        signals, from the same ``_build_text(title, abstract)`` input:
+
+        * ``affinity`` — engagement-weighted pos−neg cosine over the corpus
+          (what the user DID; the gate's ``corpus_affinity`` feature).
+          Identical math to :meth:`match_candidate`'s affinity but ~1000×
+          cheaper at scale (one numpy matmul over the cached corpus matrix vs
+          a Python cosine loop with a JSON re-parse each call); the full
+          ``match_candidate`` (collections / goals / top items) stays for the
+          review UI.
+        * ``goal_sims`` — ``{goal text: cosine}`` against each stored
+          research-goal embedding (what the user SAID they want), or ``None``
+          when no goals are stored — strictly "signal unavailable", never a
+          fake 0.0. Aggregation (max / weighting) is the caller's policy.
+
+        Distinct numbers, deliberately computed from one embedding so they can
+        never drift apart the way two separate embed paths would."""
         matrix, weights = self._corpus_arrays(stale_days_for_weak_negative)
-        if matrix.shape[0] == 0:
-            return 0.0
+        conn = self._conn()
+        try:
+            goal_rows = conn.execute("SELECT goal, embedding_json FROM goal_embeddings").fetchall()
+        finally:
+            conn.close()
+        if matrix.shape[0] == 0 and not goal_rows:
+            return 0.0, None
         cand = np.asarray(self._embed(self._build_text(title, abstract)), dtype=np.float32)
         norm = float(np.linalg.norm(cand))
         if norm > 0:
             cand = cand / norm
-        sims = matrix @ cand
-        pos = weights > 0
-        neg = weights < 0
-        pos_den = float(weights[pos].sum())
-        neg_w = -weights[neg]
-        neg_den = float(neg_w.sum())
-        positive_similarity = float((sims[pos] * weights[pos]).sum() / pos_den) if pos_den > 0 else 0.0
-        negative_similarity = float((sims[neg] * neg_w).sum() / neg_den) if neg_den > 0 else 0.0
-        affinity = self._clamp(positive_similarity - negative_similarity, -1.0, 1.0)
-        return round(affinity, 4)
+
+        affinity = 0.0
+        if matrix.shape[0] > 0:
+            sims = matrix @ cand
+            pos = weights > 0
+            neg = weights < 0
+            pos_den = float(weights[pos].sum())
+            neg_w = -weights[neg]
+            neg_den = float(neg_w.sum())
+            positive_similarity = float((sims[pos] * weights[pos]).sum() / pos_den) if pos_den > 0 else 0.0
+            negative_similarity = float((sims[neg] * neg_w).sum() / neg_den) if neg_den > 0 else 0.0
+            affinity = round(self._clamp(positive_similarity - negative_similarity, -1.0, 1.0), 4)
+
+        goal_sims: dict[str, float] | None = None
+        if goal_rows:
+            acc: dict[str, float] = {}
+            for row in goal_rows:
+                gvec = np.asarray(self._parse_embedding(row["embedding_json"]), dtype=np.float32)
+                gnorm = float(np.linalg.norm(gvec))
+                if gnorm == 0:
+                    continue  # unembeddable goal text — no cosine exists for it
+                acc[str(row["goal"])] = round(float((gvec / gnorm) @ cand), 4)
+            goal_sims = acc or None
+        return affinity, goal_sims
 
     def _affinity_to_targets(self, item_ids: list[str], target_mat: np.ndarray) -> dict[str, float]:
         """``{item_id: max cosine to the rows of target_mat}`` over the items'
@@ -130,8 +161,9 @@ class CorpusReadMixin:
         is cheap at queue-build time even for the whole library: one IN-query +
         a (n×dim)·(dim×G) matmul. Items with no cached embedding, or when no goals
         are set, are omitted (caller falls back to the gate-only order). Distinct
-        from :meth:`affinity_only` (engagement-based pos−neg) — this is similarity
-        to what the user SAID they want, which the gate does not feature."""
+        from the engagement affinity of :meth:`affinity_and_goals` (pos−neg to the
+        saved library) — this is similarity to what the user SAID they want, which
+        the gate does not feature."""
         if not [i for i in item_ids if str(i or "").strip()]:
             return {}
         conn = self._conn()

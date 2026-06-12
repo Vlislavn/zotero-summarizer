@@ -40,3 +40,28 @@ def test_compute_row_weights_mixed():
     ]
     weights = lw.compute_row_weights(rows)
     assert list(weights) == pytest.approx([0.3, 0.5, 1.0, 1.0])
+
+
+# ---------------------------------------------------------------------------
+# Compound tiers + outcome segments (June 2026).
+# ---------------------------------------------------------------------------
+
+
+def test_outcome_segment_upgrades_to_review_weight():
+    # A resolved 7-day observation is as informative as a deliberate Review
+    # click — regardless of which outcome resolved.
+    assert lw._tier_weight("feed_interest|outcome_kept_inbox", 0, 0) == lw.WEIGHT_REVIEW
+    assert lw._tier_weight("feed_interest|outcome_trashed", 0, 0) == lw.WEIGHT_REVIEW
+    assert lw._tier_weight("feed_interest|outcome_some_future_name", 0, 0) == lw.WEIGHT_REVIEW
+
+
+def test_unknown_suffix_inherits_base_tier_weight():
+    # A suffixed tier must inherit its base weight, never fall through to the
+    # 0.7 legacy default (which would UP-weight a soft signal).
+    assert lw._tier_weight("feed_interest|whatever_new", 0, 0) == lw.WEIGHT_INTEREST
+    assert lw._tier_weight("first_glance|whatever_new", 0, 0) == lw.WEIGHT_GLANCE
+
+
+def test_existing_compound_engagement_tiers_unchanged():
+    assert lw._tier_weight("medium_positive|notes=1", 0, 1) == lw.WEIGHT_MED
+    assert lw._tier_weight("critical_engagement|medium_positive", 0, 0) == lw.WEIGHT_HIGH

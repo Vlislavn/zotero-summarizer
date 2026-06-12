@@ -102,7 +102,7 @@ def test_match_candidate_applies_positive_and_negative_feedback(monkeypatch, tmp
     assert result.matched_goal == "goal:agentic"
 
 
-def test_affinity_only_matches_match_candidate(monkeypatch, tmp_path):
+def test_affinity_and_goals_matches_match_candidate(monkeypatch, tmp_path):
     """The vectorized fast path returns the same affinity as match_candidate."""
     monkeypatch.setattr(embedding_cache, "SentenceTransformer", None)
     cache = embedding_cache.EmbeddingCache(tmp_path / "corpus_cache.db", "test-model")
@@ -121,7 +121,7 @@ def test_affinity_only_matches_match_candidate(monkeypatch, tmp_path):
     ])
 
     full = cache.match_candidate("Candidate Paper", "Studies multiagent coordination.").affinity_score
-    fast = cache.affinity_only("Candidate Paper", "Studies multiagent coordination.")
+    fast, _goal_sims = cache.affinity_and_goals("Candidate Paper", "Studies multiagent coordination.")
     assert fast == full
     # candidate==positive vector, negative orthogonal → pos_sim 1, neg_sim 0 → affinity 1.0
     assert fast == 1.0
@@ -134,11 +134,11 @@ def test_affinity_cache_invalidates_on_upsert(monkeypatch, tmp_path):
     monkeypatch.setattr(cache, "_embed", lambda t: [1.0, 0.0, 0.0])
 
     cache.upsert_items([CorpusItem(item_id="p1", title="A", abstract="x", tags=["🧠"], collections=[])])
-    a1 = cache.affinity_only("cand", "y")          # builds the cache; only a positive → 1.0
+    a1, _ = cache.affinity_and_goals("cand", "y")  # builds the cache; only a positive → 1.0
     assert a1 == 1.0
     v1 = cache._corpus_version
 
     cache.upsert_items([CorpusItem(item_id="p2", title="B", abstract="z", tags=["❌"], collections=[])])
     assert cache._corpus_version > v1               # write bumped the version
-    a2 = cache.affinity_only("cand", "y")          # rebuilt with the strong negative → 0.0
+    a2, _ = cache.affinity_and_goals("cand", "y")  # rebuilt with the strong negative → 0.0
     assert a2 == 0.0

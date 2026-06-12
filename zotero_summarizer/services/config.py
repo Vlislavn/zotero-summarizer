@@ -33,6 +33,10 @@ async def update_runtime_config(new_config: GoalsConfig) -> dict:
     existing_cache: EmbeddingCache | None = getattr(app_state, "embedding_cache", None)
     previous_model_name = existing_cache.model_name if existing_cache is not None else None
     model_changed = previous_model_name is not None and previous_model_name != new_config.corpus.embedding_model
+    # Captured BEFORE the swap: edited research goals invalidate every persisted
+    # per-item goal_sim (the slate's rank-blend input), so a background slate
+    # rescore is scheduled after the save (see below).
+    goals_changed = list(app_state.app_state.config.research_goals) != list(new_config.research_goals)
 
     def prepare_embedding_cache() -> EmbeddingCache:
         cache = EmbeddingCache(current_settings.corpus_db_path, new_config.corpus.embedding_model)
@@ -57,5 +61,14 @@ async def update_runtime_config(new_config: GoalsConfig) -> dict:
 
     if model_changed and new_config.corpus.enabled and getattr(app_state, "zotero_reader", None) is not None:
         asyncio.create_task(corpus.auto_import_corpus_from_zotero())
+
+    if goals_changed:
+        # Persisted per-item goal_sims were computed against the OLD goals; the
+        # Today slate would silently rank on stale signals until the next
+        # retrain/startup rescore. Background, never blocks the save. Lazy
+        # import mirrors _gate._rescore_slate_after_swap (module-cycle guard).
+        from zotero_summarizer.services.triage.feeds import schedule_slate_rescore_async
+
+        schedule_slate_rescore_async("goals-updated")
 
     return {"status": "ok", "config": payload}

@@ -48,14 +48,21 @@ CREATE TABLE IF NOT EXISTS processed_feed_items (
 _DEFAULT_NOW = datetime(2026, 5, 15, 12, 0, 0, tzinfo=timezone.utc)
 
 
-def _make_shap_json(*, affinity: float = 0.3, prestige: float | None = 4.2) -> str:
+def _make_shap_json(
+    *,
+    affinity: float = 0.3,
+    prestige: float | None = 4.2,
+    goal_sims: dict[str, float] | None = None,
+) -> str:
     payload: dict[str, object] = {
         "shap": [
             {"feature": "venue_h_index", "contribution": 0.12},
             {"feature": "year_recency", "contribution": -0.04},
             {"feature": "title_log_len", "contribution": 0.01},
         ],
-        "aux_context": {"corpus_affinity": affinity},
+        # goal_sims mirrors the gate aux pass: {goal text: cosine}, absent key
+        # == signal unavailable (candidate.row_goal_sim returns None then).
+        "aux_context": {"corpus_affinity": affinity, "goal_sims": goal_sims},
     }
     if prestige is not None:
         payload["summary"] = {"prestige_score": prestige}
@@ -92,6 +99,7 @@ def _insert(
     arxiv_id: str | None = None,
     materialized_zotero_key: str | None = None,
     final_outcome: str | None = None,
+    goal_sims: dict[str, float] | None = None,
 ) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
@@ -104,6 +112,7 @@ def _insert(
             shap_json = _make_shap_json(
                 affinity=corpus_affinity if corpus_affinity is not None else 0.3,
                 prestige=4.2,
+                goal_sims=goal_sims,
             )
         conn.execute(
             """

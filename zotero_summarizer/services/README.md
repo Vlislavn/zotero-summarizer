@@ -34,7 +34,9 @@ they resolve lazily per stage so startup never depends on a provider being reach
 cached gate with an unchanged golden sha, so an offline-trained model reflects on the
 next start without a manual `rescore-slate`),
 `run_log`, `config` (GET/PUT `/api/config`; PUT persists + invalidates stage clients,
-does not validate provider availability), `health`, `results`,
+does not validate provider availability; an edit to `research_goals` schedules a
+background Today-slate rescore so persisted per-item `goal_sims` — the slate's
+rank-blend input — don't go stale against the new goals), `health`, `results`,
 `corpus` (embeddings/affinity), `emoji_signals`.
 
 **Boundaries:** may import `storage/`, `integrations/`, `models`, and

@@ -114,7 +114,9 @@ def _feedback_type_from_outcome(outcome: str) -> str:
 
 
 def _relevance_from_weight(weight: float) -> float:
-    """Map signal_weight (-3..+3) to inferred_relevance scale (1..5)."""
-    # Linear: weight=-3 -> 1, weight=0 -> 3, weight=+3 -> 5
-    val = 3.0 + (weight / 1.5)
-    return max(1.0, min(5.0, val))
+    """Map signal_weight (-3..+3) to inferred_relevance scale (1..5).
+
+    Delegates to the single shared definition next to ``OUTCOME_WEIGHT`` so the
+    feedback emitter and the training-label outcome correction can't drift.
+    """
+    return feeds_storage.relevance_from_signal_weight(weight)

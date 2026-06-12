@@ -7573,7 +7573,7 @@ requires-dist = [
     { name = "rank-bm25", specifier = ">=0.2.2" },
     { name = "sentence-transformers", specifier = ">=3.0.1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
-    { name = "vulture", marker = "extra == 'dev'", specifier = ">=2.11" },
+    { name = "vulture", marker = "extra == 'dev'", specifier = "==2.16" },
 ]
 provides-extras = ["dev"]
 

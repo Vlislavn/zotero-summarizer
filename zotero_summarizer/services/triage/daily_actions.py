@@ -16,6 +16,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+from zotero_summarizer.domain import VERDICT_SOURCE_MACHINE_ADD, VERDICT_SOURCE_USER
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.services.library import fulltext, review
@@ -57,6 +58,7 @@ def _golden_key(row: dict[str, Any]) -> str:
 def _record_label(
     row: dict[str, Any], priority: str, note: str, *,
     signal_tier: str = "feed_user_label", original_priority: str | None = None,
+    source: str = VERDICT_SOURCE_USER,
 ) -> None:
     """Write the training label two ways: golden CSV (for retrain) + the
     label_verdicts overlay (so it persists, wins, and excludes the card from
@@ -65,6 +67,11 @@ def _record_label(
     ``signal_tier`` sets the golden row's training weight tier — `feed_interest`
     for the soft pre-read "Add to library" signal, `feed_user_label` (default)
     for a confident decision like trash.
+
+    ``source`` marks verdict provenance: ``machine_add`` for the provisional
+    pre-read "Add" verdict (superseded by the 7-day materialization outcome at
+    train time — see ``services.golden.hybrid_gt``), ``user`` (default) for a
+    deliberate decision like trash.
 
     ``original_priority`` records the gate/model's derived priority on the
     verdict overlay. Callers that mutate ``row["reading_priority"]`` before
@@ -79,6 +86,7 @@ def _record_label(
         original_derived_priority=original_priority,
         user_priority=priority,
         comment=note,
+        source=source,
     )
 
 
@@ -125,6 +133,7 @@ def add_to_library(item_ids: list[int]) -> dict[str, Any]:
             _record_label(
                 row, _ADD_PRIORITY, "added from Today",
                 signal_tier="feed_interest", original_priority=original_priority,
+                source=VERDICT_SOURCE_MACHINE_ADD,
             )
             added += 1
         except Exception as exc:

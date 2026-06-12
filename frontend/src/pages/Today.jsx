@@ -303,7 +303,10 @@ export default function Today() {
       <header className="mb-3 flex items-baseline justify-between flex-wrap gap-2">
         <div>
           <h2 className="text-lg font-bold text-slate-900">Today’s reading</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p
+            className="text-xs text-slate-500 mt-0.5"
+            title="Best first: ranked by a blend of model relevance, goal match, and author/venue prestige — same order as the Library queue, so a card's displayed score may sit out of order. Surprise and off-track picks follow the model picks."
+          >
             Cull the feed: keep what’s worth reading into your library, trash the rest.
           </p>
           {typeof slate?.awaiting_review_total === 'number' && (
@@ -392,6 +395,23 @@ export default function Today() {
           Showing older scored items (no fresh triage in the last 7 days).
           {triageStatus?.running ? ' Fresh triage is running…' : ''}
         </p>
+      )}
+
+      {!slateQuery.isLoading && !slateQuery.error
+        && (slate?.weak_slate || (slate?.low_relevance_hidden ?? 0) > 0) && (
+        <div className="mb-3 p-2.5 rounded-xl border border-amber-200 bg-amber-50 text-xs text-amber-900 flex items-start gap-2">
+          <span aria-hidden="true">⚖️</span>
+          <span className="flex-1 leading-snug">
+            {slate?.weak_slate
+              ? 'Light week — nothing in your feed strongly matches your goals in the last 7 days. '
+              : ''}
+            {(slate?.low_relevance_hidden ?? 0) > 0 && (
+              <><strong>{slate.low_relevance_hidden}</strong> below-the-bar paper
+                {slate.low_relevance_hidden === 1 ? '' : 's'} hidden. </>
+            )}
+            Run “Triage backlog” to pull in newer papers.
+          </span>
+        </div>
       )}
 
       {papers.length > 0 && (

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -15,6 +16,20 @@ from zotero_summarizer.services import run_log
 from zotero_summarizer.services._common import atomic_write, now_iso_z
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, eq=False)
+class _TrainMatrix:
+    """The three per-row training arrays that always travel together: feature
+    matrix ``X``, continuous target ``y``, and ``sample_weight`` (all length n)."""
+
+    X: "np.ndarray"
+    y: "np.ndarray"
+    sample_weight: "np.ndarray"
+
+    @property
+    def n(self) -> int:
+        return int(self.X.shape[0])
 
 
 def _featurize_training_matrix(
@@ -82,6 +97,81 @@ def _oof_quality_metrics(train_rows: list[dict], preds_oof: "np.ndarray") -> dic
     }
 
 
+# --- Temporal-holdout diagnostic (June 2026) -------------------------------
+# Production always predicts the FUTURE (today's feed) from the PAST
+# (everything labeled so far), but the shuffled GroupKFold OOF lets folds
+# train on rows newer than their validation rows: measured 0.653 OOF Spearman
+# vs 0.394 on a strict train-on-oldest/test-on-newest split of the same data
+# (tools/eval_temporal_objective.py, 2026-06-12, n=1852, dont_read share
+# 52%→68% across eras). Every retrain logs the forward-looking number next to
+# the comparable OOF series so drift and honest performance stay visible.
+
+_TEMPORAL_HOLDOUT_FRACTION = 0.2
+_TEMPORAL_MIN_TEST = 30  # below this a forward Spearman is noise, not signal
+_NO_DATE_SENTINEL = 1e9  # rows without days_since_added sort as oldest
+
+
+def _row_days(row: dict[str, Any]) -> float:
+    raw = (row.get("days_since_added") or "").strip()
+    return float(raw) if raw else _NO_DATE_SENTINEL
+
+
+def _temporal_group_split(
+    train_rows: list[dict[str, Any]], groups: list[str]
+) -> tuple["np.ndarray", "np.ndarray"]:
+    """``(train_idx, test_idx)``: newest ~20% of rows held out, whole groups.
+
+    Group-aware (``paper_group_id``) so the same paper never lands on both
+    sides; a group's age is its NEWEST member (min ``days_since_added``).
+    """
+    group_age: dict[str, float] = {}
+    for row, g in zip(train_rows, groups):
+        d = _row_days(row)
+        group_age[g] = min(d, group_age.get(g, _NO_DATE_SENTINEL))
+    newest_first = sorted(group_age, key=lambda g: group_age[g])
+    target = int(len(train_rows) * _TEMPORAL_HOLDOUT_FRACTION)
+    test_groups: set[str] = set()
+    covered = 0
+    for g in newest_first:
+        if covered >= target:
+            break
+        test_groups.add(g)
+        covered += sum(1 for gg in groups if gg == g)
+    test_mask = np.asarray([g in test_groups for g in groups])
+    return np.where(~test_mask)[0], np.where(test_mask)[0]
+
+
+def _temporal_holdout_metrics(
+    classifier_name: str,
+    matrix: _TrainMatrix,
+    train_rows: list[dict[str, Any]],
+    groups: list[str],
+    *,
+    pca_dim: int,
+) -> dict[str, Any] | None:
+    """Forward-looking Spearman on the newest-20% holdout; one extra fit.
+
+    ``None`` is the defined "metric not computable" result — holdout under
+    ``_TEMPORAL_MIN_TEST`` rows or a constant label vector on either side
+    (Spearman undefined) — which small test fixtures legitimately hit.
+    """
+    from scipy.stats import spearmanr
+
+    X, y, sw = matrix.X, matrix.y, matrix.sample_weight
+    tr, te = _temporal_group_split(train_rows, groups)
+    if len(te) < _TEMPORAL_MIN_TEST:
+        return None
+    if len(set(y[tr].tolist())) < 2 or len(set(y[te].tolist())) < 2:
+        return None
+    _, p_te = classifier._fit_predict(
+        classifier_name, X[tr], y[tr], X[te],
+        pca_dim=pca_dim, return_train_probs=False,
+        objective="regression", sample_weight=sw[tr],
+    )
+    rho = float(spearmanr(y[te], p_te).statistic)
+    return {"temporal_spearman": round(rho, 4), "temporal_holdout_n": int(len(te))}
+
+
 def _fit_final_model(
     classifier_name: str,
     X_train: "np.ndarray",
@@ -142,6 +232,93 @@ def _fit_final_model(
     return fitted_model, pca_object
 
 
+def _oof_predictions(
+    classifier_name: str,
+    matrix: _TrainMatrix,
+    groups: list[str],
+    *,
+    n_folds: int,
+    pca_dim: int,
+) -> tuple["np.ndarray", float]:
+    """K-fold out-of-fold predictions + diagnostic Spearman ρ (honest: every
+    row is scored by a fold that never trained on it)."""
+    from scipy.stats import spearmanr
+    from sklearn.model_selection import GroupKFold
+
+    preds_oof = np.zeros(matrix.n, dtype=np.float64)
+    kf = GroupKFold(n_splits=n_folds)
+    for fold_idx, (tr, vl) in enumerate(kf.split(matrix.X, groups=groups), start=1):
+        _, p_vl = classifier._fit_predict(
+            classifier_name, matrix.X[tr], matrix.y[tr], matrix.X[vl],
+            pca_dim=pca_dim, return_train_probs=False,
+            objective="regression", sample_weight=matrix.sample_weight[tr],
+        )
+        preds_oof[vl] = p_vl
+        LOGGER.info("train_and_save: fold %d/%d done", fold_idx, n_folds)
+    oof_rho = float(spearmanr(matrix.y, preds_oof).statistic) if matrix.n > 2 else 0.0
+    return preds_oof, oof_rho
+
+
+def _training_metadata(
+    library: Any,
+    temporal: dict[str, Any] | None,
+    *,
+    n_train: int,
+    oof_rho: float,
+    oof_metrics: dict[str, Any],
+    cal_diag: Any,
+) -> dict[str, Any]:
+    """The JSON-able ``training_metadata`` block stored on the artefact."""
+    return {
+        "n_train": n_train,
+        "n_positive_library": library.n_rows,
+        "objective": "regression",
+        "oof_spearman": round(oof_rho, 4),
+        # None = holdout too small / constant labels (tiny fixtures) —
+        # the ModelCard renders an em-dash then, never a fake number.
+        "temporal_spearman": None if temporal is None else temporal["temporal_spearman"],
+        "temporal_holdout_n": 0 if temporal is None else temporal["temporal_holdout_n"],
+        "oof_metrics_vs_gold": oof_metrics,
+        "band_calibration": cal_diag,
+        "trained_at": now_iso_z(),
+        "git_commit": run_log.short_git_commit(),
+    }
+
+
+def _build_artifact(
+    matrix: _TrainMatrix,
+    library: Any,
+    fitted_model: Any,
+    pca_object: Any,
+    calibrator: Any,
+    *,
+    classifier_name: str,
+    sha256: str,
+    pca_dim: int,
+    metadata: dict[str, Any],
+) -> TrainedClassifier:
+    """Assemble the persisted artefact from the already-trained pieces."""
+    return TrainedClassifier(
+        classifier_name=classifier_name,
+        golden_csv_sha256=sha256,
+        feature_dim=classifier.FEATURE_DIM,
+        pca_dim=pca_dim,
+        X_train=matrix.X,
+        y_train=matrix.y,
+        pca_object=pca_object,
+        fitted_model=fitted_model,
+        calibrator=calibrator,
+        t_keep=0.0,
+        t_must=0.0,
+        t_could=0.0,
+        library_embeddings=library.embeddings if library.n_rows > 0 else None,
+        library_centroid=library.centroid if library.n_rows > 0 else None,
+        library_recent_centroid=library.recent_centroid if library.n_rows > 0 else None,
+        library_authors_lower=library.authors_lower if library.n_rows > 0 else None,
+        training_metadata=metadata,
+    )
+
+
 def train_and_save(
     golden_csv: Path,
     *,
@@ -174,8 +351,6 @@ def train_and_save(
     Annotate UI become ground truth for the next retrain.
     """
     import csv as _csv
-    from scipy.stats import spearmanr
-    from sklearn.model_selection import GroupKFold
     from zotero_summarizer.services.golden import hybrid_gt
 
     if classifier_name not in ("tabpfn", "lightgbm", "logreg"):
@@ -207,20 +382,12 @@ def train_and_save(
     #    threshold-tuning step any more (no thresholds to tune).
     from zotero_summarizer.services.model.label_weights import compute_row_weights
     sw_all = compute_row_weights(train_rows)
-
-    preds_oof = np.zeros(n_train, dtype=np.float64)
+    gold_labels = [(r.get("gold_priority_final") or "").strip() for r in train_rows]
     groups = [paper_group_id(r) for r in train_rows]
-    kf = GroupKFold(n_splits=n_folds)
-    for fold_idx, (tr, vl) in enumerate(kf.split(X_train, groups=groups), start=1):
-        _, p_vl = classifier._fit_predict(
-            classifier_name, X_train[tr], y_train[tr], X_train[vl],
-            pca_dim=pca_dim, return_train_probs=False,
-            objective="regression",
-            sample_weight=sw_all[tr],
-        )
-        preds_oof[vl] = p_vl
-        LOGGER.info("train_and_save: fold %d/%d done", fold_idx, n_folds)
-    oof_rho = float(spearmanr(y_train, preds_oof).statistic) if n_train > 2 else 0.0
+    matrix = _TrainMatrix(X_train, y_train, sw_all)
+    preds_oof, oof_rho = _oof_predictions(
+        classifier_name, matrix, groups, n_folds=n_folds, pca_dim=pca_dim,
+    )
 
     # 3b. Top-band calibration: fit a MONOTONE raw→relevance map on the OOF
     # predictions so the compressed top is reachable (must_read recall collapses
@@ -230,13 +397,19 @@ def train_and_save(
     # are genuinely scarce.
     from zotero_summarizer.services.model import band_calibration
 
-    gold_labels = [(r.get("gold_priority_final") or "").strip() for r in train_rows]
     calibrator, cal_diag = band_calibration.fit_band_calibrator(preds_oof, y_train, gold_labels)
     eff_oof = band_calibration.apply_band_calibration(calibrator, preds_oof)
 
     # Out-of-fold per-class quality (honest — predictions never saw their own
     # fold), on the EFFECTIVE (post-calibration) bins the shipped gate will assign.
     oof_metrics = _oof_quality_metrics(train_rows, eff_oof)
+
+    # 3c. Forward-looking Spearman: train on the oldest 80%, score the newest
+    # 20% — the number production actually delivers (the shuffled OOF above
+    # overstates it; see the module comment on _temporal_holdout_metrics).
+    temporal = _temporal_holdout_metrics(
+        classifier_name, matrix, train_rows, groups, pca_dim=pca_dim,
+    )
 
     # 4. Final fit on FULL training set.
     fitted_model, pca_object = _fit_final_model(
@@ -245,33 +418,13 @@ def train_and_save(
 
     # 5. Build the artefact.
     sha256 = run_log.file_sha256(golden_csv, prefix_len=64)
-    trained = TrainedClassifier(
-        classifier_name=classifier_name,
-        golden_csv_sha256=sha256,
-        feature_dim=classifier.FEATURE_DIM,
-        pca_dim=pca_dim,
-        X_train=X_train,
-        y_train=y_train,
-        pca_object=pca_object,
-        fitted_model=fitted_model,
-        calibrator=calibrator,
-        t_keep=0.0,
-        t_must=0.0,
-        t_could=0.0,
-        library_embeddings=library.embeddings if library.n_rows > 0 else None,
-        library_centroid=library.centroid if library.n_rows > 0 else None,
-        library_recent_centroid=library.recent_centroid if library.n_rows > 0 else None,
-        library_authors_lower=library.authors_lower if library.n_rows > 0 else None,
-        training_metadata={
-            "n_train": n_train,
-            "n_positive_library": library.n_rows,
-            "objective": "regression",
-            "oof_spearman": round(oof_rho, 4),
-            "oof_metrics_vs_gold": oof_metrics,
-            "band_calibration": cal_diag,
-            "trained_at": now_iso_z(),
-            "git_commit": run_log.short_git_commit(),
-        },
+    trained = _build_artifact(
+        matrix, library, fitted_model, pca_object, calibrator,
+        classifier_name=classifier_name, sha256=sha256, pca_dim=pca_dim,
+        metadata=_training_metadata(
+            library, temporal,
+            n_train=n_train, oof_rho=oof_rho, oof_metrics=oof_metrics, cal_diag=cal_diag,
+        ),
     )
 
     # 6. Persist artefacts.
@@ -292,8 +445,9 @@ def train_and_save(
             "input_csv_sha256_prefix": sha256[:12],
         })
     LOGGER.info(
-        "trained regressor %s saved to %s (n_train=%d, OOF Spearman ρ=%.3f)",
+        "trained regressor %s saved to %s (n_train=%d, OOF Spearman ρ=%.3f, forward ρ=%s)",
         classifier_name, output_dir, n_train, oof_rho,
+        "n/a" if temporal is None else f"{temporal['temporal_spearman']:.3f}",
     )
     return trained
 

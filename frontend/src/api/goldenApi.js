@@ -89,9 +89,13 @@ export async function deleteVerdict(itemKey) {
 
 /**
  * GET /api/golden/effective-labels/summary
- * Returns: { total_rows, user_verdicts, user_confirmed_derivation, user_overrode_derivation }.
+ * Returns: { total_rows, user_verdicts, user_confirmed_derivation,
+ *   user_overrode_derivation, machine_provisional, outcome_corrected }.
  * Aggregate counts for the hybrid ground-truth pipeline — powers the
  * "Effective labels" strip and the "Used as GT" badge tooltip context.
+ * `user_verdicts` counts DELIBERATE verdicts only; provisional "Add to
+ * library" verdicts are reported separately (`machine_provisional`, plus
+ * the subset already corrected by a 7-day outcome, `outcome_corrected`).
  */
 export async function fetchEffectiveLabelsSummary() {
   return request('/effective-labels/summary');

@@ -95,3 +95,57 @@ def test_migrate_existing_initializes_both_databases(tmp_path):
             conn.close()
         assert row is not None
         assert int(row[0]) == result.schema_version
+
+
+def test_apply_schema_adds_verdict_source_and_backfills(tmp_path):
+    """Pre-June-2026 DBs gain label_verdicts.source via the column-presence
+    ALTER; rows written by the historical "Add to library" path (frozen
+    comment marker) backfill to 'machine_add', everything else to 'user'.
+    The backfill runs once — a later pass must not overwrite new values."""
+    from zotero_summarizer.storage import repositories
+
+    db = tmp_path / "old.db"
+    conn = sqlite3.connect(str(db))
+    try:
+        # The pre-`source` table shape, with one machine add + one deliberate verdict.
+        conn.execute(
+            """
+            CREATE TABLE label_verdicts (
+                id INTEGER PRIMARY KEY,
+                item_key TEXT NOT NULL,
+                original_derived_priority TEXT NOT NULL,
+                user_priority TEXT NOT NULL,
+                comment TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(item_key)
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO label_verdicts"
+            " (item_key, original_derived_priority, user_priority, comment, created_at)"
+            " VALUES ('feed:1', 'dont_read', 'should_read', 'added from Today', 't0'),"
+            "        ('feed:2', 'could_read', 'must_read', 'read it', 't1')"
+        )
+        conn.commit()
+        repositories.apply_schema(conn)
+        conn.commit()
+        rows = dict(
+            conn.execute("SELECT item_key, source FROM label_verdicts").fetchall()
+        )
+        assert rows == {"feed:1": "machine_add", "feed:2": "user"}
+
+        # Idempotency: a second pass (column already present) leaves a
+        # user-flipped row alone even if its comment still matches.
+        conn.execute(
+            "UPDATE label_verdicts SET source = 'user' WHERE item_key = 'feed:1'"
+        )
+        conn.commit()
+        repositories.apply_schema(conn)
+        conn.commit()
+        row = conn.execute(
+            "SELECT source FROM label_verdicts WHERE item_key = 'feed:1'"
+        ).fetchone()
+        assert row[0] == "user"
+    finally:
+        conn.close()

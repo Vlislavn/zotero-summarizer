@@ -50,7 +50,7 @@ class EmbeddingCache(CorpusReadMixin):
         # thread pool, so serialize the embedding forward pass. Only the fast
         # torch step is guarded — the slow LLM HTTP calls still overlap.
         self._embed_lock = threading.Lock()
-        # Cached corpus matrix for the vectorized affinity_only() fast path:
+        # Cached corpus matrix for the vectorized affinity_and_goals() fast path:
         # {version, stale_days, matrix (np float32 N×dim), weights (np N)}.
         # Rebuilt when _corpus_version changes (bumped on any corpus write) so we
         # parse the (large) embedding set once, not per scored item.

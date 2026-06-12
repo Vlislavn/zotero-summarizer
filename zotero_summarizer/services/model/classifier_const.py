@@ -22,7 +22,10 @@ EMBEDDING_DIM = 768
 #   2  year_recency             int 0..20
 #   3  title_log_len            log1p(len)
 #   4  abstract_log_len         log1p(len)
-#   5  corpus_affinity          cosine to research_goals
+#   5  corpus_affinity          engagement-weighted pos−neg cosine to the ENGAGED
+#                               library (corpus_read.affinity_and_goals) — NOT goal
+#                               match; the goal-text signal (goal_sims) is
+#                               aux-context only, deliberately not a feature
 #   6  prestige_score           OpenAlex field-normalized citation percentile → [1, 5]
 #   7  nearest_kept_cosine      max cosine to positive-engagement subset P
 #   8  positive_centroid_cosine cosine to mean(P)

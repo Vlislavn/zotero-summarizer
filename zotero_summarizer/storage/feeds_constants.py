@@ -51,3 +51,24 @@ OUTCOME_WEIGHT = {
     OUTCOME_TRASHED: -3.0,
     OUTCOME_UNKNOWN: -1.0,
 }
+
+# Outcomes that carry OBSERVED user behaviour on the materialized item.
+# ``pending`` is an unelapsed window and ``unknown`` is a key-resolution
+# failure (merge/hard-delete edge) — neither is behavioural evidence, so
+# neither may correct a training label (see services.golden.hybrid_gt).
+BEHAVIORAL_OUTCOMES = frozenset(
+    {OUTCOME_ENGAGED, OUTCOME_MOVED_COLLECTION, OUTCOME_KEPT_INBOX,
+     OUTCOME_DELETED_ALL, OUTCOME_TRASHED}
+)
+
+
+def relevance_from_signal_weight(weight: float) -> float:
+    """Map an outcome signal weight (-3..+3) to the relevance scale (1..5).
+
+    Linear: -3 -> 1.0, 0 -> 3.0, +3 -> 5.0; clamped at both ends. Single
+    definition shared by the outcome feedback emitter
+    (``services.triage.feeds._outcomes``) and the training-label outcome
+    correction (``services.golden.hybrid_gt``) so the two can never drift.
+    """
+    val = 3.0 + (float(weight) / 1.5)
+    return max(1.0, min(5.0, val))

@@ -90,10 +90,11 @@ def _slate_to_payload(slate: daily_select.DailySlate) -> dict[str, Any]:
     return {
         "papers": [asdict(paper) for paper in slate.papers],
         "pool_size": slate.pool_size,
-        "capped_at": slate.capped_at,
         "lookback_hours": slate.lookback_hours,
         "empty_role_events": list(slate.empty_role_events),
         "fellback_to_recent": slate.fellback_to_recent,
+        "low_relevance_hidden": slate.low_relevance_hidden,
+        "weak_slate": slate.weak_slate,
     }
 
 
