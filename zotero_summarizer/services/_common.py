@@ -43,6 +43,24 @@ def effective_llm_concurrency(provider: ProviderConfig | None, item_count: int) 
     return max(1, min(settings().triage_job_concurrency, n))
 
 
+def deep_review_sub_concurrency(provider: ProviderConfig | None) -> int:
+    """Number of LLM SUB-calls (self-consistency rubric samples / per-goal
+    summaries) to run in parallel WITHIN one paper's deep review.
+
+    A **local** provider stays serial (1) — one big on-device model can't absorb
+    concurrent inference without thrashing host RAM. A **remote** provider uses its
+    own ``max_sub_concurrency`` cap, falling back to ``TRIAGE_JOB_CONCURRENCY`` when
+    unset. ``provider=None`` falls to the remote branch (never silently serialises a
+    real remote run). Shared by the background job and the ``verify-deep-review`` CLI
+    so the two never drift."""
+    if provider is not None and provider.is_local:
+        return 1
+    configured = getattr(provider, "max_sub_concurrency", None) if provider else None
+    if configured is not None:
+        return max(1, int(configured))
+    return max(1, settings().triage_job_concurrency)
+
+
 def setup_logging() -> None:
     current_settings = settings()
     level = getattr(logging, current_settings.app_log_level, logging.INFO)

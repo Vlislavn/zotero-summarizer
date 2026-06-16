@@ -102,12 +102,13 @@ export async function fetchReadingQueueStatus() {
 /**
  * POST /api/library/deep-review/run { top_k | item_key }
  * Starts an on-demand full-text deep review (quality + relevance). With itemKey,
- * reviews that single paper (the per-paper "Run deeper разбор" button);
+ * reviews that single paper (the per-paper "Run deeper review" button);
  * otherwise the top-N unread picks. Single-flight; returns { status, total,
  * completed, ... }.
  */
-export async function runDeepReview({ topK = 5, itemKey = null } = {}) {
+export async function runDeepReview({ topK = 5, itemKey = null, focusPrompt = '' } = {}) {
   const body = itemKey ? { item_key: itemKey } : { top_k: topK };
+  if (focusPrompt) body.focus_prompt = focusPrompt;
   return request('/api/library/deep-review/run', {
     method: 'POST',
     body: JSON.stringify(body),
@@ -117,6 +118,27 @@ export async function runDeepReview({ topK = 5, itemKey = null } = {}) {
 /** GET /api/library/deep-review/status → { status, total, completed, error, started_at }. */
 export async function fetchDeepReviewStatus() {
   return request('/api/library/deep-review/status');
+}
+
+/**
+ * POST /api/library/review-fleet/run { top_k }
+ * Pre-decides a reading verdict for the top-N Read-next picks in the background
+ * (reusing each paper's CACHED deep-review signals — no new LLM call). The
+ * results surface on queue rows as `proposed_verdict` SUGGESTIONS the human
+ * Confirms/Overrides — never auto-applied labels. Single-flight: returns the
+ * in-flight status when a run is already going. Resolves to
+ * { status, total, completed, error, started_at, progress }.
+ */
+export async function runReviewFleet({ topK = 5 } = {}) {
+  return request('/api/library/review-fleet/run', {
+    method: 'POST',
+    body: JSON.stringify({ top_k: topK }),
+  });
+}
+
+/** GET /api/library/review-fleet/status → { status, total, completed, error, started_at, progress }. */
+export async function fetchReviewFleetStatus() {
+  return request('/api/library/review-fleet/status');
 }
 
 /**
@@ -203,4 +225,44 @@ export async function updateItemCollections(itemKey, { add = [], remove = [], fo
 /** Thin "add to one collection" wrapper over {@link updateItemCollections} (bulk path). */
 export async function addItemToCollection(itemKey, { collectionKey, force = false }) {
   return updateItemCollections(itemKey, { add: [collectionKey], force });
+}
+
+/**
+ * GET /api/library/render/{itemKey} — paper-read artifact status + output paths.
+ * Build via POST /api/library/render/{itemKey}/build.
+ */
+export async function fetchPaperRender(itemKey) {
+  return request(`/api/library/render/${encodeURIComponent(itemKey)}`);
+}
+
+/** POST /api/library/render/{itemKey}/build { force, allow_arxiv_source }. */
+export async function buildPaperRender(itemKey, { force = false, allowArxivSource = false } = {}) {
+  return request(`/api/library/render/${encodeURIComponent(itemKey)}/build`, {
+    method: 'POST',
+    body: JSON.stringify({ force, allow_arxiv_source: allowArxivSource }),
+  });
+}
+
+/** URL of the generated single-file HTML brief (embedded inline in the reader
+ * pane; figures load via relative URLs against the figure route). Pass the
+ * render's `built_at` as `version` so the iframe src changes when the brief is
+ * rebuilt (e.g. a deep review bakes in the digest) — without it the browser
+ * keeps showing the cached, digest-less HTML. The backend ignores the extra
+ * query param; it only busts the browser cache. */
+export function paperPresentationUrl(itemKey, version) {
+  const base = `/api/library/render/${encodeURIComponent(itemKey)}/presentation`;
+  return version ? `${base}?v=${encodeURIComponent(version)}` : base;
+}
+
+/**
+ * POST /api/library/ask { item_key, question, mode } — correctness-first Q&A
+ * over generated paper-read notes + full text. Metadata/count questions are
+ * answered deterministically; model answers require grounded evidence.
+ * Resolves to { answer, abstained, quote, mode, chunks_used, latency_seconds, model }.
+ */
+export async function askPaper(itemKey, question, { mode = 'comprehensive' } = {}) {
+  return request('/api/library/ask', {
+    method: 'POST',
+    body: JSON.stringify({ item_key: itemKey, question, mode }),
+  });
 }

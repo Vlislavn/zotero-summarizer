@@ -10,162 +10,43 @@ import {
   STATUS_TABS,
   flattenCollections,
   buildDraft,
-  previewChange,
-  changeBadgeClass,
-  changeTypeLabel,
-  collectionOptionLabel,
   buildPayloadFromDraft,
 } from './pendingHelpers.js';
+import { StatusBanner, ChangeGroup } from './pendingComponents.jsx';
+import { humanizeError } from '../utils/humanizeError.js';
+import Async from '../components/ui/Async.jsx';
+import { useKeyboardNav } from '../hooks/useKeyboardNav.js';
+import { useOptimisticAction } from '../hooks/useOptimisticAction.js';
+import { useFocusOnChange } from '../hooks/useFocusOnChange.js';
 
 // Pending Changes page — port of the `activeTab === 'pending'` block from
 // zotero_summarizer/web/ui.html. Provides functional parity:
 //   - filter by status (pending / applied / rejected / failed)
 //   - select / apply / reject batches of pending rows
 //   - inline edit drafts for tag_changes, add/remove_from_collection, add_note
-// Helpers extracted to ./pendingHelpers.js to keep this file under budget.
-
-function StatusBanner({ message, isError }) {
-  if (!message) return null;
-  const cls = isError
-    ? 'bg-rose-50 border-rose-200 text-rose-800'
-    : 'bg-emerald-50 border-emerald-200 text-emerald-800';
-  return <div className={`my-2 p-2 rounded-lg border text-xs ${cls}`}>{message}</div>;
-}
-
-function ChangeEditor({ change, drafts, setDrafts, flatCollections, saving, onSave }) {
-  const getField = (field) => {
-    const existing = drafts[change.id];
-    if (existing && Object.prototype.hasOwnProperty.call(existing, field)) {
-      return existing[field];
-    }
-    const next = buildDraft(change);
-    // Lazily seed the draft so controlled inputs always have a value.
-    setDrafts((prev) => (prev[change.id] ? prev : { ...prev, [change.id]: next }));
-    return next[field] || '';
-  };
-
-  const setField = (field, value) => {
-    setDrafts((prev) => {
-      const merged = { ...buildDraft(change), ...(prev[change.id] || {}) };
-      merged[field] = value;
-      if (field === 'collection_key') {
-        const entry = flatCollections.find((n) => String(n.key) === String(value || ''));
-        if (entry) merged.collection_path = String(entry.name || '').trim();
-      }
-      return { ...prev, [change.id]: merged };
-    });
-  };
-
-  const SaveBtn = () => (
-    <button
-      type="button"
-      onClick={onSave}
-      disabled={Boolean(saving[change.id])}
-      className="px-3 py-1.5 rounded bg-slate-900 text-white hover:bg-slate-700 disabled:bg-slate-300 disabled:text-slate-500"
-    >
-      {saving[change.id] ? 'Saving...' : 'Save edit'}
-    </button>
-  );
-
-  if (change.change_type === 'tag_changes') {
-    return (
-      <div className="ml-6 mt-2 grid md:grid-cols-2 gap-2 text-xs">
-        <div>
-          <label className="text-slate-500">Add tags (comma-separated)</label>
-          <input
-            type="text"
-            value={getField('add_tags_text')}
-            onChange={(e) => setField('add_tags_text', e.target.value)}
-            className="mt-1 w-full px-2 py-1.5 border border-slate-300 rounded"
-          />
-        </div>
-        <div>
-          <label className="text-slate-500">Remove tags (comma-separated)</label>
-          <input
-            type="text"
-            value={getField('remove_tags_text')}
-            onChange={(e) => setField('remove_tags_text', e.target.value)}
-            className="mt-1 w-full px-2 py-1.5 border border-slate-300 rounded"
-          />
-        </div>
-        <div className="md:col-span-2">
-          <SaveBtn />
-        </div>
-      </div>
-    );
-  }
-
-  if (
-    change.change_type === 'add_to_collection'
-    || change.change_type === 'remove_from_collection'
-  ) {
-    const currentPath = getField('collection_path');
-    return (
-      <div className="ml-6 mt-2 grid gap-2 text-xs">
-        <div>
-          <label className="text-slate-500">Target collection</label>
-          <select
-            value={getField('collection_key')}
-            onChange={(e) => setField('collection_key', e.target.value)}
-            className="mt-1 w-full px-2 py-1.5 border border-slate-300 rounded"
-          >
-            <option value="">Select collection</option>
-            {flatCollections.map((entry) => (
-              <option key={entry.key} value={entry.key}>
-                {collectionOptionLabel(entry)}
-              </option>
-            ))}
-          </select>
-          {currentPath && (
-            <div className="mt-1 text-[11px] text-slate-500">
-              Current path: <span>{currentPath}</span>
-            </div>
-          )}
-        </div>
-        <div><SaveBtn /></div>
-      </div>
-    );
-  }
-
-  if (change.change_type === 'add_note') {
-    return (
-      <div className="ml-6 mt-2 grid gap-2 text-xs">
-        <div>
-          <label className="text-slate-500">Note title</label>
-          <input
-            type="text"
-            value={getField('note_title')}
-            onChange={(e) => setField('note_title', e.target.value)}
-            className="mt-1 w-full px-2 py-1.5 border border-slate-300 rounded"
-          />
-        </div>
-        <div>
-          <label className="text-slate-500">Note HTML</label>
-          <textarea
-            rows={5}
-            value={getField('note_html')}
-            onChange={(e) => setField('note_html', e.target.value)}
-            className="mt-1 w-full px-2 py-1.5 border border-slate-300 rounded font-mono"
-          />
-        </div>
-        <div><SaveBtn /></div>
-      </div>
-    );
-  }
-
-  return null;
-}
+// Plus power-tool interaction parity with the Annotate surface (Phase C):
+//   - j/k move the active change-group, space/enter toggle its checkboxes,
+//     `a` apply selected, `r` reject selected (the shared useKeyboardNav hook
+//     owns the typing/modifier guards)
+//   - optimistic status flip on apply/reject, rolled back on error
+//   - focus follows the active group so keyboard nav stays anchored
+// Helpers extracted to ./pendingHelpers.js and the presentational
+// subcomponents (StatusBanner / ChangeEditor / ChangeGroup) to
+// ./pendingComponents.jsx to keep this file under budget.
 
 export default function Pending() {
   const [status, setStatus] = useState('pending');
   const [pending, setPending] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(null);
   const [selected, setSelected] = useState(() => new Set());
   const [drafts, setDrafts] = useState({});
   const [saving, setSaving] = useState({});
   const [message, setMessage] = useState('');
   const [isError, setIsError] = useState(false);
   const [flatCollections, setFlatCollections] = useState([]);
+  // Index of the keyboard-active change-group within `groupedPending`.
+  const [activeIdx, setActiveIdx] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -184,6 +65,7 @@ export default function Pending() {
 
   const load = useCallback(async (currentStatus = status) => {
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await fetchPending({ status: currentStatus, limit: 500 });
       const items = data?.items || [];
@@ -195,8 +77,7 @@ export default function Pending() {
         return next;
       });
     } catch (err) {
-      setMessage(err.message || 'Failed to load changes.');
-      setIsError(true);
+      setLoadError(err);
       setPending([]);
     } finally {
       setLoading(false);
@@ -211,6 +92,7 @@ export default function Pending() {
     setDrafts({});
     setMessage('');
     setIsError(false);
+    setActiveIdx(0);
   }, []);
 
   const groupedPending = useMemo(() => {
@@ -228,13 +110,31 @@ export default function Pending() {
     return [...map.values()];
   }, [pending]);
 
+  // Keep the active index inside the (possibly shrunk) list after a reload.
+  useEffect(() => {
+    setActiveIdx((idx) => {
+      if (groupedPending.length === 0) return 0;
+      return Math.min(idx, groupedPending.length - 1);
+    });
+  }, [groupedPending.length]);
+
   const selectedLabel = useMemo(() => {
     const row = STATUS_TABS.find((t) => t.value === status);
     return row ? row.label.toLowerCase() : status;
   }, [status]);
 
+  const isPending = status === 'pending';
+
+  // Focus follows the active group so the keyboard user's attention and the
+  // browser focus stay together. Keyed on the active group's IDENTITY (its
+  // item_key), not just the index: j/k change the index → identity changes; an
+  // apply/reject drops that group from the list so the same index now points at
+  // the next group → identity changes again, moving focus onto it.
+  const activeGroupKey = groupedPending[activeIdx]?.item_key ?? null;
+  const activeGroupRef = useFocusOnChange(activeGroupKey);
+
   function toggleOne(id) {
-    if (status !== 'pending') return;
+    if (!isPending) return;
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
@@ -243,12 +143,30 @@ export default function Pending() {
   }
 
   function selectAll(all) {
-    if (status !== 'pending') return;
+    if (!isPending) return;
     setSelected(all ? new Set(pending.map((i) => i.id)) : new Set());
   }
 
+  // Toggle every change in the active group: select them all unless they are
+  // already all selected, in which case clear them (a single space/enter chord
+  // both checks and unchecks the active card).
+  const toggleActiveGroup = useCallback(() => {
+    if (!isPending) return;
+    const group = groupedPending[activeIdx];
+    if (!group) return;
+    const ids = group.changes.map((c) => c.id);
+    setSelected((prev) => {
+      const allOn = ids.every((id) => prev.has(id));
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (allOn) next.delete(id); else next.add(id);
+      }
+      return next;
+    });
+  }, [isPending, groupedPending, activeIdx]);
+
   async function handleSaveEdit(change) {
-    if (status !== 'pending') {
+    if (!isPending) {
       setMessage('Switch to Pending status before editing.');
       setIsError(true);
       return;
@@ -270,29 +188,53 @@ export default function Pending() {
       }));
       await load(status);
     } catch (err) {
-      setMessage(err.message || 'Failed to save pending change.');
+      setMessage(err?.message ? humanizeError(err) : 'Failed to save pending change.');
       setIsError(true);
     } finally {
       setSaving((prev) => ({ ...prev, [change.id]: false }));
     }
   }
 
-  async function handleApply(force = false) {
-    if (status !== 'pending') {
-      setMessage('Only pending rows can be applied.');
-      setIsError(true);
-      return;
-    }
-    if (!selected.size) return;
-    try {
-      const data = await applyPending([...selected], { force });
-      if (data?.error === 'zotero_running' && !force) {
+  // ---------- Optimistic apply / reject ----------
+  // The shared useOptimisticAction hook wants a React-Query-style
+  // `mutate(vars, {onSuccess, onError})`; adapt the plain async API call into
+  // that shape. The optimistic step flips the affected rows' status locally and
+  // advances the active group so the next pending item is ready under the hand;
+  // rollback restores the previous rows + selection and surfaces the error.
+
+  const flipStatus = useCallback((ids, nextStatus) => {
+    const idSet = new Set(ids);
+    setPending((prev) =>
+      prev.map((row) => (idSet.has(row.id) ? { ...row, status: nextStatus } : row)));
+  }, []);
+
+  const makeMutate = useCallback(
+    (apiCall) => (variables, { onSuccess, onError }) => {
+      apiCall(variables).then(onSuccess).catch(onError);
+    },
+    [],
+  );
+
+  const runApply = useOptimisticAction({
+    mutate: makeMutate(({ ids, force }) => applyPending(ids, { force })),
+    optimisticUpdate: (_vars, ctx) => {
+      flipStatus(ctx.ids, 'applied');
+      setSelected(new Set());
+      setMessage('Applying selected changes…');
+      setIsError(false);
+    },
+    onSuccess: (data, vars, ctx) => {
+      if (data?.error === 'zotero_running' && !ctx.force) {
         if (window.confirm('Zotero appears to be running. Apply anyway?')) {
-          await handleApply(true);
+          // Re-run with force; the rows already read "applied" optimistically.
+          runApply({ ids: ctx.ids, force: true }, { context: { ids: ctx.ids, force: true } });
+        } else {
+          flipStatus(ctx.ids, 'pending');
+          setSelected(new Set(ctx.ids));
+          setMessage('Apply cancelled — Zotero is running.');
         }
         return;
       }
-      setSelected(new Set());
       const inboxRemoved = Number(data?.inbox_removed || 0);
       setMessage(
         inboxRemoved > 0
@@ -300,33 +242,86 @@ export default function Pending() {
           : 'Selected changes applied.',
       );
       setIsError(false);
-      await load(status);
-    } catch (err) {
-      setMessage(err.message || 'Failed to apply changes.');
+      load(status);
+    },
+    rollback: (err, _vars, ctx) => {
+      flipStatus(ctx.ids, 'pending');
+      setSelected(new Set(ctx.ids));
+      setMessage(humanizeError(err));
       setIsError(true);
-    }
-  }
+    },
+  });
 
-  async function handleReject() {
-    if (status !== 'pending') {
+  const runReject = useOptimisticAction({
+    mutate: makeMutate(({ ids }) => rejectPending(ids)),
+    optimisticUpdate: (_vars, ctx) => {
+      flipStatus(ctx.ids, 'rejected');
+      setSelected(new Set());
+      setMessage('Rejecting selected changes…');
+      setIsError(false);
+    },
+    onSuccess: () => {
+      setMessage('Selected changes rejected.');
+      setIsError(false);
+      load(status);
+    },
+    rollback: (err, _vars, ctx) => {
+      flipStatus(ctx.ids, 'pending');
+      setSelected(new Set(ctx.ids));
+      setMessage(humanizeError(err));
+      setIsError(true);
+    },
+  });
+
+  const handleApply = useCallback(() => {
+    if (!isPending) {
+      setMessage('Only pending rows can be applied.');
+      setIsError(true);
+      return;
+    }
+    if (!selected.size) return;
+    const ids = [...selected];
+    runApply({ ids, force: false }, { context: { ids, force: false } });
+  }, [isPending, selected, runApply]);
+
+  const handleReject = useCallback(() => {
+    if (!isPending) {
       setMessage('Only pending rows can be rejected.');
       setIsError(true);
       return;
     }
     if (!selected.size) return;
-    try {
-      await rejectPending([...selected]);
-      setSelected(new Set());
-      setMessage('Selected changes rejected.');
-      setIsError(false);
-      await load(status);
-    } catch (err) {
-      setMessage(err.message || 'Failed to reject changes.');
-      setIsError(true);
-    }
-  }
+    const ids = [...selected];
+    runReject({ ids }, { context: { ids } });
+  }, [isPending, selected, runReject]);
 
-  const isPending = status === 'pending';
+  // ---------- Keyboard shortcuts ----------
+  // j/k move the active group; space/enter toggle its checkboxes; a/r apply or
+  // reject the current selection. The shared useKeyboardNav hook disables itself
+  // while the user is typing in an input/textarea and ignores meta/ctrl/alt
+  // chords, so the inline edit fields keep their own keys.
+  const ACTION_KEYS = useMemo(
+    () => ({ ' ': 'toggle', Enter: 'toggle', a: 'apply', r: 'reject' }),
+    [],
+  );
+  const onAction = useCallback(
+    (mapped) => {
+      if (mapped === 'toggle') toggleActiveGroup();
+      else if (mapped === 'apply') handleApply();
+      else if (mapped === 'reject') handleReject();
+    },
+    [toggleActiveGroup, handleApply, handleReject],
+  );
+  useKeyboardNav({
+    onPrev: () => setActiveIdx((i) => Math.max(0, i - 1)),
+    onNext: () =>
+      setActiveIdx((i) => Math.min(Math.max(0, groupedPending.length - 1), i + 1)),
+    onAction,
+    actionKeys: ACTION_KEYS,
+    hasSelection: isPending && groupedPending.length > 0,
+    enabled: isPending,
+    deps: [groupedPending.length, onAction, isPending],
+  });
 
   return (
     <div className="glass rounded-2xl border border-slate-200 p-4">
@@ -334,6 +329,11 @@ export default function Pending() {
         <div>
           <h2 className="text-lg font-bold">Pending Changes</h2>
           <p className="text-xs text-slate-500">Review, edit, and apply queued updates to Zotero.</p>
+          {isPending && (
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>space</kbd> select · <kbd>a</kbd> apply · <kbd>r</kbd> reject
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2 text-sm">
           <button type="button" onClick={() => selectAll(true)}
@@ -342,7 +342,7 @@ export default function Pending() {
             className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200">Clear</button>
           <button
             type="button"
-            onClick={() => handleApply(false)}
+            onClick={handleApply}
             disabled={selected.size === 0 || !isPending}
             className="px-3 py-1.5 rounded bg-green-700 text-white hover:bg-green-800 disabled:bg-slate-300 disabled:text-slate-500"
           >
@@ -384,69 +384,30 @@ export default function Pending() {
         </div>
       )}
 
-      {groupedPending.map((group) => (
-        <div
-          key={group.item_key}
-          className="mb-3 border border-slate-200 rounded-xl bg-white overflow-hidden"
-        >
-          <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
-            <div className="font-semibold">{group.item_title || group.item_key}</div>
-            <div className="text-xs text-slate-500 mono">{group.item_key}</div>
-          </div>
-          <div className="p-3 space-y-2">
-            {group.changes.map((change) => (
-              <div key={change.id} className="border border-slate-100 rounded-lg p-2">
-                <label className="flex items-start gap-2 text-sm rounded-lg hover:bg-slate-50 transition-colors cursor-pointer">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    disabled={!isPending}
-                    checked={selected.has(change.id)}
-                    onChange={() => toggleOne(change.id)}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${changeBadgeClass(change.change_type)}`}>
-                        {changeTypeLabel(change.change_type)}
-                      </span>
-                      <span className="text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-600">
-                        status: {change.status || 'pending'}
-                      </span>
-                    </div>
-                    <div className="text-xs text-slate-600 mt-1 break-words">
-                      {previewChange(change)}
-                    </div>
-                    {change.applied_at && (
-                      <div className="text-[11px] text-slate-500 mt-1">
-                        Applied at: {change.applied_at}
-                      </div>
-                    )}
-                    {change.error_message && (
-                      <div className="text-[11px] text-rose-700 mt-1">{change.error_message}</div>
-                    )}
-                  </div>
-                </label>
-
-                {isPending && (
-                  <ChangeEditor
-                    change={change}
-                    drafts={drafts}
-                    setDrafts={setDrafts}
-                    flatCollections={flatCollections}
-                    saving={saving}
-                    onSave={() => handleSaveEdit(change)}
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-
-      {loading && <div className="text-sm text-slate-500">Loading changes...</div>}
-      {!loading && pending.length === 0 && (
-        <div className="text-sm text-slate-500">No {selectedLabel} changes.</div>
-      )}
+      <Async
+        loading={loading}
+        error={loadError}
+        empty={!loading && !loadError && groupedPending.length === 0}
+        loadingText="Loading changes…"
+        emptyMessage={`No ${selectedLabel} changes.`}
+      >
+        {groupedPending.map((group, idx) => (
+          <ChangeGroup
+            key={group.item_key}
+            group={group}
+            isActive={isPending && idx === activeIdx}
+            groupRef={activeGroupRef}
+            isPending={isPending}
+            selected={selected}
+            toggleOne={toggleOne}
+            drafts={drafts}
+            setDrafts={setDrafts}
+            flatCollections={flatCollections}
+            saving={saving}
+            onSaveEdit={handleSaveEdit}
+          />
+        ))}
+      </Async>
     </div>
   );
 }

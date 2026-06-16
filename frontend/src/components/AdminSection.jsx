@@ -5,6 +5,7 @@ import {
   refreshLabels,
   retrain,
 } from '../api/settingsApi.js';
+import SpinnerBase from './ui/Spinner.jsx';
 
 // Admin section for the Settings page. Two long-running model-lifecycle
 // operations live here:
@@ -45,14 +46,10 @@ function Banner({ kind, children }) {
   );
 }
 
+// Thin wrapper over the shared Spinner that pins the exact size/color/baseline
+// alignment the admin job rows used (align-[-2px] keeps it on the text baseline).
 function Spinner() {
-  // Tailwind-only spinner; keeps the bundle small (no extra icon dep).
-  return (
-    <span
-      className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700 align-[-2px]"
-      aria-hidden="true"
-    />
-  );
+  return <SpinnerBase size="md" color="slate-dark" className="align-[-2px]" />;
 }
 
 function formatByClass(byClass) {

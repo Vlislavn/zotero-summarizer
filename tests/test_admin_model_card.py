@@ -1,9 +1,11 @@
 """Tests for GET /api/admin/model — the Settings model-card endpoint.
 
 Calls the route handler ``model_card`` directly (it's a plain async
-function). For each case we point ``settings.project_root`` at a tmp
-directory and override the ``_model_dir`` helper to read from the same
-tmp tree, so nothing touches the user's real ``~/.cache``.
+function). The handler now lives in ``services/model/model_card.py`` (lifted out
+of the api layer); ``admin`` re-exports it, so the route is unchanged. For each
+case we point ``settings.project_root`` at a tmp directory and override the
+``_model_dir`` helper *on the service module* (where ``model_card`` resolves it)
+to read from the same tmp tree, so nothing touches the user's real ``~/.cache``.
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ import pytest
 
 from zotero_summarizer.api.routes import admin as admin_route
 from zotero_summarizer.runtime import AppContext, set_context
+from zotero_summarizer.services.model import model_card as model_card_svc
 from zotero_summarizer.settings import Settings
 
 
@@ -29,8 +32,10 @@ def _seed_settings(tmp_path: Path) -> None:
 
 
 def _override_model_dir(monkeypatch: pytest.MonkeyPatch, model_dir: Path) -> None:
-    """Make admin._model_dir() return ``model_dir`` instead of ~/.cache/.../models."""
-    monkeypatch.setattr(admin_route, "_model_dir", lambda: model_dir)
+    """Make ``model_card``'s ``_model_dir()`` return ``model_dir`` instead of
+    ~/.cache/.../models. Patched on the service module (where ``model_card``
+    resolves the helper); ``admin`` re-exports the same object."""
+    monkeypatch.setattr(model_card_svc, "_model_dir", lambda: model_dir)
 
 
 def _run(coro):

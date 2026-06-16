@@ -62,27 +62,42 @@ class RuntimeState:
     # Serialises concurrent corpus writes (set to an asyncio.Lock at startup).
     corpus_write_lock: "asyncio.Lock | None" = None
 
-    # Per-stage LLM client cache (stage -> LLMClient). Built lazily on first use
-    # so startup never depends on a provider being reachable.
-    _stage_clients: dict[str, Any] = field(default_factory=dict)
+    # Per-stage LLM client cache, keyed by (stage, enable_thinking). Built lazily
+    # on first use so startup never depends on a provider being reachable.
+    _stage_clients: dict[Any, Any] = field(default_factory=dict)
 
-    def resolve_stage_client(self, stage: str) -> Any:
+    def resolve_stage_client(self, stage: str, *, enable_thinking: bool | None = None) -> Any:
         """Return the LLM client for ``stage`` ('feed'|'backlog'|'deep_review'),
         building + caching it on first use from ``app_state.config.llm_routing``.
+
+        ``enable_thinking`` (not ``None``) forces the reasoning flag on/off for the
+        returned client — deep_review uses it to think on the DIGEST (quality) but
+        not on the trivial verification calls (speed) on the same provider. It is a
+        no-op for providers that don't advertise ``chat_template_kwargs``.
 
         Raises (APIError / provider error) only here, on first use — never at
         startup. Callers run inside their own worker boundaries, so a missing
         key or unreachable endpoint degrades that stage without crashing the app.
         """
-        cached = self._stage_clients.get(stage)
+        cache_key = (stage, enable_thinking)
+        cached = self._stage_clients.get(cache_key)
         if cached is not None:
             return cached
         from zotero_summarizer.models.providers import resolve_stage
-        from zotero_summarizer.services.llm.factory import build_client_for_stage
+        from zotero_summarizer.services.llm.factory import (
+            build_client_for_provider,
+            build_client_for_stage,
+        )
 
         routing = self.app_state.config.llm_routing
-        client = build_client_for_stage(resolve_stage(routing, stage))
-        self._stage_clients[stage] = client
+        resolved = resolve_stage(routing, stage)
+        if enable_thinking is None:
+            client = build_client_for_stage(resolved)
+        else:
+            client = build_client_for_provider(
+                resolved.provider, resolved.model, enable_thinking=enable_thinking
+            )
+        self._stage_clients[cache_key] = client
         return client
 
     def resolve_stage_provider(self, stage: str) -> Any:

@@ -1,192 +1,117 @@
 # Zotero Summarizer
 
-Local-first paper-triage assistant for [Zotero](https://www.zotero.org/). It reads
-the RSS feeds you follow in Zotero, scores each new paper for how worth-reading it
-is (a cheap ML gate first, an LLM for the survivors), and gives you a small daily
-slate to cull. Your keep/trash decisions train the model, so tomorrow's slate is
-sharper. Zotero stays the source of truth — the app only writes back tags and
-collection memberships you approve, after backing up first.
+A local-first reading assistant for [Zotero](https://www.zotero.org/). It reads the
+RSS feeds you follow, scores each new paper for how worth-reading it is (a cheap ML
+gate first, an LLM for the survivors), and gives you a small daily slate to cull. Your
+keep/trash decisions train the model, so tomorrow's slate is sharper.
 
-Everything runs on your machine. There is **no shipped training data**: the model
-learns from *your* labels (see [Bring your own ground truth](#bring-your-own-ground-truth)).
+```
+  RSS feeds (in Zotero) → [ML gate → LLM] → ranked daily slate → you cull / read / label
+        ▲                                                                      │
+        └──────────────── retrain on your labels ◄─────────────────────────────┘
+                 approved tag/collection changes → Zotero (backup first)
+```
 
-## Prerequisites
+**Local-first · no telemetry · trained on _your_ labels** (nothing ships with the repo —
+the model learns from how you triage). Zotero stays the source of truth; the app only
+writes back changes you approve.
 
-- **Python 3.10+**
-- **Node 18+** (to build the React UI)
-- **Zotero desktop** with at least one **RSS feed** subscribed (the app reads
-  Zotero's own SQLite DB; it never logs into anything on your behalf)
-- An **OpenAI-compatible LLM endpoint** — a local one (Ollama, vLLM, LM Studio)
-  or a hosted API. You provide the base URL + key.
+## Requirements
+
+- **Python 3.10+** and **[uv](https://docs.astral.sh/uv/getting-started/installation/)**
+- **Zotero desktop** with at least one **RSS feed** subscribed
+- An **OpenAI-compatible LLM endpoint** — **local** (Ollama, vLLM, LM Studio,
+  `mlx_lm.server`) or **hosted** (any API). You provide the base URL + key.
+- *(developers only: Node 18+ to rebuild the UI — the built UI is already shipped)*
+
+**Hardware** — the app itself is light; the only heavy part is the **optional local LLM**:
+
+| You run… | Need | What you get |
+|---|---|---|
+| **Hosted API, or no LLM** | ~8 GB RAM · any modern CPU · **no GPU** | ML triage + Library search run on-device; a hosted API adds summaries / brief / ask with **no local-LLM RAM** |
+| **A local ~7–20B LLM** | 16–32 GB unified RAM (Apple Silicon) or an NVIDIA GPU | summaries, paper brief, ask-the-paper, deep review — fully offline |
+| **A local ~35B LLM** | 48 GB+ unified memory, or 24 GB+ VRAM | highest-quality deep reviews + quality grading |
+
+The on-device ML (relevance gate + search) runs on **CPU** — no GPU required for the app.
+**Disk:** ~1.5 GB of ML models (downloaded once) plus your data under `data/`. The LLM is
+**optional**: with none at all, the ML-only "Triage backlog" still ranks your feed.
 
 ## Quickstart
 
 ```bash
-# 1. Install
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+# 1. Install (uv creates the env and installs from the lockfile)
+uv sync
 
-# 2. Build the UI
-cd frontend && npm install && npm run build && cd ..
-
-# 3. Configure (both files are gitignored — see Configuration below)
-cp .env.example .env            # then edit: LLM key/URL + Zotero paths
-cp goals.example.yaml goals.yaml # then edit: your research goals
-
-# 4. Create the local databases
-zotero-summarizer migrate
-
-# 5. Run
-zotero-summarizer serve --host 127.0.0.1 --port 8000
+# 2. Run — first launch auto-creates goals.yaml + a .env skeleton and migrates the DB
+uv run zotero-summarizer serve
 ```
 
-Open <http://127.0.0.1:8000/>. On the **Today** tab, click **Triage backlog** to
-score your unread feed papers, then start culling.
+First run bootstraps everything and the in-app **`/setup` wizard** walks you through the
+rest — no manual file copying:
 
-## How you use it
+```
+uv sync ─▶ serve ─▶ open the app ─▶ /setup wizard ─▶ set ONE secret in .env ─▶ Triage backlog
+            (auto-bootstrap        Connect Zotero    by the env-var NAME the
+             goals.yaml/.env       Connect LLM       wizard shows you (e.g.
+             + migrate the DB)     Describe research  OPENAI_API_KEY) — then restart
+```
 
-Two stages, both of which train the model:
+Open <http://127.0.0.1:8000/>. A brand-new install lands on the **`/setup` wizard**
+(Connect Zotero → Connect LLM → Describe research) with Zotero-path auto-detect and a live
+LLM connection test. Prefer the terminal? Run `uv run zotero-summarizer setup` for the same
+guided flow headless.
 
-1. **Today (cull).** A ranked slate of fresh feed papers. For each, make one
-   binary call — **Add to library** (keep, a positive signal → materialized into
-   your Zotero *Inbox*) or **Trash** (a negative signal). No fine-grained label here.
-2. **Library → Read next, then Annotate (label).** Your unread library papers
-   ranked by relevance. When you actually read one, give it the fine label
-   (`must` / `should` / `could` / `don't`) and notes in **Annotate**.
+The wizard never asks for your raw API key — it collects the **env-var name** that holds it
+(e.g. `OPENAI_API_KEY`). You set the actual secret value yourself in `.env` (or your shell),
+then restart. With Zotero and the LLM connected, go to **Today** and click **Triage backlog**
+to score your unread feed papers, then start culling. *(Going offline? Run `uv run
+zotero-summarizer prefetch-models` once while online — see [docs/usage.md](docs/usage.md).)*
+
+## What you'll do
+
+- **Today — cull.** A ranked slate of fresh feed papers. One binary call each: **Add to
+  library** (keep → materialized into your Zotero *Inbox*) or **Trash**. Both train the gate.
+- **Library — read.** Your unread papers, ranked by relevance. For each you get:
+  - a **paper brief** — at-a-glance read verdict, goal-match board (which of your goals it
+    serves), a reference-free **quality grade** (FLAG / NEUTRAL / HIGHLIGHT), and figures;
+  - **ask the paper** — grounded Q&A that quotes the text and abstains when the answer isn't there;
+  - **deep review** — an on-demand full-text digest + quality assessment for your top picks.
+- **Annotate — label.** When you actually read one, give it the fine label
+  (`must` / `should` / `could` / `don't`). That's your ground truth; the model retrains on it.
 
 Open PDFs and take notes in Zotero as usual; come back here to triage.
 
-## Two ways to run triage
-
-Scoring papers always runs the same pipeline (gate → LLM → SQLite). What *triggers*
-it is your choice:
-
-- **UI, on demand (simplest).** Just run `serve` and click **Triage backlog** on
-  *Today* whenever you want fresh papers scored. No background process.
-- **Daemon, automatic (optional).** `zotero-summarizer feeds serve` runs a
-  background loop that scores unread items every few minutes and, each morning,
-  auto-materializes the 1–2 best into your Inbox — so a slate is waiting without
-  you clicking anything. The `feeds.*` config block only matters if you run this.
-
-Use whichever fits. The daemon is convenience, not a requirement.
-
-## Bring your own ground truth
-
-The model is trained on a **golden dataset** that *you* build — nothing ships with
-the repo. You create it just by using the app:
-
-1. **Cull and label** as above. Add/Trash on *Today* and the fine labels in
-   *Annotate* are recorded as engagement signals. (You can also signal directly in
-   Zotero with emoji tags: 🧠 deeply engaged, 👀 skimmed, 👎 not relevant.)
-2. **Refresh labels** (Settings tab, or `zotero-summarizer goldenset export`) writes
-   `data/zotero-summarizer-golden.csv` from those signals — that file *is* your
-   ground truth.
-3. **Retrain model** (Settings, or `zotero-summarizer goldenset train`) rebuilds the
-   relevance gate on your labels.
-
-Until you have labels, the gate stays off and the daemon/UI simply LLM-scores
-everything — the app is fully usable while your dataset grows. A few dozen
-keep/trash decisions is enough to start; quality improves as you label more.
-
 ## Configuration
 
-Two files, both gitignored; copy the committed `*.example` templates to create them.
+Two files under your project root, both gitignored and **created automatically on first
+run** — no templates to copy:
 
-**`.env`** — secrets, paths, runtime knobs:
+| File | You touch | Managed by |
+|---|---|---|
+| `.env` | the **one secret** (your API key, set by the name the wizard shows) | the app writes the two Zotero paths here for you via the `/setup` wizard / `setup` CLI |
+| `goals.yaml` | nothing by hand | app-authored — edit research goals + LLM routing in **Settings**, don't hand-edit |
 
-```dotenv
-OPENAI_API_KEY=...                        # primary LLM (summaries, library triage)
-OPENAI_API_BASE=https://api.openai.com/v1 # any OpenAI-compatible base URL
-PDF_ROOT=/Users/you/Zotero/storage
-ZOTERO_DATA_DIR=/Users/you/Zotero
-
-# Optional second provider for the Today "Triage backlog" drain (a stronger
-# model for the freshest papers). Any OpenAI-compatible endpoint; unset to skip.
-CUSTOM_BASE_URL=https://your-provider.example/v1
-CUSTOM_API_KEY=...
-```
-
-**`goals.yaml`** — your research goals, triage criteria, model names, and prompts.
-Keep the LLM base URL generic so it follows `.env`:
-
-```yaml
-llm:
-  draft_model: your-model
-  refine_model: your-model
-  api_base: ${OPENAI_API_BASE}
-  api_key_env: OPENAI_API_KEY
-```
-
-All app state (the two SQLite DBs, your golden dataset, logs, ML artifacts) lives
-under `data/` (gitignored).
+The Settings page is split into **Essentials** (research goals, triage criteria, the default
+LLM provider, Zotero paths — always visible) and a collapsible **Advanced** section (full
+stage routing, classifier gate, corpus). Secrets stay **name-only** everywhere in the UI: it
+collects the env-var name, never the raw value. Everything else has working defaults. Full
+reference in [docs/usage.md](docs/usage.md).
 
 ## Commands
 
 ```bash
-zotero-summarizer serve            # FastAPI server + browser UI
-zotero-summarizer migrate          # init/upgrade the local SQLite stores
-zotero-summarizer mcp              # MCP server over stdio (agent surface)
-zotero-summarizer smoke-test       # verify the app constructs
-zotero-summarizer prefetch-models  # download the ML models for offline use (run online once;
-                                   #   --check reports cache status without downloading)
-
-# Feeds (optional daemon / one-shots)
-zotero-summarizer feeds list       # discover feed names + IDs
-zotero-summarizer feeds serve      # background daemon (auto-triage + daily pick)
-zotero-summarizer feeds run --feeds "Agents"   # one-shot: exhaust one feed
-zotero-summarizer feeds tick       # single tick (cron/launchd-friendly)
-
-# Ground-truth lifecycle
-zotero-summarizer goldenset export # write data/zotero-summarizer-golden.csv
-zotero-summarizer goldenset train  # (re)train the relevance gate on your labels
+uv run zotero-summarizer serve            # FastAPI server + browser UI (auto-bootstraps on first run)
+uv run zotero-summarizer setup            # headless guided onboarding (same flow as the /setup wizard)
+uv run zotero-summarizer migrate          # init / upgrade the local databases (serve does this for you)
+uv run zotero-summarizer prefetch-models  # download ML models for offline use (--check = status)
+uv run zotero-summarizer feeds serve      # optional background daemon (auto-triage + daily pick)
+uv run zotero-summarizer goldenset train-classifier  # retrain the relevance gate on your labels
 ```
 
-## Offline / air-gapped use
+## Going further
 
-The app is **local-first**: the UI, Zotero I/O, the ML relevance gate, and Library
-search (BM25 + embeddings + cross-encoder rerank) all run on your machine. There are
-only two things that need the internet, and both are one-time or swappable:
-
-1. **The ML models** download from HuggingFace on first use (~2.6 GB total): the
-   SPECTER2 gate encoder + adapter, the corpus embedding model, and the search
-   reranker. Pre-cache them once while online:
-
-   ```bash
-   zotero-summarizer prefetch-models          # download all four
-   zotero-summarizer prefetch-models --check   # report what's cached (no download)
-   ```
-
-   Then run offline with cache-only model loading (skips the HuggingFace hub check, so
-   a disconnected machine never hangs on a network timeout):
-
-   ```bash
-   ZS_OFFLINE=1 zotero-summarizer serve         # or set HF_HUB_OFFLINE=1 in .env
-   ```
-
-2. **The LLM** (summaries, deep review, quality review) needs an OpenAI-compatible
-   endpoint. Point it at a **local** server — Ollama, vLLM, LM Studio, `mlx_lm.server` —
-   in `goals.yaml`/`.env` and you're fully offline. With **no** LLM at all, everything
-   still works except those LLM-written summaries; the **ML-only "Triage backlog"** drain
-   (the classifier gate, no LLM) still scores your feed, and Library search/ranking is
-   unaffected.
-
-The optional enrichments — OpenAlex prestige, Unpaywall, and arXiv full-text fetch — are
-**off by default** and skip gracefully when offline. There is no telemetry and the served
-UI pulls no external assets (no CDN/fonts).
-
-## Safety model
-
-Triage never writes directly to Zotero. It queues pending tag/note/collection
-changes; you review and explicitly apply or reject them in the UI. Applying takes a
-Zotero SQLite backup first.
-
-## Development
-
-```bash
-pre-commit run --all-files                       # LOC / layering / README guardrails
-KMP_DUPLICATE_LIB_OK=TRUE pytest -q --forked     # backend tests (see ARCHITECTURE.md)
-cd frontend && npm run lint && npm test && npm run build
-```
-
-Architecture, layering rules, and the mental model live in
-[docs/architecture.md](docs/architecture.md).
+- **[docs/usage.md](docs/usage.md)** — the daemon, how the model learns from your labels,
+  offline / air-gapped use, the safety model, and the full config reference.
+- **[docs/architecture.md](docs/architecture.md)** — how it works, the layering rules, and
+  the dev / verification workflow.
+- **[CHANGELOG.md](CHANGELOG.md)** — notable changes (latest: the guided first-run setup).

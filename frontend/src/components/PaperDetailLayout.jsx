@@ -19,18 +19,28 @@ export default function PaperDetailLayout({
   children,
   emptyState = null,
   className = '',
+  // Optional: attach a ref + make the pane programmatically focusable so a
+  // caller (Annotate) can move focus here after the selection changes. Both
+  // default to inert, so every existing caller renders byte-identically.
+  paneRef = null,
+  tabIndex = undefined,
 }) {
   if (emptyState) return emptyState;
 
   return (
     <section
+      ref={paneRef}
+      tabIndex={tabIndex}
       className={[
         'glass rounded-2xl border border-slate-200',
         'p-0 lg:col-span-8',
         'overflow-hidden flex flex-col',
         'max-h-[calc(100vh-7rem)] relative',
+        // Only a focusable pane needs the no-ring rule; inert (no tabIndex)
+        // callers keep their exact class list.
+        tabIndex !== undefined ? 'focus:outline-none' : '',
         className,
-      ].join(' ')}
+      ].filter(Boolean).join(' ')}
     >
       {topStrip && (
         <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-slate-200 px-4 pt-4 pb-3">

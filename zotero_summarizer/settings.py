@@ -45,6 +45,8 @@ class Settings:
     corpus_db_path: Path
     golden_csv_path: Path
     golden_jsonl_path: Path
+    faithbench_dir: Path
+    paper_render_dir: Path
 
     @classmethod
     def load(
@@ -81,4 +83,6 @@ class Settings:
             corpus_db_path=data_dir / "corpus_cache.db",
             golden_csv_path=data_dir / "zotero-summarizer-golden.csv",
             golden_jsonl_path=data_dir / "zotero-summarizer-golden.jsonl",
+            faithbench_dir=data_dir / "faithbench",
+            paper_render_dir=data_dir / "paper_render",
         )

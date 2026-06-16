@@ -300,11 +300,24 @@ def startup(override_model: str | None = None) -> None:
         loop.create_task(corpus.auto_import_corpus_from_zotero())
         auto_corpus_import_started = True
 
+    # Launch-time deep-review prewarm: background-compute the top-K not-yet-cached
+    # reviews so the first open is instant (gated by quality_review.prewarm_on_startup_k
+    # / ZS_DEEP_REVIEW_PREWARM_K). Local import mirrors _init_classifier_gate's lazy
+    # imports — keeps the startup module from depending on the library layer at load.
+    from zotero_summarizer.services.library import deep_review_prewarm
+    prewarm_scheduled = deep_review_prewarm.schedule_on_startup(config, app_state)
+
+    # Launch-time review-fleet prewarm: pre-decide a reading verdict for the same
+    # top-K picks (Confirm/Override instead of decide-from-scratch). Reuses the
+    # cached deep reviews the prewarm above warms, so it adds no extra model load.
+    from zotero_summarizer.services.library.review_fleet import prewarm as review_fleet_prewarm
+    review_fleet_scheduled = review_fleet_prewarm.schedule_on_startup(config, app_state)
+
     LOGGER.info(
         (
             "Startup complete config=%s timeout=%ss log_file=%s corpus_db=%s embedding_model=%s "
             "zotero_data_dir=%s interrupted_jobs=%s resumed_jobs=%s auto_corpus_import=%s "
-            "triage_job_concurrency=%s"
+            "deep_review_prewarm=%s review_fleet_prewarm=%s triage_job_concurrency=%s"
         ),
         current_settings.config_path,
         current_settings.summary_timeout_seconds,
@@ -315,5 +328,7 @@ def startup(override_model: str | None = None) -> None:
         interrupted_jobs,
         resumed_jobs,
         auto_corpus_import_started,
+        prewarm_scheduled,
+        review_fleet_scheduled,
         current_settings.triage_job_concurrency,
     )

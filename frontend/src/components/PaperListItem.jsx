@@ -1,3 +1,5 @@
+import { pretty } from '../utils/priorityLabels.js';
+
 // One row in the paper list on the left side of /annotate.
 // Props: { item, isSelected, onClick }
 const PRIORITY_BADGE = {
@@ -64,7 +66,7 @@ export default function PaperListItem({
             }`}
             title={item.is_user_override ? 'Your label (wins over derived)' : 'Priority'}
           >
-            {effective}
+            {pretty(effective)}
           </span>
           {typeof item.derived_score === 'number' && (
             <span className="text-[10px] mono text-slate-500">
@@ -76,7 +78,7 @@ export default function PaperListItem({
               className="px-1.5 py-0.5 rounded text-[10px] border bg-slate-50 text-slate-500 border-slate-200"
               title="Auto-derived value (overridden by your label)"
             >
-              was: {item.derived_priority}
+              was: {pretty(item.derived_priority)}
             </span>
           )}
           {isOrphaned && (

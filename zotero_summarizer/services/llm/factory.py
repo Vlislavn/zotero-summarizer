@@ -38,21 +38,46 @@ def resolve_api_key(provider: ProviderConfig) -> str:
     return api_key
 
 
-def build_client_for_provider(provider: ProviderConfig, model: str) -> LLMClient:
+def _override_thinking(extra_body: dict | None, enable: bool) -> dict | None:
+    """Return ``extra_body`` with ``chat_template_kwargs.enable_thinking`` set to
+    ``enable`` — but ONLY when the provider already advertises
+    ``chat_template_kwargs`` (i.e. the endpoint is a reasoning model that honors
+    the flag: ollama qwen3, kather sota, vLLM). A provider with no
+    ``chat_template_kwargs`` (e.g. real OpenAI) is left untouched so it never
+    receives an unknown ``extra_body`` key it would reject. This is what lets
+    deep_review run the DIGEST with thinking ON (quality) and the trivial
+    verification calls with thinking OFF (speed) on the same provider."""
+    if not extra_body or "chat_template_kwargs" not in extra_body:
+        return extra_body
+    ctk = dict(extra_body["chat_template_kwargs"])
+    ctk["enable_thinking"] = enable
+    return {**extra_body, "chat_template_kwargs": ctk}
+
+
+def build_client_for_provider(
+    provider: ProviderConfig, model: str, *, enable_thinking: bool | None = None
+) -> LLMClient:
     """Construct an ``LLMClient`` for ``provider`` serving ``model``.
 
-    Raises ``APIError`` when the provider's ``api_key_env`` is unset or the
-    provider ``type`` is unsupported.
+    ``enable_thinking`` (when not ``None``) forces the reasoning flag on/off for
+    THIS client, overriding the provider's base ``extra_body`` — used by
+    deep_review to think on the digest but not on the trivial calls. It is a
+    no-op for providers that don't advertise ``chat_template_kwargs`` (see
+    :func:`_override_thinking`). Raises ``APIError`` when the provider's
+    ``api_key_env`` is unset or the provider ``type`` is unsupported.
     """
     api_key = resolve_api_key(provider)
 
     if provider.type == ProviderType.openai:
+        extra_body = provider.extra_body
+        if enable_thinking is not None:
+            extra_body = _override_thinking(provider.extra_body, enable_thinking)
         return build_llm(
             provider.base_url,
             model,
             api_key,
             max_tokens=provider.max_tokens,
-            extra_body=provider.extra_body,
+            extra_body=extra_body,
         )
 
     if provider.type == ProviderType.anthropic:

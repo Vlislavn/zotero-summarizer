@@ -12,6 +12,10 @@ router = APIRouter()
 # provider and returns per-stage operational|fail. The app starts regardless of
 # provider availability; this is how the user verifies stages on demand.
 router.add_api_route("/api/admin/llm-check", operational_check.check_stages, methods=["POST"])
+# Cheap proactive reachability (GET /models, no tokens): the deep-review surface
+# polls this on mount so a dead endpoint shows a banner before a run, instead of
+# the run silently producing no digest.
+router.add_api_route("/api/admin/llm-reachability", operational_check.check_reachability, methods=["GET"])
 
 
 async def list_provider_models(provider: ProviderConfig) -> dict:

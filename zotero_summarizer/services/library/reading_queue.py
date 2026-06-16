@@ -314,11 +314,6 @@ def live_scoring(item: dict[str, Any]) -> dict[str, Any] | None:
     return scoring_from_prediction(pred) if pred is not None else None
 
 
-def read_score_cache() -> dict[str, dict[str, Any]]:
-    """Scored entries only, keyed by item_key — see the staleness variant below."""
-    return read_score_cache_with_staleness()[0]
-
-
 def read_score_cache_with_staleness() -> tuple[dict[str, dict[str, Any]], bool]:
     """``(scores, stale)`` — per-item ``{relevance, prestige, prestige_known}``;
     ``stale`` is True when the cache was computed against a DIFFERENT gate than
@@ -353,20 +348,18 @@ def get_cached_scoring(item_key: str) -> dict[str, Any] | None:
     return entry.get("scoring") if entry else None
 
 
-def _verdicted_keys() -> frozenset[str]:
-    """Item keys the user has cast any verdict on (``label_verdicts``).
+def _verdict_priorities() -> dict[str, str]:
+    """``{item_key: user_priority}`` for the user's manual verdicts (``label_verdicts``).
 
-    These are "handled" — read AND labelled — so they drop out of Read next
-    (e.g. a paper you marked ``dont_read`` must not reappear), mirroring the
-    Today slate's handled-filter. Any verdict counts, not just ``dont_read``.
-
-    Uses the UNCAPPED key reader: a paged fetch with a fixed limit silently
-    un-hides handled papers once the table outgrows it — the same failure
-    class as the 500-cap training bug fixed in June 2026.
+    Only ``dont_read`` is "handled" (drops out of Read next, like the Today
+    slate); a POSITIVE verdict is a reading intent, so the paper stays and pins
+    to the top (``_ranking.sort_unread``) — a label makes it findable, not hidden.
+    UNCAPPED reader: a paged fetch un-hides handled papers once the table outgrows
+    it (the 500-cap training-bug failure class).
     """
     from zotero_summarizer.storage import repositories
 
-    return frozenset(repositories.list_label_verdict_keys(get_settings().triage_db_path))
+    return repositories.list_label_verdict_priorities(get_settings().triage_db_path)
 
 
 def build_reading_queue(
@@ -406,15 +399,21 @@ def build_reading_queue(
     cached, computed_at, stale = (
         _read_cache_with_meta(gate_sha) if model_ready else ({}, None, False)
     )
-    verdicted = _verdicted_keys()
+    verdict_priority = _verdict_priorities()
+    # Review-fleet sidecar — display-only SUGGESTION per row, never fed to the hide/pin logic below.
+    from zotero_summarizer.services.library.review_fleet import verdict_store  # lazy: it imports us
+    proposed_verdicts = verdict_store.read_all()
 
     unread: list[dict[str, Any]] = []
     read: list[dict[str, Any]] = []
     for it in rows:
         tags = it.get("tags") or []
         is_read = _is_read(tags)
-        # "Handled" = engaged (emoji) OR the user has cast a verdict on it.
-        handled = is_read or it["item_key"] in verdicted
+        user_priority = verdict_priority.get(it["item_key"], "")
+        # "Handled" = engaged (emoji) OR explicitly rejected (dont_read verdict).
+        # A POSITIVE verdict is a reading intent — the paper stays visible and
+        # pins to the top (``_ranking.sort_unread``) instead of being hidden.
+        handled = is_read or user_priority == "dont_read"
         entry = cached.get(it["item_key"])
         prestige_score, prestige_known = _entry_prestige(entry)
         rec = {
@@ -422,6 +421,7 @@ def build_reading_queue(
             "title": it.get("title") or "",
             "authors": it.get("authors") or "",
             "reading_priority": it.get("reading_priority") or "",
+            "user_priority": user_priority,
             "has_pdf": bool(it.get("has_pdf")),
             "date_added": it.get("date_added") or "",
             "read": is_read,
@@ -429,6 +429,7 @@ def build_reading_queue(
             "why_reason": entry["why_reason"] if entry else None,
             "prestige_score": prestige_score,
             "prestige_known": prestige_known,
+            "proposed_verdict": proposed_verdicts.get(it["item_key"]),
         }
         if handled:
             read.append(rec)

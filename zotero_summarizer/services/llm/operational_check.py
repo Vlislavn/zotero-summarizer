@@ -15,9 +15,9 @@ import asyncio
 import logging
 from typing import Any
 
-from zotero_summarizer.models.providers import STAGES, resolve_stage
+from zotero_summarizer.models.providers import STAGES, ProviderConfig, resolve_stage
 from zotero_summarizer.services._common import state
-from zotero_summarizer.services.llm.factory import build_client_for_stage
+from zotero_summarizer.services.llm.factory import build_client_for_provider
 
 LOGGER = logging.getLogger("zotero_summarizer")
 
@@ -46,21 +46,30 @@ def _stage_skeleton(routing: Any, stage: str) -> tuple[Any, dict[str, Any]]:
     }
 
 
+def probe_provider(provider: ProviderConfig, model: str) -> dict[str, Any]:
+    """Probe ONE provider+model with a tiny prompt — the single shared probe
+    mechanism behind both the per-stage operational check and the setup
+    config-draft validator.
+
+    Returns ``{status: "operational"|"fail", detail: str}``. The broad ``except``
+    is the documented status boundary: a probe reports a pass/fail row instead of
+    stopping the caller, so every failure mode (missing key, 401, connection
+    refused, bad model) becomes a ``fail`` row rather than propagating. Callers
+    that need an exception (none today) would call ``build_client_for_provider``
+    directly.
+    """
+    try:
+        client = build_client_for_provider(provider, model)
+        client.prompt(_PROBE_PROMPT)
+        return {"status": "operational", "detail": ""}
+    except Exception as exc:  # noqa: BLE001 — probe status boundary (see docstring)
+        LOGGER.warning("LLM probe failed for provider=%s model=%s: %s", provider.name, model, exc)
+        return {"status": "fail", "detail": f"{type(exc).__name__}: {exc}"}
+
+
 def _probe_stage(routing: Any, stage: str) -> dict[str, Any]:
     resolved, row = _stage_skeleton(routing, stage)
-    # Broad except is the documented per-stage boundary: the user asked for the
-    # check to report a per-stage pass/fail instead of stopping the run, so every
-    # failure mode (missing key, 401, connection refused, bad model) becomes a
-    # "fail" row rather than propagating.
-    try:
-        client = build_client_for_stage(resolved)
-        client.prompt(_PROBE_PROMPT)
-        row["status"] = "operational"
-        row["detail"] = ""
-    except Exception as exc:  # noqa: BLE001 — per-stage status boundary (see above)
-        LOGGER.warning("LLM operational check failed for stage=%s: %s", stage, exc)
-        row["status"] = "fail"
-        row["detail"] = f"{type(exc).__name__}: {exc}"
+    row.update(probe_provider(resolved.provider, resolved.model))
     return row
 
 
@@ -104,4 +113,66 @@ async def check_stages() -> dict[str, Any]:
         )
     )
     all_ok = all(row["status"] == "operational" for row in stages)
+    return {"status": "ok" if all_ok else "degraded", "stages": stages}
+
+
+# ---------------------------------------------------------------------------
+# Cheap REACHABILITY probe (no tokens, no model load): a GET /models listing is
+# enough to tell "endpoint up + model served" from "unreachable". This is the
+# PROACTIVE companion to check_stages — safe to call on Settings load or before a
+# deep-review run to warn that a stage's endpoint is down, so a dead endpoint
+# surfaces as a banner instead of a silent empty result after a failed run.
+# ---------------------------------------------------------------------------
+
+_REACH_TIMEOUT_SECS = 4.0
+
+
+def _reach_stage(routing: Any, stage: str) -> dict[str, Any]:
+    from zotero_summarizer.services.llm import model_list
+
+    resolved, row = _stage_skeleton(routing, stage)
+    row["base_url"] = resolved.provider.base_url or ""
+    # Broad except is the same per-stage status boundary as _probe_stage: every
+    # failure mode (unset key, connection refused, 404 model id) becomes an
+    # unreachable row the UI surfaces, never a propagating error.
+    try:
+        model_list.list_models_for_provider(resolved.provider)
+        row["reachable"] = True
+        row["detail"] = ""
+    except Exception as exc:  # noqa: BLE001 — per-stage status boundary (see _probe_stage)
+        LOGGER.warning("LLM reachability check failed for stage=%s: %s", stage, exc)
+        row["reachable"] = False
+        row["detail"] = f"{type(exc).__name__}: {exc}"
+    return row
+
+
+async def _reach_stage_bounded(routing: Any, stage: str) -> dict[str, Any]:
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(_reach_stage, routing, stage),
+            timeout=_REACH_TIMEOUT_SECS,
+        )
+    except asyncio.TimeoutError:
+        _resolved, row = _stage_skeleton(routing, stage)
+        row["base_url"] = _resolved.provider.base_url or ""
+        row["reachable"] = False
+        row["detail"] = f"timeout after {_REACH_TIMEOUT_SECS:.0f}s — endpoint slow or unreachable"
+        return row
+
+
+async def check_reachability() -> dict[str, Any]:
+    """Cheap per-stage endpoint reachability (GET /models, no tokens spent).
+
+    Returns ``{status: ok|degraded, stages: [{stage, provider, type, model,
+    base_url, reachable, detail}]}``. The proactive companion to
+    :func:`check_stages`; the deep-review surface calls this on mount so an
+    unreachable endpoint is announced before the user runs a review.
+    """
+    routing = state().app_state.config.llm_routing
+    stages = list(
+        await asyncio.gather(
+            *(_reach_stage_bounded(routing, stage) for stage in STAGES)
+        )
+    )
+    all_ok = all(row["reachable"] for row in stages)
     return {"status": "ok" if all_ok else "degraded", "stages": stages}

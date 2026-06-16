@@ -1,14 +1,23 @@
 import { startTransition, useEffect, useState } from 'react';
 import InlineAnnotate from './InlineAnnotate.jsx';
+import ProposedVerdictCard from './ProposedVerdictCard.jsx';
 import ScoreHistogram from './ScoreHistogram.jsx';
 import { StatusBanner, formatShortDate, truncateAuthors } from './shared.jsx';
 import { isHighPrestige } from '../../utils/relevanceBands.js';
+import { humanizeError } from '../../utils/humanizeError.js';
+import Spinner from '../ui/Spinner.jsx';
 
 // Stage-2 "Read next": the single Library surface. Ranked queue over the WHOLE
 // library with an inline annotate panel (links, tags, per-paper deep review).
 // Read/handled items are hidden unless toggled. An opt-in "Select" mode reveals
 // checkboxes for bulk triage (the merged Browse/triage flow), kept secondary.
 const REVEAL_STEP = 60;  // rows revealed initially and per "Show more" click
+
+// Your explicit verdict label. A positive verdict pins the paper to the top of
+// Read next (the backend sort) — this chip marks it so a labelled paper is
+// instantly recognisable instead of vanishing (dont_read is handled-filtered,
+// so it never reaches the queue and isn't in this map).
+const USER_PRIORITY_LABEL = { must_read: 'must read', should_read: 'should read', could_read: 'could read' };
 
 export default function ReadNextView({
   items, loading, err, includeRead, onToggleIncludeRead,
@@ -149,7 +158,7 @@ export default function ReadNextView({
       )}
       {rerankerLoading && (
         <div className="mb-2 flex items-center gap-2 text-xs text-slate-600">
-          <span aria-hidden="true" className="inline-block h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-teal-600 animate-spin" />
+          <Spinner size="sm" color="teal" />
           Downloading the reranker model (first semantic search only) — showing BM25 + embedding results meanwhile; search again shortly for the reranked order.
         </div>
       )}
@@ -160,7 +169,7 @@ export default function ReadNextView({
       )}
       {computing && (
         <div className="mb-2 flex items-center gap-2 text-xs text-slate-600">
-          <span aria-hidden="true" className="inline-block h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-teal-600 animate-spin" />
+          <Spinner size="sm" color="teal" />
           Scoring your whole library… first full scan (~2,400 papers) can take a few minutes; results stream in as they compute, then re-scans are fast.
         </div>
       )}
@@ -175,7 +184,7 @@ export default function ReadNextView({
                 ? 'This view needs the updated backend — restart the app (the server has no auto-reload), then reload the page.'
                 : err.status === 503
                   ? 'Zotero database was busy. Close Zotero if it’s open, then retry.'
-                  : `Failed to load queue: ${err.message || err}`
+                  : `Failed to load queue: ${humanizeError(err)}`
             }
             isError
           />
@@ -236,8 +245,19 @@ export default function ReadNextView({
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-medium text-slate-900 truncate">{it.title || '(untitled)'}</span>
                   <span className="block text-xs text-slate-500 truncate">{truncateAuthors(it.authors)}</span>
-                  {(typeof it.relevance_score === 'number' || it.why_reason || it.date_added) && (
+                  {(it.user_priority || typeof it.relevance_score === 'number' || it.why_reason || it.date_added) && (
                     <span className="mt-0.5 flex items-center gap-2 text-[11px]">
+                      {/* Your label leads the row (Von Restorff): a paper you
+                          marked is pinned to the top of Read next and flagged
+                          here, so labelling makes it findable, never hidden. */}
+                      {USER_PRIORITY_LABEL[it.user_priority] && (
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full bg-amber-100 text-amber-900 border border-amber-300 font-semibold"
+                          title="Your label — you set this paper's reading priority, so it's pinned to the top of Read next."
+                        >
+                          🏷 {USER_PRIORITY_LABEL[it.user_priority]}
+                        </span>
+                      )}
                       {typeof it.relevance_score === 'number' ? (
                         <span className="font-semibold text-teal-700" title="Model relevance score (1–5)">
                           ★ {it.relevance_score.toFixed(1)}
@@ -279,10 +299,25 @@ export default function ReadNextView({
                 </span>
               </button>
             </div>
+            {/* The fleet pre-decided a verdict → the Confirm/Override card (Phase
+                2). One-tap ratify, or Override to expand the full editor below
+                with the proposal pre-selected. Hidden once the row is expanded
+                (the editor takes over) — exactly two paths, never both at once. */}
+            {it.proposed_verdict && expandedKey !== it.item_key && (
+              <ProposedVerdictCard
+                itemKey={it.item_key}
+                proposal={it.proposed_verdict}
+                onSaved={() => { setExpandedKey(null); onSaved?.(); }}
+                onOverride={() => setExpandedKey(it.item_key)}
+              />
+            )}
             {expandedKey === it.item_key && (
               <InlineAnnotate
                 itemKey={it.item_key}
                 collections={collections}
+                // Override path: pre-select the fleet's proposal in the verdict
+                // picker (Jakob's Law — same editor, just a sensible default).
+                derivedPriorityOverride={it.proposed_verdict?.proposed || null}
                 onSaved={() => { setExpandedKey(null); onSaved?.(); }}
                 onQueueRefresh={() => onSaved?.()}
               />

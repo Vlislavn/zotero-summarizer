@@ -1,3 +1,5 @@
+import { pretty } from '../utils/priorityLabels.js';
+
 // Renders the additive provenance chain for a paper's derived priority.
 // Props: { provenance } — shape matches /api/golden/review-detail's `provenance`.
 
@@ -49,7 +51,7 @@ export default function ProvenanceBreakdown({ provenance = null }) {
             'bg-slate-100 text-slate-700 border-slate-200'
           }`}
         >
-          {derivedPriority}
+          {pretty(derivedPriority)}
         </span>
         {typeof derivedScore === 'number' && (
           <span className="mono text-xs text-slate-700">
@@ -64,7 +66,7 @@ export default function ProvenanceBreakdown({ provenance = null }) {
             }`}
             title="Persisted priority differs from derived"
           >
-            persisted: {persistedPriority}
+            persisted: {pretty(persistedPriority)}
           </span>
         )}
         {provenance.is_direct_user_verdict && (

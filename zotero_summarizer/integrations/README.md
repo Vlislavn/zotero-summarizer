@@ -10,7 +10,7 @@ services/ ─calls→ integrations/ ─talks to→  Zotero DB | PDFs | LLM API |
 
 | file | responsibility |
 |---|---|
-| `zotero_read.py` | `ZoteroReader`: connection/execute infra + collection helpers |
+| `zotero_read.py` | `ZoteroReader`: connection/execute infra + collection helpers. `_sort_collection_nodes` pins the two workflow collections to the top of every collections list (`_PINNED_COLLECTIONS`: rank 0 = Inbox landing zone, rank 1 = the read-next queue — pattern mirrors the frontend `CollectionEditor` `READ_NEXT_RE`), then alphabetical; applied recursively |
 | `_zotero_read_items.py` · `_zotero_read_lookup.py` · `_zotero_read_feeds.py` | reader query mixins (items/detail + `get_all_items` which paginates past the per-call 500 clamp for whole-library passes · find/membership/tags — DOI dedup matches all `domain.normalize_doi` variants · feeds) |
 | `_zotero_read_common.py` | `ZoteroReadError` + arXiv/sanitize helpers + `_NON_BIBLIOGRAPHIC_TYPES_SQL` (the single `('attachment','note','annotation')` exclusion every "library items" query shares so PDF annotations never appear as papers) + `_USER_LIBRARY_ID_SELECT` (the single `type='user'` library scope every whole-library read injects — Zotero keeps ~dozens of `type='feed'` RSS libraries in the same `items` table, so an unscoped read leaks feed items into the corpus/ranker/tag writes/full-text; this caused cross-library 403 attachments) (leaf) |
 | `zotero_write.py` | `ZoteroWriter`: WAL-consistent backup (+ prune) + the apply-changes dispatcher |

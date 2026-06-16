@@ -5,6 +5,7 @@ import hashlib  # noqa: F401
 import json  # noqa: F401
 import logging  # noqa: F401
 import sqlite3  # noqa: F401
+import threading
 import time  # noqa: F401
 from pathlib import Path  # noqa: F401
 from typing import Any, Callable  # noqa: F401
@@ -15,6 +16,15 @@ from zotero_summarizer.services.model.classifier_const import *  # noqa: F401,F4
 
 # Process-wide cache of the loaded SPECTER2 model/tokenizer (lazy, first call).
 _MODEL_CACHE: dict[str, Any] = {}
+# transformers' meta-device weight init (accelerate `init_empty_weights`) patches
+# GLOBAL torch state and is NOT thread-safe; two concurrent first-loads interleave
+# and leave one model's params on the `meta` device → `mdl.to(device)` raises
+# "Cannot copy out of meta tensor". Serialize the load to one thread at a time, and
+# the forward pass too (torch inference is not thread-safe, and `_encode_chunk`
+# mutates the shared device on its MPS→CPU fallback). Mirrors reranker.py /
+# claim_checker.py, which already guard their models the same way.
+_LOAD_LOCK = threading.Lock()
+_PREDICT_LOCK = threading.Lock()
 
 
 def _content_hash(title: str, abstract: str, authors: str = "", venue: str = "") -> str:
@@ -51,41 +61,44 @@ def _load_specter2() -> tuple[Any, Any, Any]:
     The model is moved onto the selected device (MPS/CUDA/CPU); the device is
     cached so the encode helpers know where to place inputs.
     """
-    if "loaded" in _MODEL_CACHE:
+    if "loaded" in _MODEL_CACHE:                       # fast path: no lock once warm
         return _MODEL_CACHE["tok"], _MODEL_CACHE["mdl"], _MODEL_CACHE["torch"]
-    LOGGER.info(
-        "loading SPECTER2 base %r + proximity adapter %r (first call ~400MB+50MB)",
-        SPECTER2_MODEL_NAME, SPECTER2_ADAPTER_NAME,
-    )
-    import torch
-    from adapters import AutoAdapterModel
-    from transformers import AutoTokenizer
-
-    try:
-        tok = AutoTokenizer.from_pretrained(SPECTER2_MODEL_NAME)
-        mdl = AutoAdapterModel.from_pretrained(SPECTER2_MODEL_NAME)
-        mdl.load_adapter(
-            SPECTER2_ADAPTER_NAME,
-            source="hf",
-            load_as="proximity",
-            set_active=True,
+    with _LOAD_LOCK:                                   # one materialization at a time
+        if "loaded" in _MODEL_CACHE:                   # re-check: a peer loaded while we waited
+            return _MODEL_CACHE["tok"], _MODEL_CACHE["mdl"], _MODEL_CACHE["torch"]
+        LOGGER.info(
+            "loading SPECTER2 base %r + proximity adapter %r (first call ~400MB+50MB)",
+            SPECTER2_MODEL_NAME, SPECTER2_ADAPTER_NAME,
         )
-    except Exception as exc:
-        # The gate has no local fallback — scoring needs SPECTER2. Turn an opaque
-        # HuggingFace/offline error into an actionable one (re-raised, not swallowed):
-        # offline + not-yet-cached is the common cause.
-        raise RuntimeError(
-            f"Could not load the SPECTER2 gate encoder "
-            f"({SPECTER2_MODEL_NAME} + {SPECTER2_ADAPTER_NAME}). If you are offline, "
-            f"the model is not cached yet — run `zotero-summarizer prefetch-models` "
-            f"while online once to populate the cache. Original error: {exc}"
-        ) from exc
-    mdl.eval()
-    device = _select_device(torch)
-    mdl.to(device)
-    _MODEL_CACHE.update({"tok": tok, "mdl": mdl, "torch": torch, "device": device, "loaded": True})
-    LOGGER.info("SPECTER2 + proximity adapter ready on device=%s", device)
-    return tok, mdl, torch
+        import torch
+        from adapters import AutoAdapterModel
+        from transformers import AutoTokenizer
+
+        try:
+            tok = AutoTokenizer.from_pretrained(SPECTER2_MODEL_NAME)
+            mdl = AutoAdapterModel.from_pretrained(SPECTER2_MODEL_NAME)
+            mdl.load_adapter(
+                SPECTER2_ADAPTER_NAME,
+                source="hf",
+                load_as="proximity",
+                set_active=True,
+            )
+        except Exception as exc:
+            # The gate has no local fallback — scoring needs SPECTER2. Turn an opaque
+            # HuggingFace/offline error into an actionable one (re-raised, not swallowed):
+            # offline + not-yet-cached is the common cause.
+            raise RuntimeError(
+                f"Could not load the SPECTER2 gate encoder "
+                f"({SPECTER2_MODEL_NAME} + {SPECTER2_ADAPTER_NAME}). If you are offline, "
+                f"the model is not cached yet — run `zotero-summarizer prefetch-models` "
+                f"while online once to populate the cache. Original error: {exc}"
+            ) from exc
+        mdl.eval()
+        device = _select_device(torch)
+        mdl.to(device)
+        _MODEL_CACHE.update({"tok": tok, "mdl": mdl, "torch": torch, "device": device, "loaded": True})
+        LOGGER.info("SPECTER2 + proximity adapter ready on device=%s", device)
+        return tok, mdl, torch
 
 
 def _pair_to_text(tok: Any, title: str, abstract: str) -> str:
@@ -105,20 +118,24 @@ def _encode_chunk(tok: Any, mdl: Any, torch: Any, texts: list[str], device: str)
     for the rest of the process. An error on CPU is real and propagates.
     """
     inputs = tok(texts, padding=True, truncation=True, max_length=512, return_tensors="pt")
-    try:
-        moved = {k: v.to(device) for k, v in inputs.items()}
-        with torch.no_grad():
-            outputs = mdl(**moved)
-        return outputs.last_hidden_state[:, 0, :].cpu().numpy().astype(np.float32)
-    except (RuntimeError, NotImplementedError) as exc:
-        if device == "cpu":
-            raise
-        LOGGER.warning("SPECTER2 forward failed on device=%s (%s); falling back to cpu", device, exc)
-        mdl.to("cpu")
-        _MODEL_CACHE["device"] = "cpu"
-        with torch.no_grad():
-            outputs = mdl(**{k: v.to("cpu") for k, v in inputs.items()})
-        return outputs.last_hidden_state[:, 0, :].cpu().numpy().astype(np.float32)
+    # Serialize the forward pass: torch inference is not thread-safe, and the
+    # fallback below moves the shared model + mutates the shared device, which a
+    # concurrent encode must not observe mid-flight.
+    with _PREDICT_LOCK:
+        try:
+            moved = {k: v.to(device) for k, v in inputs.items()}
+            with torch.no_grad():
+                outputs = mdl(**moved)
+            return outputs.last_hidden_state[:, 0, :].cpu().numpy().astype(np.float32)
+        except (RuntimeError, NotImplementedError) as exc:
+            if device == "cpu":
+                raise
+            LOGGER.warning("SPECTER2 forward failed on device=%s (%s); falling back to cpu", device, exc)
+            mdl.to("cpu")
+            _MODEL_CACHE["device"] = "cpu"
+            with torch.no_grad():
+                outputs = mdl(**{k: v.to("cpu") for k, v in inputs.items()})
+            return outputs.last_hidden_state[:, 0, :].cpu().numpy().astype(np.float32)
 
 
 def compute_embeddings_batch(

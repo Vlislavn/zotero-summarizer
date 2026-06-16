@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -252,9 +253,27 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
             current_id = int(parent) if parent is not None else None
         return " > ".join(reversed(parts))
 
+    # The two workflow collections pin to the top of every collections list (rank
+    # 0 = the daily-selection landing zone, rank 1 = the read-next queue) so the
+    # surfaces the user acts on most aren't buried alphabetically; everything else
+    # stays alphabetical. The read-next pattern mirrors the frontend
+    # CollectionEditor's READ_NEXT_RE so the two never drift.
+    _PINNED_COLLECTIONS: tuple[tuple[int, "re.Pattern[str]"], ...] = (
+        (0, re.compile(r"^\s*inbox\b", re.IGNORECASE)),
+        (1, re.compile(r"read[\s_-]*next|read[\s_-]*later|to[\s_-]*read|reading[\s_-]*list", re.IGNORECASE)),
+    )
+
+    @staticmethod
+    def _collection_sort_key(node: dict[str, Any]) -> tuple[int, str]:
+        name = str(node.get("name") or "")
+        for rank, pattern in ZoteroReader._PINNED_COLLECTIONS:
+            if pattern.search(name):
+                return (rank, name.lower())
+        return (len(ZoteroReader._PINNED_COLLECTIONS), name.lower())
+
     @staticmethod
     def _sort_collection_nodes(nodes: list[dict[str, Any]]) -> None:
-        nodes.sort(key=lambda node: str(node.get("name") or "").lower())
+        nodes.sort(key=ZoteroReader._collection_sort_key)
         for node in nodes:
             ZoteroReader._sort_collection_nodes(node.get("children", []))
 

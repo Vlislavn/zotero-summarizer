@@ -41,8 +41,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-RUNTIME_ROOT = "zotero_summarizer"
+from _model_fields import (  # noqa: E402 — same-dir import, script context
+    REPO_ROOT,
+    RUNTIME_ROOT,
+    _all_runtime_python_files,
+    model_field_keys,
+)
 CONSUMER_ALLOWLIST = Path(__file__).with_name("dead_code_allowlist.txt")
 VULTURE_ALLOWLIST = Path(__file__).with_name("vulture_allowlist.txt")
 VULTURE_BLOCK_CONFIDENCE = 80
@@ -331,44 +335,6 @@ def filter_allowlisted(
     return [f for f in findings if vulture_finding_key(f) not in allowlist]
 
 
-def _is_model_class(node: ast.ClassDef) -> bool:
-    """True when ``node`` is a pydantic ``BaseModel`` subclass or ``@dataclass``."""
-    for decorator in node.decorator_list:
-        target = decorator.func if isinstance(decorator, ast.Call) else decorator
-        if isinstance(target, ast.Name) and target.id == "dataclass":
-            return True
-        if isinstance(target, ast.Attribute) and target.attr == "dataclass":
-            return True
-    for base in node.bases:
-        if isinstance(base, ast.Name) and base.id == "BaseModel":
-            return True
-        if isinstance(base, ast.Attribute) and base.attr == "BaseModel":
-            return True
-    return False
-
-
-def model_field_keys(paths: list[str]) -> set[str]:
-    """Return ``<path>:<name>`` for every class-level annotated field of a
-    pydantic ``BaseModel`` / ``@dataclass`` across ``paths``.
-
-    Vulture flags these (the framework populates + serialises them; they are
-    never read by name). Recognising the *shape* — an ``AnnAssign`` field of a
-    model class — is a structural guard, not a symbol list, so new response
-    fields are covered with no allowlist churn.
-    """
-    keys: set[str] = set()
-    for path in paths:
-        tree = ast.parse((REPO_ROOT / path).read_text(encoding="utf-8"))
-        posix = Path(path).as_posix()
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.ClassDef) or not _is_model_class(node):
-                continue
-            for stmt in node.body:
-                if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
-                    keys.add(f"{posix}:{stmt.target.id}")
-    return keys
-
-
 def suppress_model_fields(
     advisory: list[VultureFinding], model_keys: set[str]
 ) -> list[VultureFinding]:
@@ -386,7 +352,7 @@ def _classified_findings() -> tuple[list[VultureFinding], list[VultureFinding]]:
     """
     findings = parse_vulture_findings(_run_vulture(VULTURE_ADVISORY_CONFIDENCE))
     blocking, advisory = split_blocking_advisory(findings, VULTURE_BLOCK_CONFIDENCE)
-    advisory = suppress_model_fields(advisory, model_field_keys(_runtime_python_files()))
+    advisory = suppress_model_fields(advisory, model_field_keys(_all_runtime_python_files()))
     return blocking, advisory
 
 

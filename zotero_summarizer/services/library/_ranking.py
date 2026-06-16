@@ -23,6 +23,12 @@ _PRIORITY_RANK: dict[str, int] = {
     "must_read": 3, "should_read": 2, "could_read": 1, "": 0, "dont_read": -1,
 }
 
+# The user's explicit verdict OUTRANKS the model: a paper labelled must/should/
+# could_read pins to the top of Read next (priority order), so a label makes it
+# findable rather than burying it in the ranked majority. ``dont_read`` never
+# reaches the sort — it's handled-filtered out of ``unread`` upstream.
+_USER_VERDICT_RANK: dict[str, int] = {"must_read": 3, "should_read": 2, "could_read": 1}
+
 
 def _content_key(rec: dict[str, Any]) -> str:
     """Normalized-full-title identity for de-duplication. The same paper imported
@@ -126,10 +132,20 @@ def sort_unread(unread: list[dict[str, Any]], *, model_ready: bool) -> None:
             key=lambda c: (_PRIORITY_RANK.get(c["reading_priority"], 0), c["date_added"]),
             reverse=True,
         )
+    # The user's explicit verdict wins over the model's order: pin labelled
+    # papers (must/should/could_read) to the top in priority order. Stable, so
+    # the blended/recency order is preserved within each verdict tier AND across
+    # the unlabelled rank-0 majority (a no-op when nothing is labelled).
+    if any(r.get("user_priority") in _USER_VERDICT_RANK for r in unread):
+        unread.sort(
+            key=lambda c: _USER_VERDICT_RANK.get(c.get("user_priority") or "", 0),
+            reverse=True,
+        )
 
 
 __all__ = [
     "_PRIORITY_RANK",
+    "_USER_VERDICT_RANK",
     "_content_key",
     "_dedup_by_content",
     "_goal_affinity",

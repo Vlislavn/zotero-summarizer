@@ -14,7 +14,7 @@
 const CONFIG_BASE = '/api/config';
 const ADMIN_BASE = '/api/admin';
 
-async function request(path, options = {}) {
+export async function request(path, options = {}) {
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     ...options,
@@ -116,6 +116,18 @@ export async function getJob(jobId) {
  */
 export async function checkLlm() {
   return request(`${ADMIN_BASE}/llm-check`, { method: 'POST' });
+}
+
+/**
+ * GET /api/admin/llm-reachability
+ * Cheap proactive reachability of the saved LLM routing (a GET /models listing —
+ * no tokens spent, no model load). The deep-review surface polls this on mount so
+ * a dead endpoint is announced before a run. Resolves to
+ *   { status: 'ok'|'degraded',
+ *     stages: [ { stage, provider, type, model, base_url, reachable, detail } ] }.
+ */
+export async function fetchLlmReachability() {
+  return request(`${ADMIN_BASE}/llm-reachability`, { method: 'GET' });
 }
 
 /**

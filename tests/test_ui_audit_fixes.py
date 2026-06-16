@@ -51,6 +51,32 @@ def test_list_label_verdict_keys_exported_and_uncapped(tmp_path):
     assert keys == {f"feed:{i}" for i in range(7)}
 
 
+def test_list_label_verdict_priorities_returns_latest_priority_per_key(tmp_path):
+    """The reading-queue handled-filter needs the PRIORITY, not just the key, so
+    a positive label stays visible while only dont_read hides. The reader returns
+    one row per item_key (the UPSERT), reflecting the latest relabel."""
+    assert hasattr(repo, "list_label_verdict_priorities"), "must be exported via repositories.__all__"
+    db = tmp_path / "triage.db"
+    conn = __import__("sqlite3").connect(str(db))
+    repo.apply_schema(conn)
+    conn.commit()
+    conn.close()
+    repo.insert_or_update_label_verdict(
+        db, item_key="K1", original_derived_priority="could_read",
+        user_priority="must_read", comment="",
+    )
+    repo.insert_or_update_label_verdict(
+        db, item_key="K2", original_derived_priority="should_read",
+        user_priority="dont_read", comment="",
+    )
+    # Relabel K1 — the UPSERT keeps one row, so the latest priority wins.
+    repo.insert_or_update_label_verdict(
+        db, item_key="K1", original_derived_priority="could_read",
+        user_priority="should_read", comment="",
+    )
+    assert repo.list_label_verdict_priorities(db) == {"K1": "should_read", "K2": "dont_read"}
+
+
 # --- llm-check: a slow probe times out per-stage instead of hanging ----------
 
 def test_probe_stage_bounded_times_out(monkeypatch):

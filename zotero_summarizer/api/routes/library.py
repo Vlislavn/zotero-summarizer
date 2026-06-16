@@ -3,14 +3,22 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services.library import deep_review, fulltext, reading_queue, score_tags
+from zotero_summarizer.services.library import (
+    deep_review,
+    fulltext,
+    paper_render,
+    qa,
+    reading_queue,
+    score_tags,
+)
+from zotero_summarizer.services.library.review_fleet import fleet as review_fleet
 from zotero_summarizer.services.zotero.zotero import get_zotero_reader_or_raise
 from zotero_summarizer.storage import repositories as triage_db
 
@@ -24,8 +32,15 @@ _REJECT_TAG = "❌"
 class DeepReviewRunRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20)
     # When set, deep-review this single item instead of the top-K queue slice
-    # (the per-paper "Run deeper разбор" button).
+    # (the per-paper "Run deeper review" button).
     item_key: str | None = Field(default=None, min_length=1)
+    # Optional reader focus — shapes which aspects the LLM emphasises.
+    focus_prompt: str = Field(default="", max_length=1000)
+
+
+class ReviewFleetRunRequest(BaseModel):
+    # How many top Read-next picks to pre-decide in this run.
+    top_k: int = Field(default=5, ge=1, le=20)
 
 
 class RejectTagRequest(BaseModel):
@@ -35,6 +50,20 @@ class RejectTagRequest(BaseModel):
 class RelTagSyncRequest(BaseModel):
     # Apply even if Zotero is running (writes back up first regardless).
     force: bool = Field(default=False)
+
+
+class AskPaperRequest(BaseModel):
+    item_key: str = Field(..., min_length=1)
+    question: str = Field(..., min_length=1, max_length=2000)
+    # comprehensive (default; metadata+notes+body) | retrieval (top-k chunks) | full_text (raw body)
+    mode: Literal["comprehensive", "retrieval", "full_text"] = Field(default="comprehensive")
+
+
+class PaperRenderBuildRequest(BaseModel):
+    force: bool = Field(default=False)
+    # Explicit consent gate for arXiv source tarball download. When false, the
+    # builder still uses local TeX but falls back to PDF instead of downloading.
+    allow_arxiv_source: bool = Field(default=False)
 
 
 async def get_reading_queue(
@@ -58,6 +87,11 @@ async def get_reading_queue(
             message=f"limit must be between 1 and 10000 inclusive; got {limit}",
             status_code=422,
         )
+    # Zotero not configured is an EXPECTED state (first run), not a server fault:
+    # fail fast at the boundary with a clean 503 — matching the /api/zotero/*
+    # routes — instead of letting build_reading_queue's reader-unavailable
+    # RuntimeError surface as a 500 "Unexpected server error".
+    get_zotero_reader_or_raise()
     return await asyncio.to_thread(
         reading_queue.build_reading_queue,
         include_read=include_read, limit=limit, refresh=refresh,
@@ -87,19 +121,77 @@ async def get_item_pdf(item_key: str) -> FileResponse:
     return FileResponse(pdf_path, media_type="application/pdf", filename=Path(pdf_path).name)
 
 
+async def get_paper_render(item_key: str) -> dict[str, Any]:
+    """Paper-read artifact status/metadata. Use POST ``/build`` to generate the
+    Markdown notes, HTML presentation, figures, and audit files."""
+    return await asyncio.to_thread(paper_render.render_paper, item_key)
+
+
+async def build_paper_render(item_key: str, req: PaperRenderBuildRequest) -> dict[str, Any]:
+    """Start a background paper-render-compatible build for one item."""
+    return await asyncio.to_thread(
+        paper_render.start_build,
+        item_key,
+        force=req.force,
+        allow_arxiv_source=req.allow_arxiv_source,
+    )
+
+
+async def get_paper_figure(item_key: str, name: str) -> FileResponse:
+    """Serve one generated figure image from a paper-read artifact."""
+    path = await asyncio.to_thread(paper_render.figure_path, item_key, name)
+    media = "image/png" if path.suffix == ".png" else "image/jpeg"
+    return FileResponse(path, media_type=media)
+
+
+async def get_paper_presentation(item_key: str) -> FileResponse:
+    """Serve the generated single-file HTML "paper brief". Disposition is
+    ``inline`` so the reader pane can embed it in an <iframe> (a ``filename``
+    alone would force ``attachment`` → a download instead of rendering)."""
+    path = await asyncio.to_thread(paper_render.presentation_path, item_key)
+    return FileResponse(
+        path, media_type="text/html", filename=path.name, content_disposition_type="inline"
+    )
+
+
+async def ask_paper(req: AskPaperRequest) -> dict[str, Any]:
+    """Grounded Q&A about one paper using the local deep_review-stage model and
+    the benchmark-validated abstention prompt. ``answer`` is null when the model
+    abstains (the paper doesn't contain the answer)."""
+    return await asyncio.to_thread(qa.ask_paper, req.item_key, req.question, mode=req.mode)
+
+
 async def run_deep_review(req: DeepReviewRunRequest) -> dict[str, Any]:
     """Start an on-demand full-text deep review (quality + relevance). With
     ``item_key`` set, reviews that single paper (per-paper button); otherwise the
     top-``top_k`` unread picks. Single-flight: returns the in-flight status when
     a run is already going. Poll ``GET /api/library/deep-review/status``."""
     if req.item_key:
-        return await asyncio.to_thread(deep_review.start, item_keys=[req.item_key])
-    return await asyncio.to_thread(deep_review.start, req.top_k)
+        return await asyncio.to_thread(
+            deep_review.start, item_keys=[req.item_key], focus_prompt=req.focus_prompt
+        )
+    return await asyncio.to_thread(deep_review.start, req.top_k, focus_prompt=req.focus_prompt)
 
 
 async def get_deep_review_status() -> dict[str, Any]:
     """Poll the deep-review job: ``{status, total, completed, error, started_at}``."""
     return deep_review.status()
+
+
+async def run_review_fleet(req: ReviewFleetRunRequest) -> dict[str, Any]:
+    """Start the review fleet: pre-decide a reading verdict for the top-``top_k``
+    Read-next picks in the background (reusing cached deep reviews, serial for RAM
+    safety). The proposals are SUGGESTIONS surfaced on the queue as
+    ``proposed_verdict`` — never auto-applied labels. Single-flight: returns the
+    in-flight status when a run is already going. Poll ``GET
+    /api/library/review-fleet/status``."""
+    return await asyncio.to_thread(review_fleet.start, req.top_k)
+
+
+async def get_review_fleet_status() -> dict[str, Any]:
+    """Poll the review-fleet job: ``{status, total, completed, error, started_at,
+    progress}``."""
+    return review_fleet.status()
 
 
 async def queue_reject_tag(req: RejectTagRequest) -> dict[str, Any]:
@@ -160,8 +252,15 @@ async def sync_score_ranks(req: RelTagSyncRequest) -> dict[str, Any]:
 router.add_api_route("/api/library/reading-queue", get_reading_queue, methods=["GET"])
 router.add_api_route("/api/library/reading-queue/status", get_reading_queue_status, methods=["GET"])
 router.add_api_route("/api/library/pdf/{item_key}", get_item_pdf, methods=["GET"])
+router.add_api_route("/api/library/render/{item_key}", get_paper_render, methods=["GET"])
+router.add_api_route("/api/library/render/{item_key}/build", build_paper_render, methods=["POST"])
+router.add_api_route("/api/library/render/{item_key}/presentation", get_paper_presentation, methods=["GET"])
+router.add_api_route("/api/library/render/{item_key}/figures/{name}", get_paper_figure, methods=["GET"])
+router.add_api_route("/api/library/ask", ask_paper, methods=["POST"])
 router.add_api_route("/api/library/deep-review/run", run_deep_review, methods=["POST"])
 router.add_api_route("/api/library/deep-review/status", get_deep_review_status, methods=["GET"])
+router.add_api_route("/api/library/review-fleet/run", run_review_fleet, methods=["POST"])
+router.add_api_route("/api/library/review-fleet/status", get_review_fleet_status, methods=["GET"])
 router.add_api_route("/api/library/reject-tag", queue_reject_tag, methods=["POST"])
 router.add_api_route("/api/library/fetch-fulltext", fetch_fulltext, methods=["POST"])
 router.add_api_route("/api/library/fetch-fulltext/status", fetch_fulltext_status, methods=["GET"])

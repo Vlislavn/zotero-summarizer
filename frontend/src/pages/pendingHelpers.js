@@ -117,6 +117,25 @@ export function changeBadgeClass(type) {
   }
 }
 
+// Same color vocabulary as changeBadgeClass(), expressed as the shared
+// ActionBadge `tone` token so the change pill renders via the app-wide Badge
+// primitive instead of a bespoke className. The amber/emerald/rose/sky/slate
+// mapping is byte-for-byte the palette changeBadgeClass() used.
+export function changeBadgeTone(type) {
+  switch (type) {
+    case 'tag_changes':
+      return 'amber';
+    case 'add_to_collection':
+      return 'emerald';
+    case 'remove_from_collection':
+      return 'rose';
+    case 'add_note':
+      return 'sky';
+    default:
+      return 'slate';
+  }
+}
+
 export function changeTypeLabel(type) {
   return String(type || '').replace(/_/g, ' ');
 }

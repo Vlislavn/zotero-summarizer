@@ -82,6 +82,24 @@ def test_provider_is_local_detects_loopback():
     assert not ProviderConfig(name="c", type=ProviderType.anthropic, api_key_env="K").is_local
 
 
+def test_lean_deep_review_defaults_false_and_is_independent_of_is_local():
+    """The deep-review TIER flag defaults off and is orthogonal to is_local: a
+    loopback provider (the MLX shape) is local but NOT lean unless explicitly
+    flagged — this is the fix for the 2026-06-15 mis-tiering (loopback ≠ lean)."""
+    mlx = ProviderConfig(name="mlx", base_url="http://127.0.0.1:8080/v1", api_key_env="K")
+    assert mlx.is_local and mlx.lean_deep_review is False  # loopback but full tier
+    ollama = ProviderConfig(
+        name="default", base_url="http://localhost:11434/v1", api_key_env="K",
+        lean_deep_review=True,
+    )
+    assert ollama.is_local and ollama.lean_deep_review is True
+    # round-trips through the routing config + resolve_stage (deep_review inherits default)
+    routing = LLMRoutingConfig(
+        providers=[ollama], default=DefaultModelConfig(provider="default", model="qwen3:8b"),
+    )
+    assert resolve_stage(routing, "deep_review").provider.lean_deep_review is True
+
+
 def test_effective_llm_concurrency_local_vs_remote(monkeypatch):
     import zotero_summarizer.services._common as common
     monkeypatch.setattr(common, "settings", lambda: types.SimpleNamespace(triage_job_concurrency=4))
@@ -215,6 +233,44 @@ def test_factory_openai_reuses_build_llm(monkeypatch):
     }
 
 
+def test_factory_enable_thinking_override(monkeypatch):
+    # deep_review forces the DIGEST to reason (enable_thinking=True) while the
+    # provider's base extra_body disables it for the fast trivial calls. The
+    # override flips ONLY chat_template_kwargs.enable_thinking, leaving the rest.
+    from zotero_summarizer.services.llm import factory
+
+    monkeypatch.setenv("LOCAL_KEY", "secret")
+    captured = {}
+    monkeypatch.setattr(
+        factory, "build_llm",
+        lambda url, model, key, max_tokens, extra_body: captured.update(extra_body=extra_body) or "C",
+    )
+    base = {"chat_template_kwargs": {"enable_thinking": False}, "keep": 1}
+    provider = ProviderConfig(name="p", base_url="http://localhost:8080/v1",
+                              api_key_env="LOCAL_KEY", extra_body=base)
+    factory.build_client_for_provider(provider, "m", enable_thinking=True)
+    assert captured["extra_body"]["chat_template_kwargs"]["enable_thinking"] is True
+    assert captured["extra_body"]["keep"] == 1            # other keys preserved
+    assert base["chat_template_kwargs"]["enable_thinking"] is False  # source not mutated
+
+
+def test_factory_enable_thinking_noop_without_chat_template_kwargs(monkeypatch):
+    # A plain OpenAI provider (no chat_template_kwargs) must NOT receive an injected
+    # key it would reject — the override is a no-op there.
+    from zotero_summarizer.services.llm import factory
+
+    monkeypatch.setenv("LOCAL_KEY", "secret")
+    captured = {}
+    monkeypatch.setattr(
+        factory, "build_llm",
+        lambda url, model, key, max_tokens, extra_body: captured.update(extra_body=extra_body) or "C",
+    )
+    provider = ProviderConfig(name="oa", base_url="https://api.openai.com/v1",
+                              api_key_env="LOCAL_KEY", extra_body=None)
+    factory.build_client_for_provider(provider, "m", enable_thinking=True)
+    assert captured["extra_body"] is None  # nothing injected
+
+
 def test_factory_anthropic_builds_native_adapter(monkeypatch):
     from zotero_summarizer.services.llm import factory
     from zotero_summarizer.integrations import llm_anthropic
@@ -257,13 +313,15 @@ def test_operational_check_reports_per_stage_status(monkeypatch):
         def prompt(self, _p):
             return "ok"
 
-    def _fake_build(resolved):
-        # The deep_review stage points at an unreachable provider.
-        if resolved.stage == "deep_review":
+    def _fake_build(provider, model):
+        # The deep_review stage routes to the anthropic ("claude") provider —
+        # simulate that endpoint being unreachable (the shared probe_provider now
+        # builds per provider+model, not per resolved-stage object).
+        if provider.type == ProviderType.anthropic:
             raise RuntimeError("connection refused")
         return _OkClient()
 
-    monkeypatch.setattr(operational_check, "build_client_for_stage", _fake_build)
+    monkeypatch.setattr(operational_check, "build_client_for_provider", _fake_build)
 
     result = asyncio.run(operational_check.check_stages())
     assert result["status"] == "degraded"
@@ -271,6 +329,34 @@ def test_operational_check_reports_per_stage_status(monkeypatch):
     assert by_stage["feed"]["status"] == "operational"
     assert by_stage["backlog"]["status"] == "operational"
     assert by_stage["deep_review"]["status"] == "fail"
+    assert "connection refused" in by_stage["deep_review"]["detail"]
+
+
+def test_reachability_check_reports_per_stage(monkeypatch):
+    """Cheap reachability probe (GET /models): an unreachable stage comes back
+    reachable=False with its base_url + detail so the deep-review banner can name
+    the dead endpoint — the proactive half of the silent-empty-brief fix."""
+    from zotero_summarizer.services.llm import model_list, operational_check
+
+    routing = _routing(deep_review=StageModelConfig(provider="claude", model="claude-opus-4-8"))
+    fake_state = types.SimpleNamespace(app_state=types.SimpleNamespace(config=types.SimpleNamespace(llm_routing=routing)))
+    monkeypatch.setattr(operational_check, "state", lambda: fake_state)
+
+    def _fake_list(provider):
+        # deep_review routes to the anthropic provider — simulate it down.
+        if provider.type == ProviderType.anthropic:
+            raise RuntimeError("connection refused")
+        return ["base-model"]
+
+    monkeypatch.setattr(model_list, "list_models_for_provider", _fake_list)
+
+    result = asyncio.run(operational_check.check_reachability())
+    assert result["status"] == "degraded"
+    by_stage = {row["stage"]: row for row in result["stages"]}
+    assert by_stage["feed"]["reachable"] is True
+    assert by_stage["feed"]["base_url"] == "http://localhost/v1"   # named for the banner
+    assert by_stage["backlog"]["reachable"] is True
+    assert by_stage["deep_review"]["reachable"] is False
     assert "connection refused" in by_stage["deep_review"]["detail"]
 
 

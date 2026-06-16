@@ -224,6 +224,29 @@ def list_label_verdict_keys(db_path: Path) -> set[str]:
     return {str(r["item_key"]) for r in rows}
 
 
+def list_label_verdict_priorities(db_path: Path) -> dict[str, str]:
+    """``{item_key: user_priority}`` for every manual verdict — uncapped.
+
+    The reading-queue handled-filter needs the PRIORITY, not just the key
+    (:func:`list_label_verdict_keys`): a ``dont_read`` verdict hides the paper
+    (handled), but ``must_read``/``should_read``/``could_read`` are positive
+    reading intents that must stay visible and pin to the top of Read next — a
+    label should make a paper easy to find, not vanish. One row per ``item_key``
+    via the UPSERT; uncapped for the same reason as
+    :func:`list_label_verdict_keys` (a paged fetch silently drops rows once the
+    table outgrows the cap).
+    """
+    conn = _connect_to(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT item_key, user_priority FROM label_verdicts "
+            "WHERE item_key IS NOT NULL AND item_key != ''"
+        ).fetchall()
+    finally:
+        conn.close()
+    return {str(r["item_key"]): str(r["user_priority"]) for r in rows}
+
+
 def delete_label_verdict(db_path: Path, item_key: str) -> bool:
     """Delete one verdict; return True iff a row was removed."""
     safe_item_key = str(item_key or "").strip()
@@ -248,5 +271,6 @@ __all__ = [
     "list_label_verdicts",
     "list_all_label_verdicts",
     "list_label_verdict_keys",
+    "list_label_verdict_priorities",
     "delete_label_verdict",
 ]

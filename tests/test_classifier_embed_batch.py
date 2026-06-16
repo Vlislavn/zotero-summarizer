@@ -7,6 +7,8 @@ the MPS→CPU device fallback.
 """
 from __future__ import annotations
 
+import threading
+import time
 from contextlib import nullcontext
 
 import numpy as np
@@ -148,3 +150,50 @@ def test_encode_chunk_reraises_on_cpu_failure():
         assert "genuine failure" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("expected the CPU-path error to propagate (fail-fast)")
+
+
+# --- load thread-safety (regression: meta-tensor race) ---------------------
+
+def test_load_specter2_loads_once_under_concurrency(monkeypatch):
+    """Concurrent first-loads must materialize SPECTER2 exactly ONCE.
+
+    Two threads racing into `_load_specter2` used to both call
+    `from_pretrained`; transformers' meta-device init patches global torch state
+    and isn't thread-safe, so the second load left params on the `meta` device →
+    `mdl.to(device)` raised "Cannot copy out of meta tensor" in the gate-retrain
+    worker. The `_LOAD_LOCK` + double-checked cache must serialize them.
+    """
+    embed._MODEL_CACHE.clear()
+    n_constructs = {"n": 0}
+
+    class _FakeMdl:
+        def eval(self):
+            ...
+
+        def to(self, device):
+            ...
+
+        def load_adapter(self, *a, **k):
+            ...
+
+    def _slow_from_pretrained(*a, **k):
+        n_constructs["n"] += 1
+        time.sleep(0.05)  # widen the window so the threads overlap inside the load
+        return _FakeMdl()
+
+    monkeypatch.setattr("adapters.AutoAdapterModel.from_pretrained",
+                        staticmethod(_slow_from_pretrained))
+    monkeypatch.setattr("transformers.AutoTokenizer.from_pretrained",
+                        staticmethod(lambda *a, **k: object()))
+    monkeypatch.setattr(embed, "_select_device", lambda torch: "cpu")
+
+    try:
+        threads = [threading.Thread(target=embed._load_specter2) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        # Before the lock this was ~8 (and on the real model, the meta corruption).
+        assert n_constructs["n"] == 1
+    finally:
+        embed._MODEL_CACHE.clear()

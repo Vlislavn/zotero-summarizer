@@ -1,24 +1,18 @@
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 
-// Primary tabs: Library / Today / Annotate / Settings — Library (Read next) is
+// Primary tabs: Library / Today / Settings / Ops (Increment 3 nav collapse —
+// 8 routes folded to 3 daily surfaces + one Ops surface). Library (Read next) is
 // the landing surface and the leftmost "home" tab (Serial Position / Jakob's
-// Law: the default view IS the first tab), since it carries both daily
-// workflows (Read-next queue + Meaning search). Today (feed cull) sits next;
-// everything else hides behind a "More" disclosure (Hick's Law — the daily flow
-// stays at 4 choices). When on a power-tool route the bar tags it with a
-// breadcrumb.
+// Law: the default view IS the first tab), since it carries both daily workflows
+// (Read-next queue + Meaning search) AND the folded-in Batch-label mode (the
+// former Annotate page). Today (feed cull) sits next, then Settings. Ops is the
+// rarely-used operator surface (Feed review + Triage jobs + Pending changes) on
+// its own tab — Hick's Law: the bar stays at four flat choices, no disclosure.
 const PRIMARY = [
   { to: '/library', label: 'Library' },
   { to: '/today', label: 'Today' },
-  { to: '/annotate', label: 'Annotate' },
   { to: '/settings', label: 'Settings' },
-];
-
-const POWER_TOOLS = [
-  { to: '/triage', label: 'Triage' },
-  { to: '/review', label: 'Feed Review' },
-  { to: '/pending', label: 'Pending' },
-  { to: '/audit', label: 'Re-label Audit' },
+  { to: '/ops', label: 'Ops' },
 ];
 
 function tabClass({ isActive }) {
@@ -30,67 +24,18 @@ function tabClass({ isActive }) {
   ].join(' ');
 }
 
-function powerLinkClass({ isActive }) {
-  return [
-    'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors text-left',
-    isActive
-      ? 'bg-slate-100 text-slate-900 font-semibold'
-      : 'text-slate-700 hover:bg-slate-100',
-  ].join(' ');
-}
-
 export default function NavBar() {
-  const { pathname } = useLocation();
-  const activePower = POWER_TOOLS.find((t) => pathname.startsWith(t.to));
-
   return (
     <header className="glass border border-slate-200 rounded-2xl shadow-lg p-4 mb-5 overflow-visible relative z-30">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-4 flex-wrap">
-          <h1 className="text-xl font-bold text-slate-900">Zotero Summarizer</h1>
-          <nav className="flex gap-1.5 items-center">
-            {PRIMARY.map((t) => (
-              <NavLink key={t.to} to={t.to} className={tabClass}>
-                {t.label}
-              </NavLink>
-            ))}
-            {activePower && (
-              <>
-                <span className="text-slate-300 px-1" aria-hidden>·</span>
-                <NavLink to={activePower.to} className={tabClass}>
-                  {activePower.label}
-                </NavLink>
-              </>
-            )}
-          </nav>
-        </div>
-
-        {/* The "More" disclosure uses an explicit chevron + hover style
-            so the affordance reads as a menu, not as static text. The
-            absolute panel positions itself relative to the header card. */}
-        <details className="text-sm relative group">
-          <summary
-            className="cursor-pointer select-none list-none px-3 py-1.5 rounded-lg
-                       border border-slate-200 bg-white text-slate-700
-                       hover:bg-slate-100 hover:border-slate-300
-                       group-open:bg-slate-100 group-open:border-slate-300
-                       inline-flex items-center gap-1.5"
-          >
-            <span className="text-[15px] leading-none" aria-hidden>⋯</span>
-            <span>More</span>
-            <span className="text-slate-400 text-xs group-open:rotate-180 transition-transform" aria-hidden>▾</span>
-          </summary>
-          <div className="absolute right-0 mt-2 z-20 bg-white border border-slate-200 rounded-xl shadow-lg p-2 flex flex-col gap-1 min-w-[200px]">
-            <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-slate-400">
-              Power tools
-            </div>
-            {POWER_TOOLS.map((t) => (
-              <NavLink key={t.to} to={t.to} className={powerLinkClass}>
-                {t.label}
-              </NavLink>
-            ))}
-          </div>
-        </details>
+      <div className="flex items-center gap-4 flex-wrap">
+        <h1 className="text-xl font-bold text-slate-900">Zotero Summarizer</h1>
+        <nav className="flex gap-1.5 items-center">
+          {PRIMARY.map((t) => (
+            <NavLink key={t.to} to={t.to} className={tabClass}>
+              {t.label}
+            </NavLink>
+          ))}
+        </nav>
       </div>
     </header>
   );

@@ -2,13 +2,17 @@
 // under 500 LOC. Pure presentational widgets + filter chip definitions used
 // only by the annotate-verdict workflow.
 
-import { useState } from 'react';
+import { pretty } from '../utils/priorityLabels.js';
 
+// Filter chips: the `key` stays the wire/enum value the backend filters on; the
+// `label` shows the shared human vocabulary (Mental Model / Jakob's Law) so the
+// raw `must_read` enum never reaches the user. 'all' and '🎯 border' are not
+// priorities — they keep their own labels.
 export const PRIORITY_FILTERS = [
-  { key: 'must_read', label: 'must_read', cls: 'bg-emerald-600 text-white border-emerald-600' },
-  { key: 'should_read', label: 'should_read', cls: 'bg-sky-600 text-white border-sky-600' },
-  { key: 'could_read', label: 'could_read', cls: 'bg-amber-500 text-white border-amber-500' },
-  { key: 'dont_read', label: 'dont_read', cls: 'bg-rose-600 text-white border-rose-600' },
+  { key: 'must_read', label: pretty('must_read'), cls: 'bg-emerald-600 text-white border-emerald-600' },
+  { key: 'should_read', label: pretty('should_read'), cls: 'bg-sky-600 text-white border-sky-600' },
+  { key: 'could_read', label: pretty('could_read'), cls: 'bg-amber-500 text-white border-amber-500' },
+  { key: 'dont_read', label: pretty('dont_read'), cls: 'bg-rose-600 text-white border-rose-600' },
   { key: '', label: 'all', cls: 'bg-slate-700 text-white border-slate-700' },
   // Sprint-3+ active learning: ranks library rows by border distance.
   // The backend re-trains the regressor each call (~30 s), so the chip
@@ -16,12 +20,24 @@ export const PRIORITY_FILTERS = [
   { key: 'border', label: '🎯 border', cls: 'bg-violet-600 text-white border-violet-600' },
 ];
 
+// Diagnostic flag categories (the active-learning audit lens) — NOT the reading
+// priority enum, so they don't go through `pretty()`. They still get human copy so
+// the raw `must_read`/`near_must_read` wire codes never reach the user (same
+// Mental-Model rule the PRIORITY_FILTERS above follow). `key` stays the wire value
+// the backend filters on; `label` is what the chip shows.
 export const FLAG_FILTERS = [
   { key: '', label: 'any' },
-  { key: 'weak_must_read', label: 'weak_must_read' },
-  { key: 'near_must_read', label: 'near_must_read' },
-  { key: 'manual_override', label: 'manual_override' },
+  { key: 'weak_must_read', label: 'weak top pick' },
+  { key: 'near_must_read', label: 'near top pick' },
+  { key: 'manual_override', label: 'manual override' },
 ];
+
+// key -> human label for the flag chips (mirrors FLAG_FILTERS), used to render the
+// ACTIVE flag chip without leaking the raw wire code. Unknown keys fall through.
+export const FLAG_FILTER_LABELS = Object.fromEntries(
+  FLAG_FILTERS.filter((f) => f.key).map((f) => [f.key, f.label]),
+);
+export const prettyFlag = (key) => FLAG_FILTER_LABELS[key] || key;
 
 // Batch-mode keyboard map (Jakob's Law: Gmail/Vim conventions for j/k; inbox-triage 1-4).
 export const PRIORITY_BY_KEY = {
@@ -31,56 +47,17 @@ export const PRIORITY_BY_KEY = {
   4: 'dont_read',
 };
 
-// Orientation banner — Annotate's equivalent of Today's HintBanner (Jakob's
-// Law: same dismissible pattern, same localStorage key shape). It owns the
-// "what is this surface + why label + how" explanation so a researcher landing
-// here from the nav never has to infer the workflow (Mental Model / Paradox of
-// the Active User), and it names the full consequence of a label so the
-// retrain→Zotero loop lives in the copy, not the user's head (Tesler's Law).
-const ANNOTATE_HINT_KEY = 'annotate_hint_dismissed_v1';
-const ANNOTATE_HINT_TEXT =
+// Orientation-banner copy — Annotate's equivalent of Today's hint. The shared
+// <HintBanner storageKey=… > (components/ui/HintBanner.jsx) owns the dismissible
+// teal card + localStorage logic; these constants supply the key + text so the
+// page renders it with the same copy and dismiss key it always used. It names
+// the full consequence of a label so the retrain→Zotero loop lives in the copy,
+// not the user's head (Tesler's Law).
+export const ANNOTATE_HINT_KEY = 'annotate_hint_dismissed_v1';
+export const ANNOTATE_HINT_TEXT =
   'Annotate = label what you’ve read. Set must / should / could / don’t '
   + '(keys 1–4 · j/k to move between papers) on papers you’ve read. Your verdict '
   + 'becomes ground truth: it retrains the model and is mirrored to Zotero as a note.';
-
-export function readAnnotateHintDismissed() {
-  try {
-    return window.localStorage.getItem(ANNOTATE_HINT_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function writeAnnotateHintDismissed() {
-  try {
-    window.localStorage.setItem(ANNOTATE_HINT_KEY, '1');
-  } catch {
-    /* no-op: incognito / disabled storage */
-  }
-}
-
-export function AnnotateHintBanner({ onDismiss }) {
-  return (
-    <div
-      role="note"
-      className="mb-3 flex items-start gap-3 p-3 rounded-xl border border-teal-200 bg-teal-50 text-sm text-teal-900"
-    >
-      <span className="flex-1 leading-snug">{ANNOTATE_HINT_TEXT}</span>
-      <button
-        type="button"
-        onClick={() => {
-          writeAnnotateHintDismissed();
-          onDismiss();
-        }}
-        aria-label="Dismiss hint"
-        title="Dismiss"
-        className="text-teal-700 hover:text-teal-900 leading-none px-1.5 py-0.5 rounded hover:bg-teal-100"
-      >
-        {'×'}
-      </button>
-    </div>
-  );
-}
 
 export function FilterChip({ active, onClick, children, activeCls }) {
   return (
@@ -103,32 +80,6 @@ export function ErrorBanner({ error, title = 'Error' }) {
   return (
     <div className="my-2 p-2 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800">
       <span className="font-semibold">{title}:</span> {error.message || String(error)}
-    </div>
-  );
-}
-
-export function AbstractBlock({ abstract }) {
-  const [expanded, setExpanded] = useState(false);
-  if (!abstract) return null;
-  return (
-    <div>
-      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
-        Abstract
-      </h3>
-      <div
-        className={`text-sm text-slate-700 whitespace-pre-line ${
-          expanded ? '' : 'line-clamp-5'
-        }`}
-      >
-        {abstract}
-      </div>
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="mt-1 text-[11px] text-teal-700 hover:text-teal-900 font-medium"
-      >
-        {expanded ? 'Show less' : 'Show more'}
-      </button>
     </div>
   );
 }

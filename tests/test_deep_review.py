@@ -24,7 +24,7 @@ def config():
 def _reset_state(tmp_path, monkeypatch):
     """Isolate the module-global job state + cache file for every test."""
     deep_review._STATE.update(
-        {"running": False, "total": 0, "completed": 0, "error": None, "started_at": None}
+        {"running": False, "total": 0, "completed": 0, "error": None, "started_at": None, "progress": {}}
     )
     monkeypatch.setattr(deep_review, "_cache_path", lambda: tmp_path / "deep_reviews.json")
     yield
@@ -69,10 +69,11 @@ def _fake_state(config, *, extractor, reader):
         unpaywall_client=None,
         zotero_reader=reader,
         # The deep_review stage now resolves its client via the runtime state.
-        resolve_stage_client=lambda stage: _StubLLM(),
-        # Provider drives concurrency (local → serial). A local stub keeps the
-        # deep-review job single-threaded and deterministic in tests.
-        resolve_stage_provider=lambda stage: types.SimpleNamespace(is_local=True),
+        resolve_stage_client=lambda stage, **_k: _StubLLM(),
+        # Provider drives concurrency (is_local → serial) AND the deep-review tier
+        # (lean_deep_review → cheap tier). A local+lean stub keeps the job
+        # single-threaded, deterministic, and on the lean tier in tests.
+        resolve_stage_provider=lambda stage: types.SimpleNamespace(is_local=True, lean_deep_review=True),
     )
 
 
@@ -88,6 +89,29 @@ def _wire(monkeypatch, config, *, reader, extractor, note_fn=None):
     monkeypatch.setattr(deep_review, "get_state", lambda: _fake_state(config, extractor=extractor, reader=reader))
     # The digest is upserted to Zotero inside _review_one; stub it (no real lib).
     monkeypatch.setattr(zotero_svc, "zotero_upsert_digest_note", note_fn or (lambda _ik, _d: None))
+    # Keep ORCHESTRATION tests hermetic: stub the heavy enrichment layers (real
+    # quality-eval + goal-summaries pull a local LLM + a 1.3GB embedder and have
+    # their own unit tests). This test asserts the orchestrator ATTACHES them.
+    def _stub_layers(ctx):
+        goals = list(getattr(ctx.config, "research_goals", []) or [])
+        return {"quality_band": "neutral"}, [{"goal": g, "retrieval_state": "miss"} for g in goals]
+    monkeypatch.setattr(deep_review, "_extra_layers", _stub_layers)
+
+
+def test_status_exposes_progress_field():
+    """The polled status carries a `progress` dict (live phase + sub-step) so the
+    UI can show what a running review is doing; {} when idle."""
+    s = deep_review.status()
+    assert "progress" in s and s["progress"] == {}
+
+
+def test_run_job_clears_progress_when_done(config, monkeypatch):
+    """A finished run resets progress to {} so the next poll doesn't show a stale
+    phase from the last review."""
+    reader = _StubReader({"K1": _detail()})
+    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"))
+    deep_review._run_job([{"item_key": "K1", "title": "T"}])
+    assert deep_review.status()["progress"] == {}
 
 
 def test_run_job_writes_digest_entry(config, monkeypatch):
@@ -105,8 +129,11 @@ def test_run_job_writes_digest_entry(config, monkeypatch):
     assert entry["needs_pdf"] is False
     assert entry["zotero_note_written"] is True and entry["zotero_note_error"] is None
     assert entry["reviewed_at"]
-    # The confusing relevance re-score is gone.
-    assert "fulltext_composite" not in entry and "quality" not in entry
+    # The confusing relevance re-score is gone; the goal-aligned layers are attached
+    # (quality verdict + per-goal board), each independently-skippable.
+    assert "fulltext_composite" not in entry
+    assert "quality" in entry and "goal_summaries" in entry
+    assert isinstance(entry["goal_summaries"], list)
     assert deep_review.status()["status"] == "ready"
     assert deep_review.status()["completed"] == 1
 
@@ -160,6 +187,110 @@ def test_run_job_isolates_per_item_failure(config, monkeypatch):
     assert s["completed"] == 2 and s["status"] == "ready" and s["error"] is None
 
 
+def test_run_job_all_items_failed_surfaces_job_error(config, monkeypatch):
+    """When EVERY item raises (e.g. the deep_review LLM endpoint is unreachable),
+    the job must surface a job-level error — not report a clean 'ready' with an
+    empty cache, which silently hid the unreachable-MLX failure in the UI.
+
+    Regression for the 2026-06-14 'Run deeper review does nothing' report: the
+    digest LLM pointed at a dead endpoint, every item failed, yet status stayed
+    'ready' / error=None so DeepReviewSection rendered nothing."""
+    reader = _StubReader({"BAD": _detail(title="BAD")})
+    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"))
+    # Give the resolved provider a base_url so the message names the dead endpoint.
+    monkeypatch.setattr(
+        deep_review, "get_state",
+        lambda: types.SimpleNamespace(
+            app_state=types.SimpleNamespace(config=config),
+            pdf_extractor=_StubExtractor("BODY"), unpaywall_client=None, zotero_reader=reader,
+            resolve_stage_client=lambda stage, **_k: _StubLLM(),
+            resolve_stage_provider=lambda stage: types.SimpleNamespace(
+                is_local=True, base_url="http://127.0.0.1:8080/v1"
+            ),
+        ),
+    )
+
+    deep_review._run_job([{"item_key": "BAD", "title": "BAD"}])
+
+    assert deep_review.get_cached_review("BAD") is None  # nothing cached
+    s = deep_review.status()
+    assert s["status"] == "error"
+    assert s["completed"] == 1
+    assert "LLM blew up" in s["error"]            # the per-item cause is surfaced
+    assert "127.0.0.1:8080" in s["error"]         # the dead endpoint is named
+
+
+def test_lean_tier_uses_lean_max_text_chars(config, monkeypatch):
+    """A provider flagged lean_deep_review feeds assess_digest the cheaper
+    lean_max_text_chars; a non-lean provider feeds the full max_text_chars
+    (the tier-aware speedup, keyed on provider.lean_deep_review)."""
+    reader = _StubReader({"K1": _detail()})
+    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY TEXT"))
+    seen: list[int | None] = []
+    real = deep_review.quality_review.assess_digest
+    monkeypatch.setattr(
+        deep_review.quality_review, "assess_digest",
+        lambda **kw: (seen.append(kw.get("max_chars")), real(**kw))[1],
+    )
+    # _wire's fake provider is lean_deep_review=True → lean tier.
+    deep_review._run_job([{"item_key": "K1", "title": "T"}])
+    assert seen[-1] == config.quality_review.lean_max_text_chars
+
+    # A non-lean provider → full max_text_chars.
+    monkeypatch.setattr(deep_review, "get_state", lambda: types.SimpleNamespace(
+        app_state=types.SimpleNamespace(config=config), pdf_extractor=_StubExtractor("BODY TEXT"),
+        unpaywall_client=None, zotero_reader=reader,
+        resolve_stage_client=lambda s, **_k: _StubLLM(),
+        resolve_stage_provider=lambda s: types.SimpleNamespace(is_local=False, lean_deep_review=False),
+    ))
+    deep_review._run_job([{"item_key": "K1", "title": "T"}])
+    assert seen[-1] == config.quality_review.max_text_chars
+
+
+def test_mlx_shape_loopback_but_not_lean_uses_full_tier(config, monkeypatch):
+    """Regression (2026-06-15 /verify finding): a loopback-but-not-lean provider —
+    the MLX shape `is_local=True, lean_deep_review=False` — must get the FULL tier:
+    full max_text_chars on the digest, the full self_consistency_runs, and per-goal
+    summaries (NOT batched). Before the fix the tier keyed on is_local, so MLX (on
+    127.0.0.1:8080) wrongly ran the lean tier and silently degraded the digest."""
+    from zotero_summarizer.services.library import _paper_goal_summaries, quality_eval
+
+    reader = _StubReader({"K1": _detail()})
+    # NOT _wire: we want the real _extra_layers so we can capture the tier values it
+    # forwards to evaluate_quality + summarize_for_goals.
+    monkeypatch.setattr(deep_review, "get_state", lambda: types.SimpleNamespace(
+        app_state=types.SimpleNamespace(config=config), pdf_extractor=_StubExtractor("BODY TEXT"),
+        unpaywall_client=None, zotero_reader=reader,
+        resolve_stage_client=lambda s, **_k: _StubLLM(),
+        resolve_stage_provider=lambda s: types.SimpleNamespace(is_local=True, lean_deep_review=False),
+    ))
+    monkeypatch.setattr(zotero_svc, "zotero_upsert_digest_note", lambda _ik, _d: None)
+
+    seen_digest: list[int | None] = []
+    real = deep_review.quality_review.assess_digest
+    monkeypatch.setattr(
+        deep_review.quality_review, "assess_digest",
+        lambda **kw: (seen_digest.append(kw.get("max_chars")), real(**kw))[1],
+    )
+    captured = {}
+    monkeypatch.setattr(
+        quality_eval, "evaluate_quality",
+        lambda **kw: captured.update(runs=kw.get("self_consistency_runs"), eval_max=kw.get("max_chars"))
+        or types.SimpleNamespace(model_dump=lambda: {"quality_band": "neutral"}),
+    )
+    monkeypatch.setattr(
+        _paper_goal_summaries, "summarize_for_goals",
+        lambda **kw: captured.update(batch=kw.get("batch")) or [],
+    )
+
+    deep_review._run_job([{"item_key": "K1", "title": "T"}])
+
+    assert seen_digest[-1] == config.quality_review.max_text_chars          # full digest cap, not lean
+    assert captured["runs"] == config.quality_review.self_consistency_runs  # full rubric runs (3), not 1
+    assert captured["eval_max"] == config.quality_review.max_text_chars     # full eval cap
+    assert captured["batch"] is False                                       # per-goal, NOT batched
+
+
 def test_assess_digest_maps_fields_and_injects_goals(config):
     captured = {}
 
@@ -211,7 +342,7 @@ def test_start_empty_queue_finishes_without_spawn(monkeypatch):
 
 
 def test_start_with_item_keys_skips_queue(monkeypatch):
-    """The per-paper 'Run deeper разбор' button: an explicit item_keys run must
+    """The per-paper 'Run deeper review' button: an explicit item_keys run must
     review exactly those papers (not the top-K queue), pulling gate_relevance
     from the score cache."""
     def _should_not_run(**_):
@@ -223,7 +354,7 @@ def test_start_with_item_keys_skips_queue(monkeypatch):
         lambda key: {"composite_score": 4.1} if key == "K1" else None,
     )
     captured = {}
-    monkeypatch.setattr(deep_review, "_run_job", lambda items: captured.update(items=items))
+    monkeypatch.setattr(deep_review, "_run_job", lambda items, **_kw: captured.update(items=items))
     monkeypatch.setattr(deep_review, "run_in_background", lambda target: target())
 
     out = deep_review.start(item_keys=["K1"])

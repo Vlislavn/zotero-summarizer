@@ -108,11 +108,35 @@ class QualityReviewConfig(BaseModel):
 
     enabled: bool = Field(default=True)
     top_k: int = Field(default=5, ge=1, le=20)
+    # Launch-time prewarm: on startup, background-compute deep reviews for the top-N
+    # not-yet-cached unread picks so the FIRST open is instant (not just the second).
+    # Skip-if-cached keeps re-launches cheap. 0 disables. Concurrency is inherited
+    # from the deep_review job (serial on a local provider, parallel on a remote one).
+    # Env override: ZS_DEEP_REVIEW_PREWARM_K. See services/library/deep_review_prewarm.py.
+    prewarm_on_startup_k: int = Field(default=5, ge=0, le=20)
     max_pdf_bytes: int = Field(default=20_000_000, ge=1_000_000)
     fetch_timeout_secs: float = Field(default=30.0, ge=1.0, le=300.0)
     # Hard cap on full-text chars fed to the reviewer (context safety).
     max_text_chars: int = Field(default=60_000, ge=2_000)
+    # Tier-aware deep-review cost. A provider flagged `lean_deep_review` (e.g. ollama,
+    # which is prefill-bound on long prompts) uses the smaller `lean_max_text_chars`
+    # + `lean_self_consistency_runs` (and batched goal summaries) to stay usable
+    # (~few min); any other provider — incl. MLX, which is loopback but fast — uses the
+    # full `max_text_chars` + `self_consistency_runs`. The tier is keyed on the
+    # provider's `lean_deep_review` flag, NOT `is_local` (loopback ≠ lean).
+    # `batch_goal_summaries` collapses the per-goal LLM calls into one (the biggest
+    # call-count saving) and only applies on the lean tier.
+    self_consistency_runs: int = Field(default=3, ge=1, le=7)
+    lean_self_consistency_runs: int = Field(default=1, ge=1, le=7)
+    lean_max_text_chars: int = Field(default=12_000, ge=2_000)
+    batch_goal_summaries: bool = Field(default=True)
     unpaywall_email: str = Field(default="")
+    # Phase A (SHADOW): also run the MiniCheck ENCODER claim-checker alongside the
+    # LLM overstatement judge and record its per-claim support probs for an A/B —
+    # NO behavior change (the band/overstatements stay LLM-decided). Off by default;
+    # needs the optional `minicheck` dep. See services/model/claim_checker.py.
+    shadow_claim_check: bool = Field(default=False)
+    claim_check_model: str = Field(default="flan-t5-large")
 
 
 class ClassifierGateConfig(BaseModel):

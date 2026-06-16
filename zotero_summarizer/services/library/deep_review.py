@@ -25,12 +25,17 @@ import json
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from typing import Any
 
-from zotero_summarizer.services._common import effective_llm_concurrency, now_iso_z
+from zotero_summarizer.services._common import (
+    deep_review_sub_concurrency,
+    effective_llm_concurrency,
+    now_iso_z,
+    settings,
+)
 
-from zotero_summarizer.services.library import quality_review, reading_queue
-from zotero_summarizer.services._common import settings as get_settings
+from zotero_summarizer.services.library import _deep_review_progress, quality_review, reading_queue
 from zotero_summarizer.services._common import state as get_state
 
 LOGGER = logging.getLogger(__name__)
@@ -48,8 +53,10 @@ _STATE: dict[str, Any] = {
     "completed": 0,
     "error": None,
     "started_at": None,
+    # Live within-item progress (phase + sub-step) for the polled status, written
+    # by ReviewReporter via _set_progress; {} between items / when idle.
+    "progress": {},
 }
-
 
 
 def try_start() -> bool:
@@ -62,6 +69,7 @@ def try_start() -> bool:
         _STATE["total"] = 0
         _STATE["completed"] = 0
         _STATE["started_at"] = now_iso_z()
+        _STATE["progress"] = {}
         return True
 
 
@@ -69,6 +77,24 @@ def finish(error: str | None = None) -> None:
     with _LOCK:
         _STATE["running"] = False
         _STATE["error"] = error
+        _STATE["progress"] = {}
+
+
+def _set_progress(progress: dict[str, Any]) -> None:
+    """Lock-guarded write of the live within-item progress (ReviewReporter sink)."""
+    with _LOCK:
+        _STATE["progress"] = progress
+
+
+def _summarize_errors(errors: list[str], provider: Any) -> str:
+    """Job-level message for a run where EVERY item raised. Dedups identical
+    per-item errors (the unreachable-endpoint case) and names the resolved
+    endpoint, so the cause is actionable instead of a silent empty result."""
+    uniq = sorted(set(errors))
+    body = uniq[0] if len(uniq) == 1 else f"{errors[0]} (+{len(errors) - 1} more)"
+    endpoint = getattr(provider, "base_url", None)
+    suffix = f" — deep_review LLM endpoint {endpoint} may be unreachable" if endpoint else ""
+    return f"All {len(errors)} item(s) failed: {body}{suffix}"
 
 
 def status() -> dict[str, Any]:
@@ -83,6 +109,7 @@ def status() -> dict[str, Any]:
         completed = int(_STATE["completed"])
         error = _STATE["error"]
         started_at = _STATE["started_at"]
+        progress = dict(_STATE["progress"])
     if running:
         state = "running"
     elif error:
@@ -97,11 +124,28 @@ def status() -> dict[str, Any]:
         "completed": completed,
         "error": error,
         "started_at": started_at,
+        "progress": progress,
     }
 
 
 def run_in_background(target) -> None:
     threading.Thread(target=target, daemon=True).start()
+
+
+def _try_rebuild_render(item_key: str) -> None:
+    """Rebuild the HTML artifact with the new digest baked in.
+
+    User-authorized background side-effect — user selected 'Auto-rebuild after review'.
+    Never raises: if the rebuild fails (e.g. PDF moved), the digest is already saved.
+    """
+    try:
+        from zotero_summarizer.services.library import paper_render  # lazy: avoids circular at load time
+        state = paper_render._read_state(item_key)
+        if state is None or state.get("status") != "completed":
+            return
+        paper_render.build_paper_read(item_key, force=True)
+    except Exception as exc:  # noqa: BLE001 — auto-rebuild is user-authorized best-effort
+        LOGGER.warning("auto-rebuild after deep review failed for %s: %s", item_key, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +190,79 @@ def get_cached_review(item_key: str) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(slots=True)
+class _ExtraLayersCtx:
+    item_key: str
+    title: str
+    pdf_path: str
+    text: str
+    digest_dump: dict[str, Any]
+    llm: Any
+    config: Any
+    prestige: dict[str, Any] | None
+    prestige_floor_value: float | None
+    reporter: Any = None
+    lean_tier: bool = False
+    sub_concurrency: int = 1
+
+
+def _extra_layers(ctx: _ExtraLayersCtx) -> tuple[dict[str, Any] | None, list[dict[str, Any]] | None]:
+    """Reference-free quality eval + goal-conditioned summaries for one paper.
+
+    Each is an INDEPENDENTLY-SKIPPABLE layer (per the design): a failure degrades
+    to no panel / no board rather than blocking the digest. The broad excepts are
+    the background-worker boundary the rest of this module already uses."""
+    from pathlib import Path
+
+    sections: list[dict[str, Any]] = []
+    body = ctx.text
+    try:
+        from zotero_summarizer.services.library import _paper_read_pdf
+        content = _paper_read_pdf.extract_pdf_content(Path(ctx.pdf_path))
+        sections = content.get("sections") or []
+        body = str(content.get("full_text") or ctx.text)
+    except Exception as exc:  # noqa: BLE001 — section extraction is best-effort enrichment
+        LOGGER.warning("section extraction for %s failed: %s", ctx.item_key, exc)
+
+    qr = ctx.config.quality_review
+    runs = int(qr.lean_self_consistency_runs if ctx.lean_tier else qr.self_consistency_runs)
+    max_chars = int(qr.lean_max_text_chars if ctx.lean_tier else qr.max_text_chars)
+    quality_dump: dict[str, Any] | None = None
+    try:
+        from zotero_summarizer.services.library import quality_eval
+        ps = ctx.prestige or {}
+        quality = quality_eval.evaluate_quality(
+            title=ctx.title, full_text=body, sections=sections, digest=ctx.digest_dump,
+            llm=ctx.llm, max_chars=max_chars,
+            prestige_score=ps.get("prestige"), prestige_known=bool(ps.get("prestige_known")),
+            prestige_floor=ctx.prestige_floor_value, self_consistency_runs=runs,
+            shadow_claim_check=bool(getattr(qr, "shadow_claim_check", False)),
+            claim_check_model=str(getattr(qr, "claim_check_model", "flan-t5-large")),
+            reporter=ctx.reporter, sub_concurrency=ctx.sub_concurrency,
+        )
+        quality_dump = quality.model_dump()
+    except Exception as exc:  # noqa: BLE001 — independently-skippable layer (design)
+        LOGGER.warning("quality eval for %s failed: %s", ctx.item_key, exc)
+
+    goal_dump: list[dict[str, Any]] | None = None
+    try:
+        goals = [g for g in (ctx.config.research_goals or []) if str(g).strip()]
+        if goals:
+            from zotero_summarizer.services.library import _paper_goal_summaries
+            # Goal batching is a LEAN-tier optimization (6→1 call to spare prefill on a
+            # slow backend). On the full tier (MLX) keep per-goal calls — each goal gets
+            # the model's full attention, higher quality. Match the CLI's gating.
+            batch = bool(ctx.lean_tier and getattr(qr, "batch_goal_summaries", True))
+            summaries = _paper_goal_summaries.summarize_for_goals(
+                goals=goals, sections=sections, full_text=body, llm=ctx.llm,
+                reporter=ctx.reporter, batch=batch, sub_concurrency=ctx.sub_concurrency,
+            )
+            goal_dump = [g.model_dump() for g in summaries]
+    except Exception as exc:  # noqa: BLE001 — independently-skippable layer (design)
+        LOGGER.warning("goal summaries for %s failed: %s", ctx.item_key, exc)
+    return quality_dump, goal_dump
+
+
 def _review_one(
     item: dict[str, Any],
     *,
@@ -154,6 +271,12 @@ def _review_one(
     extractor: Any,
     llm: Any,
     quality_enabled: bool,
+    llm_digest: Any = None,
+    focus_prompt: str = "",
+    prestige_scores: dict[str, Any] | None = None,
+    prestige_floor_value: float | None = None,
+    lean_tier: bool = False,
+    sub_concurrency: int = 1,
 ) -> dict[str, Any] | None:
     """Condensed paper DIGEST (what it's about + how to use it + quality) for one
     library item, from its LOCAL Zotero PDF only. ``None`` when the item vanished
@@ -175,18 +298,34 @@ def _review_one(
     pdf_path = str(detail.get("pdf_path") or "")
 
     digest_dump: dict[str, Any] | None = None
+    quality_dump: dict[str, Any] | None = None
+    goal_dump: list[dict[str, Any]] | None = None
     note_written = False
     note_error: str | None = None
 
     if pdf_path and quality_enabled:
+        reporter = _deep_review_progress.ReviewReporter(item_key, title, _set_progress)
+        reporter.phase("extract")
         # A corrupt PDF raises out of extract_text and is handled by the per-item
         # boundary in _run_job.
         text = extractor.extract_text(pdf_path).strip()
         if text:
+            qr = config.quality_review
+            max_chars = int(qr.lean_max_text_chars if lean_tier else qr.max_text_chars)
+            reporter.phase("digest", is_call=True)
             digest = quality_review.assess_digest(
-                title=title, full_text=text, config=config, llm=llm,
+                title=title, full_text=text, config=config, llm=llm_digest or llm,
+                focus_prompt=focus_prompt, max_chars=max_chars,
             )
             digest_dump = digest.model_dump()
+            quality_dump, goal_dump = _extra_layers(_ExtraLayersCtx(
+                item_key=item_key, title=title, pdf_path=pdf_path, text=text,
+                digest_dump=digest_dump, llm=llm, config=config,
+                prestige=(prestige_scores or {}).get(item_key),
+                prestige_floor_value=prestige_floor_value, reporter=reporter,
+                lean_tier=lean_tier, sub_concurrency=sub_concurrency,
+            ))
+            reporter.phase("note")
             try:
                 from zotero_summarizer.services.zotero.zotero import zotero_upsert_digest_note
                 zotero_upsert_digest_note(item_key, digest)
@@ -194,9 +333,12 @@ def _review_one(
             except Exception as exc:  # noqa: BLE001 — note write must not fail the digest
                 note_error = f"{type(exc).__name__}: {exc}"
                 LOGGER.warning("digest note write for %s failed: %s", item_key, exc)
+            reporter.summary()
 
     return {
         "digest": digest_dump,
+        "quality": quality_dump,
+        "goal_summaries": goal_dump,
         "needs_pdf": not bool(pdf_path),
         "gate_relevance": item.get("gate_relevance"),
         "reviewed_at": now_iso_z(),
@@ -205,7 +347,24 @@ def _review_one(
     }
 
 
-def _run_job(items: list[dict[str, Any]]) -> None:
+def _load_prestige_context() -> tuple[dict[str, Any], float | None]:
+    """``(scores_by_item, library_prestige_floor)`` for the quality HIGHLIGHT bar.
+
+    Reads the existing global score cache (one read per job). Boundary: a missing/
+    unreadable cache yields ``({}, None)`` so the floor is simply inert — never a
+    crash, and never demotes papers (asymmetric)."""
+    try:
+        scores, _stale = reading_queue.read_score_cache_with_staleness()
+    except Exception as exc:  # noqa: BLE001 — prestige is optional enrichment
+        LOGGER.warning("prestige context unavailable: %s", exc)
+        return {}, None
+    floor = reading_queue.prestige_floor(
+        [(s.get("prestige"), bool(s.get("prestige_known"))) for s in scores.values()]
+    )
+    return scores, floor
+
+
+def _run_job(items: list[dict[str, Any]], *, focus_prompt: str = "") -> None:
     """Background worker: deep-review ``items`` concurrently, writing the cache
     incrementally from this (single) thread so progress is visible. The LLM is
     the configured **deep_review** stage client (``goals.yaml:
@@ -221,11 +380,27 @@ def _run_job(items: list[dict[str, Any]]) -> None:
             raise RuntimeError("Zotero reader unavailable; cannot deep-review")
         quality_enabled = bool(cfg.enabled and extractor is not None)
         llm = app.resolve_stage_client("deep_review")
+        # DIGEST reasons (quality); trivial calls keep the fast thinking-off default
+        # (a thinking-off digest goes empty/hallucinates — see README). No-op sans flag.
+        llm_digest = app.resolve_stage_client("deep_review", enable_thinking=True)
         provider = app.resolve_stage_provider("deep_review")
+        # `lean_deep_review` providers (ollama, prefill-bound) use the cheaper tier
+        # (smaller text, 1 rubric run, batched goals); keyed on the flag, NOT
+        # is_local (MLX is loopback but fast). See services/library/README.md.
+        lean_tier = bool(getattr(provider, "lean_deep_review", False))
+        # Sub-call concurrency: how many rubric samples / goal calls run in parallel
+        # WITHIN a single paper review (local→serial for RAM safety, remote→capped).
+        # Shared with verify-deep-review so the CLI receipt matches production.
+        sub_concurrency = deep_review_sub_concurrency(provider)
 
         cache = _read_all()
+        # Library-wide prestige floor for the quality HIGHLIGHT bar (asymmetric —
+        # never demotes uncited papers; inert when there's no OpenAlex coverage).
+        prestige_scores, prestige_floor_value = _load_prestige_context()
         # Serial for a local model (protect RAM), configured cap for a remote one.
         max_workers = effective_llm_concurrency(provider, len(items) or 1)
+        wrote = 0
+        errors: list[str] = []
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = {
                 pool.submit(
@@ -235,7 +410,13 @@ def _run_job(items: list[dict[str, Any]]) -> None:
                     config=config,
                     extractor=extractor,
                     llm=llm,
+                    llm_digest=llm_digest,
                     quality_enabled=quality_enabled,
+                    focus_prompt=focus_prompt,
+                    prestige_scores=prestige_scores,
+                    prestige_floor_value=prestige_floor_value,
+                    lean_tier=lean_tier,
+                    sub_concurrency=sub_concurrency,
                 ): it
                 for it in items
             }
@@ -246,22 +427,32 @@ def _run_job(items: list[dict[str, Any]]) -> None:
                     if entry is not None:
                         cache[str(it["item_key"])] = entry
                         _write_all(cache)
+                        _try_rebuild_render(str(it["item_key"]))
+                        wrote += 1
                 except Exception as exc:  # noqa: BLE001 — per-item background boundary
                     LOGGER.warning("deep_review failed item=%s: %s", it.get("item_key"), exc)
+                    errors.append(f"{type(exc).__name__}: {exc}")
                 with _LOCK:
                     _STATE["completed"] += 1
-        finish(error=None)
+        # Fail loud when the run produced NOTHING and items errored (e.g. the
+        # deep_review LLM endpoint is unreachable): otherwise the job reports a
+        # clean 'ready' with an empty cache and the UI silently shows no digest.
+        # A partial run (≥1 cached entry) stays 'ready' — empty results are valid.
+        finish(error=_summarize_errors(errors, provider) if errors and wrote == 0 else None)
     except Exception as exc:  # noqa: BLE001 — background worker boundary
         LOGGER.exception("deep_review job crashed")
         finish(error=f"{type(exc).__name__}: {exc}")
 
 
 def start(
-    top_k: int = _DEFAULT_TOP_K, *, item_keys: list[str] | None = None,
+    top_k: int = _DEFAULT_TOP_K,
+    *,
+    item_keys: list[str] | None = None,
+    focus_prompt: str = "",
 ) -> dict[str, Any]:
     """Kick off a deep review (single-flight). With ``item_keys`` set, reviews
     exactly those papers (the per-paper button); otherwise the top-``top_k``
-    unread picks.
+    unread picks. ``focus_prompt`` shapes the LLM's emphasis for this run.
 
     Returns the current ``status()``. A no-op (returns the in-flight status)
     when a run is already going.
@@ -302,7 +493,7 @@ def start(
         finish(error=None)
         return status()
 
-    run_in_background(lambda: _run_job(items))
+    run_in_background(lambda: _run_job(items, focus_prompt=focus_prompt))
     return status()
 
 

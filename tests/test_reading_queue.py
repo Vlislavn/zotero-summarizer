@@ -90,7 +90,11 @@ def _isolate(monkeypatch, tmp_path):
         reading_queue, "get_settings",
         lambda: SimpleNamespace(corpus_db_path=tmp_path / "c.db", triage_db_path=tmp_path / "t.db"),
     )
-    monkeypatch.setattr(repositories, "list_label_verdict_keys", lambda db_path: set())
+    monkeypatch.setattr(repositories, "list_label_verdict_priorities", lambda db_path: {})
+    # No review-fleet proposals by default (hermetic — never reads the real model
+    # dir's proposed_verdicts.json); tests that exercise the attach override this.
+    from zotero_summarizer.services.library.review_fleet import verdict_store
+    monkeypatch.setattr(verdict_store, "read_all", lambda: {})
     yield
     reading_queue.finish(error=None)
 
@@ -157,21 +161,106 @@ def test_filters_passed_through_to_reader(monkeypatch):
     assert captured == {"collection_key": "COLL", "tag": "🧪 method", "search": "brain"}
 
 
-def test_excludes_items_with_a_user_verdict(monkeypatch):
-    """A paper the user has verdicted (esp. dont_read) is 'handled' and must not
-    appear in Read next — even though it has no engagement emoji."""
+def test_dont_read_verdict_hides_paper(monkeypatch):
+    """A ``dont_read`` verdict is 'handled' and must not appear in Read next —
+    even though it has no engagement emoji (a rejected paper must not reappear)."""
     from zotero_summarizer.storage import repositories
 
     _patch_state(monkeypatch, _FakeReader([_item("A"), _item("V")]), _FakeGate("sha1"))
     _seed("sha1", A=3.0, V=4.0)
     monkeypatch.setattr(
-        repositories, "list_label_verdict_keys",
-        lambda db_path: {"V"},
+        repositories, "list_label_verdict_priorities",
+        lambda db_path: {"V": "dont_read"},
     )
     res = reading_queue.build_reading_queue()
     keys = [i["item_key"] for i in res["items"]]
     assert "V" not in keys and "A" in keys
     assert res["read_hidden"] == 1  # V counted as handled/hidden
+
+
+def test_proposed_verdict_attached_to_rows(monkeypatch):
+    """The review-fleet's pre-decided verdict is attached to each row as
+    ``proposed_verdict`` (a SUGGESTION the user Confirms/Overrides); rows without
+    a proposal carry ``None``."""
+    from zotero_summarizer.services.library.review_fleet import verdict_store
+
+    _patch_state(monkeypatch, _FakeReader([_item("A"), _item("B")]), _FakeGate("sha1"))
+    _seed("sha1", A=3.0, B=4.0)
+    monkeypatch.setattr(
+        verdict_store, "read_all",
+        lambda: {"A": {"proposed": "must_read", "confidence": 0.85}},
+    )
+    res = reading_queue.build_reading_queue()
+    by_key = {i["item_key"]: i for i in res["items"]}
+    assert by_key["A"]["proposed_verdict"] == {"proposed": "must_read", "confidence": 0.85}
+    assert by_key["B"]["proposed_verdict"] is None  # no proposal yet
+
+
+def test_proposed_dont_read_does_not_hide_paper(monkeypatch):
+    """A ``dont_read`` SUGGESTION must NOT auto-hide a paper — only the user's
+    CONFIRMED ``dont_read`` label (via _verdict_priorities) does. The proposal is
+    display-only and is never routed through the handled/hide logic."""
+    from zotero_summarizer.storage import repositories
+    from zotero_summarizer.services.library.review_fleet import verdict_store
+
+    _patch_state(monkeypatch, _FakeReader([_item("A"), _item("S")]), _FakeGate("sha1"))
+    _seed("sha1", A=3.0, S=4.0)
+    monkeypatch.setattr(repositories, "list_label_verdict_priorities", lambda db_path: {})
+    monkeypatch.setattr(
+        verdict_store, "read_all",
+        lambda: {"S": {"proposed": "dont_read", "confidence": 0.75}},
+    )
+    res = reading_queue.build_reading_queue()
+    keys = [i["item_key"] for i in res["items"]]
+    assert "S" in keys  # the dont_read SUGGESTION did not hide it
+    assert res["read_hidden"] == 0
+    proposed = next(i for i in res["items"] if i["item_key"] == "S")["proposed_verdict"]
+    assert proposed["proposed"] == "dont_read"
+
+
+def test_positive_verdict_stays_visible_and_pins_to_top(monkeypatch):
+    """REGRESSION: a positive verdict (must/should/could_read) is a reading
+    INTENT, not 'done' — the paper must stay in Read next AND pin to the top,
+    even with a lower relevance score than the rest. Previously ANY verdict
+    marked a paper 'handled', so labelling a paper made it vanish from the queue
+    (unfindable). Only ``dont_read`` hides; positive labels surface."""
+    from zotero_summarizer.storage import repositories
+
+    # L has the LOWEST relevance (2.0) but a must_read label → must lead the list.
+    _patch_state(monkeypatch, _FakeReader([_item("A"), _item("B"), _item("L")]), _FakeGate("sha1"))
+    _seed("sha1", A=3.0, B=4.5, L=2.0)
+    monkeypatch.setattr(
+        repositories, "list_label_verdict_priorities",
+        lambda db_path: {"L": "must_read"},
+    )
+    res = reading_queue.build_reading_queue()
+    keys = [i["item_key"] for i in res["items"]]
+    assert keys[0] == "L"                       # labelled paper pinned to the top
+    assert set(keys) == {"A", "B", "L"}         # nothing hidden
+    assert res["read_hidden"] == 0
+    pinned = next(i for i in res["items"] if i["item_key"] == "L")
+    assert pinned["user_priority"] == "must_read"  # surfaced for the UI badge
+
+
+def test_positive_verdicts_pin_in_priority_order(monkeypatch):
+    """Multiple labelled papers pin to the top in priority order (must > should >
+    could), preserving the relevance order WITHIN each tier; unlabelled papers
+    follow. So the user's explicit ranking wins over the model's."""
+    from zotero_summarizer.storage import repositories
+
+    _patch_state(
+        monkeypatch,
+        _FakeReader([_item("could"), _item("plain"), _item("must"), _item("should")]),
+        _FakeGate("sha1"),
+    )
+    _seed("sha1", could=4.9, plain=4.8, must=1.0, should=1.0)
+    monkeypatch.setattr(
+        repositories, "list_label_verdict_priorities",
+        lambda db_path: {"must": "must_read", "should": "should_read", "could": "could_read"},
+    )
+    res = reading_queue.build_reading_queue()
+    keys = [i["item_key"] for i in res["items"]]
+    assert keys == ["must", "should", "could", "plain"]
 
 
 def test_read_items_hidden_live_and_shown_with_toggle(monkeypatch):

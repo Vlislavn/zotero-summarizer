@@ -13,7 +13,7 @@ errors.py  ── APIError -> uniform JSON error body + handlers
 
 | file | responsibility |
 |---|---|
-| `app.py` | `create_app()` factory — wiring, SPA mount, exception handlers, lifespan (no import-time app; uvicorn uses `app:create_app` with `factory=True`) |
+| `app.py` | `create_app()` factory — wiring, SPA mount, exception handlers, lifespan (no import-time app; uvicorn uses `app:create_app` with `factory=True`). The lifespan runs `setup.bootstrap.bootstrap_phase0` (idempotent first-run seed of `goals.yaml` etc., never overwrites) **before** `lifecycle.startup`, which fails fast on a missing config. |
 | `errors.py` | `APIError` + the canonical error schema and FastAPI handlers |
 | `routes/` | one module per resource (see routes/README.md) |
 

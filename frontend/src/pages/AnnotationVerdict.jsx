@@ -15,6 +15,10 @@ import {
   fetchBorderSuggestions,
 } from '../api/goldenApi.js';
 import { fetchCollections, fetchTags } from '../api/libraryApi.js';
+import { humanizeError } from '../utils/humanizeError.js';
+import { useKeyboardNav } from '../hooks/useKeyboardNav.js';
+import { useOptimisticAction } from '../hooks/useOptimisticAction.js';
+import { useFocusOnChange } from '../hooks/useFocusOnChange.js';
 import PaperListItem from '../components/PaperListItem.jsx';
 import ProvenanceBreakdown from '../components/ProvenanceBreakdown.jsx';
 import AnnotationsList from '../components/AnnotationsList.jsx';
@@ -22,21 +26,20 @@ import NotesList from '../components/NotesList.jsx';
 import VerdictPanel from '../components/VerdictPanel.jsx';
 import AuthorByline from '../components/AuthorByline.jsx';
 import PaperDetailLayout from '../components/PaperDetailLayout.jsx';
-import LinksRow from '../components/paper/LinksRow.jsx';
-import TagOfInterestEditor from '../components/paper/TagOfInterestEditor.jsx';
-import DeepReviewSection from '../components/paper/DeepReviewSection.jsx';
+import PaperDetailView from '../components/paper/PaperDetailView/index.jsx';
+import HintBanner from '../components/ui/HintBanner.jsx';
 import {
   PRIORITY_FILTERS,
   FLAG_FILTERS,
+  prettyFlag,
   PRIORITY_BY_KEY,
+  ANNOTATE_HINT_KEY,
+  ANNOTATE_HINT_TEXT,
   FilterChip,
   ErrorBanner,
-  AbstractBlock,
   GroundTruthOneLiner,
   EffectiveLabelsStrip,
   TriageProgress,
-  AnnotateHintBanner,
-  readAnnotateHintDismissed,
 } from './AnnotationVerdict_helpers.jsx';
 
 // Flatten the Zotero collection tree into indented <option>s for a compact
@@ -113,7 +116,8 @@ export default function AnnotationVerdict() {
   // optimistic auto-advance on verdict save, flashStatus for keyboard feedback.
   const [flashStatus, setFlashStatus] = useState(null);
   const [sortOrder, setSortOrder] = useState('score_desc');
-  const [hintDismissed, setHintDismissed] = useState(readAnnotateHintDismissed);
+  // Open/closed state of the embedded paper-brief pane (parity with Library's InlineAnnotate).
+  const [readerOpen, setReaderOpen] = useState(false);
   const listRef = useRef(null);
 
   // ---------- List query ----------
@@ -314,36 +318,43 @@ export default function AnnotationVerdict() {
   }
 
   // Optimistic save: advance to next paper instantly, run the mutation in the
-  // background. Doherty Threshold: keeps batch-mode flow under 400 ms perceived.
+  // background, roll the selection back on error. Doherty Threshold: keeps
+  // batch-mode flow under 400 ms perceived. The advance-then-mutate-then-
+  // rollback sequence is the reusable useOptimisticAction hook.
+  const runOptimisticSave = useOptimisticAction({
+    mutate: submitMutation.mutate,
+    optimisticUpdate: (_vars, ctx) => {
+      setFlashStatus(`Saved ${ctx.itemKey} → ${ctx.user_priority}`);
+      setTimeout(() => setFlashStatus(null), 1500);
+      advance('next');
+    },
+    onSuccess: (data, _vars, ctx) => {
+      // The verdict is mirrored to Zotero as a `label:<priority>` tag (the
+      // ground truth) and the comment as a note. Flag a soft failure on either
+      // (e.g. Zotero open) without undoing the saved verdict.
+      const soft = data?.label_error || data?.note_error;
+      if (soft) {
+        const what = data?.label_error ? 'label not written' : 'note not written';
+        setFlashStatus(`Saved ${ctx.itemKey} → ${ctx.user_priority} (${what}: ${soft})`);
+        setTimeout(() => setFlashStatus(null), 4000);
+      }
+    },
+    rollback: (err, _vars, ctx) => {
+      setSelectedKey(ctx.itemKey);
+      setFlashStatus(`Save failed for ${ctx.itemKey}: ${humanizeError(err)}`);
+    },
+  });
+
   const handleVerdictSubmit = useCallback(
     ({ user_priority, comment }) => {
       if (!selectedKey) return;
       const itemKey = selectedKey;
-      setFlashStatus(`Saved ${itemKey} → ${user_priority}`);
-      setTimeout(() => setFlashStatus(null), 1500);
-      advance('next');
-      submitMutation.mutate(
+      runOptimisticSave(
         { item_key: itemKey, user_priority, comment },
-        {
-          onSuccess: (data) => {
-            // The verdict is mirrored to Zotero as a `label:<priority>` tag (the
-            // ground truth) and the comment as a note. Flag a soft failure on
-            // either (e.g. Zotero open) without undoing the saved verdict.
-            const soft = data?.label_error || data?.note_error;
-            if (soft) {
-              const what = data?.label_error ? 'label not written' : 'note not written';
-              setFlashStatus(`Saved ${itemKey} → ${user_priority} (${what}: ${soft})`);
-              setTimeout(() => setFlashStatus(null), 4000);
-            }
-          },
-          onError: (err) => {
-            setSelectedKey(itemKey);
-            setFlashStatus(`Save failed for ${itemKey}: ${err.message || err}`);
-          },
-        },
+        { context: { itemKey, user_priority } },
       );
     },
-    [selectedKey, advance, submitMutation],
+    [selectedKey, runOptimisticSave],
   );
 
   function handleVerdictDelete() {
@@ -352,53 +363,42 @@ export default function AnnotationVerdict() {
   }
 
   // ---------- Keyboard shortcuts ----------
-  // Disabled while the user is typing in the comment textarea or the search box.
-  useEffect(() => {
-    function onKey(e) {
-      const t = e.target;
-      const isTyping =
-        t && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && t.type !== 'checkbox'));
-      if (isTyping) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+  // j/k move between papers; 1–4 set a priority. Disabled while typing in the
+  // comment textarea or the search box (the reusable useKeyboardNav hook owns
+  // the typing/modifier guards). The number-key path keeps Annotate's overwrite
+  // guard so a fumbled key can't silently replace a deliberate verdict.
+  const handlePriorityKey = useCallback(
+    (priority) => {
+      const existing = detailQuery.data?.verdict ?? null;
+      if (
+        existing
+        && existing.user_priority
+        && existing.user_priority !== priority
+        && !window.confirm(
+          `Overwrite your verdict (${existing.user_priority} → ${priority}) for this paper?`,
+        )
+      ) {
+        return;
+      }
+      handleVerdictSubmit({ user_priority: priority, comment: existing?.comment ?? '' });
+    },
+    [detailQuery.data, handleVerdictSubmit],
+  );
 
-      if (e.key === 'j') {
-        e.preventDefault();
-        advance('next');
-        return;
-      }
-      if (e.key === 'k') {
-        e.preventDefault();
-        advance('prev');
-        return;
-      }
-      if (PRIORITY_BY_KEY[e.key] && selectedKey) {
-        e.preventDefault();
-        const priority = PRIORITY_BY_KEY[e.key];
-        const existing = detailQuery.data?.verdict ?? null;
-        // Overwrite guard, relocated from the mouse path's "Edit" gate
-        // (Tesler's Law): a number key commits instantly for a new or unchanged
-        // verdict — the common batch case — but changing an existing verdict to
-        // a different value asks first, so a fumbled key can't silently destroy
-        // a deliberate label.
-        if (
-          existing
-          && existing.user_priority
-          && existing.user_priority !== priority
-          && !window.confirm(
-            `Overwrite your verdict (${existing.user_priority} → ${priority}) for this paper?`,
-          )
-        ) {
-          return;
-        }
-        handleVerdictSubmit({ user_priority: priority, comment: existing?.comment ?? '' });
-        return;
-      }
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [advance, selectedKey, detailQuery.data, handleVerdictSubmit]);
+  useKeyboardNav({
+    onPrev: () => advance('prev'),
+    onNext: () => advance('next'),
+    onAction: handlePriorityKey,
+    actionKeys: PRIORITY_BY_KEY,
+    hasSelection: Boolean(selectedKey),
+    deps: [advance, selectedKey, handlePriorityKey],
+  });
 
   const detail = detailQuery.data;
+
+  // Keep keyboard focus on the detail pane after the selection changes so j/k
+  // navigation stays anchored where the user's attention moved.
+  const detailFocusRef = useFocusOnChange(selectedKey);
 
   // Right column: empty / loading / loaded
   let detailContent = null;
@@ -428,6 +428,8 @@ export default function AnnotationVerdict() {
   } else if (detail) {
     detailContent = (
       <PaperDetailLayout
+        paneRef={detailFocusRef}
+        tabIndex={-1}
         topStrip={<DetailTopStrip detail={detail} />}
         bottomStrip={
           <div className="space-y-2">
@@ -457,40 +459,32 @@ export default function AnnotationVerdict() {
       >
         <ErrorBanner error={detailQuery.error} title="Detail load failed" />
 
-        {/* Links: abstract / DOI / full PDF (shared with Library) */}
-        <LinksRow detail={detail} itemKey={detail.item_key} />
-
-        {/* Deep review (full-text quality + relevance, shared with Library) */}
-        <DeepReviewSection
+        {/* Shared paper-detail assembly (links + deep review + brief + ask +
+            abstract + tags), read-only here. Annotate-only tails — provenance,
+            annotations, notes — follow via `extras`. */}
+        <PaperDetailView
+          mode="readonly"
+          detail={detail}
           itemKey={detail.item_key}
-          deep={detail.deep_review}
-          hasPdf={detail.has_pdf}
-          onDone={() => queryClient.invalidateQueries({ queryKey: ['review-detail', selectedKey] })}
+          readerOpen={readerOpen}
+          onReaderOpenChange={setReaderOpen}
+          onDeepReviewDone={() =>
+            queryClient.invalidateQueries({ queryKey: ['review-detail', selectedKey] })}
+          onTagsChanged={() =>
+            queryClient.invalidateQueries({ queryKey: ['review-detail', selectedKey] })}
+          extras={
+            <>
+              {/* Provenance */}
+              <ProvenanceBreakdown provenance={detail.provenance} />
+
+              {/* Annotations */}
+              <AnnotationsList annotations={detail.annotations} />
+
+              {/* Notes */}
+              <NotesList notes={detail.notes} />
+            </>
+          }
         />
-
-        {/* Abstract */}
-        <AbstractBlock abstract={detail.abstract} />
-
-        {/* Tags of interest: emoji signals + free text (shared with Library) */}
-        <div>
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
-            Tags
-          </h3>
-          <TagOfInterestEditor
-            itemKey={detail.item_key}
-            tags={detail.tags}
-            onChanged={() => queryClient.invalidateQueries({ queryKey: ['review-detail', selectedKey] })}
-          />
-        </div>
-
-        {/* Provenance */}
-        <ProvenanceBreakdown provenance={detail.provenance} />
-
-        {/* Annotations */}
-        <AnnotationsList annotations={detail.annotations} />
-
-        {/* Notes */}
-        <NotesList notes={detail.notes} />
       </PaperDetailLayout>
     );
   } else {
@@ -526,9 +520,9 @@ export default function AnnotationVerdict() {
 
   return (
     <>
-      {!hintDismissed && (
-        <AnnotateHintBanner onDismiss={() => setHintDismissed(true)} />
-      )}
+      <HintBanner storageKey={ANNOTATE_HINT_KEY} className="mb-3">
+        {ANNOTATE_HINT_TEXT}
+      </HintBanner>
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
       {/* ---------- Left column: paper list ---------- */}
       <aside
@@ -583,7 +577,7 @@ export default function AnnotationVerdict() {
               Advanced filters
               {flagFilter && (
                 <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
-                  {flagFilter}
+                  {prettyFlag(flagFilter)}
                 </span>
               )}
             </summary>

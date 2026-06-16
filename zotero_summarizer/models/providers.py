@@ -61,6 +61,18 @@ class ProviderConfig(BaseModel):
     # budget — 16384 — or the thinking phase eats the whole allowance; chat models are
     # fine at 4096.
     max_tokens: int = Field(default=4096, ge=1)
+    # Use the cheaper deep-review TIER when this provider runs the `deep_review` stage:
+    # smaller text cap, 1 self-consistency run, batched goal summaries. Set it on a
+    # prefill-bound backend (e.g. ollama) that is too slow for the full review. This is
+    # INDEPENDENT of `is_local` (which is loopback/concurrency only): MLX runs on
+    # loopback yet is fast, so it stays on the full tier with this flag left False.
+    lean_deep_review: bool = Field(default=False)
+    # Max concurrent LLM sub-calls within a single deep review (rubric samples, goal
+    # summaries). None → inherit the global triage_job_concurrency cap. Local providers
+    # always get 1 regardless of this value (RAM protection). For remote reasoning
+    # models (e.g. kather/sota) set to 3–4 so the 3 rubric runs and 6 goal calls fan
+    # out concurrently without hammering the endpoint.
+    max_sub_concurrency: Optional[int] = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def _require_base_url_for_openai(self) -> "ProviderConfig":

@@ -7,6 +7,9 @@ import {
   reviewConfirmAllGateRejected,
 } from '../api/reviewApi.js';
 import { priorityClass, reviewPaperUrl } from './reviewHelpers.js';
+import { pretty } from '../utils/priorityLabels.js';
+import VerdictPicker from '../components/VerdictPicker.jsx';
+import { humanizeError } from '../utils/humanizeError.js';
 
 // Tabs the Today funnel can deep-link into (?state=gate_rejected etc.).
 const VALID_STATES = new Set(['awaiting_review', 'gate_rejected']);
@@ -54,7 +57,7 @@ function ReviewItem({ item, state, localState, onAction }) {
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <span className={`font-bold uppercase tracking-wide px-2 py-0.5 rounded ${priorityClass(item.reading_priority)}`}>
-              {item.reading_priority || '?'}
+              {item.reading_priority ? pretty(item.reading_priority) : '?'}
             </span>
             <span className="mono text-slate-500">
               {item.composite_score != null ? Number(item.composite_score).toFixed(2) : '—'}
@@ -113,19 +116,11 @@ function ReviewItem({ item, state, localState, onAction }) {
             </button>
           </>
         )}
-        <span className="text-xs text-slate-500 ml-1">Relabel:</span>
-        <button type="button" onClick={() => onAction(item.id, 'relabel', 'must_read')}
+        <VerdictPicker
+          label="Relabel:"
           disabled={Boolean(localState)}
-          className="px-2 py-1 rounded-lg text-xs border border-amber-300 bg-amber-50 hover:bg-amber-100 disabled:opacity-50">must</button>
-        <button type="button" onClick={() => onAction(item.id, 'relabel', 'should_read')}
-          disabled={Boolean(localState)}
-          className="px-2 py-1 rounded-lg text-xs border border-sky-300 bg-sky-50 hover:bg-sky-100 disabled:opacity-50">should</button>
-        <button type="button" onClick={() => onAction(item.id, 'relabel', 'could_read')}
-          disabled={Boolean(localState)}
-          className="px-2 py-1 rounded-lg text-xs border border-slate-300 bg-slate-50 hover:bg-slate-100 disabled:opacity-50">could</button>
-        <button type="button" onClick={() => onAction(item.id, 'relabel', 'dont_read')}
-          disabled={Boolean(localState)}
-          className="px-2 py-1 rounded-lg text-xs border border-rose-300 bg-rose-50 hover:bg-rose-100 disabled:opacity-50">dont</button>
+          onPick={(priority) => onAction(item.id, 'relabel', priority)}
+        />
         {localState && (
           <span className={`text-xs ml-2 ${localState === 'approved' ? 'text-emerald-700' : 'text-rose-700'}`}>
             → {localState}
@@ -168,7 +163,7 @@ export default function Review() {
         return out;
       });
     } catch (err) {
-      setMessage(`Failed to load review queue: ${err.message || err}`);
+      setMessage(`Failed to load review queue: ${humanizeError(err)}`);
       setIsError(true);
     } finally {
       setLoading(false);
@@ -187,13 +182,13 @@ export default function Review() {
       const result = await reviewAction(id, action, label);
       const wentApproved = action === 'approve' || (action === 'relabel' && label !== 'dont_read');
       setItemState((prev) => ({ ...prev, [id]: wentApproved ? 'approved' : 'rejected' }));
-      const parts = [`Item ${id}: ${action}${label ? ` (${label})` : ''} OK`];
+      const parts = [`Item ${id}: ${action}${label ? ` (${pretty(label)})` : ''} OK`];
       if (result?.queued_pending_changes) parts.push(`queued ${result.queued_pending_changes} pending change(s)`);
       if (result?.golden_csv_row_added) parts.push('appended to golden CSV');
       setMessage(parts.join(' — '));
       setIsError(false);
     } catch (err) {
-      setMessage(`Item ${id}: ${action} failed — ${err.message || err}`);
+      setMessage(`Item ${id}: ${action} failed — ${humanizeError(err)}`);
       setIsError(true);
     }
   }, []);
@@ -216,7 +211,7 @@ export default function Review() {
       setIsError(failedCount > 0);
       await load(state);
     } catch (err) {
-      setMessage(`Apply-all failed: ${err.message || err}`);
+      setMessage(`Apply-all failed: ${humanizeError(err)}`);
       setIsError(true);
     } finally {
       setApplying(false);
@@ -225,7 +220,7 @@ export default function Review() {
 
   const handleConfirmGateRejected = useCallback(async () => {
     if (!window.confirm(
-      `Confirm all ${items.length} unaltered gate_rejected items as dont_read?\n\n`
+      `Confirm all ${items.length} unaltered gate-rejected items as ${pretty('dont_read')}?\n\n`
       + 'This appends them to zotero-summarizer-golden.csv as negative training rows. '
       + 'Already-relabelled items are skipped automatically. The next feeds run will retrain.',
     )) return;
@@ -239,7 +234,7 @@ export default function Review() {
       );
       setIsError(false);
     } catch (err) {
-      setMessage(`Bulk-confirm failed: ${err.message || err}`);
+      setMessage(`Bulk-confirm failed: ${humanizeError(err)}`);
       setIsError(true);
     } finally {
       setConfirming(false);
@@ -307,9 +302,9 @@ export default function Review() {
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div>
               <strong>Gate-rejected pile</strong> — items the classifier dropped before LLM
-              ({items.length} shown). Use <b>relabel</b> to either confirm the verdict (dont) or
-              correct false negatives. Approve / Reject are hidden here — relabel does the right
-              thing for both training and Zotero.
+              ({items.length} shown). Use <b>relabel</b> to either confirm the verdict
+              ({pretty('dont_read')}) or correct false negatives. Approve / Reject are hidden
+              here — relabel does the right thing for both training and Zotero.
             </div>
             <button
               type="button"
@@ -317,7 +312,7 @@ export default function Review() {
               disabled={confirming}
               className="px-3 py-1 rounded-lg text-xs font-semibold bg-rose-700 text-white hover:bg-rose-800 disabled:bg-slate-300"
             >
-              {confirming ? 'Writing…' : 'Confirm remaining as dont_read'}
+              {confirming ? 'Writing…' : `Confirm remaining as ${pretty('dont_read')}`}
             </button>
           </div>
         </div>

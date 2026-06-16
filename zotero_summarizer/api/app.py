@@ -67,6 +67,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         set_context(AppContext(settings=effective_settings))
+        # Phase 0: make a fresh checkout runnable with no manual `cp`/`migrate`.
+        # Idempotent + safe (never overwrites existing files); must run BEFORE
+        # startup, which fails fast on a missing goals.yaml.
+        from zotero_summarizer.services.setup.bootstrap import bootstrap_phase0
+
+        bootstrap_phase0(effective_settings)
         lifecycle.startup()
         yield
 

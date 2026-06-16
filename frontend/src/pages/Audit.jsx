@@ -6,6 +6,9 @@ import {
   auditMetrics,
   auditReset,
 } from '../api/auditApi.js';
+import VerdictPicker from '../components/VerdictPicker.jsx';
+import { pretty } from '../utils/priorityLabels.js';
+import { humanizeError } from '../utils/humanizeError.js';
 
 // Re-label Audit page — port of the `activeTab === 'audit'` block from
 // zotero_summarizer/web/ui.html. Functional parity with the Alpine version:
@@ -54,7 +57,7 @@ export default function Audit() {
       setCandidate(data?.candidate ?? null);
     } catch (err) {
       setCandidate(null);
-      setError(`Fetch-next failed: ${err.message || err}`);
+      setError(`Fetch-next failed: ${humanizeError(err)}`);
     }
   }, []);
 
@@ -67,7 +70,7 @@ export default function Audit() {
       setSession(data);
       await fetchNext();
     } catch (err) {
-      setError(`Init failed: ${err.message || err}`);
+      setError(`Init failed: ${humanizeError(err)}`);
     } finally {
       setBusy(false);
     }
@@ -83,7 +86,7 @@ export default function Audit() {
         setSession(data);
         await fetchNext();
       } catch (err) {
-        setError(`Submit failed: ${err.message || err}`);
+        setError(`Submit failed: ${humanizeError(err)}`);
       } finally {
         setBusy(false);
       }
@@ -104,7 +107,7 @@ export default function Audit() {
       if (err && err.status === 400) {
         setError('Submit at least one re-label first, then click Show metrics.');
       } else {
-        setError(`Metrics failed: ${err.message || err}`);
+        setError(`Metrics failed: ${humanizeError(err)}`);
       }
     } finally {
       setBusy(false);
@@ -121,7 +124,7 @@ export default function Audit() {
       setCandidate(null);
       setMetrics(null);
     } catch (err) {
-      setError(`Reset failed: ${err.message || err}`);
+      setError(`Reset failed: ${humanizeError(err)}`);
     } finally {
       setBusy(false);
     }
@@ -213,40 +216,7 @@ export default function Audit() {
           <div className="text-sm whitespace-pre-line text-slate-800 mb-4">
             {candidate.abstract}
           </div>
-          <div className="flex gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={() => handleSubmit('must_read')}
-              disabled={busy}
-              className="px-3 py-1 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-700 disabled:opacity-50"
-            >
-              must_read
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSubmit('should_read')}
-              disabled={busy}
-              className="px-3 py-1 rounded bg-sky-600 text-white text-sm hover:bg-sky-700 disabled:opacity-50"
-            >
-              should_read
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSubmit('could_read')}
-              disabled={busy}
-              className="px-3 py-1 rounded bg-amber-500 text-white text-sm hover:bg-amber-600 disabled:opacity-50"
-            >
-              could_read
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSubmit('dont_read')}
-              disabled={busy}
-              className="px-3 py-1 rounded bg-rose-600 text-white text-sm hover:bg-rose-700 disabled:opacity-50"
-            >
-              dont_read
-            </button>
-          </div>
+          <VerdictPicker size="md" disabled={busy} onPick={handleSubmit} />
         </div>
       )}
 
@@ -322,7 +292,7 @@ export default function Audit() {
               <span className="font-semibold">P(agree | original):</span>{' '}
               {Object.entries(metrics.by_class).map(([cls, p]) => (
                 <span key={cls} className="mr-3">
-                  {cls}: {formatPercent(p)}
+                  {pretty(cls)}: {formatPercent(p)}
                 </span>
               ))}
             </div>

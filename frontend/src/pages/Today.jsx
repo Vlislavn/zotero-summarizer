@@ -15,6 +15,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import PipelineFunnel from '../components/PipelineFunnel.jsx';
 import PaperCard from '../components/today/PaperCard.jsx';
+import NotConfiguredCard from '../components/setup/NotConfiguredCard.jsx';
+import Spinner from '../components/ui/Spinner.jsx';
+import HintBanner from '../components/ui/HintBanner.jsx';
+import { humanizeError } from '../utils/humanizeError.js';
+import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import {
   fetchDailySlate,
   addToLibrary,
@@ -39,43 +44,7 @@ function ErrorBanner({ error, title = 'Error' }) {
   return (
     <div className="my-2 p-2 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800">
       <span className="font-semibold">{title}:</span>{' '}
-      {error.message || String(error)}
-    </div>
-  );
-}
-
-function readHintDismissed() {
-  try {
-    return window.localStorage.getItem(HINT_STORAGE_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function writeHintDismissed() {
-  try {
-    window.localStorage.setItem(HINT_STORAGE_KEY, '1');
-  } catch {
-    /* no-op: incognito / disabled storage */
-  }
-}
-
-function HintBanner({ onDismiss }) {
-  return (
-    <div
-      role="note"
-      className="mb-4 flex items-start gap-3 p-3 rounded-xl border border-teal-200 bg-teal-50 text-sm text-teal-900"
-    >
-      <span className="flex-1 leading-snug">{HINT_TEXT}</span>
-      <button
-        type="button"
-        onClick={onDismiss}
-        aria-label="Dismiss hint"
-        title="Dismiss"
-        className="text-teal-700 hover:text-teal-900 leading-none px-1.5 py-0.5 rounded hover:bg-teal-100"
-      >
-        {'×'}
-      </button>
+      {humanizeError(error)}
     </div>
   );
 }
@@ -205,7 +174,11 @@ function SpotCheck({ onNavigate }) {
 export default function Today() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const [hintDismissed, setHintDismissed] = useState(readHintDismissed);
+  // Gate the Zotero/scoring-backed slate on a connected reader — otherwise the
+  // first-run "finish setup" card sits behind a "Slate load failed" error.
+  const { status } = useSetupStatus();
+  const zoteroReady = status?.zotero?.db_found === true;
+  const zoteroKnownMissing = Boolean(status) && !status?.zotero?.db_found;
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [actionMsg, setActionMsg] = useState('');
   const triageKicked = useRef(false);
@@ -216,6 +189,7 @@ export default function Today() {
   const slateQuery = useQuery({
     queryKey: ['daily-slate', { K: 15, lookback_hours: 168 }],
     queryFn: () => fetchDailySlate({ K: 15, lookback_hours: 168 }),
+    enabled: zoteroReady,
   });
 
   const addMutation = useMutation({ mutationFn: addToLibrary });
@@ -226,6 +200,7 @@ export default function Today() {
   const triageStatusQuery = useQuery({
     queryKey: ['triage-status'],
     queryFn: getTriageStatus,
+    enabled: zoteroReady,
     refetchInterval: (q) => (q.state.data?.running ? 3000 : false),
   });
   const triageStatus = triageStatusQuery.data;
@@ -257,11 +232,6 @@ export default function Today() {
       prev.size === papers.length ? new Set() : new Set(papers.map((p) => p.item_id)),
     );
   }, [papers]);
-
-  const handleDismissHint = useCallback(() => {
-    writeHintDismissed();
-    setHintDismissed(true);
-  }, []);
 
   const busy = addMutation.isPending || trashMutation.isPending;
 
@@ -298,8 +268,18 @@ export default function Today() {
   const actionError = addMutation.error || trashMutation.error;
   const selectedCount = selectedIds.size;
 
+  // Zotero not connected → the cull queue can't load. Show only the setup card.
+  if (zoteroKnownMissing) {
+    return (
+      <section className="glass rounded-2xl border border-slate-200 p-4">
+        <NotConfiguredCard />
+      </section>
+    );
+  }
+
   return (
     <section className="glass rounded-2xl border border-slate-200 p-4">
+      <NotConfiguredCard />
       <header className="mb-3 flex items-baseline justify-between flex-wrap gap-2">
         <div>
           <h2 className="text-lg font-bold text-slate-900">Today’s reading</h2>
@@ -336,9 +316,7 @@ export default function Today() {
             title="Rank the whole un-triaged feed backlog with the ML gate (no LLM). Runs in the background; processed items are marked read in Zotero."
             className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium hover:bg-slate-100 disabled:opacity-50 inline-flex items-center gap-1.5"
           >
-            {draining && (
-              <span aria-hidden="true" className="inline-block h-3 w-3 rounded-full border-2 border-slate-300 border-t-teal-600 animate-spin" />
-            )}
+            {draining && <Spinner size="xs" color="teal" />}
             {draining
               ? `Triaging (ML)… ${triageStatus?.gate_onward ?? triageStatus?.triaged ?? 0} kept`
               : 'Triage backlog'}
@@ -354,7 +332,7 @@ export default function Today() {
         </div>
       </header>
 
-      {!hintDismissed && <HintBanner onDismiss={handleDismissHint} />}
+      <HintBanner storageKey={HINT_STORAGE_KEY}>{HINT_TEXT}</HintBanner>
       <ErrorBanner error={slateQuery.error} title="Slate load failed" />
       <ErrorBanner error={actionError} title="Action failed" />
       {actionMsg && (
@@ -365,7 +343,7 @@ export default function Today() {
 
       {slateQuery.isLoading && (
         <div role="status" aria-live="polite" className="flex items-center gap-2 p-4 text-sm text-slate-600">
-          <span aria-hidden="true" className="inline-block h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-teal-600 animate-spin" />
+          <Spinner size="sm" color="teal" />
           Loading today’s slate…
         </div>
       )}
@@ -377,7 +355,7 @@ export default function Today() {
         <>
           {triageStatus?.running && (
             <div className="my-2 p-2 rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-600 flex items-center gap-2">
-              <span aria-hidden="true" className="inline-block h-3 w-3 rounded-full border-2 border-slate-300 border-t-teal-600 animate-spin" />
+              <Spinner size="xs" color="teal" />
               Triaging via the ML gate — kept {triageStatus.gate_onward ?? triageStatus.triaged ?? 0}, filtered{' '}
               {triageStatus.gate_rejected || 0}
               {triageStatus.gate_reject_rate != null

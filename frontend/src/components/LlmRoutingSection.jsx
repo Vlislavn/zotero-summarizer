@@ -1,6 +1,11 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { checkLlm, listModels } from '../api/settingsApi.js';
+// StatusPill now lives with its badge siblings in ui/Badge.jsx; re-exported here
+// so existing importers (CheckResults below, setup/StepConnectLlm) keep working.
+import { StatusPill } from './ui/Badge.jsx';
+
+export { StatusPill };
 
 // LLM providers & per-stage routing editor for the Settings page.
 //
@@ -302,23 +307,7 @@ function StageRow({
 
 // --- Operational check ----------------------------------------------------
 
-function StatusPill({ status }) {
-  const ok = status === 'operational';
-  return (
-    <span
-      className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border ${
-        ok
-          ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-          : 'bg-rose-50 border-rose-200 text-rose-800'
-      }`}
-    >
-      <span aria-hidden>{ok ? '✓' : '✗'}</span>
-      {ok ? 'operational' : 'fail'}
-    </span>
-  );
-}
-
-function CheckResults({ result }) {
+export function CheckResults({ result }) {
   if (!result) return null;
   const degraded = result.status === 'degraded';
   return (

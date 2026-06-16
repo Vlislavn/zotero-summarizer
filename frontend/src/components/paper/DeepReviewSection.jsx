@@ -1,12 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 import { runDeepReview, fetchDeepReviewStatus } from '../../api/libraryApi.js';
+import { fetchLlmReachability } from '../../api/settingsApi.js';
 import { GRADE_CLS, formatShortDate } from '../library/shared.jsx';
+import Spinner from '../ui/Spinner.jsx';
 
 const DECISION_CLS = {
   read: 'bg-emerald-100 text-emerald-800 border-emerald-300',
   skim: 'bg-amber-100 text-amber-800 border-amber-300',
   skip: 'bg-slate-100 text-slate-600 border-slate-300',
 };
+
+// "92" -> "1m 32s", "8" -> "8s". Used for the live elapsed + ETA readout so the
+// running review reports real progress instead of a fixed "~1–2 min" guess.
+function formatDuration(seconds) {
+  const s = Math.max(0, Math.round(Number(seconds) || 0));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return rem ? `${m}m ${rem}s` : `${m}m`;
+}
 
 function Section({ label, value }) {
   if (!value) return null;
@@ -23,13 +35,17 @@ function BulletSection({ label, items }) {
   return (
     <div className="text-[11px] text-slate-700">
       <span className="font-semibold text-slate-500">{label}:</span>
-      <ul className="list-disc ml-4">{list.map((x, i) => <li key={i}>{x}</li>)}</ul>
+      <ul className="list-disc ml-4">
+        {list.map((x, i) => (
+          <li key={i}>{x}</li>
+        ))}
+      </ul>
     </div>
   );
 }
 
 // Condensed paper digest: a 1-line headline (read/skip + quality grade + TL;DR),
-// with the full 7-point investigation behind one "Details" expander (Cognitive
+// with the full referee investigation behind one "Details" expander (Cognitive
 // Load / Miller's Law). Replaces the old contradictory relevance re-score.
 function DigestBlock({ deep }) {
   const d = deep.digest;
@@ -69,6 +85,7 @@ function DigestBlock({ deep }) {
           Details
         </summary>
         <div className="mt-1.5 space-y-1">
+          <Section label="Verdict" value={d.verdict} />
           <Section label="Why" value={d.read_why} />
           <BulletSection label="Read parts" items={d.read_parts} />
           <Section label="Relevance" value={d.relevance} />
@@ -104,7 +121,28 @@ function DigestBlock({ deep }) {
 export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true }) {
   const [status, setStatus] = useState({ status: 'idle', completed: 0, total: 0, error: null });
   const [error, setError] = useState(null);
+  const [focusPrompt, setFocusPrompt] = useState('');
+  // Reachability of the deep_review LLM endpoint (null = unknown/probing).
+  const [llm, setLlm] = useState(null);
   const pollRef = useRef(null);
+
+  // Proactively probe the deep_review endpoint so an unreachable model is
+  // announced BEFORE the user clicks Run — the failure that silently produced an
+  // empty brief. Cheap GET /models; a probe error is advisory and just hides the
+  // banner (never blocks the section).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const h = await fetchLlmReachability();
+        if (cancelled) return;
+        setLlm((h.stages || []).find((s) => s.stage === 'deep_review') || null);
+      } catch {
+        /* advisory probe — ignore, the run path still surfaces real errors */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // On mount, reflect any already-running review so the button doesn't silently
   // no-op (deep review is global single-flight — one at a time).
@@ -135,7 +173,7 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
   async function handleRun() {
     setError(null);
     try {
-      const s = await runDeepReview({ itemKey });
+      const s = await runDeepReview({ itemKey, focusPrompt });
       setStatus(s);
       if (s.status === 'running') poll();
       else onDone?.();
@@ -147,6 +185,16 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
   const running = status.status === 'running';
   return (
     <div className="space-y-2">
+      {llm && llm.reachable === false && (
+        <div className="rounded-xl border border-rose-300 bg-rose-50 p-3 text-xs text-rose-800" role="alert">
+          <span className="font-semibold">Deep-review model unreachable.</span>{' '}
+          <span className="font-mono">{llm.model || '(model unset)'}</span> at{' '}
+          <span className="font-mono">{llm.base_url || '(no base URL)'}</span> isn’t responding,
+          so a review will produce no digest. Start that server, or pick a reachable model in{' '}
+          <span className="font-semibold">Settings → LLM routing</span>.
+          {llm.detail && <div className="mt-1 text-[11px] text-rose-600 break-words">{llm.detail}</div>}
+        </div>
+      )}
       {deep && deep.needs_pdf && (
         <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-xs text-amber-800">
           <span className="font-semibold">No PDF yet.</span>{' '}
@@ -160,22 +208,52 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
           Needs a PDF — fetch it in Zotero first, then deep-review.
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={handleRun}
-          disabled={running}
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-50"
-          title="Run a condensed full-text digest (what it's about + how to use it + quality)"
-        >
-          {running && (
-            <span aria-hidden="true" className="inline-block h-3.5 w-3.5 rounded-full border-2 border-indigo-200 border-t-white animate-spin" />
-          )}
-          {running ? 'Analyzing the full text… (~1–2 min)' : 'Run deeper разбор'}
-        </button>
+        <div className="space-y-1.5">
+          <textarea
+            value={focusPrompt}
+            onChange={(e) => setFocusPrompt(e.target.value)}
+            disabled={running}
+            placeholder="Optional focus (e.g. 'highlight clinical applicability', 'I care about reproducibility')"
+            maxLength={1000}
+            rows={2}
+            className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11px] text-slate-700 placeholder-slate-400 resize-none focus:outline-none focus:border-indigo-400 disabled:opacity-50"
+          />
+          <button
+            type="button"
+            onClick={handleRun}
+            disabled={running}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-50"
+            title="Run a condensed full-text digest (what it's about + how to use it + quality)"
+          >
+            {running && <Spinner size="sm" color="indigo-on-fill" />}
+            {running
+              ? `Analyzing the full text…${
+                  status.progress?.eta_seconds != null
+                    ? ` (~${formatDuration(status.progress.eta_seconds)} left)`
+                    : ''
+                }`
+              : 'Run deeper review'}
+          </button>
+        </div>
       )}
       {running && (
-        <div className="text-[11px] text-indigo-600">
-          A deep review is running — the digest appears here when it's done.
+        <div className="text-[11px] text-indigo-600 space-y-0.5">
+          <div>A deep review is running — the digest appears here when it's done.</div>
+          {status.progress?.phase_label && (
+            <div className="font-semibold">
+              {status.progress.phase_label}
+              {status.progress.sub?.total > 0 &&
+                ` ${status.progress.sub.done}/${status.progress.sub.total}`}
+              {status.total > 1 && ` · paper ${status.completed + 1} of ${status.total}`}
+            </div>
+          )}
+          {status.progress?.total_elapsed_seconds != null && (
+            <div className="text-indigo-500">
+              {formatDuration(status.progress.total_elapsed_seconds)} elapsed
+              {status.progress.eta_seconds != null &&
+                ` · ~${formatDuration(status.progress.eta_seconds)} remaining`}
+            </div>
+          )}
         </div>
       )}
       {status.status === 'error' && status.error && (

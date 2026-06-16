@@ -14,6 +14,9 @@ __all__ = [
     "TriageResult",
     "QualityReview",
     "PaperDigest",
+    "GoalSummary",
+    "QualityEval",
+    "ProposedVerdict",
     "RefinedSummary",
     "SummarizeResponse",
     "CorpusItem",
@@ -99,12 +102,88 @@ class PaperDigest(QualityReview):
     impact: str = Field(default="")
     unknown_unknowns: str = Field(default="")
     implementation: List[str] = Field(default_factory=list)
+    # Remaining parts of the user's 11-part summary_structure (goal-aligned brief).
+    executive_summary: str = Field(default="")
+    key_findings: List[str] = Field(default_factory=list)
+    methods: str = Field(default="")
+    limitations: str = Field(default="")
+    industry_impact: str = Field(default="")
+    academy_impact: str = Field(default="")
 
     @field_validator("read_decision", mode="before")
     @classmethod
     def _norm_read_decision(cls, value: Any) -> str:
         v = str(value or "").strip().lower()
         return v if v in {"read", "skim", "skip"} else ""
+
+
+class GoalSummary(BaseModel):
+    """Per-goal grounded relevance result for the Goal Match Board.
+
+    Produced by ``services.library._paper_goal_summaries`` via goal-conditioned
+    hybrid retrieval over the paper's own chunks. One per standing research goal
+    (the board always renders all cells). ``retrieval_state`` distinguishes a
+    grounded negative (``miss`` = gate ran, nothing cleared the floor) from a
+    degraded-retrieval neutral (``not_retrieved``) so a confident "not addressed"
+    is never a false negative. ``summary`` is ``None`` unless the goal fired."""
+
+    goal: str = Field(default="")
+    relevant: bool = Field(default=False)
+    retrieval_state: Literal["hit", "miss", "not_retrieved"] = Field(default="not_retrieved")
+    score: float = Field(default=0.0)  # 0-3 best fused/reranked chunk score
+    summary: Optional[str] = Field(default=None)  # <=3 sentences; None when abstained
+    key_sections: List[str] = Field(default_factory=list)  # distinct evidence section titles
+    supporting_quotes: List[str] = Field(default_factory=list)  # verbatim grounded spans
+    abstained: bool = Field(default=True)
+
+
+class QualityEval(BaseModel):
+    """Reference-free, AUTHOR-BLIND full-text quality assessment computed by
+    ``services.library.quality_eval`` (not the digest LLM). A coarse 3-band
+    verdict — never a fine score — with the decomposed rubric + red flags that
+    justify it, so it stays glassbox. ``uncertain`` = self-consistency runs
+    disagreed (human look)."""
+
+    quality_band: Literal["flag", "neutral", "highlight", "uncertain", ""] = Field(default="")
+    grade: str = Field(default="")  # A-D (may echo the digest grade)
+    rubric: Dict[str, str] = Field(default_factory=dict)  # check_name -> "yes"|"no"|"na"
+    evidence: Dict[str, str] = Field(default_factory=dict)  # check_name -> verbatim quote
+    red_flags: List[str] = Field(default_factory=list)
+    overstatements: List[str] = Field(default_factory=list)  # abstract claims unsupported in body
+    claim_grounding_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    # SHADOW (Phase A): MiniCheck encoder support prob per headline claim, recorded
+    # for the encoder-vs-LLM A/B. Empty unless `quality_review.shadow_claim_check`
+    # is on; does NOT affect the band or overstatements.
+    claim_support_probs: Dict[str, float] = Field(default_factory=dict)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    passes_agreed: int = Field(default=0)  # self-consistency runs that voted the final band
+    passes_total: int = Field(default=0)   # total self-consistency runs (renders "N/M agree")
+    domain: str = Field(default="")  # clinical_bio | agentic | general
+    basis: str = Field(default="full_text")
+
+
+class ProposedVerdict(BaseModel):
+    """A PRE-DECIDED reading verdict the review-fleet computes in the background
+    from a paper's already-cached deep-review signals (digest + quality_eval) — a
+    SUGGESTION the human Confirms or Overrides, never an auto-applied label.
+
+    Computed by ``services.library.review_fleet.propose.propose_verdict`` (a pure,
+    deterministic function — NO LLM call; it only reads pre-computed signals).
+    ``proposed`` is one of the four reading priorities; ``confidence`` is lowered
+    (and a flag added) when the underlying quality signal is uncertain. It is
+    attached to a reading-queue row as ``proposed_verdict`` and is NEVER routed
+    through the hide/pin verdict logic — a ``dont_read`` suggestion must not
+    auto-hide a paper."""
+
+    proposed: Literal["must_read", "should_read", "could_read", "dont_read"]
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    rationale: str = Field(default="")
+    flags: List[str] = Field(default_factory=list)
+    # Provenance of the signals the proposal was derived from (for the UI + audit).
+    digest_read_decision: str = Field(default="")  # read | skim | skip | "" (no digest)
+    grade: str = Field(default="")  # A-D from the digest/quality_eval ("" = unknown)
+    proposed_at: str = Field(default="")
+    source: str = Field(default="review_fleet")
 
 
 class RefinedSummary(BaseModel):

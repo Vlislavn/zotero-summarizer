@@ -21,18 +21,31 @@ live LLM clients, and runs the manual "is it operational" probe.
 
 ## Files
 
-- `factory.py` — `build_client_for_provider(provider, model)` / `build_client_for_stage(resolved)`.
+- `factory.py` — `build_client_for_provider(provider, model, *, enable_thinking=None)` /
+  `build_client_for_stage(resolved)`. The optional `enable_thinking` forces the reasoning
+  flag on/off for THIS client by toggling `chat_template_kwargs.enable_thinking` — a no-op
+  for providers that don't already advertise that key (so a plain OpenAI endpoint never gets
+  an unknown extra_body key). deep_review uses it to make the DIGEST reason while the trivial
+  verification calls stay fast; `runtime.resolve_stage_client(stage, enable_thinking=...)`
+  caches the two variants by `(stage, enable_thinking)`.
   Dispatches on `ProviderConfig.type`; `resolve_api_key(provider)` reads the API key from
   the env var named by `api_key_env` (the single key-resolution point, reused by
   `model_list`) and raises `APIError(missing_api_key)` when unset. `openai` reuses
   `services._adapters.build_llm`; `anthropic` builds `integrations.llm_anthropic.AnthropicLLMClient`.
-- `operational_check.py` — `check_stages()` probes each stage's provider with a tiny
-  prompt and returns per-stage `operational | fail`. Per-stage failures are reported,
+- `operational_check.py` — `probe_provider(provider, model)` is the SINGLE shared probe
+  mechanism (a tiny prompt → `{status: operational|fail, detail}`); both the per-stage
+  `check_stages()` here AND `services/setup/validate.py`'s connection test call it, so
+  there is one probe, never two divergent ones. `check_stages()` probes each stage's
+  provider and returns per-stage `operational | fail`. Per-stage failures are reported,
   never raised: the app always starts, and the user runs this check manually to verify
   each stage. Probes run in worker threads (`asyncio.to_thread`), each bounded by a
   per-stage timeout (`_PROBE_TIMEOUT_SECS`) so a slow/loading/unreachable provider
   reports `fail: timeout` instead of hanging the button — the check always answers
-  within the timeout. Surfaced at `POST /api/admin/llm-check`.
+  within the timeout. Surfaced at `POST /api/admin/llm-check`. `check_reachability()`
+  is the CHEAP proactive companion: a per-stage `GET /models` (via `model_list`, no
+  tokens, no model load, `_REACH_TIMEOUT_SECS`) returning `reachable` + `base_url`;
+  the deep-review surface polls it on mount (`GET /api/admin/llm-reachability`) so a
+  dead endpoint shows a banner before a run rather than a silent empty digest.
 - `model_list.py` — `list_models_for_provider(provider)` resolves the key
   (`factory.resolve_api_key`) and dispatches by `type` to `integrations.llm_models`,
   returning sorted, unique model ids for the Settings model-picker. Takes the provider

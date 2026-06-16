@@ -13,9 +13,15 @@ RSS ─> [triage] ─gate─> [model] ─> SQLite ─> [api] ─> React UI ─> 
                                     approved changes ─> [zotero] ─> Zotero (backup first)
 ```
 
-`services/` holds the logic in 5 domains: **model** (ML gate), **golden**
-(labels), **triage** (feed daemon), **library** (reading), **zotero** (writes).
-Each package has a `README.md` with an ASCII sketch — read it before editing.
+`services/` holds the logic in 6 domains: **model** (ML gate), **golden**
+(labels), **triage** (feed daemon), **library** (reading + the paper brief &
+ask-paper Q&A), **zotero** (writes), and **faithbench** (the faithfulness
+benchmark that validates the abstention/grounding prompt + chunk index
+`library.qa` reuses). Each package has a `README.md` with an ASCII sketch — read
+it before editing. Note: `library.qa` imports `faithbench` and
+`faithbench._build_claims` imports `library.quality_review` — a lazy-resolved
+cycle; the clean long-term move is to lift the shared grounding primitives into a
+neutral module both import (follow-up, not required now).
 
 ## Hard rules (pre-commit enforces these)
 
@@ -27,7 +33,11 @@ Each package has a `README.md` with an ASCII sketch — read it before editing.
    modules live in a domain subpackage.
 3. **Touch a package's code → update its `README.md` in the same commit.**
 4. **All app state lives under `data/`** (gitignored). Paths come from
-   `Settings` — never hardcode `project_root / "..."`.
+   `Settings` — never hardcode `project_root / "..."`. *Sanctioned exception:*
+   the paper-read artifacts (`{name}_notes.md` / `_presentation.html` /
+   `figures/`) are written next to the Zotero PDF for upstream compatibility;
+   only their `paper_read.json` state lives under `data/paper_render/`. See
+   `services/library/README.md`.
 
 ## Workflow
 

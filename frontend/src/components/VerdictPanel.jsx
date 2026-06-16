@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { PRIORITY_LABELS, pretty } from '../utils/priorityLabels.js';
 
 // Verdict editor for a single paper.
 // Props:
@@ -12,12 +13,17 @@ import { useEffect, useState } from 'react';
 //   deleting: boolean
 //   deleteError: string | null
 
-const PRIORITIES = [
-  { key: 'must_read', label: 'must_read', cls: 'bg-emerald-600 hover:bg-emerald-700 text-white' },
-  { key: 'should_read', label: 'should_read', cls: 'bg-sky-600 hover:bg-sky-700 text-white' },
-  { key: 'could_read', label: 'could_read', cls: 'bg-amber-500 hover:bg-amber-600 text-white' },
-  { key: 'dont_read', label: 'dont_read', cls: 'bg-rose-600 hover:bg-rose-700 text-white' },
-];
+// One human vocabulary for the verdict (Mental Model / Jakob's Law): the buttons
+// read in plain words, not the raw `must_read` enum. `key` stays the wire value;
+// the human label comes from the shared `PRIORITY_LABELS` map so every surface
+// reads the same words. The `cls` palette stays here — it's button styling, not
+// vocabulary.
+export const PRIORITIES = [
+  { key: 'must_read', cls: 'bg-emerald-600 hover:bg-emerald-700 text-white' },
+  { key: 'should_read', cls: 'bg-sky-600 hover:bg-sky-700 text-white' },
+  { key: 'could_read', cls: 'bg-amber-500 hover:bg-amber-600 text-white' },
+  { key: 'dont_read', cls: 'bg-rose-600 hover:bg-rose-700 text-white' },
+].map((p) => ({ ...p, label: PRIORITY_LABELS[p.key] }));
 
 export default function VerdictPanel({
   itemKey,
@@ -58,7 +64,7 @@ export default function VerdictPanel({
   function handleDelete() {
     if (!existingVerdict) return;
     const ok = window.confirm(
-      `Delete your verdict (${existingVerdict.user_priority}) for this paper?`,
+      `Delete your verdict (${pretty(existingVerdict.user_priority)}) for this paper?`,
     );
     if (ok) onDelete();
   }
@@ -76,7 +82,7 @@ export default function VerdictPanel({
         <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 flex flex-wrap items-center gap-2">
           <span>
             Previously:{' '}
-            <span className="font-semibold">{existingVerdict.user_priority}</span>
+            <span className="font-semibold">{pretty(existingVerdict.user_priority)}</span>
             {existingVerdict.created_at && (
               <span className="text-emerald-700">
                 {' '}· {existingVerdict.created_at}
