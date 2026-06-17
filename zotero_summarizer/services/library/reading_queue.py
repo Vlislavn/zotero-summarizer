@@ -23,7 +23,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from zotero_summarizer.services._common import now_iso_z
+from zotero_summarizer.services._common import now_iso_z, write_json_atomic
 
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.library import _flight
@@ -152,14 +152,7 @@ def _read_cache_with_meta(gate_sha: str) -> tuple[dict[str, Any], str | None, bo
 
 
 def _write_cache(gate_sha: str, scores: dict[str, Any]) -> None:
-    path = _cache_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(
-        json.dumps({"gate_sha": gate_sha, "computed_at": now_iso_z(), "scores": scores}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    tmp.replace(path)
+    write_json_atomic(_cache_path(), {"gate_sha": gate_sha, "computed_at": now_iso_z(), "scores": scores})
 
 
 def scoring_from_prediction(pred: Any) -> dict[str, Any]:
@@ -403,6 +396,10 @@ def build_reading_queue(
     # Review-fleet sidecar — display-only SUGGESTION per row, never fed to the hide/pin logic below.
     from zotero_summarizer.services.library.review_fleet import verdict_store  # lazy: it imports us
     proposed_verdicts = verdict_store.read_all()
+    # Deep-review quality per row (one cache read) — display + a bounded quality lift
+    # in the sort + the "quality papers" client filter. Display-only, like the verdict.
+    from zotero_summarizer.services.library import deep_review as _dr  # lazy: it imports us
+    reviews = _dr._read_all()
 
     unread: list[dict[str, Any]] = []
     read: list[dict[str, Any]] = []
@@ -416,6 +413,7 @@ def build_reading_queue(
         handled = is_read or user_priority == "dont_read"
         entry = cached.get(it["item_key"])
         prestige_score, prestige_known = _entry_prestige(entry)
+        qual = (reviews.get(it["item_key"]) or {}).get("quality") or {}
         rec = {
             "item_key": it["item_key"],
             "title": it.get("title") or "",
@@ -430,6 +428,8 @@ def build_reading_queue(
             "prestige_score": prestige_score,
             "prestige_known": prestige_known,
             "proposed_verdict": proposed_verdicts.get(it["item_key"]),
+            "quality_grade": qual.get("grade") or None,
+            "quality_band": qual.get("quality_band") or None,
         }
         if handled:
             read.append(rec)

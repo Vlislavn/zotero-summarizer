@@ -137,6 +137,15 @@ class QualityReviewConfig(BaseModel):
     # needs the optional `minicheck` dep. See services/model/claim_checker.py.
     shadow_claim_check: bool = Field(default=False)
     claim_check_model: str = Field(default="flan-t5-large")
+    # Self-verification 2nd pass: one extra (short) LLM call that re-checks the CRITICAL
+    # items a first pass marked met — does the grounding quote actually establish the
+    # criterion? Overturns over-claims (the LLM positivity bias). On by default; set
+    # false to skip the extra call on a slow local model.
+    self_verification: bool = Field(default=True)
+    # Use the IBM Docling PDF parser (structured tables + figure captions) instead of
+    # the light fitz path. Off by default — needs the optional `docling` dep
+    # (`uv pip install docling`) + downloads layout models on first use.
+    use_docling: bool = Field(default=False)
 
 
 class ClassifierGateConfig(BaseModel):

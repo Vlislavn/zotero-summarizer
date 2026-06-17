@@ -21,6 +21,7 @@ __all__ = [
     "PathStatus",
     "ZoteroStatus",
     "ClassifierStatus",
+    "SubsystemStatus",
     "SetupStatusResponse",
     "DetectedZoteroDir",
     "DetectZoteroResponse",
@@ -82,6 +83,15 @@ class ClassifierStatus(BaseModel):
     trained_at: Optional[str] = None
 
 
+class SubsystemStatus(BaseModel):
+    # One runtime subsystem's readiness (ML gate, a critical dep, …). ``detail``
+    # carries the human reason WHEN not ready (empty when ready). Surfaced by the
+    # readiness primitive at boot, here, and via the action-boundary 503 guard.
+    name: str
+    ready: bool
+    detail: str = ""
+
+
 class SetupStatusResponse(BaseModel):
     # ``ready`` = config.valid AND research_goals_count>0 AND llm.api_key_present
     # AND zotero.db_found. reachable/classifier are advisory, NOT part of ready.
@@ -91,6 +101,9 @@ class SetupStatusResponse(BaseModel):
     paths: PathStatus
     zotero: ZoteroStatus
     classifier: ClassifierStatus
+    # Runtime subsystem readiness (additive — does not affect ``ready``). A
+    # not-ready entry tells the UI which subsystem is down and why.
+    subsystems: List[SubsystemStatus] = Field(default_factory=list)
 
 
 # --- GET /api/setup/detect-zotero ------------------------------------------

@@ -127,7 +127,7 @@ class ReviewReporter:
                 "[dr item=%s] %s done in %.1fs",
                 self._item_key, self._phase, phase_elapsed,
             )
-            # update the running median for future ETA estimates
+            # EWMA (0.7 prior / 0.3 latest) so one slow paper doesn't skew the ETA
             _PHASE_MEDIANS[self._phase] = round(
                 0.7 * _PHASE_MEDIANS.get(self._phase, phase_elapsed) + 0.3 * phase_elapsed, 1
             )

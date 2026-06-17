@@ -11,3 +11,14 @@
 # Current contents: 0 blocking findings (debug-leftover path is clean). The advisory
 # entries below are pre-existing — long functions, the WAL-pragma / best-effort
 # `except: pass` idiom, a few long param lists — frozen as known debt, never blocking.
+#
+# Frozen-contract benchmark/quality orchestrators: keyword-only entry points whose
+# param count IS the public interface; splitting them would push the params into
+# extracted helpers (no net reduction) and bundling args adds an abstraction layer
+# for an advisory nit. Sanctioned, not refactored.
+zotero_summarizer/services/faithbench/_judge.py:236:slop/too-many-params    # judge_claim — kw-only judge entry
+zotero_summarizer/services/faithbench/_judge.py:296:slop/function-too-long  # judge_run orchestrator
+zotero_summarizer/services/faithbench/_judge.py:296:slop/too-many-params    # judge_run orchestrator
+zotero_summarizer/services/faithbench/_runner.py:201:slop/function-too-long # run_benchmark orchestrator
+zotero_summarizer/services/faithbench/_runner.py:201:slop/too-many-params   # run_benchmark orchestrator
+zotero_summarizer/services/library/quality_eval.py:73:slop/too-many-params  # _run_rubric — kw-only rubric runner

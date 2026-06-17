@@ -52,8 +52,15 @@ def _looks_like_heading(line: str) -> bool:
     return False
 
 
-def extract_pdf_content(pdf_path: Path) -> dict[str, Any]:
-    """Extract metadata, section-ish text, and reference count from a PDF."""
+def extract_pdf_content(pdf_path: Path, *, use_docling: bool = False) -> dict[str, Any]:
+    """Extract metadata, section-ish text, and reference count from a PDF.
+
+    ``use_docling=True`` delegates to the high-fidelity Docling parser (TableFormer
+    structured tables + figure captions — fixes truncated tables / bad figures); the
+    default fitz path below is the light, no-extra-dep extractor."""
+    if use_docling:
+        from zotero_summarizer.services.library import _paper_docling
+        return _paper_docling.extract(pdf_path)
     with fitz.open(pdf_path) as doc:
         meta = doc.metadata or {}
         pages: list[str] = []

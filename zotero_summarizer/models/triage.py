@@ -160,6 +160,18 @@ class QualityEval(BaseModel):
     passes_total: int = Field(default=0)   # total self-consistency runs (renders "N/M agree")
     domain: str = Field(default="")  # clinical_bio | agentic | general
     basis: str = Field(default="full_text")
+    # Type-aware coverage (the honest replacement for the unvalidated 1-5 self-scores):
+    # which recognized-standard checklist was applied, and the fraction of APPLICABLE
+    # items met (grounded "yes"). ``grade`` above is DERIVED from ``coverage_fraction``.
+    paper_type: str = Field(default="")          # PaperType value the checklist was chosen for
+    coverage_standard: str = Field(default="")   # e.g. "TRIPOD+AI / PROBAST+AI"
+    coverage_met: int = Field(default=0)
+    coverage_applicable: int = Field(default=0)
+    coverage_fraction: float = Field(default=0.0, ge=0.0, le=1.0)
+    missing_critical: List[str] = Field(default_factory=list)  # critical items not met
+    # Critical items the self-verification 2nd pass OVERTURNED (first pass over-claimed
+    # them as met; the quote didn't establish the criterion) — transparency on the check.
+    self_verification_demoted: List[str] = Field(default_factory=list)
 
 
 class ProposedVerdict(BaseModel):

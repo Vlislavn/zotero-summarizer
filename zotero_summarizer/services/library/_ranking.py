@@ -76,6 +76,17 @@ def _goal_affinity(item_keys: list[str]) -> dict[str, float]:
     return cache.goal_affinity_for_items(item_keys)
 
 
+# Bounded deep-review QUALITY lift (user-requested: "качественные статьи наверху").
+# Added to the normalized blend key, capped so it can NEVER leap a relevance band or
+# override the measured goal/prestige blend (the primary signal). Library-only; a
+# paper with no deep review (no grade) gets 0. A/B float up, D nudges down slightly.
+_QUALITY_BONUS: dict[str, float] = {"A": 0.06, "B": 0.03, "C": 0.0, "D": -0.02}
+
+
+def _quality_bonus(rec: dict[str, Any]) -> float:
+    return _QUALITY_BONUS.get(str(rec.get("quality_grade") or "").upper(), 0.0)
+
+
 def _known_prestige(rec: dict[str, Any]) -> float | None:
     """The row's prestige score ONLY when it is real OpenAlex evidence
     (``prestige_known``) — else None. Cold-start / uncited / no-record rows have
@@ -106,7 +117,7 @@ def _blended_sort(unread: list[dict[str, Any]]) -> None:
     def key(r: dict[str, Any]) -> tuple[int, float, str]:
         if r["relevance_score"] is None:
             return (0, 0.0, r["date_added"])  # unscored → bottom
-        return (1, blended[id(r)], r["date_added"])
+        return (1, blended[id(r)] + _quality_bonus(r), r["date_added"])
 
     unread.sort(key=key, reverse=True)
 
@@ -150,6 +161,7 @@ __all__ = [
     "_dedup_by_content",
     "_goal_affinity",
     "_known_prestige",
+    "_quality_bonus",
     "_blended_sort",
     "sort_unread",
 ]

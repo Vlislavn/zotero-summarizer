@@ -94,7 +94,9 @@ def _wire(monkeypatch, config, *, reader, extractor, note_fn=None):
     # their own unit tests). This test asserts the orchestrator ATTACHES them.
     def _stub_layers(ctx):
         goals = list(getattr(ctx.config, "research_goals", []) or [])
-        return {"quality_band": "neutral"}, [{"goal": g, "retrieval_state": "miss"} for g in goals]
+        return ({"quality_band": "neutral"},
+                [{"goal": g, "retrieval_state": "miss"} for g in goals],
+                {"type": "empirical_ml", "confidence": 0.9, "source": "llm"})
     monkeypatch.setattr(deep_review, "_extra_layers", _stub_layers)
 
 

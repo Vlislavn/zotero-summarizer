@@ -22,13 +22,12 @@ run; the same top-K never recompute).
 """
 from __future__ import annotations
 
-import os
 import threading
 import time
 from typing import Any
 
 from zotero_summarizer.services._common import LOGGER
-from zotero_summarizer.services.library import deep_review, reading_queue
+from zotero_summarizer.services.library import _flight, deep_review, reading_queue
 
 _ENV_PREWARM_K = "ZS_DEEP_REVIEW_PREWARM_K"
 
@@ -40,23 +39,9 @@ PREWARM_POLL_INTERVAL_SECS = 3.0
 
 
 def resolve_prewarm_k(config: Any) -> int:
-    """Top-N to prewarm: ``quality_review.prewarm_on_startup_k``, SUPERSEDED by the
-    ``ZS_DEEP_REVIEW_PREWARM_K`` env var when it is set. ``0`` disables.
-
-    The env value is validated at this I/O boundary and rejected LOUDLY (a malformed
-    or negative value raises ``ValueError`` naming the var) rather than being silently
-    ignored — a typo should surface, not run with the wrong setting.
-    """
-    raw = os.getenv(_ENV_PREWARM_K)
-    if raw is not None and raw.strip():
-        try:
-            value = int(raw)
-        except ValueError as exc:
-            raise ValueError(f"{_ENV_PREWARM_K}={raw!r} must be an integer") from exc
-        if value < 0:
-            raise ValueError(f"{_ENV_PREWARM_K}={raw!r} must be >= 0")
-        return value
-    return int(getattr(config.quality_review, "prewarm_on_startup_k", 0))
+    """Top-N to prewarm, from config + the ``ZS_DEEP_REVIEW_PREWARM_K`` env override.
+    Thin wrapper over the shared resolver — see ``_flight.resolve_prewarm_k``."""
+    return _flight.resolve_prewarm_k(config, env_var=_ENV_PREWARM_K)
 
 
 def _select_uncached_top(k: int) -> list[str]:

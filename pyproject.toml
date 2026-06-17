@@ -24,6 +24,7 @@ dependencies = [
     "optuna>=4.8.0",
     "pandas>=2.0.0",
     "rank-bm25>=0.2.2",
+    "lightgbm>=4.0.0",
 ]
 
 [project.optional-dependencies]
@@ -35,6 +36,13 @@ dev = [
     # versions, so a float would desync `make scan` / the gate from the committed
     # vulture_allowlist.txt. Keep in lockstep with the .pre-commit-config pin.
     "vulture==2.16",
+]
+# Optional high-fidelity PDF parser (IBM Docling: TableFormer tables + figure
+# classification). Heavy (pulls layout models); install only when you want the
+# clean figure/table extraction path: `uv pip install docling`. Gated at runtime
+# by `quality_review.use_docling` with a fitz fallback, so the base install stays light.
+docling = [
+    "docling>=2.0.0",
 ]
 
 [project.scripts]

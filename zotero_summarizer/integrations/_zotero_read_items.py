@@ -382,7 +382,7 @@ class ZoteroItemsMixin:
         def _read(conn: sqlite3.Connection) -> dict[str, Any] | None:
             item_row = conn.execute(
                 f"""
-                SELECT i.itemID, i.key, i.dateAdded, i.dateModified, i.libraryID
+                SELECT i.itemID, i.key, i.dateAdded, i.dateModified, i.libraryID, it.typeName AS item_type
                 FROM items i
                 JOIN itemTypes it ON it.itemTypeID = i.itemTypeID
                 LEFT JOIN deletedItems di ON di.itemID = i.itemID
@@ -478,6 +478,7 @@ class ZoteroItemsMixin:
 
             return {
                 "item_key": str(item_row["key"]),
+                "item_type": str(item_row["item_type"] or ""),  # Zotero typeName (weak type prior)
                 "title": fields.get("title", "Untitled"),
                 "abstract": fields.get("abstractNote", ""),
                 "publication_date": fields.get("date", ""),

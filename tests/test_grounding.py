@@ -27,3 +27,39 @@ def test_floors_match_published_contract():
 def test_qa_reuses_the_shared_contract():
     # qa imports the shared function (single contract for qa / goal-summaries / quality).
     assert qa._quote_is_grounded is _grounding.quote_is_grounded
+
+
+def test_fuzzy_grounds_paraphrase_that_strict_rejects():
+    # Regression: smaller models paraphrase their evidence quote, so the strict
+    # verbatim bar rejected genuinely-met criteria and collapsed checklist coverage.
+    ctx = ("Annotations were obtained independently from four practicing radiologists "
+           "at the medical center, and patients were split at the subject level.")
+    paraphrase = "annotations obtained independently from four practicing radiologists at the center"
+    assert _grounding.quote_is_grounded(paraphrase, ctx) is False              # strict: not verbatim
+    assert _grounding.quote_is_grounded(paraphrase, ctx, fuzzy=True) is True   # fuzzy: content present
+
+
+def test_fuzzy_still_rejects_hallucinations():
+    ctx = ("Annotations were obtained from four practicing radiologists; the network "
+           "was trained on chest radiographs and reported an F1 score with a confidence interval.")
+    # text simply not in the body
+    assert _grounding.quote_is_grounded(
+        "the trial enrolled three thousand patients across nine centers in Asia", ctx, fuzzy=True) is False
+    # scattered common domain words (no contiguous run) must NOT ground — anti-fabrication
+    assert _grounding.quote_is_grounded(
+        "radiologists network chest trained score confidence patients centers reported obtained",
+        ctx, fuzzy=True) is False
+
+
+def test_fuzzy_is_nfkc_robust_to_ligatures():
+    # PDF extraction keeps the 'ﬁ' ligature; a model emits plain 'fi'. Must still ground.
+    ctx = "we ﬁt the classiﬁer on the training set and evaluate diagnostic eﬃciency on held-out data"
+    quote = "we fit the classifier on the training set and evaluate diagnostic efficiency"
+    assert _grounding.quote_is_grounded(quote, ctx, fuzzy=True) is True
+
+
+def test_strict_default_unchanged_for_safety_critical_callers():
+    # qa / goal-summaries call WITHOUT fuzzy → exact-span behavior preserved (faithbench guard).
+    ctx = "We evaluate DxChain on the MIMIC-IV cardiac dataset for held-out testing."
+    assert _grounding.quote_is_grounded("We evaluate DxChain on the MIMIC-IV cardiac dataset", ctx) is True
+    assert _grounding.quote_is_grounded("we assess DxChain using the MIMIC cardiac data", ctx) is False

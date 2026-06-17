@@ -33,6 +33,7 @@ from zotero_summarizer.services._common import (
     effective_llm_concurrency,
     now_iso_z,
     settings,
+    write_json_atomic,
 )
 
 from zotero_summarizer.services.library import _deep_review_progress, quality_review, reading_queue
@@ -168,14 +169,7 @@ def _read_all() -> dict[str, Any]:
 
 
 def _write_all(reviews: dict[str, Any]) -> None:
-    path = _cache_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(
-        json.dumps({"updated_at": now_iso_z(), "reviews": reviews}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    tmp.replace(path)
+    write_json_atomic(_cache_path(), {"updated_at": now_iso_z(), "reviews": reviews})
 
 
 def get_cached_review(item_key: str) -> dict[str, Any] | None:
@@ -204,10 +198,11 @@ class _ExtraLayersCtx:
     reporter: Any = None
     lean_tier: bool = False
     sub_concurrency: int = 1
+    item_type: str | None = None  # Zotero typeName — weak prior for paper-type detection
 
 
-def _extra_layers(ctx: _ExtraLayersCtx) -> tuple[dict[str, Any] | None, list[dict[str, Any]] | None]:
-    """Reference-free quality eval + goal-conditioned summaries for one paper.
+def _extra_layers(ctx: _ExtraLayersCtx) -> tuple[dict[str, Any] | None, list[dict[str, Any]] | None, dict[str, Any]]:
+    """Paper-type detection + reference-free quality eval + goal-conditioned summaries.
 
     Each is an INDEPENDENTLY-SKIPPABLE layer (per the design): a failure degrades
     to no panel / no board rather than blocking the digest. The broad excepts are
@@ -218,11 +213,14 @@ def _extra_layers(ctx: _ExtraLayersCtx) -> tuple[dict[str, Any] | None, list[dic
     body = ctx.text
     try:
         from zotero_summarizer.services.library import _paper_read_pdf
-        content = _paper_read_pdf.extract_pdf_content(Path(ctx.pdf_path))
+        content = _paper_read_pdf.extract_pdf_content(Path(ctx.pdf_path), use_docling=ctx.config.quality_review.use_docling)
         sections = content.get("sections") or []
         body = str(content.get("full_text") or ctx.text)
     except Exception as exc:  # noqa: BLE001 — section extraction is best-effort enrichment
         LOGGER.warning("section extraction for %s failed: %s", ctx.item_key, exc)
+
+    from zotero_summarizer.services.library import paper_type as _pt
+    paper_type_dump = _pt.detect_safe(ctx, sections, body, LOGGER)
 
     qr = ctx.config.quality_review
     runs = int(qr.lean_self_consistency_runs if ctx.lean_tier else qr.self_consistency_runs)
@@ -233,12 +231,12 @@ def _extra_layers(ctx: _ExtraLayersCtx) -> tuple[dict[str, Any] | None, list[dic
         ps = ctx.prestige or {}
         quality = quality_eval.evaluate_quality(
             title=ctx.title, full_text=body, sections=sections, digest=ctx.digest_dump,
-            llm=ctx.llm, max_chars=max_chars,
+            llm=ctx.llm, max_chars=max_chars, paper_type=paper_type_dump.get("type"),
             prestige_score=ps.get("prestige"), prestige_known=bool(ps.get("prestige_known")),
             prestige_floor=ctx.prestige_floor_value, self_consistency_runs=runs,
             shadow_claim_check=bool(getattr(qr, "shadow_claim_check", False)),
             claim_check_model=str(getattr(qr, "claim_check_model", "flan-t5-large")),
-            reporter=ctx.reporter, sub_concurrency=ctx.sub_concurrency,
+            reporter=ctx.reporter, sub_concurrency=ctx.sub_concurrency, self_verification=bool(qr.self_verification),
         )
         quality_dump = quality.model_dump()
     except Exception as exc:  # noqa: BLE001 — independently-skippable layer (design)
@@ -260,7 +258,7 @@ def _extra_layers(ctx: _ExtraLayersCtx) -> tuple[dict[str, Any] | None, list[dic
             goal_dump = [g.model_dump() for g in summaries]
     except Exception as exc:  # noqa: BLE001 — independently-skippable layer (design)
         LOGGER.warning("goal summaries for %s failed: %s", ctx.item_key, exc)
-    return quality_dump, goal_dump
+    return quality_dump, goal_dump, paper_type_dump
 
 
 def _review_one(
@@ -300,6 +298,7 @@ def _review_one(
     digest_dump: dict[str, Any] | None = None
     quality_dump: dict[str, Any] | None = None
     goal_dump: list[dict[str, Any]] | None = None
+    paper_type_dump: dict[str, Any] | None = None
     note_written = False
     note_error: str | None = None
 
@@ -318,12 +317,12 @@ def _review_one(
                 focus_prompt=focus_prompt, max_chars=max_chars,
             )
             digest_dump = digest.model_dump()
-            quality_dump, goal_dump = _extra_layers(_ExtraLayersCtx(
+            quality_dump, goal_dump, paper_type_dump = _extra_layers(_ExtraLayersCtx(
                 item_key=item_key, title=title, pdf_path=pdf_path, text=text,
                 digest_dump=digest_dump, llm=llm, config=config,
                 prestige=(prestige_scores or {}).get(item_key),
                 prestige_floor_value=prestige_floor_value, reporter=reporter,
-                lean_tier=lean_tier, sub_concurrency=sub_concurrency,
+                lean_tier=lean_tier, sub_concurrency=sub_concurrency, item_type=detail.get("item_type"),
             ))
             reporter.phase("note")
             try:
@@ -339,6 +338,7 @@ def _review_one(
         "digest": digest_dump,
         "quality": quality_dump,
         "goal_summaries": goal_dump,
+        "paper_type": paper_type_dump,
         "needs_pdf": not bool(pdf_path),
         "gate_relevance": item.get("gate_relevance"),
         "reviewed_at": now_iso_z(),
