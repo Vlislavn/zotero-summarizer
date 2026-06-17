@@ -44,7 +44,9 @@ export default function InlineAnnotate({
   }
 
   return (
-    <div className="mt-2 rounded-xl border border-teal-200 bg-teal-50/30 p-3 space-y-3">
+    // A single connecting accent rule ties the expanded review to its row (Law
+    // of Uniform Connectedness) — not a tinted box around boxes.
+    <div className="mt-1 border-l-2 border-teal-300 pl-4 pr-1 py-1 space-y-3">
       {detailQuery.isLoading && <div className="text-xs text-slate-500">Loading detail…</div>}
       {detailQuery.error && (
         <StatusBanner message={`Detail load failed: ${detailQuery.error.message || detailQuery.error}`} isError />

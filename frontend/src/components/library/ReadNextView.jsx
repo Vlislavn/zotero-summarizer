@@ -58,6 +58,9 @@ export default function ReadNextView({
   // reset the reveal here instead.
   useEffect(() => { setVisibleCount(REVEAL_STEP); }, [filterSig]);
   const shown = items.slice(0, visibleCount);
+  // The expanded review renders in a RIGHT-SIDE panel (not full-width below the row),
+  // so the list stays readable while you decide — "чуть правее, не размером с основную".
+  const expandedItem = expandedKey ? items.find((it) => it.item_key === expandedKey) : null;
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
@@ -219,7 +222,8 @@ export default function ReadNextView({
           </div>
         )
       )}
-      <ol className="space-y-2">
+      <div className={expandedItem ? 'lg:flex lg:gap-3 lg:items-start' : ''}>
+      <ol className={`space-y-2 ${expandedItem ? 'lg:flex-1 lg:min-w-0' : ''}`}>
         {shown.map((it, idx) => (
           <li key={it.item_key}>
             <div
@@ -303,6 +307,8 @@ export default function ReadNextView({
                 2). One-tap ratify, or Override to expand the full editor below
                 with the proposal pre-selected. Hidden once the row is expanded
                 (the editor takes over) — exactly two paths, never both at once. */}
+            {/* The fleet's Confirm/Override card stays inline on the row (small,
+                one-tap). The FULL expanded editor moves to the right-side panel. */}
             {it.proposed_verdict && expandedKey !== it.item_key && (
               <ProposedVerdictCard
                 itemKey={it.item_key}
@@ -311,20 +317,38 @@ export default function ReadNextView({
                 onOverride={() => setExpandedKey(it.item_key)}
               />
             )}
-            {expandedKey === it.item_key && (
-              <InlineAnnotate
-                itemKey={it.item_key}
-                collections={collections}
-                // Override path: pre-select the fleet's proposal in the verdict
-                // picker (Jakob's Law — same editor, just a sensible default).
-                derivedPriorityOverride={it.proposed_verdict?.proposed || null}
-                onSaved={() => { setExpandedKey(null); onSaved?.(); }}
-                onQueueRefresh={() => onSaved?.()}
-              />
-            )}
           </li>
         ))}
       </ol>
+      {/* Right-side review panel — the expanded paper detail, sticky beside the list
+          (stacks below on mobile). Narrower than the list, so the queue stays usable. */}
+      {expandedItem && (
+        <aside className="mt-2 lg:mt-0 lg:w-[44%] lg:shrink-0 lg:sticky lg:top-2 lg:self-start lg:max-h-[86vh] lg:overflow-auto rounded-xl border border-teal-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-slate-100">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-400 truncate">
+              {expandedItem.title || '(untitled)'}
+            </span>
+            <button
+              type="button"
+              onClick={() => setExpandedKey(null)}
+              title="Close review"
+              className="shrink-0 px-1.5 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="p-1">
+            <InlineAnnotate
+              itemKey={expandedItem.item_key}
+              collections={collections}
+              derivedPriorityOverride={expandedItem.proposed_verdict?.proposed || null}
+              onSaved={() => { setExpandedKey(null); onSaved?.(); }}
+              onQueueRefresh={() => onSaved?.()}
+            />
+          </div>
+        </aside>
+      )}
+      </div>
       {items.length > shown.length && (
         <div className="mt-3 flex items-center justify-center gap-3 text-xs text-slate-500">
           <span>Showing {shown.length} of {items.length}</span>

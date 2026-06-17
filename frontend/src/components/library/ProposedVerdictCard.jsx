@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { submitVerdict } from '../../api/goldenApi.js';
 import { queueRejectTag } from '../../api/libraryApi.js';
 import { pretty } from '../../utils/priorityLabels.js';
-import { GRADE_CLS } from './shared.jsx';
+import { Chip } from '../paper/review/primitives.jsx';
 
 // The Confirm/Override card (Phase 2): the review-fleet has PRE-DECIDED a reading
 // verdict for this paper (rec.proposed_verdict, computed from cached deep-review
@@ -29,23 +29,6 @@ import { GRADE_CLS } from './shared.jsx';
 // cases (no digest 0.35, ungraded skim 0.45, any uncertain/overstatement −0.2)
 // fall under it. Matches services/library/review_fleet/propose.py::_confidence.
 const CONFIDENCE_FLOOR = 0.6;
-
-// Short, human-readable gloss for the propose.py flag codes (kept terse —
-// Cognitive Load: a chip, not a sentence). Unknown codes fall through verbatim.
-const FLAG_LABELS = {
-  quality_uncertain: 'quality uncertain',
-  overstatements: 'overstated claims',
-  quality_flag: 'quality concern',
-  red_flags: 'red flags',
-};
-
-// Distinct from the amber 🏷 user-label chip and the teal ★ score (Von Restorff):
-// a keep proposal reads indigo (the Digest family), a Remove proposal reads rose
-// so the one destructive ratification is unmistakable.
-const PROPOSAL_CLS = {
-  keep: 'bg-indigo-100 text-indigo-900 border-indigo-300',
-  remove: 'bg-rose-100 text-rose-800 border-rose-300',
-};
 
 export default function ProposedVerdictCard({ itemKey, proposal, onSaved, onOverride }) {
   const [submitting, setSubmitting] = useState(false);
@@ -76,64 +59,40 @@ export default function ProposedVerdictCard({ itemKey, proposal, onSaved, onOver
     }
   }
 
-  const chipCls = isRemove ? PROPOSAL_CLS.remove : PROPOSAL_CLS.keep;
   return (
-    <div className="mt-2 rounded-xl border border-indigo-200 bg-indigo-50/40 p-2.5 space-y-2">
+    <div className="mt-2 rounded-lg border-l-[3px] border-indigo-300 bg-indigo-50/40 pl-3.5 pr-3 py-2.5 space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[10px] uppercase tracking-wider font-semibold text-indigo-500">
+        <span className="text-[11px] uppercase tracking-[0.06em] font-semibold text-indigo-500">
           Proposed
         </span>
-        {/* Von Restorff: the proposal chip — its own color, distinct from 🏷 amber
+        {/* Von Restorff: the proposal chip — its own colour, distinct from 🏷 amber
             label and ★ teal score, so the pre-decision reads as its own thing. */}
-        <span
-          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border ${chipCls}`}
+        <Chip
+          tone={isRemove ? 'rose' : 'indigo'}
           title="The review fleet pre-decided this reading verdict from the paper's cached deep-review signals. Confirm to accept, or Override to change it."
         >
           {pretty(proposed)}
-        </span>
-        {proposal.grade && (
-          <span
-            className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${GRADE_CLS[proposal.grade] || 'bg-slate-100 text-slate-700 border-slate-300'}`}
-            title="Full-text quality grade the proposal drew on"
-          >
-            Quality {proposal.grade}
-          </span>
-        )}
+        </Chip>
         <span
-          className="text-[10px] text-indigo-500"
+          className="text-[11px] text-indigo-500"
           title="How confident the fleet is in this proposal (from the agreement + strength of the cached signals)"
         >
           {Math.round(confidence * 100)}% confident
         </span>
       </div>
 
-      {proposal.rationale && (
-        <p className="text-[11px] text-slate-700">{proposal.rationale}</p>
-      )}
-
-      {flags.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1">
-          {flags.map((f) => (
-            <span
-              key={f}
-              className="px-1.5 py-0 rounded-full text-[10px] font-medium bg-amber-100 text-amber-900 border border-amber-300"
-              title="A quality signal worth a human check — so the one-tap Confirm is withheld here."
-            >
-              ⚠ {FLAG_LABELS[f] || f}
-            </span>
-          ))}
-        </div>
-      )}
-
+      {/* Subtracted (Occam / Selective Attention): the grade chip duplicated the
+          review banner's, and the rationale + per-flag pills repeated what the
+          expanded review already shows. The flags still GATE one-tap Confirm
+          (Tesler — the safety boundary stays); here they collapse to ONE terse
+          note, with the full reasons one Override-click away. */}
       {!confirmable && (
-        <p className="text-[10px] text-amber-700">
-          {flags.length > 0
-            ? 'Flagged for a check — review it before deciding.'
-            : 'Low confidence — review it before deciding.'}
+        <p className="text-[11px] text-amber-700">
+          ⚠ {flags.length > 0 ? 'Flagged' : 'Low confidence'} — open to check before deciding.
         </p>
       )}
 
-      {error && <p className="text-[11px] text-rose-700">{error}</p>}
+      {error && <p className="text-[12px] text-rose-700">{error}</p>}
 
       {/* Exactly TWO primary actions (Hick's/Tesler's) — and only ONE (Override)
           when the proposal is ambiguous, so an uncertain call always goes to the

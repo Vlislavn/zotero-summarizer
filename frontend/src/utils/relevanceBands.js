@@ -43,6 +43,7 @@ export const EMPTY_FILTERS = {
   minScore: 1,      // 1 = no floor; up to 5 in 0.5 steps
   why: [],          // multi-select of why_reason strings; [] = all
   scored: 'any',    // any | scored | unscored
+  quality: 'any',   // any | high (deep-review grade A/B) | low (C/D); the "quality papers" filter
 };
 
 export function isFilterActive(f) {
@@ -54,6 +55,7 @@ export function isFilterActive(f) {
     || (typeof f.minScore === 'number' && f.minScore > 1)
     || (f.why && f.why.length > 0)
     || f.scored !== 'any'
+    || f.quality !== 'any'
   );
 }
 
@@ -114,6 +116,15 @@ export function buildPredicate(filters, ctx) {
     if (f.scored === 'scored' && score === null) return false;
     if (f.scored === 'unscored' && score !== null) return false;
 
+    // Deep-review quality grade (only set on reviewed rows). When the filter is on,
+    // un-reviewed (ungraded) rows match neither high nor low — i.e. "quality papers"
+    // shows only the deep-reviewed, well-graded ones.
+    if (f.quality && f.quality !== 'any') {
+      const g = String(it.quality_grade || '').toUpperCase();
+      if (f.quality === 'high' && !(g === 'A' || g === 'B')) return false;
+      if (f.quality === 'low' && !(g === 'C' || g === 'D')) return false;
+    }
+
     return true;
   };
 }
@@ -128,6 +139,7 @@ export function serializeFilters(f) {
   if (typeof f.minScore === 'number' && f.minScore > 1) out.s = String(f.minScore);
   if (f.why && f.why.length) out.w = f.why.join('~');   // '~' never appears in a why label
   if (f.scored && f.scored !== 'any') out.sc = f.scored;
+  if (f.quality && f.quality !== 'any') out.q = f.quality;
   return out;
 }
 
@@ -140,5 +152,6 @@ export function hydrateFilters(searchParams) {
   const minScore = Number.isFinite(sNum) && sNum > 1 && sNum <= 5 ? sNum : 1;
   const why = (get('w') || '').split('~').filter(Boolean);
   const scored = ['scored', 'unscored'].includes(get('sc')) ? get('sc') : 'any';
-  return { bands, prestige, goal, minScore, why, scored };
+  const quality = ['high', 'low'].includes(get('q')) ? get('q') : 'any';
+  return { bands, prestige, goal, minScore, why, scored, quality };
 }

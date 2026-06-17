@@ -73,30 +73,31 @@ export default function VerdictPanel({
     <div>
       <h3 className="text-sm font-bold text-slate-900 mb-3">
         Your verdict
-        <span className="ml-2 text-[10px] uppercase tracking-wider text-slate-400 font-medium">
+        <span className="ml-2 text-[11px] uppercase tracking-wider text-slate-400 font-medium">
           1 must · 2 should · 3 could · 4 don't · j/k navigate
         </span>
       </h3>
 
       {existingVerdict && !editing && (
-        <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 flex flex-wrap items-center gap-2">
+        // A hairline row, not a tinted box — the saved verdict reads as state,
+        // with a quiet emerald accent on the value (Von Restorff stays with the
+        // priority buttons below).
+        <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-slate-200/70 pb-2.5 text-[13px] text-slate-600">
           <span>
             Previously:{' '}
-            <span className="font-semibold">{pretty(existingVerdict.user_priority)}</span>
+            <span className="font-semibold text-emerald-700">{pretty(existingVerdict.user_priority)}</span>
             {existingVerdict.created_at && (
-              <span className="text-emerald-700">
-                {' '}· {existingVerdict.created_at}
-              </span>
+              <span className="text-slate-400">{' '}· {existingVerdict.created_at}</span>
             )}
           </span>
           {existingVerdict.comment && (
-            <span className="italic text-emerald-800">“{existingVerdict.comment}”</span>
+            <span className="italic text-slate-500">“{existingVerdict.comment}”</span>
           )}
           <span className="ml-auto flex gap-1.5">
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="px-2 py-0.5 rounded border border-emerald-300 bg-white text-emerald-800 hover:bg-emerald-100"
+              className="px-2 py-0.5 rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
             >
               Edit
             </button>

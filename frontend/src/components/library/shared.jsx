@@ -1,11 +1,5 @@
-// Shared helpers for the Library "Read next" surface.
-
-export const GRADE_CLS = {
-  A: 'bg-emerald-100 text-emerald-800 border-emerald-300',
-  B: 'bg-sky-100 text-sky-800 border-sky-300',
-  C: 'bg-amber-100 text-amber-800 border-amber-300',
-  D: 'bg-rose-100 text-rose-800 border-rose-300',
-};
+// Shared helpers for the Library "Read next" surface. (Quality-grade colours now
+// live in paper/review/tones.js — the single source for the review vocabulary.)
 
 export function formatShortDate(value) {
   if (!value) return '';

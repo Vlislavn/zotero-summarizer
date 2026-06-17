@@ -20,6 +20,12 @@ const GOAL_OPTS = [
   { value: 'high', label: 'high' },
   { value: 'low', label: 'low' },
 ];
+// Deep-review quality grade: A/B = "quality papers", C/D = weak. Only shown when
+// some rows carry a grade (i.e. have been deep-reviewed).
+const QUALITY_OPTS = [
+  { value: 'high', label: 'A/B' },
+  { value: 'low', label: 'C/D' },
+];
 const SCORED_OPTS = [
   { value: 'scored', label: 'scored' },
   { value: 'unscored', label: 'unscored' },
@@ -35,7 +41,8 @@ function Cluster({ label, children }) {
 }
 
 export default function LibraryFilterBar({
-  filters, onChange, whyOptions = [], goalEnabled = false, rawCount = 0, shownCount = 0, onClear,
+  filters, onChange, whyOptions = [], goalEnabled = false, qualityEnabled = false,
+  rawCount = 0, shownCount = 0, onClear,
 }) {
   const set = (patch) => onChange({ ...filters, ...patch });
   // Single-select cluster: clicking the active value clears it back to 'any'.
@@ -87,6 +94,21 @@ export default function LibraryFilterBar({
                 key={o.value}
                 active={filters.goal === o.value}
                 onClick={() => single('goal', o.value)}
+              >
+                {o.label}
+              </FilterChip>
+            ))}
+          </Cluster>
+        )}
+
+        {/* Quality — single-select; only when some rows carry a deep-review grade. */}
+        {qualityEnabled && (
+          <Cluster label="Quality">
+            {QUALITY_OPTS.map((o) => (
+              <FilterChip
+                key={o.value}
+                active={filters.quality === o.value}
+                onClick={() => single('quality', o.value)}
               >
                 {o.label}
               </FilterChip>

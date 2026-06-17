@@ -16,10 +16,12 @@ import {
 } from '../api/libraryApi.js';
 import ReadNextView from '../components/library/ReadNextView.jsx';
 import LibraryFilterBar from '../components/library/LibraryFilterBar.jsx';
+import PredictionsBar from '../components/library/PredictionsBar.jsx';
 import NotConfiguredCard from '../components/setup/NotConfiguredCard.jsx';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import ZoteroActionsMenu from '../components/library/ZoteroActionsMenu.jsx';
 import { StatusBanner, formatShortDate } from '../components/library/shared.jsx';
+import { Section } from '../components/paper/review/primitives.jsx';
 import {
   EMPTY_FILTERS, buildPredicate, goalHighKeys, isFilterActive,
   serializeFilters, hydrateFilters,
@@ -102,7 +104,10 @@ export default function LibraryReadNext() {
   // Review-fleet (Phase 2): pre-decide a reading verdict for the top-N picks in
   // the background, then attach it to queue rows as `proposed_verdict` so each
   // surfaces a Confirm/Override card. Status mirrors the deep-review poll pattern.
-  const [fleetStatus, setFleetStatus] = useState({ status: 'idle', completed: 0, total: 0, error: null });
+  const [fleetStatus, setFleetStatus] = useState({
+    status: 'idle', completed: 0, total: 0, proposed: 0,
+    skipped_no_fulltext: 0, failed: 0, error: null, progress: {},
+  });
   const fleetPollRef = useRef(null);
   const [message, setMessage] = useState('');
   const [isError, setIsError] = useState(false);
@@ -116,7 +121,7 @@ export default function LibraryReadNext() {
   // setSearchParams every render can loop, since its identity changes with the
   // location it just updated). Non-filter params are preserved.
   useEffect(() => {
-    const FILTER_KEYS = ['b', 'pr', 'g', 's', 'w', 'sc'];
+    const FILTER_KEYS = ['b', 'pr', 'g', 's', 'w', 'sc', 'q'];
     const target = serializeFilters(clientFilters);
     const current = new URLSearchParams();
     for (const [k, v] of searchParams.entries()) {
@@ -144,6 +149,10 @@ export default function LibraryReadNext() {
     [queue],
   );
   const goalEnabled = useMemo(() => queue.some((i) => typeof i.goal_sim === 'number'), [queue]);
+  const qualityEnabled = useMemo(() => queue.some((i) => i.quality_grade), [queue]);
+  // Proposals already on the rows (e.g. from the startup prewarm) — lets the
+  // predictions bar say "N ready below" instead of implying nothing happened.
+  const proposedCount = useMemo(() => queue.filter((i) => i.proposed_verdict).length, [queue]);
   const filtersActive = isFilterActive(clientFilters);
   const filterSig = useMemo(() => JSON.stringify(serializeFilters(clientFilters)), [clientFilters]);
 
@@ -438,7 +447,7 @@ export default function LibraryReadNext() {
   async function handleRunFleet() {
     setMessage('');
     try {
-      const s = await runReviewFleet({ topK: 10 });
+      const s = await runReviewFleet({ topK: 5 });
       setFleetStatus(s);
       if (s.status === 'running') pollFleet();
       else loadQueue(false);
@@ -633,144 +642,93 @@ export default function LibraryReadNext() {
         </div>
       </aside>
 
-      {/* ----- Main: the single Read-next surface ----- */}
-      <div className="glass rounded-2xl border border-slate-200 p-3 lg:col-span-3">
-        <NotConfiguredCard />
-        <div className="flex flex-wrap gap-2 items-center mb-3">
-          <input
-            type="text"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            onKeyUp={(e) => { if (e.key === 'Enter') applySearch(); }}
-            placeholder={searchMode === 'meaning'
-              ? 'Search by meaning… (e.g. hallucination mitigation)'
-              : 'Search title, abstract, tags'}
-            className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-          />
-          {/* Meaning (hybrid semantic) vs Exact (substring). Default Meaning so a
-              plain query finds relevant papers, not just literal matches. */}
-          <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden text-sm shrink-0">
+      {/* ----- Main: the single Read-next surface, three labelled regions so the
+          read-only FIND, the suggestion-making REVIEW QUEUE, and the
+          whole-library-WRITE EXPORT can't be confused for one another (the old
+          one-column jumble put "Predict" next to the Zotero "last synced" line, so
+          a click on Predict looked like it should change a Sync timestamp). One
+          outer border; sections separated by the hairline rhythm only. ----- */}
+      <div className="glass rounded-2xl border border-slate-200 p-3 lg:col-span-3 divide-y divide-slate-200/60">
+        {/* Region A — FIND: read-only, instant scoping (search + smart filters). */}
+        <Section label="Find">
+          <div className="flex flex-wrap gap-2 items-center">
+            <input
+              type="text"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onKeyUp={(e) => { if (e.key === 'Enter') applySearch(); }}
+              placeholder={searchMode === 'meaning'
+                ? 'Search by meaning… (e.g. hallucination mitigation)'
+                : 'Search title, abstract, tags'}
+              className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+            {/* Meaning (hybrid semantic) vs Exact (substring). Default Meaning so a
+                plain query finds relevant papers, not just literal matches. */}
+            <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden text-sm shrink-0">
+              <button
+                type="button"
+                onClick={() => setSearchMode('meaning')}
+                title="Semantic search — ranks by meaning (BM25 + embeddings + local reranker)"
+                className={`px-3 py-2 ${searchMode === 'meaning' ? 'bg-teal-600 text-white' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
+              >
+                Meaning
+              </button>
+              <button
+                type="button"
+                onClick={() => setSearchMode('exact')}
+                title="Exact text — substring match on title / abstract / tags"
+                className={`px-3 py-2 border-l border-slate-300 ${searchMode === 'exact' ? 'bg-slate-700 text-white' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
+              >
+                Exact
+              </button>
+            </div>
             <button
               type="button"
-              onClick={() => setSearchMode('meaning')}
-              title="Semantic search — ranks by meaning (BM25 + embeddings + local reranker)"
-              className={`px-3 py-2 ${searchMode === 'meaning' ? 'bg-teal-600 text-white' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
+              onClick={applySearch}
+              className="px-3 py-2 rounded-lg bg-slate-900 text-white text-sm hover:bg-slate-700"
             >
-              Meaning
+              Search
             </button>
-            <button
-              type="button"
-              onClick={() => setSearchMode('exact')}
-              title="Exact text — substring match on title / abstract / tags"
-              className={`px-3 py-2 border-l border-slate-300 ${searchMode === 'exact' ? 'bg-slate-700 text-white' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
-            >
-              Exact
-            </button>
+            {(selectedCollection || selectedTag || search) && (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="px-3 py-2 rounded-lg bg-slate-200 text-slate-700 text-sm hover:bg-slate-300"
+              >
+                Clear
+              </button>
+            )}
           </div>
-          <button
-            type="button"
-            onClick={applySearch}
-            className="px-3 py-2 rounded-lg bg-slate-900 text-white text-sm hover:bg-slate-700"
-          >
-            Search
-          </button>
-          {(selectedCollection || selectedTag || search) && (
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="px-3 py-2 rounded-lg bg-slate-200 text-slate-700 text-sm hover:bg-slate-300"
-            >
-              Clear
-            </button>
+
+          {/* Smart client-side filters live WITH search (same cluster: scope the
+              queue). Only meaningful once the model has scored the library
+              (bands/prestige/goal all key off the relevance score). */}
+          {queueMeta.model_ready && queue.length > 0 && (
+            <div className="mt-3">
+              <LibraryFilterBar
+                filters={clientFilters}
+                onChange={setClientFilters}
+                whyOptions={whyOptions}
+                goalEnabled={goalEnabled}
+                qualityEnabled={qualityEnabled}
+                rawCount={queue.length}
+                shownCount={filteredQueue.length}
+                onClear={clearClientFilters}
+              />
+            </div>
           )}
-          {/* Hick's/Miller's Law: the three heavy whole-library Zotero WRITE
-              actions live in one grouped disclosure instead of crowding the
-              search row. */}
-          <ZoteroActionsMenu
-            disabled={syncingTags || syncingRanks || syncingAll}
-            actions={[
-              {
-                label: 'Sync all → Zotero', busy: syncingAll, busyLabel: 'Syncing…',
-                onClick: () => handleSyncAll(false),
-                title: 'One click, whole chain: rescore the library if the model changed since, then write zs:rel/<band> relevance tags AND stamp the Call-Number ranks (zr0001…) into Zotero. Backup-first; needs Zotero closed (you\'ll be asked to force otherwise). Then just sort the Call Number column in Zotero.',
-              },
-              {
-                label: 'Fetch full text', busy: fetchingFulltext, busyLabel: 'Fetching…',
-                disabled: fetchingFulltext, onClick: () => handleFetchFulltext(false),
-                title: 'Download the arXiv full-text PDF for every library paper that has an arXiv link but no PDF, and attach it natively to Zotero. Skips papers that already have a PDF. Backs up first; runs with Zotero closed; PDFs upload to zotero.org on the next sync.',
-              },
-              {
-                label: 'Sync relevance tags', busy: syncingTags, busyLabel: 'Syncing…',
-                onClick: () => handleSyncRelTags(false),
-                title: 'Write zs:rel/<band> tags onto scored library items so you can FILTER by ML relevance in Zotero. Backs up first; doesn\'t touch your priority/manual tags.',
-              },
-              {
-                label: 'Sort ranks (Call Number)', busy: syncingRanks, busyLabel: 'Writing…',
-                onClick: () => handleSyncScoreRanks(false),
-                title: 'Stamp a whole-library rank into every paper\'s Zotero Call Number (zr0001…) — scorable papers first, no-abstract ones last — so you can SORT your ENTIRE library by relevance in Zotero. Run Rescore first for complete scores. Add the Call Number column and sort ascending. Backs up first.',
-              },
-            ]}
+        </Section>
+
+        {/* Region B — REVIEW QUEUE: the work surface. Predict lives HERE, atop the
+            rows whose Confirm/Override cards it produces, with its own feedback. */}
+        <Section label="Review queue">
+          <PredictionsBar
+            fleetStatus={fleetStatus}
+            onRun={handleRunFleet}
+            proposedCount={proposedCount}
           />
-          {/* Phase 2: pre-decide a reading verdict for the top picks so each row
-              shows a one-tap Confirm/Override card. Reuses CACHED deep reviews —
-              no new LLM call. Unobtrusive, secondary to the search/sync row. */}
-          <button
-            type="button"
-            onClick={handleRunFleet}
-            disabled={fleetStatus.status === 'running'}
-            className="px-3 py-2 rounded-lg border border-indigo-300 text-indigo-700 text-sm hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Pre-decide a reading verdict for your top picks (from each paper's cached deep review — no new model call), so each shows a one-tap Confirm / Override card. Suggestions only; nothing is written until you Confirm."
-          >
-            {fleetStatus.status === 'running' ? 'Pre-deciding…' : 'Pre-decide top picks'}
-          </button>
-        </div>
-
-        {/* Doherty Threshold: a small live status line while the fleet runs (3s
-            poll), so the background pre-decision reports progress instead of going
-            quiet. Proposals appear on the rows when it finishes. */}
-        {fleetStatus.status === 'running' && (
-          <p className="mb-2 text-[11px] text-indigo-600">
-            Pre-deciding reading verdicts…{' '}
-            {fleetStatus.total > 0 ? `${fleetStatus.completed || 0}/${fleetStatus.total} done` : 'starting'}
-            {' '}— Confirm/Override cards appear on the rows when ready.
-          </p>
-        )}
-        {fleetStatus.status === 'error' && fleetStatus.error && (
-          <p className="mb-2 text-[11px] text-rose-700">Pre-decide failed: {fleetStatus.error}</p>
-        )}
-
-        {/* Sequencing nudge (Tesler): after a retrain the cached scores — and any
-            tags/ranks synced from them — are from the OLD model. The backend now
-            refuses a stale sync; this line says so before the user even tries. */}
-        {queueMeta.scores_stale && (
-          <p className="mb-2 text-[11px] text-amber-700 font-medium">
-            ⚠ The model was retrained since these scores. Rescore first — then “Sync relevance tags” / “Sort ranks” to update Zotero.
-          </p>
-        )}
-        {(zoteroSyncedAt.tags || zoteroSyncedAt.ranks) && (
-          <p className="mb-2 text-[11px] text-slate-400">
-            Zotero last synced — relevance tags: {formatShortDate(zoteroSyncedAt.tags) || 'never'} ·
-            Call-Number ranks: {formatShortDate(zoteroSyncedAt.ranks) || 'never'}
-          </p>
-        )}
-
-        <StatusBanner message={message} isError={isError} />
-
-        {/* Smart client-side filters — only meaningful once the model has scored
-            the library (bands/prestige/goal all key off the relevance score). */}
-        {queueMeta.model_ready && queue.length > 0 && (
-          <LibraryFilterBar
-            filters={clientFilters}
-            onChange={setClientFilters}
-            whyOptions={whyOptions}
-            goalEnabled={goalEnabled}
-            rawCount={queue.length}
-            shownCount={filteredQueue.length}
-            onClear={clearClientFilters}
-          />
-        )}
-
-        <ReadNextView
+          <div className="mt-3">
+            <ReadNextView
           // Remount on a deliberate SERVER filter change so the incremental-reveal
           // count and any expanded row reset — but NOT on the 4s status poll, and
           // NOT on a client filter (that resets the reveal via filterSig instead).
@@ -814,6 +772,53 @@ export default function LibraryReadNext() {
           semanticUnavailable={queueMeta.semantic_unavailable}
           prestigeFloor={filterCtx.prestigeFloor}
         />
+          </div>
+        </Section>
+
+        {/* Region C — EXPORT TO ZOTERO: the heavy, occasional whole-library WRITES
+            and their last-synced status, which belongs HERE beside Sync — never
+            under Predict (the conflation that made Predict look like it should
+            change a sync timestamp). Hick's/Miller's Law: the four actions stay in
+            one grouped disclosure. */}
+        <Section label="Export to Zotero">
+          <div className="flex flex-wrap gap-2 items-center">
+            <ZoteroActionsMenu
+              disabled={syncingTags || syncingRanks || syncingAll}
+              actions={[
+                {
+                  label: 'Sync all → Zotero', busy: syncingAll, busyLabel: 'Syncing…',
+                  onClick: () => handleSyncAll(false),
+                  title: 'One click, whole chain: rescore the library if the model changed since, then write zs:rel/<band> relevance tags AND stamp the Call-Number ranks (zr0001…) into Zotero. Backup-first; needs Zotero closed (you\'ll be asked to force otherwise). Then just sort the Call Number column in Zotero.',
+                },
+                {
+                  label: 'Fetch full text', busy: fetchingFulltext, busyLabel: 'Fetching…',
+                  disabled: fetchingFulltext, onClick: () => handleFetchFulltext(false),
+                  title: 'Download the arXiv full-text PDF for every library paper that has an arXiv link but no PDF, and attach it natively to Zotero. Skips papers that already have a PDF. Backs up first; runs with Zotero closed; PDFs upload to zotero.org on the next sync.',
+                },
+                {
+                  label: 'Sync relevance tags', busy: syncingTags, busyLabel: 'Syncing…',
+                  onClick: () => handleSyncRelTags(false),
+                  title: 'Write zs:rel/<band> tags onto scored library items so you can FILTER by ML relevance in Zotero. Backs up first; doesn\'t touch your priority/manual tags.',
+                },
+                {
+                  label: 'Sort ranks (Call Number)', busy: syncingRanks, busyLabel: 'Writing…',
+                  onClick: () => handleSyncScoreRanks(false),
+                  title: 'Stamp a whole-library rank into every paper\'s Zotero Call Number (zr0001…) — scorable papers first, no-abstract ones last — so you can SORT your ENTIRE library by relevance in Zotero. Run Rescore first for complete scores. Add the Call Number column and sort ascending. Backs up first.',
+                },
+              ]}
+            />
+          </div>
+          {(zoteroSyncedAt.tags || zoteroSyncedAt.ranks) && (
+            <p className="mt-2 text-[11px] text-slate-400">
+              Last synced — relevance tags: {formatShortDate(zoteroSyncedAt.tags) || 'never'} ·
+              Call-Number ranks: {formatShortDate(zoteroSyncedAt.ranks) || 'never'}
+            </p>
+          )}
+        </Section>
+
+        {/* One shared transient slot for action results (sync / add-to-collection /
+            triage). Self-gates to null when empty, so no stray hairline. */}
+        <StatusBanner message={message} isError={isError} />
       </div>
     </div>
   );

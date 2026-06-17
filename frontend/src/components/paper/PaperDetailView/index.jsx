@@ -6,6 +6,7 @@ import PaperReaderPane from '../../library/PaperReaderPane.jsx';
 import AskPaperBox from '../../library/AskPaperBox.jsx';
 import VerdictPanel from '../../VerdictPanel.jsx';
 import AbstractBlock from './AbstractBlock.jsx';
+import { Section } from '../review/primitives.jsx';
 
 // ONE configurable paper-detail assembly, extracted from the duplicated bodies
 // of AnnotationVerdict (the "detail" right column) and InlineAnnotate (the
@@ -45,15 +46,6 @@ import AbstractBlock from './AbstractBlock.jsx';
 //                VerdictPanel (editable mode only)
 //   extras:      extra nodes appended after the body (readonly tails)
 
-// Section heading inside the editable panel (Law of Common Region).
-function ZoneLabel({ children }) {
-  return (
-    <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 select-none">
-      {children}
-    </div>
-  );
-}
-
 export default function PaperDetailView({
   mode = 'readonly',
   detail,
@@ -82,109 +74,101 @@ export default function PaperDetailView({
   const showCollection = (show.collection ?? editable) && editable;
   const showVerdict = (show.verdict ?? editable) && editable;
 
+  // ONE flat, hairline-divided column for both modes (Law of Common Region:
+  // a divider, not a box). Editable splits into Decide / Act chunks (Miller's
+  // Law); read-only drops the verdict/collection (Annotate owns the verdict in
+  // its sticky strip) and labels each section.
   if (editable) {
     return (
       <>
         {showLinks && <LinksRow detail={detail} itemKey={itemKey} />}
+        <div className="divide-y divide-slate-200/60">
+          <Section label="Decide">
+            <div className="space-y-4">
+              <DeepReviewSection
+                itemKey={itemKey}
+                deep={detail.deep_review}
+                hasPdf={hasPdf}
+                onDone={onDeepReviewDone}
+              />
+              {showReader && (
+                <PaperReaderPane itemKey={itemKey} open={readerOpen} onOpenChange={onReaderOpenChange} />
+              )}
+              {showAbstract && <AbstractBlock abstract={detail.abstract} variant="details" />}
+              {showAsk && <AskPaperBox itemKey={itemKey} />}
+            </div>
+          </Section>
 
-        {/* DECIDE: everything you read to make the call. */}
-        <section className="rounded-lg border border-slate-200 bg-white/70 p-2.5 space-y-2.5">
-          <ZoneLabel>Decide</ZoneLabel>
-          <DeepReviewSection
-            itemKey={itemKey}
-            deep={detail.deep_review}
-            hasPdf={hasPdf}
-            onDone={onDeepReviewDone}
-          />
-          {showReader && (
-            <PaperReaderPane
-              itemKey={itemKey}
-              open={readerOpen}
-              onOpenChange={onReaderOpenChange}
-            />
-          )}
-          {showAbstract && (
-            <AbstractBlock abstract={detail.abstract} variant="details" />
-          )}
-          {showAsk && <AskPaperBox itemKey={itemKey} />}
-        </section>
-
-        {/* ACT: the verdict is the primary action; tag + collection follow. */}
-        <section className="rounded-lg border border-slate-200 bg-white/70 p-2.5 space-y-2.5">
-          <ZoneLabel>Act</ZoneLabel>
-          {showVerdict && (
-            <VerdictPanel
-              itemKey={itemKey}
-              derivedPriority={verdict.derivedPriority}
-              existingVerdict={verdict.existing}
-              onSubmit={verdict.onSubmit}
-              onDelete={verdict.onDelete}
-              submitting={verdict.submitting}
-              submitError={verdict.submitError}
-              deleting={verdict.deleting}
-              deleteError={verdict.deleteError}
-            />
-          )}
-          {showTags && (
-            <TagOfInterestEditor
-              itemKey={itemKey}
-              tags={detail.tags}
-              onChanged={onTagsChanged}
-            />
-          )}
-          {showCollection && (
-            <CollectionEditor
-              itemKey={itemKey}
-              current={detail.collections}
-              collections={collections}
-              onChanged={onCollectionsChanged}
-            />
-          )}
-        </section>
+          <Section label="Act">
+            <div className="space-y-4">
+              {showVerdict && (
+                <VerdictPanel
+                  itemKey={itemKey}
+                  derivedPriority={verdict.derivedPriority}
+                  existingVerdict={verdict.existing}
+                  onSubmit={verdict.onSubmit}
+                  onDelete={verdict.onDelete}
+                  submitting={verdict.submitting}
+                  submitError={verdict.submitError}
+                  deleting={verdict.deleting}
+                  deleteError={verdict.deleteError}
+                />
+              )}
+              {showTags && (
+                <TagOfInterestEditor itemKey={itemKey} tags={detail.tags} onChanged={onTagsChanged} />
+              )}
+              {showCollection && (
+                <CollectionEditor
+                  itemKey={itemKey}
+                  current={detail.collections}
+                  collections={collections}
+                  onChanged={onCollectionsChanged}
+                />
+              )}
+            </div>
+          </Section>
+        </div>
         {extras}
       </>
     );
   }
 
-  // readonly (Annotate): flat sections, expandable abstract, no zone borders.
+  // readonly (Annotate): same flat column, labelled sections, no zone borders.
   return (
     <>
       {showLinks && <LinksRow detail={detail} itemKey={itemKey} />}
-      {showDeepReview && (
-        <DeepReviewSection
-          itemKey={itemKey}
-          deep={detail.deep_review}
-          hasPdf={hasPdf}
-          onDone={onDeepReviewDone}
-        />
-      )}
-      {(showReader || showAsk) && (
-        <>
-          {showReader && (
-            <PaperReaderPane
+      <div className="divide-y divide-slate-200/60">
+        {showDeepReview && (
+          <Section label="Review">
+            <DeepReviewSection
               itemKey={itemKey}
-              open={readerOpen}
-              onOpenChange={onReaderOpenChange}
+              deep={detail.deep_review}
+              hasPdf={hasPdf}
+              onDone={onDeepReviewDone}
             />
-          )}
-          {showAsk && <AskPaperBox itemKey={itemKey} />}
-        </>
-      )}
-      {showAbstract && (
-        <AbstractBlock abstract={detail.abstract} variant="expandable" />
-      )}
-      {showTags && (
-        <div>
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
-            Tags
-          </h3>
-          <TagOfInterestEditor
-            itemKey={itemKey}
-            tags={detail.tags}
-            onChanged={onTagsChanged}
-          />
-        </div>
-      )}
+          </Section>
+        )}
+        {(showReader || showAsk) && (
+          <Section>
+            <div className="space-y-4">
+              {showReader && (
+                <PaperReaderPane itemKey={itemKey} open={readerOpen} onOpenChange={onReaderOpenChange} />
+              )}
+              {showAsk && <AskPaperBox itemKey={itemKey} />}
+            </div>
+          </Section>
+        )}
+        {showAbstract && (
+          <Section label="Abstract">
+            <AbstractBlock abstract={detail.abstract} variant="expandable" />
+          </Section>
+        )}
+        {showTags && (
+          <Section label="Tags">
+            <TagOfInterestEditor itemKey={itemKey} tags={detail.tags} onChanged={onTagsChanged} />
+          </Section>
+        )}
+      </div>
       {extras}
     </>
   );

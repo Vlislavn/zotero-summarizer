@@ -335,6 +335,18 @@ export default function Today() {
       <HintBanner storageKey={HINT_STORAGE_KEY}>{HINT_TEXT}</HintBanner>
       <ErrorBanner error={slateQuery.error} title="Slate load failed" />
       <ErrorBanner error={actionError} title="Action failed" />
+      {/* The drain needs a live ML gate. A 503 here (e.g. lightgbm not
+          installed / gate retrain failed) is surfaced instead of silently
+          starting a doomed background spin. */}
+      <ErrorBanner error={triageMutation.error} title="Triage backlog unavailable" />
+      {/* A drain that errored AND finished was previously invisible (the error
+          was only shown while running). Surface it now. */}
+      {!triageStatus?.running && (triageStatus?.error || triageStatus?.rescore_error) && (
+        <ErrorBanner
+          error={triageStatus.error || triageStatus.rescore_error}
+          title="Last triage run failed"
+        />
+      )}
       {actionMsg && (
         <div className="my-2 p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800">
           {actionMsg}

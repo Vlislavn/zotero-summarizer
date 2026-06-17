@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { askPaper } from '../../api/libraryApi.js';
 import Spinner from '../ui/Spinner.jsx';
+import { Disclosure } from '../paper/review/primitives.jsx';
 
 const MODE_HELP =
   'Comprehensive: metadata + generated notes + paper body. ' +
@@ -55,11 +56,8 @@ export default function AskPaperBox({ itemKey }) {
   }
 
   return (
-    <details className="rounded-xl border border-slate-200 bg-white">
-      <summary className="cursor-pointer select-none px-3 py-2 text-[11px] uppercase tracking-wider font-semibold text-slate-500">
-        Ask the paper
-      </summary>
-      <div className="px-3 pb-3 space-y-2">
+    <Disclosure summary="Ask the paper">
+      <div className="space-y-3">
         <form onSubmit={handleAsk} className="flex flex-wrap items-center gap-2">
           <label className="sr-only" htmlFor="ask-q">Question about this paper</label>
           <input
@@ -69,7 +67,7 @@ export default function AskPaperBox({ itemKey }) {
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             placeholder="e.g. What dataset did they train on?"
-            className="flex-1 px-2 py-1.5 rounded-lg border border-slate-300 text-xs focus:outline-none focus:ring-1 focus:ring-teal-500"
+            className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg border border-slate-300 text-[13px] focus:outline-none focus:ring-1 focus:ring-teal-500"
             disabled={busy}
           />
           <label className="sr-only" htmlFor="ask-mode">Answer mode</label>
@@ -79,7 +77,7 @@ export default function AskPaperBox({ itemKey }) {
             value={mode}
             onChange={(e) => setMode(e.target.value)}
             disabled={busy}
-            className="px-2 py-1.5 rounded-lg border border-slate-300 text-xs bg-white"
+            className="px-2 py-1.5 rounded-lg border border-slate-300 text-[13px] bg-white"
             title={MODE_HELP}
           >
             <option value="comprehensive">Comprehensive</option>
@@ -89,7 +87,7 @@ export default function AskPaperBox({ itemKey }) {
           <button
             type="submit"
             disabled={busy || !question.trim()}
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-teal-600 text-white text-xs font-semibold hover:bg-teal-700 disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-teal-700 text-white text-[13px] font-semibold hover:bg-teal-800 disabled:opacity-50"
             title="Answered from this paper's generated artifact and text only"
           >
             {busy && <Spinner size="sm" color="teal-on-fill" />}
@@ -99,26 +97,31 @@ export default function AskPaperBox({ itemKey }) {
         {busy && (
           <div role="status" aria-live="polite" className="sr-only">Reading the paper…</div>
         )}
-        {error && <div className="text-[11px] text-rose-700">Ask failed: {error}</div>}
-        {history.map((entry) => (
-          <div key={entry.id} className="rounded-lg border border-slate-200 bg-slate-50 p-2 space-y-1">
-            <p className="text-[11px] font-semibold text-slate-700">Q: {entry.q}</p>
-            {entry.abstained ? (
-              <p className="text-[11px] text-amber-700">
-                The paper doesn't contain this answer (the model abstained rather than guessing).
-              </p>
-            ) : (
-              <p className="text-xs text-slate-800">{entry.answer}</p>
-            )}
-            {entry.quote && (
-              <blockquote className="border-l-2 border-teal-300 pl-2 text-[11px] italic text-slate-600">
-                “{entry.quote}”
-              </blockquote>
-            )}
-            <div className="text-[10px] text-slate-400">{metaLine(entry)}</div>
+        {error && <div className="text-[12px] text-rose-700">Ask failed: {error}</div>}
+        {/* Answers as hairline-separated reading rows — no slate card per answer. */}
+        {history.length > 0 && (
+          <div className="divide-y divide-slate-200/60">
+            {history.map((entry) => (
+              <div key={entry.id} className="py-2.5 first:pt-0 space-y-1">
+                <p className="text-[12px] font-semibold text-slate-500">Q: {entry.q}</p>
+                {entry.abstained ? (
+                  <p className="text-[13px] leading-relaxed text-amber-700">
+                    The paper doesn't contain this answer (the model abstained rather than guessing).
+                  </p>
+                ) : (
+                  <p className="text-[13px] leading-relaxed text-slate-800">{entry.answer}</p>
+                )}
+                {entry.quote && (
+                  <blockquote className="border-l-2 border-teal-300 pl-2 text-[12px] italic text-slate-500 leading-relaxed">
+                    “{entry.quote}”
+                  </blockquote>
+                )}
+                <div className="text-[11px] text-slate-400">{metaLine(entry)}</div>
+              </div>
+            ))}
           </div>
-        ))}
+        )}
       </div>
-    </details>
+    </Disclosure>
   );
 }

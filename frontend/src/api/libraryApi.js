@@ -254,6 +254,13 @@ export function paperPresentationUrl(itemKey, version) {
   return version ? `${base}?v=${encodeURIComponent(version)}` : base;
 }
 
+/** URL of one generated figure image (rendered natively as a thumbnail in the
+ * reader pane — no iframe). `name` is a render artifact figure filename
+ * (validated server-side against the per-item figures dir). */
+export function paperFigureUrl(itemKey, name) {
+  return `/api/library/render/${encodeURIComponent(itemKey)}/figures/${encodeURIComponent(name)}`;
+}
+
 /**
  * POST /api/library/ask { item_key, question, mode } — correctness-first Q&A
  * over generated paper-read notes + full text. Metadata/count questions are
