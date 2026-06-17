@@ -18,7 +18,6 @@ effective priority disagree.
 
 from __future__ import annotations
 
-import csv
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +28,7 @@ from zotero_summarizer.domain import (
     PRIORITY_MUST_READ_THRESHOLD,
     PRIORITY_SHOULD_READ_THRESHOLD,
 )
+from zotero_summarizer.services._common import load_golden_rows as load_rows
 
 
 LOGGER = logging.getLogger(__name__)
@@ -175,13 +175,6 @@ def suggest_border_labels(
     # Rank: closest to threshold first; tie-break by disagreement (those go up).
     suggestions.sort(key=lambda s: (s.border_distance, 0 if s.disagrees else 1))
     return suggestions[:top_k]
-
-
-def load_rows(csv_path: Path) -> list[dict[str, str]]:
-    if not csv_path.exists():
-        raise FileNotFoundError(f"golden CSV missing: {csv_path}")
-    with csv_path.open("r", encoding="utf-8", newline="") as f:
-        return list(csv.DictReader(f))
 
 
 def format_suggestions_markdown(suggestions: list[LabelSuggestion]) -> str:

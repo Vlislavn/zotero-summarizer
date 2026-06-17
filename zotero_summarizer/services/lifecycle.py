@@ -121,6 +121,7 @@ def _init_classifier_gate(app_state: RuntimeState, config: GoalsConfig, current_
     app_state.classifier_gate = None
     app_state.classifier_gate_lock = None
     app_state.classifier_gate_training = False
+    app_state.classifier_gate_error = ""
     if not config.classifier_gate.enabled:
         return
 
@@ -280,6 +281,18 @@ def startup(override_model: str | None = None) -> None:
     _init_metadata_clients(app_state, config, current_settings)
     _init_classifier_gate(app_state, config, current_settings)
     _init_zotero(app_state, current_settings)
+
+    # Loud boot-time readiness sweep so a missing critical dep (e.g. lightgbm)
+    # is visible in the log at once, not discovered later as a silent gate=None.
+    # The gate itself trains async — a "not ready yet" here is informational.
+    from zotero_summarizer.services import readiness
+    for st in readiness.all_statuses():
+        if st.ready:
+            continue
+        if st.name == "classifier_gate":
+            LOGGER.info("readiness: %s not ready yet — %s", st.name, st.detail)
+        else:
+            LOGGER.error("readiness: %s NOT READY — %s", st.name, st.detail)
 
     interrupted_jobs = _load_persisted_jobs(app_state)
 

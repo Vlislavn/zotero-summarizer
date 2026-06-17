@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from datetime import datetime, timezone
 import json
 import logging
@@ -217,6 +218,24 @@ def now_iso() -> str:
 def now_iso_z() -> str:
     """UTC timestamp, second precision, ``Z`` suffix (e.g. ``2026-05-23T12:00:00Z``)."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    """Write ``payload`` as JSON to ``path`` via tmp + ``replace`` (atomic on POSIX),
+    creating parent dirs. A crash/race can never leave a half-written cache file.
+    The caller owns the envelope (e.g. ``{"updated_at": now_iso_z(), ...}``)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
+
+
+def load_golden_rows(csv_path: Path) -> list[dict[str, str]]:
+    """Read the golden CSV into a list of row dicts. Fail-fast if missing."""
+    if not csv_path.exists():
+        raise FileNotFoundError(f"golden CSV not found at {csv_path}")
+    with csv_path.open(newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
 
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")

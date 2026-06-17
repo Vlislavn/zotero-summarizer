@@ -8,11 +8,10 @@ confounding).
 """
 from __future__ import annotations
 
-import csv
 import logging
 import random
-from pathlib import Path
 
+from zotero_summarizer.services._common import load_golden_rows
 from zotero_summarizer.services.golden.relabel_audit._constants import (
     AGE_BUCKET_EDGES,
     AGE_BUCKET_NAMES,
@@ -136,13 +135,6 @@ def sample_stratified(
 
     rng.shuffle(chosen)
     return chosen[:sample_size]
-
-
-def load_golden_rows(csv_path: Path) -> list[dict[str, str]]:
-    if not csv_path.exists():
-        raise FileNotFoundError(f"golden CSV not found at {csv_path}")
-    with csv_path.open(newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
 
 
 __all__ = ["is_eligible_row", "sample_stratified", "load_golden_rows"]

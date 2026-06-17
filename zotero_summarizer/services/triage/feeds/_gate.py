@@ -320,6 +320,9 @@ def install_gate(new_gate: Any, *, reason: str, rescore: bool = True) -> dict[st
             app_state.classifier_gate = new_gate
     else:
         app_state.classifier_gate = new_gate
+    # A live gate is installed — clear any prior retrain-failure reason so
+    # readiness reports healthy again.
+    app_state.classifier_gate_error = ""
     md = new_gate.training_metadata
     LOGGER.info(
         "classifier gate installed (%s): %s (n_train=%d, %s, golden_sha=%s)",
@@ -376,7 +379,12 @@ def _gate_retrain_worker(golden_csv: Path, classifier_name: str) -> None:
         # is best-effort and never raises, so the except below stays scoped to
         # genuine train/swap failures.
         install_gate(new_gate, reason="daemon-retrain")
-    except Exception:
+    except Exception as exc:
+        # Record WHY so readiness can report it (e.g. "No module named
+        # 'lightgbm'") instead of leaving the gate a silent None. install_gate
+        # clears this on the next success. Re-raised below so the thread
+        # excepthook still surfaces it.
+        get_state().classifier_gate_error = f"{type(exc).__name__}: {exc}"
         LOGGER.exception("background gate retrain failed; keeping previous gate")
         raise
     finally:

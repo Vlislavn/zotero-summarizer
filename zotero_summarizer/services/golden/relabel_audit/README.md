@@ -13,8 +13,8 @@ golden rows ─_sampling→ stratified blind sample ─_session→ JSON (data/re
 
 | file | responsibility |
 |---|---|
-| `_constants.py` | age buckets, dataclasses (dependency-light); `PRIORITY_TO_SCORE` re-exports `domain.PRIORITY_TO_RELEVANCE` (single source) |
-| `_sampling.py` | eligibility predicate + stratified sampling |
+| `_constants.py` | age buckets, dataclasses (dependency-light); `PRIORITY_TO_SCORE` re-exports `domain.PRIORITY_TO_RELEVANCE` (single source); `now_iso` re-exports `services._common.now_iso_z` (de-duped) |
+| `_sampling.py` | eligibility predicate + stratified sampling; golden-CSV read reuses `services._common.load_golden_rows` (de-duped) |
 | `_session.py` | session JSON I/O (create/resume/record) |
 | `_metrics.py` | κ / ICC / Pearson / Spearman over paired responses |
 | `_trickle.py` | daily-trickle picker with the 24h rate-limit gate |

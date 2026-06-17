@@ -8,13 +8,13 @@ features we evaluate match what the live model sees.
 
 from __future__ import annotations
 
-import csv
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
 
+from zotero_summarizer.services._common import load_golden_rows
 from zotero_summarizer.services.model import classifier
 
 
@@ -133,11 +133,3 @@ def featurize_golden(
         sample_weights=weights,
         selected_rows=selected,
     )
-
-
-def load_golden_rows(csv_path: Path) -> list[dict[str, str]]:
-    """Read the golden CSV, returning a list of row dicts. Fail-fast on missing."""
-    if not csv_path.exists():
-        raise FileNotFoundError(f"golden CSV not found at {csv_path}")
-    with csv_path.open(newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))

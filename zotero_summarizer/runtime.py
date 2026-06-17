@@ -50,6 +50,11 @@ class RuntimeState:
     classifier_gate: Any = None
     classifier_gate_lock: "threading.Lock | None" = None
     classifier_gate_training: bool = False
+    # Last gate (re)train failure reason (empty when healthy). Mirrors
+    # ``zotero_error`` so readiness checks can report WHY the gate is None
+    # (e.g. "ModuleNotFoundError: No module named 'lightgbm'") instead of
+    # leaving it a silent None.
+    classifier_gate_error: str = ""
 
     # Zotero local integration (None when unavailable; reason in zotero_error).
     zotero_reader: "ZoteroReader | None" = None
