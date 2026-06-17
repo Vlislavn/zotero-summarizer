@@ -18,8 +18,9 @@ logic is duplicated between the two front-ends.
 
  status.py   ─ read_config + check_reachability(default) + key-PRESENCE bool
               + paths.exists() + zotero_status_payload + feed count + model_card
+              + readiness.all_statuses() → SetupStatusResponse.subsystems[]
               → SetupStatusResponse; `ready` = config.valid & goals>0 &
-                api_key_present & zotero.db_found  (reachable/classifier advisory)
+                api_key_present & zotero.db_found  (reachable/classifier/subsystems advisory)
  detect.py   ─ per-OS probe dirs + current settings().zotero_data_dir(source=env)
               → DetectedZoteroDir[], db_exists first. READ-ONLY (Path.exists only).
  env_writer.py ─ _ALLOWED_ENV_KEYS=(PDF_ROOT,ZOTERO_DATA_DIR); reject others (422);

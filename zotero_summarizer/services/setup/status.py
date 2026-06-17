@@ -28,6 +28,7 @@ from zotero_summarizer.models.setup import (
     SetupStatusResponse,
     ZoteroStatus,
 )
+from zotero_summarizer.services import readiness
 from zotero_summarizer.services._common import read_config, settings, state
 from zotero_summarizer.services.llm import operational_check
 from zotero_summarizer.services.model.model_card import model_card
@@ -161,4 +162,5 @@ async def get_setup_status() -> SetupStatusResponse:
         paths=paths,
         zotero=zotero,
         classifier=classifier,
+        subsystems=readiness.all_statuses(),
     )

@@ -21,6 +21,12 @@ export function deriveConfigured(status) {
   );
 }
 
+// Runtime subsystems (ML gate, critical deps) that are NOT ready right now.
+// Empty when everything is healthy (older backends omit the field → []).
+export function deriveSubsystemIssues(status) {
+  return (status?.subsystems || []).filter((s) => s && s.ready === false);
+}
+
 export function derivePillars(status) {
   const config = status?.config || {};
   const llm = status?.llm || {};
@@ -47,5 +53,6 @@ export function useSetupStatus(options = {}) {
     status,
     isConfigured: deriveConfigured(status),
     pillars: derivePillars(status),
+    subsystemIssues: deriveSubsystemIssues(status),
   };
 }

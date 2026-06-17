@@ -33,9 +33,15 @@ function scrollToAnchor(id) {
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
+// "dep:lightgbm" / "classifier_gate" → a short human label for the pill.
+function subsystemLabel(name) {
+  if (name.startsWith('dep:')) return name.slice(4);
+  return name.replace(/_/g, ' ');
+}
+
 export default function ReadinessStrip() {
   const navigate = useNavigate();
-  const { pillars, isLoading, isError } = useSetupStatus();
+  const { pillars, subsystemIssues, isLoading, isError } = useSetupStatus();
 
   if (isLoading || isError) return null;
 
@@ -68,6 +74,17 @@ export default function ReadinessStrip() {
         onClick={() => navigate('/setup')}
         title={pillars.model ? 'Classifier trained' : 'No trained model — retrain below or run setup'}
       />
+      {/* Runtime subsystems that are down right now (e.g. a missing dep, or the
+          gate failed to load). Only the not-ready ones render — green = absent. */}
+      {subsystemIssues.map((s) => (
+        <Pill
+          key={s.name}
+          label={subsystemLabel(s.name)}
+          ok={false}
+          onClick={() => navigate('/setup')}
+          title={s.detail || `${s.name} not ready`}
+        />
+      ))}
     </div>
   );
 }
