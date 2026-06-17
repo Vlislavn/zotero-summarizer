@@ -31,7 +31,10 @@ def _reset_latch_and_inline_threads(monkeypatch):
     runs inline so the job finishes before ``start`` returns."""
     fleet._LATCH.finish(None)  # release any slot a prior test left claimed
     with fleet._LOCK:
-        fleet._STATE.update(total=0, completed=0, started_at=None, progress={})
+        fleet._STATE.update(
+            total=0, completed=0, proposed=0, skipped_no_fulltext=0, failed=0,
+            started_at=None, progress={},
+        )
     monkeypatch.setattr(fleet._flight, "run_in_background", lambda target: target())
     yield
     fleet._LATCH.finish(None)
@@ -85,6 +88,7 @@ def test_run_writes_a_proposal_per_top_k_item_from_cache(monkeypatch):
     ProposedVerdict(**upserts["A"])  # round-trips through the model -> valid shape
     assert out["status"] == "ready"
     assert out["total"] == 2 and out["completed"] == 2
+    assert out["proposed"] == 2  # every processed pick yielded a verdict
 
 
 def test_run_slices_to_top_k(monkeypatch):
@@ -98,6 +102,57 @@ def test_run_slices_to_top_k(monkeypatch):
 
     fleet.start(top_k=2)
     assert upserts == ["A", "B"]  # only the top-2, in queue order
+
+
+# --- next-5 advance: skip already-decided picks so a re-run walks the queue ---------
+
+
+def test_select_keys_skips_proposed_and_labeled_picks():
+    """The 'predict the NEXT 5' rule: rows that already carry a ``proposed_verdict``
+    (the fleet's own output) or a ``user_priority`` (the human's label) are skipped,
+    so selection advances to the still-undecided picks, capped at ``top_k``."""
+    queue = {
+        "items": [
+            {"item_key": "done", "proposed_verdict": {"proposed": "must_read"}},
+            {"item_key": "labeled", "user_priority": "should_read"},
+            {"item_key": "fresh1"},
+            {"item_key": "fresh2"},
+            {"item_key": "fresh3"},
+        ]
+    }
+    assert fleet._select_keys(queue, top_k=2) == ["fresh1", "fresh2"]
+
+
+def test_select_keys_returns_fewer_when_undecided_tail_is_short():
+    """When the queue's undecided tail is shorter than top_k, take what's there."""
+    queue = {
+        "items": [
+            {"item_key": "done", "proposed_verdict": {"proposed": "could_read"}},
+            {"item_key": "fresh1"},
+        ]
+    }
+    assert fleet._select_keys(queue, top_k=5) == ["fresh1"]
+
+
+def test_run_only_proposes_for_undecided_picks(monkeypatch):
+    """End-to-end through ``start()``: a queue whose top picks are already decided
+    yields proposals only for the next undecided ones — a re-run advances."""
+    queue = {
+        "items": [
+            {"item_key": "A", "proposed_verdict": {"proposed": "must_read"}},
+            {"item_key": "B", "user_priority": "should_read"},
+            {"item_key": "C"},
+            {"item_key": "D"},
+        ]
+    }
+    monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: queue)
+    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: _review())
+    monkeypatch.setattr(fleet.deep_review, "start", lambda **_k: None)
+    upserts: list = []
+    monkeypatch.setattr(fleet.verdict_store, "upsert", lambda key, prop: upserts.append(key))
+
+    fleet.start(top_k=2)
+    assert upserts == ["C", "D"]  # A (proposed) and B (labeled) skipped
 
 
 # --- the cache MISS path: triggers a serial deep review, polls, re-reads -----------
@@ -129,9 +184,10 @@ def test_cache_miss_triggers_deep_review_then_proposes(monkeypatch):
     assert upserts["A"]["proposed"] == "should_read"  # read + grade C
 
 
-def test_cache_miss_that_never_materializes_writes_no_proposal(monkeypatch):
-    """A review that never appears (no PDF / errored) -> no proposal, but the item
-    still counts as completed and the job finishes cleanly."""
+def test_cache_miss_that_never_materializes_reports_done_empty(monkeypatch):
+    """A review that never appears (deep review errored / produced nothing) -> the
+    item is counted as PROCESSED and FAILED, the run proposes nothing, and the
+    status is the honest ``done_empty`` (not a false ``ready``)."""
     monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: _queue("A"))
     monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: None)  # always a miss
     monkeypatch.setattr(fleet.deep_review, "start", lambda **_k: None)
@@ -143,6 +199,30 @@ def test_cache_miss_that_never_materializes_writes_no_proposal(monkeypatch):
     out = fleet.start(top_k=1)
     assert upserts == {}
     assert out["completed"] == 1  # counted even though nothing was proposed
+    assert out["proposed"] == 0 and out["failed"] == 1
+    assert out["status"] == "done_empty"
+
+
+def test_run_over_fulltextless_papers_reports_done_empty(monkeypatch):
+    """The user's silent no-op: picks have a cached review but no full-text PDF
+    (``needs_pdf`` / ``digest is None``) -> zero proposals, and the status SAYS so
+    (``done_empty``, ``skipped_no_fulltext``) instead of masquerading as ``ready``."""
+    monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: _queue("A", "B"))
+    # cached review EXISTS but carries no usable full text (the deep_review needs_pdf case)
+    monkeypatch.setattr(fleet.deep_review, "get_cached_review",
+                        lambda key: {"needs_pdf": True, "digest": None})
+
+    def _no_model(**_kw):
+        raise AssertionError("deep_review.start must not run when a (thin) review is cached")
+
+    monkeypatch.setattr(fleet.deep_review, "start", _no_model)
+    upserts: dict = {}
+    monkeypatch.setattr(fleet.verdict_store, "upsert", lambda key, prop: upserts.update({key: prop}))
+
+    out = fleet.start(top_k=2)
+    assert upserts == {}  # nothing stored
+    assert out["proposed"] == 0 and out["skipped_no_fulltext"] == 2
+    assert out["status"] == "done_empty"  # FAILS before the fix (today: "ready")
 
 
 # --- single-flight: a second start while running is a no-op ------------------------

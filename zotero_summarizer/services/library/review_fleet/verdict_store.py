@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from zotero_summarizer.services._common import now_iso_z
+from zotero_summarizer.services._common import now_iso_z, write_json_atomic
 
 _CACHE_FILENAME = "proposed_verdicts.json"
 
@@ -44,14 +44,7 @@ def read_all() -> dict[str, Any]:
 
 
 def _write_all(proposals: dict[str, Any]) -> None:
-    path = _cache_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(
-        json.dumps({"updated_at": now_iso_z(), "proposals": proposals}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    tmp.replace(path)
+    write_json_atomic(_cache_path(), {"updated_at": now_iso_z(), "proposals": proposals})
 
 
 def upsert(item_key: str, proposal: dict[str, Any]) -> None:

@@ -205,9 +205,13 @@ def _tick_report(**overrides):
     return SimpleNamespace(**base)
 
 
-def _fake_state(*, gate_only: bool):
+_GATE_SENTINEL = object()  # any non-None stands in for a live classifier gate
+
+
+def _fake_state(*, gate_only: bool, classifier_gate: object = _GATE_SENTINEL):
     """Minimal RuntimeState stand-in for the drain: the config flag the worker
-    reads + a resolve_stage_client hook to detect whether an LLM was built."""
+    reads, a live-gate stand-in (pass ``classifier_gate=None`` to simulate an
+    unavailable gate), and a resolve_stage_client hook to detect an LLM build."""
     from types import SimpleNamespace
     calls = {"resolved": False}
 
@@ -221,9 +225,34 @@ def _fake_state(*, gate_only: bool):
                 classifier_gate=SimpleNamespace(bulk_drain_gate_only=gate_only),
             ),
         ),
+        classifier_gate=classifier_gate,
         resolve_stage_client=resolve_stage_client,
         _resolve_calls=calls,
     )
+
+
+def test_drain_aborts_when_gate_only_but_gate_missing(monkeypatch):
+    """gate_only drain with no live gate must fail fast with a clear error and
+    NOT spin. Regression for 2026-06-16: lightgbm uninstalled → gate stayed None
+    → the gate-only drain synthesised nothing, never marked items read, and
+    re-fetched the same batch every tick while the error was swallowed."""
+    from unittest.mock import MagicMock
+    import zotero_summarizer.services._common as common
+    from zotero_summarizer.services.triage import feeds
+
+    triage_backlog._finish(error=None, done=False)
+    triage_backlog._reset_and_claim()
+    monkeypatch.setattr(common, "state", lambda: _fake_state(gate_only=True, classifier_gate=None))
+    tick = MagicMock(side_effect=AssertionError("run_daemon_tick must not be called"))
+    monkeypatch.setattr(feeds, "run_daemon_tick", tick)
+
+    triage_backlog._drain_worker()
+
+    assert tick.call_count == 0                       # no spin — aborted before any tick
+    st = triage_backlog.status()
+    assert st["running"] is False
+    assert st["done"] is False
+    assert "gate" in (st["error"] or "").lower()
 
 
 def test_drain_stops_immediately_on_fatal_llm_error(monkeypatch):
@@ -396,3 +425,23 @@ def test_drain_ml_only_is_gate_only_with_no_llm(monkeypatch):
     assert kwargs["triage_llm"] is None
     assert fake._resolve_calls["resolved"] is False  # no LLM built in the ML-only drain
     assert triage_backlog.status()["done"] is True
+
+
+def test_auto_library_rescore_is_threshold_gated(monkeypatch):
+    """A drain that added MANY new items kicks a background whole-library rescore
+    (build_reading_queue refresh=True); a small drain does not (user request:
+    auto-rescore only when many items were added)."""
+    from zotero_summarizer.services.library import reading_queue
+
+    calls = []
+    monkeypatch.setattr(reading_queue, "build_reading_queue", lambda **kw: calls.append(kw))
+
+    with triage_backlog._LOCK:
+        triage_backlog._STATE["gate_onward"] = triage_backlog._LIBRARY_RESCORE_MIN_ITEMS - 1
+    triage_backlog._rescore_library_if_many()
+    assert calls == []  # below threshold → no rescore
+
+    with triage_backlog._LOCK:
+        triage_backlog._STATE["gate_onward"] = triage_backlog._LIBRARY_RESCORE_MIN_ITEMS + 5
+    triage_backlog._rescore_library_if_many()
+    assert calls and calls[0].get("refresh") is True  # above → background rescore kicked

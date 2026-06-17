@@ -319,8 +319,19 @@ async def trigger_triage_backlog() -> dict[str, Any]:
     non-matches for free first. Returns immediately; the client polls
     ``GET /api/daily/triage-status``. If a drain is already running, this
     is a no-op that reports the in-flight status.
+
+    Fail-fast: the default (gate-only) drain MANDATORILY needs a live classifier
+    gate. ``readiness.require`` returns a ``503`` with the real reason (e.g.
+    "lightgbm not installed") instead of starting a doomed background spin that
+    re-fetches the same batch forever and looks like "nothing happened".
     """
+    from zotero_summarizer.services import readiness
+    from zotero_summarizer.services._common import state
     from zotero_summarizer.services.triage import triage_backlog
+
+    gate_only = bool(state().app_state.config.classifier_gate.bulk_drain_gate_only)
+    if gate_only:
+        readiness.require("classifier_gate")
     started = triage_backlog.start_drain()
     return {"started": started, "status": triage_backlog.status()}
 

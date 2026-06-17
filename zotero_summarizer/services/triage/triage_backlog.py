@@ -18,12 +18,19 @@ items, so re-running is safe.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from typing import Any
 
 from zotero_summarizer.services._common import now_iso_z
 
 LOGGER = logging.getLogger(__name__)
+
+# Auto-rescore the WHOLE LIBRARY after a drain that added at least this many new
+# items, so freshly-ingested papers get a relevance score without the user pressing
+# Rescore ("рескор проходил сам если добавилось много новых элементов"). Named
+# constant + env override (no magic number); a trivial drain never triggers a scan.
+_LIBRARY_RESCORE_MIN_ITEMS = int(os.environ.get("ZS_AUTORESCORE_MIN_ITEMS", "10"))
 
 
 # Batch size per tick. Each tick: gate-rejects the obvious ones for free, then
@@ -132,6 +139,26 @@ def _rescore_after_drain() -> None:
             _STATE["rescore_error"] = f"{type(exc).__name__}: {exc}"
 
 
+def _rescore_library_if_many() -> None:
+    """When a drain added MANY new items, kick a background WHOLE-LIBRARY rescore so
+    they get a relevance score without a manual Rescore. Single-flight + gate-gated via
+    ``build_reading_queue(refresh=True)`` (a no-op when a rescore is already running or
+    the gate isn't ready); threshold-gated so a small drain never triggers a full scan.
+    Best-effort background-worker boundary — the drain already persisted the rows."""
+    with _LOCK:
+        onward = int(_STATE.get("gate_onward", 0))
+    if onward < _LIBRARY_RESCORE_MIN_ITEMS:
+        return
+    try:
+        from zotero_summarizer.services.library import reading_queue
+        reading_queue.build_reading_queue(limit=1, refresh=True)  # kicks the bg single-flight
+        LOGGER.info("post-drain library rescore kicked (onward=%d ≥ %d)", onward, _LIBRARY_RESCORE_MIN_ITEMS)
+    except Exception as exc:  # noqa: BLE001 — background-worker boundary; drain already done
+        LOGGER.exception("post-drain library rescore failed (non-fatal)")
+        with _LOCK:
+            _STATE["rescore_error"] = f"{type(exc).__name__}: {exc}"
+
+
 def _drain_worker() -> None:
     """Loop ``run_daemon_tick`` until the backlog is empty. ML-only by default
     (no LLM); the legacy path uses the configured **backlog** stage client.
@@ -154,6 +181,15 @@ def _drain_worker() -> None:
         # in bulk. Set classifier_gate.bulk_drain_gate_only=False for the legacy
         # gate→LLM path (then the backlog stage client is used).
         gate_only = bool(state().app_state.config.classifier_gate.bulk_drain_gate_only)
+        if gate_only and getattr(state(), "classifier_gate", None) is None:
+            # Fail fast, don't spin: a gate-only drain with no live gate would
+            # synthesise zero candidates and re-fetch the same unread batch every
+            # tick (the 2026-06-16 bug). The route already prechecks this; this is
+            # defence-in-depth for a gate that dies mid-drain.
+            from zotero_summarizer.services import readiness
+            detail = readiness.check_classifier_gate().detail
+            _finish(error=f"classifier gate unavailable — {detail}", done=False)
+            return
         triage_llm = None if gate_only else state().resolve_stage_client("backlog")
         drained = False
         for _ in range(_MAX_TICKS):
@@ -183,11 +219,16 @@ def _drain_worker() -> None:
         # drained or hit the safety cap, new rows were added either way. (Skipped
         # on the fatal-LLM early return above, where the gate may be unusable.)
         _rescore_after_drain()
+        _rescore_library_if_many()  # also rescore the whole library when many were added
         if drained:
             _finish(error=None, done=True)
         else:
             _finish(error=f"hit safety cap of {_MAX_TICKS} ticks", done=False)
     except Exception as exc:  # noqa: BLE001 — background worker boundary
+        # Log with traceback: there is no caller to receive this, so without the
+        # log the failure is invisible (the original bug — every other boundary
+        # in this module logs). The reason is also recorded in the job status.
+        LOGGER.exception("backlog drain failed")
         _finish(error=f"{type(exc).__name__}: {exc}", done=False)
 
 

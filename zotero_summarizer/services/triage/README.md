@@ -20,8 +20,15 @@ survivor from embeddings + prestige with **no per-item LLM call** — fast,
 memory-safe, GPU-accelerated. Rows are written `triaged_pending` + marked read
 (`review_mode=False`) so the slate fills and the picker drains. The full-text
 LLM quality digest is **on-demand per paper** (Library → Deep Review), never run
-in bulk. `triage_backlog.status()` exposes `gate_reject_rate` / `gate_onward` so
-the Today banner can show "filtered X% by the ML gate". Concurrency for the
+in bulk. **Fail-fast precondition:** the gate-only drain MANDATORILY needs a live
+classifier gate, so the `POST /api/daily/triage-backlog` route calls
+`services.readiness.require("classifier_gate")` first — a missing gate (e.g.
+`lightgbm` uninstalled, or a retrain still in flight) returns a `503` with the real
+reason instead of starting a doomed background spin that re-fetches the same batch
+forever (the 2026-06-16 bug). `_drain_worker` repeats the check as defence-in-depth
+and its exception boundary now `LOGGER.exception`s, so a drain failure is never
+swallowed unlogged again. `triage_backlog.status()` exposes `gate_reject_rate` /
+`gate_onward` so the Today banner can show "filtered X% by the ML gate". Concurrency for the
 remaining LLM work (legacy drain / live daemon) is provider-aware: **1 for a
 local model**, the configured `TRIAGE_JOB_CONCURRENCY` for a remote one
 (`services._common.effective_llm_concurrency`).

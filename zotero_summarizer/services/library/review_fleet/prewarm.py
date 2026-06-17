@@ -18,7 +18,6 @@ unavailable (no local PDFs → no reviews → nothing to pre-decide).
 """
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from zotero_summarizer.services._common import LOGGER
@@ -29,22 +28,9 @@ _ENV_PREWARM_K = "ZS_REVIEW_FLEET_PREWARM_K"
 
 
 def resolve_prewarm_k(config: Any) -> int:
-    """Top-N to pre-decide: ``quality_review.prewarm_on_startup_k``, SUPERSEDED by
-    the ``ZS_REVIEW_FLEET_PREWARM_K`` env var when set. ``0`` disables.
-
-    The env value is validated at this I/O boundary and rejected LOUDLY (raises
-    ``ValueError`` naming the var) for a malformed or negative value — a typo
-    should surface, not silently run with the wrong setting."""
-    raw = os.getenv(_ENV_PREWARM_K)
-    if raw is not None and raw.strip():
-        try:
-            value = int(raw)
-        except ValueError as exc:
-            raise ValueError(f"{_ENV_PREWARM_K}={raw!r} must be an integer") from exc
-        if value < 0:
-            raise ValueError(f"{_ENV_PREWARM_K}={raw!r} must be >= 0")
-        return value
-    return int(getattr(config.quality_review, "prewarm_on_startup_k", 0))
+    """Top-N to pre-decide, from config + the ``ZS_REVIEW_FLEET_PREWARM_K`` env
+    override. Thin wrapper over the shared resolver — see ``_flight.resolve_prewarm_k``."""
+    return _flight.resolve_prewarm_k(config, env_var=_ENV_PREWARM_K)
 
 
 def _prewarm_worker(k: int) -> None:

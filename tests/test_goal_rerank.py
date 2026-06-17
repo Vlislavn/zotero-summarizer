@@ -26,6 +26,26 @@ def test_blended_sort_floats_on_goal_item_above_higher_relevance():
     assert [r["item_key"] for r in recs] == ["B", "A", "C"]
 
 
+def test_quality_grade_gives_a_bounded_lift_within_neighbourhood():
+    # Equal relevance + no goal/prestige signal → the deep-review grade is the only
+    # differentiator: an A-graded paper floats above an ungraded one (user request).
+    a = {**_rec("A_GRADE", 3.0, None), "quality_grade": "A"}
+    none = {**_rec("UNGRADED", 3.0, None)}
+    recs = [none, a]
+    _ranking._blended_sort(recs)
+    assert [r["item_key"] for r in recs] == ["A_GRADE", "UNGRADED"]
+
+
+def test_quality_lift_cannot_override_a_full_relevance_band():
+    # The lift is BOUNDED: a D-graded high-relevance paper still outranks an
+    # A-graded low-relevance one — quality nudges within a band, never across.
+    hi = {**_rec("HI_REL_D", 4.5, None), "quality_grade": "D"}
+    lo = {**_rec("LO_REL_A", 2.5, None), "quality_grade": "A"}
+    recs = [lo, hi]
+    _ranking._blended_sort(recs)
+    assert [r["item_key"] for r in recs] == ["HI_REL_D", "LO_REL_A"]
+
+
 def test_blended_sort_prestige_lifts_equal_relevance_paper():
     # Equal relevance, no goal signal → prestige is the only differentiator: the
     # high-prestige paper (strong author/venue) floats above the low-prestige one.

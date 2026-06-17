@@ -189,9 +189,20 @@ async def run_review_fleet(req: ReviewFleetRunRequest) -> dict[str, Any]:
 
 
 async def get_review_fleet_status() -> dict[str, Any]:
-    """Poll the review-fleet job: ``{status, total, completed, error, started_at,
-    progress}``."""
+    """Poll the review-fleet job: ``{status, total, completed, proposed,
+    skipped_no_fulltext, failed, error, started_at, progress}``. ``status`` is
+    ``done_empty`` when a run processed picks but proposed nothing (e.g. no
+    full-text PDF) — distinct from ``ready`` (≥1 proposal)."""
     return review_fleet.status()
+
+
+async def get_review_fleet_calibration() -> dict[str, Any]:
+    """Honest calibration: agreement (+ Cohen's kappa) between the fleet's PROPOSED
+    verdicts and the user's CONFIRMED labels, over items that have both. Flagged
+    ``insufficient`` until enough matched pairs accumulate — agreement is then
+    self-consistency, not human-validated accuracy."""
+    from zotero_summarizer.services.library import quality_calibration
+    return await asyncio.to_thread(quality_calibration.compute_proposal_calibration)
 
 
 async def queue_reject_tag(req: RejectTagRequest) -> dict[str, Any]:
@@ -261,6 +272,7 @@ router.add_api_route("/api/library/deep-review/run", run_deep_review, methods=["
 router.add_api_route("/api/library/deep-review/status", get_deep_review_status, methods=["GET"])
 router.add_api_route("/api/library/review-fleet/run", run_review_fleet, methods=["POST"])
 router.add_api_route("/api/library/review-fleet/status", get_review_fleet_status, methods=["GET"])
+router.add_api_route("/api/library/review-fleet/calibration", get_review_fleet_calibration, methods=["GET"])
 router.add_api_route("/api/library/reject-tag", queue_reject_tag, methods=["POST"])
 router.add_api_route("/api/library/fetch-fulltext", fetch_fulltext, methods=["POST"])
 router.add_api_route("/api/library/fetch-fulltext/status", fetch_fulltext_status, methods=["GET"])
