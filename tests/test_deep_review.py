@@ -97,7 +97,7 @@ def _wire(monkeypatch, config, *, reader, extractor, note_fn=None):
         return ({"quality_band": "neutral"},
                 [{"goal": g, "retrieval_state": "miss"} for g in goals],
                 {"type": "empirical_ml", "confidence": 0.9, "source": "llm"})
-    monkeypatch.setattr(deep_review, "_extra_layers", _stub_layers)
+    monkeypatch.setattr(deep_review._deep_review_layers, "extra_layers", _stub_layers)
 
 
 def test_status_exposes_progress_field():
@@ -189,28 +189,33 @@ def test_run_job_isolates_per_item_failure(config, monkeypatch):
     assert s["completed"] == 2 and s["status"] == "ready" and s["error"] is None
 
 
-def test_run_job_all_items_failed_surfaces_job_error(config, monkeypatch):
-    """When EVERY item raises (e.g. the deep_review LLM endpoint is unreachable),
-    the job must surface a job-level error — not report a clean 'ready' with an
-    empty cache, which silently hid the unreachable-MLX failure in the UI.
-
-    Regression for the 2026-06-14 'Run deeper review does nothing' report: the
-    digest LLM pointed at a dead endpoint, every item failed, yet status stayed
-    'ready' / error=None so DeepReviewSection rendered nothing."""
-    reader = _StubReader({"BAD": _detail(title="BAD")})
-    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"))
-    # Give the resolved provider a base_url so the message names the dead endpoint.
+def _wire_provider_endpoint(monkeypatch, config, reader, llm, base_url):
+    """get_state stub whose resolved deep_review provider advertises ``base_url``."""
     monkeypatch.setattr(
         deep_review, "get_state",
         lambda: types.SimpleNamespace(
             app_state=types.SimpleNamespace(config=config),
             pdf_extractor=_StubExtractor("BODY"), unpaywall_client=None, zotero_reader=reader,
-            resolve_stage_client=lambda stage, **_k: _StubLLM(),
+            resolve_stage_client=lambda stage, **_k: llm,
             resolve_stage_provider=lambda stage: types.SimpleNamespace(
-                is_local=True, base_url="http://127.0.0.1:8080/v1"
+                is_local=True, base_url=base_url
             ),
         ),
     )
+
+
+def test_run_job_all_items_failed_surfaces_job_error(config, monkeypatch):
+    """When EVERY item raises, the job must surface a job-level error — not report a
+    clean 'ready' with an empty cache, which silently hid the failure in the UI.
+
+    Regression for the 2026-06-14 'Run deeper review does nothing' report (status
+    must be 'error', not 'ready') AND the 2026-06-18 misattribution: a NON-connectivity
+    failure (the endpoint responded, the digest just couldn't be built) must NOT be
+    blamed on the network — that suffix once sent debugging down the wrong path."""
+    reader = _StubReader({"BAD": _detail(title="BAD")})
+    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"))
+    # _StubLLM raises a non-connectivity RuntimeError ("LLM blew up on this one").
+    _wire_provider_endpoint(monkeypatch, config, reader, _StubLLM(), "http://127.0.0.1:8080/v1")
 
     deep_review._run_job([{"item_key": "BAD", "title": "BAD"}])
 
@@ -219,7 +224,30 @@ def test_run_job_all_items_failed_surfaces_job_error(config, monkeypatch):
     assert s["status"] == "error"
     assert s["completed"] == 1
     assert "LLM blew up" in s["error"]            # the per-item cause is surfaced
-    assert "127.0.0.1:8080" in s["error"]         # the dead endpoint is named
+    assert "may be unreachable" not in s["error"]  # not mislabelled a network failure
+    assert "127.0.0.1:8080" not in s["error"]      # endpoint NOT blamed for a bad body
+
+
+def test_run_job_all_failed_names_endpoint_only_on_connectivity_error(config, monkeypatch):
+    """The flip side: when the per-item failure actually looks like a connection
+    problem, the message DOES name the resolved endpoint (preserves the 2026-06-14
+    unreachable-MLX intent), so a genuinely-down backend stays actionable."""
+
+    class _DownLLM:
+        def pydantic_prompt(self, *, prompt, pydantic_model):
+            raise RuntimeError("Connection refused")
+
+    reader = _StubReader({"BAD": _detail(title="BAD")})
+    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"))
+    _wire_provider_endpoint(monkeypatch, config, reader, _DownLLM(), "http://127.0.0.1:8080/v1")
+
+    deep_review._run_job([{"item_key": "BAD", "title": "BAD"}])
+
+    s = deep_review.status()
+    assert s["status"] == "error"
+    assert "Connection refused" in s["error"]
+    assert "127.0.0.1:8080" in s["error"]          # the dead endpoint IS named
+    assert "may be unreachable" in s["error"]
 
 
 def test_lean_tier_uses_lean_max_text_chars(config, monkeypatch):
@@ -309,6 +337,32 @@ def test_assess_digest_maps_fields_and_injects_goals(config):
     assert "{research_goals}" not in captured["prompt"]  # goals placeholder was filled
 
 
+def test_assess_digest_salvages_raw_json_string_and_fails_loud_on_empty(config):
+    """Regression for the 2026-06-18 deep-review crash: onprem's pydantic_prompt
+    returns the RAW string (not the model) when its own parser can't build it, and
+    assess_digest then `.model_copy()`'d a str → opaque AttributeError. It now
+    salvages a JSON blob with the stronger extractor; a truly empty completion
+    raises cleanly (caught at deep_review's per-item boundary), never an
+    AttributeError."""
+    from zotero_summarizer.services.library import quality_review
+
+    class _StrLLM:
+        def __init__(self, out):
+            self.out = out
+
+        def pydantic_prompt(self, *, prompt, pydantic_model):
+            return self.out  # a STR, exactly as onprem returns on a parse failure
+
+    # Markdown-fenced JSON (onprem's parser fails; extract_json_blob recovers it).
+    raw = '```json\n{"read_decision": "read", "grade": "A", "tldr": "ok"}\n```'
+    d = quality_review.assess_digest(title="T", full_text="BODY", config=config, llm=_StrLLM(raw))
+    assert d.read_decision == "read" and d.grade == "A" and d.basis == "full_text"
+
+    # An empty completion is unsalvageable → raises (NOT an opaque .model_copy crash).
+    with pytest.raises(Exception):
+        quality_review.assess_digest(title="T", full_text="BODY", config=config, llm=_StrLLM(""))
+
+
 def test_build_digest_note_html_marked_and_escaped():
     from zotero_summarizer.models import PaperDigest
     from zotero_summarizer.services.zotero.pending import DIGEST_NOTE_MARKER, build_digest_note_html
@@ -361,7 +415,7 @@ def test_start_with_item_keys_skips_queue(monkeypatch):
 
     out = deep_review.start(item_keys=["K1"])
     assert out["total"] == 1
-    assert captured["items"] == [{"item_key": "K1", "title": "", "gate_relevance": 4.1}]
+    assert captured["items"] == [{"item_key": "K1", "title": "", "gate_relevance": 4.1, "pdf_path": ""}]
 
 
 def test_build_library_detail_surfaces_deep_review(monkeypatch):

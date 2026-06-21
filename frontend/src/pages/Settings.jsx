@@ -26,6 +26,7 @@ import { Banner } from '../components/form/Fields.jsx';
 import ReadinessStrip from '../components/settings/ReadinessStrip.jsx';
 import EssentialsSection from '../components/settings/EssentialsSection.jsx';
 import AdvancedSection from '../components/settings/AdvancedSection.jsx';
+import UniversityAccessPanel from '../components/settings/UniversityAccessPanel.jsx';
 
 export default function Settings() {
   const queryClient = useQueryClient();
@@ -215,6 +216,10 @@ export default function Settings() {
           {!saving && saveError && <span className="text-xs text-rose-700">{saveError}</span>}
         </div>
       </form>
+
+      {/* University access for the review fleet's browser PDF fetch — outside the
+          config form so its login action can't be conflated with the config submit. */}
+      <UniversityAccessPanel />
 
       {/* Read-only model card sits above the admin actions so the user sees
           what's currently deployed before retraining or refreshing. */}

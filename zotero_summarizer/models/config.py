@@ -21,6 +21,7 @@ __all__ = [
     "FullTextRefineConfig",
     "QualityReviewConfig",
     "ClassifierGateConfig",
+    "UniversityAccessConfig",
     "GoalsConfig",
 ]
 
@@ -148,6 +149,28 @@ class QualityReviewConfig(BaseModel):
     use_docling: bool = Field(default=False)
 
 
+class UniversityAccessConfig(BaseModel):
+    """Institutional full-text access for the review fleet's PDF acquisition.
+
+    For non-arXiv / paywalled papers (Cloudflare-protected like bioRxiv, or behind a
+    journal subscription) a headless download can't pass. When ``enabled``, the fleet
+    drives a real browser (a persistent profile the user logs into once via the
+    ``login_url``) to fetch the PDF using the user's institutional session. Disabled
+    by default — the optional ``patchright`` browser dependency must be installed.
+
+    ``ezproxy_prefix`` is OPTIONAL: set it for an EZproxy library (the prefix is
+    prepended to the DOI/publisher URL); leave it empty for SSO/OpenAthens, where the
+    persisted login session carries access without a URL rewrite. ``browser_profile_dir``
+    blank means the app-owned default under ``data/`` (see Settings)."""
+
+    enabled: bool = Field(default=False)
+    ezproxy_prefix: str = Field(default="")
+    login_url: str = Field(default="")
+    browser_profile_dir: str = Field(default="")
+    headless: bool = Field(default=True)
+    fetch_timeout_secs: float = Field(default=60.0, ge=5.0, le=600.0)
+
+
 class ClassifierGateConfig(BaseModel):
     """Phase 1.13 hybrid daemon: classifier as fast-reject before LLM.
 
@@ -223,6 +246,7 @@ class GoalsConfig(BaseModel):
     full_text_refine: FullTextRefineConfig = Field(default_factory=FullTextRefineConfig)
     quality_review: QualityReviewConfig = Field(default_factory=QualityReviewConfig)
     classifier_gate: ClassifierGateConfig = Field(default_factory=ClassifierGateConfig)
+    university_access: UniversityAccessConfig = Field(default_factory=UniversityAccessConfig)
 
     @field_validator("research_goals", "triage_criteria", "summary_structure")
     @classmethod

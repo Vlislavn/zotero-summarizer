@@ -32,8 +32,8 @@ def _reset_latch_and_inline_threads(monkeypatch):
     fleet._LATCH.finish(None)  # release any slot a prior test left claimed
     with fleet._LOCK:
         fleet._STATE.update(
-            total=0, completed=0, proposed=0, skipped_no_fulltext=0, failed=0,
-            started_at=None, progress={},
+            total=0, completed=0, proposed=0, no_fetchable_source=0,
+            needs_library_login=0, failed=0, started_at=None, progress={},
         )
     monkeypatch.setattr(fleet._flight, "run_in_background", lambda target: target())
     yield
@@ -170,7 +170,8 @@ def test_cache_miss_triggers_deep_review_then_proposes(monkeypatch):
         return None if reads["n"] == 1 else _review(grade="C")
 
     monkeypatch.setattr(fleet.deep_review, "get_cached_review", _get_cached)
-    monkeypatch.setattr(fleet.deep_review, "start", lambda **kw: started.append(kw))
+    # start() returns {accepted: True} (our job claimed the slot — the C1 contract).
+    monkeypatch.setattr(fleet.deep_review, "start", lambda **kw: (started.append(kw), {"accepted": True})[1])
     # status settles immediately (not 'running') so the poll loop never sleeps
     monkeypatch.setattr(fleet.deep_review, "status", lambda: {"status": "ready"})
     monkeypatch.setattr(fleet.time, "sleep", lambda _s: pytest.fail("must not sleep when settled"))
@@ -180,7 +181,7 @@ def test_cache_miss_triggers_deep_review_then_proposes(monkeypatch):
 
     fleet.start(top_k=1)
 
-    assert started == [{"item_keys": ["A"]}]  # serial single-key trigger
+    assert started == [{"item_keys": ["A"], "pdf_overrides": None}]  # serial single-key trigger
     assert upserts["A"]["proposed"] == "should_read"  # read + grade C
 
 
@@ -190,7 +191,9 @@ def test_cache_miss_that_never_materializes_reports_done_empty(monkeypatch):
     status is the honest ``done_empty`` (not a false ``ready``)."""
     monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: _queue("A"))
     monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: None)  # always a miss
-    monkeypatch.setattr(fleet.deep_review, "start", lambda **_k: None)
+    # Our job IS accepted but produces no cache entry → genuinely failed (C1: the
+    # accepted-but-empty path stops, not an infinite re-claim loop).
+    monkeypatch.setattr(fleet.deep_review, "start", lambda **_k: {"accepted": True})
     monkeypatch.setattr(fleet.deep_review, "status", lambda: {"status": "ready"})
     monkeypatch.setattr(fleet.time, "sleep", lambda _s: None)
     upserts: dict = {}
@@ -204,16 +207,26 @@ def test_cache_miss_that_never_materializes_reports_done_empty(monkeypatch):
 
 
 def test_run_over_fulltextless_papers_reports_done_empty(monkeypatch):
-    """The user's silent no-op: picks have a cached review but no full-text PDF
-    (``needs_pdf`` / ``digest is None``) -> zero proposals, and the status SAYS so
-    (``done_empty``, ``skipped_no_fulltext``) instead of masquerading as ``ready``."""
+    """Picks have a cached ``needs_pdf`` review AND no PDF source can be acquired (no
+    arXiv/OA, no proxied source) -> the fleet reports the honest ``done_empty`` /
+    ``no_fetchable_source`` rather than a false ``ready``."""
+    import types
+
+    from zotero_summarizer.services.library import _pdf_acquire
+    from zotero_summarizer.services.zotero import zotero as zmod
+
     monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: _queue("A", "B"))
     # cached review EXISTS but carries no usable full text (the deep_review needs_pdf case)
     monkeypatch.setattr(fleet.deep_review, "get_cached_review",
                         lambda key: {"needs_pdf": True, "digest": None})
+    monkeypatch.setattr(zmod, "get_zotero_reader_or_raise", lambda: types.SimpleNamespace(
+        get_item_detail=lambda k: {"has_pdf": False, "url": "", "doi": ""}))
+    # No source can be acquired, and it's NOT a login issue → no_fetchable_source.
+    monkeypatch.setattr(_pdf_acquire, "acquire_pdf_for",
+                        lambda key, detail: _pdf_acquire.AcquireResult(path=None, needs_login=False))
 
     def _no_model(**_kw):
-        raise AssertionError("deep_review.start must not run when a (thin) review is cached")
+        raise AssertionError("deep_review.start must not run when no PDF was acquired")
 
     monkeypatch.setattr(fleet.deep_review, "start", _no_model)
     upserts: dict = {}
@@ -221,8 +234,114 @@ def test_run_over_fulltextless_papers_reports_done_empty(monkeypatch):
 
     out = fleet.start(top_k=2)
     assert upserts == {}  # nothing stored
-    assert out["proposed"] == 0 and out["skipped_no_fulltext"] == 2
-    assert out["status"] == "done_empty"  # FAILS before the fix (today: "ready")
+    assert out["proposed"] == 0 and out["no_fetchable_source"] == 2
+    assert out["status"] == "done_empty"
+
+
+def test_needs_library_login_when_proxied_source_unreachable(monkeypatch):
+    """A proxied/paywalled source EXISTS but the browser isn't logged in → the pick is
+    the actionable ``needs_library_login`` (distinct from ``no_fetchable_source``)."""
+    import types
+
+    from zotero_summarizer.services.library import _pdf_acquire
+    from zotero_summarizer.services.zotero import zotero as zmod
+
+    monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: _queue("A"))
+    monkeypatch.setattr(fleet.deep_review, "get_cached_review",
+                        lambda key: {"needs_pdf": True, "digest": None})
+    monkeypatch.setattr(zmod, "get_zotero_reader_or_raise", lambda: types.SimpleNamespace(
+        get_item_detail=lambda k: {"has_pdf": False, "url": "https://www.nature.com/x", "doi": "10.1/x"}))
+    monkeypatch.setattr(_pdf_acquire, "acquire_pdf_for",
+                        lambda key, detail: _pdf_acquire.AcquireResult(path=None, needs_login=True))
+    monkeypatch.setattr(fleet.deep_review, "start",
+                        lambda **_k: pytest.fail("must not re-review when no PDF was acquired"))
+    monkeypatch.setattr(fleet.verdict_store, "upsert", lambda key, prop: pytest.fail("nothing to propose"))
+
+    out = fleet.start(top_k=1)
+    assert out["proposed"] == 0 and out["needs_library_login"] == 1
+    assert out["status"] == "done_empty"
+
+
+def test_run_job_scans_the_whole_library_not_a_fixed_window(monkeypatch):
+    """Regression for the heavily-labeled silent no-op: the fleet must rank a large
+    slice (not max(top_k*8, 40)) so undecided picks BELOW the pinned/labeled prefix
+    are reachable. (With ~38+ labeled papers a 40-row window selected zero keys.)"""
+    captured: dict = {}
+
+    def _build(**kw):
+        captured.update(kw)
+        return _queue("A")
+
+    monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", _build)
+    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: _review())
+    monkeypatch.setattr(fleet.deep_review, "start", lambda **_k: None)
+    monkeypatch.setattr(fleet.verdict_store, "upsert", lambda key, prop: None)
+
+    fleet.start(top_k=5)
+    assert captured.get("limit", 0) >= 1000  # whole-library scan, not a 40-row window
+
+
+def test_needs_pdf_pick_acquires_then_re_reviews_and_proposes(monkeypatch):
+    """The acquisition path: a PDF-less pick gets a PDF acquired (OA/browser), then a
+    forced re-review FROM THAT PATH produces a digest, then a verdict is proposed."""
+    import types
+
+    from zotero_summarizer.services.library import _pdf_acquire
+    from zotero_summarizer.services.zotero import zotero as zmod
+
+    monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: _queue("A"))
+
+    # First (non-forced) read: needs_pdf. After the acquire, the forced re-review hits.
+    calls = {"forced": [], "paths": []}
+
+    def _ensure(item_key, *, force=False, pdf_path=None):
+        if force:
+            calls["forced"].append(item_key)
+            calls["paths"].append(pdf_path)
+            return _review(grade="A")        # re-reviewed WITH the acquired PDF path
+        return {"needs_pdf": True, "digest": None}
+
+    monkeypatch.setattr(fleet, "_ensure_review", _ensure)
+    monkeypatch.setattr(zmod, "get_zotero_reader_or_raise", lambda: types.SimpleNamespace(
+        get_item_detail=lambda k: {"has_pdf": False, "url": "", "doi": ""}))
+    monkeypatch.setattr(_pdf_acquire, "acquire_pdf_for",
+                        lambda key, detail: _pdf_acquire.AcquireResult(path="/tmp/A.pdf"))
+    upserts: dict = {}
+    monkeypatch.setattr(fleet.verdict_store, "upsert", lambda key, prop: upserts.update({key: prop}))
+
+    out = fleet.start(top_k=1)
+    assert calls["forced"] == ["A"] and calls["paths"] == ["/tmp/A.pdf"]  # acquired, re-reviewed from path
+    assert upserts["A"]["proposed"] == "must_read"          # read + grade A
+    assert out["proposed"] == 1 and out["status"] == "ready"
+
+
+def test_stale_digestless_cache_is_recomputed_not_trusted(monkeypatch):
+    """A cached review with NO digest that is NOT needs_pdf is a stale FAILURE:
+    ``_ensure_review`` must treat it as a miss and recompute (deep review works
+    now), rather than returning it so the pick is skipped forever."""
+    started: list = []
+    # Stale failed entry: had a PDF (needs_pdf falsy) but produced no digest.
+    monkeypatch.setattr(fleet.deep_review, "get_cached_review",
+                        lambda key: {"needs_pdf": False, "digest": None})
+    monkeypatch.setattr(fleet.deep_review, "start",
+                        lambda **kw: (started.append(kw), {"accepted": True})[1])
+    monkeypatch.setattr(fleet.deep_review, "status", lambda: {"status": "ready"})
+    monkeypatch.setattr(fleet.time, "sleep", lambda _s: None)
+
+    review = fleet._ensure_review("A")
+    assert started == [{"item_keys": ["A"], "pdf_overrides": None}]  # recomputed, not trusted as-is
+
+
+def test_ensure_review_keeps_a_needs_pdf_cache_without_re_reviewing(monkeypatch):
+    """A genuine ``needs_pdf`` cache is reused as-is — re-reviewing a paper with no
+    PDF is futile, so no model load."""
+    monkeypatch.setattr(fleet.deep_review, "get_cached_review",
+                        lambda key: {"needs_pdf": True, "digest": None})
+    monkeypatch.setattr(fleet.deep_review, "start",
+                        lambda **_k: pytest.fail("must not re-review a needs_pdf cache"))
+
+    review = fleet._ensure_review("A")
+    assert review == {"needs_pdf": True, "digest": None}
 
 
 # --- single-flight: a second start while running is a no-op ------------------------

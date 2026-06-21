@@ -142,6 +142,25 @@ export async function fetchReviewFleetStatus() {
 }
 
 /**
+ * GET /api/library/university-access/status
+ * → { enabled, browser_available, logged_in, login_url, ezproxy_prefix_set }.
+ * Powers the Settings "University access" panel: whether the browser PDF-fetch
+ * feature is on, the optional browser dep is installed, and a session is present.
+ */
+export async function fetchUniversityAccessStatus() {
+  return request('/api/library/university-access/status');
+}
+
+/**
+ * POST /api/library/university-login
+ * Opens the one-time HEADED library login (background) so the review fleet's browser
+ * PDF fetch can reuse the institutional session. Resolves to { started, reason? }.
+ */
+export async function runUniversityLogin() {
+  return request('/api/library/university-login', { method: 'POST' });
+}
+
+/**
  * POST /api/library/reject-tag { item_key }
  * Queues a Pending ❌ tag for the item (Deep Review "Remove"). The dont_read
  * verdict (drop + training) is a separate submitVerdict call.

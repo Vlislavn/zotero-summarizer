@@ -47,6 +47,9 @@ class Settings:
     golden_jsonl_path: Path
     faithbench_dir: Path
     paper_render_dir: Path
+    # App-owned browser profile for university institutional access (persistent
+    # login session). Default under data/; overridable via UniversityAccessConfig.
+    browser_profile_dir: Path
 
     @classmethod
     def load(
@@ -85,4 +88,5 @@ class Settings:
             golden_jsonl_path=data_dir / "zotero-summarizer-golden.jsonl",
             faithbench_dir=data_dir / "faithbench",
             paper_render_dir=data_dir / "paper_render",
+            browser_profile_dir=data_dir / "browser_profile",
         )

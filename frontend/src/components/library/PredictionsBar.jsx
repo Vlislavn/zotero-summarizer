@@ -13,8 +13,10 @@
 function stateLine(fleetStatus, proposedCount) {
   const {
     status, total = 0, completed = 0, proposed = 0,
-    skipped_no_fulltext: skipped = 0, error, progress = {},
+    no_fetchable_source: noSource = 0, needs_library_login: needsLogin = 0,
+    failed = 0, error, progress = {},
   } = fleetStatus || {};
+  const skipped = noSource + needsLogin;
 
   if (status === 'running') {
     const idx = progress.index || completed + 1;
@@ -28,14 +30,21 @@ function stateLine(fleetStatus, proposedCount) {
     return { tone: 'text-rose-700', text: `Pre-decide failed: ${error || 'unknown error'}` };
   }
   if (status === 'ready') {
-    const tail = skipped > 0 ? ` (${skipped} had no full text.)` : '';
+    const loginTail = needsLogin > 0 ? `; ${needsLogin} need a library login` : '';
+    const tail = skipped > 0 ? ` (${skipped} had no full text${loginTail}.)` : '';
     return { tone: 'text-slate-600', text: `Predicted ${proposed} of ${total} — Confirm or Override on the rows below.${tail}` };
   }
   if (status === 'done_empty') {
+    // The fleet acquires the PDF itself (arXiv/OA headless, then the university
+    // browser), so an empty run names the REAL reason per item, not a guess.
+    const detail = failed > 0
+      ? `${failed} couldn’t be reviewed — the deep-review step errored (check the server log).`
+      : needsLogin > 0
+        ? `${needsLogin} need your university library login — open Settings → University access, log in, then Predict again.`
+        : 'none had a fetchable PDF (a web article, or no open-access / arXiv source).';
     return {
       tone: 'text-amber-700',
-      text: `Reviewed ${completed} paper${completed === 1 ? '' : 's'} but couldn’t suggest a verdict — they have no full-text PDF. `
-        + 'Use “Fetch full text” in Export to Zotero below, then Predict again.',
+      text: `Reviewed ${completed} paper${completed === 1 ? '' : 's'} but suggested no verdict — ${detail}`,
     };
   }
   // idle / never run — if a startup prewarm already left proposals on the rows, say

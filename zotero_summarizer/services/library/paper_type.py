@@ -5,7 +5,7 @@ space, then ONE LLM classification call decides. Low confidence (or a contradict
 with a hard metadata signal) falls back to a safe SUPERTYPE — so a review is never
 judged as an empirical paper, and vice-versa, even when the classifier is unsure.
 
-Detection is cheap and gate-independent; the caller (``deep_review._extra_layers``)
+Detection is cheap and gate-independent; the caller (``_deep_review_layers.extra_layers``)
 treats it as one more independently-skippable layer and degrades to ``GENERIC_EMPIRICAL``
 on failure (the module's established background-worker boundary). Within ``detect`` the
 LLM error propagates — we don't silently swallow it here.

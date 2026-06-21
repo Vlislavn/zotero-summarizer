@@ -19,7 +19,7 @@ Call sites pass ``sections`` from ``_paper_read_pdf.extract_pdf_content``; when
 Errors propagate (no error-masking): the only place this runs is on over-budget
 papers, and a genuine chunk-index failure is a signal, not something to hide
 behind a silent prefix slice. The digest caller runs it directly; the quality
-caller is already inside ``deep_review._extra_layers``' skippable-layer boundary.
+caller is already inside ``_deep_review_layers.extra_layers``' skippable-layer boundary.
 """
 from __future__ import annotations
 

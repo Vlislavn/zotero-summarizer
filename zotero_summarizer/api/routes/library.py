@@ -17,6 +17,7 @@ from zotero_summarizer.services.library import (
     qa,
     reading_queue,
     score_tags,
+    university_access,
 )
 from zotero_summarizer.services.library.review_fleet import fleet as review_fleet
 from zotero_summarizer.services.zotero.zotero import get_zotero_reader_or_raise
@@ -190,10 +191,24 @@ async def run_review_fleet(req: ReviewFleetRunRequest) -> dict[str, Any]:
 
 async def get_review_fleet_status() -> dict[str, Any]:
     """Poll the review-fleet job: ``{status, total, completed, proposed,
-    skipped_no_fulltext, failed, error, started_at, progress}``. ``status`` is
-    ``done_empty`` when a run processed picks but proposed nothing (e.g. no
-    full-text PDF) — distinct from ``ready`` (≥1 proposal)."""
+    no_fetchable_source, needs_library_login, failed, error, started_at,
+    progress}``. ``status`` is ``done_empty`` when a run processed picks but proposed
+    nothing — ``needs_library_login`` flags picks whose proxied/paywalled PDF needs
+    the university login (Settings → University access); distinct from ``ready``."""
     return review_fleet.status()
+
+
+async def get_university_access_status() -> dict[str, Any]:
+    """Readiness for the Settings panel: ``{enabled, browser_available, logged_in,
+    login_url, ezproxy_prefix_set}``."""
+    return await asyncio.to_thread(university_access.status)
+
+
+async def run_university_login() -> dict[str, Any]:
+    """Open the one-time headed library login (background) so the fleet's browser PDF
+    fetch can reuse the institutional session. Returns ``{started, reason?}``; refuses
+    when the browser extra is missing or a deep review is running."""
+    return await asyncio.to_thread(university_access.start_login)
 
 
 async def get_review_fleet_calibration() -> dict[str, Any]:
@@ -273,6 +288,8 @@ router.add_api_route("/api/library/deep-review/status", get_deep_review_status, 
 router.add_api_route("/api/library/review-fleet/run", run_review_fleet, methods=["POST"])
 router.add_api_route("/api/library/review-fleet/status", get_review_fleet_status, methods=["GET"])
 router.add_api_route("/api/library/review-fleet/calibration", get_review_fleet_calibration, methods=["GET"])
+router.add_api_route("/api/library/university-access/status", get_university_access_status, methods=["GET"])
+router.add_api_route("/api/library/university-login", run_university_login, methods=["POST"])
 router.add_api_route("/api/library/reject-tag", queue_reject_tag, methods=["POST"])
 router.add_api_route("/api/library/fetch-fulltext", fetch_fulltext, methods=["POST"])
 router.add_api_route("/api/library/fetch-fulltext/status", fetch_fulltext_status, methods=["GET"])

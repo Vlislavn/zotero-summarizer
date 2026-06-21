@@ -44,6 +44,16 @@ dev = [
 docling = [
     "docling>=2.0.0",
 ]
+# Optional browser automation for university institutional full-text access
+# (review fleet → non-arXiv / paywalled PDFs). Patchright is a drop-in patched
+# Playwright (undetectable CDP) that passes Cloudflare; a persistent profile
+# carries the EZproxy/SSO session. Install when you want the browser fetch path:
+# `uv pip install -e '.[browser]' && patchright install chromium`. Gated at
+# runtime by `university_access.enabled` with graceful degrade, so the base
+# install stays light (no Chromium download). See integrations/browser_fetch.py.
+browser = [
+    "patchright>=1.40",
+]
 
 [project.scripts]
 zotero-summarizer = "zotero_summarizer.cli:main"

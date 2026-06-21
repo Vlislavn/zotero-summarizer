@@ -9,6 +9,51 @@ yet publish versioned releases, so everything currently lives under
 
 ### Added
 
+- **University browser access for the review fleet's PDF fetch.** Non-arXiv /
+  paywalled picks (bioRxiv, Nature, journal DOIs) can now be reviewed: `_pdf_acquire`
+  resolves arXiv → Unpaywall OA → OpenAlex `oa_url` (headless) → a real browser
+  (`integrations/browser_fetch.py`, optional `[browser]` extra = patchright) driving a
+  persistent profile the user logs into once via Settings → University access
+  (`POST /api/library/university-login`). New `university_access` config (optional
+  EZproxy prefix; blank = SSO/OpenAthens).
+
+### Changed
+
+- **Review fleet reviews from a local cache, not a Zotero attachment.** An acquired
+  PDF is injected into `deep_review` via new `start(pdf_overrides=…)` and reviewed
+  from that path with NO Zotero write, so verdicts work while Zotero is open. Outcome
+  taxonomy is now honest per-pick: `no_fetchable_source` (web/no source) vs
+  `needs_library_login` (proxied source, not logged in) — PredictionsBar names the
+  real reason instead of guessing "no arXiv link, or Zotero was open". `_extra_layers`
+  split into `_deep_review_layers.py` to keep `deep_review.py` under the 500-LOC cap.
+
+### Fixed
+
+- **Temporal-eval `days_since_added=-1` sentinel bug.** `_row_days` parsed the
+  feed-row "no date" sentinel `-1` as the *newest* age, so the forward-looking
+  holdout was ~94% undated feed rows (88% mass auto-rejects) — `temporal_spearman`
+  measured junk separation, not recent reading decisions. Undated rows now sort
+  oldest (never held out), and the holdout fraction is taken over the *dated* pool.
+
+### Changed
+
+- **Unchecked Today→library adds downgraded to weak `could_read` (3.0).** A
+  provisional "Add" (source=`machine_add`) was a full-strength `should_read` (4.0)
+  training/eval label indistinguishable from a verified one. Its effective training
+  label is now capped at `could_read` until an explicit verdict/outcome resolves —
+  measured to lift honest forward-ranking ρ on real reading decisions ~0 → 0.29.
+- **Daemon + active-learning retrains now apply the `hybrid_gt` verdict overlay**
+  (threaded `triage_db_path` through `load_or_train`), matching `/admin/retrain` —
+  the three paths previously trained on different labels (raw CSV vs. overlaid).
+
+### Added
+
+- **Honest split-by-population gate metrics.** Training metadata + ModelCard now
+  report `oof_spearman_verified` (OOF on dated reading-decisions — the gate's real
+  ranking ability, ~0.14) alongside the aggregate `oof_spearman` (inflated by ~72%
+  trivially-rejected feed rows). Recency-weighted training was measured (half-life
+  sweep) and **rejected** (hurt forward ρ); the negative is recorded in `label_weights`.
+
 - **Paper-quality benchmark harness.** `tools/bench_paper_quality.py` scores the
   pipeline against an Opus-4.8-authored, frozen, FIREWALLED gold set across 4
   deterministically-graded tracks — paper-type detection, checklist↔gold Cohen's κ,
@@ -173,6 +218,54 @@ yet publish versioned releases, so everything currently lives under
   so the `/api/admin/model` route and behavior are unchanged.
 
 ### Fixed
+
+- **"Predict next 5" silently did nothing on a heavily-labeled library.** The
+  fleet ranked only a 40-row window, but the queue pins labeled papers to its top,
+  so every window row was already-decided → 0 undecided picks selected. It now
+  scans the whole ranked library. It also **fetches the arXiv PDF** for a PDF-less
+  pick (backup-first, connector-guarded) and re-reviews it, and **recomputes stale
+  digest-less cached reviews** instead of skipping them forever — so re-running
+  keeps adding deep reviews + proposals.
+- **`serve` died with `Errno 48 address already in use` when a previous server
+  was still running.** It now reclaims its port first (`lsof` discovery →
+  SIGTERM, then SIGKILL if it clings), so a re-run replaces the old instance.
+  Opt out with `--no-kill`.
+- **Deep review crashed with `'str' object has no attribute 'model_copy'` on an
+  empty/malformed LLM completion.** onprem's `pydantic_prompt` returns the raw
+  string when its parser can't build the model; `assess_digest` then `.model_copy()`'d
+  a str. `assess_digest` now salvages a JSON blob with `extract_json_blob` (mirroring
+  the existing pattern in `triage/summarization`) and raises cleanly on a truly empty
+  completion — caught at deep_review's per-item boundary. Verified live (full digest +
+  Zotero note, no crash).
+- **Deep-review failures were always blamed on an unreachable endpoint.**
+  `_summarize_errors` appended "endpoint … may be unreachable" to every all-failed
+  run, even a parse/validation error where the endpoint clearly responded —
+  misdirecting debugging. The suffix is now gated on a connectivity-looking error;
+  other causes are reported verbatim.
+- **Library Rescore / Sync reloaded the MiniLM embedder once per 50-item predict
+  batch (178× in ~3 min).** `_build_aux_providers` built a fresh `EmbeddingCache`
+  (instance-local model memo) per `gate.predict()`. `_resolve_embedding_cache` now
+  reuses the runtime singleton. Verified: a full 1877-item rescore = **0 reloads**.
+- **Ask-the-paper returned an unhandled 500 on empty/unparseable LLM output.**
+  `ask_paper` now catches the parse `ValueError` and abstains (untrusted LLM output
+  at the boundary), without changing faithbench's distinct exception-counting.
+- **"Predict next 5" reported every paper `failed` when a deep-review job was already
+  in flight** (e.g. the startup prewarm). The fleet read a foreign job settling as
+  "our item done". `deep_review.start()` now returns `accepted`; the fleet waits then
+  re-claims the slot for its own item.
+- **Retrain double-ran on a fast double-click.** The `_RETRAIN_LOCK.locked()`
+  precheck raced (the worker acquired later, on its own thread). `retrain()` now
+  claims the lock synchronously; the worker releases it on every exit path.
+- **Sort-ranks (Call Number) re-stamped every item every run** even when ranks were
+  unchanged — a no-op `set_field` touches `dateModified`/version → a full-library
+  phantom sync. Now skips items whose Call Number already equals the computed rank.
+- **Trash 500'd the whole batch when Zotero held the DB lock**, after the dont_read
+  labels were already committed (partial state). `mark_feed_items_read` is now
+  best-effort: reports `marked_read: 0` + `marked_read_error` instead of failing.
+- **Test/hygiene:** fixed a stale `test_offline` mock (missing `quality_review` →
+  `AttributeError` once `_model_targets` started reading `shadow_claim_check`) and
+  removed a stale `slop_allowlist.txt` grandfather (`quality_eval.py:73`, no live
+  finding) so `test_allowlist_reconcile` passes.
 
 - **Quality band: near-perfect-metric red flag false-fired on the Adam β2
   hyperparameter (the within-±1 residual).** The structural EMP leakage red-flag
