@@ -9,11 +9,23 @@ yet publish versioned releases, so everything currently lives under
 
 ### Added
 
-- **PubMed documented as a first-class triage source.** No code: the pipeline
-  reads Zotero feed items (never parses RSS), so a PubMed saved-search RSS feed
-  flows through gate → goal_sim → slate like arXiv/bioRxiv. docs/usage.md adds a
-  validated medical-agentic-AI query (anchors "agent" to AI to dodge the
-  pharmacological-agent flood) + the RSS abstract-truncation caveat.
+- **HackerNoon documented as a triage source (practitioner/engineering angle).**
+  Zero code: a tag-filtered RSS feed (`hackernoon.com/tagged/llm/feed` — validated
+  on-point for LLM/agent engineering; the narrower `ai-agents`/`agentic-ai` tags
+  don't exist) flows through the same Zotero-RSS pipeline. docs/usage.md notes the
+  caveats: triage is title-driven (the tag feed carries no full abstract) and it's
+  triage-only (blogs have no PDF/DOI/prestige, so deep-review/ask-paper don't apply
+  — read on the web).
+- **PubMed as a first-class triage source + PMC full-text rung.** Ingestion is
+  zero-code (the pipeline reads Zotero feed items, never parses RSS), so a PubMed
+  saved-search RSS feed flows through gate → goal_sim → slate like arXiv/bioRxiv.
+  docs/usage.md ships four validated medical-agentic-AI / oncology query feeds
+  (live-checked against NCBI: "agent" anchored to AI to dodge the pharmacological
+  flood; `[tiab]` over MeSH because MeSH indexing lags ~60% on fresh papers). New
+  `integrations/pubmed.py` resolves PMID/DOI → PMC PDF URL (keyless ID-Converter)
+  so `_pdf_acquire` can fetch papers in PMC with **no DOI** (e.g. AMIA proceedings)
+  that the DOI-keyed Unpaywall/OpenAlex rungs miss — via the browser rung, since
+  fresh PMC is bot-walled headless.
 - **University browser access for the review fleet's PDF fetch.** Non-arXiv /
   paywalled picks (bioRxiv, Nature, journal DOIs) can now be reviewed: `_pdf_acquire`
   resolves arXiv → Unpaywall OA → OpenAlex `oa_url` (headless) → a real browser
@@ -21,15 +33,22 @@ yet publish versioned releases, so everything currently lives under
   persistent profile the user logs into once via Settings → University access
   (`POST /api/library/university-login`). New `university_access` config (optional
   EZproxy prefix; blank = SSO/OpenAthens).
-- **Reuse an existing Safari login instead of a second in-app sign-in.**
-  `university_access.reuse_safari_cookies` (Settings toggle) reads Safari's session
-  cookies (`browser-cookie3`, optional `[browser]` extra) and injects them into the
-  fetch context — so a paywalled paper you can already open in Safari downloads
-  without logging in again. Needs macOS Full Disk Access; degrades to the in-app
-  login when the store is unreadable or the session expired.
+- **Reuse an existing browser login instead of a second in-app sign-in.**
+  `university_access.cookie_browser` (Settings picker: chrome/firefox/edge/brave/…)
+  reads that browser's session cookies (`browser-cookie3`, optional `[browser]` extra)
+  and injects them into the fetch context — so a paywalled paper you can already open
+  there downloads without logging in again. Degrades to the in-app login when the
+  store is unreadable or the session expired. NOTE: **Safari is unreadable on macOS
+  15+/26** (Apple hardened its cookie container — Full Disk Access can't reach it);
+  use Chrome/Firefox or the in-app login.
 
 ### Changed
 
+- **UI clarity pass (subtraction-first), pt.1.** One tone vocabulary
+  (`ui/Badge`→canonical `CHIP_TONE`); Today drops PipelineFunnel/Refresh/telemetry;
+  cull `PaperCard` loses relevance+prestige bars+bucket badge (one relevance scale);
+  `ModelCard` 14→5 audit fields; Library band-filter = histogram bars only; Review =
+  one verdict row (no dup Approve/Reject). Laws: Occam/Miller/Hick/Working-Memory.
 - **Review fleet reviews from a local cache, not a Zotero attachment.** An acquired
   PDF is injected into `deep_review` via new `start(pdf_overrides=…)` and reviewed
   from that path with NO Zotero write, so verdicts work while Zotero is open. Outcome

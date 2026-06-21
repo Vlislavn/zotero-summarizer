@@ -12,17 +12,18 @@ from pathlib import Path
 from zotero_summarizer.services.library import _pdf_acquire
 
 
-def _app(*, ua_enabled=False, ezproxy_prefix="", unpaywall=None, openalex=None, reuse_safari=False):
+def _app(*, ua_enabled=False, ezproxy_prefix="", unpaywall=None, openalex=None, cookie_browser="", openalex_cache=None):
     ua = types.SimpleNamespace(
         enabled=ua_enabled, ezproxy_prefix=ezproxy_prefix, login_url="",
         browser_profile_dir="", headless=True, fetch_timeout_secs=60.0,
-        reuse_safari_cookies=reuse_safari,
+        cookie_browser=cookie_browser,
     )
     qr = types.SimpleNamespace(max_pdf_bytes=20_000_000, fetch_timeout_secs=30.0)
-    config = types.SimpleNamespace(quality_review=qr, university_access=ua)
+    prestige = types.SimpleNamespace(user_agent_email="")
+    config = types.SimpleNamespace(quality_review=qr, university_access=ua, prestige=prestige)
     return types.SimpleNamespace(
         app_state=types.SimpleNamespace(config=config),
-        unpaywall_client=unpaywall, openalex_client=openalex,
+        unpaywall_client=unpaywall, openalex_client=openalex, openalex_cache=openalex_cache,
     )
 
 
@@ -64,6 +65,41 @@ def test_openalex_oa_url_rung_used_when_no_direct(monkeypatch):
     assert fetched == ["https://oa.example/x.pdf"]
 
 
+def test_pmc_rung_recovers_no_doi_pubmed_item(monkeypatch):
+    """A PubMed paper in PMC but with NO DOI (e.g. AMIA proceedings): arXiv/Unpaywall
+    resolve nothing, but the PMC rung supplies a PDF URL that enters the fetch chain
+    (here the fetch is stubbed to succeed). Regression for the DOI-keyed rungs leaving
+    the agentic cluster with no URL to try. (Live: fresh PMC is browser-routed.)"""
+    app = _app(openalex_cache=object())  # opaque cache; resolver is stubbed below
+    fetched: list = []
+    captured: dict = {}
+
+    def _resolve_pmc(**kw):
+        captured.update(kw)
+        return "https://pmc.ncbi.nlm.nih.gov/articles/PMC13274294/pdf/"
+
+    monkeypatch.setattr(_pdf_acquire.pubmed, "resolve_pmc_pdf_url", _resolve_pmc)
+    _patch(
+        monkeypatch, app,
+        resolve=lambda **_k: None,
+        headless_fetch=lambda url, **_k: (fetched.append(url), Path("/tmp/pmc.pdf"))[1],
+    )
+    res = _pdf_acquire.acquire_pdf_for("A", {"url": "https://pubmed.ncbi.nlm.nih.gov/42317861/", "doi": ""})
+    assert res.path == Path("/tmp/pmc.pdf")
+    assert fetched == ["https://pmc.ncbi.nlm.nih.gov/articles/PMC13274294/pdf/"]
+    assert captured["pmid"] == "42317861"  # PMID parsed from the PubMed URL and threaded
+
+
+def test_pmc_rung_skipped_when_no_cache(monkeypatch):
+    """No OpenAlex cache (prestige/full-text disabled) → PMC rung is skipped, not crashed."""
+    app = _app(openalex_cache=None)
+    boom = lambda **_k: (_ for _ in ()).throw(AssertionError("resolve_pmc must not be called"))
+    monkeypatch.setattr(_pdf_acquire.pubmed, "resolve_pmc_pdf_url", boom)
+    _patch(monkeypatch, app, resolve=lambda **_k: None)
+    res = _pdf_acquire.acquire_pdf_for("A", {"url": "https://pubmed.ncbi.nlm.nih.gov/42317861/", "doi": ""})
+    assert res.path is None and res.needs_login is False
+
+
 def test_browser_rung_used_for_proxied_when_headless_fails(monkeypatch):
     """Headless yields nothing; a publisher URL + enabled access → the browser fetch
     runs and (here) succeeds."""
@@ -94,10 +130,10 @@ def test_disabled_access_never_opens_browser(monkeypatch):
     assert browser_calls == []
 
 
-def test_reuse_safari_cookies_threaded_to_browser(monkeypatch):
-    """When `reuse_safari_cookies` is set, the browser rung is called with it so the
-    user's existing Safari session is injected (no separate in-app login)."""
-    app = _app(ua_enabled=True, reuse_safari=True)
+def test_cookie_browser_threaded_to_browser(monkeypatch):
+    """When `cookie_browser` is set, the browser rung is called with it so the user's
+    existing session from that browser is injected (no separate in-app login)."""
+    app = _app(ua_enabled=True, cookie_browser="chrome")
     seen = {}
     def _browser(url, **kw):
         seen.update(kw)
@@ -105,7 +141,7 @@ def test_reuse_safari_cookies_threaded_to_browser(monkeypatch):
     _patch(monkeypatch, app, resolve=lambda **_k: None, headless_fetch=lambda *_a, **_k: None, browser_fetch=_browser)
     res = _pdf_acquire.acquire_pdf_for("A", {"url": "https://www.nature.com/x", "doi": "10.1/x"})
     assert res.path == Path("/tmp/b.pdf")
-    assert seen.get("reuse_safari_cookies") is True
+    assert seen.get("cookie_browser") == "chrome"
 
 
 def test_unreachable_proxied_source_needs_login(monkeypatch):

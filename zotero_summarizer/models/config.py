@@ -169,11 +169,21 @@ class UniversityAccessConfig(BaseModel):
     browser_profile_dir: str = Field(default="")
     headless: bool = Field(default=True)
     fetch_timeout_secs: float = Field(default=60.0, ge=5.0, le=600.0)
-    # Reuse your EXISTING Safari session instead of a separate in-app login: read
-    # Safari's cookie store and inject it into the fetch (needs the optional
-    # ``browser-cookie3`` dep + macOS Full Disk Access for the app). Off by default;
-    # the in-app login remains the fallback for expired sessions / Cloudflare sites.
-    reuse_safari_cookies: bool = Field(default=False)
+    # Reuse an EXISTING browser's session instead of a separate in-app login: read that
+    # browser's cookie store (``browser-cookie3``) and inject it into the fetch. ``""``
+    # = off. NOTE: ``safari`` does NOT work on macOS 15+/26 — Apple hardened Safari's
+    # container so its cookies are unreadable even with Full Disk Access; use ``chrome``
+    # / ``firefox``. The in-app login (``login_url``) remains the fallback.
+    cookie_browser: str = Field(default="")
+
+    @field_validator("cookie_browser")
+    @classmethod
+    def _validate_cookie_browser(cls, value: str) -> str:
+        v = (value or "").strip().lower()
+        allowed = {"", "chrome", "chromium", "firefox", "edge", "brave", "safari", "opera", "vivaldi"}
+        if v not in allowed:
+            raise ValueError(f"cookie_browser must be one of {sorted(allowed)}, got {value!r}")
+        return v
 
 
 class ClassifierGateConfig(BaseModel):

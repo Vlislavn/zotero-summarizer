@@ -33,10 +33,10 @@ export default function UniversityAccessPanel() {
         enabled: Boolean(ua.enabled),
         login_url: ua.login_url || '',
         ezproxy_prefix: ua.ezproxy_prefix || '',
-        reuse_safari_cookies: Boolean(ua.reuse_safari_cookies),
+        cookie_browser: ua.cookie_browser || '',
       });
     }
-  }, [configQuery.data, form, ua.enabled, ua.login_url, ua.ezproxy_prefix, ua.reuse_safari_cookies]);
+  }, [configQuery.data, form, ua.enabled, ua.login_url, ua.ezproxy_prefix, ua.cookie_browser]);
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -111,18 +111,23 @@ export default function UniversityAccessPanel() {
         Enable browser PDF fetch for the review fleet
       </label>
 
-      <label className="flex items-start gap-2 text-sm text-slate-700">
-        <input
-          type="checkbox"
-          className="mt-0.5"
-          checked={form.reuse_safari_cookies}
-          onChange={(e) => setForm((f) => ({ ...f, reuse_safari_cookies: e.target.checked }))}
-        />
-        <span>
-          Reuse my existing <strong>Safari</strong> login (skip the in-app sign-in)
-          <span className="block text-[11px] text-slate-400">
-            Reads Safari's session cookies — needs macOS Full Disk Access for this app. Falls back to the in-app login when the session is missing/expired.
-          </span>
+      <label className="block text-xs text-slate-600">
+        Reuse an existing browser login (skip the in-app sign-in)
+        <select
+          value={form.cookie_browser}
+          onChange={(e) => setForm((f) => ({ ...f, cookie_browser: e.target.value }))}
+          className="mt-1 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm bg-white"
+        >
+          <option value="">Don't reuse — use the in-app login</option>
+          <option value="chrome">Chrome</option>
+          <option value="firefox">Firefox</option>
+          <option value="edge">Edge</option>
+          <option value="brave">Brave</option>
+          <option value="safari">Safari (blocked on macOS 15+/26)</option>
+        </select>
+        <span className="block text-[11px] text-slate-400 mt-1">
+          Reads that browser's session cookies so a paper you can already open there fetches without a second login.
+          Safari is unreadable on recent macOS (Apple's hardened container) — use Chrome/Firefox. Falls back to the in-app login.
         </span>
       </label>
 

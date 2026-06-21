@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from zotero_summarizer.integrations import browser_fetch, pdf_fetch
+from zotero_summarizer.integrations import browser_fetch, pdf_fetch, pubmed
 from zotero_summarizer.integrations._zotero_read_common import _arxiv_id_from_url_or_doi
 from zotero_summarizer.services._common import LOGGER, state as get_state
 from zotero_summarizer.services.library.university_access import profile_dir as _profile_dir
@@ -59,11 +59,26 @@ def acquire_pdf_for(item_key: str, detail: dict[str, Any]) -> AcquireResult:
     doi = str(detail.get("doi") or "")
     arxiv_id = _arxiv_id_from_url_or_doi(url, doi)
 
-    # --- headless rungs: arXiv → Unpaywall → OpenAlex oa_url ----------------
+    # --- headless rungs: arXiv → Unpaywall → PMC → OpenAlex oa_url -----------
     headless_urls: list[str] = []
     direct = pdf_fetch.resolve_pdf_url(doi=doi, arxiv_id=arxiv_id, url=url, unpaywall=app.unpaywall_client)
     if direct:
         headless_urls.append(direct)
+    # PMC full text — recovers PubMed papers that are in PMC but carry NO DOI (e.g.
+    # AMIA proceedings, where clinical agentic-AI work clusters); the DOI-keyed
+    # Unpaywall/OpenAlex rungs can't resolve those, leaving no PDF URL to try. Fresh
+    # PMC has no reliable HEADLESS route (bot-wall interstitial), so this URL is really
+    # for the browser rung below — the headless attempt falls through. Reuses the cache.
+    cache = getattr(app, "openalex_cache", None)
+    if cache is not None:
+        pmc_url = pubmed.resolve_pmc_pdf_url(
+            cache=cache,
+            pmid=pubmed._pmid_from_url(url),
+            doi=doi,
+            email=str(getattr(config.prestige, "user_agent_email", "") or ""),
+        )
+        if pmc_url:
+            headless_urls.append(pmc_url)
     openalex = getattr(app, "openalex_client", None)
     if openalex is not None and doi:
         work = openalex.fetch_work_by_doi(doi)
@@ -87,7 +102,7 @@ def acquire_pdf_for(item_key: str, detail: dict[str, Any]) -> AcquireResult:
         path = browser_fetch.fetch_pdf_via_browser(
             candidate, profile_dir=profile, cache_dir=None,
             timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes, headless=ua.headless,
-            reuse_safari_cookies=bool(getattr(ua, "reuse_safari_cookies", False)),
+            cookie_browser=str(getattr(ua, "cookie_browser", "") or ""),
         )
         if path is not None:
             return AcquireResult(path=path)

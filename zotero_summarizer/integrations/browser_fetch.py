@@ -77,7 +77,7 @@ def _import_browser_cookie3() -> Any:
     return browser_cookie3
 
 
-def _safari_cookie_dicts(jar: Any) -> list[dict[str, Any]]:
+def _cookie_dicts(jar: Any) -> list[dict[str, Any]]:
     """Convert a ``http.cookiejar`` jar to Playwright ``add_cookies`` dicts (domain+path
     form). Skips entries with no name/domain."""
     out: list[dict[str, Any]] = []
@@ -94,22 +94,31 @@ def _safari_cookie_dicts(jar: Any) -> list[dict[str, Any]]:
     return out
 
 
-def _load_safari_cookies() -> list[dict[str, Any]]:
-    """The user's Safari cookies as Playwright ``add_cookies`` dicts, or ``[]`` when
-    the dep is missing or the store can't be read (no Full Disk Access). Best-effort
-    by contract — the user opted into Safari-session reuse and the in-app login is the
-    fallback (a read failure must not crash the fetch)."""
+def _load_browser_cookies(browser: str) -> list[dict[str, Any]]:
+    """The user's cookies from ``browser`` (e.g. ``chrome``/``firefox``) as Playwright
+    ``add_cookies`` dicts, or ``[]`` when reuse is off, the dep/browser is unavailable,
+    or the store can't be read. Best-effort by contract — the user opted into
+    browser-session reuse and the in-app login is the fallback (a read failure must not
+    crash the fetch). NOTE: ``safari`` is unreadable on macOS 15+/26 (hardened
+    container, even with Full Disk Access) → returns ``[]``."""
+    name = (browser or "").strip().lower()
+    if not name:
+        return []
     module = _import_browser_cookie3()
     if module is None:
+        return []
+    loader = getattr(module, name, None)
+    if loader is None:
+        LOGGER.info("cookie reuse: %r is not a browser browser-cookie3 supports", name)
         return []
     err_cls = getattr(module, "BrowserCookieError", None)
     catch: tuple[type[BaseException], ...] = (OSError,) if err_cls is None else (OSError, err_cls)
     try:
-        jar = module.safari()
+        jar = loader()
     except catch as exc:
-        LOGGER.info("Safari cookies unreadable (Full Disk Access needed?): %s", exc)
+        LOGGER.info("%s cookies unreadable: %s", name, exc)
         return []
-    return _safari_cookie_dicts(jar)
+    return _cookie_dicts(jar)
 
 
 def _looks_pdf(body: bytes, *, max_bytes: int) -> bool:
@@ -129,7 +138,7 @@ def fetch_pdf_via_browser(
     timeout: float = 60.0,
     max_bytes: int = _DEFAULT_MAX_BYTES,
     headless: bool = True,
-    reuse_safari_cookies: bool = False,
+    cookie_browser: str = "",
 ) -> Path | None:
     """Fetch ``url`` to a local PDF using the persistent browser profile; return the
     cached path or ``None``. Shares ``pdf_fetch``'s cache dir + filename scheme so a
@@ -138,9 +147,10 @@ def fetch_pdf_via_browser(
     Two strategies: (1) an authenticated context request (carries the profile's
     cookies — best for a direct-PDF link behind EZproxy); (2) full navigation with
     response interception (for publishers that stream the PDF inline behind a JS /
-    Cloudflare landing page). With ``reuse_safari_cookies`` the user's existing Safari
-    session is injected first (no separate in-app login). ``None`` on a missing dep, a
-    non-PDF, or any browser error (authorized best-effort contract)."""
+    Cloudflare landing page). When ``cookie_browser`` is set (e.g. ``chrome``), the
+    user's existing session from THAT browser is injected first (no separate in-app
+    login). ``None`` on a missing dep, a non-PDF, or any browser error (authorized
+    best-effort contract)."""
     if not url:
         return None
     cache_dir = (cache_dir or _DEFAULT_CACHE_DIR).expanduser()
@@ -158,7 +168,7 @@ def fetch_pdf_via_browser(
         return None
     try:
         body = _drive_browser(sync_playwright, error_class, url, profile_dir, timeout, max_bytes, headless,
-                              reuse_safari_cookies=reuse_safari_cookies)
+                              cookie_browser=cookie_browser)
     finally:
         _BROWSER_LOCK.release()
 
@@ -179,7 +189,7 @@ def _drive_browser(
     max_bytes: int,
     headless: bool,
     *,
-    reuse_safari_cookies: bool = False,
+    cookie_browser: str = "",
 ) -> bytes:
     """Launch a persistent context and return the captured PDF bytes (``b''`` on any
     failure). Caught errors: the browser lib's own error class + OSError — mirrors
@@ -191,14 +201,14 @@ def _drive_browser(
         with sync_playwright() as pw:
             ctx = pw.chromium.launch_persistent_context(str(profile_dir), headless=headless)
             try:
-                if reuse_safari_cookies:
-                    cookies = _load_safari_cookies()
+                if cookie_browser:
+                    cookies = _load_browser_cookies(cookie_browser)
                     if cookies:
                         try:
-                            ctx.add_cookies(cookies)  # bring the user's live Safari session
-                            LOGGER.info("injected %d Safari cookies into the fetch context", len(cookies))
+                            ctx.add_cookies(cookies)  # bring the user's live browser session
+                            LOGGER.info("injected %d %s cookies into the fetch context", len(cookies), cookie_browser)
                         except catch as exc:  # a malformed cookie must not kill the fetch
-                            LOGGER.info("Safari cookie injection failed (continuing without): %s", exc)
+                            LOGGER.info("%s cookie injection failed (continuing without): %s", cookie_browser, exc)
                 # (1) authenticated direct request — cheapest, carries cookies.
                 resp = ctx.request.get(url, timeout=timeout_ms)
                 if resp.ok:
