@@ -53,6 +53,9 @@ docling = [
 # install stays light (no Chromium download). See integrations/browser_fetch.py.
 browser = [
     "patchright>=1.40",
+    # Read the user's existing Safari/Chrome session cookies to reuse an institutional
+    # login without a second in-app sign-in (gated by `university_access.reuse_safari_cookies`).
+    "browser-cookie3>=0.19",
 ]
 
 [project.scripts]

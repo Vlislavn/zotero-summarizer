@@ -33,9 +33,10 @@ export default function UniversityAccessPanel() {
         enabled: Boolean(ua.enabled),
         login_url: ua.login_url || '',
         ezproxy_prefix: ua.ezproxy_prefix || '',
+        reuse_safari_cookies: Boolean(ua.reuse_safari_cookies),
       });
     }
-  }, [configQuery.data, form, ua.enabled, ua.login_url, ua.ezproxy_prefix]);
+  }, [configQuery.data, form, ua.enabled, ua.login_url, ua.ezproxy_prefix, ua.reuse_safari_cookies]);
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -108,6 +109,21 @@ export default function UniversityAccessPanel() {
           onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))}
         />
         Enable browser PDF fetch for the review fleet
+      </label>
+
+      <label className="flex items-start gap-2 text-sm text-slate-700">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={form.reuse_safari_cookies}
+          onChange={(e) => setForm((f) => ({ ...f, reuse_safari_cookies: e.target.checked }))}
+        />
+        <span>
+          Reuse my existing <strong>Safari</strong> login (skip the in-app sign-in)
+          <span className="block text-[11px] text-slate-400">
+            Reads Safari's session cookies — needs macOS Full Disk Access for this app. Falls back to the in-app login when the session is missing/expired.
+          </span>
+        </span>
       </label>
 
       <label className="block text-xs text-slate-600">

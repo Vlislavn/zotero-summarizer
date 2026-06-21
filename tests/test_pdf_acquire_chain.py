@@ -12,10 +12,11 @@ from pathlib import Path
 from zotero_summarizer.services.library import _pdf_acquire
 
 
-def _app(*, ua_enabled=False, ezproxy_prefix="", unpaywall=None, openalex=None):
+def _app(*, ua_enabled=False, ezproxy_prefix="", unpaywall=None, openalex=None, reuse_safari=False):
     ua = types.SimpleNamespace(
         enabled=ua_enabled, ezproxy_prefix=ezproxy_prefix, login_url="",
         browser_profile_dir="", headless=True, fetch_timeout_secs=60.0,
+        reuse_safari_cookies=reuse_safari,
     )
     qr = types.SimpleNamespace(max_pdf_bytes=20_000_000, fetch_timeout_secs=30.0)
     config = types.SimpleNamespace(quality_review=qr, university_access=ua)
@@ -91,6 +92,20 @@ def test_disabled_access_never_opens_browser(monkeypatch):
     res = _pdf_acquire.acquire_pdf_for("A", {"url": "https://www.nature.com/x", "doi": "10.1/x"})
     assert res.path is None and res.needs_login is False
     assert browser_calls == []
+
+
+def test_reuse_safari_cookies_threaded_to_browser(monkeypatch):
+    """When `reuse_safari_cookies` is set, the browser rung is called with it so the
+    user's existing Safari session is injected (no separate in-app login)."""
+    app = _app(ua_enabled=True, reuse_safari=True)
+    seen = {}
+    def _browser(url, **kw):
+        seen.update(kw)
+        return Path("/tmp/b.pdf")
+    _patch(monkeypatch, app, resolve=lambda **_k: None, headless_fetch=lambda *_a, **_k: None, browser_fetch=_browser)
+    res = _pdf_acquire.acquire_pdf_for("A", {"url": "https://www.nature.com/x", "doi": "10.1/x"})
+    assert res.path == Path("/tmp/b.pdf")
+    assert seen.get("reuse_safari_cookies") is True
 
 
 def test_unreachable_proxied_source_needs_login(monkeypatch):

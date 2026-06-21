@@ -87,6 +87,7 @@ def acquire_pdf_for(item_key: str, detail: dict[str, Any]) -> AcquireResult:
         path = browser_fetch.fetch_pdf_via_browser(
             candidate, profile_dir=profile, cache_dir=None,
             timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes, headless=ua.headless,
+            reuse_safari_cookies=bool(getattr(ua, "reuse_safari_cookies", False)),
         )
         if path is not None:
             return AcquireResult(path=path)

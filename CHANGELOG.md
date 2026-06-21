@@ -9,6 +9,11 @@ yet publish versioned releases, so everything currently lives under
 
 ### Added
 
+- **PubMed documented as a first-class triage source.** No code: the pipeline
+  reads Zotero feed items (never parses RSS), so a PubMed saved-search RSS feed
+  flows through gate → goal_sim → slate like arXiv/bioRxiv. docs/usage.md adds a
+  validated medical-agentic-AI query (anchors "agent" to AI to dodge the
+  pharmacological-agent flood) + the RSS abstract-truncation caveat.
 - **University browser access for the review fleet's PDF fetch.** Non-arXiv /
   paywalled picks (bioRxiv, Nature, journal DOIs) can now be reviewed: `_pdf_acquire`
   resolves arXiv → Unpaywall OA → OpenAlex `oa_url` (headless) → a real browser
@@ -16,6 +21,12 @@ yet publish versioned releases, so everything currently lives under
   persistent profile the user logs into once via Settings → University access
   (`POST /api/library/university-login`). New `university_access` config (optional
   EZproxy prefix; blank = SSO/OpenAthens).
+- **Reuse an existing Safari login instead of a second in-app sign-in.**
+  `university_access.reuse_safari_cookies` (Settings toggle) reads Safari's session
+  cookies (`browser-cookie3`, optional `[browser]` extra) and injects them into the
+  fetch context — so a paywalled paper you can already open in Safari downloads
+  without logging in again. Needs macOS Full Disk Access; degrades to the in-app
+  login when the store is unreadable or the session expired.
 
 ### Changed
 

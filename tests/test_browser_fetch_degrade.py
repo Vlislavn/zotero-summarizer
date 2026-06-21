@@ -37,6 +37,32 @@ def test_looks_pdf_validates_magic_and_size():
     assert browser_fetch._looks_pdf(b"%PDF" + b"x" * 100, max_bytes=10) is False  # oversize
 
 
+def test_safari_cookies_empty_when_dep_missing(monkeypatch):
+    monkeypatch.setattr(browser_fetch, "_import_browser_cookie3", lambda: None)
+    assert browser_fetch._load_safari_cookies() == []  # degrades, no crash
+
+
+def test_safari_cookies_empty_when_store_unreadable(monkeypatch):
+    """Full Disk Access denied / unreadable store → [] (fall back to in-app login)."""
+    import types
+    def _boom():
+        raise OSError("operation not permitted")
+    fake_mod = types.SimpleNamespace(safari=_boom, BrowserCookieError=RuntimeError)
+    monkeypatch.setattr(browser_fetch, "_import_browser_cookie3", lambda: fake_mod)
+    assert browser_fetch._load_safari_cookies() == []
+
+
+def test_safari_cookie_dicts_maps_jar_to_playwright_format():
+    import types
+    jar = [
+        types.SimpleNamespace(name="sess", value="abc", domain=".nature.com", path="/", secure=True, expires=99999),
+        types.SimpleNamespace(name="", value="x", domain=".nature.com", path="/", secure=False, expires=None),  # no name → skip
+        types.SimpleNamespace(name="y", value="z", domain="", path="/", secure=False, expires=None),  # no domain → skip
+    ]
+    out = browser_fetch._safari_cookie_dicts(jar)
+    assert out == [{"name": "sess", "value": "abc", "domain": ".nature.com", "path": "/", "secure": True, "expires": 99999.0}]
+
+
 def test_is_logged_in_tracks_login_marker_not_cookies(tmp_path):
     """Readiness hinges on the login-complete MARKER, not a Cookies file — Chromium
     writes Cookies on any page visit, which would false-positive."""

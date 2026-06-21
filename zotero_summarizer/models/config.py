@@ -169,6 +169,11 @@ class UniversityAccessConfig(BaseModel):
     browser_profile_dir: str = Field(default="")
     headless: bool = Field(default=True)
     fetch_timeout_secs: float = Field(default=60.0, ge=5.0, le=600.0)
+    # Reuse your EXISTING Safari session instead of a separate in-app login: read
+    # Safari's cookie store and inject it into the fetch (needs the optional
+    # ``browser-cookie3`` dep + macOS Full Disk Access for the app). Off by default;
+    # the in-app login remains the fallback for expired sessions / Cloudflare sites.
+    reuse_safari_cookies: bool = Field(default=False)
 
 
 class ClassifierGateConfig(BaseModel):
