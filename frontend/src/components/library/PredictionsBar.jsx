@@ -30,17 +30,17 @@ function stateLine(fleetStatus, proposedCount) {
     return { tone: 'text-rose-700', text: `Pre-decide failed: ${error || 'unknown error'}` };
   }
   if (status === 'ready') {
-    const loginTail = needsLogin > 0 ? `; ${needsLogin} need a library login` : '';
+    const loginTail = needsLogin > 0 ? `; ${needsLogin} are paywalled at a publisher you're not signed into` : '';
     const tail = skipped > 0 ? ` (${skipped} had no full text${loginTail}.)` : '';
     return { tone: 'text-slate-600', text: `Predicted ${proposed} of ${total} — Confirm or Override on the rows below.${tail}` };
   }
   if (status === 'done_empty') {
-    // The fleet acquires the PDF itself (arXiv/OA headless, then the university
-    // browser), so an empty run names the REAL reason per item, not a guess.
+    // The fleet acquires the PDF itself (arXiv/OA headless, then the browser using
+    // your existing session), so an empty run names the REAL reason per item.
     const detail = failed > 0
       ? `${failed} couldn’t be reviewed — the deep-review step errored (check the server log).`
       : needsLogin > 0
-        ? `${needsLogin} need your university library login — open Settings → University access, log in, then Predict again.`
+        ? `${needsLogin} are paywalled at a publisher you're not signed into — open that paper in your browser (where you have access), or sign into that publisher, then Predict again.`
         : 'none had a fetchable PDF (a web article, or no open-access / arXiv source).';
     return {
       tone: 'text-amber-700',
@@ -69,7 +69,7 @@ export default function PredictionsBar({ fleetStatus, onRun, proposedCount = 0 }
           onClick={onRun}
           disabled={running}
           className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Pre-decide a reading verdict for the next 5 UNDECIDED picks (from each paper's deep review), so each shows a one-tap Confirm / Override card. Re-run to advance to the next 5. Suggestions only; nothing is written until you Confirm."
+          title="Suggestions only — nothing is written until you Confirm."
         >
           {running ? 'Predicting…' : 'Predict next 5'}
         </button>

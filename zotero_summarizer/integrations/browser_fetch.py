@@ -139,6 +139,7 @@ def fetch_pdf_via_browser(
     max_bytes: int = _DEFAULT_MAX_BYTES,
     headless: bool = True,
     cookie_browser: str = "",
+    render_fallback: bool = False,
 ) -> Path | None:
     """Fetch ``url`` to a local PDF using the persistent browser profile; return the
     cached path or ``None``. Shares ``pdf_fetch``'s cache dir + filename scheme so a
@@ -169,7 +170,7 @@ def fetch_pdf_via_browser(
         return None
     try:
         body = _drive_browser(sync_playwright, error_class, url, profile_dir, timeout, max_bytes, headless,
-                              cookie_browser=cookie_browser)
+                              cookie_browser=cookie_browser, render_fallback=render_fallback)
     finally:
         _BROWSER_LOCK.release()
 
@@ -248,10 +249,17 @@ def _drive_browser(
     headless: bool,
     *,
     cookie_browser: str = "",
+    render_fallback: bool = False,
 ) -> bytes:
     """Launch a persistent context and return the captured PDF bytes (``b''`` on any
     failure). Caught errors: the browser lib's own error class + OSError — mirrors
-    ``pdf_fetch.fetch_pdf``'s narrow boundary, never a bare except."""
+    ``pdf_fetch.fetch_pdf``'s narrow boundary, never a bare except.
+
+    ``render_fallback``: if the page declares NO PDF (no ``citation_pdf_url`` — i.e. it
+    is web content like a Nature news/comment piece, not a real paper), render the page
+    itself to a PDF. A page that DOES declare a PDF we just couldn't fetch (gated behind
+    a login for THAT publisher) returns ``b''`` so the caller reports it honestly rather
+    than reviewing a paywall stub."""
     profile_dir.mkdir(parents=True, exist_ok=True)
     timeout_ms = int(timeout * 1000)
     catch: tuple[type[BaseException], ...] = (OSError,) if error_class is None else (error_class, OSError)
@@ -300,8 +308,16 @@ def _drive_browser(
                 pdf_url = meta.get_attribute("content") if meta else None
                 if pdf_url and pdf_url != url:
                     resp2 = ctx.request.get(pdf_url, timeout=timeout_ms)
-                    if resp2.ok:
+                    if resp2.ok and _looks_pdf(resp2.body(), max_bytes=max_bytes):
                         return resp2.body()
+                    # A real PDF is DECLARED but we couldn't fetch it (gated behind a
+                    # login for this publisher). Don't render a paywall stub — let the
+                    # caller report "needs login for this publisher" honestly.
+                    return b""
+                # (4) no declared PDF → this is web content (e.g. a Nature news/comment
+                # piece with a DOI). Render the page itself so it can still be reviewed.
+                if render_fallback:
+                    return page.pdf(format="A4", print_background=False)
                 return b""
             finally:
                 ctx.close()  # flushes the persistent profile's cookies to disk

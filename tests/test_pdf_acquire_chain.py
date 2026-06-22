@@ -147,6 +147,22 @@ def test_cookie_browser_threaded_to_browser(monkeypatch):
     assert seen.get("cookie_browser") == "chrome"
 
 
+def test_scholarly_landing_passes_render_fallback(monkeypatch):
+    """A scholarly item whose landing fetch fails should be retried with
+    render_fallback=True (so a DOI'd web page — e.g. a Nature news piece with no real
+    PDF — renders instead of falsely reporting needs_login). The flag rides on the
+    LANDING candidate only."""
+    app = _app(ua_enabled=True, review_web_articles=True)
+    seen = {}
+    def _browser(url, **kw):
+        seen.update(kw)
+        return Path("/tmp/rendered.pdf")
+    _patch(monkeypatch, app, resolve=lambda **_k: None, headless_fetch=lambda *_a, **_k: None, browser_fetch=_browser)
+    res = _pdf_acquire.acquire_pdf_for("A", {"url": "https://www.nature.com/articles/d41586-x", "doi": "10.1038/d41586-x"})
+    assert res.path == Path("/tmp/rendered.pdf")
+    assert seen.get("render_fallback") is True
+
+
 def test_unreachable_proxied_source_needs_login(monkeypatch):
     """A proxied source exists but the browser can't fetch it (paywall/Cloudflare,
     or no valid session) → the actionable ``needs_login`` signal — driven by the

@@ -100,32 +100,37 @@ def acquire_pdf_for(item_key: str, detail: dict[str, Any]) -> AcquireResult:
     scholarly = bool(arxiv_id or doi)
 
     # --- browser rung: proxied / publisher (Cloudflare / SSO paywall) -------
+    web_articles = bool(getattr(qr, "review_web_articles", False))
     if ua.enabled and scholarly:
         proxied = _proxied_url(ua, url, doi)
         if proxied:
             profile = _profile_dir(ua)
+            cb = str(getattr(ua, "cookie_browser", "") or "")
             # Retry the OA links via the real browser too (they may sit behind a
             # Cloudflare landing the headless client couldn't pass), then the proxied URL.
             for candidate in _dedupe([*headless_urls, proxied]):
+                # render-fallback only on the LANDING page (proxied) — a scholarly item
+                # whose landing declares NO PDF is actually web content (e.g. a Nature
+                # news/comment d41586 piece), so render it instead of failing. A direct
+                # PDF URL never renders. A landing that DOES declare a gated PDF returns
+                # None → honest needs_login (don't review a paywall stub).
                 path = browser_fetch.fetch_pdf_via_browser(
                     candidate, profile_dir=profile, cache_dir=None,
                     timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes, headless=ua.headless,
-                    cookie_browser=str(getattr(ua, "cookie_browser", "") or ""),
+                    cookie_browser=cb, render_fallback=(web_articles and candidate == proxied),
                 )
                 if path is not None:
                     return AcquireResult(path=path)
-            # A proxied/paywalled source EXISTED but the browser couldn't fetch it → the
-            # session is missing/expired (or the `browser` extra is absent): the
-            # actionable ``needs_library_login`` signal. (We do NOT gate on a
-            # cookie-presence guess — Chromium writes cookies on any visit, which would
-            # mislabel a paywall as "no source".)
+            # A real, DECLARED PDF existed but the browser couldn't fetch it — the
+            # session for THIS publisher is missing in the cookie-source browser (or
+            # the `browser` extra is absent). Actionable: log into that publisher.
             LOGGER.info("review-fleet: browser PDF fetch yielded nothing for %s → needs_library_login", item_key)
             return AcquireResult(path=None, needs_login=True)
 
     # --- web-article rung: a blog/Substack/news page has HTML full text but NO PDF.
     # Render the page to a PDF so the PDF-only review pipeline can digest it. Last
     # resort, only for non-scholarly web pages, gated by `review_web_articles`.
-    if getattr(qr, "review_web_articles", False) and not scholarly and _is_web_article(url):
+    if web_articles and not scholarly and _is_web_article(url):
         rendered = browser_fetch.render_article_pdf(
             url, cache_dir=None, timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes
         )

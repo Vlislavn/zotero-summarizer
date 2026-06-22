@@ -9,6 +9,18 @@ yet publish versioned releases, so everything currently lives under
 
 ### Fixed
 
+- **"Needs library login" was misleading + over-fired.** A scholarly item whose
+  landing page declares NO real PDF (e.g. a Nature news/comment `d41586` piece — web
+  content with a DOI) was routed to the paywall rung and reported `needs_library_login`,
+  even though the user uses a browser-cookie session (no in-app login exists). Now the
+  browser rung renders such a page (`render_fallback`, gated by `review_web_articles`)
+  so it gets a verdict; `needs_library_login` fires ONLY when a real `citation_pdf_url`
+  PDF exists but is gated at a publisher the cookie-source browser isn't signed into —
+  and the message says so ("open it in your browser / sign into that publisher"), not
+  "open Settings → University access". Verified live: a Nature news piece and an Ovid
+  NEJM-AI case study both rendered to full text via the user's Chrome session (17.8K /
+  36.4K chars) instead of failing.
+
 - **Paywalled publisher PDFs (Nature/Springer/Elsevier…) now fetch via the browser
   rung — and the 20 MB size cap no longer drops them.** Two fixes: (1) `_drive_browser`
   follows a landing page's `citation_pdf_url` meta (the Highwire tag publishers expose)
