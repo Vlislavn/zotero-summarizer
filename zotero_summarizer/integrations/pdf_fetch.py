@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 _PDF_MAGIC = b"%PDF"
-_DEFAULT_MAX_BYTES = 20_000_000
+_DEFAULT_MAX_BYTES = 50_000_000  # figure-heavy clinical/Nature PDFs run >20 MB
 _DEFAULT_TIMEOUT_SECS = 30.0
 _DEFAULT_CACHE_DIR = Path.home() / ".cache" / "zotero-summarizer" / "pdfs"
 

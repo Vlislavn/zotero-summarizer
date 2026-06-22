@@ -38,6 +38,17 @@ def test_login_window_reports_unavailable_when_dep_missing(tmp_path, monkeypatch
     assert res["ok"] is False and res["logged_in"] is False and "not installed" in res["error"]
 
 
+def test_size_cap_accommodates_large_clinical_pdf():
+    """Regression: a ~20.5 MB clinical/Nature PDF must pass the default cap. The old
+    20 MB cap rejected a valid Nature PDF the Chrome session had already fetched (the
+    fetch GOT the bytes, then dropped them for being 0.5 MB too big)."""
+    from zotero_summarizer.models import QualityReviewConfig
+    cap = QualityReviewConfig().max_pdf_bytes
+    big = b"%PDF-1.4" + bytes(20_600_000)  # ~20.5 MB, like the real Nature Medicine paper
+    assert cap >= 25_000_000
+    assert browser_fetch._looks_pdf(big, max_bytes=cap) is True
+
+
 def test_looks_pdf_validates_magic_and_size():
     assert browser_fetch._looks_pdf(b"%PDF-1.7\n...", max_bytes=1_000_000) is True
     assert browser_fetch._looks_pdf(b"<html>not a pdf</html>", max_bytes=1_000_000) is False

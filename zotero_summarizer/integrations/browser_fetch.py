@@ -144,13 +144,14 @@ def fetch_pdf_via_browser(
     cached path or ``None``. Shares ``pdf_fetch``'s cache dir + filename scheme so a
     headless and a browser fetch of the same URL hit one cache.
 
-    Two strategies: (1) an authenticated context request (carries the profile's
+    Three strategies: (1) an authenticated context request (carries the profile's
     cookies — best for a direct-PDF link behind EZproxy); (2) full navigation with
-    response interception (for publishers that stream the PDF inline behind a JS /
-    Cloudflare landing page). When ``cookie_browser`` is set (e.g. ``chrome``), the
-    user's existing session from THAT browser is injected first (no separate in-app
-    login). ``None`` on a missing dep, a non-PDF, or any browser error (authorized
-    best-effort contract)."""
+    response interception (publishers that stream the PDF inline); (3) for a landing
+    page that didn't stream one, follow its ``citation_pdf_url`` meta (the Highwire tag
+    Nature/Springer/Elsevier/Wiley expose) and fetch THAT through the cookie'd context.
+    When ``cookie_browser`` is set (e.g. ``chrome``), the user's existing session from
+    THAT browser is injected first (no separate in-app login). ``None`` on a missing
+    dep, a non-PDF, or any browser error (authorized best-effort contract)."""
     if not url:
         return None
     cache_dir = (cache_dir or _DEFAULT_CACHE_DIR).expanduser()
@@ -289,7 +290,19 @@ def _drive_browser(
                 page = ctx.new_page()
                 page.on("response", _on_response)
                 page.goto(url, wait_until="load", timeout=timeout_ms)
-                return captured[0] if captured else b""
+                if captured:
+                    return captured[0]
+                # (3) a landing page that didn't stream a PDF: follow the publisher's
+                # declared PDF link. ``citation_pdf_url`` is the Highwire/Google-Scholar
+                # meta tag Nature/Springer/Elsevier/Wiley/etc. expose; fetch it through
+                # the SAME cookie'd context so the institutional session carries.
+                meta = page.query_selector("meta[name='citation_pdf_url']")
+                pdf_url = meta.get_attribute("content") if meta else None
+                if pdf_url and pdf_url != url:
+                    resp2 = ctx.request.get(pdf_url, timeout=timeout_ms)
+                    if resp2.ok:
+                        return resp2.body()
+                return b""
             finally:
                 ctx.close()  # flushes the persistent profile's cookies to disk
     except catch as exc:

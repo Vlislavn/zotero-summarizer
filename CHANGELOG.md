@@ -7,6 +7,18 @@ yet publish versioned releases, so everything currently lives under
 
 ## [Unreleased]
 
+### Fixed
+
+- **Paywalled publisher PDFs (Nature/Springer/Elsevier…) now fetch via the browser
+  rung — and the 20 MB size cap no longer drops them.** Two fixes: (1) `_drive_browser`
+  follows a landing page's `citation_pdf_url` meta (the Highwire tag publishers expose)
+  and fetches it through the cookie'd context, so the orchestrator gets the real PDF
+  from a paywalled landing URL; (2) the PDF size cap was raised 20 MB → **50 MB**
+  (`quality_review`/`full_text_refine.max_pdf_bytes`, `pdf_fetch._DEFAULT_MAX_BYTES`) —
+  a figure-heavy clinical PDF runs >20 MB and was being fetched then rejected. Verified
+  live: a 20.5 MB / 24-page Nature Medicine paper fetched end-to-end via the user's
+  Chrome session (`cookie_browser=chrome`).
+
 ### Added
 
 - **Review fleet now reviews web articles (blogs/Substack/news), not just PDFs.** The

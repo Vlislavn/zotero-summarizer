@@ -95,7 +95,7 @@ class FullTextRefineConfig(BaseModel):
 
     enabled: bool = Field(default=False)
     top_k: int = Field(default=2, ge=1, le=10)
-    max_pdf_bytes: int = Field(default=20_000_000, ge=1_000_000)
+    max_pdf_bytes: int = Field(default=50_000_000, ge=1_000_000)  # figure-heavy clinical PDFs run >20 MB
     fetch_timeout_secs: float = Field(default=30.0, ge=1.0, le=300.0)
     unpaywall_email: str = Field(default="")
 
@@ -115,7 +115,7 @@ class QualityReviewConfig(BaseModel):
     # from the deep_review job (serial on a local provider, parallel on a remote one).
     # Env override: ZS_DEEP_REVIEW_PREWARM_K. See services/library/deep_review_prewarm.py.
     prewarm_on_startup_k: int = Field(default=5, ge=0, le=20)
-    max_pdf_bytes: int = Field(default=20_000_000, ge=1_000_000)
+    max_pdf_bytes: int = Field(default=50_000_000, ge=1_000_000)  # figure-heavy clinical PDFs run >20 MB
     fetch_timeout_secs: float = Field(default=30.0, ge=1.0, le=300.0)
     # Hard cap on full-text chars fed to the reviewer (context safety).
     max_text_chars: int = Field(default=60_000, ge=2_000)
