@@ -30,18 +30,15 @@ function stateLine(fleetStatus, proposedCount) {
     return { tone: 'text-rose-700', text: `Pre-decide failed: ${error || 'unknown error'}` };
   }
   if (status === 'ready') {
-    const loginTail = needsLogin > 0 ? `; ${needsLogin} are paywalled at a publisher you're not signed into` : '';
-    const tail = skipped > 0 ? ` (${skipped} had no full text${loginTail}.)` : '';
+    // Neutral count — no login call-to-action (the user refreshes their own session
+    // by opening papers; needs_login is folded into the plain "no full text" tally).
+    const tail = skipped > 0 ? ` (${skipped} had no full text.)` : '';
     return { tone: 'text-slate-600', text: `Predicted ${proposed} of ${total} — Confirm or Override on the rows below.${tail}` };
   }
   if (status === 'done_empty') {
-    // The fleet acquires the PDF itself (arXiv/OA headless, then the browser using
-    // your existing session), so an empty run names the REAL reason per item.
     const detail = failed > 0
       ? `${failed} couldn’t be reviewed — the deep-review step errored (check the server log).`
-      : needsLogin > 0
-        ? `${needsLogin} are paywalled at a publisher you're not signed into — open that paper in your browser (where you have access), or sign into that publisher, then Predict again.`
-        : 'none had a fetchable PDF (a web article, or no open-access / arXiv source).';
+      : 'none had a fetchable PDF (a web article, a paywall, or no open-access / arXiv source).';
     return {
       tone: 'text-amber-700',
       text: `Reviewed ${completed} paper${completed === 1 ? '' : 's'} but suggested no verdict — ${detail}`,
