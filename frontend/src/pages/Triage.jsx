@@ -449,16 +449,9 @@ export default function Triage() {
       </div>
 
       <div className="mt-4 border border-slate-200 rounded-xl p-3 bg-white">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="font-semibold text-slate-700">Calibration</h3>
-          <button
-            type="button"
-            onClick={loadCalibration}
-            className="text-xs px-2 py-1 rounded bg-slate-100 hover:bg-slate-200"
-          >
-            Refresh
-          </button>
-        </div>
+        {/* No panel-local Refresh — calibration auto-reloads on the active job's
+            terminal transition and after every feedback submission. */}
+        <h3 className="font-semibold text-slate-700">Calibration</h3>
         <Async
           loading={calibrationLoading}
           error={calibrationError}
@@ -471,16 +464,14 @@ export default function Triage() {
               const p = calibration?.periods?.[periodKey] || {};
               return (
                 <div key={periodKey} className="border border-slate-200 rounded-lg p-2 bg-slate-50">
+                  {/* The 3 trust signals the operator acts on — raw counts the
+                      rates derive from were dropped (glanceable readout, not a
+                      spreadsheet). */}
                   <div className="font-semibold text-slate-700">{periodLabels[periodKey]}</div>
-                  <div className="mt-1">Feedback: <span className="mono">{p.total_feedback ?? 0}</span></div>
-                  <div>Approved: <span className="mono">{p.approved_count ?? 0}</span></div>
-                  <div>Rejected: <span className="mono">{p.rejected_count ?? 0}</span></div>
-                  <div>Agreement: <span className="mono">{formatPercent(p.agreement_rate)}</span></div>
-                  <div>Precision: <span className="mono">{formatPercent(p.precision)}</span></div>
+                  <div className="mt-1">Agreement: <span className="mono">{formatPercent(p.agreement_rate)}</span></div>
                   <div title="Counterfactual-audit estimate of how often the ML gate keeps the papers you'd actually want — the gate's online trust signal.">
                     Gate recall: <span className="mono">{formatPercent(p.recall)}</span>
                   </div>
-                  <div>False positive: <span className="mono">{p.false_positive_count ?? 0}</span></div>
                   <div title="Papers the ML gate dropped but you approved on audit (🎲) — the gate's miss rate. Lower is better.">
                     Gate misses (audit FN): <span className="mono">{p.false_negative_count ?? 0}</span>
                   </div>

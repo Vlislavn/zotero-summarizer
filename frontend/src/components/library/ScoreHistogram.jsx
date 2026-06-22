@@ -46,31 +46,15 @@ export default function ScoreHistogram({ distribution, onBandClick = null, activ
             </span>
           ) : null}
         </span>
+        {/* Legend is a pure key — the BARS below are the single band click-target
+            (one band control on the surface, not two). */}
         <span className="flex flex-wrap gap-2 text-[10px] text-slate-500">
-          {Object.entries(BAND_LABEL).map(([band, lab]) => {
-            const swatch = (
-              <>
-                <span className={`inline-block h-2 w-2 rounded-sm ${BAND_BAR[band]}`} />
-                {lab} {by_band[band] || 0}
-              </>
-            );
-            if (!interactive) {
-              return <span key={band} className="flex items-center gap-1">{swatch}</span>;
-            }
-            const on = activeSet.has(band);
-            return (
-              <button
-                key={band}
-                type="button"
-                onClick={() => onBandClick(band)}
-                aria-pressed={on}
-                title={on ? `Stop filtering by ${lab}` : `Filter to ${lab}`}
-                className={`flex items-center gap-1 rounded px-1 -mx-1 hover:bg-slate-100 ${on ? 'font-semibold text-slate-800' : ''}`}
-              >
-                {swatch}
-              </button>
-            );
-          })}
+          {Object.entries(BAND_LABEL).map(([band, lab]) => (
+            <span key={band} className="flex items-center gap-1">
+              <span className={`inline-block h-2 w-2 rounded-sm ${BAND_BAR[band]}`} />
+              {lab} {by_band[band] || 0}
+            </span>
+          ))}
         </span>
       </div>
 

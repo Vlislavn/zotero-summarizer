@@ -33,6 +33,11 @@ yet publish versioned releases, so everything currently lives under
 
 ### Added
 
+- **Gated picks surface as one-click sign-in links.** When the fleet can't fetch a
+  paywalled paper (session stale/absent at that publisher), `status()` now returns
+  `needs_login_items: [{item_key, title, url}]` and the Suggested-verdicts bar renders
+  each as a link — open it, log in (refreshing the session the fetch reuses), then
+  Predict again. Replaces the prior in-app-login prompt the user never set up.
 - **Review fleet now reviews web articles (blogs/Substack/news), not just PDFs.** The
   top reading-queue picks were often web articles whose full text is HTML, so the
   PDF-only fleet skipped them ("no fetchable PDF"). New `_pdf_acquire` web-article rung
@@ -83,6 +88,13 @@ yet publish versioned releases, so everything currently lives under
 
 ### Changed
 
+- **Review-fleet deep reviews run in parallel for a remote/API provider, serial for a
+  local one.** Two fixes: the fleet now batches its picks into ONE `deep_review.start`
+  call (was: one paper at a time through the single-flight latch); and the N-paper
+  fan-out width comes from `deep_review_fleet_concurrency` — a remote batch fans out
+  capped by the provider's `max_sub_concurrency` (else all N), NOT the global
+  `TRIAGE_JOB_CONCURRENCY` (a local-RAM triage knob a user may pin to 1, which used to
+  silently serialise a remote batch). PDF acquisition between passes stays sequential.
 - **UI clarity pass, pt.2.** Settings: University-access folded into the one
   config form (3 saves→1, 6 save-states→1); Refresh-labels card, retrain classifier
   dropdown, corpus-similarity + ML-tuning knobs removed (server defaults kept).

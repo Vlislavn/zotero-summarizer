@@ -45,6 +45,7 @@ from typing import Any, Iterable
 
 from zotero_summarizer.domain import (
     PRIORITY_TO_RELEVANCE as _PRIORITY_TO_RELEVANCE,
+    ReadingPriority,
     VERDICT_SOURCE_MACHINE_ADD,
     score_to_priority,
 )
@@ -58,6 +59,17 @@ SOURCE_USER = "user"
 SOURCE_MACHINE = VERDICT_SOURCE_MACHINE_ADD
 # Provisional verdict corrected by the observed 7-day materialization outcome.
 SOURCE_OUTCOME = "outcome"
+
+# An unresolved "Add to library" (source=machine_add) is a PROVISIONAL interest
+# signal, not a verified reading decision: the user moved it Today→library but
+# has not checked the label. Its effective TRAINING relevance is therefore capped
+# at a weak ``could_read`` (3.0), NOT the ``should_read`` (4.0) the add action
+# stamps for display intent — otherwise an unread "Add" becomes an unverified
+# top-band positive (~13% of training-eligible rows; user decision 2026-06-19:
+# "capture the transfer, but the label isn't actually checked"). An explicit user
+# verdict, an emoji/engagement signal, or a 7-day behavioural outcome overrides it.
+_UNCHECKED_ADD_PRIORITY = ReadingPriority.COULD_READ.value
+_UNCHECKED_ADD_RELEVANCE = float(_PRIORITY_TO_RELEVANCE[_UNCHECKED_ADD_PRIORITY])
 
 
 def load_user_verdicts(db_path: Path) -> dict[str, dict[str, Any]]:
@@ -118,12 +130,15 @@ def _resolve_verdict(
     """
     user_priority = verdict["user_priority"]
     if verdict.get("source") == VERDICT_SOURCE_MACHINE_ADD:
+        # Provisional/unchecked: cap the effective label at weak could_read (the
+        # demote-only outcome floor uses the same cap, so a behavioural outcome
+        # can only hold-flat-or-lower it, never promote an unread add).
         if outcome is not None:
-            correction = outcome_correction(user_priority, outcome)
+            correction = outcome_correction(_UNCHECKED_ADD_PRIORITY, outcome)
             if correction is not None:
                 priority, relevance = correction
                 return priority, relevance, SOURCE_OUTCOME
-        return user_priority, float(_PRIORITY_TO_RELEVANCE[user_priority]), SOURCE_MACHINE
+        return _UNCHECKED_ADD_PRIORITY, _UNCHECKED_ADD_RELEVANCE, SOURCE_MACHINE
     return user_priority, float(_PRIORITY_TO_RELEVANCE[user_priority]), SOURCE_USER
 
 

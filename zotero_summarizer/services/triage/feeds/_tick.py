@@ -131,7 +131,7 @@ def run_daemon_tick(
     # 2.5 Classifier gate (Phase 1.13) — fast-reject before the LLM; also kicks
     #     off a background retrain when the golden CSV's sha changed.
     _maybe_schedule_gate_retrain(tick_id)
-    to_triage, gate_rejected = _apply_classifier_gate(tick_id, to_triage)
+    to_triage, gate_rejected = _apply_classifier_gate(tick_id, to_triage, gate_only=gate_only)
 
     # 3. Triage the gate survivors.
     triaged_results, fast_rejected_results, errors_results, fatal_seen = run_triage_stage(

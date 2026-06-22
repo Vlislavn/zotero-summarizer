@@ -14,10 +14,10 @@ export const PRIORITY_FILTERS = [
   { key: 'could_read', label: pretty('could_read'), cls: 'bg-amber-500 text-white border-amber-500' },
   { key: 'dont_read', label: pretty('dont_read'), cls: 'bg-rose-600 text-white border-rose-600' },
   { key: '', label: 'all', cls: 'bg-slate-700 text-white border-slate-700' },
-  // Sprint-3+ active learning: ranks library rows by border distance.
-  // The backend re-trains the regressor each call (~30 s), so the chip
-  // shows a loading state on first click; result cached for 5 min.
-  { key: 'border', label: '🎯 border', cls: 'bg-violet-600 text-white border-violet-600' },
+  // NOTE: 'border' (active-learning) is intentionally NOT a chip here — it swaps
+  // the data source and polls for minutes while it re-scores the library, so it
+  // renders as a distinct labelled button in AnnotationVerdict, not a cheap
+  // instant-filter chip (Jakob's Law / Hick's Law).
 ];
 
 // Diagnostic flag categories (the active-learning audit lens) — NOT the reading

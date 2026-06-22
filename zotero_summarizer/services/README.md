@@ -28,9 +28,11 @@ Shared files: `_common` (helpers: settings/logging/sqlite-ro/now_iso_z/html_to_t
 `load_golden_rows` (fail-fast golden-CSV reader), `atomic_write` (callback) + `write_json_atomic`
 (dict→JSON) for tmp+replace artifact/cache writes, NaN-rejecting `clamp`; `emoji_signals`
 bins via `domain` so label derivation == prediction; the LLM-concurrency gates
-`effective_llm_concurrency` (per-item fan-out) and `deep_review_sub_concurrency`
-(within-review rubric/goal sub-calls) — both local→serial / remote→capped, shared so
-the daemon, deep-review job, and `verify-deep-review` CLI never drift),
+`effective_llm_concurrency` (triage per-item fan-out, remote→`TRIAGE_JOB_CONCURRENCY`),
+`deep_review_fleet_concurrency` (the N-paper deep-review batch, remote→`max_sub_concurrency`
+else all N — NOT the triage knob, so a remote batch isn't throttled by the local-RAM cap)
+and `deep_review_sub_concurrency` (within-review rubric/goal sub-calls) — all local→serial,
+shared so the daemon, deep-review job, and `verify-deep-review` CLI never drift),
 `_adapters` (`build_llm`: OpenAI-compatible client via OnPrem; `build_pdf_extractor`.
 All LLM clients are constructed through `services/llm/factory`, which calls
 `build_llm` for `openai`-type providers), `lifecycle` (startup composition root — small `_init_*`

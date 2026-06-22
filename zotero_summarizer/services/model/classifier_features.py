@@ -14,6 +14,28 @@ import numpy as np  # noqa: F401
 from zotero_summarizer.services.model.classifier_const import *  # noqa: F401,F403
 
 
+def _resolve_embedding_cache(corpus_db_path: Path, model_name: str) -> Any:
+    """Return the process-wide :class:`EmbeddingCache` instead of a fresh one.
+
+    Constructing a new ``EmbeddingCache`` per ``predict()`` batch made the
+    MiniLM weights reload once per 50-item batch (the 178×-reload perf bug:
+    model memoization is instance-local). The runtime singleton is ALSO the
+    corpus write instance, so its affinity-cache ``_corpus_version`` bumps stay
+    consistent with reads. Falls back to a fresh instance when no runtime is
+    wired (training / tests) or the db/model don't match (post model-swap)."""
+    from zotero_summarizer.storage.corpus import EmbeddingCache
+    from zotero_summarizer.services._common import state
+
+    shared = getattr(state(), "embedding_cache", None)
+    if (
+        shared is not None
+        and str(getattr(shared, "db_path", "")) == str(corpus_db_path)
+        and getattr(shared, "model_name", None) == model_name
+    ):
+        return shared
+    return EmbeddingCache(corpus_db_path, model_name)
+
+
 def _build_aux_providers(
     corpus_db_path: Path,
     goals_config: Any | None,
@@ -46,9 +68,7 @@ def _build_aux_providers(
     try:
         corpus_cfg = getattr(goals_config, "corpus", None)
         if corpus_cfg is not None and getattr(corpus_cfg, "enabled", False):
-            from zotero_summarizer.storage.corpus import EmbeddingCache
-
-            embed_cache = EmbeddingCache(
+            embed_cache = _resolve_embedding_cache(
                 corpus_db_path, corpus_cfg.embedding_model
             )
     except Exception as exc:

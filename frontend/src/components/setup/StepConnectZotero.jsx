@@ -1,16 +1,17 @@
-// Wizard step 1 — Connect Zotero. Auto-detects the Zotero data dir, lets the
-// user confirm or override the path + the PDF root, then saves via PUT
-// /api/setup/paths (which reports restart_required). The live status row shows
-// "DB found ✓ / N feeds ✓" straight from the setup-status payload; Next is
-// gated on status.zotero.db_found after a Re-detect.
+// Wizard step 1 — Connect Zotero. Auto-detects the Zotero data dir; clicking a
+// detected location SAVES it immediately (no second button, nothing to remember).
+// Manual entry lives behind an "Enter path manually" disclosure for the rare
+// no-candidates case. The live status row shows "DB found ✓ / N feeds" from the
+// setup-status payload. Saving reports restart_required (carried to the Done step).
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { detectZotero, updatePaths } from '../../api/setupApi.js';
 import { humanizeError } from '../../utils/humanizeError.js';
 import { Banner, Field } from '../form/Fields.jsx';
+import Button from '../ui/Button.jsx';
 
-export default function StepConnectZotero({ status, draftPaths, onPatchPaths, onStatusChanged }) {
+export default function StepConnectZotero({ status, draftPaths, onPatchPaths, onStatusChanged, onPathsSaved }) {
   const queryClient = useQueryClient();
   const [restartBanner, setRestartBanner] = useState('');
 
@@ -25,26 +26,25 @@ export default function StepConnectZotero({ status, draftPaths, onPatchPaths, on
     mutationFn: updatePaths,
     onSuccess: () => {
       setRestartBanner('Restart required to apply new paths.');
-      // The backend re-reads paths only on restart, but invalidating refreshes
-      // the existence/feed-count flags it can compute live.
       queryClient.invalidateQueries({ queryKey: ['setup-status'] });
       onStatusChanged?.();
+      onPathsSaved?.();
     },
   });
 
   const zotero = status?.zotero || {};
   const dbFound = Boolean(zotero.db_found);
 
+  // Selecting a detected location applies AND saves it in one click.
   function applyCandidate(c) {
     onPatchPaths({ zotero_data_dir: c.data_dir });
+    saveMutation.mutate({ zotero_data_dir: c.data_dir });
   }
 
-  function handleSave() {
+  function handleSaveManual() {
     setRestartBanner('');
-    const body = {};
-    if (draftPaths.zotero_data_dir) body.zotero_data_dir = draftPaths.zotero_data_dir;
-    if (draftPaths.pdf_root) body.pdf_root = draftPaths.pdf_root;
-    saveMutation.mutate(body);
+    if (!draftPaths.zotero_data_dir) return;
+    saveMutation.mutate({ zotero_data_dir: draftPaths.zotero_data_dir });
   }
 
   return (
@@ -52,8 +52,8 @@ export default function StepConnectZotero({ status, draftPaths, onPatchPaths, on
       <div>
         <h3 className="text-base font-semibold text-slate-900">Connect Zotero</h3>
         <p className="text-sm text-slate-500 mt-1">
-          We look for your Zotero data directory automatically. Confirm it below
-          or point us at a different location.
+          We look for your Zotero data directory automatically. Click the right one
+          to connect it, or enter the path manually.
         </p>
       </div>
 
@@ -85,7 +85,7 @@ export default function StepConnectZotero({ status, draftPaths, onPatchPaths, on
 
       {zotero.error && <Banner kind="error">{zotero.error}</Banner>}
 
-      {/* Detected candidates. */}
+      {/* Detected candidates — clicking one saves the path immediately. */}
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-2">
           <span className="text-sm font-semibold text-slate-700">Detected locations</span>
@@ -127,42 +127,35 @@ export default function StepConnectZotero({ status, draftPaths, onPatchPaths, on
                 <span className={c.storage_exists ? 'text-emerald-700' : 'text-slate-400'}>
                   {c.storage_exists ? '✓ storage/' : 'no storage/'}
                 </span>
-                <span className="text-slate-400">source: {c.source}</span>
               </div>
             </button>
           );
         })}
       </div>
 
-      {/* Manual override + PDF root. */}
-      <div className="grid gap-4">
-        <Field
-          label="Zotero data directory"
-          value={draftPaths.zotero_data_dir || ''}
-          onChange={(v) => onPatchPaths({ zotero_data_dir: v })}
-          placeholder="/Users/you/Zotero"
-          hint="Folder containing zotero.sqlite and storage/."
-        />
-        <Field
-          label="PDF root (optional)"
-          value={draftPaths.pdf_root || ''}
-          onChange={(v) => onPatchPaths({ pdf_root: v })}
-          placeholder="Defaults to the Zotero storage/ folder"
-          hint="Where generated paper-read artifacts are written next to the PDF."
-        />
-      </div>
-
-      <div className="flex items-center gap-3 flex-wrap">
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saveMutation.isPending || !draftPaths.zotero_data_dir}
-          className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-semibold hover:bg-slate-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
-        >
-          {saveMutation.isPending ? 'Saving…' : 'Save paths'}
-        </button>
-        <span className="text-xs text-slate-500">Then Re-detect to confirm the DB is found.</span>
-      </div>
+      {/* Manual override — only needed when auto-detect missed; collapsed once a
+          location was found. The PDF-root override moved to Settings → Advanced. */}
+      <details open={candidates.length === 0} className="text-sm">
+        <summary className="cursor-pointer select-none text-slate-500 hover:text-slate-800 w-fit">
+          Enter path manually
+        </summary>
+        <div className="mt-2 space-y-3">
+          <Field
+            label="Zotero data directory"
+            value={draftPaths.zotero_data_dir || ''}
+            onChange={(v) => onPatchPaths({ zotero_data_dir: v })}
+            placeholder="/Users/you/Zotero"
+            hint="Folder containing zotero.sqlite and storage/."
+          />
+          <Button
+            variant="secondary"
+            onClick={handleSaveManual}
+            disabled={saveMutation.isPending || !draftPaths.zotero_data_dir}
+          >
+            {saveMutation.isPending ? 'Saving…' : 'Save path'}
+          </Button>
+        </div>
+      </details>
 
       {saveMutation.error && (
         <Banner kind="error">{humanizeError(saveMutation.error)}</Banner>

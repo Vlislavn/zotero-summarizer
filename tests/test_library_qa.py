@@ -125,6 +125,23 @@ def test_ask_paper_abstention_passes_through(tmp_path, monkeypatch):
     assert out["abstained"] is True and out["answer"] is None
 
 
+def test_ask_paper_empty_llm_output_abstains_not_500(tmp_path, monkeypatch):
+    """A1 regression: an empty / unparseable LLM completion (0 output tokens, or a
+    reasoning model emptying `content`) must ABSTAIN at the qa boundary, not raise
+    an unhandled ValueError → 500. answer_with_retry re-feeds the empty body and
+    raises; ask_paper must catch it and return the abstain payload."""
+    pdf = tmp_path / "p.pdf"
+    pdf.write_bytes(b"%PDF-fake")
+
+    class _EmptyLLM:
+        def prompt(self, prompt, **kwargs):
+            return ""  # no JSON recoverable
+
+    _fake_state(tmp_path, pdf, _Extractor(), _EmptyLLM(), monkeypatch)
+    out = qa.ask_paper("KEY1", "What was the cohort size?")
+    assert out["abstained"] is True and out["answer"] is None and out["quote"] is None
+
+
 def test_ask_paper_full_text_mode_sends_whole_capped_text(tmp_path, monkeypatch):
     pdf = tmp_path / "p.pdf"
     pdf.write_bytes(b"%PDF-fake")

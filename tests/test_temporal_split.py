@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from zotero_summarizer.services.model.classifier_training import (
-    _TrainMatrix,
+from zotero_summarizer.services.model.classifier_temporal import (
     _temporal_group_split,
     _temporal_holdout_metrics,
 )
+from zotero_summarizer.services.model.classifier_training import _TrainMatrix
 
 
 def _rows(days: list[float | None]) -> list[dict]:
@@ -45,6 +45,28 @@ def test_rows_without_dates_sort_oldest() -> None:
     tr, te = _temporal_group_split(_rows(days), groups)
     assert 0 in tr.tolist() and 1 in tr.tolist()
     assert all(days[i] is not None for i in te.tolist())
+
+
+def test_negative_days_are_undated_not_newest() -> None:
+    # Regression (2026-06-19): feed:* rows carry days_since_added == "-1" ("no
+    # Zotero date"). float("-1") = -1.0 sorted them as the NEWEST, so the forward
+    # holdout filled with undated feed rows. They must sort OLDEST (train side).
+    days = [-1.0] * 8 + [30.0, 20.0, 10.0, 5.0]  # 8 undated + 4 dated
+    groups = [f"g{i}" for i in range(12)]
+    tr, te = _temporal_group_split(_rows(days), groups)
+    assert all(days[i] >= 0 for i in te.tolist())          # holdout is dated only
+    assert all(i in tr.tolist() for i in range(8))         # all -1 rows train
+
+
+def test_holdout_fraction_is_relative_to_dated_pool() -> None:
+    # 90 undated + 10 dated: the holdout is 20% of the DATED pool (2 rows), not
+    # 20% of all 100 rows — otherwise undated-heavy corpora swallow the whole
+    # dated set into the test side (which collapsed forward Spearman to noise).
+    days = [-1.0] * 90 + [float(d) for d in range(10, 0, -1)]
+    groups = [f"g{i}" for i in range(100)]
+    tr, te = _temporal_group_split(_rows(days), groups)
+    assert len(te) == 2  # int(10 * 0.2)
+    assert all(days[i] >= 0 for i in te.tolist())
 
 
 def _synthetic(n: int, *, constant_y: bool = False, seed: int = 7):

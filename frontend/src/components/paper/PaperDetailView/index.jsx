@@ -6,7 +6,7 @@ import PaperReaderPane from '../../library/PaperReaderPane.jsx';
 import AskPaperBox from '../../library/AskPaperBox.jsx';
 import VerdictPanel from '../../VerdictPanel.jsx';
 import AbstractBlock from './AbstractBlock.jsx';
-import { Section } from '../review/primitives.jsx';
+import { Section, Disclosure } from '../review/primitives.jsx';
 
 // ONE configurable paper-detail assembly, extracted from the duplicated bodies
 // of AnnotationVerdict (the "detail" right column) and InlineAnnotate (the
@@ -114,16 +114,25 @@ export default function PaperDetailView({
                   deleteError={verdict.deleteError}
                 />
               )}
-              {showTags && (
-                <TagOfInterestEditor itemKey={itemKey} tags={detail.tags} onChanged={onTagsChanged} />
-              )}
-              {showCollection && (
-                <CollectionEditor
-                  itemKey={itemKey}
-                  current={detail.collections}
-                  collections={collections}
-                  onChanged={onCollectionsChanged}
-                />
+              {/* Tags + collections behind ONE disclosure — secondary filing the
+                  verdict doesn't depend on (Hick's Law: the Act zone leads with
+                  the verdict, not three stacked editors). */}
+              {(showTags || showCollection) && (
+                <Disclosure summary="Tags & collections">
+                  <div className="space-y-4">
+                    {showTags && (
+                      <TagOfInterestEditor itemKey={itemKey} tags={detail.tags} onChanged={onTagsChanged} />
+                    )}
+                    {showCollection && (
+                      <CollectionEditor
+                        itemKey={itemKey}
+                        current={detail.collections}
+                        collections={collections}
+                        onChanged={onCollectionsChanged}
+                      />
+                    )}
+                  </div>
+                </Disclosure>
               )}
             </div>
           </Section>

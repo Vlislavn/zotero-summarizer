@@ -201,10 +201,22 @@ def trash(item_ids: list[int]) -> dict[str, Any]:
                 "title": str(row.get("title") or ""),
                 "error": str(exc),
             })
-    marked = writer.mark_feed_items_read(read_ids) if read_ids else 0
+    # The labels above are the source of truth and are already committed. Marking
+    # the feed items read in Zotero is a best-effort convenience (its own docstring
+    # says so) — if Zotero holds the DB lock it must NOT 500 the whole batch and
+    # leave the user thinking the trash failed when the labels actually saved.
+    marked = 0
+    marked_read_error: str | None = None
+    if read_ids:
+        try:
+            marked = writer.mark_feed_items_read(read_ids)
+        except Exception as exc:
+            LOGGER.warning("trash: mark_feed_items_read failed (labels already saved): %s", exc)
+            marked_read_error = str(exc)
     return {
         "trashed": trashed,
         "marked_read": marked,
+        "marked_read_error": marked_read_error,
         "failed_count": len(failed),
         "failed": failed[:20],
     }

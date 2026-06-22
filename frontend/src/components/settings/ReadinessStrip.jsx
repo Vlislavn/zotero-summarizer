@@ -74,17 +74,17 @@ export default function ReadinessStrip() {
         onClick={() => navigate('/setup')}
         title={pillars.model ? 'Classifier trained' : 'No trained model — retrain below or run setup'}
       />
-      {/* Runtime subsystems that are down right now (e.g. a missing dep, or the
-          gate failed to load). Only the not-ready ones render — green = absent. */}
-      {subsystemIssues.map((s) => (
+      {/* Runtime subsystems down right now (missing dep, gate failed to load…) —
+          ONE summary pill rather than N identical-destination pills (Hick's Law:
+          the answer is "something's down, go here"). Detail in the tooltip. */}
+      {subsystemIssues.length > 0 && (
         <Pill
-          key={s.name}
-          label={subsystemLabel(s.name)}
+          label={`${subsystemIssues.length} subsystem${subsystemIssues.length === 1 ? '' : 's'} down`}
           ok={false}
           onClick={() => navigate('/setup')}
-          title={s.detail || `${s.name} not ready`}
+          title={subsystemIssues.map((s) => s.detail || subsystemLabel(s.name)).join(' · ')}
         />
-      ))}
+      )}
     </div>
   );
 }

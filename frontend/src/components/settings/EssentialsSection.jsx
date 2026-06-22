@@ -44,7 +44,6 @@ function ZoteroPaths({ form, onUpdate }) {
   });
 
   const paths = status?.paths || {};
-  const zotero = status?.zotero || {};
 
   function handleSavePaths() {
     setRestartBanner('');
@@ -73,17 +72,9 @@ function ZoteroPaths({ form, onUpdate }) {
         />
       </div>
 
-      {/* Live status row. */}
+      {/* PDF-root status only — the Zotero DB / dir readiness is already the
+          ReadinessStrip's Zotero pill (one readiness answer, not two). */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-        <span
-          className={`inline-flex items-center gap-1 ${
-            zotero.db_found ? 'text-emerald-700' : 'text-rose-700'
-          }`}
-        >
-          <span aria-hidden>{zotero.db_found ? '✓' : '✗'}</span>
-          {zotero.db_found ? `DB found · ${zotero.feed_count ?? 0} feeds` : 'DB not found'}
-        </span>
-        <PathStatus label="Zotero dir" info={paths.zotero_data_dir} />
         <PathStatus label="PDF root" info={paths.pdf_root} />
       </div>
 

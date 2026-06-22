@@ -44,7 +44,7 @@ function AuxContext({ aux }) {
   );
 }
 
-function ReviewItem({ item, state, localState, onAction }) {
+function ReviewItem({ item, localState, onAction }) {
   const url = reviewPaperUrl(item);
   const wrapperClass = localState === 'approved'
     ? 'bg-emerald-50 border-emerald-300'
@@ -102,20 +102,9 @@ function ReviewItem({ item, state, localState, onAction }) {
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        {state === 'awaiting_review' && (
-          <>
-            <button type="button" onClick={() => onAction(item.id, 'approve')}
-              disabled={Boolean(localState)}
-              className="px-3 py-1 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-500">
-              Approve
-            </button>
-            <button type="button" onClick={() => onAction(item.id, 'reject')}
-              disabled={Boolean(localState)}
-              className="px-3 py-1 rounded-lg text-xs font-semibold bg-rose-600 text-white hover:bg-rose-700 disabled:bg-slate-200 disabled:text-slate-500">
-              Reject
-            </button>
-          </>
-        )}
+        {/* VerdictPicker is the single verdict row on BOTH queue states —
+            handleAction maps a positive pick → approved, dont_read → rejected.
+            The duplicate Approve/Reject buttons were removed (one vocabulary). */}
         <VerdictPicker
           label="Relabel:"
           disabled={Boolean(localState)}
@@ -137,7 +126,10 @@ export default function Review() {
     ? searchParams.get('state')
     : 'awaiting_review';
   const [state, setState] = useState(initialState);
-  const [sort, setSort] = useState('recent');
+  // Active-learning default: load uncertain-first (composite_score closest to a
+  // class boundary) so triaging maximises model lift per click — a system-owned
+  // ML nicety the user shouldn't toggle each session (Tesler's Law).
+  const [sort] = useState('border');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -264,19 +256,6 @@ export default function Review() {
           >
             Gate-rejected
           </button>
-          {/* Sprint-3+ active-learning sort: 'border' surfaces uncertain
-              rows first (composite_score closest to a priority threshold)
-              so triaging them maximises model lift per click. */}
-          <button
-            type="button"
-            onClick={() => setSort(sort === 'border' ? 'recent' : 'border')}
-            title="Sort by uncertainty (closest to class boundary)"
-            className={`px-3 py-1 rounded-lg border border-slate-300 text-xs font-semibold ${
-              sort === 'border' ? 'bg-violet-700 text-white' : 'bg-white text-slate-700 hover:bg-slate-100'
-            }`}
-          >
-            🎯 border
-          </button>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-500">
@@ -332,7 +311,6 @@ export default function Review() {
           <ReviewItem
             key={item.id}
             item={item}
-            state={state}
             localState={itemState[item.id]}
             onAction={handleAction}
           />

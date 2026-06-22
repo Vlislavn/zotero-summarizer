@@ -11,7 +11,6 @@ import {
   submitVerdict,
   deleteVerdict,
   fetchEffectiveLabels,
-  fetchEffectiveLabelsSummary,
   fetchBorderSuggestions,
 } from '../api/goldenApi.js';
 import { fetchCollections, fetchTags } from '../api/libraryApi.js';
@@ -38,7 +37,6 @@ import {
   FilterChip,
   ErrorBanner,
   GroundTruthOneLiner,
-  EffectiveLabelsStrip,
   TriageProgress,
 } from './AnnotationVerdict_helpers.jsx';
 
@@ -82,7 +80,6 @@ function DetailTopStrip({ detail }) {
             Added {String(detail.date_added).slice(0, 10)}
           </span>
         )}
-        <span className="mono text-slate-400">{detail.item_key}</span>
       </div>
     </div>
   );
@@ -115,7 +112,6 @@ export default function AnnotationVerdict() {
   // Phase 1.18 batch-mode bundle: keyboard shortcuts (j/k navigate, 1-4 priority),
   // optimistic auto-advance on verdict save, flashStatus for keyboard feedback.
   const [flashStatus, setFlashStatus] = useState(null);
-  const [sortOrder, setSortOrder] = useState('score_desc');
   // Open/closed state of the embedded paper-brief pane (parity with Library's InlineAnnotate).
   const [readerOpen, setReaderOpen] = useState(false);
   const listRef = useRef(null);
@@ -187,12 +183,10 @@ export default function AnnotationVerdict() {
 
   const sortedItems = useMemo(() => {
     if (isBorderMode) return items;
-    return [...items].sort((a, b) =>
-      sortOrder === 'score_desc'
-        ? (b.derived_score ?? 0) - (a.derived_score ?? 0)
-        : (a.derived_score ?? 0) - (b.derived_score ?? 0),
-    );
-  }, [items, sortOrder, isBorderMode]);
+    // Fixed score_desc — worst-first has no triage workflow in a teach-the-model
+    // list (Pareto: the default is right ~95% of the time; the toggle was removed).
+    return [...items].sort((a, b) => (b.derived_score ?? 0) - (a.derived_score ?? 0));
+  }, [items, isBorderMode]);
 
   const filteredItems = useMemo(() => {
     if (!search.trim()) return sortedItems;
@@ -216,12 +210,6 @@ export default function AnnotationVerdict() {
     queryFn: fetchEffectiveLabels,
     staleTime: 60_000,
   });
-  const effectiveLabelsSummaryQuery = useQuery({
-    queryKey: ['effective-labels-summary'],
-    queryFn: fetchEffectiveLabelsSummary,
-    staleTime: 60_000,
-  });
-
   // item_key -> source ('user' | 'derived'). Built once per data change.
   const effectiveSourceByKey = useMemo(() => {
     const m = new Map();
@@ -293,9 +281,8 @@ export default function AnnotationVerdict() {
     mutationFn: submitVerdict,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['provenance-list'] });
-      // Refresh "Used as GT" badge + summary strip immediately.
+      // Refresh "Used as GT" badges immediately.
       queryClient.invalidateQueries({ queryKey: ['effective-labels'] });
-      queryClient.invalidateQueries({ queryKey: ['effective-labels-summary'] });
     },
   });
 
@@ -307,7 +294,6 @@ export default function AnnotationVerdict() {
       }
       queryClient.invalidateQueries({ queryKey: ['provenance-list'] });
       queryClient.invalidateQueries({ queryKey: ['effective-labels'] });
-      queryClient.invalidateQueries({ queryKey: ['effective-labels-summary'] });
     },
   });
 
@@ -537,17 +523,7 @@ export default function AnnotationVerdict() {
             Showing {filteredItems.length} of {totalMatched}
           </span>
         </div>
-        {/* Persistent one-liner (the hint banner above is dismissible and never
-            returns): a cold visit must still explain what this tab is FOR. */}
-        <p className="text-[11px] text-slate-500 mb-2 leading-snug">
-          Teach the model: confirm or fix a paper’s priority (keys 1–4). Your verdicts
-          become training ground truth at the next retrain — same as a{' '}
-          <code className="text-[10px]">label:*</code> tag in Zotero.
-        </p>
-
         <TriageProgress labeled={labeledCount} total={filteredItems.length} />
-
-        <EffectiveLabelsStrip summary={effectiveLabelsSummaryQuery.data} />
 
         <div className="space-y-2 mb-2">
           <div className="flex flex-wrap gap-1.5">
@@ -558,9 +534,7 @@ export default function AnnotationVerdict() {
                 activeCls={p.cls}
                 onClick={() => {
                   // Clear the title search when switching filters, else a
-                  // leftover query silently shrinks the new list (e.g.
-                  // switching to 'border' showed "1 of 50" because an old
-                  // search term still matched a single row).
+                  // leftover query silently shrinks the new list.
                   setSearch('');
                   setPriorityFilter(p.key);
                 }}
@@ -569,8 +543,23 @@ export default function AnnotationVerdict() {
               </FilterChip>
             ))}
           </div>
+          {/* Active-learning mode is a distinct labelled button, not an instant
+              filter chip: it swaps the data source and polls for minutes while it
+              re-scores the library (Jakob's Law — a chip reads as instant). */}
+          <button
+            type="button"
+            onClick={() => { setSearch(''); setPriorityFilter(isBorderMode ? 'must_read' : 'border'); }}
+            title="Surface the borderline picks the model is least sure about — re-scores your library (a few minutes the first time, then cached). A heavier job than the instant priority filters."
+            className={`w-full text-left text-xs px-2.5 py-1.5 rounded-lg border font-medium ${
+              isBorderMode
+                ? 'bg-violet-600 text-white border-violet-600'
+                : 'bg-white text-violet-700 border-violet-300 hover:bg-violet-50'
+            }`}
+          >
+            🎯 {isBorderMode ? 'Active learning — borderline picks (click to exit)' : 'Active learning: review borderline picks'}
+          </button>
           <details
-            open={Boolean(flagFilter)}
+            open={Boolean(flagFilter) || Boolean(selectedCollection) || Boolean(selectedTag)}
             className="text-xs"
           >
             <summary className="cursor-pointer text-slate-500 hover:text-slate-800 select-none mb-1.5">
@@ -598,50 +587,41 @@ export default function AnnotationVerdict() {
                 );
               })}
             </div>
-          </details>
-          <div className="flex flex-wrap gap-1.5">
-            <select
-              value={selectedCollection}
-              onChange={(e) => setSelectedCollection(e.target.value)}
-              title="Filter by Zotero collection"
-              className="flex-1 min-w-0 text-xs px-2 py-1.5 rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500"
-            >
-              <option value="">All collections</option>
-              {flatCollections.map((c) => (
-                <option key={c.key} value={c.key}>{c.name} ({c.item_count})</option>
-              ))}
-            </select>
-            <select
-              value={selectedTag}
-              onChange={(e) => setSelectedTag(e.target.value)}
-              title="Filter by Zotero tag"
-              className="flex-1 min-w-0 text-xs px-2 py-1.5 rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500"
-            >
-              <option value="">All tags</option>
-              {topTags.map((t) => (
-                <option key={t.tag} value={t.tag}>{t.tag} ({t.item_count})</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex gap-1.5">
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search title…"
-              className="flex-1 min-w-0 text-sm px-2.5 py-1.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500"
-            />
-            {!isBorderMode && (
-              <button
-                type="button"
-                title={sortOrder === 'score_desc' ? 'Sorted by score ↓ — click for ↑' : 'Sorted by score ↑ — click for ↓'}
-                onClick={() => setSortOrder((s) => s === 'score_desc' ? 'score_asc' : 'score_desc')}
-                className="shrink-0 text-[11px] px-2 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-600 font-semibold"
+            {/* Collection + Tag default to "All" on the vast majority of triage
+                runs, so they live in Advanced too — the steady-state control
+                surface is just the priority chips + search. */}
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              <select
+                value={selectedCollection}
+                onChange={(e) => setSelectedCollection(e.target.value)}
+                title="Filter by Zotero collection"
+                className="flex-1 min-w-0 text-xs px-2 py-1.5 rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500"
               >
-                {sortOrder === 'score_desc' ? '↓ score' : '↑ score'}
-              </button>
-            )}
-          </div>
+                <option value="">All collections</option>
+                {flatCollections.map((c) => (
+                  <option key={c.key} value={c.key}>{c.name} ({c.item_count})</option>
+                ))}
+              </select>
+              <select
+                value={selectedTag}
+                onChange={(e) => setSelectedTag(e.target.value)}
+                title="Filter by Zotero tag"
+                className="flex-1 min-w-0 text-xs px-2 py-1.5 rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500"
+              >
+                <option value="">All tags</option>
+                {topTags.map((t) => (
+                  <option key={t.tag} value={t.tag}>{t.tag} ({t.item_count})</option>
+                ))}
+              </select>
+            </div>
+          </details>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search title…"
+            className="w-full text-sm px-2.5 py-1.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500"
+          />
         </div>
 
         <ErrorBanner error={listQuery.error || borderQuery.error} title="List load failed" />

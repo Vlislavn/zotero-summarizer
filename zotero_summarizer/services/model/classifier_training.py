@@ -12,6 +12,11 @@ import numpy as np
 
 from zotero_summarizer.services.model import classifier
 from zotero_summarizer.services.model.classifier_artifact import DEFAULT_MODEL_DIR, TrainedClassifier
+from zotero_summarizer.services.model.classifier_temporal import (
+    _NO_DATE_SENTINEL,
+    _row_days,
+    _temporal_holdout_metrics,
+)
 from zotero_summarizer.services import run_log
 from zotero_summarizer.services._common import atomic_write, now_iso_z
 
@@ -95,81 +100,6 @@ def _oof_quality_metrics(train_rows: list[dict], preds_oof: "np.ndarray") -> dic
         "binary": gm.compute_binary(gold_labels, pred_labels).as_dict(),
         "confusion": gm.compute_confusion(gold_labels, pred_labels),
     }
-
-
-# --- Temporal-holdout diagnostic (June 2026) -------------------------------
-# Production always predicts the FUTURE (today's feed) from the PAST
-# (everything labeled so far), but the shuffled GroupKFold OOF lets folds
-# train on rows newer than their validation rows: measured 0.653 OOF Spearman
-# vs 0.394 on a strict train-on-oldest/test-on-newest split of the same data
-# (tools/eval_temporal_objective.py, 2026-06-12, n=1852, dont_read share
-# 52%→68% across eras). Every retrain logs the forward-looking number next to
-# the comparable OOF series so drift and honest performance stay visible.
-
-_TEMPORAL_HOLDOUT_FRACTION = 0.2
-_TEMPORAL_MIN_TEST = 30  # below this a forward Spearman is noise, not signal
-_NO_DATE_SENTINEL = 1e9  # rows without days_since_added sort as oldest
-
-
-def _row_days(row: dict[str, Any]) -> float:
-    raw = (row.get("days_since_added") or "").strip()
-    return float(raw) if raw else _NO_DATE_SENTINEL
-
-
-def _temporal_group_split(
-    train_rows: list[dict[str, Any]], groups: list[str]
-) -> tuple["np.ndarray", "np.ndarray"]:
-    """``(train_idx, test_idx)``: newest ~20% of rows held out, whole groups.
-
-    Group-aware (``paper_group_id``) so the same paper never lands on both
-    sides; a group's age is its NEWEST member (min ``days_since_added``).
-    """
-    group_age: dict[str, float] = {}
-    for row, g in zip(train_rows, groups):
-        d = _row_days(row)
-        group_age[g] = min(d, group_age.get(g, _NO_DATE_SENTINEL))
-    newest_first = sorted(group_age, key=lambda g: group_age[g])
-    target = int(len(train_rows) * _TEMPORAL_HOLDOUT_FRACTION)
-    test_groups: set[str] = set()
-    covered = 0
-    for g in newest_first:
-        if covered >= target:
-            break
-        test_groups.add(g)
-        covered += sum(1 for gg in groups if gg == g)
-    test_mask = np.asarray([g in test_groups for g in groups])
-    return np.where(~test_mask)[0], np.where(test_mask)[0]
-
-
-def _temporal_holdout_metrics(
-    classifier_name: str,
-    matrix: _TrainMatrix,
-    train_rows: list[dict[str, Any]],
-    groups: list[str],
-    *,
-    pca_dim: int,
-) -> dict[str, Any] | None:
-    """Forward-looking Spearman on the newest-20% holdout; one extra fit.
-
-    ``None`` is the defined "metric not computable" result — holdout under
-    ``_TEMPORAL_MIN_TEST`` rows or a constant label vector on either side
-    (Spearman undefined) — which small test fixtures legitimately hit.
-    """
-    from scipy.stats import spearmanr
-
-    X, y, sw = matrix.X, matrix.y, matrix.sample_weight
-    tr, te = _temporal_group_split(train_rows, groups)
-    if len(te) < _TEMPORAL_MIN_TEST:
-        return None
-    if len(set(y[tr].tolist())) < 2 or len(set(y[te].tolist())) < 2:
-        return None
-    _, p_te = classifier._fit_predict(
-        classifier_name, X[tr], y[tr], X[te],
-        pca_dim=pca_dim, return_train_probs=False,
-        objective="regression", sample_weight=sw[tr],
-    )
-    rho = float(spearmanr(y[te], p_te).statistic)
-    return {"temporal_spearman": round(rho, 4), "temporal_holdout_n": int(len(te))}
 
 
 def _fit_final_model(
@@ -259,12 +189,36 @@ def _oof_predictions(
     return preds_oof, oof_rho
 
 
+def _dated_oof_spearman(
+    train_rows: list[dict[str, Any]], y_train: "np.ndarray", preds_oof: "np.ndarray"
+) -> tuple[float | None, int]:
+    """In-distribution OOF Spearman on the DATED (verified-engagement) rows only.
+
+    The aggregate ``oof_spearman`` is dominated by undated feed:* rows (~72% of
+    the set: mass auto-rejects + provisional adds), which the gate separates
+    easily and which inflate the headline. This restricts the same OOF
+    predictions to genuinely-dated Zotero-engagement rows — the reading decisions
+    the gate is actually weak at ranking — so the card can report both honestly.
+    Returns ``(rho | None, n_dated)``; ``None`` when the dated subset is too small
+    or has a constant label.
+    """
+    from scipy.stats import spearmanr
+
+    dated = np.asarray([_row_days(r) < _NO_DATE_SENTINEL for r in train_rows])
+    n_dated = int(dated.sum())
+    if n_dated <= 2 or len(set(y_train[dated].tolist())) < 2:
+        return None, n_dated
+    return float(spearmanr(y_train[dated], preds_oof[dated]).statistic), n_dated
+
+
 def _training_metadata(
     library: Any,
     temporal: dict[str, Any] | None,
     *,
     n_train: int,
     oof_rho: float,
+    oof_rho_verified: float | None,
+    n_verified: int,
     oof_metrics: dict[str, Any],
     cal_diag: Any,
 ) -> dict[str, Any]:
@@ -274,6 +228,12 @@ def _training_metadata(
         "n_positive_library": library.n_rows,
         "objective": "regression",
         "oof_spearman": round(oof_rho, 4),
+        # Honest split: oof_spearman above is the aggregate (inflated by ~72%
+        # undated feed:* rows the gate trivially rejects); this is the SAME OOF
+        # restricted to dated reading-decisions — the gate's real ranking ability.
+        # None = subset too small / constant label (tiny fixtures).
+        "oof_spearman_verified": None if oof_rho_verified is None else round(oof_rho_verified, 4),
+        "n_verified": n_verified,
         # None = holdout too small / constant labels (tiny fixtures) —
         # the ModelCard renders an em-dash then, never a fake number.
         "temporal_spearman": None if temporal is None else temporal["temporal_spearman"],
@@ -388,6 +348,7 @@ def train_and_save(
     preds_oof, oof_rho = _oof_predictions(
         classifier_name, matrix, groups, n_folds=n_folds, pca_dim=pca_dim,
     )
+    oof_rho_verified, n_verified = _dated_oof_spearman(train_rows, y_train, preds_oof)
 
     # 3b. Top-band calibration: fit a MONOTONE raw→relevance map on the OOF
     # predictions so the compressed top is reachable (must_read recall collapses
@@ -423,7 +384,9 @@ def train_and_save(
         classifier_name=classifier_name, sha256=sha256, pca_dim=pca_dim,
         metadata=_training_metadata(
             library, temporal,
-            n_train=n_train, oof_rho=oof_rho, oof_metrics=oof_metrics, cal_diag=cal_diag,
+            n_train=n_train, oof_rho=oof_rho,
+            oof_rho_verified=oof_rho_verified, n_verified=n_verified,
+            oof_metrics=oof_metrics, cal_diag=cal_diag,
         ),
     )
 

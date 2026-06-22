@@ -21,36 +21,17 @@ export default function ClassifierGateFields({ form, onUpdate, onToggleDropPrior
       {/* Sub-fields hidden until the gate is enabled. */}
       {form.gate_enabled && (
         <>
-          <div className="grid md:grid-cols-2 gap-4">
-            <Field
-              kind="select"
-              label="Classifier model"
-              value={form.gate_model_name}
-              onChange={(v) => onUpdate('gate_model_name', v)}
-              options={CLASSIFIER_MODEL_OPTIONS}
-              hint="tabpfn = best F1, slower. lightgbm = fast. logreg = baseline."
-            />
-            <Field
-              kind="number"
-              label="Raw-score dont_read floor"
-              value={form.gate_raw_score_dont_read_below}
-              onChange={(v) => onUpdate('gate_raw_score_dont_read_below', v)}
-              step={0.01}
-              min={0}
-              max={1}
-              hint="Items with raw classifier prob < this cutoff get forced to dont_read. 0 disables."
-            />
-            <Field
-              kind="number"
-              label="Audit sample / tick"
-              value={form.gate_audit_sample_per_tick}
-              onChange={(v) => onUpdate('gate_audit_sample_per_tick', v)}
-              step={1}
-              min={0}
-              max={20}
-              hint="Counterfactual audit: resurrect N gate-rejected rows each tick so the user's verdict on them estimates false-negative rate. 0 disables."
-            />
-          </div>
+          {/* Only the model choice is user-facing. The raw-score dont_read floor
+              and audit-sample knobs were removed — ML-tuning the clinician can't
+              reason about; their server defaults (0 / 1) round-trip untouched. */}
+          <Field
+            kind="select"
+            label="Classifier model"
+            value={form.gate_model_name}
+            onChange={(v) => onUpdate('gate_model_name', v)}
+            options={CLASSIFIER_MODEL_OPTIONS}
+            hint="tabpfn = best F1, slower. lightgbm = fast. logreg = baseline."
+          />
           <fieldset>
             <legend className="text-sm font-semibold text-slate-700 mb-2">Drop priorities</legend>
             <p className="text-xs text-slate-500 mb-2">

@@ -335,28 +335,32 @@ export default function Pending() {
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2 text-sm">
-          <button type="button" onClick={() => selectAll(true)}
-            className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200">Select all</button>
-          <button type="button" onClick={() => selectAll(false)}
-            className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200">Clear</button>
-          <button
-            type="button"
-            onClick={handleApply}
-            disabled={selected.size === 0 || !isPending}
-            className="px-3 py-1.5 rounded bg-green-700 text-white hover:bg-green-800 disabled:bg-slate-300 disabled:text-slate-500"
-          >
-            Apply selected
-          </button>
-          <button
-            type="button"
-            onClick={handleReject}
-            disabled={selected.size === 0 || !isPending}
-            className="px-3 py-1.5 rounded bg-amber-600 text-white hover:bg-amber-700 disabled:bg-slate-300 disabled:text-slate-500"
-          >
-            Reject selected
-          </button>
-        </div>
+        {/* Batch controls only on the Pending tab — Applied/Rejected/Failed are
+            pure read-only history, so no inert affordances + no scold banner. */}
+        {isPending && (
+          <div className="flex items-center gap-2 text-sm">
+            <button type="button" onClick={() => selectAll(true)}
+              className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200">Select all</button>
+            <button type="button" onClick={() => selectAll(false)}
+              className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200">Clear</button>
+            <button
+              type="button"
+              onClick={handleApply}
+              disabled={selected.size === 0}
+              className="px-3 py-1.5 rounded bg-green-700 text-white hover:bg-green-800 disabled:bg-slate-300 disabled:text-slate-500"
+            >
+              Apply selected
+            </button>
+            <button
+              type="button"
+              onClick={handleReject}
+              disabled={selected.size === 0}
+              className="px-3 py-1.5 rounded bg-amber-600 text-white hover:bg-amber-700 disabled:bg-slate-300 disabled:text-slate-500"
+            >
+              Reject selected
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2 mb-3">
@@ -377,12 +381,6 @@ export default function Pending() {
       </div>
 
       <StatusBanner message={message} isError={isError} />
-
-      {!isPending && (
-        <div className="mb-3 text-xs text-slate-500">
-          Switch to Pending status to apply/reject or edit changes.
-        </div>
-      )}
 
       <Async
         loading={loading}

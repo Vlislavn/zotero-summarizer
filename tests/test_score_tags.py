@@ -214,6 +214,27 @@ def test_sync_score_ranks_skips_user_call_number(monkeypatch):
     assert written == {"B": "zr0001"}   # dense numbering over the items we DO write
 
 
+def test_sync_score_ranks_idempotent_when_ranks_unchanged(monkeypatch):
+    # Re-running on a library already stamped with the SAME zr#### ranks must write
+    # NOTHING — a no-op set_field still touches dateModified/version and would
+    # re-upload the whole library as "modified" (a sync storm). Z5 regression.
+    monkeypatch.setattr(score_tags.reading_queue, "read_score_cache_with_staleness",
+                        lambda: (_cache(("A", 4.5, None, False), ("B", 3.9, None, False)), False))
+    monkeypatch.setattr(score_tags.reading_queue, "_goal_affinity", lambda keys: {})
+    items = [{"item_key": "A", "date_added": "2026-01-01"},   # ranks zr0001
+             {"item_key": "B", "date_added": "2026-01-02"}]   # ranks zr0002
+    call_numbers = {"A": "zr0001", "B": "zr0002"}             # already correct
+    writer = _Writer(running=False)
+    monkeypatch.setattr(score_tags, "get_zotero_reader_or_raise", lambda: _reader(items, call_numbers))
+    monkeypatch.setattr(score_tags, "get_zotero_writer_or_raise", lambda: writer)
+
+    out = score_tags.sync_score_ranks()
+
+    assert out["ranked"] == 0 and out["skipped_unchanged"] == 2
+    changes, _ = writer.calls[0]
+    assert changes == []   # nothing re-stamped
+
+
 def test_sync_score_ranks_requires_force_when_zotero_running(monkeypatch):
     monkeypatch.setattr(score_tags.reading_queue, "read_score_cache_with_staleness",
                         lambda: (_cache(("A", 4.0, None, False)), False))

@@ -8,8 +8,48 @@ from zotero_summarizer.settings import Settings
 from zotero_summarizer.storage.migrations import migrate_existing
 
 
+def _free_port(port: int) -> None:
+    """Stop whatever is already LISTENING on ``port`` so ``serve`` can rebind.
+
+    The app is single-user and local; the usual squatter is a leftover server
+    from a previous run that didn't shut down (uvicorn's `Errno 48 address
+    already in use`). SIGTERM it, give it a moment to release the socket, then
+    SIGKILL if it clings. ponytail: match by port only — it's the app's own
+    configured port, so killing the squatter is exactly what's wanted.
+
+    Discovery uses ``lsof`` rather than psutil's system-wide ``net_connections``,
+    which needs root on macOS; ``lsof -ti`` lists the caller's own listeners
+    without privileges. psutil then handles the known PID's graceful terminate.
+    """
+    import subprocess
+
+    import psutil
+
+    out = subprocess.run(
+        ["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
+        capture_output=True, text=True,
+    ).stdout
+    for pid in sorted({int(p) for p in out.split()}):
+        try:
+            proc = psutil.Process(pid)
+            print(f"freeing port {port}: stopping pid {pid} ({proc.name()})", flush=True)
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except psutil.TimeoutExpired:
+                proc.kill()
+        except psutil.NoSuchProcess:
+            # Vanished between scan and kill — that's the outcome we wanted anyway.
+            continue
+
+
 def _serve(args: argparse.Namespace) -> int:
     import uvicorn
+
+    # Always reclaim the port first so a re-run replaces the old server instead of
+    # failing with 'address already in use'. Opt out with --no-kill.
+    if not args.no_kill:
+        _free_port(args.port)
 
     # factory=True so the app is built when uvicorn starts (and on each reload),
     # not as an import-time side effect of api.app.
@@ -233,6 +273,8 @@ def register_app(subparsers) -> None:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--reload", action="store_true")
+    serve.add_argument("--no-kill", action="store_true",
+                       help="Don't stop an existing server on the port first (default: reclaim it)")
     serve.set_defaults(func=_serve)
 
     mcp = subparsers.add_parser("mcp", help="Run the MCP server over stdio")

@@ -1,22 +1,25 @@
 """The review-fleet background job: pre-decide a reading verdict for the top-N picks.
 
-Single-flight (its own ``FlightLatch``), and deliberately **serial**. For each of
-the top-``top_k`` reading-queue picks it:
+Single-flight (its own ``FlightLatch``). It hands the picks to ``deep_review`` in
+**one batched call** and lets ``deep_review``'s own provider-aware fan-out decide
+concurrency: **parallel for a remote/API provider, serial for a local one**
+(``deep_review_fleet_concurrency`` — a remote batch fans out, capped by the provider's
+``max_sub_concurrency``, while one on-device model is never asked to serve concurrent
+inference and thrash host RAM). The fleet runs three passes:
 
-    1. reuses the cached deep review if present (``deep_review.get_cached_review``);
-    2. otherwise triggers ``deep_review.start([key])`` and POLLS that job's status
-       until it settles — one paper at a time, so we NEVER fire two model loads at
-       once (RAM safety on the unified-memory Mac, matching ``deep_review``'s own
-       local-serial rule);
-    3. folds the cached digest + quality signals into a ``ProposedVerdict`` via the
-       pure ``propose.propose_verdict`` (no LLM here) and ``verdict_store.upsert``s it.
+    1. **review** the picks that lack a usable cached deep review — one
+       ``deep_review.start(keys)`` call, polled until it settles;
+    2. **acquire** a PDF for any pick still without usable full text (no local
+       Zotero attachment) — SEQUENTIALLY via ``_pdf_acquire`` (arXiv/OA headless,
+       then the university browser for Cloudflare/SSO paywalls; a stateful browser
+       session, never parallelized) — then one batched re-review FROM THAT PATH;
+    3. **propose** — fold each cached digest + quality signals into a
+       ``ProposedVerdict`` via the pure ``propose.propose_verdict`` (no LLM here)
+       and ``verdict_store.upsert`` it.
 
 It writes ONLY the proposed-verdict sidecar — never ``label_verdicts``, never
-Zotero. The proposals are suggestions the human Confirms/Overrides later.
-
-For a pick with no local Zotero PDF it ACQUIRES one via ``_pdf_acquire`` (arXiv/OA
-headless, then the university browser for Cloudflare/SSO paywalls) into a local
-cache and re-reviews FROM THAT PATH — never a Zotero write, so a verdict works while
+Zotero. The proposals are suggestions the human Confirms/Overrides later. The
+acquired PDF goes to a local cache, never a Zotero write, so a verdict works while
 Zotero is open.
 
 ``status()`` mirrors ``deep_review``'s poll shape and adds a per-outcome tally:
@@ -42,11 +45,11 @@ from zotero_summarizer.services.library.review_fleet import propose, verdict_sto
 
 _DEFAULT_TOP_K = 5
 
-# Safety-net cap (NOT a per-call magic timeout): how long we wait for ONE paper's
-# deep review to finish before giving up on it and moving to the next. A local
-# full-tier review is minutes; this is the work-agnostic upper bound, env-free
-# because the fleet is launch/owner-driven, not a tight loop.
-_PER_ITEM_WAIT_SECS = 600.0
+# Safety-net cap (NOT a per-call magic timeout): how long we wait for ONE batched
+# deep-review pass to finish before giving up and moving on. A local full-tier
+# review is minutes per paper and a local batch runs serially, so this is the
+# work-agnostic upper bound, env-free because the fleet is launch/owner-driven.
+_PER_BATCH_WAIT_SECS = 600.0
 _POLL_INTERVAL_SECS = 2.0
 # Rank the whole library when selecting undecided picks (matches the UI's
 # QUEUE_LIMIT): the queue pins already-labeled papers to its top, so a fixed
@@ -65,8 +68,11 @@ _STATE: dict[str, Any] = {
     # No fetchable PDF source at all (web article / no arXiv / no OA copy).
     "no_fetchable_source": 0,
     # A proxied/paywalled source EXISTS but the browser couldn't fetch it because the
-    # university profile isn't logged in (or the `browser` extra is missing) — actionable.
+    # session for that publisher is stale/absent — actionable.
     "needs_library_login": 0,
+    # The gated picks as ``[{item_key, title, url}]`` — the UI surfaces each as a
+    # clickable link the user opens to sign in (refreshing the session), then re-Predicts.
+    "needs_login_items": [],
     "failed": 0,
     "started_at": None,
     "progress": {},
@@ -83,6 +89,7 @@ def try_start() -> bool:
         _STATE["proposed"] = 0
         _STATE["no_fetchable_source"] = 0
         _STATE["needs_library_login"] = 0
+        _STATE["needs_login_items"] = []
         _STATE["failed"] = 0
         _STATE["started_at"] = now_iso_z()
         _STATE["progress"] = {}
@@ -112,6 +119,7 @@ def status() -> dict[str, Any]:
         proposed = int(_STATE["proposed"])
         no_fetchable_source = int(_STATE["no_fetchable_source"])
         needs_library_login = int(_STATE["needs_library_login"])
+        needs_login_items = list(_STATE["needs_login_items"])
         failed = int(_STATE["failed"])
         started_at = _STATE["started_at"]
         progress = dict(_STATE["progress"])
@@ -132,6 +140,7 @@ def status() -> dict[str, Any]:
         "proposed": proposed,
         "no_fetchable_source": no_fetchable_source,
         "needs_library_login": needs_library_login,
+        "needs_login_items": needs_login_items,
         "failed": failed,
         "error": error,
         "started_at": started_at,
@@ -144,71 +153,120 @@ def _set_progress(progress: dict[str, Any]) -> None:
         _STATE["progress"] = progress
 
 
-def _ensure_review(item_key: str, *, force: bool = False, pdf_path: str | None = None) -> dict[str, Any] | None:
-    """Return the cached deep review for ``item_key``, computing it SERIALLY first
-    if absent. Triggers ``deep_review.start([key])`` and polls its single-flight
-    status until it settles (never a parallel model load), then re-reads the cache.
+def _usable_cache(item_key: str) -> dict[str, Any] | None:
+    """The cached deep review for ``item_key`` IF it's usable — a real digest, or an
+    honest ``needs_pdf`` (a re-review without a PDF is futile). A digest-less,
+    has-PDF entry is a STALE FAILURE → ``None`` so it's recomputed (deep review works
+    now). ``None`` when absent or stale."""
+    cached = deep_review.get_cached_review(item_key)
+    if cached is not None and (cached.get("digest") is not None or cached.get("needs_pdf")):
+        return cached
+    return None
 
-    ``force`` bypasses the cache and recomputes — used after a PDF was acquired, so
-    the paper is re-reviewed with its new full text. ``pdf_path`` (a local cache
-    download from the university/OA chain) is injected via ``deep_review``'s
-    ``pdf_overrides`` so the review runs from that path with NO Zotero attachment.
-    Returns the cached review dict, or ``None`` when the review never materialized
-    (e.g. the paper has no PDF, or the deep-review job errored — via its status)."""
-    if not force:
-        cached = deep_review.get_cached_review(item_key)
-        # Reuse only a USABLE cache: a real digest, or an honest needs_pdf (a
-        # re-review without a PDF is futile). A digest-less, has-PDF entry is a
-        # STALE FAILURE → fall through and recompute (deep review works now).
-        if cached is not None and (cached.get("digest") is not None or cached.get("needs_pdf")):
-            return cached
 
-    # Two SEPARATE budgets so a long FOREIGN job can't starve OUR own review:
-    # `foreign_waited` caps how long we wait for a foreign latch to free, `own_waited`
-    # caps OUR review once we've claimed the slot. A foreign job that runs out almost
-    # the whole window still leaves the full own-review budget when we re-claim.
+def _has_digest(item_key: str) -> bool:
+    """True once ``item_key`` carries a real digest — the terminal state a re-review
+    aims for, so a re-acquired batch stops asking for it."""
+    cached = deep_review.get_cached_review(item_key)
+    return cached is not None and cached.get("digest") is not None
+
+
+def _run_batched_review(item_keys: list[str], *, overrides: dict[str, str] | None = None, force: bool = False) -> None:
+    """Review a BATCH of items in ONE ``deep_review.start`` call, polled until OUR
+    accepted job settles. ``deep_review`` fans the batch out provider-aware — parallel
+    for a remote provider, serial (one model load at a time) for a local one — so this
+    is where "parallel for API, serial for local" actually lands. PDF acquisition is
+    NOT here (the caller does that sequentially); ``overrides`` injects already-acquired
+    cache paths via ``pdf_overrides``.
+
+    Honors the FOREIGN latch: when a foreign deep-review job (the startup prewarm, or
+    the user's own "Run deeper review") holds the single-flight slot, ``accepted`` is
+    False — we wait for it to drain then RE-CLAIM for the keys it didn't finish, never
+    reading the foreign job's settle as "our items failed" (the old per-item bug). Two
+    SEPARATE budgets so a long foreign job can't starve our own pass. Best-effort:
+    leaves whatever it couldn't review uncached for the propose pass to tally."""
+    if not item_keys:
+        return
+    done = _has_digest if force else (lambda k: _usable_cache(k) is not None)
     foreign_waited = own_waited = 0.0
+    with _LOCK:
+        display_total = int(_STATE["total"]) or len(item_keys)
     while True:
-        # `accepted` is False when a FOREIGN deep-review job (the startup prewarm, or
-        # the user's own "Run deeper review") holds the slot — the job we poll below
-        # is NOT ours, so its settling must not be read as "our item is done" (the
-        # old bug: every item reported 'failed').
-        overrides = {item_key: pdf_path} if pdf_path else None
-        accepted = bool(deep_review.start(item_keys=[item_key], pdf_overrides=overrides).get("accepted"))
+        # Re-filter each round: a foreign job may have finished some of our keys while
+        # we waited — don't redo its work. `force` keeps needs_pdf keys pending so the
+        # re-acquired PDF is actually reviewed.
+        pending = [k for k in item_keys if not done(k)]
+        if not pending:
+            return
+        ov = {k: overrides[k] for k in pending if overrides and k in overrides} or None
+        accepted = bool(deep_review.start(item_keys=pending, pdf_overrides=ov).get("accepted"))
         while True:
             dr_status = deep_review.status()
-            # Merge onto the base {item_key, index, total} set by the caller so the UI
-            # keeps "paper i of n" while it reports the cold paper's deep-review status.
             with _LOCK:
                 merged = dict(_STATE["progress"])
-            merged.update({"item_key": item_key, "deep_review": dr_status})
+            merged.update({"index": int(dr_status.get("completed") or 0), "total": display_total, "deep_review": dr_status})
             _set_progress(merged)
             if dr_status["status"] != "running":
                 break
-            if (own_waited if accepted else foreign_waited) >= _PER_ITEM_WAIT_SECS:
+            if (own_waited if accepted else foreign_waited) >= _PER_BATCH_WAIT_SECS:
                 break  # this budget is spent
             time.sleep(_POLL_INTERVAL_SECS)
             if accepted:
                 own_waited += _POLL_INTERVAL_SECS
             else:
                 foreign_waited += _POLL_INTERVAL_SECS
-        cached = deep_review.get_cached_review(item_key)
-        if cached is not None:
-            return cached
         if accepted:
-            # OUR job ran but cached nothing for this item → it genuinely errored.
-            # Retrying would just error again, so stop (caller records 'failed').
-            return None
-        if foreign_waited >= _PER_ITEM_WAIT_SECS:
-            return None  # waited a full budget for the latch and it never freed
-        # A foreign job settled without reviewing our item — wait a tick (so
+            return  # OUR batch ran (settled or budget spent) — propose pass reads the cache
+        if foreign_waited >= _PER_BATCH_WAIT_SECS:
+            return  # waited a full budget for the latch and it never freed
+        # A foreign job settled without finishing our keys — wait a tick (so
         # `foreign_waited` always advances → termination) then re-claim the slot.
         time.sleep(_POLL_INTERVAL_SECS)
         foreign_waited += _POLL_INTERVAL_SECS
 
 
-def _propose_for_item(item_key: str) -> str:
-    """Compute + store the proposed verdict for one item, returning the OUTCOME:
+def _acquire_missing_pdfs(keys: list[str], outcomes: dict[str, str]) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+    """SEQUENTIALLY acquire a PDF for each pick still without usable full text (no
+    local Zotero attachment), returning ``({key: local_path}, {key: {title, url}})``.
+    The second map is the GATED picks — a real PDF exists but the session for that
+    publisher is stale/absent; its ``url`` is surfaced as a clickable sign-in link.
+    Acquisition drives a stateful university browser session, so it is never
+    parallelized regardless of provider. A pick with a Zotero PDF but no digest is a
+    genuine extraction failure, not a missing source — skipped. A per-key acquisition
+    failure is isolated to that key (recorded ``failed`` in ``outcomes``)."""
+    from zotero_summarizer.services.library import _pdf_acquire
+    from zotero_summarizer.services.zotero.zotero import get_zotero_reader_or_raise
+
+    overrides: dict[str, str] = {}
+    login: dict[str, dict[str, str]] = {}
+    for item_key in keys:
+        if item_key in outcomes:
+            continue
+        review = deep_review.get_cached_review(item_key)
+        if not (review is None or review.get("needs_pdf") or review.get("digest") is None):
+            continue  # already has a digest — nothing to acquire
+        try:
+            detail = get_zotero_reader_or_raise().get_item_detail(item_key) or {}
+            if detail.get("has_pdf"):
+                continue  # has a local PDF but no digest → extraction failure, not a missing source
+            result = _pdf_acquire.acquire_pdf_for(item_key, detail)
+            if result.path is not None:
+                overrides[item_key] = str(result.path)
+            elif result.needs_login:
+                doi = str(detail.get("doi") or "")
+                login[item_key] = {
+                    "title": str(detail.get("title") or item_key),
+                    # the page to open + sign into (refreshing the session the fetch reuses)
+                    "url": str(detail.get("url") or (f"https://doi.org/{doi}" if doi else "")),
+                }
+        except Exception as exc:  # noqa: BLE001 — per-item background boundary
+            LOGGER.warning("review_fleet acquire failed item=%s: %s", item_key, exc)
+            outcomes[item_key] = "failed"
+    return overrides, login
+
+
+def _propose_for_item(item_key: str, *, login: dict[str, dict[str, str]]) -> str:
+    """Fold the cached review into a stored proposal, returning the OUTCOME:
 
       - ``"proposed"``             — a verdict was written;
       - ``"no_fetchable_source"``  — no usable full text and no fetchable PDF source
@@ -217,26 +275,13 @@ def _propose_for_item(item_key: str) -> str:
         couldn't fetch it (university profile not logged in / `browser` extra missing);
       - ``"failed"``               — the review never materialized (no review dict).
 
-    When the first review has no usable full text, we ACQUIRE a PDF (arXiv/OA headless,
-    then the university browser) into a local cache and re-review FROM THAT PATH — no
-    Zotero write, so it works while Zotero is open. The caller tallies the outcomes."""
-    from zotero_summarizer.services.library import _pdf_acquire
-    from zotero_summarizer.services.zotero.zotero import get_zotero_reader_or_raise
-
-    review = _ensure_review(item_key)
+    Pure read of the cache the review/acquire passes populated — no LLM, no model load."""
+    review = deep_review.get_cached_review(item_key)
     if review is None or review.get("needs_pdf") or review.get("digest") is None:
-        detail = get_zotero_reader_or_raise().get_item_detail(item_key) or {}
-        # Only acquire when there's no local Zotero PDF — a has_pdf item with no digest
-        # is a genuine extraction failure, not a missing source.
-        if not detail.get("has_pdf"):
-            result = _pdf_acquire.acquire_pdf_for(item_key, detail)
-            if result.path is not None:
-                review = _ensure_review(item_key, force=True, pdf_path=str(result.path))
-            elif result.needs_login:
-                return "needs_library_login"
-    if review is None:
-        return "failed"
-    if review.get("needs_pdf") or review.get("digest") is None:
+        if item_key in login:
+            return "needs_library_login"
+        if review is None:
+            return "failed"
         return "no_fetchable_source"
     proposal = propose.propose_verdict(
         review.get("digest"),
@@ -266,7 +311,10 @@ def _select_keys(queue: dict[str, Any], top_k: int) -> list[str]:
 
 
 def _run_job(top_k: int) -> None:
-    """Background worker: serially pre-decide the next ``top_k`` UNDECIDED picks."""
+    """Background worker: pre-decide the next ``top_k`` UNDECIDED picks in three passes
+    (review → acquire-and-re-review → propose). The two review passes are batched into
+    ``deep_review``, which fans them out parallel for a remote provider / serial for a
+    local one; PDF acquisition between them stays sequential."""
     try:
         # Scan the WHOLE ranked library, not a fixed prefix: the queue PINS the
         # user's already-labeled papers to its top, so on a heavily-labeled library
@@ -278,19 +326,46 @@ def _run_job(top_k: int) -> None:
         with _LOCK:
             _STATE["total"] = len(keys)
             _STATE["completed"] = 0
-        for i, item_key in enumerate(keys):
-            # Base progress (paper i of n) BEFORE the work, so a cold paper's long
-            # deep review reports its position; _ensure_review then merges in the
-            # live deep_review status under the same dict.
-            _set_progress({"item_key": item_key, "index": i + 1, "total": len(keys)})
+
+        # PASS 1 — review the picks without a usable cached deep review, in one batched
+        # provider-aware call. A per-key cache read that blows up is isolated here so
+        # one bad pick can't sink the whole batch (recorded `failed` for the propose pass).
+        outcomes: dict[str, str] = {}
+        to_review: list[str] = []
+        for item_key in keys:
             try:
-                outcome = _propose_for_item(item_key)
+                if _usable_cache(item_key) is None:
+                    to_review.append(item_key)
             except Exception as exc:  # noqa: BLE001 — per-item background boundary
-                LOGGER.warning("review_fleet failed item=%s: %s", item_key, exc)
-                outcome = "failed"
+                LOGGER.warning("review_fleet partition failed item=%s: %s", item_key, exc)
+                outcomes[item_key] = "failed"
+        _run_batched_review(to_review)
+
+        # PASS 2 — acquire a PDF (sequentially) for picks still without full text, then
+        # one batched re-review FROM the acquired paths (force: a needs_pdf cache is not
+        # "done" until the new PDF yields a digest).
+        overrides, login = _acquire_missing_pdfs(keys, outcomes)
+        _run_batched_review(list(overrides), overrides=overrides, force=True)
+
+        # PASS 3 — propose from the cache the review passes populated (pure, no LLM).
+        for item_key in keys:
+            outcome = outcomes.get(item_key)
+            if outcome is None:
+                try:
+                    outcome = _propose_for_item(item_key, login=login)
+                except Exception as exc:  # noqa: BLE001 — per-item background boundary
+                    LOGGER.warning("review_fleet propose failed item=%s: %s", item_key, exc)
+                    outcome = "failed"
             with _LOCK:
                 _STATE["completed"] += 1
                 _STATE[outcome] += 1
+        # Surface the gated picks (with a sign-in link each) so the UI can show
+        # "open, log in, then re-Predict" — only those with a URL to open.
+        with _LOCK:
+            _STATE["needs_login_items"] = [
+                {"item_key": k, "title": v["title"], "url": v["url"]}
+                for k, v in login.items() if v.get("url")
+            ]
         finish(error=None)
     except Exception as exc:  # noqa: BLE001 — background-worker boundary
         LOGGER.exception("review_fleet job crashed")
@@ -299,8 +374,9 @@ def _run_job(top_k: int) -> None:
 
 def start(top_k: int = _DEFAULT_TOP_K) -> dict[str, Any]:
     """Kick off a review-fleet run (single-flight). Pre-decides the top-``top_k``
-    Read-next picks in the background, serially. Returns the current ``status()``;
-    a no-op (returns the in-flight status) when a run is already going."""
+    Read-next picks in the background (deep review batched parallel-for-remote /
+    serial-for-local). Returns the current ``status()``; a no-op (returns the
+    in-flight status) when a run is already going."""
     if not try_start():
         return status()
     _flight.run_in_background(lambda: _run_job(max(1, top_k)))

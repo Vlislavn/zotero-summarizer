@@ -46,6 +46,144 @@ SQLite). What *triggers* it is your choice:
 
 The daemon is convenience, not a requirement.
 
+## Adding sources (arXiv, bioRxiv, PubMed, HackerNoon)
+
+A "source" is just an **RSS feed subscribed in Zotero** — the app reads Zotero's
+feed items, it never fetches RSS itself. So any feed Zotero can subscribe to is a
+first-class source, and the same pipeline (gate → goal_sim → LLM → daily slate)
+scores all of them. To add one: in Zotero, **Add Library → Add Feed → From URL…**,
+paste the feed URL, Save. The daemon discovers it on the next tick; `feeds list`
+shows it.
+
+**PubMed** is the recommended source for *published, clinical* work (e.g.
+medical agentic-AI papers) that the CS/bio preprint feeds miss. PubMed turns any
+search into a feed: run a search → **Create RSS** → copy the URL → add it in
+Zotero as above.
+
+The query is your volume + quality filter; the daily slate only surfaces 1–2
+papers regardless of intake. Two pitfalls found by validating these live against
+NCBI:
+- **`"agent"` mostly means a *pharmacological* agent** in PubMed — anchor it to AI
+  (require an AI/LLM co-term), or even `"multi-agent"` matches *multi-agent
+  chemotherapy*.
+- **Use `[tiab]` free-text, not pure MeSH** — MeSH indexing lags: over the last 14
+  days MeSH catches only ~39% of what title/abstract text does (it's ~87% over 6
+  months). A feed wants the newest papers, so MeSH would miss most of them. The
+  queries below use MeSH only where it adds recall.
+
+Four validated feeds (counts = last 90 days; add as many as you want — DOI dedup
+collapses overlap, the daily cap bounds volume):
+
+```
+# F1 — medical agentic-AI (~1.7/day, ~93% on-target)
+(agentic[tiab] OR "agentic AI"[tiab] OR "AI agent"[tiab] OR "AI agents"[tiab]
+ OR "LLM agent"[tiab] OR "LLM agents"[tiab] OR "autonomous agent"[tiab]
+ OR "autonomous agents"[tiab] OR "multi-agent"[tiab] OR multiagent[tiab]
+ OR "language model agent"[tiab] OR "language model agents"[tiab])
+AND ("artificial intelligence"[tiab] OR AI[tiab] OR LLM[tiab] OR "large language model"[tiab]
+ OR "large language models"[tiab] OR GPT[tiab] OR ChatGPT[tiab] OR "generative AI"[tiab]
+ OR "foundation model"[tiab] OR "foundation models"[tiab] OR "language model"[tiab]
+ OR "language models"[tiab])
+AND (clinical[tiab] OR patient*[tiab] OR diagnos*[tiab] OR healthcare[tiab]
+ OR medicine[tiab] OR "decision support"[tiab])
+AND english[lang]
+
+# F2 — clinical LLM applications (~12.7/day, ~87% on-target)
+("large language model"[tiab] OR "large language models"[tiab]
+ OR "generative artificial intelligence"[tiab] OR "generative AI"[tiab]
+ OR ChatGPT[tiab] OR "GPT-4"[tiab] OR "foundation model"[tiab] OR "foundation models"[tiab])
+AND ("clinical decision support"[tiab] OR diagnos*[tiab] OR "clinical workflow"[tiab]
+ OR "electronic health record"[tiab] OR "electronic health records"[tiab]
+ OR triage[tiab] OR "treatment planning"[tiab] OR "clinical reasoning"[tiab])
+AND english[lang]
+
+# F3 — oncology LLM/AI (~5.2/day, ~67% on-target)
+("large language model"[tiab] OR "large language models"[tiab] OR LLM[tiab]
+ OR "generative AI"[tiab] OR "generative artificial intelligence"[tiab]
+ OR ChatGPT[tiab] OR "GPT-4"[tiab] OR agentic[tiab] OR "AI agent"[tiab]
+ OR "AI agents"[tiab] OR "foundation model"[tiab] OR "foundation models"[tiab]
+ OR "retrieval-augmented"[tiab])
+AND (oncolog*[tiab] OR cancer[tiab] OR tumour*[tiab] OR tumor*[tiab]
+ OR carcinoma[tiab] OR "Neoplasms"[Mesh])
+AND english[lang]
+
+# F4 — clinical decision support + LLM (~4.5/day, ~67% on-target)
+("Decision Support Systems, Clinical"[Mesh] OR "clinical decision support"[tiab])
+AND ("large language model"[tiab] OR "large language models"[tiab] OR LLM[tiab]
+ OR "generative AI"[tiab] OR agentic[tiab] OR "Artificial Intelligence"[Mesh])
+AND english[lang]
+```
+
+For an extra quality cut, AND a high-impact-venue clause, e.g.
+`("NPJ Digit Med"[journal] OR "Lancet Digit Health"[journal] OR "Nat Med"[journal])`.
+So these rank to the top of the slate, make sure your **research goals** (Settings)
+include a clinical/agentic-AI sentence — goal-text similarity is the dominant
+ranking signal.
+
+**Full text.** When you read a PubMed pick, the app resolves a PDF via
+`_pdf_acquire`: arXiv → Unpaywall/OpenAlex (by DOI) → **PMC** → browser. PMC matters
+because the most on-target agentic papers (e.g. AMIA proceedings) sit in PMC with
+*no DOI*, so the DOI rungs can't reach them. Note: fresh PMC papers have no reliable
+headless download (the site serves a bot-wall page), so PMC full text needs the
+**browser rung** — enable **Settings → University access** (the optional `[browser]`
+extra). Without it, OA papers with a DOI still resolve headless via Unpaywall.
+
+*Caveat:* PubMed RSS abstracts are often truncated to the conclusion (Zotero only
+fetches the full record when you save an item to your library, not for feed
+items). Triage runs on that partial abstract today; prestige + goal-text matching
+still rank the picks well. If you find PubMed picks ranking poorly because the
+abstract is too thin, that's the signal to add the deferred efetch backfill.
+
+### HackerNoon (practitioner / engineering angle)
+
+HackerNoon adds the *building-agents* engineering view that arXiv (research) and
+PubMed (clinical) miss. It's a tag-filtered RSS feed — same **Add Feed → From
+URL…** flow. Tags are the only filter (no boolean queries), so pick a narrow one
+and let the gate + goal_sim do the rest:
+
+```
+https://hackernoon.com/tagged/llm/feed                     # best fit (~50/feed; LLM/agent eng.)
+https://hackernoon.com/tagged/artificial-intelligence/feed # broader (more general-ML noise)
+https://hackernoon.com/tagged/chatgpt/feed                 # optional
+```
+
+Validated live: the `llm` tag is genuinely on-point ("Guardrails That Stopped My
+AI Agent From Going Rogue", "API Gateway Pattern for Safer Enterprise AI Agents",
+"Local LLMs Need More Than OpenAI-Compatible Endpoints") with some SEO/marketing
+filler the gate filters out. Note the narrower `ai-agents` / `agentic-ai` /
+`generative-ai` tags **don't exist as feeds** — use `llm`.
+
+Two differences from the academic sources, both fine:
+- **Triage is title-driven.** HackerNoon's tag feed carries the title + a
+  one-sentence lede, no full abstract — so the gate/goal_sim rank mostly on the
+  (informative) title. Make sure your goals.yaml has an agentic-AI goal sentence.
+- **Triage-only — read on the web.** Blog posts have no PDF/DOI/PMC, so there's no
+  prestige (cold-start, never penalised) and the PDF-based deep-review/ask-paper
+  don't apply (they're built for papers with method checklists). HackerNoon picks
+  surface in the slate; click through to read. No app code is involved.
+
+### Cover the flagship journal, not just the sub-journal
+
+A common coverage gap: subscribing to a *sub*-journal (Nature Cancer, NEJM AI,
+Lancet Digital Health, JAMA Oncology) but not its **flagship parent** (Nature,
+NEJM, The Lancet, JAMA). Landmark cross-cutting papers — e.g. *"Towards autonomous
+medical AI agents"* (Nature, 2026) — publish in the flagship and silently fall
+through: there's no preprint, and PubMed indexing lags days–weeks, so nothing
+ingests them in time. Subscribe the flagships too (verified RSS):
+
+```
+https://www.nature.com/nature.rss                                    # flagship Nature
+https://www.nature.com/ncomms.rss                                    # Nature Communications
+https://www.nature.com/natbiomedeng.rss                             # Nature Biomedical Engineering
+https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science # Science
+https://www.nejm.org/action/showFeed?type=etoc&feed=rss&jc=nejm       # NEJM
+https://www.thelancet.com/rssfeed/lancet_current.xml                 # The Lancet
+https://www.cell.com/cell/current.rss                                # Cell
+```
+
+The PubMed feeds (F1–F4 above) are the backstop — they catch flagship papers once
+PubMed indexes them — but the flagship RSS gives same-day coverage.
+
 ## Bring your own ground truth
 
 The relevance model is trained on a **golden dataset that you build** — nothing ships

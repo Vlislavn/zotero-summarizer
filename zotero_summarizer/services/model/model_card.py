@@ -102,6 +102,12 @@ async def model_card() -> dict[str, Any]:
             "feature_dim": twin.get("feature_dim"),
             "objective": twin.get("objective"),
             "oof_spearman": twin.get("oof_spearman"),
+            # Same OOF restricted to dated reading-decisions (the gate's real
+            # ranking ability; the aggregate above is inflated by ~72% undated
+            # feed:* rows the gate trivially rejects). Null on pre-2026-06-19
+            # models or a too-small dated subset.
+            "oof_spearman_verified": twin.get("oof_spearman_verified"),
+            "n_verified": twin.get("n_verified"),
             # Forward-looking (train-past/test-future) Spearman; null on models
             # trained before June 2026 or when the holdout was too small.
             "temporal_spearman": twin.get("temporal_spearman"),

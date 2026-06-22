@@ -11,8 +11,9 @@ the gate and confused users); the digest is the whole output.
 Mirrors ``reading_queue``'s established single-flight + JSON-cache pattern:
 results land in ``deep_reviews.json`` keyed by ``item_key`` and are surfaced by
 ``review_detail.build_library_detail``. The digest is also upserted to the Zotero
-item as one short note (best-effort). Concurrency reuses
-``settings().triage_job_concurrency``.
+item as one short note (best-effort). The N papers fan out provider-aware
+(``deep_review_fleet_concurrency``): serial for a local model, capped by the remote
+provider's ``max_sub_concurrency`` (else all N) for a remote one.
 
 Empty/partial results are valid: a paper with no local PDF is marked
 ``needs_pdf`` and nothing else runs — an honest "no full text", not a masked
@@ -28,8 +29,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from zotero_summarizer.services._common import (
+    deep_review_fleet_concurrency,
     deep_review_sub_concurrency,
-    effective_llm_concurrency,
     now_iso_z,
     settings,
     write_json_atomic,
@@ -317,8 +318,9 @@ def _run_job(items: list[dict[str, Any]], *, focus_prompt: str = "") -> None:
         # Library-wide prestige floor for the quality HIGHLIGHT bar (asymmetric —
         # never demotes uncited papers; inert when there's no OpenAlex coverage).
         prestige_scores, prestige_floor_value = _load_prestige_context()
-        # Serial for a local model (protect RAM), configured cap for a remote one.
-        max_workers = effective_llm_concurrency(provider, len(items) or 1)
+        # Serial for a local model (protect RAM); a remote one fans out across papers —
+        # capped by its own max_sub_concurrency, else all N (NOT the local-RAM triage knob).
+        max_workers = deep_review_fleet_concurrency(provider, len(items) or 1)
         wrote = 0
         errors: list[str] = []
         with ThreadPoolExecutor(max_workers=max_workers) as pool:

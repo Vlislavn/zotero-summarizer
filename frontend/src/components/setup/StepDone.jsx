@@ -1,15 +1,14 @@
 // Wizard step 4 — Done. Confirms the config was saved and routes to /today,
-// where the first daily slate lands.
+// where the first daily slate lands. The per-pillar checklist was removed —
+// StepProgress already credited Zotero/LLM/Goals green throughout the wizard, so
+// re-rendering the same state in a third idiom only diluted the one next action.
 
 import { useNavigate } from 'react-router-dom';
+import Button from '../ui/Button.jsx';
+import { Banner } from '../form/Fields.jsx';
 
-export default function StepDone({ pillars }) {
+export default function StepDone({ pathsChanged = false }) {
   const navigate = useNavigate();
-  const rows = [
-    ['Zotero', pillars?.zotero],
-    ['LLM', pillars?.llm],
-    ['Goals', pillars?.goals],
-  ];
   return (
     <div className="space-y-5 text-center py-4">
       <div className="text-5xl" aria-hidden>🎉</div>
@@ -21,25 +20,18 @@ export default function StepDone({ pillars }) {
         </p>
       </div>
 
-      <ul className="inline-flex flex-col gap-1.5 text-sm text-left">
-        {rows.map(([label, ok]) => (
-          <li key={label} className="flex items-center gap-2">
-            <span className={ok ? 'text-emerald-600' : 'text-amber-500'} aria-hidden>
-              {ok ? '✓' : '○'}
-            </span>
-            <span className="text-slate-700">{label}</span>
-          </li>
-        ))}
-      </ul>
+      {/* The one genuine cross-step reminder: a path change only applies on restart,
+          and that fact was set two steps ago — carry it here so it isn't lost. */}
+      {pathsChanged && (
+        <div className="max-w-sm mx-auto text-left">
+          <Banner kind="success">
+            You changed the Zotero paths — restart the app to apply them.
+          </Banner>
+        </div>
+      )}
 
       <div>
-        <button
-          type="button"
-          onClick={() => navigate('/today')}
-          className="px-5 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-semibold hover:bg-slate-700"
-        >
-          Go to Today
-        </button>
+        <Button onClick={() => navigate('/today')}>Go to Today</Button>
       </div>
     </div>
   );

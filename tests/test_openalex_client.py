@@ -7,7 +7,10 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from zotero_summarizer.integrations.openalex import OpenAlexClient
+from zotero_summarizer.integrations.openalex import (
+    OpenAlexClient,
+    _abstract_from_inverted_index,
+)
 from zotero_summarizer.integrations.openalex_cache import OpenAlexCache
 
 
@@ -234,6 +237,42 @@ def test_genuine_empty_author_works_is_cached(tmp_path):
     work = client.fetch_work_by_doi("10.1/empty-author")
     assert work.max_author_field_percentile is None
     assert cache.get("doi:10.1/empty-author") is not None   # cached (no retry churn)
+
+
+# ------------------------- abstract reconstruction (RSS backfill source)
+
+
+def test_abstract_from_inverted_index_roundtrip():
+    inv = {"We": [0], "propose": [1], "a": [2], "method": [3]}
+    assert _abstract_from_inverted_index(inv) == "We propose a method"
+    # A word at multiple positions is placed at each.
+    assert _abstract_from_inverted_index({"foo": [0, 2], "bar": [1]}) == "foo bar foo"
+
+
+def test_abstract_from_inverted_index_empty_or_none():
+    assert _abstract_from_inverted_index(None) is None
+    assert _abstract_from_inverted_index({}) is None
+
+
+def test_work_abstract_reconstructed_from_payload(tmp_path):
+    """The cached OpenAlex work already carries abstract_inverted_index — expose it."""
+    cache = OpenAlexCache(tmp_path / "c.db", ttl_seconds=86400)
+    cache.set("doi:10.1/x", {
+        "id": "https://openalex.org/W1",
+        "cited_by_count": 3,
+        "abstract_inverted_index": {"Deep": [0], "learning": [1], "works": [2]},
+    })
+    client = OpenAlexClient(cache, http_client=MagicMock())
+    work = client.fetch_work_by_doi("10.1/x")
+    assert work.abstract == "Deep learning works"
+
+
+def test_work_abstract_none_without_index(tmp_path):
+    cache = OpenAlexCache(tmp_path / "c.db", ttl_seconds=86400)
+    cache.set("doi:10.1/y", {"id": "https://openalex.org/W2", "cited_by_count": 0})
+    client = OpenAlexClient(cache, http_client=MagicMock())
+    work = client.fetch_work_by_doi("10.1/y")
+    assert work.abstract is None
 
 
 def test_author_field_percentile_cached_payload(tmp_path):

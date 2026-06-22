@@ -75,10 +75,15 @@ def test_cache_report(monkeypatch):
 
 def test_model_targets_includes_four(monkeypatch):
     from zotero_summarizer.cli import _app
-    config = SimpleNamespace(corpus=SimpleNamespace(
-        embedding_model="sentence-transformers/all-MiniLM-L6-v2",
-        reranker_model="BAAI/bge-reranker-v2-m3",
-    ))
+    config = SimpleNamespace(
+        corpus=SimpleNamespace(
+            embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+            reranker_model="BAAI/bge-reranker-v2-m3",
+        ),
+        # _model_targets reads quality_review.shadow_claim_check to decide whether to
+        # add the optional MiniCheck encoder target — off → exactly the four below.
+        quality_review=SimpleNamespace(shadow_claim_check=False),
+    )
     repos = [r for _, r in _app._model_targets(config)]
     assert "allenai/specter2_base" in repos
     assert "allenai/specter2" in repos

@@ -47,7 +47,7 @@ export default function AdvancedSection({
           Advanced
         </span>
         <span className="text-xs text-slate-400 font-normal normal-case">
-          LLM routing · classifier gate · corpus similarity
+          LLM routing · classifier gate
         </span>
       </summary>
 
@@ -90,38 +90,9 @@ export default function AdvancedSection({
             onToggleDropPriority={onToggleDropPriority}
           />
         </section>
-
-        <div className="border-t border-slate-200" />
-
-        {/* Corpus similarity slider — moved here from the old triage card. */}
-        <section className="space-y-2">
-          <div>
-            <h4 className="text-sm font-bold uppercase tracking-wider text-slate-500">
-              Corpus similarity
-            </h4>
-          </div>
-          <label className="block">
-            <span className="text-sm font-semibold text-slate-700">
-              Corpus similarity threshold
-            </span>
-            <input
-              type="range"
-              min="-1"
-              max="1"
-              step="0.01"
-              value={form.corpus_similarity_threshold ?? -0.3}
-              onChange={(e) => onUpdate('corpus_similarity_threshold', Number(e.target.value))}
-              className="w-full mt-1"
-            />
-            <div className="text-xs text-slate-600 font-mono">
-              {Number(form.corpus_similarity_threshold ?? 0).toFixed(2)}
-            </div>
-            <span className="text-xs text-slate-500 mt-1 block">
-              Cosine similarity floor for goal-alignment retrieval. Lower = more
-              permissive matching.
-            </span>
-          </label>
-        </section>
+        {/* The corpus-similarity slider was removed: a raw cosine [-1,1] floor the
+            clinician can't reason about. The -0.3 server default is round-tripped
+            untouched (configForm still maps it); edit goals.yaml to tune it. */}
       </div>
     </details>
   );

@@ -1,15 +1,17 @@
 """Review-fleet (Phase-2 background pre-decision of Read-next verdicts).
 
-Covers the four modules with stubs (no real LLM / Zotero / model load):
+Covers three modules with stubs (no real LLM / Zotero / model load); ``prewarm`` lives
+in ``test_review_fleet_prewarm.py``:
   * ``propose.propose_verdict`` — the pure deterministic truth-table (the brain).
   * ``verdict_store`` — atomic JSON sidecar round-trip + clear + corrupt-loud.
-  * ``fleet`` — the single-flight serial job: cache reuse, on-demand review, the
-    status shape, per-item-failure isolation, and the "no Zotero / no review"
-    paths — all with deep_review + reading_queue stubbed.
-  * ``prewarm`` — knob resolution (config + env + fail-loud) and the enable gate.
+  * ``fleet`` — the single-flight, BATCHED provider-aware job: cache reuse, the one
+    batched deep_review.start call, sequential PDF acquire + re-review, the status
+    shape, per-item-failure isolation, and the "no Zotero / no review" paths — all
+    with deep_review + reading_queue stubbed.
 """
 from __future__ import annotations
 
+from pathlib import Path
 import types
 
 import pytest
@@ -20,7 +22,6 @@ from zotero_summarizer.services.library.review_fleet import (
     propose,
     verdict_store,
 )
-from zotero_summarizer.services.library.review_fleet import prewarm
 
 
 # ===========================================================================
@@ -211,7 +212,7 @@ def test_write_is_atomic_no_tmp_left_behind(_store_path):
 
 
 # ===========================================================================
-# fleet — single-flight serial job
+# fleet — single-flight, batched provider-aware job
 # ===========================================================================
 
 
@@ -242,6 +243,26 @@ def _cached_review(read_decision="read", grade="A"):
     return {"digest": _digest(read_decision, grade), "quality": _quality(), "goal_summaries": []}
 
 
+def _stub_deep_review(monkeypatch, cache, *, status="ready", review=None):
+    """Wire ``deep_review`` against a mutable ``cache`` dict: ``start`` records each call
+    and reviews its keys INTO the cache (so the parallelism lives in one batched call),
+    ``get_cached_review`` reads the dict, ``status`` reports ``status``. ``review`` is an
+    optional ``(item_key, pdf_overrides) -> entry`` factory (default: a read/A digest).
+    Returns the recorded ``start`` call args ``[{item_keys, pdf_overrides}]``."""
+    starts: list[dict] = []
+
+    def _start(*, item_keys=None, pdf_overrides=None, **_kw):
+        starts.append({"item_keys": list(item_keys or []), "pdf_overrides": dict(pdf_overrides or {})})
+        for key in item_keys or []:
+            cache[key] = review(key, pdf_overrides) if callable(review) else _cached_review()
+        return {"accepted": True}
+
+    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: cache.get(key))
+    monkeypatch.setattr(fleet.deep_review, "start", _start)
+    monkeypatch.setattr(fleet.deep_review, "status", lambda: {"status": status})
+    return starts
+
+
 def test_status_idle_before_any_run():
     s = fleet.status()
     assert s["status"] == "idle"
@@ -266,31 +287,41 @@ def test_run_uses_cached_review_without_starting_deep_review(monkeypatch):
     assert stored["A"]["proposed"] == "must_read"
 
 
-def test_run_computes_missing_review_serially(monkeypatch):
-    _stub_queue(monkeypatch, ["A"])
-    calls = {"start": 0, "status": 0}
-    # First get_cached_review (pre-check) miss, then a hit after start+poll.
-    seq = iter([None, _cached_review("skim", "B")])
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: next(seq))
-    monkeypatch.setattr(fleet.deep_review, "start", lambda **_kw: calls.__setitem__("start", calls["start"] + 1))
-
-    def _status():
-        calls["status"] += 1
-        return {"status": "ready"}  # settles immediately
-
-    monkeypatch.setattr(fleet.deep_review, "status", _status)
+def test_uncached_picks_review_in_one_batched_call(monkeypatch):
+    """The fan-out parallelism lives INSIDE one ``deep_review.start`` call (its
+    ``effective_llm_concurrency`` decides parallel-for-remote / serial-for-local), so
+    the fleet must hand all uncached picks over in a SINGLE batched call — not one call
+    per paper as it used to."""
+    _stub_queue(monkeypatch, ["A", "B", "C"])
+    cache: dict = {}
+    starts = _stub_deep_review(monkeypatch, cache)
     monkeypatch.setattr(fleet.time, "sleep", lambda _s: pytest.fail("must not sleep once settled"))
 
-    fleet.start(top_k=1)
-    assert calls["start"] == 1
-    assert verdict_store.read_all()["A"]["proposed"] == "should_read"
+    fleet.start(top_k=3)
+    assert [s["item_keys"] for s in starts] == [["A", "B", "C"]]  # ONE batched call, all keys
+    s = fleet.status()
+    assert s["status"] == "ready" and s["completed"] == 3
+    assert set(verdict_store.read_all()) == {"A", "B", "C"}
+
+
+def test_cached_picks_are_reused_only_uncached_are_reviewed(monkeypatch):
+    """A pick with a usable cached digest is reused (no review); only the cold picks go
+    into the batched ``deep_review.start`` call."""
+    _stub_queue(monkeypatch, ["CACHED", "COLD"])
+    cache = {"CACHED": _cached_review("read", "A")}
+    starts = _stub_deep_review(monkeypatch, cache, review=lambda key, _ov: _cached_review("skim", "B"))
+
+    fleet.start(top_k=2)
+    assert [s["item_keys"] for s in starts] == [["COLD"]]  # CACHED reused, only COLD reviewed
+    stored = verdict_store.read_all()
+    assert stored["CACHED"]["proposed"] == "must_read"
+    assert stored["COLD"]["proposed"] == "should_read"
 
 
 def test_run_polls_until_deep_review_settles(monkeypatch):
     _stub_queue(monkeypatch, ["A"])
-    seq = iter([None, _cached_review()])
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: next(seq))
-    monkeypatch.setattr(fleet.deep_review, "start", lambda **_kw: None)
+    cache: dict = {}
+    _stub_deep_review(monkeypatch, cache)
     statuses = iter(["running", "running", "ready"])
     monkeypatch.setattr(fleet.deep_review, "status", lambda: {"status": next(statuses)})
     sleeps = {"n": 0}
@@ -306,11 +337,116 @@ def test_run_skips_item_with_no_review(monkeypatch):
     stores no proposal — never a guessed verdict."""
     _stub_queue(monkeypatch, ["A"])
     monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: None)
-    monkeypatch.setattr(fleet.deep_review, "start", lambda **_kw: None)
+    monkeypatch.setattr(fleet.deep_review, "start", lambda **_kw: {"accepted": True})
     monkeypatch.setattr(fleet.deep_review, "status", lambda: {"status": "ready"})
 
     fleet.start(top_k=1)
     s = fleet.status()
+    assert s["completed"] == 1
+    assert verdict_store.read_all() == {}
+
+
+def test_fleet_retries_when_foreign_deep_review_holds_latch(monkeypatch):
+    """C1 regression: a FOREIGN deep-review job (startup prewarm / the user's own
+    'Run deeper review') holds the single-flight latch, so the fleet's first batched
+    start() is NOT accepted. It must wait for the latch to free, RE-CLAIM the slot for
+    its still-uncached keys, and review them — not read the foreign job's settle as 'our
+    items failed' (the old bug reported every item 'failed' / done_empty)."""
+    _stub_queue(monkeypatch, ["A"])
+    cache: dict = {}
+    accepts = iter([False, True])  # foreign holds the latch, then frees
+
+    def _start(*, item_keys=None, **_kw):
+        acc = next(accepts)
+        if acc:  # only OUR accepted job writes the cache
+            for key in item_keys or []:
+                cache[key] = _cached_review("read", "A")
+        return {"accepted": acc}
+
+    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: cache.get(key))
+    monkeypatch.setattr(fleet.deep_review, "start", _start)
+    monkeypatch.setattr(fleet.deep_review, "status", lambda: {"status": "ready"})
+    monkeypatch.setattr(fleet.time, "sleep", lambda _s: None)
+
+    fleet.start(top_k=1)
+    s = fleet.status()
+    assert s["status"] == "ready" and s["completed"] == 1
+    assert verdict_store.read_all()["A"]["proposed"] == "must_read"  # our item WAS reviewed
+
+
+def test_foreign_job_holding_latch_does_not_starve_own_review_budget(monkeypatch):
+    """C1 (separate budgets): a foreign job that holds the latch for most of the
+    window must NOT consume OUR batch's budget. The foreign job runs several polls then
+    frees; the fleet re-claims and reviews its own picks to completion."""
+    _stub_queue(monkeypatch, ["A"])
+    cache: dict = {}
+    accepts = iter([False, True])
+
+    def _start(*, item_keys=None, **_kw):
+        acc = next(accepts)
+        if acc:
+            for key in item_keys or []:
+                cache[key] = _cached_review("read", "A")
+        return {"accepted": acc}
+
+    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: cache.get(key))
+    monkeypatch.setattr(fleet.deep_review, "start", _start)
+    # foreign job runs 3 polls then settles; OUR batch settles on the first poll.
+    statuses = iter(["running", "running", "running", "ready", "ready"])
+    monkeypatch.setattr(fleet.deep_review, "status", lambda: {"status": next(statuses)})
+    monkeypatch.setattr(fleet.time, "sleep", lambda _s: None)
+
+    fleet.start(top_k=1)
+    assert verdict_store.read_all()["A"]["proposed"] == "must_read"  # re-claimed + reviewed
+
+
+def test_needs_pdf_pick_is_acquired_then_re_reviewed_from_that_path(monkeypatch):
+    """A pick with no Zotero PDF first reviews to ``needs_pdf``, then the fleet acquires
+    a PDF (sequentially) and re-reviews FROM that path via ``pdf_overrides`` — the digest
+    from the acquired path drives the proposal."""
+    _stub_queue(monkeypatch, ["A"])
+    cache: dict = {}
+
+    def _review(_key, pdf_overrides):
+        # WITH an override (re-review from the acquired path) → a digest; without → needs_pdf.
+        return _cached_review("read", "A") if pdf_overrides else {"digest": None, "needs_pdf": True}
+
+    starts = _stub_deep_review(monkeypatch, cache, review=_review)
+    monkeypatch.setattr(fleet.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(
+        "zotero_summarizer.services.zotero.zotero.get_zotero_reader_or_raise",
+        lambda: types.SimpleNamespace(get_item_detail=lambda _k: {"has_pdf": False}),
+    )
+    monkeypatch.setattr(
+        "zotero_summarizer.services.library._pdf_acquire.acquire_pdf_for",
+        lambda _k, _detail: types.SimpleNamespace(path=Path("/tmp/acquired.pdf"), needs_login=False),
+    )
+
+    fleet.start(top_k=1)
+    # Pass 1 reviews from Zotero (needs_pdf), pass 2 re-reviews WITH the acquired override.
+    assert [s["pdf_overrides"] for s in starts] == [{}, {"A": "/tmp/acquired.pdf"}]
+    assert verdict_store.read_all()["A"]["proposed"] == "must_read"
+
+
+def test_needs_library_login_pick_is_tallied_not_proposed(monkeypatch):
+    """A paywalled pick the browser can't reach (no logged-in session) is tallied
+    ``needs_library_login`` and gets NO proposal — never a guessed verdict."""
+    _stub_queue(monkeypatch, ["A"])
+    cache: dict = {}
+    _stub_deep_review(monkeypatch, cache, review=lambda _k, _ov: {"digest": None, "needs_pdf": True})
+    monkeypatch.setattr(fleet.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(
+        "zotero_summarizer.services.zotero.zotero.get_zotero_reader_or_raise",
+        lambda: types.SimpleNamespace(get_item_detail=lambda _k: {"has_pdf": False}),
+    )
+    monkeypatch.setattr(
+        "zotero_summarizer.services.library._pdf_acquire.acquire_pdf_for",
+        lambda _k, _detail: types.SimpleNamespace(path=None, needs_login=True),
+    )
+
+    fleet.start(top_k=1)
+    s = fleet.status()
+    assert s["needs_library_login"] == 1
     assert s["completed"] == 1
     assert verdict_store.read_all() == {}
 
@@ -355,87 +491,3 @@ def test_single_flight_second_start_is_noop(monkeypatch):
     s = fleet.start(top_k=1)
     assert s["status"] == "running"
     fleet.finish(error=None)
-
-
-# ===========================================================================
-# prewarm — knob resolution + enable gate (mirrors deep_review_prewarm)
-# ===========================================================================
-
-
-def _config(*, prewarm_k=5, enabled=True):
-    return types.SimpleNamespace(
-        quality_review=types.SimpleNamespace(prewarm_on_startup_k=prewarm_k, enabled=enabled),
-    )
-
-
-def _app_state(*, reader=object()):
-    return types.SimpleNamespace(zotero_reader=reader)
-
-
-@pytest.fixture(autouse=True)
-def _clear_prewarm_env(monkeypatch):
-    monkeypatch.delenv(prewarm._ENV_PREWARM_K, raising=False)
-    yield
-
-
-def test_resolve_uses_config_when_env_unset():
-    assert prewarm.resolve_prewarm_k(_config(prewarm_k=3)) == 3
-
-
-def test_resolve_env_supersedes_config(monkeypatch):
-    monkeypatch.setenv(prewarm._ENV_PREWARM_K, "7")
-    assert prewarm.resolve_prewarm_k(_config(prewarm_k=3)) == 7
-
-
-def test_resolve_rejects_non_integer_env_loudly(monkeypatch):
-    monkeypatch.setenv(prewarm._ENV_PREWARM_K, "lots")
-    with pytest.raises(ValueError, match=prewarm._ENV_PREWARM_K):
-        prewarm.resolve_prewarm_k(_config())
-
-
-def test_resolve_rejects_negative_env_loudly(monkeypatch):
-    monkeypatch.setenv(prewarm._ENV_PREWARM_K, "-1")
-    with pytest.raises(ValueError, match=">= 0"):
-        prewarm.resolve_prewarm_k(_config())
-
-
-def test_schedule_runs_worker_with_resolved_k(monkeypatch):
-    seen = {}
-    monkeypatch.setattr(prewarm, "_prewarm_worker", lambda k: seen.update(k=k))
-    monkeypatch.setattr(prewarm._flight, "run_in_background", lambda target: target())
-    assert prewarm.schedule_on_startup(_config(prewarm_k=3), _app_state()) is True
-    assert seen["k"] == 3
-
-
-def test_schedule_skips_when_k_zero(monkeypatch):
-    monkeypatch.setattr(prewarm._flight, "run_in_background", _never_spawn)
-    assert prewarm.schedule_on_startup(_config(prewarm_k=0), _app_state()) is False
-
-
-def test_schedule_skips_when_deep_review_disabled(monkeypatch):
-    monkeypatch.setattr(prewarm._flight, "run_in_background", _never_spawn)
-    assert prewarm.schedule_on_startup(_config(enabled=False), _app_state()) is False
-
-
-def test_schedule_skips_without_zotero_reader(monkeypatch):
-    monkeypatch.setattr(prewarm._flight, "run_in_background", _never_spawn)
-    assert prewarm.schedule_on_startup(_config(), _app_state(reader=None)) is False
-
-
-def test_worker_starts_fleet_with_k(monkeypatch):
-    captured = {}
-    monkeypatch.setattr(prewarm.fleet, "start", lambda *, top_k: captured.update(top_k=top_k))
-    prewarm._prewarm_worker(4)
-    assert captured == {"top_k": 4}
-
-
-def test_worker_swallows_failures(monkeypatch):
-    def _boom(*, top_k):
-        raise RuntimeError("fleet kickoff blew up")
-
-    monkeypatch.setattr(prewarm.fleet, "start", _boom)
-    prewarm._prewarm_worker(2)  # logged + swallowed, no raise
-
-
-def _never_spawn(_target):
-    raise AssertionError("run_in_background must not be called when prewarm is disabled")

@@ -17,6 +17,7 @@ import { listModels } from '../../api/settingsApi.js';
 import { humanizeError } from '../../utils/humanizeError.js';
 import { Banner, Field } from '../form/Fields.jsx';
 import { StatusPill } from '../LlmRoutingSection.jsx';
+import Button from '../ui/Button.jsx';
 
 const PROVIDER_TYPES = ['openai', 'anthropic'];
 const DEFAULT_MAX_TOKENS = 4096;
@@ -35,7 +36,7 @@ function firstProvider(routing) {
   };
 }
 
-export default function StepConnectLlm({ status, routing, onPatchRouting, testedOk, onTested }) {
+export default function StepConnectLlm({ routing, onPatchRouting, testedOk, onTested }) {
   const provider = firstProvider(routing);
   const isOpenai = provider.type === 'openai';
   const defaultModel = routing?.default?.model || '';
@@ -75,8 +76,6 @@ export default function StepConnectLlm({ status, routing, onPatchRouting, tested
     });
   }
 
-  const apiKeyPresent = Boolean(status?.llm?.api_key_present);
-
   return (
     <div className="space-y-4">
       <div>
@@ -106,27 +105,12 @@ export default function StepConnectLlm({ status, routing, onPatchRouting, tested
       </div>
 
       <Field
-        label="API key env var (NAME)"
+        label="API key env var"
         value={provider.api_key_env || ''}
         onChange={(v) => patchProvider({ api_key_env: v })}
         placeholder="OPENAI_API_KEY"
         hint="This is the env var NAME — set the secret value in .env / your shell, not here."
       />
-
-      {/* "set in environment?" indicator from the status payload. */}
-      <div className="flex items-center gap-2 text-sm">
-        <span className="text-slate-600">Secret set in environment?</span>
-        <span
-          className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border ${
-            apiKeyPresent
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-              : 'bg-amber-50 border-amber-200 text-amber-900'
-          }`}
-        >
-          <span aria-hidden>{apiKeyPresent ? '✓' : '✗'}</span>
-          {apiKeyPresent ? 'set' : 'not detected'}
-        </span>
-      </div>
 
       {/* Default model — a native combobox so the test's models become
           type-ahead suggestions (Field has no `list` prop), while still
@@ -154,14 +138,13 @@ export default function StepConnectLlm({ status, routing, onPatchRouting, tested
       </label>
 
       <div className="flex items-center gap-3 flex-wrap">
-        <button
-          type="button"
+        <Button
+          variant="secondary"
           onClick={() => testMutation.mutate()}
           disabled={testMutation.isPending || (isOpenai && !provider.base_url)}
-          className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-semibold hover:bg-slate-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
         >
           {testMutation.isPending ? 'Testing…' : 'Test connection'}
-        </button>
+        </Button>
         {testedOk && testMutation.isSuccess && <StatusPill status="operational" />}
         {testMutation.isSuccess && (
           <span className="text-xs text-slate-500">

@@ -43,11 +43,17 @@ def load_or_train(
     force_retrain: bool = False,
     n_folds: int = 5,
     pca_dim: int = 100,
+    triage_db_path: Path | None = None,
 ) -> TrainedClassifier:
     """Load if the cached model's sha matches the golden CSV; otherwise retrain.
 
     Failures during loading (corruption, schema drift) trigger a retrain
     rather than raising — keeps the daemon robust against stale artefacts.
+
+    ``triage_db_path`` is threaded into the retrain so the daemon path applies
+    the same ``hybrid_gt`` verdict overlay as the UI ``/admin/retrain`` route —
+    without it the two paths trained on DIFFERENT labels (raw CSV vs. overlaid),
+    e.g. a daemon retrain would not apply the unchecked-add downgrade.
     """
     output_dir = output_dir or DEFAULT_MODEL_DIR
     joblib_path = output_dir / f"{classifier_name}.joblib"
@@ -76,5 +82,6 @@ def load_or_train(
         output_dir=output_dir,
         n_folds=n_folds,
         pca_dim=pca_dim,
+        triage_db_path=triage_db_path,
     )
 

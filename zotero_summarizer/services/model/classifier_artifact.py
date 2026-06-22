@@ -1,6 +1,7 @@
 """The serialisable TrainedClassifier artefact + SHAP attribution."""
 from __future__ import annotations
 
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -9,6 +10,8 @@ from typing import Any, Callable
 import numpy as np
 
 from zotero_summarizer.services.model import classifier
+
+LOGGER = logging.getLogger(__name__)
 
 DEFAULT_MODEL_DIR = Path.home() / ".cache" / "zotero-summarizer" / "models"
 
@@ -29,6 +32,37 @@ _EXTRA_FEATURE_NAMES = (
     "recent_centroid_cosine", "topic_drift",
     "author_overlap_count",
 )
+
+
+def _backfill_abstracts(items: list[dict[str, Any]], openalex_client: Any) -> int:
+    """Fill empty ``abstract`` fields in place from OpenAlex; return the count.
+
+    Many RSS items arrive title-only. OpenAlex — already queried here for
+    prestige — carries the abstract in the same cached payload, so recovering it
+    lets the gate score the item instead of dropping it (and the value persists
+    to ``processed_feed_items.abstract`` once the caller records the decision).
+    Lookup is by DOI, then by title; both are already on the item dict. A miss
+    (or a cache-only/offline client) returns ``None`` per the client contract and
+    is simply left for the gate's title+abstract filter to drop.
+    """
+    filled = 0
+    for it in items:
+        if (it.get("abstract") or "").strip():
+            continue
+        doi = (it.get("doi") or "").strip()
+        work = openalex_client.fetch_work_by_doi(doi) if doi else None
+        if work is None or not work.abstract:
+            title = (it.get("title") or "").strip()
+            yr = (it.get("publication_date") or it.get("year") or "")[:4]
+            work = openalex_client.fetch_work_by_title(
+                title, year=int(yr) if yr.isdigit() else None
+            ) if title else None
+        if work is not None and work.abstract:
+            it["abstract"] = work.abstract
+            filled += 1
+    if filled:
+        LOGGER.info("openalex: backfilled %d missing abstract(s) before gate scoring", filled)
+    return filled
 
 
 def _format_shap(
@@ -181,6 +215,16 @@ class TrainedClassifier:
         TreeSHAP (``predict_proba(X, pred_contrib=True)``); ``pred.aux_context``
         is populated for all model types.
         """
+        # 1. Featurise — same as the prediction path in predict_new_items. Build
+        #    the aux providers BEFORE the title+abstract filter so we can backfill
+        #    title-only items from OpenAlex (which we're about to call for prestige
+        #    anyway) and recover them into the scorable set.
+        embed_cache, openalex_client, cold_start_policy = classifier._build_aux_providers(
+            corpus_db_path, goals_config, allow_network=prestige_network,
+        )
+        if openalex_client is not None:
+            _backfill_abstracts(items, openalex_client)
+
         valid = [
             it for it in items
             if (it.get("title") or "").strip() and (it.get("abstract") or "").strip()
@@ -188,10 +232,6 @@ class TrainedClassifier:
         if not valid:
             return []
 
-        # 1. Featurise — same as the prediction path in predict_new_items.
-        embed_cache, openalex_client, cold_start_policy = classifier._build_aux_providers(
-            corpus_db_path, goals_config, allow_network=prestige_network,
-        )
         from zotero_summarizer.services.model.library_features import compute_library_features
         library = self._build_predict_library()
         X_new = np.zeros((len(valid), self.feature_dim), dtype=np.float32)

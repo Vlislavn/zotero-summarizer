@@ -115,6 +115,8 @@ def _pack_review_payload(item: dict[str, Any], summary: Any = None) -> str | Non
 def _apply_classifier_gate(
     tick_id: str,
     items: list[dict[str, Any]],
+    *,
+    gate_only: bool = False,
 ) -> tuple[list[dict[str, Any]], list[tuple[dict[str, Any], Any]]]:
     """Phase 1.13 hybrid gate. Returns (survivors, rejected_with_prediction).
 
@@ -122,6 +124,11 @@ def _apply_classifier_gate(
     fail the tick so the user fixes it. When the gate is not configured
     (lifecycle didn't load it), the daemon runs unchanged: returns
     ``(items, [])``.
+
+    ``gate_only``: items the gate cannot score (still no title+abstract after the
+    OpenAlex backfill) have no LLM fallback, so they are returned in the rejected
+    list as ``(item, None)`` — a terminal gate-reject — instead of being forwarded
+    as predictionless survivors that would crash the gate-only synthesiser.
     """
     app_state = get_state()
     gate = getattr(app_state, "classifier_gate", None)
@@ -152,13 +159,21 @@ def _apply_classifier_gate(
     by_key = {p.item_key: p for p in predictions}
     survivors: list[dict[str, Any]] = []
     rejected: list[tuple[dict[str, Any], Any]] = []
+    unscorable: list[tuple[dict[str, Any], Any]] = []
     for item in items:
         cache_key = str(item.get("item_key") or item.get("item_id") or "")
         pred = by_key.get(cache_key)
         if pred is None:
-            # Featurisation skipped this item (missing title/abstract). Forward
-            # to the LLM path — that pipeline has its own handling for this.
-            survivors.append(item)
+            # The gate could not featurise this item even after the OpenAlex
+            # abstract backfill (still missing title or abstract). The LLM path
+            # has its own handling, so forward it there; but in gate_only mode
+            # there is no fallback — record it as a terminal gate-reject
+            # (pred=None) rather than a predictionless survivor that would crash
+            # the gate-only synthesiser.
+            if gate_only:
+                unscorable.append((item, None))
+            else:
+                survivors.append(item)
             continue
         # Attach attribution onto the item dict so the triage loop can persist
         # it alongside the final decision (Phase 1.14 review UI).
@@ -193,11 +208,13 @@ def _apply_classifier_gate(
             survivors.append(item)
 
     LOGGER.info(
-        "[%s] gate: %d rejected, %d survived (model=%s, drop=%s, audit=%d)",
-        tick_id, len(rejected), len(survivors), gate.classifier_name,
+        "[%s] gate: %d rejected, %d unscorable, %d survived (model=%s, drop=%s, audit=%d)",
+        tick_id, len(rejected), len(unscorable), len(survivors), gate.classifier_name,
         sorted(drop_set), len(resurrected),
     )
-    return survivors, rejected
+    # Unscorable items join the rejected pile AFTER audit sampling so a
+    # predictionless (item, None) is never resurrected back into survivors.
+    return survivors, rejected + unscorable
 
 
 def schedule_gate_retrain_async(reason: str, *, allow_initial: bool = False) -> bool:
@@ -373,6 +390,7 @@ def _gate_retrain_worker(golden_csv: Path, classifier_name: str) -> None:
             force_retrain=True,
             n_folds=gate_cfg.n_folds,
             pca_dim=gate_cfg.pca_dim,
+            triage_db_path=settings_.triage_db_path,
         )
         # Swap the new gate in AND re-score the live slate so Today reflects the
         # retrain immediately (single source of truth: install_gate). The rescore

@@ -32,7 +32,7 @@ import numpy as np
 
 # The split is the production one — train_and_save logs temporal_spearman with
 # the same helpers on every retrain; this tool adds the NDCG + objective A/B.
-from zotero_summarizer.services.model.classifier_training import (
+from zotero_summarizer.services.model.classifier_temporal import (
     _NO_DATE_SENTINEL as NO_DATE_SENTINEL,
     _row_days,
     _temporal_group_split,

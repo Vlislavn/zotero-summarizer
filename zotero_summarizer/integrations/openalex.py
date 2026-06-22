@@ -57,6 +57,11 @@ class OpenAlexWork:
     # has its own percentile (not cold-start, so not computed) or no author has any
     # field-normalized works yet. Used ONLY when ``citation_percentile is None``.
     max_author_field_percentile: float | None = None
+    # Reconstructed from OpenAlex's ``abstract_inverted_index`` (already present in
+    # the cached work payload). Used to backfill RSS items that arrived with a
+    # title but no abstract so the classifier gate can score them. None when the
+    # work has no abstract index (some records omit it).
+    abstract: str | None = None
 
 
 class _RateLimiter:
@@ -268,6 +273,9 @@ class OpenAlexClient:
                     if payload.get("__max_author_field_percentile") is not None
                     else None
                 ),
+                abstract=_abstract_from_inverted_index(
+                    payload.get("abstract_inverted_index")
+                ),
             )
         except (ValueError, TypeError) as exc:
             LOGGER.debug("openalex: payload parse failed: %s", exc)
@@ -295,6 +303,24 @@ class OpenAlexClient:
             return resp.json()
         except ValueError:
             return None
+
+def _abstract_from_inverted_index(inv: dict[str, list[int]] | None) -> str | None:
+    """Reconstruct plain abstract text from OpenAlex's ``abstract_inverted_index``.
+
+    OpenAlex ships the abstract as ``{word: [positions...]}`` (copyright-friendly).
+    Place each word at every position it occupies, order by position, and join.
+    Returns None for a missing/empty index.
+    """
+    if not inv:
+        return None
+    positions: list[tuple[int, str]] = [
+        (pos, word) for word, idxs in inv.items() for pos in idxs
+    ]
+    if not positions:
+        return None
+    positions.sort(key=lambda p: p[0])
+    return " ".join(word for _, word in positions)
+
 
 def _median(values: list[float]) -> float | None:
     """Median of a SORTED list (caller sorts). None for an empty list."""

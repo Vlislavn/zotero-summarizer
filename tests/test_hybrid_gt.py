@@ -257,39 +257,44 @@ def test_machine_add_trashed_outcome_becomes_dont_read(tmp_path: Path):
 
 
 def test_machine_add_engaged_outcome_is_demote_only(tmp_path: Path):
-    """Positive outcomes never promote: the engagement export carries those."""
+    """Positive outcomes never promote. An unchecked add caps at could_read (3.0),
+    so even an `engaged` outcome (mapped 5.0) holds flat at could_read — the real
+    promotion comes from the separate full-weight Zotero engagement export."""
     db_path = tmp_path / "t.db"
     _init_label_verdicts(db_path)
     _seed_machine_add(db_path, "feed:12")
     _seed_outcome(db_path, 12, "engaged")
 
     out = hybrid_gt.apply_hybrid([_feed_row(12)], db_path)
-    assert out[0]["gold_priority_final"] == "should_read"
-    assert float(out[0]["gold_inferred_relevance"]) == 4.0
+    assert out[0]["gold_priority_final"] == "could_read"
+    assert float(out[0]["gold_inferred_relevance"]) == 3.0
     assert out[0]["_hybrid_source"] == "outcome"
 
 
-def test_machine_add_pending_window_stays_provisional(tmp_path: Path):
-    """No resolved outcome yet → the provisional verdict applies unchanged."""
+def test_machine_add_pending_window_is_weak_could_read(tmp_path: Path):
+    """No resolved outcome yet → the UNCHECKED provisional add resolves to a weak
+    could_read (3.0), not the should_read the add stamps for display intent."""
     db_path = tmp_path / "t.db"
     _init_label_verdicts(db_path)
     _seed_machine_add(db_path, "feed:13")
 
     out = hybrid_gt.apply_hybrid([_feed_row(13)], db_path)
-    assert out[0]["gold_priority_final"] == "should_read"
+    assert out[0]["gold_priority_final"] == "could_read"
+    assert float(out[0]["gold_inferred_relevance"]) == 3.0
     assert out[0]["_hybrid_source"] == "machine_add"
     assert out[0]["gold_signal_tier"] == "feed_interest"  # no suffix
 
 
 def test_machine_add_unknown_outcome_carries_no_evidence(tmp_path: Path):
-    """`unknown` is a key-resolution failure, not behaviour → no correction."""
+    """`unknown` is a key-resolution failure, not behaviour → no correction; the
+    unchecked add stays at its weak could_read floor."""
     db_path = tmp_path / "t.db"
     _init_label_verdicts(db_path)
     _seed_machine_add(db_path, "feed:14")
     _seed_outcome(db_path, 14, "unknown")
 
     out = hybrid_gt.apply_hybrid([_feed_row(14)], db_path)
-    assert out[0]["gold_priority_final"] == "should_read"
+    assert out[0]["gold_priority_final"] == "could_read"
     assert out[0]["_hybrid_source"] == "machine_add"
 
 
@@ -301,7 +306,7 @@ def test_future_outcome_value_is_ignored_not_crashing(tmp_path: Path):
     _seed_outcome(db_path, 15, "archived_v2")
 
     out = hybrid_gt.apply_hybrid([_feed_row(15)], db_path)
-    assert out[0]["gold_priority_final"] == "should_read"
+    assert out[0]["gold_priority_final"] == "could_read"
     assert out[0]["_hybrid_source"] == "machine_add"
     assert hybrid_gt.outcome_correction("should_read", "archived_v2") is None
 
@@ -366,7 +371,8 @@ def test_hybrid_summary_separates_machine_adds(tmp_path: Path):
 
     merged = hybrid_gt.load_hybrid_labels(csv_path, db_path)
     assert merged["feed:20"]["source"] == "machine_add"
-    assert merged["feed:20"]["effective_priority"] == "should_read"
+    # Unchecked add → weak could_read (downgraded from should_read display intent).
+    assert merged["feed:20"]["effective_priority"] == "could_read"
     assert merged["feed:21"]["source"] == "outcome"
     assert merged["feed:21"]["effective_priority"] == "could_read"
 

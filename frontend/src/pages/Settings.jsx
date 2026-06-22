@@ -23,6 +23,7 @@ import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import AdminSection from '../components/AdminSection.jsx';
 import ModelCard from '../components/ModelCard.jsx';
 import { Banner } from '../components/form/Fields.jsx';
+import Button from '../components/ui/Button.jsx';
 import ReadinessStrip from '../components/settings/ReadinessStrip.jsx';
 import EssentialsSection from '../components/settings/EssentialsSection.jsx';
 import AdvancedSection from '../components/settings/AdvancedSection.jsx';
@@ -167,12 +168,6 @@ export default function Settings() {
       <ReadinessStrip />
 
       <form onSubmit={handleSave} className="space-y-4">
-        {(savedBanner || saveError) && (
-          <Banner kind={saveError ? 'error' : 'success'}>
-            {saveError ? `Save failed: ${saveError}` : savedBanner}
-          </Banner>
-        )}
-
         <EssentialsSection
           form={form}
           onUpdate={updateField}
@@ -190,16 +185,19 @@ export default function Settings() {
           onToggleDropPriority={toggleDropPriority}
         />
 
-        {/* Save bar — sticky-bottom so the action target stays within reach (Fitts's Law). */}
+        {/* University-access config — folded into the one form so the single sticky
+            Save commits it (the panel keeps only its login action). */}
+        <UniversityAccessPanel form={form} onUpdate={updateField} />
+
+        {/* Save bar — sticky-bottom so the action target stays within reach (Fitts's
+            Law). ONE status slot: error wins, then unsaved, then saved/idle. */}
         <div className="sticky bottom-0 -mx-4 px-4 py-3 bg-white/95 backdrop-blur border-t border-slate-200 z-10 flex items-center gap-3">
-          <button
-            type="submit"
-            disabled={saving || !isDirty}
-            className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-semibold hover:bg-slate-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
-          >
+          <Button type="submit" disabled={saving || !isDirty}>
             {saving ? 'Saving…' : 'Save changes'}
-          </button>
-          {isDirty && !saving && (
+          </Button>
+          {saveError ? (
+            <span className="text-xs text-rose-700">Save failed: {saveError}</span>
+          ) : isDirty && !saving ? (
             <span
               className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300"
               title="You have edits that have not been saved yet."
@@ -207,22 +205,16 @@ export default function Settings() {
               <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" aria-hidden />
               Unsaved changes
             </span>
+          ) : saving ? null : (
+            <span className={`text-xs ${savedBanner ? 'text-emerald-700' : 'text-slate-400'}`}>
+              {savedBanner || 'All changes saved.'}
+            </span>
           )}
-          {!isDirty && !saving && !savedBanner && !saveError && (
-            <span className="text-xs text-slate-400">All changes saved.</span>
-          )}
-          {saving && <span className="text-xs text-slate-500">PUT /api/config in flight…</span>}
-          {!saving && savedBanner && <span className="text-xs text-emerald-700">{savedBanner}</span>}
-          {!saving && saveError && <span className="text-xs text-rose-700">{saveError}</span>}
         </div>
       </form>
 
-      {/* University access for the review fleet's browser PDF fetch — outside the
-          config form so its login action can't be conflated with the config submit. */}
-      <UniversityAccessPanel />
-
-      {/* Read-only model card sits above the admin actions so the user sees
-          what's currently deployed before retraining or refreshing. */}
+      {/* Read-only model card + admin actions sit OUTSIDE the config form so their
+          action buttons can't be conflated with the config submit. */}
       <ModelCard />
 
       {/* Admin section lives outside the config form so its action buttons

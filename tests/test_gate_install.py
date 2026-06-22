@@ -117,7 +117,8 @@ def test_daemon_retrain_worker_installs_and_rescores(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(gate_mod, "get_state", lambda: app_state)
     monkeypatch.setattr(gate_mod, "get_settings", lambda: SimpleNamespace(
-        corpus_db_path=tmp_path / "corpus.db"))
+        corpus_db_path=tmp_path / "corpus.db",
+        triage_db_path=tmp_path / "triage.db"))
     calls = _stub_rescore(monkeypatch)
 
     gate_mod._gate_retrain_worker(tmp_path / "golden.csv", "logreg")
@@ -144,7 +145,8 @@ def test_daemon_retrain_worker_clears_flag_and_reraises_on_train_failure(monkeyp
     )
     monkeypatch.setattr(gate_mod, "get_state", lambda: app_state)
     monkeypatch.setattr(gate_mod, "get_settings", lambda: SimpleNamespace(
-        corpus_db_path=tmp_path / "corpus.db"))
+        corpus_db_path=tmp_path / "corpus.db",
+        triage_db_path=tmp_path / "triage.db"))
 
     with pytest.raises(RuntimeError, match="train exploded"):
         gate_mod._gate_retrain_worker(tmp_path / "golden.csv", "logreg")

@@ -11,8 +11,28 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 import zotero_summarizer.api.routes.admin as admin
 from zotero_summarizer.services.triage import feeds
+
+
+@pytest.fixture(autouse=True)
+def _clean_retrain_lock():
+    """`retrain()` now claims `_RETRAIN_LOCK` synchronously and the worker releases
+    it in its `finally`. Keep the lock clean between tests even if one asserts
+    before the worker released it (the lock is non-reentrant)."""
+    yield
+    if admin._RETRAIN_LOCK.locked():
+        admin._RETRAIN_LOCK.release()
+
+
+def _run_worker(job_id):
+    """Invoke the worker the way the route does: claim the lock first (the worker
+    releases it). Calling `_retrain_worker` without this would `release()` an
+    unheld lock and `RuntimeError`."""
+    admin._RETRAIN_LOCK.acquire()
+    admin._retrain_worker(job_id, classifier_name="logreg", n_folds=5)
 
 
 class _FakeTrained:
@@ -62,7 +82,7 @@ def test_retrain_hot_swaps_and_reports_rescore(monkeypatch, tmp_path):
     monkeypatch.setattr(feeds, "install_gate", fake_install)
 
     job = admin._new_job("retrain")
-    admin._retrain_worker(job["job_id"], classifier_name="logreg", n_folds=5)
+    _run_worker(job["job_id"])
 
     out = admin._JOBS[job["job_id"]]
     assert out["status"] == "succeeded"
@@ -81,7 +101,7 @@ def test_retrain_disabled_gate_does_not_swap(monkeypatch, tmp_path):
                         lambda *a, **k: called.append(1) or {"rescored": 1})
 
     job = admin._new_job("retrain")
-    admin._retrain_worker(job["job_id"], classifier_name="logreg", n_folds=5)
+    _run_worker(job["job_id"])
 
     out = admin._JOBS[job["job_id"]]
     assert out["status"] == "succeeded"
@@ -101,7 +121,7 @@ def test_retrain_swap_failure_does_not_fail_the_job(monkeypatch, tmp_path):
     monkeypatch.setattr(feeds, "install_gate", boom)
 
     job = admin._new_job("retrain")
-    admin._retrain_worker(job["job_id"], classifier_name="logreg", n_folds=5)
+    _run_worker(job["job_id"])
 
     out = admin._JOBS[job["job_id"]]
     assert out["status"] == "succeeded"      # train succeeded; swap failure is non-fatal

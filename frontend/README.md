@@ -110,8 +110,11 @@ Settings is re-chunked into always-visible **Essentials** + one collapsible
 **Advanced** `<details>`. The legacy `llm.draft_model/refine_model/api_base/
 api_key_env` text inputs were removed (they duplicated the `llm_routing` editor);
 the backend round-trips the nested `llm` block untouched. The API secret is
-**name-only** everywhere — the UI collects the env-var NAME and shows a
-"set in environment?" indicator from the status payload, never the raw value.
+**name-only** everywhere — the UI collects the env-var NAME, never the raw value
+(the always-on "secret set?" indicator was removed: it never gated Next and
+alarmed before the user acted). `university_access` is mapped by `configForm.js`
+too, so the single sticky **Save changes** commits it — its panel keeps only the
+one-time browser-login action.
 
 ## Navigation (Increment 3 — 3 daily surfaces + Ops)
 
@@ -178,6 +181,11 @@ Nothing is written until an explicit Confirm/Override click.
   uses `useState`. No Redux / Zustand.
 - Styling stays in Tailwind utility classes. The two custom helpers
   (`.glass` and `.mono`) match the Alpine UI in `web/ui.html`.
+- **One tone vocabulary.** The canonical pill palette is `CHIP_TONE`
+  (`components/paper/review/tones.js`); `ui/Badge.jsx` re-imports it instead of
+  keeping a second copy, so a `dont_read` / B-grade / error reads the same shade
+  in a Badge as in a Chip (Law of Similarity). New status pills reuse
+  `CHIP_TONE` / `Chip` / `ActionBadge` — don't hand-roll `bg-*-100` classes.
 
 ## Out of scope for this scaffold
 

@@ -134,6 +134,10 @@ def suggest_border_labels(
         classifier_name=classifier_name,
         corpus_db_path=corpus_db_path,
         goals_config=goals_config,
+        # If the CSV sha drifted this loads→retrains and overwrites the shared
+        # gate; pass the triage DB so that retrain applies the same hybrid
+        # overlay (incl. the unchecked-add downgrade) as the daemon/admin paths.
+        triage_db_path=db_path,
     )
     predictions = trained.predict(
         library_items,

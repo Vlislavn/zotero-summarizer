@@ -173,6 +173,129 @@ def test_apply_gate_propagates_predict_errors():
 
 
 # ---------------------------------------------------------------------------
+# gate_only: items the gate can't score must not crash the drain
+# ---------------------------------------------------------------------------
+
+
+class _FilteringStubGate(_StubGate):
+    """Mirrors the real gate: returns NO prediction for items lacking title+abstract
+    (the case left after the OpenAlex backfill can't recover an abstract)."""
+
+    def predict(self, items, *, corpus_db_path, goals_config, return_shap=False):
+        out = []
+        for it in items:
+            if not ((it.get("title") or "").strip() and (it.get("abstract") or "").strip()):
+                continue
+            key = str(it.get("item_key") or it.get("item_id") or "")
+            out.append(_StubPrediction(
+                item_key=key,
+                predicted_priority=self.priority_by_key.get(key, "should_read"),
+            ))
+        return out
+
+
+def _gate_state(gate):
+    return SimpleNamespace(
+        classifier_gate=gate,
+        app_state=SimpleNamespace(config=SimpleNamespace(
+            classifier_gate=SimpleNamespace(
+                drop_priorities=["dont_read"], raw_score_dont_read_below=0.0,
+                audit_sample_per_tick=0,
+            ),
+        )),
+    )
+
+
+def _mixed_items():
+    """Two scorable items (K1, K3) + one with an empty abstract (K2, unscorable)."""
+    return [
+        {"item_id": 1, "item_key": "K1", "title": "Title 1",
+         "abstract": "abstract text " * 30, "doi": "", "feed_library_id": 2, "guid": "K1"},
+        {"item_id": 45492, "item_key": "K2", "title": "Title 2 no abstract",
+         "abstract": "", "doi": "", "feed_library_id": 2, "guid": "K2"},
+        {"item_id": 3, "item_key": "K3", "title": "Title 3",
+         "abstract": "abstract text " * 30, "doi": "", "feed_library_id": 2, "guid": "K3"},
+    ]
+
+
+def _patched_gate(gate):
+    settings = SimpleNamespace(corpus_db_path="/tmp/nonexistent.db")
+    return patch.object(feeds, "get_state", return_value=_gate_state(gate)), \
+        patch.object(feeds, "get_settings", return_value=settings)
+
+
+def test_gate_only_routes_unscorable_to_rejected_not_survivors():
+    items = _mixed_items()
+    gate = _FilteringStubGate({"K1": "should_read", "K3": "must_read"})
+    p_state, p_settings = _patched_gate(gate)
+    with p_state, p_settings:
+        survivors, rejected = feeds._apply_classifier_gate("tick", items, gate_only=True)
+    assert {it["item_key"] for it in survivors} == {"K1", "K3"}
+    for it in survivors:
+        assert it.get("_gate_prediction") is not None
+    # The no-abstract item is a terminal gate-reject with pred=None (not a survivor).
+    assert [(it["item_key"], pred) for it, pred in rejected] == [("K2", None)]
+
+
+def test_gate_only_unscorable_does_not_reach_synthesiser():
+    """Regression: the no-abstract item used to crash run_triage_stage(gate_only)."""
+    from zotero_summarizer.services.triage.feeds._tick_phases import run_triage_stage
+
+    items = _mixed_items()
+    gate = _FilteringStubGate({"K1": "should_read", "K3": "must_read"})
+    p_state, p_settings = _patched_gate(gate)
+    with p_state, p_settings:
+        survivors, _rejected = feeds._apply_classifier_gate("tick", items, gate_only=True)
+    # Must NOT raise — every survivor carries a prediction.
+    triaged, fast, errors, fatal = run_triage_stage(
+        survivors, tick_id="tick", gate_only=True, triage_llm=None,
+    )
+    assert {it["item_key"] for it, _ in triaged} == {"K1", "K3"}
+    assert fast == [] and errors == [] and fatal is False
+
+
+def test_non_gate_only_forwards_unscorable_to_survivors():
+    """The LLM path still receives no-abstract items (it handles them itself)."""
+    items = _mixed_items()
+    gate = _FilteringStubGate({"K1": "should_read", "K3": "must_read"})
+    p_state, p_settings = _patched_gate(gate)
+    with p_state, p_settings:
+        survivors, rejected = feeds._apply_classifier_gate("tick", items, gate_only=False)
+    assert "K2" in {it["item_key"] for it in survivors}
+    assert rejected == []
+
+
+def test_record_tick_decisions_persists_unscorable_gate_reject(tmp_path, monkeypatch):
+    """A gate_rejected entry with pred=None records a terminal gate-reject row with
+    a clear reason and no score — no crash on the missing prediction."""
+    import sqlite3
+    from zotero_summarizer.services.triage.feeds import _common, _tick_phases
+    from zotero_summarizer.services.triage.feeds._tick_phases import _TickResults
+
+    db = tmp_path / "triage.db"
+    monkeypatch.setattr(_common, "get_settings", lambda: SimpleNamespace(triage_db_path=db))
+    item = {"item_id": 45492, "item_key": "K9", "title": "No abstract paper",
+            "abstract": "", "doi": "", "feed_library_id": 2, "guid": "K9"}
+    results = _TickResults(
+        triaged=[], fast_rejected=[], errors=[],
+        gate_rejected=[(item, None)], library_skipped=[], processed_dup_skipped=[],
+    )
+    _tick_phases.record_tick_decisions(results, tick_id="tick", review_mode=False)
+
+    conn = sqlite3.connect(str(db))
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            "SELECT decision, decision_reason FROM processed_feed_items WHERE feed_item_id=?",
+            (45492,),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row["decision"] == feeds_storage.DECISION_GATE_REJECTED
+    assert row["decision_reason"] == "gate_unscorable:no_abstract"
+
+
+# ---------------------------------------------------------------------------
 # Decision constant
 # ---------------------------------------------------------------------------
 

@@ -27,7 +27,6 @@ export default function PaperListItem({
   // primary thing shown + filtered on, so a manual label never visibly
   // reverts to the auto value after a Refresh-labels re-derivation.
   const effective = item.effective_priority || item.persisted_priority || derived;
-  const showWas = item.derived_priority && effective !== item.derived_priority;
   // 'orphaned' has a dedicated chip below; don't render it twice.
   const flags = (Array.isArray(item.flags) ? item.flags : []).filter(
     (f) => f !== 'orphaned',
@@ -51,13 +50,8 @@ export default function PaperListItem({
         onClick={() => onClick(item)}
         className={`w-full text-left border rounded-xl p-3 transition-colors ${cls}`}
       >
-        <div className="flex items-start justify-between gap-2">
-          <div className="text-sm font-semibold text-slate-900 leading-snug line-clamp-2">
-            {item.title || '(untitled)'}
-          </div>
-          <span className="mono text-slate-400 text-[10px] flex-shrink-0">
-            {item.item_key}
-          </span>
+        <div className="text-sm font-semibold text-slate-900 leading-snug line-clamp-2">
+          {item.title || '(untitled)'}
         </div>
         <div className="mt-1.5 flex flex-wrap gap-1 items-center">
           <span
@@ -68,19 +62,6 @@ export default function PaperListItem({
           >
             {pretty(effective)}
           </span>
-          {typeof item.derived_score === 'number' && (
-            <span className="text-[10px] mono text-slate-500">
-              {item.derived_score.toFixed(2)}
-            </span>
-          )}
-          {showWas && (
-            <span
-              className="px-1.5 py-0.5 rounded text-[10px] border bg-slate-50 text-slate-500 border-slate-200"
-              title="Auto-derived value (overridden by your label)"
-            >
-              was: {pretty(item.derived_priority)}
-            </span>
-          )}
           {isOrphaned && (
             <span
               className="px-1.5 py-0.5 rounded text-[10px] font-semibold border bg-amber-100 text-amber-800 border-amber-300"

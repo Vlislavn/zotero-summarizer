@@ -133,7 +133,15 @@ def ask_paper(item_key: str, question: str, *, mode: str = "comprehensive") -> d
 
     prompt = ANSWER_PROMPT.format(context=context, question=question)
     t0 = perf_counter()
-    parsed, _raw = answer_with_retry(llm, prompt)
+    try:
+        parsed, _raw = answer_with_retry(llm, prompt)
+    except ValueError:
+        # LLM output had no recoverable JSON answer (empty / malformed — often a
+        # transient endpoint hiccup, or a reasoning model emptying `content` at
+        # low max_tokens). Untrusted LLM output at this boundary becomes an
+        # abstention, not an unhandled 500 — the user sees "no grounded answer".
+        LOGGER.warning("qa: item=%s mode=%s — unparseable LLM output; abstaining", item_key, mode)
+        parsed = {"answer": None, "abstained": True, "quote": None}
     latency = round(perf_counter() - t0, 2)
     LOGGER.info("qa: item=%s mode=%s latency=%.1fs abstained=%s",
                 item_key, mode, latency, parsed["abstained"])

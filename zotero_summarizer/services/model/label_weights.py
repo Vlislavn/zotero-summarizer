@@ -112,6 +112,18 @@ def compute_row_weights(
     return np.asarray(out, dtype=np.float32)
 
 
+# Recency decay was TRIED here (2026-06-19) and deliberately NOT shipped:
+# scaling each tier weight by 0.5**(days_since_added/halflife) to make recent
+# labels dominate under concept drift. Half-life sweep {90,180,365}d ALL hurt the
+# forward-looking Spearman (0.418 → 0.391-0.409) and never moved keep-F1, on the
+# real train-past/test-future split (tools/eval_temporal_objective.py). Root cause:
+# the drift is a base-rate shift (dont_read share rises), not a feature→relevance
+# shift, so down-weighting old rows just discards usable supervision. Doubly wrong
+# for THIS corpus — the "recent" rows are mostly undated feed:* provisional adds
+# (days_since_added=-1), so a half-life would up-weight the unchecked labels over
+# verified engagement. The lever is label QUALITY, not age. See the dsa=-1 fix in
+# classifier_temporal._row_days.
+#
 # Band balance was TRIED here (June 2026) and deliberately NOT shipped:
 # inverse-sqrt band-frequency multipliers (sklearn class_weight='balanced'
 # smoothed à la Mahajan 2018, alpha=0.5, cap 4.0, fold-train counts) did NOT

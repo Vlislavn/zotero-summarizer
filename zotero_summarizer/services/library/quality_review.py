@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from zotero_summarizer.models import GoalsConfig, PaperDigest
+from zotero_summarizer.services._common import extract_json_blob, to_text
 from zotero_summarizer.services.library._review_text import select_review_text
 
 # Fallback when goals.yaml has no `prompts.paper_digest`. A referee-grade digest
@@ -96,4 +97,12 @@ def assess_digest(
             "Please adjust your review emphasis to highlight or downplay aspects matching this focus."
         )
     digest = llm.pydantic_prompt(prompt=prompt, pydantic_model=PaperDigest)
+    if not isinstance(digest, PaperDigest):
+        # onprem returns the raw (often empty) string when its own parser can't
+        # build the model. Salvage with the stronger 3-strategy extractor
+        # (markdown-fenced / prose-embedded JSON), mirroring services/triage/
+        # summarization. If THAT fails too (a truly empty completion) model_validate
+        # RAISES — caught at deep_review's per-item boundary and surfaced, instead of
+        # the opaque `'str' object has no attribute 'model_copy'` this once produced.
+        digest = PaperDigest.model_validate(extract_json_blob(to_text(digest)))
     return digest.model_copy(update={"basis": "full_text"})

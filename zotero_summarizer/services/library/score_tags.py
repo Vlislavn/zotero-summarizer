@@ -176,17 +176,26 @@ def sync_score_ranks(*, force: bool = False) -> dict[str, Any]:
     changes: list[dict[str, Any]] = []
     skipped_user = 0
     rank = 0
+    skipped_noop = 0
     for r in records:
         current = existing_call.get(r["item_key"], "")
         if current and not _RANK_RE.match(current):
             skipped_user += 1
             continue  # preserve the user's own Call Number — never overwrite it
-        rank += 1
+        rank += 1  # increment BEFORE the no-op check so numbering stays dense
+        value = f"{_RANK_PREFIX}{rank:04d}"
+        if current == value:
+            # Already stamped with this exact rank — skip the no-op write. A
+            # set_field always delete-inserts + touches dateModified/version, so
+            # re-stamping an unchanged library re-uploads every item as "modified"
+            # (a sync storm). Mirrors the no-op skip sync-rel-tags already does.
+            skipped_noop += 1
+            continue
         changes.append({
             "id": 0,
             "item_key": r["item_key"],
             "change_type": "set_field",
-            "payload_json": {"field": _RANK_FIELD, "value": f"{_RANK_PREFIX}{rank:04d}"},
+            "payload_json": {"field": _RANK_FIELD, "value": value},
         })
 
     # Re-check the connector immediately before the write (TOCTOU: Zotero may have
@@ -203,6 +212,7 @@ def sync_score_ranks(*, force: bool = False) -> dict[str, Any]:
         "scored": scored,
         "unscored": len(records) - scored,
         "skipped_user_callnumber": skipped_user,
+        "skipped_unchanged": skipped_noop,
         "field": _RANK_FIELD,
         "backup_path": result.get("backup_path"),
         "failed_count": len(result.get("failed") or []),

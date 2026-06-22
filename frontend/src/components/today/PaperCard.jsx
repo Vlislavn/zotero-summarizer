@@ -1,11 +1,12 @@
 // Today slate card — Stage 1 of the two-stage reading flow: read the abstract,
-// then tick the checkbox. Redesigned per the Laws of UX gate:
+// then tick the checkbox. Per the Laws of UX gate:
 //   • Von Restorff   — a relevance BAND (color + word) drives the card's visual
 //                      weight, so treasures pop and likely-trash is muted.
 //   • Selective Attention — a plain-language "why it matters" row sits at the top
 //                      (right under the band + title), where the eye lands.
-//   • Mental Model / Cognitive Load — raw scores (composite 1–5, prestige 0–1)
-//                      become anchored words + bars, not bare decimals.
+//   • Cognitive Load / Working Memory — ONE ordinal scale on this cull card: the
+//                      relevance band. Prestige and full-text Quality A–D are
+//                      Stage-2 reading signals that live in the Library, not here.
 //
 // The relevance band is DISTINCT from the full-text Quality A–D grade
 // (QualityBlock): different vocabulary (top pick / strong / fair / weak), and a
@@ -13,21 +14,8 @@
 
 import AuthorByline from '../AuthorByline.jsx';
 import { scoreToBand, BAND_ACTIVE_CLS } from '../../utils/relevanceBands.js';
-
-// Plain-language label + tooltip for why a card is in the slate (paper.role).
-// The user should never have to decode internal allocation-role names.
-const BUCKET_LABEL = {
-  model: 'top match',
-  model_fallback: 'top match',
-  surprise: 'surprise',
-  diversity: 'wildcard',
-};
-const ROLE_HINT = {
-  model: 'Best match to your interests (model + corpus + author/venue prestige).',
-  model_fallback: 'Best match to your interests (model + corpus + author/venue prestige).',
-  surprise: 'A high-surprise pick outside your usual reading pattern.',
-  diversity: 'Deliberately different from your library (low corpus affinity).',
-};
+import { Chip } from '../paper/review/primitives.jsx';
+import { gradeTone } from '../paper/review/tones.js';
 
 // Relevance-band → card accent + tint (Von Restorff): treasures full-weight,
 // trash desaturated. Keyed by the same band names as relevanceBands.scoreToBand.
@@ -36,13 +24,6 @@ const BAND_CARD_CLS = {
   should_read: 'border border-slate-200 border-l-4 border-l-sky-500 bg-white',
   could_read: 'border border-slate-200 border-l-4 border-l-amber-400 bg-white',
   dont_read: 'border border-slate-200 border-l-2 border-l-rose-300 bg-slate-50 opacity-70',
-};
-// Bar fill per band — shares the palette of relevanceBands / ScoreHistogram.
-const BAND_BAR_CLS = {
-  must_read: 'bg-emerald-500',
-  should_read: 'bg-sky-500',
-  could_read: 'bg-amber-400',
-  dont_read: 'bg-rose-400',
 };
 // Treasure→trash wording for THIS card. Deliberately NOT the must/should/could
 // priority words (those are the Stage-2 action labels) nor the Quality A–D grade.
@@ -53,13 +34,6 @@ const RELEVANCE_WORD = {
   dont_read: 'weak',
 };
 
-const GRADE_CLS = {
-  A: 'bg-emerald-100 text-emerald-800 border-emerald-300',
-  B: 'bg-teal-100 text-teal-800 border-teal-300',
-  C: 'bg-amber-100 text-amber-800 border-amber-300',
-  D: 'bg-rose-100 text-rose-800 border-rose-300',
-};
-
 function parseAuthorsString(s) {
   if (!s || typeof s !== 'string') return [];
   return s
@@ -67,49 +41,6 @@ function parseAuthorsString(s) {
     .map((name) => name.trim())
     .filter(Boolean)
     .map((name) => ({ name, h_index: null }));
-}
-
-function prestigeWord(p) {
-  if (typeof p !== 'number') return 'unknown';
-  if (p >= 0.66) return 'high';
-  if (p >= 0.33) return 'typical';
-  if (p > 0) return 'modest';
-  return 'new';
-}
-
-function Badge({ label, value, tone = 'slate', title }) {
-  const tones = {
-    slate: 'bg-slate-100 text-slate-700 border-slate-200',
-    teal: 'bg-teal-50 text-teal-800 border-teal-200',
-    violet: 'bg-violet-50 text-violet-800 border-violet-200',
-    amber: 'bg-amber-50 text-amber-800 border-amber-200',
-    sky: 'bg-sky-50 text-sky-800 border-sky-200',
-  };
-  const cls = tones[tone] || tones.slate;
-  return (
-    <span
-      title={title || label}
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] ${cls}`}
-    >
-      <span className="uppercase tracking-wider font-semibold">{label}</span>
-      {value !== '' && value != null && <span className="mono font-bold">{value}</span>}
-    </span>
-  );
-}
-
-// Anchored signal bar (label · fill · trailing word) — same visual structure as
-// QualityBar below, reused so every meter on the card reads the same.
-function SignalBar({ label, fraction, fillCls, trailing, title }) {
-  const w = Math.max(0, Math.min(1, Number(fraction) || 0)) * 100;
-  return (
-    <div className="flex items-center gap-2 text-[11px]" title={title}>
-      <span className="w-16 shrink-0 text-slate-500">{label}</span>
-      <span className="flex-1 h-1.5 rounded bg-slate-100 overflow-hidden">
-        <span className={`block h-full ${fillCls}`} style={{ width: `${w}%` }} />
-      </span>
-      {trailing && <span className="w-16 text-right text-slate-600 font-medium">{trailing}</span>}
-    </div>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -142,17 +73,16 @@ function QualityBlock({ quality }) {
       </div>
     );
   }
-  const gradeCls = GRADE_CLS[grade] || 'bg-slate-100 text-slate-700 border-slate-300';
   return (
     <div className="mt-1.5">
       <div className="flex items-start gap-2 text-xs">
         <span className="uppercase tracking-wider font-semibold text-slate-500 mt-0.5">Quality</span>
-        <span
-          className={`shrink-0 px-1.5 py-0.5 rounded-md border text-[11px] font-bold ${gradeCls}`}
+        <Chip
+          tone={gradeTone(grade)}
           title="Full-text peer-review grade (A best – D weak), independent of relevance to you"
         >
           {grade}
-        </span>
+        </Chip>
         {q.verdict && <span className="text-slate-700 italic">{q.verdict}</span>}
       </div>
       <details className="group mt-1">
@@ -212,7 +142,6 @@ export default function PaperCard({ paper, selected, onToggleSelect }) {
   const cardCls = BAND_CARD_CLS[band] || 'border border-slate-200 bg-white';
   const compositeStr =
     typeof paper.composite_score === 'number' ? paper.composite_score.toFixed(2) : '—';
-  const bucket = BUCKET_LABEL[paper.role] || paper.role || '—';
 
   const titleNode = paper.url || paper.doi
     ? (
@@ -243,30 +172,19 @@ export default function PaperCard({ paper, selected, onToggleSelect }) {
         />
         <div className="min-w-0 flex-1">
           <header className="mb-2">
-            {/* Band pill + title — the band sets the card's visual weight. */}
+            {/* Band pill + title — the band sets the card's visual weight and is
+                the ONE relevance scale on the cull card (raw value in the tooltip). */}
             <div className="flex items-start gap-2">
               <span
                 className={`shrink-0 mt-0.5 px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider ${
                   band ? BAND_ACTIVE_CLS[band] : 'bg-slate-100 text-slate-500 border-slate-200'
                 }`}
-                title="Relevance to you (model + corpus + prestige) — not a quality judgment"
+                title={`Relevance to you ${compositeStr}/5 (model + corpus + prestige) — not a quality judgment`}
               >
                 {band ? RELEVANCE_WORD[band] : 'unscored'}
               </span>
               <div className="leading-snug flex-1 min-w-0">{titleNode}</div>
             </div>
-
-            {/* Relevance magnitude bar (anchors the band; raw value in tooltip). */}
-            {band && (
-              <div className="mt-1.5">
-                <SignalBar
-                  label="relevance"
-                  fraction={Number(paper.composite_score) / 5}
-                  fillCls={BAND_BAR_CLS[band]}
-                  title={`Relevance to you ${compositeStr}/5 (model + corpus + prestige) — not a quality judgment`}
-                />
-              </div>
-            )}
 
             {/* Why it matters — top of card, where the eye lands. */}
             <WhyRow why={paper.why} />
@@ -277,24 +195,8 @@ export default function PaperCard({ paper, selected, onToggleSelect }) {
             <div className="text-[11px] text-slate-500 mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
               {paper.venue && <span className="italic">{paper.venue}</span>}
               {paper.pub_year && <span>{paper.pub_year}</span>}
-              <Badge label={bucket} tone="amber" title={ROLE_HINT[paper.role] || 'Why this paper is here'} />
-              {paper.feed_name && (
-                <Badge label="feed" value={paper.feed_name} tone="sky" title="Source RSS feed" />
-              )}
+              {paper.feed_name && <span className="text-slate-400">· {paper.feed_name}</span>}
             </div>
-
-            {/* Prestige as an anchored word + bar, not a raw 0–1 decimal. */}
-            {typeof paper.prestige_score === 'number' && (
-              <div className="mt-1.5">
-                <SignalBar
-                  label="prestige"
-                  fraction={paper.prestige_score}
-                  fillCls="bg-violet-500"
-                  trailing={prestigeWord(paper.prestige_score)}
-                  title={`Author / venue reputation ${paper.prestige_score.toFixed(2)} (0–1) — not paper quality`}
-                />
-              </div>
-            )}
           </header>
 
           {paper.abstract && (
@@ -304,17 +206,6 @@ export default function PaperCard({ paper, selected, onToggleSelect }) {
           )}
 
           <QualityBlock quality={paper.quality} />
-
-          {paper.rationale && (
-            <details className="mt-2 group">
-              <summary className="cursor-pointer text-[11px] uppercase tracking-wider font-semibold text-slate-500 hover:text-slate-700 select-none">
-                Triage rationale
-              </summary>
-              <p className="mt-1.5 text-xs text-slate-700 italic whitespace-pre-line">
-                {paper.rationale}
-              </p>
-            </details>
-          )}
         </div>
       </div>
     </article>

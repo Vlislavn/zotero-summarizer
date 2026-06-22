@@ -55,6 +55,9 @@ function stateLine(fleetStatus, proposedCount) {
 export default function PredictionsBar({ fleetStatus, onRun, proposedCount = 0 }) {
   const running = fleetStatus?.status === 'running';
   const line = stateLine(fleetStatus, proposedCount);
+  // Gated picks (paywalled, session stale) surfaced as sign-in links: open, log in to
+  // refresh the publisher session, then Predict again. Only items that carry a URL.
+  const loginItems = (fleetStatus?.needs_login_items || []).filter((it) => it && it.url);
   return (
     <div className="rounded-lg border-l-[3px] border-indigo-300 bg-indigo-50/40 pl-3.5 pr-3 py-2.5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -72,6 +75,20 @@ export default function PredictionsBar({ fleetStatus, onRun, proposedCount = 0 }
         </button>
       </div>
       <p className={`mt-1.5 text-[11px] ${line.tone}`}>{line.text}</p>
+      {loginItems.length > 0 && (
+        <div className="mt-1.5 text-[11px] text-slate-600">
+          <span>🔒 Sign in to fetch these — open the link, log in, then Predict again:</span>
+          <ul className="mt-1 space-y-0.5 list-disc pl-4">
+            {loginItems.map((it) => (
+              <li key={it.item_key}>
+                <a href={it.url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">
+                  {it.title || it.url}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

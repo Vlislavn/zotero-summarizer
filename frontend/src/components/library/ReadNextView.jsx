@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import InlineAnnotate from './InlineAnnotate.jsx';
 import ProposedVerdictCard from './ProposedVerdictCard.jsx';
 import ScoreHistogram from './ScoreHistogram.jsx';
@@ -249,7 +249,7 @@ export default function ReadNextView({
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-medium text-slate-900 truncate">{it.title || '(untitled)'}</span>
                   <span className="block text-xs text-slate-500 truncate">{truncateAuthors(it.authors)}</span>
-                  {(it.user_priority || typeof it.relevance_score === 'number' || it.why_reason || it.date_added) && (
+                  {(it.user_priority || typeof it.relevance_score === 'number') && (
                     <span className="mt-0.5 flex items-center gap-2 text-[11px]">
                       {/* Your label leads the row (Von Restorff): a paper you
                           marked is pinned to the top of Read next and flagged
@@ -282,16 +282,6 @@ export default function ReadNextView({
                           title="High author/venue prestige — citation percentile at or above your library's median. A quality signal that floats this paper toward the top; distinct from the full-text Quality grade."
                         >
                           ◆ top author/venue
-                        </span>
-                      )}
-                      {it.why_reason && (
-                        <span className="px-1.5 py-0 rounded-full bg-slate-100 text-slate-600 border border-slate-200" title="Top reason this paper scored where it did">
-                          {it.why_reason}
-                        </span>
-                      )}
-                      {it.date_added && (
-                        <span className="text-slate-400" title="When this paper was added to your library">
-                          added {formatShortDate(it.date_added)}
                         </span>
                       )}
                     </span>
@@ -358,13 +348,6 @@ export default function ReadNextView({
             className="px-3 py-1 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
           >
             Show more
-          </button>
-          <button
-            type="button"
-            onClick={() => startTransition(() => setVisibleCount(items.length))}
-            className="px-3 py-1 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
-          >
-            Show all ({items.length})
           </button>
         </div>
       )}

@@ -48,14 +48,8 @@ export default function StepDescribeResearch({ draft, onPatchDraft, fieldErrors 
         error={errorsForField(fieldErrors, 'triage_criteria')}
         hint="Hard/soft criteria the LLM weighs when scoring relevance. A sensible default is prefilled — edit freely."
       />
-
-      <Field
-        label="Output language"
-        value={draft.output_language}
-        onChange={(v) => onPatchDraft({ output_language: v })}
-        placeholder="English"
-        error={errorsForField(fieldErrors, 'output_language')}
-      />
+      {/* Output language defaults to English (configForm round-trips it); change
+          it in Settings → Advanced if you need another — not a first-run decision. */}
     </div>
   );
 }

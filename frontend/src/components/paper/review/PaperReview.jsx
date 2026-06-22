@@ -1,10 +1,10 @@
-import { Section, SectionLabel, Disclosure, Chip, KeyVal, Bullets, Stat } from './primitives.jsx';
+import { Section, SectionLabel, Disclosure, Chip, KeyVal, Bullets } from './primitives.jsx';
 import {
   gradeTone, BAND_LABEL, VERDICT_ACCENT,
 } from './tones.js';
 import {
   bandGloss, METHOD_CLAUSE, LEGEND, rubricLabel, paperTypeLabel,
-  summarizeGoals, readVerdict, relevanceVerdict, decisiveRows, fullChecklist, shortGoal,
+  summarizeGoals, readVerdict, decisiveRows, fullChecklist, shortGoal,
 } from './briefModel.js';
 import { formatShortDate } from '../../library/shared.jsx';
 
@@ -38,7 +38,7 @@ export default function PaperReview({ deep }) {
 
   const band = String(quality?.quality_band || '');
   const redFlags = (quality?.red_flags || []).map((x) => String(x || '').trim()).filter(Boolean);
-  const { nFired, maxScore } = summarizeGoals(goals);
+  const { nFired } = summarizeGoals(goals);
   const hasBrief = Boolean(quality || goals.length);
 
   // Lead verdict: the synthesized goals×rigor call when we have those layers;
@@ -74,26 +74,9 @@ export default function PaperReview({ deep }) {
         )}
       </div>
 
-      {/* Rigor · Relevance spine — borderless stats, a hairline between. */}
-      {hasBrief && (
-        <div className="mt-3 grid grid-cols-2 divide-x divide-slate-200/70 rounded-lg border border-slate-200/70 bg-white/40">
-          <div className="px-3.5 py-2.5">
-            <Stat
-              label="Rigor"
-              value={`${BAND_LABEL[band] || '—'}${quality?.passes_total ? ` · ${quality.passes_agreed}/${quality.passes_total} agree` : ''}`}
-              hint="Reference-free rigor band + how many independent passes agreed"
-            />
-          </div>
-          <div className="px-3.5 py-2.5">
-            <Stat
-              label="Relevance"
-              value={`${relevanceVerdict({ nFired, maxScore })} · ${nFired} goal${nFired === 1 ? '' : 's'} · ${maxScore.toFixed(1)}/3`}
-              hint="How strongly the paper addresses your research goals"
-            />
-          </div>
-        </div>
-      )}
-
+      {/* (The Rigor·Relevance summary spine was removed — it restated the two
+          sections immediately below it, "Relevance to your goals" + "Quality —
+          {band}", which carry the same numbers with their own labels.) */}
       <div className="mt-2 divide-y divide-slate-200/60">
         {goals.length > 0 && (
           <Section label="Relevance to your goals">
@@ -342,10 +325,6 @@ function RubricMark({ value }) {
 // The structured digest, behind the "Full digest" disclosure. Rendered ONCE
 // (the old DigestBlock + iframe both showed it). Reading-scale KeyVal rows.
 function DigestRows({ digest: d }) {
-  const scores = [
-    ['Soundness', d.soundness], ['Novelty', d.novelty], ['Significance', d.significance],
-    ['Reproducibility', d.reproducibility], ['Clarity', d.clarity],
-  ].filter(([, v]) => v != null);
   return (
     <dl className="space-y-2">
       <KeyVal label="Summary">{d.executive_summary}</KeyVal>
@@ -369,21 +348,8 @@ function DigestRows({ digest: d }) {
       )}
       <KeyVal label="Strength" tone="pos">{d.key_strength}</KeyVal>
       <KeyVal label="Weakness" tone="neg">{d.key_weakness}</KeyVal>
-      {scores.length > 0 && (
-        <KeyVal label="LLM scores">
-          <div className="flex flex-wrap gap-x-4 gap-y-0.5">
-            {scores.map(([k, v]) => (
-              <span key={k} className="text-[12px] text-slate-600">{k}: <b className="text-slate-800">{v}/5</b></span>
-            ))}
-            {d.confidence != null && (
-              <span className="text-[12px] text-slate-600">Confidence: <b className="text-slate-800">{Math.round((d.confidence || 0) * 100)}%</b></span>
-            )}
-          </div>
-          {/* Honesty: these are the reviewer-LLM's self-reported opinion, NOT validated.
-              The grade/band above come from grounded checklist coverage, not these. */}
-          <div className="mt-0.5 text-[11px] italic text-slate-400">LLM judgment — not validated; the grade comes from checklist coverage above.</div>
-        </KeyVal>
-      )}
+      {/* The reviewer-LLM's self-reported 1-5 scores were removed: unvalidated
+          opinion (the grade/band come from grounded checklist coverage, not these). */}
     </dl>
   );
 }

@@ -13,7 +13,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import PipelineFunnel from '../components/PipelineFunnel.jsx';
 import PaperCard from '../components/today/PaperCard.jsx';
 import NotConfiguredCard from '../components/setup/NotConfiguredCard.jsx';
 import Spinner from '../components/ui/Spinner.jsx';
@@ -94,7 +93,7 @@ function SpotCheckCard({ item, onAdd, onTrash, busy }) {
           disabled={busy}
           className="px-2.5 py-1 rounded-lg text-xs font-semibold border border-slate-300 hover:bg-slate-100 disabled:opacity-40"
         >
-          Confirm reject
+          Trash
         </button>
       </div>
     </article>
@@ -283,10 +282,7 @@ export default function Today() {
       <header className="mb-3 flex items-baseline justify-between flex-wrap gap-2">
         <div>
           <h2 className="text-lg font-bold text-slate-900">Today’s reading</h2>
-          <p
-            className="text-xs text-slate-500 mt-0.5"
-            title="Best first: ranked by a blend of model relevance, goal match, and author/venue prestige — same order as the Library queue, so a card's displayed score may sit out of order. Surprise and off-track picks follow the model picks."
-          >
+          <p className="text-xs text-slate-500 mt-0.5">
             Cull the feed: keep what’s worth reading into your library, trash the rest.
           </p>
           {typeof slate?.awaiting_review_total === 'number' && (
@@ -306,7 +302,6 @@ export default function Today() {
               </p>
             )
           )}
-          <PipelineFunnel lookbackHours={168} />
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -320,14 +315,6 @@ export default function Today() {
             {draining
               ? `Triaging (ML)… ${triageStatus?.gate_onward ?? triageStatus?.triaged ?? 0} kept`
               : 'Triage backlog'}
-          </button>
-          <button
-            type="button"
-            onClick={() => slateQuery.refetch()}
-            disabled={slateQuery.isFetching}
-            className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium hover:bg-slate-100 disabled:opacity-50"
-          >
-            {slateQuery.isFetching ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
       </header>
@@ -369,10 +356,7 @@ export default function Today() {
             <div className="my-2 p-2 rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-600 flex items-center gap-2">
               <Spinner size="xs" color="teal" />
               Triaging via the ML gate — kept {triageStatus.gate_onward ?? triageStatus.triaged ?? 0}, filtered{' '}
-              {triageStatus.gate_rejected || 0}
-              {triageStatus.gate_reject_rate != null
-                && ` (${Math.round(triageStatus.gate_reject_rate * 100)}% by ML)`}, tick{' '}
-              {triageStatus.ticks || 0}. New picks fill in automatically.
+              {triageStatus.gate_rejected || 0}. New picks fill in automatically.
               {triageStatus?.error && <span className="text-rose-700"> — {triageStatus.error}</span>}
             </div>
           )}
@@ -380,21 +364,17 @@ export default function Today() {
         </>
       )}
 
-      {slate?.fellback_to_recent && papers.length > 0 && (
-        <p className="mb-2 text-[11px] text-amber-700 italic">
-          Showing older scored items (no fresh triage in the last 7 days).
-          {triageStatus?.running ? ' Fresh triage is running…' : ''}
-        </p>
-      )}
-
+      {/* One amber slate-health notice (merged fellback + weak-slate) with the
+          single 'Triage backlog' CTA they both pointed at. */}
       {!slateQuery.isLoading && !slateQuery.error
-        && (slate?.weak_slate || (slate?.low_relevance_hidden ?? 0) > 0) && (
+        && (slate?.fellback_to_recent || slate?.weak_slate || (slate?.low_relevance_hidden ?? 0) > 0) && (
         <div className="mb-3 p-2.5 rounded-xl border border-amber-200 bg-amber-50 text-xs text-amber-900 flex items-start gap-2">
           <span aria-hidden="true">⚖️</span>
           <span className="flex-1 leading-snug">
             {slate?.weak_slate
-              ? 'Light week — nothing in your feed strongly matches your goals in the last 7 days. '
-              : ''}
+              && 'Light week — nothing in your feed strongly matches your goals in the last 7 days. '}
+            {slate?.fellback_to_recent
+              && 'Showing older scored items (no fresh triage in the last 7 days). '}
             {(slate?.low_relevance_hidden ?? 0) > 0 && (
               <><strong>{slate.low_relevance_hidden}</strong> below-the-bar paper
                 {slate.low_relevance_hidden === 1 ? '' : 's'} hidden. </>

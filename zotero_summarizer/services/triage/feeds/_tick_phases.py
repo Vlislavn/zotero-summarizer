@@ -253,6 +253,18 @@ def record_tick_decisions(results: _TickResults, *, tick_id: str, review_mode: b
                 decision_reason="already_in_library",
             )
         for item, pred in results.gate_rejected:
+            if pred is None:
+                # gate_only item the gate could not score (still no title+abstract
+                # after the OpenAlex backfill). Record a terminal gate-reject with
+                # no score/priority so the bounded picker stops re-fetching it;
+                # it stays visible in the gate-rejected spot-check panel.
+                feeds_storage.record_decision(
+                    conn, run_id=tick_id, feed_item=item,
+                    decision=feeds_storage.DECISION_GATE_REJECTED,
+                    decision_reason="gate_unscorable:no_abstract",
+                    shap_contribs_json=_pack_review_payload(item),
+                )
+                continue
             feeds_storage.record_decision(
                 conn, run_id=tick_id, feed_item=item,
                 decision=feeds_storage.DECISION_GATE_REJECTED,

@@ -34,6 +34,7 @@ export function configToFormState(cfg) {
   if (!cfg) return null;
   const corpus = cfg.corpus || {};
   const gate = cfg.classifier_gate || {};
+  const ua = cfg.university_access || {};
   return {
     research_goals_text: joinLines(cfg.research_goals),
     triage_criteria_text: joinLines(cfg.triage_criteria),
@@ -46,6 +47,12 @@ export function configToFormState(cfg) {
       : ['dont_read'],
     gate_raw_score_dont_read_below: Number(gate.raw_score_dont_read_below ?? 0),
     gate_audit_sample_per_tick: Number(gate.audit_sample_per_tick ?? 0),
+    // University access (browser PDF fetch) — folded into the one config form so
+    // the single sticky Save commits it; the panel keeps only its login action.
+    ua_enabled: Boolean(ua.enabled),
+    ua_login_url: ua.login_url || '',
+    ua_ezproxy_prefix: ua.ezproxy_prefix || '',
+    ua_cookie_browser: ua.cookie_browser || '',
     // Per-stage LLM routing stays a structured object (not flattened like the
     // other fields) — LlmRoutingSection edits it as a tree, and the
     // JSON.stringify dirty-check + formStateToConfig both handle nesting fine.
@@ -85,6 +92,13 @@ export function formStateToConfig(form, baseConfig) {
       : [],
     raw_score_dont_read_below: Number(form.gate_raw_score_dont_read_below ?? 0),
     audit_sample_per_tick: Number(form.gate_audit_sample_per_tick ?? 0),
+  };
+  next.university_access = {
+    ...(next.university_access || {}),
+    enabled: Boolean(form.ua_enabled),
+    login_url: form.ua_login_url || '',
+    ezproxy_prefix: form.ua_ezproxy_prefix || '',
+    cookie_browser: form.ua_cookie_browser || '',
   };
   // Write the structured routing tree straight back. The backend re-validates
   // it strictly (unique provider names, openai requires base_url, env-var name

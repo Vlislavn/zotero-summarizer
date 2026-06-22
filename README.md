@@ -19,7 +19,8 @@ writes back changes you approve.
 ## Requirements
 
 - **Python 3.10+** and **[uv](https://docs.astral.sh/uv/getting-started/installation/)**
-- **Zotero desktop** with at least one **RSS feed** subscribed
+- **Zotero desktop** with at least one **RSS feed** subscribed (arXiv, bioRxiv,
+  or a **PubMed** saved search — see [docs/usage.md](docs/usage.md) "Adding sources")
 - An **OpenAI-compatible LLM endpoint** — **local** (Ollama, vLLM, LM Studio,
   `mlx_lm.server`) or **hosted** (any API). You provide the base URL + key.
 - *(developers only: Node 18+ to rebuild the UI — the built UI is already shipped)*

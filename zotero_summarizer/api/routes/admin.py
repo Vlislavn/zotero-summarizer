@@ -139,21 +139,25 @@ def _retrain_worker(job_id: str, *, classifier_name: str, n_folds: int) -> None:
     """
     from zotero_summarizer.services.model import classifier_persistence
 
-    settings = get_settings()
-    golden_csv = settings.golden_csv_path
-    if not golden_csv.exists():
-        _finish_job(
-            job_id,
-            result=None,
-            error=f"golden CSV not found at {golden_csv}; click 'Refresh labels' first",
-        )
-        return
-    config = read_config(settings.config_path)
+    # `_RETRAIN_LOCK` was acquired SYNCHRONOUSLY by `retrain()` before this worker
+    # was spawned (closing the locked()-precheck race that let two POSTs double-
+    # train + double-hot-swap). This worker owns the lock for the whole job
+    # (train + hot-swap) and MUST release it on EVERY exit path.
+    try:
+        settings = get_settings()
+        golden_csv = settings.golden_csv_path
+        if not golden_csv.exists():
+            _finish_job(
+                job_id,
+                result=None,
+                error=f"golden CSV not found at {golden_csv}; click 'Refresh labels' first",
+            )
+            return
+        config = read_config(settings.config_path)
 
-    def progress(done: int, total: int) -> None:
-        _set_progress(job_id, done, total)
+        def progress(done: int, total: int) -> None:
+            _set_progress(job_id, done, total)
 
-    with _RETRAIN_LOCK:
         try:
             trained = classifier_persistence.train_and_save(
                 golden_csv,
@@ -170,31 +174,33 @@ def _retrain_worker(job_id: str, *, classifier_name: str, n_folds: int) -> None:
             _finish_job(job_id, result=None, error=f"{type(exc).__name__}: {exc}")
             return
 
-    # Hot-swap the freshly-trained gate into the live runtime + re-score the
-    # Today slate, so "Retrain" takes effect WITHOUT a server restart (the
-    # previous behaviour left the running gate on the old artifact until the
-    # next restart). Guarded on the gate being enabled — a disabled gate has no
-    # live slot to swap into, so we only persist to disk (loads on next start).
-    hot_swap = _hot_swap_after_retrain(trained) if config.classifier_gate.enabled else None
+        # Hot-swap the freshly-trained gate into the live runtime + re-score the
+        # Today slate, so "Retrain" takes effect WITHOUT a server restart (the
+        # previous behaviour left the running gate on the old artifact until the
+        # next restart). Guarded on the gate being enabled — a disabled gate has no
+        # live slot to swap into, so we only persist to disk (loads on next start).
+        hot_swap = _hot_swap_after_retrain(trained) if config.classifier_gate.enabled else None
 
-    _finish_job(
-        job_id,
-        result={
-            "classifier_name": trained.classifier_name,
-            "n_train": int(trained.training_metadata.get("n_train", 0)),
-            "n_holdout": int(trained.training_metadata.get("n_holdout", 0)),
-            "thresholds": {
-                "keep": round(trained.t_keep, 4),
-                "must": round(trained.t_must, 4),
-                "could": round(trained.t_could, 4),
+        _finish_job(
+            job_id,
+            result={
+                "classifier_name": trained.classifier_name,
+                "n_train": int(trained.training_metadata.get("n_train", 0)),
+                "n_holdout": int(trained.training_metadata.get("n_holdout", 0)),
+                "thresholds": {
+                    "keep": round(trained.t_keep, 4),
+                    "must": round(trained.t_must, 4),
+                    "could": round(trained.t_could, 4),
+                },
+                # Surface that the live gate + slate were refreshed (vs. disk-only),
+                # so the Settings UI can tell the user Today is already re-ranked.
+                "hot_swapped": bool(hot_swap and hot_swap.get("installed")),
+                "rescored": (hot_swap or {}).get("rescored"),
             },
-            # Surface that the live gate + slate were refreshed (vs. disk-only),
-            # so the Settings UI can tell the user Today is already re-ranked.
-            "hot_swapped": bool(hot_swap and hot_swap.get("installed")),
-            "rescored": (hot_swap or {}).get("rescored"),
-        },
-        error=None,
-    )
+            error=None,
+        )
+    finally:
+        _RETRAIN_LOCK.release()
 
 
 def _hot_swap_after_retrain(trained: Any) -> dict[str, Any]:
@@ -233,24 +239,32 @@ async def retrain(req: RetrainRequest) -> dict[str, Any]:
             message=f"classifier_name must be logreg|lightgbm|tabpfn; got {req.classifier_name!r}",
             status_code=422,
         )
-    if _RETRAIN_LOCK.locked():
+    # Claim the single-flight slot SYNCHRONOUSLY (non-blocking) before spawning the
+    # worker. The old `locked()` precheck raced: two POSTs both saw it unlocked
+    # (the worker acquires later, on its own thread) and both double-trained. The
+    # worker releases this in its `finally`.
+    if not _RETRAIN_LOCK.acquire(blocking=False):
         raise APIError(
             error="conflict",
             message="another retrain is already running; wait for it to finish",
             status_code=409,
         )
 
-    job = _new_job("retrain")
-    thread = threading.Thread(
-        target=_retrain_worker,
-        kwargs={
-            "job_id": job["job_id"],
-            "classifier_name": req.classifier_name,
-            "n_folds": req.n_folds,
-        },
-        daemon=True,
-    )
-    thread.start()
+    try:
+        job = _new_job("retrain")
+        thread = threading.Thread(
+            target=_retrain_worker,
+            kwargs={
+                "job_id": job["job_id"],
+                "classifier_name": req.classifier_name,
+                "n_folds": req.n_folds,
+            },
+            daemon=True,
+        )
+        thread.start()
+    except BaseException:  # spawn failed → release the slot we just claimed, then re-raise
+        _RETRAIN_LOCK.release()
+        raise
     return {"job_id": job["job_id"], "status": "running"}
 
 

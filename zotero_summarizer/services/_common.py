@@ -44,6 +44,27 @@ def effective_llm_concurrency(provider: ProviderConfig | None, item_count: int) 
     return max(1, min(settings().triage_job_concurrency, n))
 
 
+def deep_review_fleet_concurrency(provider: ProviderConfig | None, item_count: int) -> int:
+    """Worker count for the MULTI-paper deep-review fan-out (the N "Read next" picks the
+    fleet / prewarm review at once).
+
+    A **local** provider stays **serial** (1) — one on-device model can't serve
+    concurrent inference without thrashing host RAM. A **remote** provider fans out to
+    the work on hand, capped by its own ``max_sub_concurrency`` (the per-provider remote
+    concurrency budget) when set, else **all N at once** (an API has no host-RAM
+    constraint). Deliberately NOT the global ``TRIAGE_JOB_CONCURRENCY`` — that knob
+    serialises LOCAL triage for RAM safety, so it must never throttle a genuinely remote,
+    RAM-free batch (the bug: with ``TRIAGE_JOB_CONCURRENCY=1`` a 5-pick remote batch ran
+    serially). ``provider=None`` falls to the remote branch (never silently serialises a
+    real remote run). Peak concurrent calls is this × ``deep_review_sub_concurrency`` (the
+    within-paper sub-calls), both bounded by ``max_sub_concurrency`` for a capped provider."""
+    n = max(1, int(item_count))
+    if provider is not None and provider.is_local:
+        return 1
+    cap = getattr(provider, "max_sub_concurrency", None) if provider else None
+    return min(n, cap) if cap else n
+
+
 def deep_review_sub_concurrency(provider: ProviderConfig | None) -> int:
     """Number of LLM SUB-calls (self-consistency rubric samples / per-goal
     summaries) to run in parallel WITHIN one paper's deep review.

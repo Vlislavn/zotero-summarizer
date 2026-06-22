@@ -1,3 +1,5 @@
+import { CHIP_TONE as TONE_CLS } from '../paper/review/tones.js';
+
 // Badge primitives — the small coloured pills the app sprinkles everywhere.
 //
 // Three flavours, all sharing the same color vocabulary as the rest of the UI
@@ -12,16 +14,9 @@
 //   ActionBadge   — a generic status/change pill: pass a `tone` token (or a
 //                   raw className) + children.
 
-// --- shared tone -> class map (soft 100-bg pills with a matching 300 border) --
-const TONE_CLS = {
-  emerald: 'bg-emerald-100 text-emerald-800 border-emerald-300',
-  sky: 'bg-sky-100 text-sky-800 border-sky-300',
-  amber: 'bg-amber-100 text-amber-800 border-amber-300',
-  rose: 'bg-rose-100 text-rose-800 border-rose-300',
-  slate: 'bg-slate-100 text-slate-700 border-slate-300',
-  violet: 'bg-violet-100 text-violet-800 border-violet-300',
-  teal: 'bg-teal-100 text-teal-800 border-teal-300',
-};
+// Tone → class map: re-uses the canonical CHIP_TONE vocabulary (tones.js, imported
+// above) so a dont_read / B-grade / error reads the SAME shade in a Badge as in a
+// Chip — one tone vocabulary app-wide (Law of Similarity), not a drifting copy.
 
 // Operational check pill — exact markup the LlmRoutingSection original used so
 // the Settings/Setup surfaces render byte-identically.

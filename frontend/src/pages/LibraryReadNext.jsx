@@ -76,13 +76,9 @@ export default function LibraryReadNext() {
   const [selectedTag, setSelectedTag] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
-  // 'meaning' = hybrid semantic search (default); 'exact' = substring (legacy).
-  const [searchMode, setSearchMode] = useState('meaning');
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
   const [starting, setStarting] = useState(false);
-  const [syncingTags, setSyncingTags] = useState(false);
-  const [syncingRanks, setSyncingRanks] = useState(false);
   const [addingToCollection, setAddingToCollection] = useState(false);
   const [syncingAll, setSyncingAll] = useState(false);
   // When each Zotero export last ran (tags / Call-Number ranks) — local-only
@@ -121,7 +117,7 @@ export default function LibraryReadNext() {
   // setSearchParams every render can loop, since its identity changes with the
   // location it just updated). Non-filter params are preserved.
   useEffect(() => {
-    const FILTER_KEYS = ['b', 'pr', 'g', 's', 'w', 'sc', 'q'];
+    const FILTER_KEYS = ['b', 'pr', 'g', 'w', 'q'];
     const target = serializeFilters(clientFilters);
     const current = new URLSearchParams();
     for (const [k, v] of searchParams.entries()) {
@@ -190,7 +186,9 @@ export default function LibraryReadNext() {
       const data = await fetchReadingQueue({
         includeRead, limit: QUEUE_LIMIT, refresh: force,
         collection: selectedCollection, tag: selectedTag, search,
-        semantic: searchMode === 'meaning',
+        // Search is always semantic (hybrid BM25 + embeddings + local reranker);
+        // the backend degrades to literal text match when the corpus is off.
+        semantic: true,
       });
       setQueue(data?.items || []);
       setQueueMeta({
@@ -233,7 +231,7 @@ export default function LibraryReadNext() {
     } finally {
       setQueueLoading(false);
     }
-  }, [includeRead, selectedCollection, selectedTag, search, searchMode]);
+  }, [includeRead, selectedCollection, selectedTag, search]);
 
   useEffect(() => {
     if (zoteroReady) loadQueue();
@@ -325,79 +323,6 @@ export default function LibraryReadNext() {
       setIsError(true);
     } finally {
       setStarting(false);
-    }
-  }
-
-  async function handleSyncRelTags(force = false) {
-    setSyncingTags(true);
-    setMessage('');
-    try {
-      const data = await syncRelTags({ force });
-      if (data?.requires_force) {
-        if (window.confirm('Zotero appears to be running. Apply anyway? (a backup is taken first)')) {
-          return await handleSyncRelTags(true);
-        }
-        setMessage('Sync cancelled — close Zotero, then retry.');
-        setIsError(false);
-        return;
-      }
-      if (data?.stale) {
-        setMessage(data.message);
-        setIsError(false);
-        return;
-      }
-      const bands = Object.entries(data?.by_band || {}).map(([b, n]) => `${b}: ${n}`).join(', ');
-      setMessage(
-        `Tagged ${data?.tagged || 0} item(s)${bands ? ` (${bands})` : ''}.`
-        + (data?.backup_path ? ` Backup: ${data.backup_path}.` : '')
-        + (data?.message ? ` ${data.message}` : ''),
-      );
-      setIsError(false);
-      // Synced (wrote tags, or confirmed all up to date) — a "no scores yet"
-      // no-op still carries a Rescore-first message and must not count.
-      if (!/Rescore/.test(data?.message || '')) recordZoteroSync('tags');
-    } catch (err) {
-      setMessage(`Failed to sync relevance tags: ${err.message || err}`);
-      setIsError(true);
-    } finally {
-      setSyncingTags(false);
-    }
-  }
-
-  async function handleSyncScoreRanks(force = false) {
-    setSyncingRanks(true);
-    setMessage('');
-    try {
-      const data = await syncScoreRanks({ force });
-      if (data?.requires_force) {
-        if (window.confirm('Zotero appears to be running. Apply anyway? (a backup is taken first)')) {
-          return await handleSyncScoreRanks(true);
-        }
-        setMessage('Sync cancelled — close Zotero, then retry.');
-        setIsError(false);
-        return;
-      }
-      if (data?.stale) {
-        // Stale refusal (model retrained since the cached scores): show ONLY the
-        // sequencing message, not a noisy "Ranked 0 papers…" success template.
-        setMessage(data.message);
-        setIsError(false);
-        return;
-      }
-      setMessage(
-        `Ranked ${data?.ranked || 0} papers across your whole library into Zotero "Call Number" (zr0001…)`
-        + (data?.unscored ? ` — ${data.scored} scored, ${data.unscored} not-yet-scored at the bottom (Rescore for a complete ranking)` : '')
-        + '. Add the Call Number column in Zotero and sort it ascending to get this order.'
-        + (data?.backup_path ? ` Backup: ${data.backup_path}.` : '')
-        + (data?.message ? ` ${data.message}` : ''),
-      );
-      setIsError(false);
-      if (!/Rescore/.test(data?.message || '')) recordZoteroSync('ranks');
-    } catch (err) {
-      setMessage(`Failed to sync score ranks: ${err.message || err}`);
-      setIsError(true);
-    } finally {
-      setSyncingRanks(false);
     }
   }
 
@@ -520,7 +445,7 @@ export default function LibraryReadNext() {
         if (window.confirm('Zotero opened mid-sync. Finish anyway? (a backup is taken first)')) {
           return await handleSyncAll(true);
         }
-        setMessage('Tags synced; rank stamping cancelled — close Zotero, then run “Sort ranks”.');
+        setMessage('Tags synced; rank stamping cancelled — close Zotero, then run “Sync all” again.');
         setIsError(false);
         return;
       }
@@ -657,38 +582,11 @@ export default function LibraryReadNext() {
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyUp={(e) => { if (e.key === 'Enter') applySearch(); }}
-              placeholder={searchMode === 'meaning'
-                ? 'Search by meaning… (e.g. hallucination mitigation)'
-                : 'Search title, abstract, tags'}
+              placeholder="Search by meaning… (e.g. hallucination mitigation)"
               className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
-            {/* Meaning (hybrid semantic) vs Exact (substring). Default Meaning so a
-                plain query finds relevant papers, not just literal matches. */}
-            <div className="inline-flex rounded-lg border border-slate-300 overflow-hidden text-sm shrink-0">
-              <button
-                type="button"
-                onClick={() => setSearchMode('meaning')}
-                title="Semantic search — ranks by meaning (BM25 + embeddings + local reranker)"
-                className={`px-3 py-2 ${searchMode === 'meaning' ? 'bg-teal-600 text-white' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
-              >
-                Meaning
-              </button>
-              <button
-                type="button"
-                onClick={() => setSearchMode('exact')}
-                title="Exact text — substring match on title / abstract / tags"
-                className={`px-3 py-2 border-l border-slate-300 ${searchMode === 'exact' ? 'bg-slate-700 text-white' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
-              >
-                Exact
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={applySearch}
-              className="px-3 py-2 rounded-lg bg-slate-900 text-white text-sm hover:bg-slate-700"
-            >
-              Search
-            </button>
+            {/* Search is semantic by default (hybrid); Enter submits — no Meaning/
+                Exact toggle, no separate Search button (the input IS the control). */}
             {(selectedCollection || selectedTag || search) && (
               <button
                 type="button"
@@ -711,8 +609,6 @@ export default function LibraryReadNext() {
                 whyOptions={whyOptions}
                 goalEnabled={goalEnabled}
                 qualityEnabled={qualityEnabled}
-                rawCount={queue.length}
-                shownCount={filteredQueue.length}
                 onClear={clearClientFilters}
               />
             </div>
@@ -732,7 +628,7 @@ export default function LibraryReadNext() {
           // Remount on a deliberate SERVER filter change so the incremental-reveal
           // count and any expanded row reset — but NOT on the 4s status poll, and
           // NOT on a client filter (that resets the reveal via filterSig instead).
-          key={`${selectedCollection}|${selectedTag}|${search}|${searchMode}|${includeRead}`}
+          key={`${selectedCollection}|${selectedTag}|${search}|${includeRead}`}
           // Client filters only apply while the bar is shown (model ready); when
           // the model isn't ready the bar is hidden, so don't silently filter.
           items={queueMeta.model_ready ? filteredQueue : queue}
@@ -783,7 +679,7 @@ export default function LibraryReadNext() {
         <Section label="Export to Zotero">
           <div className="flex flex-wrap gap-2 items-center">
             <ZoteroActionsMenu
-              disabled={syncingTags || syncingRanks || syncingAll}
+              disabled={syncingAll}
               actions={[
                 {
                   label: 'Sync all → Zotero', busy: syncingAll, busyLabel: 'Syncing…',
@@ -794,16 +690,6 @@ export default function LibraryReadNext() {
                   label: 'Fetch full text', busy: fetchingFulltext, busyLabel: 'Fetching…',
                   disabled: fetchingFulltext, onClick: () => handleFetchFulltext(false),
                   title: 'Download the arXiv full-text PDF for every library paper that has an arXiv link but no PDF, and attach it natively to Zotero. Skips papers that already have a PDF. Backs up first; runs with Zotero closed; PDFs upload to zotero.org on the next sync.',
-                },
-                {
-                  label: 'Sync relevance tags', busy: syncingTags, busyLabel: 'Syncing…',
-                  onClick: () => handleSyncRelTags(false),
-                  title: 'Write zs:rel/<band> tags onto scored library items so you can FILTER by ML relevance in Zotero. Backs up first; doesn\'t touch your priority/manual tags.',
-                },
-                {
-                  label: 'Sort ranks (Call Number)', busy: syncingRanks, busyLabel: 'Writing…',
-                  onClick: () => handleSyncScoreRanks(false),
-                  title: 'Stamp a whole-library rank into every paper\'s Zotero Call Number (zr0001…) — scorable papers first, no-abstract ones last — so you can SORT your ENTIRE library by relevance in Zotero. Run Rescore first for complete scores. Add the Call Number column and sort ascending. Backs up first.',
                 },
               ]}
             />

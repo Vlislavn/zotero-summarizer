@@ -23,6 +23,7 @@ import StepConnectLlm from '../components/setup/StepConnectLlm.jsx';
 import StepDescribeResearch from '../components/setup/StepDescribeResearch.jsx';
 import StepDone from '../components/setup/StepDone.jsx';
 import { Banner } from '../components/form/Fields.jsx';
+import Button from '../components/ui/Button.jsx';
 import { validateSetup } from '../api/setupApi.js';
 
 // A sensible, editable default so the Describe step is never blank.
@@ -35,7 +36,7 @@ const DEFAULT_TRIAGE_CRITERIA = [
 export default function SetupFlow() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { status, pillars } = useSetupStatus();
+  const { status } = useSetupStatus();
 
   const configQuery = useQuery({ queryKey: ['runtime-config'], queryFn: fetchConfig });
 
@@ -55,6 +56,8 @@ export default function SetupFlow() {
   // Field errors from the last describe-step validate-config.
   const [fieldErrors, setFieldErrors] = useState([]);
   const [finishError, setFinishError] = useState('');
+  // Set when the Zotero paths were saved during setup → StepDone reminds to restart.
+  const [pathsChanged, setPathsChanged] = useState(false);
 
   // Path draft is separate from the GoalsConfig draft: paths are written via the
   // dedicated /api/setup/paths route, not the config PUT.
@@ -201,6 +204,7 @@ export default function SetupFlow() {
             draftPaths={draftPaths}
             onPatchPaths={(p) => setDraftPaths((prev) => ({ ...prev, ...p }))}
             onStatusChanged={() => queryClient.invalidateQueries({ queryKey: ['setup-status'] })}
+            onPathsSaved={() => setPathsChanged(true)}
           />
         )}
         {step === 1 && (
@@ -219,40 +223,35 @@ export default function SetupFlow() {
             fieldErrors={fieldErrors}
           />
         )}
-        {step === 3 && <StepDone pillars={pillars} />}
+        {step === 3 && <StepDone pathsChanged={pathsChanged} />}
 
         {finishError && <Banner kind="error">{finishError}</Banner>}
 
         {step < 3 && (
           <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">
-            <button
-              type="button"
+            <Button
+              variant="secondary"
               onClick={() => setStep((s) => Math.max(0, s - 1))}
               disabled={step === 0}
-              className="px-4 py-2 rounded-lg border border-slate-300 text-sm font-medium hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Back
-            </button>
+            </Button>
             {isLast ? (
-              <button
-                type="button"
+              <Button
                 onClick={handleFinish}
                 disabled={!allValid || finishMutation.isPending || validateMutation.isPending}
-                className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-semibold hover:bg-slate-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
                 title={!allValid ? 'Complete all three steps to finish.' : undefined}
               >
                 {finishMutation.isPending || validateMutation.isPending ? 'Saving…' : 'Finish'}
-              </button>
+              </Button>
             ) : (
-              <button
-                type="button"
+              <Button
                 onClick={() => setStep((s) => Math.min(2, s + 1))}
                 disabled={!stepValid}
-                className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-semibold hover:bg-slate-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
                 title={!stepValid ? 'Finish this step to continue.' : undefined}
               >
                 Next
-              </button>
+              </Button>
             )}
           </div>
         )}
