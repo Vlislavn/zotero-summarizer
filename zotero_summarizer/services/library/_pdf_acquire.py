@@ -6,9 +6,12 @@ works while Zotero is open), in this order:
 
     1. arXiv direct  ─┐
     2. Unpaywall OA   ├─ headless (``pdf_fetch``) — fast, no browser
-    3. OpenAlex oa_url┘
+    3. OpenAlex oa_url┘  (+ PMC for no-DOI PubMed papers)
     4. EZproxy / publisher ── browser (``browser_fetch``) using the university
-       persistent profile — the only rung that passes Cloudflare / SSO paywalls.
+       persistent profile / Chrome session — for SCHOLARLY paywalled papers.
+    5. web-article render ── for a NON-scholarly web page (blog/Substack/news with
+       HTML full text but no PDF), ``browser_fetch.render_article_pdf`` renders it to a
+       PDF the PDF-only review pipeline can digest (gated on ``review_web_articles``).
 
 Returns ``AcquireResult(path, needs_login)``: ``needs_login`` is True when a
 proxied/publisher source WAS available but the browser couldn't fetch it because the
@@ -90,29 +93,53 @@ def acquire_pdf_for(item_key: str, detail: dict[str, Any]) -> AcquireResult:
         if path is not None:
             return AcquireResult(path=path)
 
+    # A SCHOLARLY item (arXiv id or DOI) is an academic paper → the browser proxied /
+    # cookie rung (paywalled access). A pure web page (no scholarly id) → the
+    # web-article render rung below. Splitting on this keeps a blog out of the
+    # paywall/needs_login path, and a paywalled paper out of the HTML renderer.
+    scholarly = bool(arxiv_id or doi)
+
     # --- browser rung: proxied / publisher (Cloudflare / SSO paywall) -------
-    proxied = _proxied_url(ua, url, doi)
-    if not (ua.enabled and proxied):
-        return AcquireResult(path=None)
+    if ua.enabled and scholarly:
+        proxied = _proxied_url(ua, url, doi)
+        if proxied:
+            profile = _profile_dir(ua)
+            # Retry the OA links via the real browser too (they may sit behind a
+            # Cloudflare landing the headless client couldn't pass), then the proxied URL.
+            for candidate in _dedupe([*headless_urls, proxied]):
+                path = browser_fetch.fetch_pdf_via_browser(
+                    candidate, profile_dir=profile, cache_dir=None,
+                    timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes, headless=ua.headless,
+                    cookie_browser=str(getattr(ua, "cookie_browser", "") or ""),
+                )
+                if path is not None:
+                    return AcquireResult(path=path)
+            # A proxied/paywalled source EXISTED but the browser couldn't fetch it → the
+            # session is missing/expired (or the `browser` extra is absent): the
+            # actionable ``needs_library_login`` signal. (We do NOT gate on a
+            # cookie-presence guess — Chromium writes cookies on any visit, which would
+            # mislabel a paywall as "no source".)
+            LOGGER.info("review-fleet: browser PDF fetch yielded nothing for %s → needs_library_login", item_key)
+            return AcquireResult(path=None, needs_login=True)
 
-    profile = _profile_dir(ua)
-    # Retry the OA links via the real browser too (they may sit behind a Cloudflare
-    # landing the headless client couldn't pass), then the proxied publisher URL.
-    for candidate in _dedupe([*headless_urls, proxied]):
-        path = browser_fetch.fetch_pdf_via_browser(
-            candidate, profile_dir=profile, cache_dir=None,
-            timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes, headless=ua.headless,
-            cookie_browser=str(getattr(ua, "cookie_browser", "") or ""),
+    # --- web-article rung: a blog/Substack/news page has HTML full text but NO PDF.
+    # Render the page to a PDF so the PDF-only review pipeline can digest it. Last
+    # resort, only for non-scholarly web pages, gated by `review_web_articles`.
+    if getattr(qr, "review_web_articles", False) and not scholarly and _is_web_article(url):
+        rendered = browser_fetch.render_article_pdf(
+            url, cache_dir=None, timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes
         )
-        if path is not None:
-            return AcquireResult(path=path)
+        if rendered is not None:
+            return AcquireResult(path=rendered)
 
-    # A proxied/paywalled source EXISTED but the browser couldn't fetch it → the
-    # session is missing/expired (or the `browser` extra is absent): the actionable
-    # ``needs_library_login`` signal. (We do NOT gate on a cookie-presence guess —
-    # Chromium writes cookies on any visit, so that mislabels a paywall as "no source".)
-    LOGGER.info("review-fleet: browser PDF fetch yielded nothing for %s → needs_library_login", item_key)
-    return AcquireResult(path=None, needs_login=True)
+    return AcquireResult(path=None)
+
+
+def _is_web_article(url: str) -> bool:
+    """A web page whose full text is HTML (blog/Substack/news/docs) — an http(s) URL
+    that is not itself a PDF. The renderer turns it into a reviewable PDF."""
+    low = (url or "").strip().lower()
+    return low.startswith(("http://", "https://")) and not low.endswith(".pdf")
 
 
 def _dedupe(urls: list[str]) -> list[str]:

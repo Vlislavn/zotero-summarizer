@@ -147,6 +147,12 @@ class QualityReviewConfig(BaseModel):
     # the light fitz path. Off by default — needs the optional `docling` dep
     # (`uv pip install docling`) + downloads layout models on first use.
     use_docling: bool = Field(default=False)
+    # Review web ARTICLES (blogs/Substack/news/docs with HTML full text but no PDF) by
+    # rendering the page to a PDF (headless `page.pdf`) so the PDF-only review pipeline
+    # can digest them. Off by default (a behavior + cost change); needs the `browser`
+    # extra. The review fleet's web-article rung is gated on this. See
+    # `services/library/_pdf_acquire.py`.
+    review_web_articles: bool = Field(default=False)
 
 
 class UniversityAccessConfig(BaseModel):

@@ -9,6 +9,21 @@ yet publish versioned releases, so everything currently lives under
 
 ### Added
 
+- **Review fleet now reviews web articles (blogs/Substack/news), not just PDFs.** The
+  top reading-queue picks were often web articles whose full text is HTML, so the
+  PDF-only fleet skipped them ("no fetchable PDF"). New `_pdf_acquire` web-article rung
+  renders such a page to a PDF (`browser_fetch.render_article_pdf`, headless `page.pdf`)
+  so the existing review pipeline digests it. Gated by `quality_review.review_web_articles`
+  (off by default; needs the `browser` extra). A `scholarly = arxiv_id or doi` split keeps
+  academic papers on the paywall/browser rung and pure web pages on the renderer.
+  Verified live: eugeneyan blog → 361 KB PDF, 12.3K chars extracted.
+
+- **Docs: cover flagship journals, not just sub-journals (coverage-gap fix).** A
+  flagship-venue gap let *"Towards autonomous medical AI agents"* (Nature, 2026) slip
+  past triage — the user tracked Nature sub-journals but not flagship Nature, the paper
+  had no preprint, and PubMed hadn't indexed it. docs/usage.md now lists verified
+  flagship RSS (Nature, Nat Commun, Nat Biomed Eng, Science, NEJM, Lancet, Cell) with
+  the principle + that PubMed F1–F4 backstop the indexing lag. No code.
 - **HackerNoon documented as a triage source (practitioner/engineering angle).**
   Zero code: a tag-filtered RSS feed (`hackernoon.com/tagged/llm/feed` — validated
   on-point for LLM/agent engineering; the narrower `ai-agents`/`agentic-ai` tags
@@ -44,6 +59,14 @@ yet publish versioned releases, so everything currently lives under
 
 ### Changed
 
+- **UI clarity pass, pt.2.** Settings: University-access folded into the one
+  config form (3 saves→1, 6 save-states→1); Refresh-labels card, retrain classifier
+  dropdown, corpus-similarity + ML-tuning knobs removed (server defaults kept).
+  Library search is semantic-only (Meaning/Exact toggle + Search button gone);
+  filter model drops minScore/scored; Zotero menu 4→2. VerdictPanel fixes the
+  dont_read-renders-green bug + read-state guard (no model preselect). AnnotationVerdict,
+  Ops (Pending/Review/Triage), PaperReview, and the Setup wizard trimmed; one shared
+  `<Button>`. Bundle 464→446 kB.
 - **UI clarity pass (subtraction-first), pt.1.** One tone vocabulary
   (`ui/Badge`→canonical `CHIP_TONE`); Today drops PipelineFunnel/Refresh/telemetry;
   cull `PaperCard` loses relevance+prestige bars+bucket badge (one relevance scale);
@@ -58,6 +81,14 @@ yet publish versioned releases, so everything currently lives under
   split into `_deep_review_layers.py` to keep `deep_review.py` under the 500-LOC cap.
 
 ### Fixed
+
+- **Gate-only backlog drain crashed on title-only items + now derives their abstract.**
+  One RSS item with a title but no abstract raised `RuntimeError: gate_only triage
+  requires a gate prediction`, killing the whole drain (the backlog stayed stuck).
+  Fix: `predict` backfills missing abstracts from OpenAlex (`abstract_inverted_index`,
+  already cached for prestige — by DOI then title) so real papers become scorable and
+  show their abstract; any residual the gate still can't score is a terminal
+  `gate_rejected:gate_unscorable:no_abstract` instead of a crash.
 
 - **Temporal-eval `days_since_added=-1` sentinel bug.** `_row_days` parsed the
   feed-row "no date" sentinel `-1` as the *newest* age, so the forward-looking

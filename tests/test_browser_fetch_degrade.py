@@ -24,6 +24,14 @@ def test_fetch_returns_none_when_dep_missing(tmp_path, monkeypatch):
     assert out is None  # no crash, honest None
 
 
+def test_render_article_returns_none_when_dep_missing(tmp_path, monkeypatch):
+    _no_browser(monkeypatch)
+    out = browser_fetch.render_article_pdf(
+        "https://eugeneyan.com/writing/x", cache_dir=tmp_path / "cache",
+    )
+    assert out is None  # no crash, honest None (falls back to no_fetchable_source)
+
+
 def test_login_window_reports_unavailable_when_dep_missing(tmp_path, monkeypatch):
     _no_browser(monkeypatch)
     res = browser_fetch.open_login_window("https://lib.edu/login", tmp_path / "prof")

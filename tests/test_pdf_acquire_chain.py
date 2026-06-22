@@ -12,13 +12,15 @@ from pathlib import Path
 from zotero_summarizer.services.library import _pdf_acquire
 
 
-def _app(*, ua_enabled=False, ezproxy_prefix="", unpaywall=None, openalex=None, cookie_browser="", openalex_cache=None):
+def _app(*, ua_enabled=False, ezproxy_prefix="", unpaywall=None, openalex=None, cookie_browser="",
+         openalex_cache=None, review_web_articles=False):
     ua = types.SimpleNamespace(
         enabled=ua_enabled, ezproxy_prefix=ezproxy_prefix, login_url="",
         browser_profile_dir="", headless=True, fetch_timeout_secs=60.0,
         cookie_browser=cookie_browser,
     )
-    qr = types.SimpleNamespace(max_pdf_bytes=20_000_000, fetch_timeout_secs=30.0)
+    qr = types.SimpleNamespace(max_pdf_bytes=20_000_000, fetch_timeout_secs=30.0,
+                               review_web_articles=review_web_articles)
     prestige = types.SimpleNamespace(user_agent_email="")
     config = types.SimpleNamespace(quality_review=qr, university_access=ua, prestige=prestige)
     return types.SimpleNamespace(
@@ -27,11 +29,12 @@ def _app(*, ua_enabled=False, ezproxy_prefix="", unpaywall=None, openalex=None, 
     )
 
 
-def _patch(monkeypatch, app, *, resolve=None, headless_fetch=None, browser_fetch=None):
+def _patch(monkeypatch, app, *, resolve=None, headless_fetch=None, browser_fetch=None, render=None):
     monkeypatch.setattr(_pdf_acquire, "get_state", lambda: app)
     monkeypatch.setattr(_pdf_acquire.pdf_fetch, "resolve_pdf_url", resolve or (lambda **_k: None))
     monkeypatch.setattr(_pdf_acquire.pdf_fetch, "fetch_pdf", headless_fetch or (lambda *_a, **_k: None))
     monkeypatch.setattr(_pdf_acquire.browser_fetch, "fetch_pdf_via_browser", browser_fetch or (lambda *_a, **_k: None))
+    monkeypatch.setattr(_pdf_acquire.browser_fetch, "render_article_pdf", render or (lambda *_a, **_k: None))
 
 
 def test_arxiv_short_circuits_before_browser(monkeypatch):
@@ -157,3 +160,46 @@ def test_unreachable_proxied_source_needs_login(monkeypatch):
     )
     res = _pdf_acquire.acquire_pdf_for("A", {"url": "https://www.nature.com/x", "doi": "10.1/x"})
     assert res.path is None and res.needs_login is True
+
+
+def test_web_article_rendered_when_enabled(monkeypatch):
+    """A non-scholarly web page (blog, no DOI) with review_web_articles ON → the render
+    rung turns its HTML into a PDF the pipeline can review."""
+    app = _app(review_web_articles=True)
+    rendered: list = []
+    _patch(
+        monkeypatch, app,
+        resolve=lambda **_k: None,
+        render=lambda url, **_k: (rendered.append(url), Path("/tmp/article.pdf"))[1],
+    )
+    res = _pdf_acquire.acquire_pdf_for("A", {"url": "https://eugeneyan.com/writing/x", "doi": ""})
+    assert res.path == Path("/tmp/article.pdf") and res.needs_login is False
+    assert rendered == ["https://eugeneyan.com/writing/x"]
+
+
+def test_web_article_skipped_when_flag_off(monkeypatch):
+    """review_web_articles OFF (default) → a blog is NOT rendered; honest no-source."""
+    app = _app(review_web_articles=False)
+    render_calls: list = []
+    _patch(
+        monkeypatch, app,
+        resolve=lambda **_k: None,
+        render=lambda url, **_k: render_calls.append(url) or Path("/x"),
+    )
+    res = _pdf_acquire.acquire_pdf_for("A", {"url": "https://eugeneyan.com/writing/x", "doi": ""})
+    assert res.path is None and res.needs_login is False
+    assert render_calls == []  # never rendered
+
+
+def test_scholarly_item_never_rendered(monkeypatch):
+    """An item with a DOI is scholarly → the web-article renderer is never used (even
+    with review_web_articles ON), so a paywall page isn't mistaken for an article."""
+    app = _app(review_web_articles=True, ua_enabled=False)
+    render_calls: list = []
+    _patch(
+        monkeypatch, app,
+        resolve=lambda **_k: None,
+        render=lambda url, **_k: render_calls.append(url) or Path("/x"),
+    )
+    res = _pdf_acquire.acquire_pdf_for("A", {"url": "https://www.nature.com/x", "doi": "10.1/x"})
+    assert res.path is None and render_calls == []  # DOI ⇒ scholarly ⇒ no render

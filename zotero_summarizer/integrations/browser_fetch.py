@@ -180,6 +180,63 @@ def fetch_pdf_via_browser(
     return final_path
 
 
+def render_article_pdf(
+    url: str,
+    *,
+    cache_dir: Path | None = None,
+    timeout: float = 60.0,
+    max_bytes: int = _DEFAULT_MAX_BYTES,
+) -> Path | None:
+    """Render a WEB ARTICLE (an HTML page with no PDF — blog / Substack / news / docs)
+    to a PDF via headless Chromium ``page.pdf()``, so the PDF-only review pipeline can
+    digest it. Returns the cached path or ``None`` (missing dep / nav failure / non-PDF)
+    — best-effort, same contract as ``fetch_pdf_via_browser``.
+
+    Uses an EPHEMERAL context (a public page needs no session) and a cache key prefixed
+    ``render:`` so it never collides with a real fetched PDF at the same URL. ``page.pdf``
+    is Chromium-headless only — exactly our stack. For a web article the rendered DOM IS
+    the document, so this is the correct full text (unlike a publisher PDF, where
+    ``page.pdf`` would lose the real file — never use it there)."""
+    if not url:
+        return None
+    cache_dir = (cache_dir or _DEFAULT_CACHE_DIR).expanduser()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    final_path = _cache_path("render:" + url, cache_dir)
+    if final_path.exists() and final_path.stat().st_size > 0:
+        return final_path
+
+    sync_playwright, error_class = _load_playwright()
+    if sync_playwright is None:
+        return None
+    if not _BROWSER_LOCK.acquire(blocking=False):
+        LOGGER.info("article render skipped: another browser session is in flight")
+        return None
+    catch: tuple[type[BaseException], ...] = (OSError,) if error_class is None else (error_class, OSError)
+    timeout_ms = int(timeout * 1000)
+    body = b""
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            try:
+                page = browser.new_context().new_page()
+                page.goto(url, wait_until="load", timeout=timeout_ms)
+                body = page.pdf(format="A4", print_background=False)
+            finally:
+                browser.close()
+    except catch as exc:
+        LOGGER.info("article render failed for %s: %s", url, exc)
+        body = b""
+    finally:
+        _BROWSER_LOCK.release()
+
+    if not _looks_pdf(body, max_bytes=max_bytes):
+        return None
+    tmp_path = cache_dir / f"{final_path.stem}.tmp"
+    tmp_path.write_bytes(body)
+    tmp_path.replace(final_path)
+    return final_path
+
+
 def _drive_browser(
     sync_playwright: Callable[[], Any],
     error_class: type[BaseException] | None,
@@ -291,4 +348,4 @@ def is_logged_in(profile_dir: Path) -> bool:
     return (Path(profile_dir) / _LOGIN_MARKER).exists()
 
 
-__all__ = ["fetch_pdf_via_browser", "open_login_window", "is_logged_in", "is_available"]
+__all__ = ["fetch_pdf_via_browser", "render_article_pdf", "open_login_window", "is_logged_in", "is_available"]
