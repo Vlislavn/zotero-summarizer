@@ -13,11 +13,11 @@ from zotero_summarizer.services.library import _pdf_acquire
 
 
 def _app(*, ua_enabled=False, ezproxy_prefix="", unpaywall=None, openalex=None, cookie_browser="",
-         openalex_cache=None, review_web_articles=False):
+         openalex_cache=None, review_web_articles=False, browser_channel=""):
     ua = types.SimpleNamespace(
         enabled=ua_enabled, ezproxy_prefix=ezproxy_prefix, login_url="",
         browser_profile_dir="", headless=True, fetch_timeout_secs=60.0,
-        cookie_browser=cookie_browser,
+        cookie_browser=cookie_browser, browser_channel=browser_channel,
     )
     qr = types.SimpleNamespace(max_pdf_bytes=20_000_000, fetch_timeout_secs=30.0,
                                review_web_articles=review_web_articles)
@@ -147,6 +147,20 @@ def test_cookie_browser_threaded_to_browser(monkeypatch):
     assert seen.get("cookie_browser") == "chrome"
 
 
+def test_browser_channel_threaded_to_browser(monkeypatch):
+    """`browser_channel` (default 'chrome') reaches the browser rung so it drives the
+    REAL Chrome binary — whose fingerprint matches the injected cf_clearance."""
+    app = _app(ua_enabled=True, browser_channel="chrome")
+    seen = {}
+    def _browser(url, **kw):
+        seen.update(kw)
+        return Path("/tmp/b.pdf")
+    _patch(monkeypatch, app, resolve=lambda **_k: None, headless_fetch=lambda *_a, **_k: None, browser_fetch=_browser)
+    res = _pdf_acquire.acquire_pdf_for("A", {"url": "https://www.nature.com/x", "doi": "10.1/x"})
+    assert res.path == Path("/tmp/b.pdf")
+    assert seen.get("channel") == "chrome"
+
+
 def test_scholarly_landing_passes_render_fallback(monkeypatch):
     """A scholarly item whose landing fetch fails should be retried with
     render_fallback=True (so a DOI'd web page — e.g. a Nature news piece with no real
@@ -166,7 +180,8 @@ def test_scholarly_landing_passes_render_fallback(monkeypatch):
 def test_unreachable_proxied_source_needs_login(monkeypatch):
     """A proxied source exists but the browser can't fetch it (paywall/Cloudflare,
     or no valid session) → the actionable ``needs_login`` signal — driven by the
-    failed browser attempt, NOT a cookie-presence guess."""
+    failed browser attempt, NOT a cookie-presence guess. ``login_url`` is the proxied
+    landing (surfaced as a click-to-open sign-in link)."""
     app = _app(ua_enabled=True)
     _patch(
         monkeypatch, app,
@@ -176,6 +191,43 @@ def test_unreachable_proxied_source_needs_login(monkeypatch):
     )
     res = _pdf_acquire.acquire_pdf_for("A", {"url": "https://www.nature.com/x", "doi": "10.1/x"})
     assert res.path is None and res.needs_login is True
+    assert res.login_url == "https://www.nature.com/x"  # the landing to open + sign into
+
+
+def test_headed_fallback_retries_when_headless_blocked(monkeypatch):
+    """Interactive path (``allow_headed_fallback``): the headless attempt is bot-walled,
+    so the proxied landing is retried once with a VISIBLE browser (headless=False), which
+    passes the challenge."""
+    app = _app(ua_enabled=True)  # headless=True by default
+    headless_flags: list = []
+
+    def _browser(url, **kw):
+        headless_flags.append(kw.get("headless"))
+        return None if kw.get("headless") else Path("/tmp/headed.pdf")
+
+    _patch(monkeypatch, app, resolve=lambda **_k: None, headless_fetch=lambda *_a, **_k: None, browser_fetch=_browser)
+    res = _pdf_acquire.acquire_pdf_for(
+        "A", {"url": "https://www.nature.com/x", "doi": "10.1/x"}, allow_headed_fallback=True
+    )
+    assert res.path == Path("/tmp/headed.pdf")
+    assert True in headless_flags and headless_flags[-1] is False  # headless first, then headed
+
+
+def test_fleet_path_never_pops_headed_window(monkeypatch):
+    """The background fleet (default ``allow_headed_fallback=False``) NEVER retries with a
+    visible window — it degrades to ``needs_login`` headless-only."""
+    app = _app(ua_enabled=True)
+    headed: list = []
+
+    def _browser(url, **kw):
+        if kw.get("headless") is False:
+            headed.append(url)
+        return None
+
+    _patch(monkeypatch, app, resolve=lambda **_k: None, headless_fetch=lambda *_a, **_k: None, browser_fetch=_browser)
+    res = _pdf_acquire.acquire_pdf_for("A", {"url": "https://www.nature.com/x", "doi": "10.1/x"})
+    assert res.path is None and res.needs_login is True
+    assert headed == []  # no visible window during a background run
 
 
 def test_web_article_rendered_when_enabled(monkeypatch):

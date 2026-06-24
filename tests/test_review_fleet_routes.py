@@ -36,24 +36,42 @@ def test_status_route_returns_fleet_status_verbatim(monkeypatch):
 def test_run_route_forwards_top_k_to_fleet_start(monkeypatch):
     seen = {}
 
-    def _start(top_k):
+    def _start(top_k, *, item_keys=None):
         seen["top_k"] = top_k
+        seen["item_keys"] = item_keys
         return {"status": "running", "total": 0, "completed": 0, "error": None}
 
     monkeypatch.setattr(library_routes.review_fleet, "start", _start)
     req = library_routes.ReviewFleetRunRequest(top_k=4)
     out = asyncio.run(library_routes.run_review_fleet(req))
     assert seen["top_k"] == 4
+    assert seen["item_keys"] is None  # no explicit keys → the top_k selection path
     assert out["status"] == "running"
 
 
 def test_run_route_default_top_k(monkeypatch):
     seen = {}
     monkeypatch.setattr(
-        library_routes.review_fleet, "start", lambda top_k: seen.update(top_k=top_k) or {}
+        library_routes.review_fleet,
+        "start",
+        lambda top_k, *, item_keys=None: seen.update(top_k=top_k, item_keys=item_keys) or {},
     )
     asyncio.run(library_routes.run_review_fleet(library_routes.ReviewFleetRunRequest()))
     assert seen["top_k"] == 5  # the model default
+
+
+def test_run_route_forwards_item_keys_to_fleet_start(monkeypatch):
+    """The client's "Review cool papers" pins its cool set: the route threads
+    ``item_keys`` straight to ``fleet.start`` so the fleet reviews exactly those."""
+    seen = {}
+    monkeypatch.setattr(
+        library_routes.review_fleet,
+        "start",
+        lambda top_k, *, item_keys=None: seen.update(top_k=top_k, item_keys=item_keys) or {"status": "running"},
+    )
+    req = library_routes.ReviewFleetRunRequest(item_keys=["AAA", "BBB"])
+    asyncio.run(library_routes.run_review_fleet(req))
+    assert seen["item_keys"] == ["AAA", "BBB"]
 
 
 def test_run_request_rejects_out_of_range_top_k():

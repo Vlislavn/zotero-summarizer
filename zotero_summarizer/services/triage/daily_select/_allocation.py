@@ -14,7 +14,9 @@ from __future__ import annotations
 from typing import Any
 
 from zotero_summarizer.domain import PRIORITY_COULD_READ_THRESHOLD
+from zotero_summarizer.services._common import band_primary_enabled
 from zotero_summarizer.services.triage.daily_select._dataclasses import SlatePaper
+from zotero_summarizer.services.model.rank_blend import quality_bonus
 from zotero_summarizer.services.model.surprise import DEFAULT_BLACK_SWAN_MIN_SCORE
 
 ROLE_ORDER: tuple[str, ...] = ("model", "surprise", "diversity")
@@ -54,6 +56,19 @@ def _to_slate_paper(cand: dict[str, Any], *, role: str) -> SlatePaper:
     )
 
 
+def _model_score(cand: dict[str, Any], *, use_band: bool) -> float:
+    """``rank_score`` + the capped deep-review QUALITY lift. Quality is applied
+    ONLY here, in the FLOORED model role (and its fallback) — never in the
+    un-floored surprise/diversity pickers, whose job is off-pattern / off-library
+    discovery, not quality. The cap bounds the within-role reorder; the floor
+    (on the raw composite, below) is untouched, so a below-bar paper can never be
+    lifted into the slate by quality."""
+    q = cand.get("quality") or {}
+    return cand["rank_score"] + quality_bonus(
+        q.get("quality_band"), q.get("grade"), use_band=use_band
+    )
+
+
 def _pick_model(
     pool: list[dict[str, Any]],
     n: int,
@@ -61,16 +76,17 @@ def _pick_model(
     *,
     min_composite: float = MODEL_RELEVANCE_FLOOR,
 ) -> list[dict[str, Any]]:
-    """Top-N by ``rank_score`` among unchosen items AT/ABOVE the relevance floor
-    — the system's current best recommendation: the gate composite blended with
-    goal-text similarity and known prestige (``_candidate.attach_rank_scores``),
-    with ``dont_read``-band papers (composite < ``min_composite``) excluded so a
-    weak feed week doesn't pad Today with below-the-bar picks. Falls back to pure
-    composite order automatically when the blend signals are absent (the blend
-    folds their weights into relevance)."""
+    """Top-N by ``rank_score`` + capped quality lift among unchosen items AT/ABOVE
+    the relevance floor — the system's current best recommendation: the gate
+    composite blended with goal-text similarity and known prestige
+    (``_candidate.attach_rank_scores``), then floated by deep-review quality, with
+    ``dont_read``-band papers (composite < ``min_composite``) excluded so a weak
+    feed week doesn't pad Today with below-the-bar picks. Falls back to pure
+    composite order automatically when the blend/quality signals are absent."""
+    use_band = band_primary_enabled()
     ordered = sorted(
         (c for c in pool if c["id"] not in chosen_ids and c["composite_score"] >= min_composite),
-        key=lambda c: c["rank_score"],
+        key=lambda c: _model_score(c, use_band=use_band),
         reverse=True,
     )
     return ordered[:n]

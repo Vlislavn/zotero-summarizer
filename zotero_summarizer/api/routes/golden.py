@@ -39,6 +39,8 @@ from zotero_summarizer.api.routes._golden_helpers import (
     _golden_csv_path,
     _load_all,
     _zotero_candidate_keys,
+    log_retract_event,
+    log_verdict_event,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -290,6 +292,7 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
         user_priority=req.user_priority,
         comment=req.comment,
     )
+    log_verdict_event(req.item_key, original, req.user_priority, req.comment)
     # Make the verdict a first-class training row (covers materialized-but-unread
     # items the engagement-only export skips). Idempotent + no-op if source gone.
     # Boundary: the verdict is ALREADY durably saved above — this golden-row
@@ -376,7 +379,12 @@ async def remove_verdict(item_key: str) -> dict[str, Any]:
             message="item_key is required",
             status_code=422,
         )
+    # Read the prior verdict BEFORE delete so the retraction event keeps the
+    # model/human pair the DELETE is about to destroy.
+    prior = repositories.get_label_verdict(_db_path(), safe_item_key)
     deleted = repositories.delete_label_verdict(_db_path(), safe_item_key)
+    if deleted and prior is not None:
+        log_retract_event(safe_item_key, prior)
     return {"deleted": deleted}
 
 

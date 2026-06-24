@@ -35,6 +35,7 @@ from zotero_summarizer.domain import (
 )
 from zotero_summarizer.services.triage.daily_select._allocation import allocate
 from zotero_summarizer.services.triage.daily_select._candidate import (
+    attach_quality_from_reviews,
     attach_rank_scores,
     dedup_keep_newest,
 )
@@ -297,6 +298,12 @@ def assemble_daily_slate(
 
     deduped = dedup_keep_newest(primary_rows)
     pool_size = len(deduped)
+
+    # Bridge the deep-review QUALITY signal onto the slate: feed-GUID-keyed
+    # candidates can't join the library-item_key-keyed deep_reviews cache directly,
+    # so resolve via each row's materialized_zotero_key. The lift is confined to the
+    # floored model role in the allocator (discovery roles stay quality-free).
+    attach_quality_from_reviews(deduped)
 
     # Shared relevance × goal × prestige blend (rank_blend) — the same order
     # the Library queue uses; degrades to composite-only when those signals

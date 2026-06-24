@@ -100,6 +100,26 @@ class FullTextRefineConfig(BaseModel):
     unpaywall_email: str = Field(default="")
 
 
+class RecoverAbstractConfig(BaseModel):
+    """Acquire-before-score rescue for abstract-less, high-goal feed items.
+
+    Prestige-journal RSS (Nature/Science/Cell/NEJM/Annals) ships a title-only
+    boilerplate "abstract", so the classifier gate scores the paper on no real
+    content and drops it to ``dont_read``. When such a dropped item's strongest
+    research-goal cosine (already computed by the gate, stashed on
+    ``aux_context['goal_sims']``) clears ``goal_sim_threshold``, fetch its full
+    text via the review-fleet acquisition chain and re-score it on the PDF
+    BEFORE the gate verdict stands. ``max_per_tick`` caps the browser/paywall
+    fetch so it never runs across a whole journal backlog. See
+    ``services/triage/README.md``.
+    """
+
+    enabled: bool = Field(default=True)
+    goal_sim_threshold: float = Field(default=0.45, ge=0.0, le=1.0)
+    max_per_tick: int = Field(default=3, ge=0, le=20)
+    min_abstract_chars: int = Field(default=120, ge=0, le=2000)
+
+
 class QualityReviewConfig(BaseModel):
     """Full-text, peer-review-style quality assessment for the top-K Today picks.
 
@@ -115,6 +135,12 @@ class QualityReviewConfig(BaseModel):
     # from the deep_review job (serial on a local provider, parallel on a remote one).
     # Env override: ZS_DEEP_REVIEW_PREWARM_K. See services/library/deep_review_prewarm.py.
     prewarm_on_startup_k: int = Field(default=5, ge=0, le=20)
+    # Order-time quality-lift mode. OFF (default) = grade-only A/B/C/D bonus (the
+    # shipped, measured behaviour). ON = band-primary (highlight ↑ / flag ↓; neutral
+    # & uncertain resolve to exactly 0.0) — a Phase-2-MEASURED arm, not flipped on
+    # ahead of its gate. Env override (consumer-side): ZS_QUALITY_BAND_PRIMARY.
+    # See services/library/_ranking._band_primary_enabled + model/rank_blend.quality_bonus.
+    quality_band_primary: bool = Field(default=False)
     max_pdf_bytes: int = Field(default=50_000_000, ge=1_000_000)  # figure-heavy clinical PDFs run >20 MB
     fetch_timeout_secs: float = Field(default=30.0, ge=1.0, le=300.0)
     # Hard cap on full-text chars fed to the reviewer (context safety).
@@ -181,6 +207,12 @@ class UniversityAccessConfig(BaseModel):
     # container so its cookies are unreadable even with Full Disk Access; use ``chrome``
     # / ``firefox``. The in-app login (``login_url``) remains the fallback.
     cookie_browser: str = Field(default="")
+    # Browser DISTRIBUTION CHANNEL to drive: ``chrome`` (default) launches the REAL
+    # Google Chrome binary, whose fingerprint/UA match the ``cf_clearance`` cookie a
+    # cookie-source Chrome earned — so Cloudflare publishers (Nature/npj) accept the
+    # session, unlike bundled chromium (``""``). Any Playwright channel
+    # (chrome/chrome-beta/msedge/…); ``""`` = bundled chromium (no Chrome install needed).
+    browser_channel: str = Field(default="chrome")
 
     @field_validator("cookie_browser")
     @classmethod
@@ -189,6 +221,16 @@ class UniversityAccessConfig(BaseModel):
         allowed = {"", "chrome", "chromium", "firefox", "edge", "brave", "safari", "opera", "vivaldi"}
         if v not in allowed:
             raise ValueError(f"cookie_browser must be one of {sorted(allowed)}, got {value!r}")
+        return v
+
+    @field_validator("browser_channel")
+    @classmethod
+    def _validate_browser_channel(cls, value: str) -> str:
+        v = (value or "").strip().lower()
+        allowed = {"", "chromium", "chrome", "chrome-beta", "chrome-dev", "chrome-canary",
+                   "msedge", "msedge-beta", "msedge-dev", "msedge-canary"}
+        if v not in allowed:
+            raise ValueError(f"browser_channel must be one of {sorted(allowed)}, got {value!r}")
         return v
 
 
@@ -265,6 +307,7 @@ class GoalsConfig(BaseModel):
     corpus: CorpusConfig = Field(default_factory=CorpusConfig)
     prestige: PrestigeConfig = Field(default_factory=PrestigeConfig)
     full_text_refine: FullTextRefineConfig = Field(default_factory=FullTextRefineConfig)
+    recover_abstract: RecoverAbstractConfig = Field(default_factory=RecoverAbstractConfig)
     quality_review: QualityReviewConfig = Field(default_factory=QualityReviewConfig)
     classifier_gate: ClassifierGateConfig = Field(default_factory=ClassifierGateConfig)
     university_access: UniversityAccessConfig = Field(default_factory=UniversityAccessConfig)

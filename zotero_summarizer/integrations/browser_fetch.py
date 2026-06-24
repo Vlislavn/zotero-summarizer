@@ -139,11 +139,15 @@ def fetch_pdf_via_browser(
     max_bytes: int = _DEFAULT_MAX_BYTES,
     headless: bool = True,
     cookie_browser: str = "",
+    channel: str = "",
     render_fallback: bool = False,
 ) -> Path | None:
     """Fetch ``url`` to a local PDF using the persistent browser profile; return the
     cached path or ``None``. Shares ``pdf_fetch``'s cache dir + filename scheme so a
-    headless and a browser fetch of the same URL hit one cache.
+    headless and a browser fetch of the same URL hit one cache. ``channel`` picks the
+    browser distribution (``chrome`` = the real Chrome binary, whose fingerprint matches
+    an injected ``cf_clearance`` so Cloudflare publishers accept it; ``""`` = bundled
+    chromium).
 
     Three strategies: (1) an authenticated context request (carries the profile's
     cookies — best for a direct-PDF link behind EZproxy); (2) full navigation with
@@ -170,7 +174,7 @@ def fetch_pdf_via_browser(
         return None
     try:
         body = _drive_browser(sync_playwright, error_class, url, profile_dir, timeout, max_bytes, headless,
-                              cookie_browser=cookie_browser, render_fallback=render_fallback)
+                              cookie_browser=cookie_browser, channel=channel, render_fallback=render_fallback)
     finally:
         _BROWSER_LOCK.release()
 
@@ -239,6 +243,37 @@ def render_article_pdf(
     return final_path
 
 
+# JS that returns the page's PDF links: anchors whose text is "Download PDF" (the real
+# control) OR whose href ends in .pdf. Authoritative when the citation_pdf_url meta is a
+# redirect trap (Nature serves <article>.pdf as HTML but the button → _reference.pdf).
+_PDF_LINK_JS = (
+    "els => els.filter(e => /download\\s*(the\\s*)?pdf/i.test(e.textContent||'') "
+    "|| (e.href||'').split('?')[0].toLowerCase().endsWith('.pdf')).map(e => e.href).filter(Boolean)"
+)
+
+
+def _pdf_candidates(page: Any, landing_url: str, catch: tuple[type[BaseException], ...]) -> list[str]:
+    """Ordered, de-duped PDF links to try for a landing page: the ``citation_pdf_url``
+    meta first, then the page's on-page "Download PDF" anchors (the meta can 30x to HTML).
+    Excludes the landing URL itself. Best-effort DOM reads (a selector failure → skip)."""
+    out: list[str] = []
+    try:
+        meta = page.query_selector("meta[name='citation_pdf_url']")
+        content = meta.get_attribute("content") if meta else None
+        if content:
+            out.append(content)
+        out.extend(page.eval_on_selector_all("a", _PDF_LINK_JS) or [])
+    except catch as exc:
+        LOGGER.debug("browser: PDF-link discovery failed: %s", exc)
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for u in out:
+        if u and u != landing_url and u not in seen:
+            seen.add(u)
+            deduped.append(u)
+    return deduped
+
+
 def _drive_browser(
     sync_playwright: Callable[[], Any],
     error_class: type[BaseException] | None,
@@ -249,6 +284,7 @@ def _drive_browser(
     headless: bool,
     *,
     cookie_browser: str = "",
+    channel: str = "",
     render_fallback: bool = False,
 ) -> bytes:
     """Launch a persistent context and return the captured PDF bytes (``b''`` on any
@@ -265,7 +301,8 @@ def _drive_browser(
     catch: tuple[type[BaseException], ...] = (OSError,) if error_class is None else (error_class, OSError)
     try:
         with sync_playwright() as pw:
-            ctx = pw.chromium.launch_persistent_context(str(profile_dir), headless=headless)
+            ctx = pw.chromium.launch_persistent_context(
+                str(profile_dir), channel=(channel or None), headless=headless, no_viewport=True)
             try:
                 if cookie_browser:
                     cookies = _load_browser_cookies(cookie_browser)
@@ -300,21 +337,35 @@ def _drive_browser(
                 page.goto(url, wait_until="load", timeout=timeout_ms)
                 if captured:
                     return captured[0]
-                # (3) a landing page that didn't stream a PDF: follow the publisher's
-                # declared PDF link. ``citation_pdf_url`` is the Highwire/Google-Scholar
-                # meta tag Nature/Springer/Elsevier/Wiley/etc. expose; fetch it through
-                # the SAME cookie'd context so the institutional session carries.
-                meta = page.query_selector("meta[name='citation_pdf_url']")
-                pdf_url = meta.get_attribute("content") if meta else None
-                if pdf_url and pdf_url != url:
+                # (3) a landing page that didn't stream a PDF: follow its declared PDF
+                # links. Try the ``citation_pdf_url`` meta (Highwire tag) AND the page's
+                # actual "Download PDF" controls — the meta can be a REDIRECT TRAP (Nature's
+                # Oscar platform 30x's ``<article>.pdf`` back to the HTML landing, while the
+                # on-page Download-PDF button points to the real file, e.g. ``_reference.pdf``).
+                candidates = _pdf_candidates(page, url, catch)
+                for pdf_url in candidates:
+                    # (3a) cheap, cookie'd API request first — carries the session.
                     resp2 = ctx.request.get(pdf_url, timeout=timeout_ms)
                     if resp2.ok and _looks_pdf(resp2.body(), max_bytes=max_bytes):
                         return resp2.body()
-                    # A real PDF is DECLARED but we couldn't fetch it (gated behind a
-                    # login for this publisher). Don't render a paywall stub — let the
-                    # caller report "needs login for this publisher" honestly.
+                    # (3b) ``ctx.request`` gets none of patchright's page-level stealth and
+                    # never runs a JS challenge, so a Cloudflare publisher bot-walls it even
+                    # with cookies. Navigate to the PDF as a REAL page so the challenge runs
+                    # + cf_clearance carries; ``_on_response`` grabs the application/pdf body
+                    # (a download aborts the nav AFTER the response fires → already captured).
+                    captured.clear()
+                    try:
+                        page.goto(pdf_url, wait_until="load", timeout=timeout_ms)
+                    except catch as exc:
+                        LOGGER.debug("browser: pdf nav aborted (download?), using intercept: %s", exc)
+                    if captured:
+                        return captured[0]
+                if candidates:
+                    # Real PDF link(s) were DECLARED but none fetched (gated behind a login
+                    # for this publisher, or a hard interactive challenge). Don't render a
+                    # paywall stub — let the caller report "needs login" honestly.
                     return b""
-                # (4) no declared PDF → this is web content (e.g. a Nature news/comment
+                # (4) no declared PDF anywhere → web content (e.g. a Nature news/comment
                 # piece with a DOI). Render the page itself so it can still be reviewed.
                 if render_fallback:
                     return page.pdf(format="A4", print_background=False)
@@ -326,11 +377,13 @@ def _drive_browser(
         return b""
 
 
-def open_login_window(login_url: str, profile_dir: Path, *, timeout: float = _LOGIN_TIMEOUT_SECS) -> dict[str, Any]:
+def open_login_window(login_url: str, profile_dir: Path, *, channel: str = "",
+                      timeout: float = _LOGIN_TIMEOUT_SECS) -> dict[str, Any]:
     """Open a HEADED browser on ``login_url`` so the user logs into their library
     (SSO/2FA) once; the session persists in ``profile_dir``. Blocks until the user
-    closes the window (or ``timeout``), then flushes cookies. Returns
-    ``{ok, logged_in, error}``."""
+    closes the window (or ``timeout``), then flushes cookies. ``channel`` must match the
+    fetch's channel (``chrome``) so ``cf_clearance`` is earned by the SAME binary that
+    later fetches. Returns ``{ok, logged_in, error}``."""
     sync_playwright, error_class = _load_playwright()
     if sync_playwright is None:
         return {"ok": False, "logged_in": False, "error": "browser extra not installed (patchright)"}
@@ -340,7 +393,8 @@ def open_login_window(login_url: str, profile_dir: Path, *, timeout: float = _LO
     catch: tuple[type[BaseException], ...] = (OSError,) if error_class is None else (error_class, OSError)
     try:
         with sync_playwright() as pw:
-            ctx = pw.chromium.launch_persistent_context(str(profile_dir), headless=False)
+            ctx = pw.chromium.launch_persistent_context(
+                str(profile_dir), channel=(channel or None), headless=False, no_viewport=True)
             try:
                 page = ctx.pages[0] if ctx.pages else ctx.new_page()
                 if login_url:

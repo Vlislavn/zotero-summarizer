@@ -15,6 +15,7 @@ from contextlib import contextmanager
 from typing import Any, Iterator
 
 from zotero_summarizer.models import SummarizeResponse
+from zotero_summarizer.services import interaction_log
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.golden.goldenset import _PRIORITY_TO_RELEVANCE
 from zotero_summarizer.storage import feeds as feeds_storage
@@ -88,6 +89,18 @@ def _fetch_row(conn: sqlite3.Connection, processed_id: int) -> dict[str, Any]:
     if row is None:
         raise KeyError(f"processed_feed_items id={processed_id} not found")
     return dict(row)
+
+
+def _log_review(row: dict[str, Any], surface: str, value: str) -> None:
+    """Append the review-UI decision (model's prediction + the human's label).
+
+    ``row`` carries the gate's prediction unmutated (the DB write changes the
+    column, not this dict), so the model block records what the human overrode.
+    """
+    interaction_log.log_feed_decision(
+        row=row, item_key=f"feed:{int(row.get('feed_item_id') or 0)}",
+        surface=surface, human={"kind": "priority", "value": value},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +191,7 @@ def relabel(processed_id: int, new_priority: str) -> dict[str, Any]:
         label=new_priority,
         note=f"relabel via review UI ({new_priority}; from {row.get('decision')})",
     )
+    _log_review(row, "review_relabel", new_priority)
     return {
         "processed_id": processed_id,
         "state": feeds_storage.DECISION_USER_APPROVED,
@@ -231,6 +245,7 @@ def _confirm_or_reject_to_dont_read(processed_id: int) -> dict[str, Any]:
         label="dont_read",
         note=f"relabel via review UI (dont_read; from {prior_state})",
     )
+    _log_review(row, "review_relabel", "dont_read")
     return {"processed_id": processed_id, "golden_csv_row_added": appended}
 
 
@@ -438,6 +453,7 @@ def _label_and_terminate(
     appended = False
     if write_to_golden:
         appended = append_to_golden(row, label=label, note=f"{reason} via review UI")
+    _log_review(row, "review_reject", label)
     return {"processed_id": processed_id, "golden_csv_row_added": appended}
 
 

@@ -47,6 +47,10 @@ export default function Pending() {
   const [flatCollections, setFlatCollections] = useState([]);
   // Index of the keyboard-active change-group within `groupedPending`.
   const [activeIdx, setActiveIdx] = useState(0);
+  // Client-side title filter — find one paper's queued change without scrolling a
+  // long list. Applied at the source so grouping, select-all and keyboard nav all
+  // operate on the same visible set.
+  const [titleFilter, setTitleFilter] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -93,11 +97,17 @@ export default function Pending() {
     setMessage('');
     setIsError(false);
     setActiveIdx(0);
+    setTitleFilter('');
   }, []);
+
+  const filteredPending = useMemo(() => {
+    const q = titleFilter.trim().toLowerCase();
+    return q ? pending.filter((it) => (it.item_title || '').toLowerCase().includes(q)) : pending;
+  }, [pending, titleFilter]);
 
   const groupedPending = useMemo(() => {
     const map = new Map();
-    for (const item of pending) {
+    for (const item of filteredPending) {
       if (!map.has(item.item_key)) {
         map.set(item.item_key, {
           item_key: item.item_key,
@@ -108,7 +118,7 @@ export default function Pending() {
       map.get(item.item_key).changes.push(item);
     }
     return [...map.values()];
-  }, [pending]);
+  }, [filteredPending]);
 
   // Keep the active index inside the (possibly shrunk) list after a reload.
   useEffect(() => {
@@ -144,7 +154,7 @@ export default function Pending() {
 
   function selectAll(all) {
     if (!isPending) return;
-    setSelected(all ? new Set(pending.map((i) => i.id)) : new Set());
+    setSelected(all ? new Set(filteredPending.map((i) => i.id)) : new Set());
   }
 
   // Toggle every change in the active group: select them all unless they are
@@ -295,6 +305,24 @@ export default function Pending() {
     runReject({ ids }, { context: { ids } });
   }, [isPending, selected, runReject]);
 
+  // Retry one FAILED change — re-apply it via the same writer path without
+  // re-queuing. Only wired on the Failed tab (see ChangeGroup); reuses the
+  // apply message/refresh pattern.
+  const handleRetry = useCallback(async (change) => {
+    setMessage('Retrying failed change…');
+    setIsError(false);
+    try {
+      const data = await applyPending([change.id], { retry: true });
+      const failed = Number(data?.failed || 0);
+      setMessage(failed > 0 ? 'Retry failed again.' : 'Change applied.');
+      setIsError(failed > 0);
+      await load(status);
+    } catch (err) {
+      setMessage(humanizeError(err));
+      setIsError(true);
+    }
+  }, [load, status]);
+
   // ---------- Keyboard shortcuts ----------
   // j/k move the active group; space/enter toggle its checkboxes; a/r apply or
   // reject the current selection. The shared useKeyboardNav hook disables itself
@@ -363,7 +391,7 @@ export default function Pending() {
         )}
       </div>
 
-      <div className="flex flex-wrap gap-2 mb-3">
+      <div className="flex flex-wrap items-center gap-2 mb-3">
         {STATUS_TABS.map((tab) => (
           <button
             type="button"
@@ -378,6 +406,16 @@ export default function Pending() {
             {tab.label}
           </button>
         ))}
+        {/* Title filter — only meaningful once a few papers are queued (Hick's Law). */}
+        {pending.length > 3 && (
+          <input
+            type="text"
+            value={titleFilter}
+            onChange={(e) => setTitleFilter(e.target.value)}
+            placeholder="Filter by title…"
+            className="ml-auto text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500 w-48"
+          />
+        )}
       </div>
 
       <StatusBanner message={message} isError={isError} />
@@ -387,7 +425,9 @@ export default function Pending() {
         error={loadError}
         empty={!loading && !loadError && groupedPending.length === 0}
         loadingText="Loading changes…"
-        emptyMessage={`No ${selectedLabel} changes.`}
+        emptyMessage={titleFilter.trim()
+          ? `No ${selectedLabel} changes match “${titleFilter.trim()}”.`
+          : `No ${selectedLabel} changes.`}
       >
         {groupedPending.map((group, idx) => (
           <ChangeGroup
@@ -403,6 +443,7 @@ export default function Pending() {
             flatCollections={flatCollections}
             saving={saving}
             onSaveEdit={handleSaveEdit}
+            onRetry={handleRetry}
           />
         ))}
       </Async>

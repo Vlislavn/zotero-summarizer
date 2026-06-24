@@ -1,5 +1,6 @@
-"""Deep review (Stage-2 Read-next): per-item DIGEST, single-flight, cache,
-detail surfacing, and route registration.
+"""Deep review (Stage-2 Read-next): per-item DIGEST, per-item job registry, cache,
+detail surfacing, and route registration. (Concurrency — remote-parallel /
+local-queue / per-item single-flight — lives in ``test_deep_review_concurrency.py``.)
 
 The full reader + Zotero-DB endpoint behavior is covered by the live smoke
 (see the plan); these tests pin the novel wiring with stubs.
@@ -22,12 +23,20 @@ def config():
 
 @pytest.fixture(autouse=True)
 def _reset_state(tmp_path, monkeypatch):
-    """Isolate the module-global job state + cache file for every test."""
-    deep_review._STATE.update(
-        {"running": False, "total": 0, "completed": 0, "error": None, "started_at": None, "progress": {}}
-    )
+    """Isolate the per-item job registry + cache file for every test."""
+    with deep_review._LOCK:
+        deep_review._JOBS.clear()
     monkeypatch.setattr(deep_review, "_cache_path", lambda: tmp_path / "deep_reviews.json")
     yield
+
+
+def _run(items, *, focus_prompt=""):
+    """Synchronously review ``items`` via the new per-item path (build the run ctx
+    once, then run each worker inline) — mirrors the old ``_run_job`` for the
+    cache + per-item status assertions, with no pool/threads."""
+    ctx = deep_review._build_ctx()
+    for item in items:
+        deep_review._review_worker(item, ctx, focus_prompt)
 
 
 class _StubLLM:
@@ -112,7 +121,7 @@ def test_run_job_clears_progress_when_done(config, monkeypatch):
     phase from the last review."""
     reader = _StubReader({"K1": _detail()})
     _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"))
-    deep_review._run_job([{"item_key": "K1", "title": "T"}])
+    _run([{"item_key": "K1", "title": "T"}])
     assert deep_review.status()["progress"] == {}
 
 
@@ -120,7 +129,7 @@ def test_run_job_writes_digest_entry(config, monkeypatch):
     reader = _StubReader({"K1": _detail()})
     _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"))
 
-    deep_review._run_job([{"item_key": "K1", "title": "T", "gate_relevance": 3.0}])
+    _run([{"item_key": "K1", "title": "T", "gate_relevance": 3.0}])
 
     entry = deep_review.get_cached_review("K1")
     assert entry is not None
@@ -152,12 +161,54 @@ def test_run_job_marks_needs_pdf_without_local_pdf_and_never_fetches(config, mon
     _wire(monkeypatch, config, reader=reader,
           extractor=types.SimpleNamespace(extract_text=_boom_extract), note_fn=_boom_note)
 
-    deep_review._run_job([{"item_key": "K1", "title": "T", "gate_relevance": None}])
+    _run([{"item_key": "K1", "title": "T", "gate_relevance": None}])
 
     entry = deep_review.get_cached_review("K1")
     assert entry["needs_pdf"] is True
     assert entry["digest"] is None
     assert entry["zotero_note_written"] is False
+
+
+def _run_acquiring(monkeypatch, config, *, extractor, acquired_path, needs_login=False, login_url=""):
+    """Run one per-paper worker with acquire_missing=True; _pdf_acquire stubbed to
+    return ``acquired_path`` (None = unfetchable) + optional needs_login/login_url.
+    Returns the cached review entry."""
+    from zotero_summarizer.services.library import _pdf_acquire
+    reader = _StubReader({"K1": _detail(pdf_path="", url="https://www.nature.com/articles/x")})
+    _wire(monkeypatch, config, reader=reader, extractor=extractor)
+    monkeypatch.setattr(_pdf_acquire, "acquire_for_item",
+                        lambda key: _pdf_acquire.AcquireResult(path=acquired_path, needs_login=needs_login, login_url=login_url))
+    ctx = deep_review._build_ctx()
+    ctx["_acquire_missing"] = True
+    deep_review._review_worker({"item_key": "K1", "title": "T", "pdf_path": ""}, ctx, "")
+    return deep_review.get_cached_review("K1")
+
+
+def test_acquire_missing_fetches_pdf_then_reviews(config, monkeypatch):
+    """acquire_missing=True: a pick with no Zotero PDF gets one fetched via _pdf_acquire
+    and is reviewed FROM it (not flagged needs_pdf)."""
+    from pathlib import Path
+    seen = {}
+
+    def _capture(p):
+        seen["p"] = p
+        return "BODY"
+
+    extractor = types.SimpleNamespace(extract_text=_capture)
+    entry = _run_acquiring(monkeypatch, config, extractor=extractor, acquired_path=Path("/cache/acquired.pdf"))
+    assert entry["needs_pdf"] is False and entry["digest"]["grade"] == "A"
+    assert seen["p"] == "/cache/acquired.pdf"  # reviewed from the ACQUIRED PDF
+
+
+def test_acquire_missing_unfetchable_surfaces_needs_login(config, monkeypatch):
+    """Gated source (paywall/no session) → honest needs_pdf + no digest, AND the
+    actionable needs_login/login_url threaded onto the entry (for the sign-in link)."""
+    def _boom(p):
+        raise AssertionError("must not extract — no PDF was acquired")
+    entry = _run_acquiring(monkeypatch, config, extractor=types.SimpleNamespace(extract_text=_boom),
+                           acquired_path=None, needs_login=True, login_url="https://www.nature.com/x")
+    assert entry["needs_pdf"] is True and entry["digest"] is None
+    assert entry["needs_login"] is True and entry["login_url"] == "https://www.nature.com/x"
 
 
 def test_run_job_records_note_failure_without_dropping_digest(config, monkeypatch):
@@ -167,7 +218,7 @@ def test_run_job_records_note_failure_without_dropping_digest(config, monkeypatc
         raise RuntimeError("Zotero is open")
 
     _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"), note_fn=_failing_note)
-    deep_review._run_job([{"item_key": "K1", "title": "T"}])
+    _run([{"item_key": "K1", "title": "T"}])
 
     entry = deep_review.get_cached_review("K1")
     assert entry["digest"]["grade"] == "A"  # digest still produced
@@ -179,14 +230,16 @@ def test_run_job_isolates_per_item_failure(config, monkeypatch):
     reader = _StubReader({"GOOD": _detail(title="GOOD"), "BAD": _detail(title="BAD")})
     _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"))
 
-    deep_review._run_job(
+    _run(
         [{"item_key": "GOOD", "title": "GOOD"}, {"item_key": "BAD", "title": "BAD"}],
     )
 
+    # Each paper is its OWN job: one failing never blocks or masks the other.
     assert deep_review.get_cached_review("GOOD") is not None
     assert deep_review.get_cached_review("BAD") is None  # failed item skipped, not masked
-    s = deep_review.status()
-    assert s["completed"] == 2 and s["status"] == "ready" and s["error"] is None
+    assert deep_review.status("GOOD")["status"] == "ready" and deep_review.status("GOOD")["error"] is None
+    bad = deep_review.status("BAD")
+    assert bad["status"] == "error" and "LLM blew up" in bad["error"]
 
 
 def _wire_provider_endpoint(monkeypatch, config, reader, llm, base_url):
@@ -217,7 +270,7 @@ def test_run_job_all_items_failed_surfaces_job_error(config, monkeypatch):
     # _StubLLM raises a non-connectivity RuntimeError ("LLM blew up on this one").
     _wire_provider_endpoint(monkeypatch, config, reader, _StubLLM(), "http://127.0.0.1:8080/v1")
 
-    deep_review._run_job([{"item_key": "BAD", "title": "BAD"}])
+    _run([{"item_key": "BAD", "title": "BAD"}])
 
     assert deep_review.get_cached_review("BAD") is None  # nothing cached
     s = deep_review.status()
@@ -241,7 +294,7 @@ def test_run_job_all_failed_names_endpoint_only_on_connectivity_error(config, mo
     _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"))
     _wire_provider_endpoint(monkeypatch, config, reader, _DownLLM(), "http://127.0.0.1:8080/v1")
 
-    deep_review._run_job([{"item_key": "BAD", "title": "BAD"}])
+    _run([{"item_key": "BAD", "title": "BAD"}])
 
     s = deep_review.status()
     assert s["status"] == "error"
@@ -263,7 +316,7 @@ def test_lean_tier_uses_lean_max_text_chars(config, monkeypatch):
         lambda **kw: (seen.append(kw.get("max_chars")), real(**kw))[1],
     )
     # _wire's fake provider is lean_deep_review=True → lean tier.
-    deep_review._run_job([{"item_key": "K1", "title": "T"}])
+    _run([{"item_key": "K1", "title": "T"}])
     assert seen[-1] == config.quality_review.lean_max_text_chars
 
     # A non-lean provider → full max_text_chars.
@@ -273,7 +326,7 @@ def test_lean_tier_uses_lean_max_text_chars(config, monkeypatch):
         resolve_stage_client=lambda s, **_k: _StubLLM(),
         resolve_stage_provider=lambda s: types.SimpleNamespace(is_local=False, lean_deep_review=False),
     ))
-    deep_review._run_job([{"item_key": "K1", "title": "T"}])
+    _run([{"item_key": "K1", "title": "T"}])
     assert seen[-1] == config.quality_review.max_text_chars
 
 
@@ -313,7 +366,7 @@ def test_mlx_shape_loopback_but_not_lean_uses_full_tier(config, monkeypatch):
         lambda **kw: captured.update(batch=kw.get("batch")) or [],
     )
 
-    deep_review._run_job([{"item_key": "K1", "title": "T"}])
+    _run([{"item_key": "K1", "title": "T"}])
 
     assert seen_digest[-1] == config.quality_review.max_text_chars          # full digest cap, not lean
     assert captured["runs"] == config.quality_review.self_consistency_runs  # full rubric runs (3), not 1
@@ -374,27 +427,29 @@ def test_build_digest_note_html_marked_and_escaped():
     assert "Quality A" in h and "read" in h
 
 
-def test_start_is_single_flight(monkeypatch):
-    deep_review._STATE["running"] = True
+def test_start_accepts_concurrently_no_single_flight(monkeypatch):
+    """The old global single-flight is gone: a 2nd start is ACCEPTED (submitted), not
+    rejected — that's what lets you deep-review a 2nd paper while a 1st runs. (Per-item
+    single-flight — the SAME paper twice — is covered in test_deep_review_concurrency.py.)"""
+    monkeypatch.setattr(deep_review, "_build_ctx", lambda: {"_provider": None})
+    monkeypatch.setattr(deep_review.reading_queue, "get_cached_scoring", lambda key: None)
+    submitted: list[str] = []
+    monkeypatch.setattr(deep_review, "_submit", lambda item, ctx, fp: submitted.append(item["item_key"]))
 
-    def _should_not_run(**_):
-        raise AssertionError("build_reading_queue must not run while a job is in flight")
-
-    monkeypatch.setattr(deep_review.reading_queue, "build_reading_queue", _should_not_run)
-    out = deep_review.start(top_k=5)
-    assert out["status"] == "running"
+    a = deep_review.start(item_keys=["A"])
+    b = deep_review.start(item_keys=["B"])  # NOT blocked by A's in-flight review
+    assert a["accepted"] is True and b["accepted"] is True
+    assert submitted == ["A", "B"]
 
 
-def test_start_empty_queue_finishes_without_spawn(monkeypatch):
+def test_start_empty_queue_submits_nothing(monkeypatch):
     monkeypatch.setattr(deep_review.reading_queue, "build_reading_queue", lambda **k: {"items": []})
-
-    def _should_not_spawn(_target):
-        raise AssertionError("no background thread should spawn for an empty queue")
-
-    monkeypatch.setattr(deep_review, "run_in_background", _should_not_spawn)
+    monkeypatch.setattr(deep_review, "_build_ctx", lambda: {"_provider": None})
+    monkeypatch.setattr(
+        deep_review, "_submit", lambda *a, **k: pytest.fail("nothing to submit for an empty queue")
+    )
     out = deep_review.start(top_k=5)
-    assert out["total"] == 0
-    assert deep_review._STATE["running"] is False
+    assert out["status"] == "idle" and out["total"] == 0
 
 
 def test_start_with_item_keys_skips_queue(monkeypatch):
@@ -409,13 +464,13 @@ def test_start_with_item_keys_skips_queue(monkeypatch):
         deep_review.reading_queue, "get_cached_scoring",
         lambda key: {"composite_score": 4.1} if key == "K1" else None,
     )
-    captured = {}
-    monkeypatch.setattr(deep_review, "_run_job", lambda items, **_kw: captured.update(items=items))
-    monkeypatch.setattr(deep_review, "run_in_background", lambda target: target())
+    monkeypatch.setattr(deep_review, "_build_ctx", lambda: {"_provider": None})
+    submitted: list[dict] = []
+    monkeypatch.setattr(deep_review, "_submit", lambda item, ctx, fp: submitted.append(item))
 
     out = deep_review.start(item_keys=["K1"])
-    assert out["total"] == 1
-    assert captured["items"] == [{"item_key": "K1", "title": "", "gate_relevance": 4.1, "pdf_path": ""}]
+    assert out["accepted"] is True
+    assert submitted == [{"item_key": "K1", "title": "", "gate_relevance": 4.1, "pdf_path": ""}]
 
 
 def test_build_library_detail_surfaces_deep_review(monkeypatch):

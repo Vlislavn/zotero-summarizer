@@ -45,12 +45,13 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
     return () => { cancelled = true; };
   }, []);
 
-  // On mount, reflect any already-running review so the button doesn't silently
-  // no-op (deep review is global single-flight — one at a time).
+  // On mount, reflect THIS paper's own running review (if any) so re-opening it mid-run
+  // shows its live progress. Reviews are per-paper now, so another paper running never
+  // shows up here (the old global-single-flight bug that rendered the wrong paper).
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const s = await fetchDeepReviewStatus();
+      const s = await fetchDeepReviewStatus(itemKey);
       if (cancelled) return;
       if (s.status === 'running') { setStatus(s); poll(); }
     })();
@@ -59,12 +60,12 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
       if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null; }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [itemKey]);
 
   function poll() {
     if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null; }
     pollRef.current = setTimeout(async () => {
-      const s = await fetchDeepReviewStatus();
+      const s = await fetchDeepReviewStatus(itemKey);
       setStatus(s);
       if (s.status === 'running') poll();
       else onDone?.();
@@ -97,21 +98,33 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
           {llm.detail && <div className="mt-1 text-[11px] text-rose-600 break-words">{llm.detail}</div>}
         </div>
       )}
-      {deep && deep.needs_pdf && (
+      {deep && deep.needs_pdf && deep.needs_login && deep.login_url && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] leading-relaxed text-amber-800">
-          <span className="font-semibold">No PDF yet.</span>{' '}
-          In Zotero, select this paper and run <span className="font-semibold">“Find Available PDF”</span>, then re-run.
+          <span className="font-semibold">Needs your library sign-in.</span>{' '}
+          The full text is behind your institution’s access.{' '}
+          <a href={deep.login_url} target="_blank" rel="noopener noreferrer" className="text-indigo-700 font-medium hover:underline">
+            Open it in your browser
+          </a>{' '}
+          to sign in, then re-run.
+        </div>
+      )}
+      {deep && deep.needs_pdf && !(deep.needs_login && deep.login_url) && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] leading-relaxed text-amber-800">
+          <span className="font-semibold">No full text available.</span>{' '}
+          The review tried open access, PubMed Central, and your library session
+          but couldn’t reach a readable copy.
         </div>
       )}
 
       {reviewed && <PaperReview deep={deep} />}
 
-      {!hasPdf ? (
-        <div className="text-[12px] text-amber-700">
-          Needs a PDF — fetch it in Zotero first, then deep-review.
+      {!hasPdf && !reviewed && (
+        <div className="text-[12px] text-slate-500">
+          No PDF attached — the review will try to fetch the full text first
+          (open access, PubMed Central, then your library session).
         </div>
-      ) : (
-        <div className="space-y-2">
+      )}
+      <div className="space-y-2">
           <textarea
             value={focusPrompt}
             onChange={(e) => setFocusPrompt(e.target.value)}
@@ -137,17 +150,15 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
                 }`
               : reviewed ? 'Re-run deeper review' : 'Run deeper review'}
           </button>
-        </div>
-      )}
+      </div>
       {running && (
         <div className="text-[12px] text-teal-700 space-y-0.5">
-          <div>A deep review is running — the review appears here when it's done.</div>
+          <div>This paper's deep review is running — it appears here when it's done.</div>
           {status.progress?.phase_label && (
             <div className="font-semibold">
               {status.progress.phase_label}
               {status.progress.sub?.total > 0 &&
                 ` ${status.progress.sub.done}/${status.progress.sub.total}`}
-              {status.total > 1 && ` · paper ${status.completed + 1} of ${status.total}`}
             </div>
           )}
           {status.progress?.total_elapsed_seconds != null && (

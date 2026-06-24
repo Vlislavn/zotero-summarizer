@@ -33,9 +33,18 @@ reading_queue next-K undecided ─fleet (single-flight, 3 passes)─┐
 attaches `rec["proposed_verdict"] = proposals.get(item_key)` to each row — **but never
 routes the proposal through `_verdict_priorities`**, so a `dont_read` *suggestion* can't
 auto-hide a paper (only the user's confirmed `dont_read` label does). Routes:
-`POST /api/library/review-fleet/run {top_k}` → `fleet.start`; `GET
+`POST /api/library/review-fleet/run {top_k | item_keys}` → `fleet.start`; `GET
 /api/library/review-fleet/status` → `fleet.status`. Wired into `lifecycle.startup`
 next to the deep-review prewarm.
+
+**Pinned vs. self-selected picks.** `fleet.start(item_keys=…)` reviews EXACTLY the
+given picks; this is how the client's **"Review cool papers"** loop targets its cool
+(must/should-read) set. Without `item_keys` the fleet falls back to `_select_keys` (the
+next `top_k` undecided rows in queue order — the startup-prewarm path). The two axes
+differ: the queue ranks by the relevance×goal×prestige **blend**, so a cool-by-band
+paper can sit deep in the queue while a higher-blended `could_read` row is near the top;
+`_select_keys` is band-agnostic and would review the could rows first, so the client
+pins its cool keys to keep the fleet and the UI's "cool" count on the SAME rows.
 
 **Boundaries:** imports `deep_review`/`reading_queue` (sibling library modules),
 `_flight` (shared single-flight latch), `models.triage` (`ProposedVerdict`), and

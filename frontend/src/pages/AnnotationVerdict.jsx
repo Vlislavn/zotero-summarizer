@@ -38,6 +38,7 @@ import {
   ErrorBanner,
   GroundTruthOneLiner,
   TriageProgress,
+  sortBorderByUncertainty,
 } from './AnnotationVerdict_helpers.jsx';
 
 // Flatten the Zotero collection tree into indented <option>s for a compact
@@ -148,6 +149,20 @@ export default function AnnotationVerdict() {
   });
   const borderStatus = borderQuery.data?.status ?? null;
 
+  // The background rescore polls for minutes with no progress signal — a static
+  // message reads as hung (Doherty Threshold). Tick an elapsed-seconds counter
+  // while computing so the wait is honest/responsive; reset when it ends.
+  const [computeElapsed, setComputeElapsed] = useState(0);
+  useEffect(() => {
+    if (borderStatus !== 'computing') {
+      setComputeElapsed(0);
+      return undefined;
+    }
+    const id = setInterval(() => setComputeElapsed((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [borderStatus]);
+  const elapsedLabel = `${Math.floor(computeElapsed / 60)}:${String(computeElapsed % 60).padStart(2, '0')}`;
+
   // Collection/tag filter sources (same Zotero data Library's sidebar uses).
   const collectionsQuery = useQuery({
     queryKey: ['zotero-collections'], queryFn: fetchCollections, staleTime: 5 * 60_000,
@@ -182,7 +197,9 @@ export default function AnnotationVerdict() {
   const flagCounts = listQuery.data?.flag_counts ?? {};
 
   const sortedItems = useMemo(() => {
-    if (isBorderMode) return items;
+    // Active-learning: order by decision value (conflicts first, then closest to
+    // the boundary) so the most-worth-labeling picks lead — see helper.
+    if (isBorderMode) return sortBorderByUncertainty(items);
     // Fixed score_desc — worst-first has no triage workflow in a teach-the-model
     // list (Pareto: the default is right ~95% of the time; the toggle was removed).
     return [...items].sort((a, b) => (b.derived_score ?? 0) - (a.derived_score ?? 0));
@@ -626,6 +643,12 @@ export default function AnnotationVerdict() {
 
         <ErrorBanner error={listQuery.error || borderQuery.error} title="List load failed" />
 
+        {isBorderMode && borderStatus !== 'computing' && filteredItems.length > 0 && (
+          <p className="text-[11px] text-slate-500 mb-1.5 px-0.5">
+            Ordered by decision value — model⇄prediction conflicts first, then the picks closest to the boundary.
+          </p>
+        )}
+
         <ul className="space-y-1.5 slim-scroll overflow-y-auto flex-1 pr-1">
           {(listQuery.isLoading || borderQuery.isLoading) && (
             <li className="text-xs text-slate-500 p-3">
@@ -634,9 +657,11 @@ export default function AnnotationVerdict() {
           )}
           {isBorderMode && borderStatus === 'computing' && (
             <li className="text-xs text-slate-500 p-3">
-              Scoring your library against the current model… this runs in the
-              background (a few minutes the first time after re-labelling, then
-              cached). The list will fill in automatically.
+              Scoring your library against the current model…{' '}
+              <span className="font-semibold text-slate-700" aria-live="polite">{elapsedLabel} elapsed</span>.
+              This runs in the background (a few minutes the first time after
+              re-labelling, then cached). The list will fill in automatically —
+              or hit 🎯 above (click to exit) to keep labelling meanwhile.
             </li>
           )}
           {isBorderMode && borderStatus === 'error' && (

@@ -14,13 +14,12 @@
 #   python3 tools/precommit/check_dead_code.py make-allowlist > tools/precommit/vulture_allowlist.txt
 #   # then re-add this header
 #
-# Current residue: five public helpers exercised ONLY by tests (no runtime
+# Current residue: four public helpers exercised ONLY by tests (no runtime
 # consumer — kept as a deliberate, test-covered API surface) and one model-field
 # attribute set via assignment (read later through a dict, invisible to Vulture).
 
 zotero_summarizer/integrations/zotero_read.py:get_user_library_id   # test-only public reader (test_feed_items_read)
 zotero_summarizer/services/triage/feeds/_triage.py:prestige_venue   # SummarizeResponse field set here, read later via dict
-zotero_summarizer/services/triage/triage_jobs.py:public_job         # test-only converter (test_modular_services)
 zotero_summarizer/storage/feeds_history.py:get_run_summary          # test-only storage query (test_idempotency)
 zotero_summarizer/storage/feeds_history.py:list_recent_decisions    # test-only storage query (test_idempotency)
-zotero_summarizer/storage/repositories.py:init                      # test-only DB-init wrapper (test_modular_services)
+zotero_summarizer/storage/repositories.py:with_db_path              # test-only public API (test_modular_services, test_user_labels)

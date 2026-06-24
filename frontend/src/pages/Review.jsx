@@ -10,6 +10,7 @@ import { priorityClass, reviewPaperUrl } from './reviewHelpers.js';
 import { pretty } from '../utils/priorityLabels.js';
 import VerdictPicker from '../components/VerdictPicker.jsx';
 import { humanizeError } from '../utils/humanizeError.js';
+import { StatusBanner } from '../components/library/shared.jsx';
 
 // Tabs the Today funnel can deep-link into (?state=gate_rejected etc.).
 const VALID_STATES = new Set(['awaiting_review', 'gate_rejected']);
@@ -18,14 +19,6 @@ const VALID_STATES = new Set(['awaiting_review', 'gate_rejected']);
 // zotero_summarizer/web/ui.html. Functional parity with the Alpine version
 // (toggle queue state, approve/reject/relabel, bulk apply, bulk confirm).
 // Helpers extracted to ./reviewHelpers.js to keep this file under budget.
-
-function StatusBanner({ message, isError }) {
-  if (!message) return null;
-  const cls = isError
-    ? 'bg-rose-50 border-rose-200 text-rose-800'
-    : 'bg-emerald-50 border-emerald-200 text-emerald-800';
-  return <div className={`my-2 p-2 rounded-lg border text-xs ${cls}`}>{message}</div>;
-}
 
 function AuxContext({ aux }) {
   if (!aux) return null;

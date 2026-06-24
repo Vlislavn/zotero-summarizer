@@ -6,7 +6,8 @@ small set of shared/infra files at the top level.
 ```
               ┌─────────── shared/infra (top level) ───────────┐
               │ _common _adapters lifecycle run_log             │
-              │ config health results corpus emoji_signals      │
+              │ interaction_log config health results            │
+              │ corpus emoji_signals                             │
               └────────────────────────────────────────────────┘
    triage/ ──gate──> model/ ──trains on──> golden/ <──labels── library/
       │  (RSS daemon)        (relevance ML)   (dataset)  (Stage-2 reading)
@@ -56,7 +57,16 @@ reason vs "training" vs missing dep) — feeding ONE signal to three surfaces: t
 log, the additive `subsystems[]` on `GET /api/setup/status`, and `require(name)` →
 `503` so an action that MANDATORILY needs a dead subsystem fails fast with the real
 reason instead of degrading silently; new subsystem = one checker + one row),
-`run_log`, `config` (GET/PUT `/api/config`; PUT persists + invalidates stage clients,
+`run_log`,
+`interaction_log` (append-only **agentic interaction log** → `data/interaction-events.jsonl`:
+one immutable JSON line per human reading decision — the model prediction + the human's
+choice — plus the daemon's 7-day behavioural outcome; reuses `run_log`'s NDJSON appender,
+stamps `git_commit` + the live gate's `golden_csv_sha256` so drift is attributable to a
+model version. The live verdict tables UPSERT/DELETE and lose the trajectory; this keeps it
+for offline improvement. Best-effort: a log failure warns, never blocks the durable write.
+Emitted by the verdict routes, Today keep/trash, the review queue, triage feedback, and the
+outcome daemon — `results` also calls it),
+`config` (GET/PUT `/api/config`; PUT persists + invalidates stage clients,
 does not validate provider availability; an edit to `research_goals` schedules a
 background Today-slate rescore so persisted per-item `goal_sims` — the slate's
 rank-blend input — don't go stale against the new goals), `health`, `results`,

@@ -70,8 +70,8 @@ def test_select_drops_cached_and_keeps_rank_order(monkeypatch):
         lambda **_k: {"items": [{"item_key": "A"}, {"item_key": "B"}, {"item_key": "C"}]},
     )
     monkeypatch.setattr(
-        prewarm.deep_review, "get_cached_review",
-        lambda key: {"digest": {}} if key == "B" else None,  # B already done
+        prewarm.deep_review, "cached_review_keys",
+        lambda: {"B"},  # B already done (one cache read, not one-per-row)
     )
     assert prewarm._select_uncached_top(3) == ["A", "C"]
 
@@ -81,13 +81,13 @@ def test_select_respects_top_k_slice(monkeypatch):
         prewarm.reading_queue, "build_reading_queue",
         lambda **_k: {"items": [{"item_key": k} for k in ("A", "B", "C", "D", "E")]},
     )
-    monkeypatch.setattr(prewarm.deep_review, "get_cached_review", lambda key: None)
+    monkeypatch.setattr(prewarm.deep_review, "cached_review_keys", set)
     assert prewarm._select_uncached_top(2) == ["A", "B"]  # only the top-2 considered
 
 
 def test_select_empty_queue_yields_nothing(monkeypatch):
     monkeypatch.setattr(prewarm.reading_queue, "build_reading_queue", lambda **_k: {"items": []})
-    monkeypatch.setattr(prewarm.deep_review, "get_cached_review", lambda key: None)
+    monkeypatch.setattr(prewarm.deep_review, "cached_review_keys", set)
     assert prewarm._select_uncached_top(5) == []
 
 

@@ -11,14 +11,13 @@ import {
   fetchFulltextStatus,
   syncRelTags,
   syncScoreRanks,
-  runReviewFleet,
-  fetchReviewFleetStatus,
 } from '../api/libraryApi.js';
 import ReadNextView from '../components/library/ReadNextView.jsx';
 import LibraryFilterBar from '../components/library/LibraryFilterBar.jsx';
 import PredictionsBar from '../components/library/PredictionsBar.jsx';
 import NotConfiguredCard from '../components/setup/NotConfiguredCard.jsx';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
+import { useReviewCoolLoop } from '../hooks/useReviewCoolLoop.js';
 import ZoteroActionsMenu from '../components/library/ZoteroActionsMenu.jsx';
 import { StatusBanner, formatShortDate } from '../components/library/shared.jsx';
 import { Section } from '../components/paper/review/primitives.jsx';
@@ -97,14 +96,6 @@ export default function LibraryReadNext() {
   }
   const [fetchingFulltext, setFetchingFulltext] = useState(false);
   const ftPollRef = useRef(null);
-  // Review-fleet (Phase 2): pre-decide a reading verdict for the top-N picks in
-  // the background, then attach it to queue rows as `proposed_verdict` so each
-  // surfaces a Confirm/Override card. Status mirrors the deep-review poll pattern.
-  const [fleetStatus, setFleetStatus] = useState({
-    status: 'idle', completed: 0, total: 0, proposed: 0,
-    skipped_no_fulltext: 0, failed: 0, error: null, progress: {},
-  });
-  const fleetPollRef = useRef(null);
   const [message, setMessage] = useState('');
   const [isError, setIsError] = useState(false);
 
@@ -179,31 +170,38 @@ export default function LibraryReadNext() {
   }, [zoteroReady]);
 
   // ------ Read-next queue load (Stage 2) ------
+  // Shared query + state-mapping (used by loadQueue AND the auto-review loop's
+  // streaming reloads), so both paths render identical meta. Search is always
+  // semantic (hybrid BM25 + embeddings + local reranker); the backend degrades to
+  // literal text match when the corpus is off.
+  const queueArgs = useCallback((force = false) => ({
+    includeRead, limit: QUEUE_LIMIT, refresh: force,
+    collection: selectedCollection, tag: selectedTag, search, semantic: true,
+  }), [includeRead, selectedCollection, selectedTag, search]);
+
+  const applyQueueData = useCallback((data) => {
+    setQueue(data?.items || []);
+    setQueueMeta({
+      read_hidden: data?.read_hidden || 0,
+      total_unread: data?.total_unread || 0,
+      status: data?.status || 'ready',
+      model_ready: data?.model_ready !== false,
+      error: data?.error || null,
+      computed_at: data?.computed_at || null,
+      scores_stale: Boolean(data?.scores_stale),
+      distribution: data?.distribution || null,
+      semantic: Boolean(data?.semantic),
+      reranker_loading: Boolean(data?.reranker_loading),
+      semantic_unavailable: Boolean(data?.semantic_unavailable),
+    });
+  }, []);
+
   const loadQueue = useCallback(async (force = false) => {
     setQueueLoading(true);
     setQueueErr(null);
     try {
-      const data = await fetchReadingQueue({
-        includeRead, limit: QUEUE_LIMIT, refresh: force,
-        collection: selectedCollection, tag: selectedTag, search,
-        // Search is always semantic (hybrid BM25 + embeddings + local reranker);
-        // the backend degrades to literal text match when the corpus is off.
-        semantic: true,
-      });
-      setQueue(data?.items || []);
-      setQueueMeta({
-        read_hidden: data?.read_hidden || 0,
-        total_unread: data?.total_unread || 0,
-        status: data?.status || 'ready',
-        model_ready: data?.model_ready !== false,
-        error: data?.error || null,
-        computed_at: data?.computed_at || null,
-        scores_stale: Boolean(data?.scores_stale),
-        distribution: data?.distribution || null,
-        semantic: Boolean(data?.semantic),
-        reranker_loading: Boolean(data?.reranker_loading),
-        semantic_unavailable: Boolean(data?.semantic_unavailable),
-      });
+      const data = await fetchReadingQueue(queueArgs(force));
+      applyQueueData(data);
       if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null; }
       // Background scoring in progress → poll the CHEAP status endpoint (no
       // whole-library Zotero read) and reload ONCE when it finishes. (The old
@@ -231,7 +229,7 @@ export default function LibraryReadNext() {
     } finally {
       setQueueLoading(false);
     }
-  }, [includeRead, selectedCollection, selectedTag, search]);
+  }, [queueArgs, applyQueueData]);
 
   useEffect(() => {
     if (zoteroReady) loadQueue();
@@ -349,57 +347,15 @@ export default function LibraryReadNext() {
     }).catch(() => { ftPollRef.current = setTimeout(pollFulltext, 6000); });  // transient — keep polling
   }
 
-  // ------ Review fleet: pre-decide the top-N reading verdicts (background) ------
-  // Single-flight on the server; we poll the cheap status every 3s (deep-review
-  // pattern) and reload the queue ONCE when it finishes so the new
-  // `proposed_verdict` rows render their Confirm/Override cards.
-  const pollFleet = useCallback(() => {
-    if (fleetPollRef.current) { clearTimeout(fleetPollRef.current); fleetPollRef.current = null; }
-    fleetPollRef.current = setTimeout(async () => {
-      let s;
-      try {
-        s = await fetchReviewFleetStatus();
-      } catch {
-        pollFleet();  // transient — keep waiting, don't false-finish
-        return;
-      }
-      setFleetStatus(s);
-      if (s.status === 'running') pollFleet();
-      else loadQueue(false);  // done → one reload picks up the proposals
-    }, 3000);
-  }, [loadQueue]);
-
-  async function handleRunFleet() {
-    setMessage('');
-    try {
-      const s = await runReviewFleet({ topK: 5 });
-      setFleetStatus(s);
-      if (s.status === 'running') pollFleet();
-      else loadQueue(false);
-    } catch (err) {
-      setFleetStatus({ status: 'error', completed: 0, total: 0, error: err.message || String(err) });
-    }
-  }
-
-  // Reflect an already-running fleet on mount so the button doesn't silently
-  // no-op (single-flight, one run at a time).
-  useEffect(() => {
-    if (!zoteroReady) return undefined;
-    let cancelled = false;
-    (async () => {
-      try {
-        const s = await fetchReviewFleetStatus();
-        if (cancelled) return;
-        if (s.status === 'running') { setFleetStatus(s); pollFleet(); }
-      } catch {
-        /* advisory probe — ignore; the Run path surfaces real errors */
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (fleetPollRef.current) { clearTimeout(fleetPollRef.current); fleetPollRef.current = null; }
-    };
-  }, [zoteroReady, pollFleet]);
+  // ------ "Review cool papers" auto-review loop ------
+  // The fleet orchestration — pin the cool keys, dedup via an attempted-ledger, drain
+  // a foreign prewarm, settle a Stop honestly, resume a running fleet on mount — lives
+  // in a unit-tested hook (`useReviewCoolLoop`), so this page only wires its queue in.
+  const {
+    fleetStatus, autoReview, coolUndecided, handleReviewCool, stopReviewCool,
+  } = useReviewCoolLoop({
+    queue, queueArgs, applyQueueData, loadQueue, zoteroReady, setMessage, setIsError,
+  });
 
   // One-click Zotero export chain (Tesler: the system owns the rescore→tags→
   // ranks sequence the user previously had to remember and order correctly):
@@ -620,7 +576,11 @@ export default function LibraryReadNext() {
         <Section label="Review queue">
           <PredictionsBar
             fleetStatus={fleetStatus}
-            onRun={handleRunFleet}
+            onRun={handleReviewCool}
+            onStop={stopReviewCool}
+            autoActive={autoReview.active}
+            stopping={autoReview.stopping}
+            coolCount={coolUndecided}
             proposedCount={proposedCount}
           />
           <div className="mt-3">

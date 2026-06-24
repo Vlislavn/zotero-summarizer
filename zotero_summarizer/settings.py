@@ -45,6 +45,8 @@ class Settings:
     corpus_db_path: Path
     golden_csv_path: Path
     golden_jsonl_path: Path
+    # Append-only agentic interaction log (immutable human-decision trajectory).
+    interaction_log_path: Path
     faithbench_dir: Path
     paper_render_dir: Path
     # App-owned browser profile for university institutional access (persistent
@@ -86,6 +88,7 @@ class Settings:
             corpus_db_path=data_dir / "corpus_cache.db",
             golden_csv_path=data_dir / "zotero-summarizer-golden.csv",
             golden_jsonl_path=data_dir / "zotero-summarizer-golden.jsonl",
+            interaction_log_path=data_dir / "interaction-events.jsonl",
             faithbench_dir=data_dir / "faithbench",
             paper_render_dir=data_dir / "paper_render",
             browser_profile_dir=data_dir / "browser_profile",

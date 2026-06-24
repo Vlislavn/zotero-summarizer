@@ -19,5 +19,5 @@
 zotero_summarizer/services/faithbench/_judge.py:236:slop/too-many-params    # judge_claim — kw-only judge entry
 zotero_summarizer/services/faithbench/_judge.py:296:slop/function-too-long  # judge_run orchestrator
 zotero_summarizer/services/faithbench/_judge.py:296:slop/too-many-params    # judge_run orchestrator
-zotero_summarizer/services/faithbench/_runner.py:201:slop/function-too-long # run_benchmark orchestrator
-zotero_summarizer/services/faithbench/_runner.py:201:slop/too-many-params   # run_benchmark orchestrator
+zotero_summarizer/services/faithbench/_runner.py:196:slop/function-too-long # run_benchmark orchestrator
+zotero_summarizer/services/faithbench/_runner.py:196:slop/too-many-params   # run_benchmark orchestrator

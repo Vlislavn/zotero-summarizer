@@ -297,7 +297,10 @@ async def apply_pending_changes(req: PendingChangeMutationRequest) -> dict[str, 
             "requires_force": True,
         }
 
-    changes = await asyncio.to_thread(triage_db.get_pending_changes_by_ids, req.change_ids, ChangeStatus.PENDING.value)
+    # retry re-applies FAILED rows via the SAME writer path (success → APPLIED,
+    # failure → FAILED again); the default applies PENDING rows.
+    source_status = ChangeStatus.FAILED.value if req.retry else ChangeStatus.PENDING.value
+    changes = await asyncio.to_thread(triage_db.get_pending_changes_by_ids, req.change_ids, source_status)
     if not changes:
         return {"applied": 0, "failed": 0, "backup_path": None, "failed_items": []}
 

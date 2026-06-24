@@ -59,6 +59,26 @@ export const ANNOTATE_HINT_TEXT =
   + '(keys 1–4 · j/k to move between papers) on papers you’ve read. Your verdict '
   + 'becomes ground truth: it retrains the model and is mirrored to Zotero as a note.';
 
+// Active-learning order for the border (uncertain-picks) list: surface the most
+// decision-worthy papers FIRST — the ones where the model's current label and its
+// prediction DISAGREE (a 'conflict' flag, the highest-value labels), then the rest
+// closest to the decision boundary (smallest `border_distance` = least certain).
+// Stable, so equal-rank items keep the backend's order. Pure → unit-testable
+// without the network. The backend returns these unordered; labeling the most
+// uncertain first is what makes active learning pay off per click.
+export function sortBorderByUncertainty(items) {
+  const rank = (it) => {
+    const conflict = Array.isArray(it.flags) && it.flags.includes('conflict') ? 0 : 1;
+    const dist = typeof it.border_distance === 'number' ? it.border_distance : Number.POSITIVE_INFINITY;
+    return [conflict, dist];
+  };
+  return [...(items || [])].sort((a, b) => {
+    const [ca, da] = rank(a);
+    const [cb, db] = rank(b);
+    return ca - cb || da - db;
+  });
+}
+
 export function FilterChip({ active, onClick, children, activeCls }) {
   return (
     <button
@@ -75,14 +95,10 @@ export function FilterChip({ active, onClick, children, activeCls }) {
   );
 }
 
-export function ErrorBanner({ error, title = 'Error' }) {
-  if (!error) return null;
-  return (
-    <div className="my-2 p-2 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800">
-      <span className="font-semibold">{title}:</span> {error.message || String(error)}
-    </div>
-  );
-}
+// ErrorBanner now lives in components/library/shared.jsx (single source, runs
+// values through humanizeError); re-exported so AnnotationVerdict.jsx's import
+// keeps resolving.
+export { ErrorBanner } from '../components/library/shared.jsx';
 
 // Above the verdict buttons: tells the user whether their verdict is being
 // used as ground truth for retraining (Phase 1.18 "Used as GT" surfacing).

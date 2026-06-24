@@ -22,8 +22,9 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from zotero_summarizer.models import GoalSummary
-from zotero_summarizer.services.faithbench._corpus import chunk_text, tokenize
+from zotero_summarizer.services.faithbench._corpus import chunk_text
 from zotero_summarizer.services.library._grounding import quote_is_grounded
+from zotero_summarizer.storage.corpus_bm25 import tokenize
 from zotero_summarizer.services.library._search import _rrf
 from zotero_summarizer.services.model.reranker import get_reranker
 

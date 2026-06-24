@@ -11,7 +11,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Iterator
 
-from zotero_summarizer.domain import ChangeStatus, EXPLICIT_FEEDBACK_SIGNALS, READING_PRIORITY_SORT_RANK
+from zotero_summarizer.domain import ChangeStatus, READING_PRIORITY_SORT_RANK
 from zotero_summarizer.settings import default_project_root
 
 LOGGER = logging.getLogger("zotero_summarizer.db")
@@ -22,11 +22,11 @@ LOGGER = logging.getLogger("zotero_summarizer.db")
 # thereafter, so plain reads from the feed daemon / API threads are safe.
 DB_PATH = default_project_root() / "data" / "triage_history.db"
 
-# Per-context path override. Used by ``TriageRepository`` and ``with_db_path`` to
-# point the no-arg ``_get_conn`` at a different DB *without* mutating the module
-# global. A ``ContextVar`` is isolated per thread and per asyncio task, so the
-# feed daemon, API worker threads, and triage tasks never clobber each other's
-# override (the old save/restore-on-a-global approach was racy).
+# Per-context path override. Used by ``with_db_path`` to point the no-arg
+# ``_get_conn`` at a different DB *without* mutating the module global. A
+# ``ContextVar`` is isolated per thread and per asyncio task, so the feed daemon,
+# API worker threads, and triage tasks never clobber each other's override (the
+# old save/restore-on-a-global approach was racy).
 _DB_PATH_OVERRIDE: ContextVar[Path | None] = ContextVar("triage_db_path_override", default=None)
 
 
@@ -42,61 +42,6 @@ def with_db_path(db_path: Path) -> Iterator[None]:
         yield
     finally:
         _DB_PATH_OVERRIDE.reset(token)
-
-
-class TriageRepository:
-    """Object-oriented facade over the SQLite triage store.
-
-    The module-level function API remains, but services/tests can depend on this
-    facade to bind storage to a specific DB path. The binding is applied through
-    a ``ContextVar`` (see :func:`with_db_path`), so it is concurrency-safe.
-    """
-
-    def __init__(self, db_path: Path | None = None) -> None:
-        self.db_path = db_path or DB_PATH
-
-    def _scoped(self, fn, *args: Any, **kwargs: Any):
-        with with_db_path(self.db_path):
-            return fn(*args, **kwargs)
-
-    def init(self) -> None:
-        self._scoped(init_db)
-
-    def insert_result(self, *args: Any, **kwargs: Any) -> None:
-        self._scoped(insert_result, *args, **kwargs)
-
-    def get_result_by_item_id(self, item_id: str, batch_id: str | None = None) -> dict[str, Any] | None:
-        return self._scoped(get_result_by_item_id, item_id, batch_id)
-
-    def insert_pending_changes(self, item_key: str, item_title: str, changes: list[dict[str, Any]]) -> int:
-        return self._scoped(insert_pending_changes, item_key, item_title, changes)
-
-    def get_pending_changes(self, status: str | None = ChangeStatus.PENDING.value, limit: int = 500) -> list[dict[str, Any]]:
-        return self._scoped(get_pending_changes, status, limit)
-
-    def get_pending_changes_by_ids(self, change_ids: list[int], status: str | None = None) -> list[dict[str, Any]]:
-        return self._scoped(get_pending_changes_by_ids, change_ids, status)
-
-    def set_pending_changes_status(
-        self,
-        change_ids: list[int],
-        status: str,
-        error_message: str | None = None,
-    ) -> int:
-        return self._scoped(set_pending_changes_status, change_ids, status, error_message)
-
-    def upsert_triage_job(self, job: dict[str, Any]) -> None:
-        self._scoped(upsert_triage_job, job)
-
-    def get_triage_job(self, job_id: str) -> dict[str, Any] | None:
-        return self._scoped(get_triage_job, job_id)
-
-    def list_triage_jobs(
-        self,
-        limit: int = 20,
-        statuses: list[str] | None = None,
-    ) -> list[dict[str, Any]]:
-        return self._scoped(list_triage_jobs, limit, statuses)
 
 
 _CREATE_BATCH_TABLE = """

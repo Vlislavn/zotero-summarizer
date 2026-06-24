@@ -17,14 +17,13 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import threading
-import time
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 from zotero_summarizer.domain import normalize_doi
+from zotero_summarizer.integrations._rate_limiter import RateLimiter
 from zotero_summarizer.integrations.openalex_cache import OpenAlexCache
 
 
@@ -64,25 +63,7 @@ class OpenAlexWork:
     abstract: str | None = None
 
 
-class _RateLimiter:
-    """Simple per-process token bucket: at most ``rate`` calls per second."""
-
-    def __init__(self, rate: int) -> None:
-        self._interval = 1.0 / rate
-        self._lock = threading.Lock()
-        self._last = 0.0
-
-    def acquire(self) -> None:
-        with self._lock:
-            now = time.monotonic()
-            wait = self._last + self._interval - now
-            if wait > 0:
-                time.sleep(wait)
-                now = time.monotonic()
-            self._last = now
-
-
-_RATE_LIMITER = _RateLimiter(_RATE_LIMIT_PER_SEC)
+_RATE_LIMITER = RateLimiter(_RATE_LIMIT_PER_SEC)
 
 
 class OpenAlexClient:

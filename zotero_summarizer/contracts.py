@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal
 
 
@@ -18,14 +18,3 @@ class PendingChange:
         "mark_feed_item_read",
     ]
     payload: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class TriageJob:
-    job_id: str
-    status: str
-    total: int
-    completed: int = 0
-    item_keys: list[str] = field(default_factory=list)
-    results: list[dict[str, Any]] = field(default_factory=list)
-    errors: list[dict[str, Any]] = field(default_factory=list)

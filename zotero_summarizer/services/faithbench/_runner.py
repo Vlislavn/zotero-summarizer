@@ -89,13 +89,8 @@ class RunPaths:
 def load_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
-    rows = []
     with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
-    return rows
+        return [json.loads(line) for line in f if line.strip()]
 
 
 def trial_key(row: dict[str, Any]) -> tuple[str, str, int]:

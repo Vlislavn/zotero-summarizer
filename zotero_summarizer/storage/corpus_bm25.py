@@ -25,7 +25,9 @@ LOGGER = logging.getLogger("zotero_summarizer.corpus_bm25")
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
-def _tokenize(text: str) -> list[str]:
+def tokenize(text: str) -> list[str]:
+    """Lowercase alphanumeric tokens — the single tokenizer shared with the
+    faithbench corpus (``services/faithbench/_corpus.py`` re-exports it)."""
     return _TOKEN_RE.findall((text or "").lower())
 
 
@@ -82,7 +84,7 @@ class CorpusBM25:
                 " ".join(_parse_tags(r["tags_json"])),
             ))
             keys.append(str(r["item_id"]))
-            docs.append(_tokenize(text))
+            docs.append(tokenize(text))
         self._keys = keys
         self._version = version
         self._bm25 = BM25Okapi(docs) if (BM25Okapi is not None and docs) else None
@@ -93,7 +95,7 @@ class CorpusBM25:
         """``{item_key: bm25 score}`` for ``candidate_keys``, top_k by score.
         Empty when rank_bm25 is unavailable, the corpus is empty, the query has no
         tokens, or no candidate scores positive."""
-        q_tokens = _tokenize(query)
+        q_tokens = tokenize(query)
         if not q_tokens or not candidate_keys:
             return {}
         with self._lock:

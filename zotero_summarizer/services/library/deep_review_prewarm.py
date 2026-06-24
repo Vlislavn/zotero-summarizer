@@ -49,10 +49,11 @@ def _select_uncached_top(k: int) -> list[str]:
     that do NOT yet have a cached deep review — the only ones worth computing."""
     queue = reading_queue.build_reading_queue(limit=max(1, k))
     rows = (queue.get("items") or [])[:k]
+    cached = deep_review.cached_review_keys()  # one cache read, not one-per-row
     return [
         key
         for row in rows
-        if (key := str(row.get("item_key") or "")) and deep_review.get_cached_review(key) is None
+        if (key := str(row.get("item_key") or "")) and key not in cached
     ]
 
 

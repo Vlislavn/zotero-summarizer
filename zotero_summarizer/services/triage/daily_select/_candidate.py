@@ -23,6 +23,7 @@ import json
 import math
 from typing import Any
 
+from zotero_summarizer.services._common import LOGGER
 from zotero_summarizer.services.model.rank_blend import blend_scores
 
 
@@ -260,6 +261,9 @@ def make_candidate(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": int(row_id),
         "item_key": _row_item_key(row),
+        # The library item.key written at materialization — the join handle to the
+        # deep_review cache (feed GUID can't key it). None until materialized.
+        "materialized_zotero_key": row.get("materialized_zotero_key"),
         "title": str(row.get("title") or ""),
         "decision": str(row.get("decision") or ""),
         "composite_score": composite_f,
@@ -306,6 +310,40 @@ def dedup_keep_newest(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(grouped.values())
 
 
+def attach_quality_from_reviews(candidates: list[dict[str, Any]]) -> int:
+    """The GUID↔item_key BRIDGE: populate each candidate's ``quality`` from the
+    deep-review cache via its ``materialized_zotero_key`` (the library key = the
+    deep_reviews.json key — the feed GUID cannot join the library-keyed cache).
+
+    One cache read for the whole cohort (lazy cross-domain import). Returns the
+    number of candidates matched. The slate then floats high-quality model picks
+    up (``_allocation._pick_model``) and renders the quality chip. Emits a LOUD
+    warning when reviews exist and some candidates carry a materialized key yet
+    NONE match — the v1 trap was a silently always-0 join, never surface that as
+    'no quality'."""
+    from zotero_summarizer.services.library import deep_review  # lazy cross-domain read
+
+    reviews = deep_review._read_all()
+    materialized = 0
+    matched = 0
+    for cand in candidates:
+        key = (cand.get("materialized_zotero_key") or "").strip()
+        if not key:
+            continue
+        materialized += 1
+        entry = reviews.get(key)
+        if entry is None:
+            continue
+        cand["quality"] = entry.get("quality") or {}
+        matched += 1
+    if reviews and materialized and not matched:
+        LOGGER.warning(
+            "deep-review quality bridge matched 0/%d materialized candidates against "
+            "%d cached reviews — GUID↔item_key join may be broken", materialized, len(reviews),
+        )
+    return matched
+
+
 def attach_rank_scores(candidates: list[dict[str, Any]]) -> None:
     """Overwrite each candidate's ``rank_score`` IN PLACE with the shared
     relevance × goal × prestige blend (``services/model/rank_blend``) — the
@@ -331,6 +369,7 @@ __all__ = [
     "shap_top3",
     "make_candidate",
     "dedup_keep_newest",
+    "attach_quality_from_reviews",
     "attach_rank_scores",
     "row_corpus_affinity",
     "row_goal_sim",

@@ -29,6 +29,22 @@ def state() -> Any:
     return get_context().state
 
 
+def band_primary_enabled() -> bool:
+    """Order-time deep-review QUALITY mode, shared by BOTH rank consumers (the
+    Library queue ``_ranking`` and the Today slate allocator): grade-only (default
+    — the shipped, measured behaviour) vs band-primary (highlight ↑ / flag ↓;
+    neutral & uncertain → exactly 0.0), a Phase-2-MEASURED arm. Config
+    ``quality_review.quality_band_primary``, overridden by ``ZS_QUALITY_BAND_PRIMARY``.
+    Optional-feature boundary: no config / no state → the grade-only default."""
+    env = os.environ.get("ZS_QUALITY_BAND_PRIMARY")
+    if env is not None:
+        return env.strip().lower() in ("1", "true", "yes", "on")
+    app_state = getattr(state(), "app_state", None)
+    config = getattr(app_state, "config", None) if app_state is not None else None
+    qr = getattr(config, "quality_review", None) if config is not None else None
+    return bool(getattr(qr, "quality_band_primary", False))
+
+
 def effective_llm_concurrency(provider: ProviderConfig | None, item_count: int) -> int:
     """Worker count for a per-item LLM fan-out, conditional on the provider.
 

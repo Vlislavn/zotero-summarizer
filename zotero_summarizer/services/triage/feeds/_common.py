@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -109,6 +110,33 @@ def _infer_item_type(feed_item: dict[str, Any]) -> str:
     if "arxiv" in feed_name or "preprint" in feed_name:
         return "preprint"
     return "journalArticle"
+
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+# A publisher RSS "abstract" that is only a publication notice, e.g. Nature's
+# "Nature, Published online: 17 June 2026; doi:10.1038/s41586-026-10764-5".
+_PUB_NOTICE_RE = re.compile(r"published online[:;].*?doi:\s*\S+", re.IGNORECASE | re.DOTALL)
+
+
+def _has_usable_abstract(item: dict[str, Any], *, min_chars: int = 120) -> bool:
+    """True when the feed item carries real abstract prose for the gate to score.
+
+    Prestige-journal RSS (Nature/Science/Cell/NEJM/Annals) ships only a
+    publication notice + the title repeated — non-empty, but with no content
+    for the gate's abstract-derived features (``abstract_log_len``,
+    ``semantic_match_specter2``), which then sink the paper to ``dont_read``.
+    Strip HTML, the notice, and the title; if fewer than ``min_chars`` of prose
+    remain, the abstract is not usable and the item is a rescue candidate.
+
+    ponytail: a length heuristic, not a per-publisher parser. Tighten with a
+    notice allow-list only if a genuinely short real abstract gets flagged.
+    """
+    text = _HTML_TAG_RE.sub(" ", item.get("abstract") or "")
+    text = _PUB_NOTICE_RE.sub(" ", text)
+    title = (item.get("title") or "").strip()
+    if title:
+        text = text.replace(title, " ")
+    return len(" ".join(text.split())) >= min_chars
 
 
 def _safe_dict(value: Any) -> dict[str, Any]:

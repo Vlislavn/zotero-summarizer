@@ -195,6 +195,18 @@ export default function Settings() {
           <Button type="submit" disabled={saving || !isDirty}>
             {saving ? 'Saving…' : 'Save changes'}
           </Button>
+          {/* A way out (Tesler): revert every edit to the last-saved config without a
+              page reload. Only offered while dirty — resets the form to its baseline. */}
+          {isDirty && !saving && (
+            <button
+              type="button"
+              onClick={() => setForm(seededFormState)}
+              className="text-xs px-2.5 py-1 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100"
+              title="Discard your unsaved edits and revert to the last-saved settings."
+            >
+              Discard
+            </button>
+          )}
           {saveError ? (
             <span className="text-xs text-rose-700">Save failed: {saveError}</span>
           ) : isDirty && !saving ? (

@@ -21,6 +21,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from zotero_summarizer.api.errors import APIError
+from zotero_summarizer.services import interaction_log
 from zotero_summarizer.services.triage import daily_actions, daily_select
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.storage import feeds as feeds_storage
@@ -416,6 +417,11 @@ async def submit_daily_verdict(body: DailyVerdictRequest) -> dict[str, Any]:
         original_derived_priority=derived,
         user_priority=body.user_priority,
         comment=body.comment,
+    )
+    interaction_log.log_feed_decision(
+        row=row, item_key=golden_key, surface="today_priority",
+        model_priority=derived, comment=body.comment,
+        human={"kind": "priority", "value": body.user_priority},
     )
     return {"id": row_id, "item_key": golden_key}
 

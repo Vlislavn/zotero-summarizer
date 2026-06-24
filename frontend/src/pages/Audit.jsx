@@ -9,6 +9,8 @@ import {
 import VerdictPicker from '../components/VerdictPicker.jsx';
 import { pretty } from '../utils/priorityLabels.js';
 import { humanizeError } from '../utils/humanizeError.js';
+import { StatusBanner } from '../components/library/shared.jsx';
+import { formatPercent } from './triageHelpers.js';
 
 // Re-label Audit page — port of the `activeTab === 'audit'` block from
 // zotero_summarizer/web/ui.html. Functional parity with the Alpine version:
@@ -17,31 +19,9 @@ import { humanizeError } from '../utils/humanizeError.js';
 // the workflow is a strict request-response sequence (init -> next -> submit
 // -> next -> ... -> metrics) and React Query's caching offers no value.
 
-function StatusBanner({ message, isError }) {
-  if (!message) return null;
-  if (isError) {
-    return (
-      <div className="my-2 p-2 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800">
-        {message}
-      </div>
-    );
-  }
-  return (
-    <div className="my-2 p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800">
-      {message}
-    </div>
-  );
-}
-
 function formatNumber(value, digits = 3) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return 'n/a';
   return Number(value).toFixed(digits);
-}
-
-function formatPercent(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return 'n/a';
-  return `${Math.round(n * 100)}%`;
 }
 
 export default function Audit() {
@@ -189,6 +169,25 @@ export default function Audit() {
               <span className="font-semibold">Seed:</span> <span>{session.seed}</span>
             </div>
           </div>
+          {/* Goal-Gradient: a visible answered/target bar so the blind re-label run
+              shows how far along it is at a glance, not just two raw counts. */}
+          {Number(session.sample_size_actual) > 0 && (
+            <div
+              className="mt-3"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={Number(session.sample_size_actual)}
+              aria-valuenow={Number(session.answered) || 0}
+              aria-label="Audit progress"
+            >
+              <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-teal-500 transition-all"
+                  style={{ width: `${Math.min(100, Math.round(((Number(session.answered) || 0) / Number(session.sample_size_actual)) * 100))}%` }}
+                />
+              </div>
+            </div>
+          )}
           {session.by_age_bucket && (
             <div className="mt-2 text-xs text-slate-600">
               By age bucket:{' '}

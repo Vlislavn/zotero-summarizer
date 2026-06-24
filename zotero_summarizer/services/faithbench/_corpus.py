@@ -26,10 +26,11 @@ from zotero_summarizer.services.faithbench._constants import (
     CHUNK_OVERLAP,
     MIN_PAPER_CHARS,
 )
+from zotero_summarizer.storage.corpus_bm25 import tokenize  # the single word tokenizer (used by PaperChunkIndex)
 
 LOGGER = logging.getLogger(__name__)
 
-_TOKEN_RE = re.compile(r"[a-z0-9]+")  # same tokenizer as storage/corpus_bm25.py
+_TOKEN_RE = re.compile(r"[a-z0-9]+")  # normalize_text only; word tokens live in storage.corpus_bm25.tokenize
 _ARTICLES = frozenset({"a", "an", "the"})
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
@@ -37,10 +38,6 @@ _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 # ---------------------------------------------------------------------------
 # Normalization (SQuAD-style) — shared by build gate and judge hard checkers
 # ---------------------------------------------------------------------------
-
-
-def tokenize(text: str) -> list[str]:
-    return _TOKEN_RE.findall((text or "").lower())
 
 
 def normalize_text(text: str) -> str:

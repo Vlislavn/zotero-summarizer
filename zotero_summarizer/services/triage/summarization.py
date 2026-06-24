@@ -165,26 +165,16 @@ def run_abstract_pipeline(
 
 
 def _abstract_only_empty_response(reason: str) -> SummarizeResponse:
+    # Only the non-default fields; the rest fall back to SummarizeResponse defaults.
     return SummarizeResponse(
         executive_summary=reason,
         should_deep_read="No.",
-        key_sections_to_read=[],
-        relevance_to_research="",
-        controversial_points="",
-        industry_academy_impact="",
-        unknown_unknowns="",
-        implementation_quickstart="",
-        key_findings=[],
-        methods="",
-        limitations="",
         relevance_score=1,
         composite_relevance_score=1.0,
         reading_priority=ReadingPriority.DONT_READ.value,
         tags=["abstract_missing"],
         triage_rationale=reason,
-        triage_dimensions=None,
         triage_confidence=0.5,
-        corpus_affinity_score=0.0,
     )
 
 
@@ -196,21 +186,12 @@ def _fast_reject_response(
     return SummarizeResponse(
         executive_summary=summary_seed,
         should_deep_read="No. Low corpus affinity against your engaged library.",
-        key_sections_to_read=[],
         relevance_to_research="Fast-rejected by corpus similarity pre-filter.",
-        controversial_points="",
-        industry_academy_impact="",
-        unknown_unknowns="",
-        implementation_quickstart="",
-        key_findings=[],
-        methods="",
-        limitations="",
         relevance_score=1,
         composite_relevance_score=1.0,
         reading_priority=ReadingPriority.DONT_READ.value,
         tags=["prefilter_low_corpus_affinity"],
         triage_rationale="Corpus affinity was below threshold; paper likely does not match your engaged library profile.",
-        triage_dimensions=None,
         triage_confidence=0.9,
         corpus_affinity_score=float(corpus_context.get("affinity_score", 0.0)),
         corpus_positive_similarity=float(corpus_context.get("positive_similarity", 0.0)),

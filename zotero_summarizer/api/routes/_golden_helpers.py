@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from zotero_summarizer.services import interaction_log
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.golden import label_provenance
 from zotero_summarizer.services.library import review_detail as review_detail_svc
@@ -89,6 +90,32 @@ def _append_verdict_golden(item_key: str, priority: str, comment: str) -> None:
         year=str(payload.get("year") or ""),
         doi=str(payload.get("doi") or ""),
         comment=comment,
+    )
+
+
+def log_verdict_event(item_key: str, original: str, user_priority: str, comment: str) -> None:
+    """Append the annotate-verdict human-feedback event (model's derived priority
+    + the human's label) to the agentic interaction log."""
+    interaction_log.log_human_feedback(
+        item_key=item_key,
+        item_key_kind=interaction_log.key_kind(item_key),
+        surface="annotate_verdict",
+        model={"priority": original},
+        human={"kind": "priority", "value": user_priority},
+        comment=comment,
+    )
+
+
+def log_retract_event(item_key: str, prior: dict[str, Any]) -> None:
+    """Append the verdict-DELETE retraction event — the trajectory the
+    UPSERT/DELETE ``label_verdicts`` table erases. ``prior`` is the row read
+    BEFORE the delete (its model/human pair is gone afterwards)."""
+    interaction_log.log_human_feedback(
+        item_key=item_key,
+        item_key_kind=interaction_log.key_kind(item_key),
+        surface="annotate_retract",
+        model={"priority": prior["original_derived_priority"]},
+        human={"kind": "retract", "value": prior["user_priority"]},
     )
 
 

@@ -32,7 +32,7 @@ LAYER_RULES: list[tuple[str, tuple[str, ...]]] = [
 ]
 
 SHARED_SERVICE_MODULES = {
-    "_common", "_adapters", "lifecycle", "run_log",
+    "_common", "_adapters", "lifecycle", "run_log", "interaction_log",
     "config", "health", "readiness", "results", "corpus", "emoji_signals", "__init__",
 }
 SERVICE_DOMAINS = ("model", "golden", "triage", "library", "zotero")

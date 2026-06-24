@@ -28,12 +28,13 @@ from zotero_summarizer.services._common import now_iso_z, write_json_atomic
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.library import _flight
 from zotero_summarizer.services._common import state as get_state
-from zotero_summarizer.services.emoji_signals import ALL_EMOJIS, HARD_VETO_EMOJIS
 from zotero_summarizer.services.library._ranking import (  # noqa: F401 — re-export the seam
     _blended_sort,
+    _build_recs,
     _content_key,
     _dedup_by_content,
     _goal_affinity,
+    _order_and_dedup,
     sort_unread,
 )
 from zotero_summarizer.services.library._score_distribution import (
@@ -42,9 +43,6 @@ from zotero_summarizer.services.library._score_distribution import (
     prestige_floor,
     score_distribution as _score_distribution,
 )
-
-# "Read / handled" = engaged-with (any signal emoji) or vetoed.
-_HANDLED_EMOJIS: frozenset[str] = frozenset(ALL_EMOJIS) | HARD_VETO_EMOJIS
 
 _CACHE_FILENAME = "reading_queue.json"
 
@@ -97,11 +95,6 @@ run_in_background = _flight.run_in_background
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-
-def _is_read(tags: list[str]) -> bool:
-    return any(tag in _HANDLED_EMOJIS for tag in tags)
 
 
 def _reader():
@@ -393,69 +386,20 @@ def build_reading_queue(
         _read_cache_with_meta(gate_sha) if model_ready else ({}, None, False)
     )
     verdict_priority = _verdict_priorities()
-    # Review-fleet sidecar — display-only SUGGESTION per row, never fed to the hide/pin logic below.
+    # Two display-only sidecars merged into each row (never fed to the hide/pin
+    # logic): the review-fleet verdict SUGGESTION + deep-review quality (which also
+    # drives a bounded sort lift + the "quality papers" client filter).
     from zotero_summarizer.services.library.review_fleet import verdict_store  # lazy: it imports us
-    proposed_verdicts = verdict_store.read_all()
-    # Deep-review quality per row (one cache read) — display + a bounded quality lift
-    # in the sort + the "quality papers" client filter. Display-only, like the verdict.
     from zotero_summarizer.services.library import deep_review as _dr  # lazy: it imports us
-    reviews = _dr._read_all()
 
-    unread: list[dict[str, Any]] = []
-    read: list[dict[str, Any]] = []
-    for it in rows:
-        tags = it.get("tags") or []
-        is_read = _is_read(tags)
-        user_priority = verdict_priority.get(it["item_key"], "")
-        # "Handled" = engaged (emoji) OR explicitly rejected (dont_read verdict).
-        # A POSITIVE verdict is a reading intent — the paper stays visible and
-        # pins to the top (``_ranking.sort_unread``) instead of being hidden.
-        handled = is_read or user_priority == "dont_read"
-        entry = cached.get(it["item_key"])
-        prestige_score, prestige_known = _entry_prestige(entry)
-        qual = (reviews.get(it["item_key"]) or {}).get("quality") or {}
-        rec = {
-            "item_key": it["item_key"],
-            "title": it.get("title") or "",
-            "authors": it.get("authors") or "",
-            "reading_priority": it.get("reading_priority") or "",
-            "user_priority": user_priority,
-            "has_pdf": bool(it.get("has_pdf")),
-            "date_added": it.get("date_added") or "",
-            "read": is_read,
-            "relevance_score": entry["relevance_score"] if entry else None,
-            "why_reason": entry["why_reason"] if entry else None,
-            "prestige_score": prestige_score,
-            "prestige_known": prestige_known,
-            "proposed_verdict": proposed_verdicts.get(it["item_key"]),
-            "quality_grade": qual.get("grade") or None,
-            "quality_band": qual.get("quality_band") or None,
-        }
-        if handled:
-            read.append(rec)
-        else:
-            unread.append(rec)
-
-    # "Meaning" search: hybrid (BM25 + dense + cross-encoder rerank) re-ranks the
-    # unread set and replaces it with the ranked top-N — order only, scores/banding
-    # untouched. Falls back to the normal order when the corpus is off / no match.
-    search_flags: dict[str, Any] = {}
-    if semantic_requested:
-        from zotero_summarizer.services.library import _search
-        unread, search_flags = _search.order_unread_semantic(search, unread)
-    if not search_flags.get("semantic"):
-        # Normal queue order (goal-blended when the gate is ready; else recency).
-        sort_unread(unread, model_ready=model_ready)
-
-    # Collapse duplicate library items (same paper imported twice) AFTER the sort
-    # so the best-scored copy survives — duplicates were wasting top slots.
-    unread = _dedup_by_content(unread)
-    # Dedup `read` too, AND drop any read copy whose paper already survives in
-    # `unread` — otherwise a paper with one read + one unread copy would show in
-    # BOTH lists under include_read (now routine with the whole-library read). The
-    # actionable unread copy wins; titleless rows (empty key) are never merged.
-    _unread_keys = {k for r in unread if (k := _content_key(r))}
-    read = [r for r in _dedup_by_content(read) if _content_key(r) not in _unread_keys]
+    unread, read = _build_recs(
+        rows, cached=cached, verdict_priority=verdict_priority,
+        reviews=_dr._read_all(), proposed_verdicts=verdict_store.read_all(),
+    )
+    unread, read, search_flags = _order_and_dedup(
+        unread, read, search=search, semantic_requested=semantic_requested,
+        model_ready=model_ready,
+    )
 
     # Compute ONLY on an explicit refresh (Rescore). A prior crash (last_error
     # set) is surfaced and not auto-retried — Rescore clears it.

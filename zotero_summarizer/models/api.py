@@ -116,6 +116,9 @@ class PendingChangesResponse(BaseModel):
 class PendingChangeMutationRequest(BaseModel):
     change_ids: List[int] = Field(..., min_length=1, max_length=1000)
     force: bool = False
+    # When True, apply re-attempts FAILED rows (instead of PENDING) via the same
+    # writer path — re-trying a failed Zotero write without re-queuing.
+    retry: bool = False
 
     @field_validator("change_ids")
     @classmethod

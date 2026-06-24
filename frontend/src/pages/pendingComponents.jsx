@@ -11,23 +11,9 @@ import { ActionBadge } from '../components/ui/Badge.jsx';
 // Pending.jsx to keep the page file under its LOC budget. No data fetching or
 // app state lives here — everything arrives via props from the page.
 
-// Inline success/error banner (status for the success path, alert for errors)
-// so screen readers announce apply/reject outcomes.
-export function StatusBanner({ message, isError }) {
-  if (!message) return null;
-  const cls = isError
-    ? 'bg-rose-50 border-rose-200 text-rose-800'
-    : 'bg-emerald-50 border-emerald-200 text-emerald-800';
-  return (
-    <div
-      role={isError ? 'alert' : 'status'}
-      aria-live="polite"
-      className={`my-2 p-2 rounded-lg border text-xs ${cls}`}
-    >
-      {message}
-    </div>
-  );
-}
+// StatusBanner now lives in components/library/shared.jsx (single source);
+// re-exported here so Pending.jsx's existing import keeps resolving.
+export { StatusBanner } from '../components/library/shared.jsx';
 
 // Per-change inline draft editor. Three shapes keyed off change_type:
 // tag_changes (add/remove tag inputs), add/remove_from_collection (a collection
@@ -177,6 +163,7 @@ export function ChangeGroup({
   flatCollections,
   saving,
   onSaveEdit,
+  onRetry,
 }) {
   return (
     <div
@@ -222,6 +209,17 @@ export function ChangeGroup({
                 )}
                 {change.error_message && (
                   <div className="text-[11px] text-rose-700 mt-1">{change.error_message}</div>
+                )}
+                {/* Retry is the one affordance for a FAILED row — re-apply via the
+                    same writer path without re-queuing (Hick's Law: one button). */}
+                {change.status === 'failed' && onRetry && (
+                  <button
+                    type="button"
+                    onClick={() => onRetry(change)}
+                    className="mt-1.5 px-2 py-1 rounded text-[11px] font-semibold bg-rose-600 text-white hover:bg-rose-700"
+                  >
+                    Retry
+                  </button>
                 )}
               </div>
             </label>

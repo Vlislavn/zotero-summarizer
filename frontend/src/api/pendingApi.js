@@ -32,11 +32,11 @@ export async function fetchPending({ status = 'pending', limit = 500 } = {}) {
   return request(`/api/pending?${qs.toString()}`);
 }
 
-/** POST /api/pending/apply { change_ids, force } */
-export async function applyPending(changeIds, { force = false } = {}) {
+/** POST /api/pending/apply { change_ids, force, retry } */
+export async function applyPending(changeIds, { force = false, retry = false } = {}) {
   return request('/api/pending/apply', {
     method: 'POST',
-    body: JSON.stringify({ change_ids: changeIds, force }),
+    body: JSON.stringify({ change_ids: changeIds, force, retry }),
   });
 }
 

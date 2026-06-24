@@ -155,6 +155,26 @@ def test_run_only_proposes_for_undecided_picks(monkeypatch):
     assert upserts == ["C", "D"]  # A (proposed) and B (labeled) skipped
 
 
+def test_explicit_item_keys_review_exactly_those_and_skip_selection(monkeypatch):
+    """``fleet.start(item_keys=…)`` pins the EXACT picks (the client's cool must/
+    should-read set) and never scans/selects the queue — so the fleet reviews the SAME
+    rows the UI counts, not the band-agnostic top-of-undecided ``_select_keys`` slice
+    that would review higher-blended could_read rows and bury the cool stragglers."""
+
+    def _must_not_build(**_k):
+        raise AssertionError("explicit item_keys must NOT scan/select the queue")
+
+    monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", _must_not_build)
+    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: _review())
+    monkeypatch.setattr(fleet.deep_review, "start", lambda **_k: None)
+    upserts: list = []
+    monkeypatch.setattr(fleet.verdict_store, "upsert", lambda key, prop: upserts.append(key))
+
+    out = fleet.start(item_keys=["Z9", "Y8", "X7"])
+    assert upserts == ["Z9", "Y8", "X7"]  # exactly the pinned keys, in order
+    assert out["total"] == 3 and out["proposed"] == 3 and out["status"] == "ready"
+
+
 # --- the cache MISS path: triggers a serial deep review, polls, re-reads -----------
 
 
@@ -364,6 +384,20 @@ def test_second_start_is_a_noop_while_running(monkeypatch):
 
     out = fleet.start(top_k=5)
     assert out["status"] == "running"  # the in-flight status, not a fresh run
+    assert out["accepted"] is False  # this call did NOT claim the slot (a foreign run holds it)
+
+
+def test_start_reports_accepted_true_when_it_claims_the_slot(monkeypatch):
+    """``accepted`` is the client's robust "did MY pinned keys run?" signal — True when
+    this call claimed the single-flight slot (vs a timestamp heuristic that can't tell a
+    prewarm firing AFTER the click apart from our own run)."""
+    monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: _queue("A"))
+    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: _review())
+    monkeypatch.setattr(fleet.deep_review, "start", lambda **_k: None)
+    monkeypatch.setattr(fleet.verdict_store, "upsert", lambda key, prop: None)
+
+    out = fleet.start(item_keys=["A"])
+    assert out["accepted"] is True
 
 
 def test_serial_runs_after_finish_are_allowed(monkeypatch):

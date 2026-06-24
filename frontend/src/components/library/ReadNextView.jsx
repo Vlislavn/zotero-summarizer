@@ -3,6 +3,7 @@ import InlineAnnotate from './InlineAnnotate.jsx';
 import ProposedVerdictCard from './ProposedVerdictCard.jsx';
 import ScoreHistogram from './ScoreHistogram.jsx';
 import { StatusBanner, formatShortDate, truncateAuthors } from './shared.jsx';
+import { CHIP_TONE, bandTone, gradeTone, BAND_LABEL } from '../paper/review/tones.js';
 import { isHighPrestige } from '../../utils/relevanceBands.js';
 import { humanizeError } from '../../utils/humanizeError.js';
 import Spinner from '../ui/Spinner.jsx';
@@ -284,6 +285,36 @@ export default function ReadNextView({
                           ◆ top author/venue
                         </span>
                       )}
+                      {/* The deep-review QUALITY cause for the lift — ONE word per
+                          card: the decisive verdict (Highlight/Flag) when present,
+                          else the A–D grade. "Quality", never "band" (band = the
+                          relevance tier). Reuses the shared review tones so a
+                          Highlight reads the same emerald everywhere. */}
+                      {(() => {
+                        const band = String(it.quality_band || '').toLowerCase();
+                        const grade = String(it.quality_grade || '').toUpperCase();
+                        if (band === 'highlight' || band === 'flag') {
+                          return (
+                            <span
+                              className={`inline-flex items-center px-1.5 py-0 rounded-full border font-semibold ${CHIP_TONE[bandTone(band)]}`}
+                              title="Deep-review quality verdict — floats high-quality papers up (and sinks weak ones) WITHIN their relevance band, never across it."
+                            >
+                              {BAND_LABEL[band]}
+                            </span>
+                          );
+                        }
+                        if (grade) {
+                          return (
+                            <span
+                              className={`inline-flex items-center px-1.5 py-0 rounded-full border font-semibold ${CHIP_TONE[gradeTone(grade)]}`}
+                              title="Full-text deep-review quality grade (A–D) — floats high-quality papers up within their relevance band."
+                            >
+                              {grade}
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()}
                     </span>
                   )}
                 </span>

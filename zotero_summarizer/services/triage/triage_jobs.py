@@ -7,7 +7,6 @@ import uuid
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError, ExtractionError
-from zotero_summarizer.contracts import TriageJob
 from zotero_summarizer.domain import EXPLICIT_FEEDBACK_SIGNALS, feedback_verdict_from_signal
 from zotero_summarizer.models import SummarizeRequest, TriageRunRequest, TriageRunResponse
 from zotero_summarizer.services.zotero import pending
@@ -24,40 +23,25 @@ TRIAGE_START_LOCK = asyncio.Lock()
 TRIAGE_JOB_CONCURRENCY: int | None = None
 
 
-class TriageJobService:
-    """State-independent helpers for triage job lifecycle data."""
-
-    @staticmethod
-    def new_job(item_keys: list[str], queue_changes: bool = True) -> dict[str, Any]:
-        normalized = unique_non_empty_strings(item_keys)
-        job_id = f"job_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
-        current_time = now_iso()
-        return {
-            "job_id": job_id,
-            "status": "running",
-            "started_at": current_time,
-            "updated_at": current_time,
-            "total": len(normalized),
-            "completed": 0,
-            "current_item_key": "",
-            "current_title": "",
-            "queue_changes": bool(queue_changes),
-            "item_keys": normalized,
-            "results": [],
-            "errors": [],
-        }
-
-    @staticmethod
-    def public_job(job: dict[str, Any]) -> TriageJob:
-        return TriageJob(
-            job_id=str(job.get("job_id") or ""),
-            status=str(job.get("status") or ""),
-            total=int(job.get("total") or 0),
-            completed=int(job.get("completed") or 0),
-            item_keys=[str(item) for item in job.get("item_keys") or []],
-            results=list(job.get("results") or []),
-            errors=list(job.get("errors") or []),
-        )
+def new_job(item_keys: list[str], queue_changes: bool = True) -> dict[str, Any]:
+    """A fresh in-memory triage-job record (state-independent lifecycle data)."""
+    normalized = unique_non_empty_strings(item_keys)
+    job_id = f"job_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+    current_time = now_iso()
+    return {
+        "job_id": job_id,
+        "status": "running",
+        "started_at": current_time,
+        "updated_at": current_time,
+        "total": len(normalized),
+        "completed": 0,
+        "current_item_key": "",
+        "current_title": "",
+        "queue_changes": bool(queue_changes),
+        "item_keys": normalized,
+        "results": [],
+        "errors": [],
+    }
 
 
 def _effective_concurrency(total_remaining: int) -> int:
@@ -310,7 +294,7 @@ async def run_triage_job(req: TriageRunRequest) -> TriageRunResponse:
                 details={"job_id": running_job_id},
             )
 
-        job = TriageJobService.new_job(req.item_keys, req.queue_changes)
+        job = new_job(req.item_keys, req.queue_changes)
         job_id = str(job["job_id"])
         app_state.triage_jobs[job_id] = job
         trim_job_cache(app_state.triage_jobs)

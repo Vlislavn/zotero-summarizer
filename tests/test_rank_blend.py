@@ -12,9 +12,12 @@ from __future__ import annotations
 import pytest
 
 from zotero_summarizer.services.model.rank_blend import (
+    DEFAULT_QUALITY_BAND_BONUS,
+    DEFAULT_QUALITY_BONUS,
     GOAL_BLEND_WEIGHT,
     PRESTIGE_BLEND_WEIGHT,
     blend_scores,
+    quality_bonus,
 )
 
 
@@ -116,3 +119,65 @@ def test_generalizes_to_slate_shaped_scales() -> None:
     slate_order = sorted(range(3), key=lambda i: -slate_keys[i])
     library_order = sorted(range(3), key=lambda i: -library_keys[i])
     assert slate_order == library_order
+
+
+# --- quality_bonus (shared pure helper, both consumers) ---------------------
+
+def test_quality_bonus_grade_only_is_the_shipped_default() -> None:
+    # use_band=False (the default) = the measured grade-only behaviour, band ignored.
+    assert quality_bonus("highlight", "A") == DEFAULT_QUALITY_BONUS["A"]
+    assert quality_bonus(None, "B") == DEFAULT_QUALITY_BONUS["B"]
+    assert quality_bonus("flag", "C") == 0.0
+    assert quality_bonus(None, "D") == DEFAULT_QUALITY_BONUS["D"]
+    assert quality_bonus(None, None) == 0.0   # unreviewed → no lift
+    assert quality_bonus(None, "Z") == 0.0    # unknown grade → no lift
+
+
+def test_quality_bonus_band_primary_floats_highlight_sinks_flag() -> None:
+    hi = quality_bonus("highlight", None, use_band=True)
+    flag = quality_bonus("flag", None, use_band=True)
+    assert hi > 0.0 > flag
+    assert hi == pytest.approx(DEFAULT_QUALITY_BAND_BONUS["highlight"])
+    assert flag == pytest.approx(DEFAULT_QUALITY_BAND_BONUS["flag"])
+
+
+def test_quality_bonus_neutral_and_uncertain_are_exactly_zero() -> None:
+    # The pinned safety invariant: uncertain is a self-consistency / human-look
+    # state, NOT a demotion — it (and neutral) must resolve to EXACTLY 0.0 even
+    # with a grade that would otherwise nudge negative, so borderline (clinical)
+    # papers are never buried.
+    for grade in ("A", "B", "C", "D", None):
+        assert quality_bonus("uncertain", grade, use_band=True) == 0.0
+        assert quality_bonus("neutral", grade, use_band=True) == 0.0
+    assert quality_bonus("", "D", use_band=True) == 0.0       # unreviewed band
+    assert quality_bonus("mystery", "A", use_band=True) == 0.0  # unknown band
+
+
+def test_quality_bonus_band_primary_precedence_over_grade() -> None:
+    # A flagged paper that happens to carry a high grade still nets negative —
+    # the band leads, the grade only nudges.
+    assert quality_bonus("flag", "A", use_band=True) < 0.0
+    # A highlight with a poor grade still nets positive.
+    assert quality_bonus("highlight", "D", use_band=True) > 0.0
+
+
+def test_quality_bonus_grade_is_a_secondary_nudge_within_a_band() -> None:
+    # Same band, better grade → strictly larger lift (the secondary nudge), but
+    # the nudge never flips the band's sign.
+    assert quality_bonus("highlight", "A", use_band=True) > quality_bonus(
+        "highlight", "D", use_band=True
+    )
+
+
+def test_quality_bonus_is_bounded_across_every_combo() -> None:
+    # The cap property the panel asked to pin: the lift is small/bounded for ALL
+    # band×grade combinations (so it can only reorder within a relevance band).
+    cap = max(abs(v) for v in DEFAULT_QUALITY_BAND_BONUS.values()) + 0.5 * max(
+        abs(v) for v in DEFAULT_QUALITY_BONUS.values()
+    )
+    bands = [None, "", "highlight", "flag", "neutral", "uncertain", "mystery"]
+    grades = [None, "A", "B", "C", "D", "Z"]
+    for use_band in (False, True):
+        for b in bands:
+            for g in grades:
+                assert abs(quality_bonus(b, g, use_band=use_band)) <= cap + 1e-9

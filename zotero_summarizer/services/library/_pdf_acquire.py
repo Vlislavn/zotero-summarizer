@@ -37,6 +37,9 @@ from zotero_summarizer.services.library.university_access import profile_dir as 
 class AcquireResult:
     path: Path | None
     needs_login: bool = False
+    # The publisher landing the user can open to sign in (surfaced as a click-to-open
+    # link). Set only on a ``needs_login`` result; empty otherwise.
+    login_url: str = ""
 
 
 def _proxied_url(ua: Any, url: str, doi: str) -> str:
@@ -51,9 +54,26 @@ def _proxied_url(ua: Any, url: str, doi: str) -> str:
     return f"{prefix}{target}" if prefix else target
 
 
-def acquire_pdf_for(item_key: str, detail: dict[str, Any]) -> AcquireResult:
+def acquire_for_item(item_key: str) -> AcquireResult:
+    """Read the item's Zotero detail and acquire a reviewable PDF — the single-key entry
+    point for the per-paper deep-review path (the fleet inlines the equivalent over a
+    batch). ``AcquireResult(path=None)`` when it already has a local PDF (``deep_review``
+    will use that) or nothing is fetchable."""
+    from zotero_summarizer.services.zotero.zotero import get_zotero_reader_or_raise
+    detail = get_zotero_reader_or_raise().get_item_detail(item_key) or {}
+    if detail.get("has_pdf"):
+        return AcquireResult(path=None)
+    # Interactive path: a visible (headed) browser may pass a Cloudflare/SSO challenge a
+    # headless one can't. The background fleet keeps the default (headless-only) so no
+    # window pops up during prewarm/batch runs.
+    return acquire_pdf_for(item_key, detail, allow_headed_fallback=True)
+
+
+def acquire_pdf_for(item_key: str, detail: dict[str, Any], *, allow_headed_fallback: bool = False) -> AcquireResult:
     """Resolve + download a PDF for ``item_key`` to the local cache. ``detail`` is the
-    Zotero item detail (``url``/``doi``/``has_pdf``)."""
+    Zotero item detail (``url``/``doi``/``has_pdf``). ``allow_headed_fallback`` lets the
+    interactive per-paper path retry the publisher landing once with a VISIBLE browser
+    when the headless attempt is bot-walled (the fleet leaves it off)."""
     app = get_state()
     config = app.app_state.config
     qr = config.quality_review
@@ -106,6 +126,9 @@ def acquire_pdf_for(item_key: str, detail: dict[str, Any]) -> AcquireResult:
         if proxied:
             profile = _profile_dir(ua)
             cb = str(getattr(ua, "cookie_browser", "") or "")
+            # Drive the REAL Chrome binary (channel) so its fingerprint matches the
+            # injected cf_clearance — bundled chromium gets re-challenged by Cloudflare.
+            channel = str(getattr(ua, "browser_channel", "") or "")
             # Retry the OA links via the real browser too (they may sit behind a
             # Cloudflare landing the headless client couldn't pass), then the proxied URL.
             for candidate in _dedupe([*headless_urls, proxied]):
@@ -117,15 +140,27 @@ def acquire_pdf_for(item_key: str, detail: dict[str, Any]) -> AcquireResult:
                 path = browser_fetch.fetch_pdf_via_browser(
                     candidate, profile_dir=profile, cache_dir=None,
                     timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes, headless=ua.headless,
-                    cookie_browser=cb, render_fallback=(web_articles and candidate == proxied),
+                    cookie_browser=cb, channel=channel, render_fallback=(web_articles and candidate == proxied),
+                )
+                if path is not None:
+                    return AcquireResult(path=path)
+            # Headed fallback (interactive path only): a VISIBLE browser passes managed
+            # Cloudflare/SSO challenges a headless one can't. Retry only the proxied
+            # landing, once. No-op when already headed or for the background fleet.
+            if allow_headed_fallback and ua.headless:
+                path = browser_fetch.fetch_pdf_via_browser(
+                    proxied, profile_dir=profile, cache_dir=None,
+                    timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes, headless=False,
+                    cookie_browser=cb, channel=channel, render_fallback=web_articles,
                 )
                 if path is not None:
                     return AcquireResult(path=path)
             # A real, DECLARED PDF existed but the browser couldn't fetch it — the
             # session for THIS publisher is missing in the cookie-source browser (or
-            # the `browser` extra is absent). Actionable: log into that publisher.
-            LOGGER.info("review-fleet: browser PDF fetch yielded nothing for %s → needs_library_login", item_key)
-            return AcquireResult(path=None, needs_login=True)
+            # the `browser` extra is absent). Actionable: log into that publisher; the
+            # ``login_url`` (the landing) is surfaced as a click-to-open sign-in link.
+            LOGGER.info("browser PDF fetch yielded nothing for %s → needs_library_login", item_key)
+            return AcquireResult(path=None, needs_login=True, login_url=proxied)
 
     # --- web-article rung: a blog/Substack/news page has HTML full text but NO PDF.
     # Render the page to a PDF so the PDF-only review pipeline can digest it. Last
@@ -157,4 +192,4 @@ def _dedupe(urls: list[str]) -> list[str]:
     return out
 
 
-__all__ = ["AcquireResult", "acquire_pdf_for"]
+__all__ = ["AcquireResult", "acquire_pdf_for", "acquire_for_item"]

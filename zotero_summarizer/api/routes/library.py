@@ -40,8 +40,13 @@ class DeepReviewRunRequest(BaseModel):
 
 
 class ReviewFleetRunRequest(BaseModel):
-    # How many top Read-next picks to pre-decide in this run.
+    # How many top Read-next picks to pre-decide in this run (used only when
+    # item_keys is unset — e.g. the startup prewarm path).
     top_k: int = Field(default=5, ge=1, le=20)
+    # Explicit picks: the client's "Review cool papers" sends its cool (must/
+    # should-read) keys so the fleet reviews THOSE rows, not the band-agnostic
+    # top-of-undecided slice. Bounded so a client can't flood the review pool.
+    item_keys: list[str] | None = Field(default=None, max_length=20)
 
 
 class RejectTagRequest(BaseModel):
@@ -164,29 +169,40 @@ async def ask_paper(req: AskPaperRequest) -> dict[str, Any]:
 
 async def run_deep_review(req: DeepReviewRunRequest) -> dict[str, Any]:
     """Start an on-demand full-text deep review (quality + relevance). With
-    ``item_key`` set, reviews that single paper (per-paper button); otherwise the
-    top-``top_k`` unread picks. Single-flight: returns the in-flight status when
-    a run is already going. Poll ``GET /api/library/deep-review/status``."""
+    ``item_key`` set, reviews that single paper (per-paper button) and returns THAT
+    paper's status; otherwise the top-``top_k`` unread picks. Reviews run as per-item
+    jobs on a provider-aware pool — concurrent for a remote provider, queued for a
+    local one — so a 2nd paper isn't blocked by a 1st. Poll ``GET
+    /api/library/deep-review/status?item_key=…``."""
     if req.item_key:
-        return await asyncio.to_thread(
-            deep_review.start, item_keys=[req.item_key], focus_prompt=req.focus_prompt
+        # acquire_missing: a single paper with no Zotero PDF gets one fetched first
+        # (OA/PMC/browser session) and reviewed from it — not flagged needs_pdf. Scoped
+        # to this single-key path: acquisition is one stateful browser session.
+        await asyncio.to_thread(
+            deep_review.start,
+            item_keys=[req.item_key],
+            focus_prompt=req.focus_prompt,
+            acquire_missing=True,
         )
+        return deep_review.status(req.item_key)
     return await asyncio.to_thread(deep_review.start, req.top_k, focus_prompt=req.focus_prompt)
 
 
-async def get_deep_review_status() -> dict[str, Any]:
-    """Poll the deep-review job: ``{status, total, completed, error, started_at}``."""
-    return deep_review.status()
+async def get_deep_review_status(item_key: str | None = None) -> dict[str, Any]:
+    """Poll a deep review: ``{status, total, completed, error, started_at, progress}``.
+    With ``item_key`` set, reports THAT paper's job (so each panel shows its own
+    progress); without it, an aggregate ('is any review running?')."""
+    return deep_review.status(item_key)
 
 
 async def run_review_fleet(req: ReviewFleetRunRequest) -> dict[str, Any]:
-    """Start the review fleet: pre-decide a reading verdict for the top-``top_k``
-    Read-next picks in the background (reusing cached deep reviews, serial for RAM
-    safety). The proposals are SUGGESTIONS surfaced on the queue as
-    ``proposed_verdict`` — never auto-applied labels. Single-flight: returns the
-    in-flight status when a run is already going. Poll ``GET
-    /api/library/review-fleet/status``."""
-    return await asyncio.to_thread(review_fleet.start, req.top_k)
+    """Start the review fleet: pre-decide a reading verdict for the chosen Read-next
+    picks in the background. With ``item_keys`` it reviews EXACTLY those (the client's
+    pinned cool set); otherwise the top-``top_k`` undecided picks. The proposals are
+    SUGGESTIONS surfaced on the queue as ``proposed_verdict`` — never auto-applied
+    labels. Single-flight: returns the in-flight status when a run is already going.
+    Poll ``GET /api/library/review-fleet/status``."""
+    return await asyncio.to_thread(review_fleet.start, req.top_k, item_keys=req.item_keys)
 
 
 async def get_review_fleet_status() -> dict[str, Any]:

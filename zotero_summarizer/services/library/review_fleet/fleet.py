@@ -310,19 +310,27 @@ def _select_keys(queue: dict[str, Any], top_k: int) -> list[str]:
     return keys
 
 
-def _run_job(top_k: int) -> None:
-    """Background worker: pre-decide the next ``top_k`` UNDECIDED picks in three passes
-    (review → acquire-and-re-review → propose). The two review passes are batched into
-    ``deep_review``, which fans them out parallel for a remote provider / serial for a
-    local one; PDF acquisition between them stays sequential."""
+def _run_job(top_k: int, item_keys: list[str] | None = None) -> None:
+    """Background worker: pre-decide picks in three passes (review →
+    acquire-and-re-review → propose). With ``item_keys`` it reviews EXACTLY those
+    (the client's pinned "Review cool papers" set — so the fleet targets the SAME
+    rows the UI counts, never a band-agnostic ``_select_keys`` slice that buries the
+    cool stragglers behind higher-blended could-read rows); otherwise the next
+    ``top_k`` UNDECIDED picks. The two review passes are batched into ``deep_review``,
+    which fans them out parallel for a remote provider / serial for a local one; PDF
+    acquisition between them stays sequential."""
     try:
-        # Scan the WHOLE ranked library, not a fixed prefix: the queue PINS the
-        # user's already-labeled papers to its top, so on a heavily-labeled library
-        # a small window is all-decided and selects ZERO undecided picks (the fleet
-        # silently no-ops). _select_keys early-exits after top_k, so a big ranked
-        # list is ~free; this matches the UI's QUEUE_LIMIT.
-        queue = reading_queue.build_reading_queue(limit=_SELECTION_SCAN_LIMIT)
-        keys = _select_keys(queue, top_k)
+        if item_keys:
+            # Client-pinned cool set: review exactly these (no queue scan / selector).
+            keys = [str(k) for k in item_keys]
+        else:
+            # Scan the WHOLE ranked library, not a fixed prefix: the queue PINS the
+            # user's already-labeled papers to its top, so on a heavily-labeled library
+            # a small window is all-decided and selects ZERO undecided picks (the fleet
+            # silently no-ops). _select_keys early-exits after top_k, so a big ranked
+            # list is ~free; this matches the UI's QUEUE_LIMIT.
+            queue = reading_queue.build_reading_queue(limit=_SELECTION_SCAN_LIMIT)
+            keys = _select_keys(queue, top_k)
         with _LOCK:
             _STATE["total"] = len(keys)
             _STATE["completed"] = 0
@@ -372,15 +380,25 @@ def _run_job(top_k: int) -> None:
         finish(error=f"{type(exc).__name__}: {exc}")
 
 
-def start(top_k: int = _DEFAULT_TOP_K) -> dict[str, Any]:
-    """Kick off a review-fleet run (single-flight). Pre-decides the top-``top_k``
-    Read-next picks in the background (deep review batched parallel-for-remote /
-    serial-for-local). Returns the current ``status()``; a no-op (returns the
-    in-flight status) when a run is already going."""
+def start(top_k: int = _DEFAULT_TOP_K, *, item_keys: list[str] | None = None) -> dict[str, Any]:
+    """Kick off a review-fleet run (single-flight). With ``item_keys`` it pre-decides
+    EXACTLY those picks (the client's "Review cool papers" passes its cool — must/
+    should-read — set so the fleet reviews the SAME rows the UI counts, not the
+    band-agnostic top-of-undecided ``_select_keys`` slice); without it, the next
+    ``top_k`` undecided picks (the startup prewarm path). Deep review is batched
+    parallel-for-remote / serial-for-local.
+
+    Returns ``status()`` plus an ``accepted`` flag: ``True`` when THIS call claimed the
+    single-flight slot (our picks are now running), ``False`` when a run was already in
+    flight (a prewarm / another click) so this call is a no-op returning the FOREIGN
+    run's status. The client relies on ``accepted`` (not a started_at timestamp) to tell
+    "my pinned keys are running" from "a foreign run holds the latch — wait it out", which
+    is robust to a prewarm that fires AFTER the click."""
     if not try_start():
-        return status()
-    _flight.run_in_background(lambda: _run_job(max(1, top_k)))
-    return status()
+        return {**status(), "accepted": False}
+    keys = [str(k) for k in item_keys] if item_keys else None
+    _flight.run_in_background(lambda: _run_job(max(1, top_k), item_keys=keys))
+    return {**status(), "accepted": True}
 
 
 __all__ = ["start", "status", "try_start", "finish"]

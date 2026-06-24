@@ -11,6 +11,7 @@ import Async from '../components/ui/Async.jsx';
 import { ActionBadge } from '../components/ui/Badge.jsx';
 import { useKeyboardNav } from '../hooks/useKeyboardNav.js';
 import { useFocusOnChange } from '../hooks/useFocusOnChange.js';
+import { StatusBanner } from '../components/library/shared.jsx';
 import {
   progressPercent,
   formatPercent,
@@ -29,18 +30,6 @@ import {
 // `startTriage`. Both are owned by the Library page in this React port, so
 // jobs are *only* monitored here — to start a new job, go to Library and
 // click "Run triage".
-
-function StatusBanner({ message, isError }) {
-  if (!message) return null;
-  const cls = isError
-    ? 'bg-rose-50 border-rose-200 text-rose-800'
-    : 'bg-emerald-50 border-emerald-200 text-emerald-800';
-  return (
-    <div role="status" className={`my-2 p-2 rounded-lg border text-xs ${cls}`}>
-      {message}
-    </div>
-  );
-}
 
 // A job status pill speaking the shared Badge tone vocabulary (running=teal,
 // completed=emerald, failed=rose, cancelled/queued=slate).
@@ -117,12 +106,21 @@ export default function Triage() {
   const [isError, setIsError] = useState(false);
   const [feedbackState, setFeedbackState] = useState({});
   const [feedbackSubmitting, setFeedbackSubmitting] = useState({});
+  const [showTodoOnly, setShowTodoOnly] = useState(false);
   const [selectedJobIdx, setSelectedJobIdx] = useState(0);
   const pollRef = useRef(null);
   // Last seen status of the active job, so we can auto-refresh calibration the
   // moment a job transitions out of `running` (EDGE 4).
   const prevStatusRef = useRef(null);
   const jobListRef = useRef(null);
+
+  // Completed results, optionally narrowed to the ones still awaiting your
+  // Approve/Reject. A user-toggled filter (opt-in), so a card dropping out when
+  // you give feedback is expected — never a surprise reshuffle mid-scroll.
+  const visibleResults = useMemo(() => {
+    const all = activeJob?.results || [];
+    return showTodoOnly ? all.filter((r) => !feedbackState[r.item_key]) : all;
+  }, [activeJob, showTodoOnly, feedbackState]);
 
   const loadJobs = useCallback(async () => {
     try {
@@ -344,21 +342,38 @@ export default function Triage() {
 
           <div className="grid md:grid-cols-2 gap-3 mt-4">
             <div>
-              <h3 className="font-semibold text-slate-700 mb-2">
-                Completed Results{' '}
-                <span className="font-normal text-slate-400">
-                  ({(activeJob.results || []).length})
-                </span>
-              </h3>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <h3 className="font-semibold text-slate-700">
+                  Completed Results{' '}
+                  <span className="font-normal text-slate-400">
+                    ({showTodoOnly ? `${visibleResults.length} to review` : (activeJob.results || []).length})
+                  </span>
+                </h3>
+                {(activeJob.results || []).length > 0 && (
+                  <label className="flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer select-none shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={showTodoOnly}
+                      onChange={() => setShowTodoOnly((v) => !v)}
+                      className="h-3.5 w-3.5 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                    />
+                    Needs feedback only
+                  </label>
+                )}
+              </div>
               <p className="text-xs text-slate-500 mb-2">
                 Approve or reject each verdict — feedback queues a Zotero tag change and
                 updates calibration.
               </p>
               <div className="max-h-72 overflow-auto space-y-2 pr-1">
-                {(activeJob.results || []).length === 0 && (
-                  <div className="text-xs text-slate-500">No completed items yet.</div>
+                {visibleResults.length === 0 && (
+                  <div className="text-xs text-slate-500">
+                    {(activeJob.results || []).length === 0
+                      ? 'No completed items yet.'
+                      : 'All completed items have your feedback. ✓'}
+                  </div>
                 )}
-                {(activeJob.results || []).map((result) => (
+                {visibleResults.map((result) => (
                   <ResultCard
                     key={result.item_key}
                     result={result}

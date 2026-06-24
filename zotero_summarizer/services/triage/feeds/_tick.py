@@ -8,6 +8,7 @@ is the thin orchestrator that sequences them.
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
@@ -35,8 +36,80 @@ from zotero_summarizer.services.triage.feeds._tick_phases import (
     pick_and_log,
     prepare_unprocessed,
     record_tick_decisions,
+    recover_abstractless_rescues,
     run_triage_stage,
 )
+
+
+@dataclass(frozen=True)
+class _TickFlags:
+    dedup_enabled: bool
+    processed_dedup_enabled: bool
+    mark_processed_as_read: bool
+    outcome_check_per_tick: int
+    exclude_feed_names: set[str]
+
+
+def _resolve_tick_flags(feeds_cfg: dict[str, Any]) -> _TickFlags:
+    """Derive the per-tick dedup / mark-read / outcome flags from feeds config.
+
+    ``dedup_against_processed`` defaults to the library-dedup flag (so a config
+    that turned off duplicate protection stays off) but is independently
+    switchable. Non-paper feeds (e.g. GitHub releases) the user marked not-scholarly
+    never enter triage (so never get materialised/scored)."""
+    dedup_enabled = bool(feeds_cfg.get("dedup_against_library", True))
+    return _TickFlags(
+        dedup_enabled=dedup_enabled,
+        processed_dedup_enabled=bool(feeds_cfg.get("dedup_against_processed", dedup_enabled)),
+        mark_processed_as_read=bool(feeds_cfg.get("mark_processed_as_read", True)),
+        outcome_check_per_tick=int(feeds_cfg.get("outcome_check_per_tick") or 3),
+        exclude_feed_names={
+            str(name).strip().casefold()
+            for name in (feeds_cfg.get("exclude_feeds") or [])
+            if str(name).strip()
+        },
+    )
+
+
+def _build_tick_report(
+    *,
+    tick_id: str,
+    results: _TickResults,
+    fetched: int,
+    skipped_already_processed: int,
+    marked_read: int,
+    outcomes_resolved: int,
+    daily_ran: bool,
+    daily_materialized: int,
+    daily_rejected: int,
+    fatal_llm_error: bool,
+    elapsed_seconds: float,
+) -> DaemonTickReport:
+    """Assemble the tick report from the phase results and emit the summary log."""
+    report = DaemonTickReport(
+        tick_id=tick_id,
+        fetched=fetched,
+        skipped_already_processed=skipped_already_processed,
+        skipped_processed_dedup=len(results.processed_dup_skipped),
+        skipped_library_dedup=len(results.library_skipped),
+        triaged=len(results.triaged),
+        fast_rejected=len(results.fast_rejected),
+        gate_rejected=len(results.gate_rejected),
+        errors=len(results.errors),
+        marked_read=marked_read,
+        outcomes_resolved=outcomes_resolved,
+        daily_selection_ran=daily_ran,
+        daily_materialized=daily_materialized,
+        daily_rejected=daily_rejected,
+        fatal_llm_error=fatal_llm_error,
+        elapsed_seconds=elapsed_seconds,
+    )
+    LOGGER.info(
+        "[%s] tick done in %.2fs fetched=%d triaged=%d fast=%d gate=%d err=%d marked=%d outcomes=%d daily=%s",
+        tick_id, elapsed_seconds, fetched, len(results.triaged), len(results.fast_rejected),
+        len(results.gate_rejected), len(results.errors), marked_read, outcomes_resolved, daily_ran,
+    )
+    return report
 
 
 def run_daemon_tick(
@@ -95,26 +168,13 @@ def run_daemon_tick(
 
     # batch_size semantics: None = unlimited (feeds run full-exhaust); int = bounded.
     effective_batch: int | None = batch_size
-    dedup_enabled = bool(feeds_cfg.get("dedup_against_library", True))
-    # Content dedup against already-processed papers (different GUID / re-post /
-    # another feed). Defaults to the library-dedup flag so a config that turned
-    # off duplicate protection stays off, but is independently switchable.
-    processed_dedup_enabled = bool(feeds_cfg.get("dedup_against_processed", dedup_enabled))
-    mark_processed_as_read = bool(feeds_cfg.get("mark_processed_as_read", True))
-    outcome_check_per_tick = int(feeds_cfg.get("outcome_check_per_tick") or 3)
-    # Non-paper feeds (e.g. GitHub releases) the user marked as not-scholarly
-    # never enter triage (and so never get materialised/scored).
-    exclude_feed_names = {
-        str(name).strip().casefold()
-        for name in (feeds_cfg.get("exclude_feeds") or [])
-        if str(name).strip()
-    }
+    flags = _resolve_tick_flags(feeds_cfg)
     LOGGER.info("[%s] tick start batch=%s", tick_id, effective_batch if effective_batch is not None else "unlimited")
 
     # 1. Pick unread items (round-robin when bounded, full-exhaust when None).
     raw = pick_and_log(
         reader, batch_size=effective_batch, feed_library_ids=feed_library_ids,
-        exclude_feed_names=exclude_feed_names, tick_id=tick_id,
+        exclude_feed_names=flags.exclude_feed_names, tick_id=tick_id,
     )
     fetched = len(raw)
 
@@ -122,10 +182,10 @@ def run_daemon_tick(
     #    GUID / re-post / already decided), then against the Zotero library.
     unprocessed, skipped_processed, stale_to_mark = prepare_unprocessed(raw, tick_id=tick_id)
     unprocessed, processed_dup_skipped = dedup_against_processed(
-        unprocessed, tick_id=tick_id, enabled=processed_dedup_enabled,
+        unprocessed, tick_id=tick_id, enabled=flags.processed_dedup_enabled,
     )
     to_triage, library_skipped = dedup_against_library(
-        unprocessed, reader=reader, tick_id=tick_id, enabled=dedup_enabled,
+        unprocessed, reader=reader, tick_id=tick_id, enabled=flags.dedup_enabled,
     )
 
     # 2.5 Classifier gate (Phase 1.13) — fast-reject before the LLM; also kicks
@@ -133,10 +193,19 @@ def run_daemon_tick(
     _maybe_schedule_gate_retrain(tick_id)
     to_triage, gate_rejected = _apply_classifier_gate(tick_id, to_triage, gate_only=gate_only)
 
-    # 3. Triage the gate survivors.
+    # 2.6 Acquire-before-score rescue: prestige-journal RSS (Nature/Science/Cell)
+    #     ships no real abstract, so the gate drops high-goal papers on boilerplate.
+    #     Recover their full text + re-score before the verdict stands. Skipped in
+    #     gate_only mode (no LLM available there).
+    rescued: list[tuple[dict[str, Any], Any]] = []
+    if not gate_only:
+        rescued, gate_rejected = recover_abstractless_rescues(gate_rejected, tick_id=tick_id)
+
+    # 3. Triage the gate survivors; merge in the rescued (already-scored) picks.
     triaged_results, fast_rejected_results, errors_results, fatal_seen = run_triage_stage(
         to_triage, tick_id=tick_id, gate_only=gate_only, triage_llm=triage_llm,
     )
+    triaged_results = rescued + triaged_results
     results = _TickResults(
         triaged=triaged_results,
         fast_rejected=fast_rejected_results,
@@ -152,14 +221,14 @@ def run_daemon_tick(
     # 5. Mark all processed items read in Zotero (skipped in review_mode/dry_run
     #    so they keep showing in the Zotero RSS view while the user decides).
     marked = 0
-    if mark_processed_as_read and not dry_run and not review_mode:
+    if flags.mark_processed_as_read and not dry_run and not review_mode:
         marked = mark_processed_read(results, stale_to_mark, writer=writer, tick_id=tick_id)
 
     # 6. Resolve up to N due outcomes.
     outcomes = 0
-    if outcome_check_per_tick > 0:
+    if flags.outcome_check_per_tick > 0:
         try:
-            outcomes = _resolve_due_outcomes(reader=reader, limit=outcome_check_per_tick)
+            outcomes = _resolve_due_outcomes(reader=reader, limit=flags.outcome_check_per_tick)
         except Exception:
             LOGGER.exception("[%s] outcome resolution failed", tick_id)
 
@@ -171,28 +240,16 @@ def run_daemon_tick(
             feed_library_ids=feed_library_ids, force=force_daily_selection, dry_run=dry_run,
         )
 
-    elapsed = time.perf_counter() - start_ts
-    report = DaemonTickReport(
+    return _build_tick_report(
         tick_id=tick_id,
+        results=results,
         fetched=fetched,
         skipped_already_processed=skipped_processed,
-        skipped_processed_dedup=len(processed_dup_skipped),
-        skipped_library_dedup=len(library_skipped),
-        triaged=len(triaged_results),
-        fast_rejected=len(fast_rejected_results),
-        gate_rejected=len(gate_rejected),
-        errors=len(errors_results),
         marked_read=marked,
         outcomes_resolved=outcomes,
-        daily_selection_ran=daily_ran,
+        daily_ran=daily_ran,
         daily_materialized=daily_materialized,
         daily_rejected=daily_rejected,
         fatal_llm_error=fatal_seen,
-        elapsed_seconds=elapsed,
+        elapsed_seconds=time.perf_counter() - start_ts,
     )
-    LOGGER.info(
-        "[%s] tick done in %.2fs fetched=%d triaged=%d fast=%d gate=%d err=%d marked=%d outcomes=%d daily=%s",
-        tick_id, elapsed, fetched, len(triaged_results), len(fast_rejected_results),
-        len(gate_rejected), len(errors_results), marked, outcomes, daily_ran,
-    )
-    return report

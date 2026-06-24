@@ -102,6 +102,50 @@ def test_blended_sort_no_goal_signal_falls_back_to_relevance():
     assert [r["item_key"] for r in recs] == ["B", "A"]  # pure relevance order
 
 
+def test_band_primary_mode_floats_highlight_and_pins_uncertain(monkeypatch):
+    # With the Phase-2 band-primary arm enabled (env override, consumer-side), a
+    # highlight floats above an equal-relevance neutral, a flag sinks, and an
+    # UNCERTAIN paper stays exactly where neutral would (never buried).
+    monkeypatch.setenv("ZS_QUALITY_BAND_PRIMARY", "1")
+    hi = {**_rec("HI", 3.0, None), "quality_band": "highlight"}
+    neutral = {**_rec("NEUTRAL", 3.0, None), "quality_band": "neutral"}
+    flag = {**_rec("FLAG", 3.0, None), "quality_band": "flag"}
+    uncertain = {**_rec("UNCERTAIN", 3.0, None), "quality_band": "uncertain"}
+    recs = [flag, neutral, uncertain, hi]
+    _ranking._blended_sort(recs)
+    order = [r["item_key"] for r in recs]
+    assert order[0] == "HI"                                  # highlight floats
+    assert order[-1] == "FLAG"                               # flag sinks
+    # uncertain and neutral both got exactly 0.0 → tie, original order preserved.
+    assert order.index("UNCERTAIN") < order.index("FLAG")    # uncertain not demoted
+
+
+def test_band_primary_off_by_default_ignores_band(monkeypatch):
+    # No env, no config → the shipped grade-only default: the band is inert, so a
+    # bare highlight does NOT outrank an equal-relevance neutral on band alone.
+    monkeypatch.delenv("ZS_QUALITY_BAND_PRIMARY", raising=False)
+    hi = {**_rec("HI", 3.0, None), "quality_band": "highlight"}
+    neutral = {**_rec("NEUTRAL", 3.0, None), "quality_band": "neutral"}
+    recs = [neutral, hi]
+    _ranking._blended_sort(recs)
+    assert [r["item_key"] for r in recs] == ["NEUTRAL", "HI"]  # stable; band ignored
+
+
+def test_blended_sort_is_order_only_never_mutates_relevance(monkeypatch):
+    # The derivation==prediction invariant at the sort seam: the quality lift only
+    # REORDERS; it never touches relevance_score (banding is computed from that raw
+    # score elsewhere, so it stays byte-identical with or without the bonus).
+    monkeypatch.setenv("ZS_QUALITY_BAND_PRIMARY", "1")
+    recs = [
+        {**_rec("A", 4.0, None), "quality_band": "flag"},
+        {**_rec("B", 3.0, None), "quality_band": "highlight"},
+    ]
+    before = {r["item_key"]: r["relevance_score"] for r in recs}
+    _ranking._blended_sort(recs)
+    after = {r["item_key"]: r["relevance_score"] for r in recs}
+    assert before == after
+
+
 def test_goal_affinity_for_items_returns_max_cosine(tmp_path):
     cache = EmbeddingCache(tmp_path / "corpus.db", "stub-model")
     conn = cache._conn()

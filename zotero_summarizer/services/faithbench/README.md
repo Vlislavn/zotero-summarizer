@@ -117,7 +117,7 @@ to be re-used:
 | `_constants.py` | pinned `DEFAULT_JUDGE_MODEL` + env-var names + thresholds |
 | `_judgment.py` | tri-state `Judgment`, closed `FailureReason`/`JudgeMethod` enums |
 | `_dataset.py` | benchmark schemas, versioned JSONL persistence, review CSV |
-| `_corpus.py` | paper selection/extraction, frozen text, `normalize_text` (shared by gate AND judge), chunking, per-paper BM25 |
+| `_corpus.py` | paper selection/extraction, frozen text, `normalize_text` (shared by gate AND judge), chunking, per-paper BM25 (word `tokenize` reused from `storage.corpus_bm25`) |
 | `_build_qa.py` | QA generation + deterministic span keep-gate + traps |
 | `_build_claims.py` | digest (reuses `library.quality_review`) + claim decomposition |
 | `_runner.py` | trial execution, append-only responses, resume + manifest guard |

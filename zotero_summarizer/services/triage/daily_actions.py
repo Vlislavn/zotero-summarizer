@@ -19,6 +19,7 @@ from typing import Any
 from zotero_summarizer.domain import VERDICT_SOURCE_MACHINE_ADD, VERDICT_SOURCE_USER
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
+from zotero_summarizer.services import interaction_log
 from zotero_summarizer.services.library import fulltext, review
 from zotero_summarizer.services._common import LOGGER
 from zotero_summarizer.services._common import settings as get_settings
@@ -58,7 +59,7 @@ def _golden_key(row: dict[str, Any]) -> str:
 def _record_label(
     row: dict[str, Any], priority: str, note: str, *,
     signal_tier: str = "feed_user_label", original_priority: str | None = None,
-    source: str = VERDICT_SOURCE_USER,
+    source: str = VERDICT_SOURCE_USER, surface: str,
 ) -> None:
     """Write the training label two ways: golden CSV (for retrain) + the
     label_verdicts overlay (so it persists, wins, and excludes the card from
@@ -80,13 +81,19 @@ def _record_label(
     if original_priority is None:
         original_priority = (row.get("reading_priority") or "").strip() or "unknown"
     review.append_to_golden(row, label=priority, note=note, signal_tier=signal_tier)
+    item_key = _golden_key(row)
     repositories.insert_or_update_label_verdict(
         _db_path(),
-        item_key=_golden_key(row),
+        item_key=item_key,
         original_derived_priority=original_priority,
         user_priority=priority,
         comment=note,
         source=source,
+    )
+    interaction_log.log_feed_decision(
+        row=row, item_key=item_key, surface=surface, source=source,
+        model_priority=original_priority, comment=note,
+        human={"kind": "keep" if priority != "dont_read" else "trash", "value": priority},
     )
 
 
@@ -133,7 +140,7 @@ def add_to_library(item_ids: list[int]) -> dict[str, Any]:
             _record_label(
                 row, _ADD_PRIORITY, "added from Today",
                 signal_tier="feed_interest", original_priority=original_priority,
-                source=VERDICT_SOURCE_MACHINE_ADD,
+                source=VERDICT_SOURCE_MACHINE_ADD, surface="today_keep",
             )
             added += 1
         except Exception as exc:
@@ -187,7 +194,7 @@ def trash(item_ids: list[int]) -> dict[str, Any]:
     read_ids: list[int] = []
     for row in rows:
         try:
-            _record_label(row, "dont_read", "trashed from Today")
+            _record_label(row, "dont_read", "trashed from Today", surface="today_trash")
             _set_decision(row, feeds_storage.DECISION_USER_REJECTED, "trashed_from_today")
             fid = int(row.get("feed_item_id") or 0)
             if fid:

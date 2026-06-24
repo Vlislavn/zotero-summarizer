@@ -18,9 +18,10 @@ from zotero_summarizer import domain
 from zotero_summarizer.services.golden import goldenset, user_labels
 from zotero_summarizer.services.zotero.pending import build_label_tag_change
 from zotero_summarizer.storage.repositories import (
-    TriageRepository,
     get_label_verdict,
+    init_db,
     insert_or_update_label_verdict,
+    with_db_path,
 )
 
 
@@ -109,7 +110,8 @@ def test_build_label_tag_change_swaps_within_namespace_only():
 
 def _verdict_db(tmp_path: Path) -> Path:
     db_path = tmp_path / "triage_history.db"
-    TriageRepository(db_path).init()
+    with with_db_path(db_path):
+        init_db()
     return db_path
 
 

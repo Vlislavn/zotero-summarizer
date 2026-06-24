@@ -8,24 +8,31 @@ the user's goals, controversies, impact, unknown-unknowns, implementation) plus
 a quality grade + 5 dimensions. No separate relevance re-score (it contradicted
 the gate and confused users); the digest is the whole output.
 
-Mirrors ``reading_queue``'s established single-flight + JSON-cache pattern:
-results land in ``deep_reviews.json`` keyed by ``item_key`` and are surfaced by
+Results land in ``deep_reviews.json`` keyed by ``item_key`` and are surfaced by
 ``review_detail.build_library_detail``. The digest is also upserted to the Zotero
-item as one short note (best-effort). The N papers fan out provider-aware
-(``deep_review_fleet_concurrency``): serial for a local model, capped by the remote
-provider's ``max_sub_concurrency`` (else all N) for a remote one.
+item as one short note (best-effort).
+
+**Concurrency: per-item jobs over one provider-aware pool** (mirrors
+``paper_render``). Each requested paper becomes its own ``_JOBS[item_key]`` entry
+with its OWN live progress, run on a shared ``ThreadPoolExecutor`` sized by
+``deep_review_fleet_concurrency``: a **local** model runs 1 at a time (the 2nd
+paper QUEUES — one on-device model can't serve two reviews without thrashing host
+RAM), a **remote** model runs up to its ``max_sub_concurrency`` concurrently. So
+you can deep-review a second paper while the first is still running, and each
+paper's panel polls ``status(item_key)`` for ITS own progress (not a global one).
+Re-submitting a paper that's already running is a no-op (per-item single-flight).
 
 Empty/partial results are valid: a paper with no local PDF is marked
 ``needs_pdf`` and nothing else runs — an honest "no full text", not a masked
-error. Per-item failures are logged and skipped (background worker boundary);
-only a job-level failure (reader/LLM unavailable) sets the status error.
+error. A per-item failure is recorded on that item's job (with the connectivity
+hint) and never affects another paper's review.
 """
 from __future__ import annotations
 
 import json
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from zotero_summarizer.services._common import (
@@ -51,61 +58,95 @@ _CACHE_FILENAME = "deep_reviews.json"
 _DEFAULT_TOP_K = 5
 
 # ---------------------------------------------------------------------------
-# Single-flight background-job state (separate from reading_queue's).
+# Per-item job registry + one provider-aware review pool (mirrors paper_render).
 # ---------------------------------------------------------------------------
-_LOCK = threading.Lock()
-_STATE: dict[str, Any] = {
-    "running": False,
-    "total": 0,
-    "completed": 0,
-    "error": None,
-    "started_at": None,
-    # Live within-item progress (phase + sub-step) for the polled status, written
-    # by ReviewReporter via _set_progress; {} between items / when idle.
-    "progress": {},
-}
+# Upper bound on concurrent paper reviews when a remote provider sets no
+# max_sub_concurrency (an API has no host-RAM limit, but unbounded fan-out is
+# still impolite). Named constant, not a magic literal.
+_MAX_CONCURRENT = 8
+# Keep all running jobs + the most-recent finished ones, so the registry (and the
+# aggregate status's counts) stay bounded across a long session.
+_MAX_FINISHED_JOBS = 12
+
+_LOCK = threading.Lock()          # guards _JOBS
+_CACHE_LOCK = threading.Lock()    # guards the read-merge-write of deep_reviews.json
+_POOL_LOCK = threading.Lock()     # guards (re)building the shared pool
+_JOBS: dict[str, dict[str, Any]] = {}
+_POOL: ThreadPoolExecutor | None = None
+_POOL_SIZE = 0
 
 
-def try_start() -> bool:
-    """Claim the single-flight slot. ``False`` when a run is already in flight."""
-    with _LOCK:
-        if _STATE["running"]:
-            return False
-        _STATE["running"] = True
-        _STATE["error"] = None
-        _STATE["total"] = 0
-        _STATE["completed"] = 0
-        _STATE["started_at"] = now_iso_z()
-        _STATE["progress"] = {}
-        return True
+def _ensure_pool(provider: Any) -> ThreadPoolExecutor:
+    """The shared review pool, sized provider-aware: local→1 (a 2nd paper QUEUES
+    behind the 1st), remote→``max_sub_concurrency`` else ``_MAX_CONCURRENT``. Rebuilt
+    when the size changes (a provider / LLM-routing edit).
 
-
-def finish(error: str | None = None) -> None:
-    with _LOCK:
-        _STATE["running"] = False
-        _STATE["error"] = error
-        _STATE["progress"] = {}
-
-
-def _set_progress(progress: dict[str, Any]) -> None:
-    """Lock-guarded write of the live within-item progress (ReviewReporter sink)."""
-    with _LOCK:
-        _STATE["progress"] = progress
-
-
-def status() -> dict[str, Any]:
-    """Poll payload: ``{status, total, completed, error, started_at}``.
-
-    ``status`` is ``running`` while in flight, ``error`` after a job-level
-    failure, ``ready`` once at least one item has been reviewed, else ``idle``.
+    # ponytail: a rebuild just swaps the pool ref — in-flight reviews finish on the
+    # old pool's threads; a size change is a rare config edit, so this is cheap.
     """
+    global _POOL, _POOL_SIZE
+    size = deep_review_fleet_concurrency(provider, _MAX_CONCURRENT)
+    with _POOL_LOCK:
+        if _POOL is None or size != _POOL_SIZE:
+            _POOL = ThreadPoolExecutor(max_workers=size, thread_name_prefix="deep-review")
+            _POOL_SIZE = size
+        return _POOL
+
+
+def _trim_jobs_locked() -> None:
+    """Drop the oldest FINISHED jobs beyond ``_MAX_FINISHED_JOBS`` (running jobs are
+    always kept). Caller holds ``_LOCK``."""
+    finished = [(k, j) for k, j in _JOBS.items() if j.get("status") != "running"]
+    if len(finished) <= _MAX_FINISHED_JOBS:
+        return
+    finished.sort(key=lambda kv: kv[1].get("started_at") or "")
+    for key, _ in finished[: len(finished) - _MAX_FINISHED_JOBS]:
+        _JOBS.pop(key, None)
+
+
+def _set_job(item_key: str, **fields: Any) -> None:
+    """Merge ``fields`` into ``_JOBS[item_key]`` and trim finished jobs (lock-guarded)."""
     with _LOCK:
-        running = bool(_STATE["running"])
-        total = int(_STATE["total"])
-        completed = int(_STATE["completed"])
-        error = _STATE["error"]
-        started_at = _STATE["started_at"]
-        progress = dict(_STATE["progress"])
+        job = _JOBS.get(item_key) or {}
+        job.update(fields)
+        _JOBS[item_key] = job
+        _trim_jobs_locked()
+
+
+def _set_job_progress(item_key: str, progress: dict[str, Any]) -> None:
+    """ReviewReporter sink: write the live within-item progress onto THIS item's job."""
+    with _LOCK:
+        job = _JOBS.get(item_key)
+        if job is not None:
+            job["progress"] = progress
+
+
+def status(item_key: str | None = None) -> dict[str, Any]:
+    """Poll payload ``{status, total, completed, error, started_at, progress}``.
+
+    With ``item_key`` set, reports THAT paper's job (``running``/``ready``/``error``,
+    or ``idle`` when no job is tracked) — the per-paper panel polls this so it shows
+    its OWN progress. Without ``item_key``, an AGGREGATE: ``running`` if ANY review is
+    in flight (the ``university_access`` "is a review running?" gate + the review-fleet
+    poll rely on this), else ``error``/``ready``/``idle`` over the tracked jobs."""
+    with _LOCK:
+        if item_key is not None:
+            job = _JOBS.get(item_key)
+            if job is None:
+                return {"status": "idle", "total": 0, "completed": 0, "error": None,
+                        "started_at": None, "progress": {}}
+            return {
+                "status": str(job.get("status") or "idle"),
+                "total": 1,
+                "completed": int(job.get("completed") or 0),
+                "error": job.get("error"),
+                "started_at": job.get("started_at"),
+                "progress": dict(job.get("progress") or {}),
+            }
+        jobs = list(_JOBS.values())
+    running = [j for j in jobs if j.get("status") == "running"]
+    error = next((j.get("error") for j in jobs if j.get("status") == "error" and j.get("error")), None)
+    completed = sum(1 for j in jobs if j.get("status") in ("ready", "error"))
     if running:
         state = "running"
     elif error:
@@ -116,16 +157,12 @@ def status() -> dict[str, Any]:
         state = "idle"
     return {
         "status": state,
-        "total": total,
+        "total": len(jobs),
         "completed": completed,
         "error": error,
-        "started_at": started_at,
-        "progress": progress,
+        "started_at": min((j.get("started_at") for j in jobs if j.get("started_at")), default=None),
+        "progress": dict((running[0].get("progress") if running else {}) or {}),
     }
-
-
-def run_in_background(target) -> None:
-    threading.Thread(target=target, daemon=True).start()
 
 
 def _try_rebuild_render(item_key: str) -> None:
@@ -167,11 +204,26 @@ def _write_all(reviews: dict[str, Any]) -> None:
     write_json_atomic(_cache_path(), {"updated_at": now_iso_z(), "reviews": reviews})
 
 
+def _write_one(item_key: str, entry: dict[str, Any]) -> None:
+    """Persist ONE review entry via a locked read-merge-write, so concurrent per-item
+    workers never clobber each other's keys in the shared ``deep_reviews.json``."""
+    with _CACHE_LOCK:
+        reviews = _read_all()
+        reviews[item_key] = entry
+        _write_all(reviews)
+
+
 def get_cached_review(item_key: str) -> dict[str, Any] | None:
     """The stored deep-review entry for an item (for ``review_detail``), or None."""
     if not item_key:
         return None
     return _read_all().get(item_key)
+
+
+def cached_review_keys() -> set[str]:
+    """All item_keys with a stored deep review — one cache read (prewarm reuses this
+    instead of calling ``get_cached_review`` per row, which re-reads the whole file)."""
+    return set(_read_all())
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +245,7 @@ def _review_one(
     prestige_floor_value: float | None = None,
     lean_tier: bool = False,
     sub_concurrency: int = 1,
+    progress_sink: Any = None,
 ) -> dict[str, Any] | None:
     """Condensed paper DIGEST (what it's about + how to use it + quality) for one
     library item. ``None`` when the item vanished from Zotero (caller skips it).
@@ -224,10 +277,11 @@ def _review_one(
     note_error: str | None = None
 
     if pdf_path and quality_enabled:
-        reporter = _deep_review_progress.ReviewReporter(item_key, title, _set_progress)
+        sink = progress_sink if progress_sink is not None else (lambda _p: None)
+        reporter = _deep_review_progress.ReviewReporter(item_key, title, sink)
         reporter.phase("extract")
         # A corrupt PDF raises out of extract_text and is handled by the per-item
-        # boundary in _run_job.
+        # boundary in _review_worker (recorded on this item's job).
         text = extractor.extract_text(pdf_path).strip()
         if text:
             qr = config.quality_review
@@ -261,6 +315,11 @@ def _review_one(
         "goal_summaries": goal_dump,
         "paper_type": paper_type_dump,
         "needs_pdf": not bool(pdf_path),
+        # Set by _review_worker from the acquire result when a fetch was DECLARED-but-
+        # gated (paywall/no session) — the per-paper pane shows login_url as a
+        # click-to-open sign-in link. Default off (most reviews have a PDF).
+        "needs_login": False,
+        "login_url": "",
         "gate_relevance": item.get("gate_relevance"),
         "reviewed_at": now_iso_z(),
         "zotero_note_written": note_written,
@@ -285,85 +344,109 @@ def _load_prestige_context() -> tuple[dict[str, Any], float | None]:
     return scores, floor
 
 
-def _run_job(items: list[dict[str, Any]], *, focus_prompt: str = "") -> None:
-    """Background worker: deep-review ``items`` concurrently, writing the cache
-    incrementally from this (single) thread so progress is visible. The LLM is
-    the configured **deep_review** stage client (``goals.yaml:
-    llm_routing.deep_review``); a missing key / unreachable provider surfaces as
-    this job's error, never an app crash."""
-    try:
-        app = get_state()
-        config = app.app_state.config
-        cfg = config.quality_review
-        extractor = getattr(app, "pdf_extractor", None)
-        reader = getattr(app, "zotero_reader", None)
-        if reader is None:
-            raise RuntimeError("Zotero reader unavailable; cannot deep-review")
-        quality_enabled = bool(cfg.enabled and extractor is not None)
-        llm = app.resolve_stage_client("deep_review")
+def _build_ctx() -> dict[str, Any]:
+    """Resolve the shared per-run review context (LLM clients, config, reader, the
+    library prestige floor, provider-derived tiers) ONCE per ``start`` call. The
+    ``_provider`` key (private) is used for pool sizing + error hinting and is filtered
+    out before the kwargs reach ``_review_one``. Raises if the Zotero reader is absent."""
+    app = get_state()
+    config = app.app_state.config
+    cfg = config.quality_review
+    extractor = getattr(app, "pdf_extractor", None)
+    reader = getattr(app, "zotero_reader", None)
+    if reader is None:
+        raise RuntimeError("Zotero reader unavailable; cannot deep-review")
+    provider = app.resolve_stage_provider("deep_review")
+    prestige_scores, prestige_floor_value = _load_prestige_context()
+    return {
+        "reader": reader,
+        "config": config,
+        "extractor": extractor,
+        "quality_enabled": bool(cfg.enabled and extractor is not None),
+        "llm": app.resolve_stage_client("deep_review"),
         # DIGEST reasons (quality); trivial calls keep the fast thinking-off default
         # (a thinking-off digest goes empty/hallucinates — see README). No-op sans flag.
-        llm_digest = app.resolve_stage_client("deep_review", enable_thinking=True)
-        provider = app.resolve_stage_provider("deep_review")
-        # `lean_deep_review` providers (ollama, prefill-bound) use the cheaper tier
-        # (smaller text, 1 rubric run, batched goals); keyed on the flag, NOT
-        # is_local (MLX is loopback but fast). See services/library/README.md.
-        lean_tier = bool(getattr(provider, "lean_deep_review", False))
-        # Sub-call concurrency: how many rubric samples / goal calls run in parallel
-        # WITHIN a single paper review (local→serial for RAM safety, remote→capped).
-        # Shared with verify-deep-review so the CLI receipt matches production.
-        sub_concurrency = deep_review_sub_concurrency(provider)
+        "llm_digest": app.resolve_stage_client("deep_review", enable_thinking=True),
+        "prestige_scores": prestige_scores,
+        "prestige_floor_value": prestige_floor_value,
+        # `lean_deep_review` providers (ollama, prefill-bound) use the cheaper tier;
+        # keyed on the flag, NOT is_local (MLX is loopback but fast).
+        "lean_tier": bool(getattr(provider, "lean_deep_review", False)),
+        # Sub-call concurrency WITHIN one paper (local→serial, remote→capped); shared
+        # with verify-deep-review so the CLI receipt matches production.
+        "sub_concurrency": deep_review_sub_concurrency(provider),
+        "_provider": provider,
+    }
 
-        cache = _read_all()
-        # Library-wide prestige floor for the quality HIGHLIGHT bar (asymmetric —
-        # never demotes uncited papers; inert when there's no OpenAlex coverage).
-        prestige_scores, prestige_floor_value = _load_prestige_context()
-        # Serial for a local model (protect RAM); a remote one fans out across papers —
-        # capped by its own max_sub_concurrency, else all N (NOT the local-RAM triage knob).
-        max_workers = deep_review_fleet_concurrency(provider, len(items) or 1)
-        wrote = 0
-        errors: list[str] = []
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {
-                pool.submit(
-                    _review_one,
-                    it,
-                    reader=reader,
-                    config=config,
-                    extractor=extractor,
-                    llm=llm,
-                    llm_digest=llm_digest,
-                    quality_enabled=quality_enabled,
-                    focus_prompt=focus_prompt,
-                    prestige_scores=prestige_scores,
-                    prestige_floor_value=prestige_floor_value,
-                    lean_tier=lean_tier,
-                    sub_concurrency=sub_concurrency,
-                ): it
-                for it in items
+
+def _resolve_items(top_k: int, item_keys: list[str] | None, overrides: dict[str, str]) -> list[dict[str, Any]]:
+    """Build the per-item dicts: the explicit ``item_keys`` (per-paper button / fleet,
+    honoring ``pdf_overrides``) or the top-``top_k`` unread reading-queue picks."""
+    if item_keys:
+        # Per-paper: title is re-read inside _review_one; gate_relevance is display-only.
+        return [
+            {
+                "item_key": key,
+                "title": "",
+                "gate_relevance": (reading_queue.get_cached_scoring(key) or {}).get("composite_score"),
+                "pdf_path": overrides.get(key, ""),
             }
-            for future in as_completed(futures):
-                it = futures[future]
-                try:
-                    entry = future.result()
-                    if entry is not None:
-                        cache[str(it["item_key"])] = entry
-                        _write_all(cache)
-                        _try_rebuild_render(str(it["item_key"]))
-                        wrote += 1
-                except Exception as exc:  # noqa: BLE001 — per-item background boundary
-                    LOGGER.warning("deep_review failed item=%s: %s", it.get("item_key"), exc)
-                    errors.append(f"{type(exc).__name__}: {exc}")
-                with _LOCK:
-                    _STATE["completed"] += 1
-        # Fail loud when the run produced NOTHING and items errored (e.g. the
-        # deep_review LLM endpoint is unreachable): otherwise the job reports a
-        # clean 'ready' with an empty cache and the UI silently shows no digest.
-        # A partial run (≥1 cached entry) stays 'ready' — empty results are valid.
-        finish(error=_deep_review_errors.summarize_errors(errors, provider) if errors and wrote == 0 else None)
-    except Exception as exc:  # noqa: BLE001 — background worker boundary
-        LOGGER.exception("deep_review job crashed")
-        finish(error=f"{type(exc).__name__}: {exc}")
+            for key in item_keys
+        ]
+    queue = reading_queue.build_reading_queue(limit=max(1, top_k))
+    return [
+        {"item_key": row["item_key"], "title": row.get("title") or "", "gate_relevance": row.get("relevance_score")}
+        for row in (queue.get("items") or [])[:top_k]
+    ]
+
+
+def _review_worker(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str) -> None:
+    """Pool task: review ONE paper, persist it, and settle THIS item's job. A failure
+    is recorded on the item's job (with the connectivity hint) and never touches another
+    paper's review (per-item boundary)."""
+    item_key = str(item["item_key"])
+    kwargs = {k: v for k, v in ctx.items() if not k.startswith("_")}
+    acquired = None
+    try:
+        # Per-paper button: fetch a PDF first (arXiv/OA/PMC → browser session) for a pick
+        # with no Zotero attachment, then review FROM it. A failure here propagates to the
+        # per-item boundary below (recorded as the item's error), never silently swallowed.
+        if ctx.get("_acquire_missing") and not item.get("pdf_path"):
+            from zotero_summarizer.services.library import _pdf_acquire
+            _set_job_progress(item_key, {"phase": "acquire", "phase_label": "Fetching full text…"})
+            acquired = _pdf_acquire.acquire_for_item(item_key)
+            if acquired.path is not None:
+                item["pdf_path"] = str(acquired.path)
+        entry = _review_one(
+            item, focus_prompt=focus_prompt,
+            progress_sink=lambda prog: _set_job_progress(item_key, prog), **kwargs,
+        )
+        if entry is not None:
+            # The fetch was DECLARED-but-gated (paywall/no session): carry the actionable
+            # needs_login + landing URL so the pane shows a click-to-open sign-in link
+            # (not the misleading generic "no full text"). Only when no PDF landed.
+            if acquired is not None and acquired.needs_login and not item.get("pdf_path"):
+                entry["needs_login"] = True
+                entry["login_url"] = acquired.login_url
+            _write_one(item_key, entry)
+            _try_rebuild_render(item_key)
+        _set_job(item_key, status="ready", completed=1, progress={}, error=None)
+    except Exception as exc:  # noqa: BLE001 — per-item background boundary
+        LOGGER.warning("deep_review failed item=%s: %s", item_key, exc)
+        hint = _deep_review_errors.summarize_errors([f"{type(exc).__name__}: {exc}"], ctx.get("_provider"))
+        _set_job(item_key, status="error", completed=1, progress={}, error=hint)
+
+
+def _submit(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str) -> None:
+    """Per-item single-flight: start a review for ``item`` unless one is already running
+    for that key, on the shared provider-aware pool (local→queue, remote→concurrent)."""
+    item_key = str(item["item_key"])
+    with _LOCK:
+        existing = _JOBS.get(item_key)
+        if existing is not None and existing.get("status") == "running":
+            return  # already in flight for this paper — don't double-review
+        _JOBS[item_key] = {"status": "running", "started_at": now_iso_z(), "completed": 0, "progress": {}, "error": None}
+    _ensure_pool(ctx.get("_provider")).submit(_review_worker, item, ctx, focus_prompt)
 
 
 def start(
@@ -372,59 +455,42 @@ def start(
     item_keys: list[str] | None = None,
     focus_prompt: str = "",
     pdf_overrides: dict[str, str] | None = None,
+    acquire_missing: bool = False,
 ) -> dict[str, Any]:
-    """Kick off a deep review (single-flight). With ``item_keys`` set, reviews
-    exactly those papers (the per-paper button); otherwise the top-``top_k``
-    unread picks. ``focus_prompt`` shapes the LLM's emphasis for this run.
+    """Kick off deep review(s). With ``item_keys`` set, reviews exactly those papers
+    (the per-paper button / the review-fleet); otherwise the top-``top_k`` unread picks.
+    ``focus_prompt`` shapes the LLM's emphasis. ``pdf_overrides`` (``item_key -> local
+    PDF path``) lets the fleet review from an acquired cache file instead of a missing
+    Zotero attachment (honored only for the ``item_keys`` branch).
 
-    ``pdf_overrides`` maps ``item_key -> local PDF path``: the review-fleet passes a
-    cache download it acquired via the university-browser/OA chain so the paper is
-    reviewed from that path instead of a (missing) Zotero attachment. Only honored
-    for the ``item_keys`` branch.
+    ``acquire_missing`` (the per-paper button): for a pick with no local Zotero PDF,
+    fetch one first via ``_pdf_acquire`` (arXiv/OA/PMC headless → the browser using your
+    session) and review FROM THAT — so a paper without a Zotero attachment is fetched,
+    not just flagged ``needs_pdf``. The fleet leaves this off (it pre-acquires + passes
+    ``pdf_overrides``). Keep it to small ``item_keys`` runs — acquisition is a single
+    stateful browser session, serialized by a module lock, so concurrent acquires queue.
 
-    Returns ``status()`` + ``accepted`` (did THIS call claim the single-flight
-    slot?) — the review-fleet checks it to tell its own job from a foreign one.
-    """
-    if not try_start():
-        return {**status(), "accepted": False}
+    Each paper runs as its own job on the shared provider-aware pool — concurrent for a
+    remote provider, queued for a local one. Already-running papers are not re-submitted.
+    Returns the AGGREGATE ``status()`` + ``accepted: True`` (there's no single-flight to
+    reject; the field is kept for the review-fleet's poll contract). On a setup failure
+    (no Zotero reader / queue build) the targeted papers are marked errored so their
+    panels surface the cause."""
     overrides = pdf_overrides or {}
     try:
-        if item_keys:
-            # Per-paper: title is re-read inside _review_one; gate_relevance is
-            # display-only and pulled from the queue's score cache when present.
-            items = [
-                {
-                    "item_key": key,
-                    "title": "",
-                    "gate_relevance": (reading_queue.get_cached_scoring(key) or {}).get("composite_score"),
-                    "pdf_path": overrides.get(key, ""),
-                }
-                for key in item_keys
-            ]
-        else:
-            queue = reading_queue.build_reading_queue(limit=max(1, top_k))
-            items = [
-                {
-                    "item_key": row["item_key"],
-                    "title": row.get("title") or "",
-                    "gate_relevance": row.get("relevance_score"),
-                }
-                for row in (queue.get("items") or [])[:top_k]
-            ]
-    except Exception as exc:  # noqa: BLE001 — surface queue-build failure as job error
-        finish(error=f"{type(exc).__name__}: {exc}")
-        return {**status(), "accepted": True}
-
-    with _LOCK:
-        _STATE["total"] = len(items)
-        _STATE["completed"] = 0
-
-    if not items:
-        finish(error=None)
-        return {**status(), "accepted": True}
-
-    run_in_background(lambda: _run_job(items, focus_prompt=focus_prompt))
+        ctx = _build_ctx()
+        ctx["_acquire_missing"] = bool(acquire_missing)
+        items = _resolve_items(top_k, item_keys, overrides)
+    except Exception as exc:  # noqa: BLE001 — surface setup failure on the targeted jobs
+        msg = f"{type(exc).__name__}: {exc}"
+        LOGGER.warning("deep_review start failed: %s", msg)
+        for key in item_keys or []:
+            _set_job(str(key), status="error", completed=1, progress={}, error=msg,
+                     started_at=now_iso_z())
+        return {**status(), "accepted": True, "error": msg}
+    for item in items:
+        _submit(item, ctx, focus_prompt)
     return {**status(), "accepted": True}
 
 
-__all__ = ["start", "status", "get_cached_review", "try_start", "finish"]
+__all__ = ["start", "status", "get_cached_review"]

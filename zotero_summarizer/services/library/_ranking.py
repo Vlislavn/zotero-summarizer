@@ -1,18 +1,33 @@
-"""Post-scoring queue ORDERING helpers (split from ``reading_queue`` to keep it
-≤500 LOC): content de-duplication + goal-aware re-rank.
+"""Post-scoring queue prep + ORDERING helpers (split from ``reading_queue`` to keep
+it ≤500 LOC): row assembly + partition (``_build_recs``), content de-duplication,
+and goal-aware re-rank (``_order_and_dedup``).
 
-Both operate on the already-scored unread records and only change their ORDER —
-banding/tags/distribution stay computed from the gate's relevance score, so the
-``derivation == prediction`` invariant is untouched. ``reading_queue`` re-exports
-these so ``reading_queue._dedup_by_content`` etc. remain the public seam.
+The ordering helpers operate on the already-scored unread records and only change
+their ORDER — banding/tags/distribution stay computed from the gate's relevance
+score, so the ``derivation == prediction`` invariant is untouched. ``reading_queue``
+re-exports these so ``reading_queue._dedup_by_content`` etc. remain the public seam.
 """
 from __future__ import annotations
 
 from typing import Any
 
+from zotero_summarizer.services._common import band_primary_enabled
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services._common import state as get_state
-from zotero_summarizer.services.model.rank_blend import GOAL_BLEND_WEIGHT, blend_scores
+from zotero_summarizer.services.emoji_signals import ALL_EMOJIS, HARD_VETO_EMOJIS
+from zotero_summarizer.services.library._score_distribution import _entry_prestige
+from zotero_summarizer.services.model.rank_blend import (
+    GOAL_BLEND_WEIGHT,
+    blend_scores,
+    quality_bonus,
+)
+
+# "Read / handled" = engaged-with (any signal emoji) or vetoed.
+_HANDLED_EMOJIS: frozenset[str] = frozenset(ALL_EMOJIS) | HARD_VETO_EMOJIS
+
+
+def _is_read(tags: list[str]) -> bool:
+    return any(tag in _HANDLED_EMOJIS for tag in tags)
 
 # The blend math + weights (0.4 goal / 0.15 prestige, blind-judge provenance)
 # live in ``services/model/rank_blend`` — shared with the Today slate: same
@@ -77,14 +92,20 @@ def _goal_affinity(item_keys: list[str]) -> dict[str, float]:
 
 
 # Bounded deep-review QUALITY lift (user-requested: "качественные статьи наверху").
-# Added to the normalized blend key, capped so it can NEVER leap a relevance band or
-# override the measured goal/prestige blend (the primary signal). Library-only; a
-# paper with no deep review (no grade) gets 0. A/B float up, D nudges down slightly.
-_QUALITY_BONUS: dict[str, float] = {"A": 0.06, "B": 0.03, "C": 0.0, "D": -0.02}
+# The math lives in the shared, pure ``rank_blend.quality_bonus`` (one definition
+# for both consumers); this module only adapts the queue record + resolves the mode.
+# Added to the normalized blend key, capped so it only reorders WITHIN a relevance
+# band (banding derives from the raw 1-5 score, not this key). A paper with no
+# review gets 0.
 
 
 def _quality_bonus(rec: dict[str, Any]) -> float:
-    return _QUALITY_BONUS.get(str(rec.get("quality_grade") or "").upper(), 0.0)
+    """Capped quality lift for a queue row — the shared pure
+    ``rank_blend.quality_bonus`` adapted to the reading-queue record shape; the
+    grade-only-vs-band-primary mode is the shared ``_common.band_primary_enabled``."""
+    return quality_bonus(
+        rec.get("quality_band"), rec.get("quality_grade"), use_band=band_primary_enabled()
+    )
 
 
 def _known_prestige(rec: dict[str, Any]) -> float | None:
@@ -154,6 +175,78 @@ def sort_unread(unread: list[dict[str, Any]], *, model_ready: bool) -> None:
         )
 
 
+def _build_recs(
+    rows: list[dict[str, Any]],
+    *,
+    cached: dict[str, Any],
+    verdict_priority: dict[str, str],
+    reviews: dict[str, Any],
+    proposed_verdicts: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Partition library rows into ``(unread, read/handled)`` queue records.
+
+    "Handled" = engaged (emoji) OR explicitly rejected (``dont_read``); those drop
+    out of the unread queue. A POSITIVE verdict is a reading intent — the paper
+    stays in ``unread`` and pins to the top (``sort_unread``). The
+    ``proposed_verdict`` and quality fields are display-only sidecars (never fed to
+    the hide/pin logic)."""
+    unread: list[dict[str, Any]] = []
+    read: list[dict[str, Any]] = []
+    for it in rows:
+        is_read = _is_read(it.get("tags") or [])
+        user_priority = verdict_priority.get(it["item_key"], "")
+        entry = cached.get(it["item_key"])
+        prestige_score, prestige_known = _entry_prestige(entry)
+        qual = (reviews.get(it["item_key"]) or {}).get("quality") or {}
+        rec = {
+            "item_key": it["item_key"],
+            "title": it.get("title") or "",
+            "authors": it.get("authors") or "",
+            "reading_priority": it.get("reading_priority") or "",
+            "user_priority": user_priority,
+            "has_pdf": bool(it.get("has_pdf")),
+            "date_added": it.get("date_added") or "",
+            "read": is_read,
+            "relevance_score": entry["relevance_score"] if entry else None,
+            "why_reason": entry["why_reason"] if entry else None,
+            "prestige_score": prestige_score,
+            "prestige_known": prestige_known,
+            "proposed_verdict": proposed_verdicts.get(it["item_key"]),
+            "quality_grade": qual.get("grade") or None,
+            "quality_band": qual.get("quality_band") or None,
+        }
+        (read if (is_read or user_priority == "dont_read") else unread).append(rec)
+    return unread, read
+
+
+def _order_and_dedup(
+    unread: list[dict[str, Any]],
+    read: list[dict[str, Any]],
+    *,
+    search: str,
+    semantic_requested: bool,
+    model_ready: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    """Order the unread set then collapse duplicate library items.
+
+    "Meaning" search hybrid-re-ranks the unread set (order only — scores/banding
+    untouched), falling back to the normal goal-blended/recency sort when the
+    corpus is off / no match. Dedup runs AFTER the sort so the best-scored copy
+    survives a top slot; ``read`` is de-duped too and any read copy whose paper
+    already survives in ``unread`` is dropped (else a paper with one read + one
+    unread copy would show in BOTH lists under ``include_read``)."""
+    search_flags: dict[str, Any] = {}
+    if semantic_requested:
+        from zotero_summarizer.services.library import _search
+        unread, search_flags = _search.order_unread_semantic(search, unread)
+    if not search_flags.get("semantic"):
+        sort_unread(unread, model_ready=model_ready)
+    unread = _dedup_by_content(unread)
+    _unread_keys = {k for r in unread if (k := _content_key(r))}
+    read = [r for r in _dedup_by_content(read) if _content_key(r) not in _unread_keys]
+    return unread, read, search_flags
+
+
 __all__ = [
     "_PRIORITY_RANK",
     "_USER_VERDICT_RANK",
@@ -163,5 +256,8 @@ __all__ = [
     "_known_prestige",
     "_quality_bonus",
     "_blended_sort",
+    "_build_recs",
+    "_is_read",
+    "_order_and_dedup",
     "sort_unread",
 ]

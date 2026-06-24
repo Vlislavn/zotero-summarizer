@@ -35,6 +35,23 @@ export function scoreToBand(score) {
   return 'dont_read';
 }
 
+// "Cool" = a high-relevance pick (must/should-read band) the user hasn't decided
+// yet: no fleet proposal (proposed_verdict) and no own label (user_priority). The
+// auto-review ("Review cool papers") loops the fleet over exactly these.
+export function isCoolUndecided(it) {
+  if (!it || it.proposed_verdict || it.user_priority) return false;
+  const band = scoreToBand(typeof it.relevance_score === 'number' ? it.relevance_score : null);
+  return band === 'must_read' || band === 'should_read';
+}
+
+// The item_keys of every cool-undecided row, in queue order. The auto-review loop
+// pins these to the fleet (so it reviews the SAME rows the UI counts — a cool paper
+// can sit deep in the blended queue while the band-agnostic fleet selector would
+// review higher-blended could_read rows first).
+export function coolUndecidedKeys(items) {
+  return (items || []).filter(isCoolUndecided).map((it) => it.item_key);
+}
+
 // Default = identity filter (the list is unchanged).
 export const EMPTY_FILTERS = {
   bands: [],        // multi-select subset of BANDS; [] = all bands

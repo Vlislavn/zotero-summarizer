@@ -115,24 +115,33 @@ export async function runDeepReview({ topK = 5, itemKey = null, focusPrompt = ''
   });
 }
 
-/** GET /api/library/deep-review/status → { status, total, completed, error, started_at }. */
-export async function fetchDeepReviewStatus() {
-  return request('/api/library/deep-review/status');
+/**
+ * GET /api/library/deep-review/status → { status, total, completed, error, started_at, progress }.
+ * With `itemKey`, reports THAT paper's job (so each panel shows its own progress); without it,
+ * an aggregate ("is any review running?").
+ */
+export async function fetchDeepReviewStatus(itemKey = null) {
+  const q = itemKey ? `?item_key=${encodeURIComponent(itemKey)}` : '';
+  return request(`/api/library/deep-review/status${q}`);
 }
 
 /**
- * POST /api/library/review-fleet/run { top_k }
- * Pre-decides a reading verdict for the top-N Read-next picks in the background
- * (reusing each paper's CACHED deep-review signals — no new LLM call). The
- * results surface on queue rows as `proposed_verdict` SUGGESTIONS the human
- * Confirms/Overrides — never auto-applied labels. Single-flight: returns the
- * in-flight status when a run is already going. Resolves to
- * { status, total, completed, error, started_at, progress }.
+ * POST /api/library/review-fleet/run { item_keys | top_k }
+ * Pre-decides a reading verdict for the chosen Read-next picks in the background:
+ * with `itemKeys`, EXACTLY those (the "Review cool papers" loop pins its cool set);
+ * else the top-N undecided picks. The results surface on queue rows as
+ * `proposed_verdict` SUGGESTIONS the human Confirms/Overrides — never auto-applied
+ * labels. Single-flight: returns the in-flight status when a run is already going.
+ * Resolves to { status, total, completed, proposed, error, started_at, progress }.
  */
-export async function runReviewFleet({ topK = 5 } = {}) {
+export async function runReviewFleet({ topK = 5, itemKeys = null } = {}) {
+  // With itemKeys the fleet reviews EXACTLY those (the "Review cool papers" loop
+  // pins its cool set so the fleet targets the same rows the UI counts); else the
+  // top-`topK` undecided picks. Mirrors runDeepReview's {item_key | top_k} shape.
+  const body = itemKeys && itemKeys.length ? { item_keys: itemKeys } : { top_k: topK };
   return request('/api/library/review-fleet/run', {
     method: 'POST',
-    body: JSON.stringify({ top_k: topK }),
+    body: JSON.stringify(body),
   });
 }
 

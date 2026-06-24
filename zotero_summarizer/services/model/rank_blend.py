@@ -108,4 +108,58 @@ def blend_scores(
     return out
 
 
-__all__ = ["GOAL_BLEND_WEIGHT", "PRESTIGE_BLEND_WEIGHT", "blend_scores"]
+# --- Order-time deep-review QUALITY lift -------------------------------------
+# A SMALL, capped bonus the CONSUMER adds to the blend key (this module only
+# computes it — stays pure). It reorders WITHIN a relevance band: banding is
+# derived independently from the raw 1-5 relevance score, never from this sort
+# key, so the bonus cannot move a paper across a band at ANY magnitude. The cap
+# only bounds the within-band reorder REACH.
+#
+# Two modes, the consumer selects via ``use_band``:
+#   * grade-only (DEFAULT — the shipped, measured behaviour): the A-D referee grade.
+#   * band-primary (a Phase-2-MEASURED arm, not flipped on ahead of its gate): the
+#     3-band quality verdict drives it (highlight ↑, flag ↓) with the grade as a
+#     small secondary nudge. ``neutral`` AND ``uncertain`` resolve to EXACTLY 0.0
+#     (never negative) — ``uncertain`` is a self-consistency / human-look state,
+#     not a quality demotion, so it must never bury a borderline (e.g. clinical)
+#     paper.
+DEFAULT_QUALITY_BONUS: dict[str, float] = {"A": 0.06, "B": 0.03, "C": 0.0, "D": -0.02}
+DEFAULT_QUALITY_BAND_BONUS: dict[str, float] = {
+    "highlight": 0.06, "flag": -0.06, "neutral": 0.0, "uncertain": 0.0,
+}
+
+
+def quality_bonus(
+    band: str | None,
+    grade: str | None,
+    *,
+    use_band: bool = False,
+    grade_table: dict[str, float] = DEFAULT_QUALITY_BONUS,
+    band_table: dict[str, float] = DEFAULT_QUALITY_BAND_BONUS,
+    grade_nudge: float = 0.5,
+) -> float:
+    """Capped deep-review quality lift for one row (pure; the consumer adds it).
+
+    ``use_band=False`` → grade-only (``grade_table[grade]``, default 0.0 when
+    ungraded). ``use_band=True`` → band-primary: ``band_table[band]`` plus
+    ``grade_nudge`` × the grade lift, EXCEPT a band whose base is 0.0
+    (``neutral``/``uncertain``/unknown) returns exactly 0.0 so a borderline paper
+    is never demoted by its grade.
+    """
+    g = str(grade or "").upper()
+    if not use_band:
+        return grade_table.get(g, 0.0)
+    base = band_table.get(str(band or "").lower(), 0.0)
+    if base == 0.0:
+        return 0.0
+    return base + grade_nudge * grade_table.get(g, 0.0)
+
+
+__all__ = [
+    "GOAL_BLEND_WEIGHT",
+    "PRESTIGE_BLEND_WEIGHT",
+    "DEFAULT_QUALITY_BONUS",
+    "DEFAULT_QUALITY_BAND_BONUS",
+    "blend_scores",
+    "quality_bonus",
+]

@@ -17,6 +17,7 @@ from zotero_summarizer.models import (
     TriageFeedbackRequest,
     TriageFeedbackResponse,
 )
+from zotero_summarizer.services import interaction_log
 from zotero_summarizer.services._common import LOGGER, safe_parse_response_json
 from zotero_summarizer.storage import repositories as triage_db
 
@@ -157,6 +158,14 @@ async def submit_triage_feedback(item_key: str, req: TriageFeedbackRequest) -> T
                 "inferred_relevance": inferred_relevance,
             }
         ],
+    )
+
+    interaction_log.log_human_feedback(
+        item_key=safe_item_key,
+        item_key_kind=interaction_log.key_kind(safe_item_key),
+        surface="triage_result_feedback",
+        model={"priority": original_priority, "composite_score": result_row.get("composite_score")},
+        human={"kind": "feedback", "value": req.verdict, "inferred_relevance": inferred_relevance},
     )
 
     item_title = str(result_row.get("title") or safe_item_key)

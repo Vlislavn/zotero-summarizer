@@ -10,14 +10,14 @@
 // (checkbox multi-select + batch action, the familiar inbox pattern),
 // Law of Common Region (provenance badges group origin).
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import PaperCard from '../components/today/PaperCard.jsx';
 import NotConfiguredCard from '../components/setup/NotConfiguredCard.jsx';
 import Spinner from '../components/ui/Spinner.jsx';
 import HintBanner from '../components/ui/HintBanner.jsx';
-import { humanizeError } from '../utils/humanizeError.js';
+import { ErrorBanner } from '../components/library/shared.jsx';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import {
   fetchDailySlate,
@@ -34,19 +34,6 @@ const HINT_TEXT =
   'Today = cull. Read the abstract, tick the papers worth reading, then ' +
   'Add to library (or Trash). You give the real labels later, in Library → Read next.';
 
-// ---------------------------------------------------------------------------
-// Small shared building blocks
-// ---------------------------------------------------------------------------
-
-function ErrorBanner({ error, title = 'Error' }) {
-  if (!error) return null;
-  return (
-    <div className="my-2 p-2 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800">
-      <span className="font-semibold">{title}:</span>{' '}
-      {humanizeError(error)}
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Spot-check — a capped, clearly-labeled sample of papers the filter rejected,
@@ -214,7 +201,21 @@ export default function Today() {
   const draining = triageMutation.isPending || Boolean(triageStatus?.running);
 
   const slate = slateQuery.data;
-  const papers = slate?.papers || [];
+  // Memoized so its identity is stable across renders — keeps the select-all /
+  // filter memos below from recomputing every render (and silences the hook-deps lint).
+  const papers = useMemo(() => slate?.papers || [], [slate]);
+
+  // Source filter: focus the cull on a single feed (arXiv vs PubMed vs HN…) when
+  // the slate mixes sources. Client-side over the already-loaded slate; "" = all.
+  const [feedFilter, setFeedFilter] = useState('');
+  const feedNames = useMemo(
+    () => [...new Set(papers.map((p) => p.feed_name).filter(Boolean))].sort(),
+    [papers],
+  );
+  const visiblePapers = useMemo(
+    () => (feedFilter ? papers.filter((p) => p.feed_name === feedFilter) : papers),
+    [papers, feedFilter],
+  );
 
   const toggleSelect = useCallback((id) => {
     setSelectedIds((prev) => {
@@ -225,12 +226,15 @@ export default function Today() {
     });
   }, []);
 
-  const allSelected = papers.length > 0 && selectedIds.size === papers.length;
+  // Select-all operates on the VISIBLE (filtered) slate, so it never silently
+  // selects papers hidden by the source filter.
+  const allSelected = visiblePapers.length > 0 && visiblePapers.every((p) => selectedIds.has(p.item_id));
   const toggleSelectAll = useCallback(() => {
-    setSelectedIds((prev) =>
-      prev.size === papers.length ? new Set() : new Set(papers.map((p) => p.item_id)),
-    );
-  }, [papers]);
+    setSelectedIds((prev) => {
+      const allOn = visiblePapers.length > 0 && visiblePapers.every((p) => prev.has(p.item_id));
+      return allOn ? new Set() : new Set(visiblePapers.map((p) => p.item_id));
+    });
+  }, [visiblePapers]);
 
   const busy = addMutation.isPending || trashMutation.isPending;
 
@@ -397,6 +401,23 @@ export default function Today() {
               />
               {selectedCount > 0 ? `${selectedCount} selected` : 'Select all'}
             </label>
+            {/* Source filter — only when the slate actually mixes feeds, so a
+                single-source day shows no inert control (Hick's Law). */}
+            {feedNames.length > 1 && (
+              <select
+                value={feedFilter}
+                onChange={(e) => setFeedFilter(e.target.value)}
+                title="Show only papers from one feed source"
+                className="text-xs px-2 py-1 rounded-lg border border-slate-300 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              >
+                <option value="">All sources ({papers.length})</option>
+                {feedNames.map((name) => (
+                  <option key={name} value={name}>
+                    {name} ({papers.filter((p) => p.feed_name === name).length})
+                  </option>
+                ))}
+              </select>
+            )}
             <div className="flex-1" />
             <button
               type="button"
@@ -417,14 +438,23 @@ export default function Today() {
           </div>
 
           <div className="space-y-3">
-            {papers.map((paper) => (
-              <PaperCard
-                key={paper.item_key}
-                paper={paper}
-                selected={selectedIds.has(paper.item_id)}
-                onToggleSelect={toggleSelect}
-              />
-            ))}
+            {visiblePapers.length === 0 ? (
+              <p className="text-xs text-slate-500 p-3">
+                No papers from <span className="font-semibold">{feedFilter}</span> in today’s slate.{' '}
+                <button type="button" onClick={() => setFeedFilter('')} className="text-teal-700 underline hover:text-teal-900">
+                  Show all sources
+                </button>
+              </p>
+            ) : (
+              visiblePapers.map((paper) => (
+                <PaperCard
+                  key={paper.item_key}
+                  paper={paper}
+                  selected={selectedIds.has(paper.item_id)}
+                  onToggleSelect={toggleSelect}
+                />
+              ))
+            )}
           </div>
         </>
       )}

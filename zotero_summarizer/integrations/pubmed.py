@@ -22,13 +22,12 @@ from __future__ import annotations
 
 import logging
 import re
-import threading
-import time
 from typing import Any
 
 import httpx
 
 from zotero_summarizer.domain import normalize_doi
+from zotero_summarizer.integrations._rate_limiter import RateLimiter
 from zotero_summarizer.integrations.openalex_cache import OpenAlexCache
 
 
@@ -45,30 +44,7 @@ _PMID_RE = re.compile(r"pubmed\.ncbi\.nlm\.nih\.gov/(\d{6,9})", re.IGNORECASE)
 _PMCID_RE = re.compile(r"^PMC\d+$", re.IGNORECASE)
 
 
-class _RateLimiter:
-    """Per-process token bucket: at most ``rate`` calls per second.
-
-    ponytail: a 12-line copy of OpenAlex's limiter rather than coupling two
-    integration leaves through a private import; lift to a shared helper only if a
-    third caller appears.
-    """
-
-    def __init__(self, rate: int) -> None:
-        self._interval = 1.0 / rate
-        self._lock = threading.Lock()
-        self._last = 0.0
-
-    def acquire(self) -> None:
-        with self._lock:
-            now = time.monotonic()
-            wait = self._last + self._interval - now
-            if wait > 0:
-                time.sleep(wait)
-                now = time.monotonic()
-            self._last = now
-
-
-_RATE_LIMITER = _RateLimiter(_RATE_LIMIT_PER_SEC)
+_RATE_LIMITER = RateLimiter(_RATE_LIMIT_PER_SEC)
 
 
 def _pmid_from_url(url: str) -> str:

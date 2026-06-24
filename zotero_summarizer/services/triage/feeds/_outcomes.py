@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
+from zotero_summarizer.services import interaction_log
 from zotero_summarizer.storage import feeds as feeds_storage
 from zotero_summarizer.storage import repositories as triage_db
 from zotero_summarizer.services.triage.feeds._common import LOGGER, _triage_conn
@@ -71,6 +72,23 @@ def _resolve_due_outcomes(
             )
         except Exception:
             LOGGER.exception("insert_feedback_events failed for %s", item_key)
+        # Close the trajectory in the unified event stream: the daemon-resolved
+        # behavioural outcome, joined to the at-triage verdict via feed_item_id.
+        fid = int(row.get("feed_item_id") or 0)
+        interaction_log.log_behavioural_outcome(
+            item_key=item_key,
+            item_key_kind=interaction_log.key_kind(item_key),
+            model={
+                "priority": str(row.get("reading_priority") or ""),
+                "composite_score": row.get("composite_score"),
+                "surprise_score": row.get("surprise_score"),
+                "corpus_affinity": row.get("corpus_affinity"),
+            },
+            outcome=outcome,
+            signal_weight=weight,
+            stable_id={"feed_item_id": fid or None, "doi": row.get("doi") or None,
+                       "arxiv": row.get("arxiv_id") or None},
+        )
         resolved += 1
     return resolved
 

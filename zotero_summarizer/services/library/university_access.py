@@ -51,7 +51,8 @@ def start_login() -> dict[str, Any]:
     if deep_review.status().get("status") == "running":
         return {"started": False, "reason": "a deep review is running; try again in a moment"}
     prof = profile_dir(ua)
-    _flight.run_in_background(lambda: browser_fetch.open_login_window(ua.login_url, prof))
+    channel = str(getattr(ua, "browser_channel", "") or "")
+    _flight.run_in_background(lambda: browser_fetch.open_login_window(ua.login_url, prof, channel=channel))
     return {"started": True, "login_url": ua.login_url}
 
 

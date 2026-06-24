@@ -27,9 +27,9 @@ from zotero_summarizer.services.faithbench._corpus import (
     PaperRecord,
     normalize_text,
     sentence_at,
-    tokenize,
 )
 from zotero_summarizer.services.faithbench._dataset import QAItem, TrapItem
+from zotero_summarizer.storage.corpus_bm25 import tokenize
 
 LOGGER = logging.getLogger(__name__)
 

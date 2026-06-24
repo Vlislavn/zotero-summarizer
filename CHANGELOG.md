@@ -7,6 +7,183 @@ yet publish versioned releases, so everything currently lives under
 
 ## [Unreleased]
 
+### Changed
+
+- **Code-health cleanup (advisory `make scan`):** removed dead `contracts.TriageJob`;
+  lifted the duplicated `_RateLimiter` (openalex/pubmed) into shared
+  `integrations/_rate_limiter.py`; promoted `corpus_bm25.tokenize` to the single
+  word-tokenizer (faithbench `_build_qa` + library `_paper_goal_summaries` reuse it);
+  split `build_reading_queue` and `run_daemon_tick` into small helpers to clear the
+  function-length signal. Behavior-preserving; allowlisted the test-only `with_db_path`.
+
+- **Extracted the "Review cool papers" loop into a unit-tested `useReviewCoolLoop`
+  hook** (`frontend/src/hooks/`), shrinking `LibraryReadNext.jsx` 832→671 lines. The
+  orchestration (pin cool keys, attempted-ledger dedup, foreign-prewarm drain, honest
+  Stop-settle, mount-resume) is now isolated and covered by 7 hook tests (pin / re-chew
+  regression / drain / drain-bound / terminate / stop / count). Adds dev-only test infra
+  (`jsdom`, `@testing-library/react`) scoped per-file so the existing pure-logic tests
+  stay in the node env. Behavior-identical — re-verified live (cool 1→0, re-proposed).
+  Also: the auto-review status line is now an ARIA live region (`role=status`/`aria-live`)
+  so screen readers hear the minutes-long progress.
+
+### Fixed
+
+- **"Review cool papers" now actually drains the cool set (band-axis mismatch).** The
+  client counted cool (must/should-read) picks, but the fleet's `_select_keys` was
+  band-agnostic — it reviewed the top *undecided* rows in blended-rank order, which are
+  often higher-blended `could_read` papers, leaving band-cool stragglers (buried deep in
+  the queue) never selected; because those could rows proposed, the loop's
+  `!settled.proposed` guard never fired and it re-chewed up to 12 rounds (117 papers
+  reviewed, cool set barely moving). Fix: `fleet.start(item_keys=…)` (+ route) lets the
+  client **pin its exact cool keys** so the fleet reviews the SAME rows the UI counts;
+  `handleReviewCool` tracks an **attempted ledger** and terminates on "no new cool key",
+  not on proposed==0. Receipts confirmed the stragglers were merely *slow* (a clean
+  single review of one finished in 147 s), never a deep-review failure.
+- **"Reviewing paper N of 5" no longer overshoots** ("6 of 5"): the bar clamps the
+  progress index to the batch total (PASS-2 re-reviews had inflated `deep_review.completed`).
+- **Stop now reads honestly.** It shows a distinct **"Stopping…"** state and holds it
+  until the in-flight chunk actually settles, instead of leaving a stale "Reviewing N of
+  5" next to a re-enabled button; the tooltip no longer over-promises a mid-review cancel.
+- **A 0-proposal run explains itself** instead of reverting to the neutral idle prompt:
+  the bar's branch order now lets a real terminal status (`done_empty`/`ready`/`error`)
+  beat the idle copy ("Reviewed N but proposed 0 — none yielded a fetchable digest").
+- **First click no longer wastes itself on a running prewarm.** If a startup-prewarm
+  fleet holds the single-flight latch, the loop detects the foreign run (its `started_at`
+  predates the click), drains it without counting a round, then pins its own cool keys.
+
+### Added
+
+- **One-click "Review cool papers" — auto deep-review of every high-relevance pick.**
+  The Library Read-next bar replaces "Predict next 5" with **Review cool papers (N)**,
+  where N = the undecided must/should-read picks (`isCoolUndecided`). It loops the
+  review fleet (deep-review → propose-verdict) over that whole set in chunks of 5 until
+  it's drained, the user hits **Stop**, or a round proposes nothing new (the rest are
+  unfetchable). Results **stream in mid-run**: the queue reloads each time a paper
+  settles, so reviews, Confirm/Override cards and quality chips appear live instead of
+  only at the end. Pure frontend — reuses the existing fleet/deep-review engine; the
+  quality lift it surfaces is already applied on every queue rebuild (no separate
+  rescore). No more clicking "Run deeper review" per paper.
+- **Annotate active-learning list now orders by decision value** (`sortBorderByUncertainty`).
+  Border mode (🎯 active learning) returned its uncertain picks in raw backend order;
+  it now surfaces the most-worth-labeling papers first — model⇄prediction *conflicts*,
+  then the picks closest to the decision boundary (smallest `border_distance`) — with a
+  one-line caption explaining the order. Labeling the genuinely-uncertain papers first
+  is what makes active learning pay off per click. Pure, stable sort; unit-tested.
+- **Per-tab comfort pass** — one focused improvement on each remaining surface:
+  **Today** — a source/feed filter on the cull slate (focus on arXiv vs PubMed vs HN;
+  shown only when the slate mixes feeds). **Triage** — an opt-in "Needs feedback only"
+  filter on completed results so a long job's still-to-review items aren't buried.
+  **Pending** — a title filter to find one paper's queued change without scrolling
+  (filter-aware empty state) **plus a per-row Retry** on the Failed tab — re-applies a
+  failed Zotero write through the same path (`/api/pending/apply {retry:true}` re-applies
+  FAILED rows) without re-queuing. **Settings** — a **Discard** button (shown while dirty)
+  to revert unsaved edits to the last-saved config without a page reload. **Audit** —
+  a Goal-Gradient answered/target progress bar on the session summary. **Annotate** —
+  the active-learning border mode now shows a live **`m:ss elapsed`** timer during its
+  minutes-long "Scoring your library…" rescore (honest progress + an exit hint), and
+  orders the uncertain picks most-worth-labeling first (`sortBorderByUncertainty`).
+
+### Fixed
+
+- **Browser PDF fetch now passes Cloudflare for declared PDFs.** A paper's
+  `citation_pdf_url` (Nature/Springer/Elsevier/Wiley) was fetched via
+  `context.request.get` — an HTTP API client with none of patchright's page-level
+  stealth — so Cloudflare bot-walled it even with valid cookies (the AgentClinic / npj
+  Digital Medicine "browser yielded nothing" case). On that miss `_drive_browser` now
+  **navigates to the PDF as a real page** (`page.goto` + the response interceptor), which
+  solves the managed challenge and carries `cf_clearance`. The interactive per-paper
+  path also retries the landing once with a **visible (headed) browser**
+  (`allow_headed_fallback`) for stubborn challenges; the background fleet stays headless.
+  When a paper is still gated, the per-paper pane now surfaces a **click-to-open sign-in
+  link** (`needs_login` + `login_url` threaded onto the deep-review entry) instead of a
+  misleading "paywalled" message.
+- **Follow the page's real "Download PDF" link, not just `citation_pdf_url`.** The npj
+  Digital Medicine / AgentClinic "browser yielded nothing" case was **not** Cloudflare
+  (server is Nature's *Oscar Platform*): the `citation_pdf_url` meta (`<article>.pdf`) is a
+  **redirect trap** that 30x's back to the HTML landing, while the on-page **Download-PDF**
+  button points to the real open-access file (`_reference.pdf`, 13 MB). `_drive_browser`
+  now collects BOTH the meta and the on-page Download-PDF anchors (`_pdf_candidates`) and
+  tries each, so the actual PDF is fetched instead of giving up at the trap. Generalizes
+  to any publisher whose declared meta and real download link diverge.
+- **Browser fetch drives the REAL Chrome binary** (`UniversityAccessConfig.browser_channel`,
+  default `chrome`) with `no_viewport`, for both the fetch and the one-time login. Bundled
+  chromium's fingerprint/UA don't match the `cf_clearance` cookie a cookie-source Chrome
+  earned, so aggressive Cloudflare publishers (Nature/npj) re-challenged it; the real
+  Chrome binary's fingerprint matches, so the injected clearance is accepted. `""` falls
+  back to bundled chromium for setups without Chrome installed.
+
+### Added
+
+- **Acquire-before-score rescue for abstract-less prestige-journal papers**
+  (`feeds/_tick_phases.recover_abstractless_rescues`, `RecoverAbstractConfig`,
+  default ON). Nature/Science/Cell/NEJM RSS ships a boilerplate publication notice,
+  not a real abstract, so the gate scored those papers on no content and dropped
+  high-goal ones to `dont_read` (the "Conversational AI for Disease Management"
+  Nature miss: gate 0.299, goal_sim 0.556). The daemon now re-checks each
+  gate-rejected, abstract-less item whose strongest goal_sim clears a threshold,
+  fetches its full text (review-fleet `_pdf_acquire`) and re-scores on the PDF
+  before the verdict stands; `max_per_tick` caps the browser fetch.
+- **Deep-review quality lift in ranking** (`rank_blend.quality_bonus`, shared pure
+  helper): a capped, order-only bonus that floats high-quality papers up WITHIN
+  their relevance band (never across — banding derives from the raw score, not the
+  sort key). Grade-only by default; band-primary (highlight↑/flag↓; neutral &
+  uncertain→exactly 0.0) is a measured arm via `quality_review.quality_band_primary`
+  / `ZS_QUALITY_BAND_PRIMARY`.
+- **Quality reaches the Today slate** via a GUID↔item_key bridge
+  (`daily_select/_candidate.attach_quality_from_reviews`): joins the deep_reviews
+  cache by `materialized_zotero_key` (the feed GUID can't key it). The lift is
+  confined to the FLOORED model role (`_allocation._pick_model`); discovery roles
+  stay quality-free and a below-bar paper can't be lifted in.
+- **Per-card Quality chip** in Read-next (`ReadNextView`): one word (Highlight/Flag
+  or A–D grade) reusing the shared review tones, so a moved card shows its cause.
+- **`tools/eval_rigor_vs_band.py`**: validates the incumbent abstract
+  `methodological_rigor` vs the deep-review band (weighted κ + Spearman +
+  false-strong-on-flag cell) + a kept/trashed lift; display-only until both pass.
+
+- **Agentic interaction log** (`services/interaction_log.py` →
+  `data/interaction-events.jsonl`): append-only, immutable JSON line per human
+  reading decision + the model prediction it reacted to, plus the 7-day outcome;
+  stamped with `git_commit` + the gate `golden_csv_sha256`. Emitted by the verdict
+  routes (incl. DELETE retraction), Today keep/trash, review queue, triage feedback,
+  and the outcome daemon. Reuses `run_log`; best-effort (warns, never blocks the
+  durable write). Keeps the trajectory the UPSERT/DELETE verdict tables destroy.
+
+### Changed
+
+- **`tools/eval_slate_blend.py` firewalled + CI'd**: positive class restricted to
+  `user_approved` (`selected`/`black_swan` were the allocator's own outputs =
+  leakage, now a separate diagnostic arm); adds the reviewed∩labeled join via
+  `materialized_zotero_key` + a measurability floor, bootstrap 95% CIs, a
+  within-reviewed NDCG, and an additive-vs-normalized reorder-reach counterfactual.
+
+- **Per-paper deep review fetches the full text.** "Run deeper review" on a paper
+  with no Zotero PDF now acquires one first (`deep_review.start(acquire_missing=True)`
+  → `_pdf_acquire.acquire_for_item`: OA/PMC/library session/web-article render) and
+  reviews from it, instead of telling the user to "Find Available PDF in Zotero". On a
+  paywall with no session it still reports an honest "no full text available". Scoped
+  to the single-key route path (acquisition is one stateful browser session).
+
+- **Frontend banners deduped.** `StatusBanner` (5 copies) and `ErrorBanner` (2
+  copies) collapsed to one each in `components/library/shared.jsx`, now with a11y
+  `role`/`aria-live` and `humanizeError`. `formatPercent` in Audit reused from
+  `triageHelpers`.
+
+- **Prewarm reads the deep-review cache once, not per pick.** New
+  `deep_review.cached_review_keys()` (one read) replaces per-row
+  `get_cached_review()`, which re-parsed all of `deep_reviews.json` for every
+  top-K item.
+
+- **Smaller triage/faithbench code.** Fast-reject/abstract-only summarize
+  responses lean on `SummarizeResponse` defaults (drop ~20 restated fields);
+  `faithbench.load_jsonl` is a guarded comprehension.
+
+### Removed
+
+- **Dead over-engineering (repo audit).** The unused `TriageRepository` OO facade
+  (zero prod callers; tests now use `with_db_path`) and the `TriageJobService`
+  class (→ module function `new_job`; its dead `public_job`/`TriageJob` path,
+  used only by a test, dropped). ~70 LOC.
+
 ### Fixed
 
 - **"Needs library login" was misleading + over-fired.** A scholarly item whose
@@ -88,6 +265,12 @@ yet publish versioned releases, so everything currently lives under
 
 ### Changed
 
+- **Deep-review a 2nd paper while a 1st is still running.** `deep_review` was global
+  single-flight, so a per-paper "Run deeper review" on paper B while A ran was silently
+  rejected AND B's panel showed A's progress. It's now per-item jobs over one
+  provider-aware pool (mirrors `paper_render`): a remote/API provider reviews papers
+  concurrently, a local one queues the 2nd (RAM-safe); each panel polls
+  `status(item_key)` for its OWN progress; re-running the same paper is a no-op.
 - **Review-fleet deep reviews run in parallel for a remote/API provider, serial for a
   local one.** Two fixes: the fleet now batches its picks into ONE `deep_review.start`
   call (was: one paper at a time through the single-flight latch); and the N-paper

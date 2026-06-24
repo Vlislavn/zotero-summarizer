@@ -71,8 +71,11 @@ mcp → (HTTP only; imports none of the above)
 ## Data & config
 
 - All app state lives under `data/` (gitignored): the two SQLite DBs
-  (`triage_history.db`, `corpus_cache.db`), your golden dataset, logs, and ML
-  artifacts. Every path comes from `Settings` — never hardcode `project_root / "..."`.
+  (`triage_history.db`, `corpus_cache.db`), your golden dataset, logs, the
+  append-only **agentic interaction log** (`interaction-events.jsonl` — the
+  immutable human-decision + model-prediction trajectory for offline improvement;
+  see `services/interaction_log.py`), and ML artifacts. Every path comes from
+  `Settings` — never hardcode `project_root / "..."`.
 - Config: `.env` (secrets/paths) + `goals.yaml` (research goals, models, prompts).
   Both are gitignored; copy the `*.example` templates to bootstrap. See the README.
 - Schema changes are version-gated migrations (`storage/migrations.py`): add a new
