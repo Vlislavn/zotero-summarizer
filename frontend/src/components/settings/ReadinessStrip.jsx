@@ -1,7 +1,9 @@
 // Readiness strip for the top of Settings. Four pills — Zotero · LLM · Goals ·
-// Model — derived from useSetupStatus. A failing pill is actionable: it either
-// scrolls to the relevant Essentials field (via an anchor id) or routes to the
-// wizard / model lifecycle, so "what's broken?" answers itself.
+// Classifier — derived from useSetupStatus. A failing pill is actionable: it
+// either scrolls to the relevant region (via an anchor id) or routes to the
+// wizard / model lifecycle, so "what's broken?" answers itself. ("Classifier"
+// names the trained drop-classifier — distinct from the LLM, which is the "LLM"
+// pill — so the two model concepts don't collide.)
 
 import { useNavigate } from 'react-router-dom';
 import { useSetupStatus } from '../../hooks/useSetupStatus.js';
@@ -59,8 +61,8 @@ export default function ReadinessStrip() {
       <Pill
         label="LLM"
         ok={pillars.llm}
-        onClick={() => scrollToAnchor('essentials-provider')}
-        title={pillars.llm ? 'LLM reachable' : 'LLM not reachable — check the provider below'}
+        onClick={() => scrollToAnchor('ai-models')}
+        title={pillars.llm ? 'LLM reachable' : 'LLM not reachable — check the provider in AI models'}
       />
       <Pill
         label="Goals"
@@ -69,10 +71,10 @@ export default function ReadinessStrip() {
         title={pillars.goals ? 'Research goals set' : 'No research goals — add at least one below'}
       />
       <Pill
-        label="Model"
+        label="Classifier"
         ok={pillars.model}
         onClick={() => navigate('/setup')}
-        title={pillars.model ? 'Classifier trained' : 'No trained model — retrain below or run setup'}
+        title={pillars.model ? 'Classifier trained' : 'No trained classifier — retrain below or run setup'}
       />
       {/* Runtime subsystems down right now (missing dep, gate failed to load…) —
           ONE summary pill rather than N identical-destination pills (Hick's Law:

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { configToFormState, formStateToConfig } from './configForm.js';
+import { configToFormState, formStateToConfig, resolveStage } from './configForm.js';
 
 describe('configForm transforms', () => {
   const baseConfig = {
@@ -46,5 +46,49 @@ describe('configForm transforms', () => {
     expect(out.llm_routing).toEqual(baseConfig.llm_routing);
     // Unknown branch survives.
     expect(out.prestige).toEqual({ weight: 0.15 });
+  });
+
+  it('preserves per-provider temperature + thinking_effort on a round-trip', () => {
+    const cfg = {
+      ...baseConfig,
+      llm_routing: {
+        ...baseConfig.llm_routing,
+        providers: [
+          { name: 'p', type: 'openai', base_url: 'http://x/v1', api_key_env: 'K',
+            temperature: 0.7, thinking_effort: 'high' },
+        ],
+      },
+    };
+    const out = formStateToConfig(configToFormState(cfg), cfg);
+    expect(out.llm_routing.providers[0].temperature).toBe(0.7);
+    expect(out.llm_routing.providers[0].thinking_effort).toBe('high');
+  });
+});
+
+describe('resolveStage (client-side inheritance, mirrors providers.py)', () => {
+  const routing = {
+    providers: [
+      { name: 'local', type: 'openai', base_url: 'http://x/v1', api_key_env: 'K', temperature: 0.3 },
+      { name: 'claude', type: 'anthropic', api_key_env: 'A' },
+    ],
+    default: { provider: 'local', model: 'base' },
+    feed: { provider: null, model: null },
+    deep_review: { provider: 'claude', model: 'opus' },
+  };
+
+  it('inherits the default when the stage is unset', () => {
+    const r = resolveStage(routing, 'feed');
+    expect(r.providerName).toBe('local');
+    expect(r.model).toBe('base');
+    expect(r.inherits).toBe(true);
+    expect(r.provider.temperature).toBe(0.3);
+  });
+
+  it('uses the stage override when set', () => {
+    const r = resolveStage(routing, 'deep_review');
+    expect(r.providerName).toBe('claude');
+    expect(r.model).toBe('opus');
+    expect(r.inherits).toBe(false);
+    expect(r.provider.type).toBe('anthropic');
   });
 });

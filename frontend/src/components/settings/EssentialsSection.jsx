@@ -1,9 +1,10 @@
-// Settings → Essentials. The always-visible core: research goals, triage
-// criteria, output language, the slim default-provider editor, and the Zotero
-// paths with a live status row + a [Save paths] action (restart-required).
+// Settings → Triage region. Research goals, triage criteria, output language,
+// and the Zotero paths with a live status row + a [Save paths] action
+// (restart-required). The LLM-provider editor moved to the AI Models region
+// (AiModelsSection) — config is edited in exactly one place now.
 //
-// Anchors (essentials-goals / essentials-provider / essentials-zotero-paths)
-// are the scroll targets the ReadinessStrip's failing pills jump to.
+// Anchors (essentials-goals / essentials-zotero-paths) are the scroll targets
+// the ReadinessStrip's failing pills jump to.
 
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -11,7 +12,6 @@ import { updatePaths } from '../../api/setupApi.js';
 import { useSetupStatus } from '../../hooks/useSetupStatus.js';
 import { humanizeError } from '../../utils/humanizeError.js';
 import { Banner, Field, SectionCard } from '../form/Fields.jsx';
-import DefaultProviderField from './DefaultProviderField.jsx';
 
 function PathStatus({ label, info }) {
   const set = Boolean(info?.set);
@@ -100,7 +100,7 @@ function ZoteroPaths({ form, onUpdate }) {
   );
 }
 
-export default function EssentialsSection({ form, onUpdate, onOpenAdvanced, pathForm, onUpdatePath }) {
+export default function EssentialsSection({ form, onUpdate, pathForm, onUpdatePath }) {
   return (
     <div className="space-y-4">
       <SectionCard
@@ -135,19 +135,6 @@ export default function EssentialsSection({ form, onUpdate, onOpenAdvanced, path
             label="Output language"
             value={form.output_language}
             onChange={(v) => onUpdate('output_language', v)}
-          />
-        </div>
-      </SectionCard>
-
-      <SectionCard
-        title="LLM provider"
-        description="The default endpoint that scores your feed. For multiple providers or per-stage routing, use Advanced."
-      >
-        <div id="essentials-provider" className="scroll-mt-20">
-          <DefaultProviderField
-            routing={form.llm_routing}
-            onChange={(next) => onUpdate('llm_routing', next)}
-            onOpenAdvanced={onOpenAdvanced}
           />
         </div>
       </SectionCard>

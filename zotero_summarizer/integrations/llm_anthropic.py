@@ -16,7 +16,8 @@ actually used — keeping startup robust.
 
 Notes for Opus 4.7/4.8: ``temperature``/``top_p``/``top_k`` are removed and
 return 400, so this client does NOT send a temperature — determinism is not
-tunable on those models. Thinking is left off (the default when omitted); a
+tunable on those models. Extended thinking is off by default but enabled when a
+``thinking_budget`` is passed (from the provider's ``thinking_effort``); a
 concise system instruction keeps the response to just the requested content.
 """
 from __future__ import annotations
@@ -51,6 +52,7 @@ class AnthropicLLMClient:
         max_tokens: int = 4096,
         base_url: str | None = None,
         timeout: float = _DEFAULT_TIMEOUT_SECS,
+        thinking_budget: int | None = None,
     ) -> None:
         import anthropic  # lazy: optional dependency
 
@@ -60,7 +62,22 @@ class AnthropicLLMClient:
             timeout=timeout,
         )
         self._model = model
-        self._max_tokens = max_tokens
+        self._thinking_budget = thinking_budget
+        # Extended thinking requires max_tokens > budget_tokens; clamp up so a
+        # roomy thinking budget can't starve the actual answer. None → unchanged.
+        self._max_tokens = (
+            max(max_tokens, thinking_budget + 1024) if thinking_budget else max_tokens
+        )
+
+    def _thinking_kwargs(self) -> dict[str, Any]:
+        """Extended-thinking request kwarg when a budget is configured, else empty.
+
+        Omitting it entirely is the default-off behavior; ``temperature`` stays
+        unset (the API requires that when thinking is enabled, and Opus rejects
+        it regardless)."""
+        if self._thinking_budget is None:
+            return {}
+        return {"thinking": {"type": "enabled", "budget_tokens": self._thinking_budget}}
 
     @staticmethod
     def _system_blocks() -> list[dict[str, Any]]:
@@ -81,6 +98,7 @@ class AnthropicLLMClient:
             max_tokens=self._max_tokens,
             system=self._system_blocks(),
             messages=[{"role": "user", "content": prompt}],
+            **self._thinking_kwargs(),
         )
         self._log_usage("prompt", resp.usage)
         return "".join(block.text for block in resp.content if block.type == "text")
@@ -92,6 +110,7 @@ class AnthropicLLMClient:
             system=self._system_blocks(),
             messages=[{"role": "user", "content": prompt}],
             output_format=pydantic_model,
+            **self._thinking_kwargs(),
         )
         self._log_usage("pydantic_prompt", resp.usage)
         parsed = resp.parsed_output

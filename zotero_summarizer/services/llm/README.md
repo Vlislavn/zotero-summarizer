@@ -31,7 +31,15 @@ live LLM clients, and runs the manual "is it operational" probe.
   Dispatches on `ProviderConfig.type`; `resolve_api_key(provider)` reads the API key from
   the env var named by `api_key_env` (the single key-resolution point, reused by
   `model_list`) and raises `APIError(missing_api_key)` when unset. `openai` reuses
-  `services._adapters.build_llm`; `anthropic` builds `integrations.llm_anthropic.AnthropicLLMClient`.
+  `services._adapters.build_llm` — now threading `provider.temperature` (default 0) and the
+  `provider.thinking_effort` translation (via `thinking.py`, applied BEFORE the per-call
+  `enable_thinking` override so the digest can still force thinking on); `anthropic` builds
+  `integrations.llm_anthropic.AnthropicLLMClient` with a `thinking_budget` from the effort.
+- `thinking.py` — pure `thinking_effort` → wire-param translation. `effort_to_anthropic_budget`
+  maps a level to an Anthropic thinking budget (off/None → disabled); `apply_effort_openai`
+  folds it into `extra_body` by inferred dialect: `chat_template_kwargs` present (vLLM/qwen) →
+  `enable_thinking` on/off (graded collapses — documented, not silent); else (plain OpenAI /
+  OpenRouter) → top-level `reasoning_effort`. `None` effort is a no-op (back-compat).
 - `operational_check.py` — `probe_provider(provider, model)` is the SINGLE shared probe
   mechanism (a tiny prompt → `{status: operational|fail, detail}`); both the per-stage
   `check_stages()` here AND `services/setup/validate.py`'s connection test call it, so

@@ -141,7 +141,7 @@ function ProviderRow({ provider, index, onPatch, onRemove }) {
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
-        <label className="block w-40">
+        <label className="block w-32">
           <span className="text-xs font-semibold text-slate-700">Max tokens</span>
           <input
             type="number"
@@ -159,6 +159,50 @@ function ProviderRow({ provider, index, onPatch, onRemove }) {
             className={INPUT_CLS}
           />
         </label>
+        {/* Temperature — openai-path only; Anthropic Opus rejects the param, so it's
+            disabled there (Tesler: the system, not the user, knows it's a no-op). */}
+        <label className="block w-32">
+          <span className="text-xs font-semibold text-slate-700">Temperature</span>
+          <input
+            type="number"
+            min={0}
+            max={2}
+            step={0.1}
+            disabled={!isOpenai}
+            value={isOpenai ? provider.temperature ?? 0 : ''}
+            placeholder={isOpenai ? '' : 'n/a'}
+            title={isOpenai ? '0 = deterministic' : 'Anthropic ignores temperature'}
+            onChange={(e) =>
+              onPatch(index, {
+                temperature:
+                  e.target.value === ''
+                    ? 0
+                    : Math.min(2, Math.max(0, Number(e.target.value))),
+              })
+            }
+            className={`${INPUT_CLS} disabled:bg-slate-100 disabled:text-slate-400`}
+          />
+        </label>
+        {/* Thinking effort — Default leaves the provider untouched (deep-review still
+            decides per call). On reasoning models this sets the effort; simpler
+            on/off endpoints (vLLM) treat any non-Off level as "on". */}
+        <label className="block w-36">
+          <span className="text-xs font-semibold text-slate-700">Thinking effort</span>
+          <select
+            value={provider.thinking_effort ?? ''}
+            onChange={(e) =>
+              onPatch(index, { thinking_effort: e.target.value === '' ? null : e.target.value })
+            }
+            className={`${INPUT_CLS} bg-white`}
+            title="Default = inherit / deep-review decides per call"
+          >
+            <option value="">Default</option>
+            <option value="off">Off</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </label>
         <button
           type="button"
           onClick={() => onRemove(index)}
@@ -170,6 +214,8 @@ function ProviderRow({ provider, index, onPatch, onRemove }) {
       <p className="text-xs text-slate-500">
         The env var holds the API key&apos;s <span className="font-semibold">name</span>,
         never the secret itself. Reasoning models often need 16384 max tokens.
+        Thinking effort grades on Anthropic / OpenAI reasoning models; vLLM-style
+        endpoints honor on/off only.
       </p>
     </div>
   );

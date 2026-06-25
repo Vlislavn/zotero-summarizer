@@ -34,7 +34,8 @@ bins via `domain` so label derivation == prediction; the LLM-concurrency gates
 else all N — NOT the triage knob, so a remote batch isn't throttled by the local-RAM cap)
 and `deep_review_sub_concurrency` (within-review rubric/goal sub-calls) — all local→serial,
 shared so the daemon, deep-review job, and `verify-deep-review` CLI never drift),
-`_adapters` (`build_llm`: OpenAI-compatible client via OnPrem; `build_pdf_extractor`.
+`_adapters` (`build_llm`: OpenAI-compatible client via OnPrem — now threads a
+per-provider `temperature` (default 0, deterministic); `build_pdf_extractor`.
 All LLM clients are constructed through `services/llm/factory`, which calls
 `build_llm` for `openai`-type providers), `lifecycle` (startup composition root — small `_init_*`
 builders wire each singleton onto `RuntimeState`; LLM clients are NOT built here,

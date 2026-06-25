@@ -7,6 +7,19 @@ yet publish versioned releases, so everything currently lives under
 
 ## [Unreleased]
 
+### Added
+
+- **Legible model config: Active-Models summary + per-provider temperature & graded
+  thinking-effort.** Settings now opens with a read-only "Active models" card showing the
+  RESOLVED provider·model·temperature·thinking + a live reachability dot per stage
+  (feed/backlog/deep_review) — answering "what's running now" without a probe. New
+  per-provider `temperature` (default 0, openai-path only) and `thinking_effort`
+  (off/low/medium/high; `services/llm/thinking.py` maps it per dialect — Anthropic budget,
+  OpenAI `reasoning_effort`, or vLLM `enable_thinking` on/off). `None` effort is fully
+  back-compat. `/settings` regrouped into AI Models / Triage / Classifier; the duplicate
+  slim default-provider editor is gone (one editor); the readiness "Model" pill renamed to
+  "Classifier" (it's the trained classifier, not the LLM).
+
 ### Changed
 
 - **Code-health cleanup (advisory `make scan`):** removed dead `contracts.TriageJob`;

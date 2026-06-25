@@ -25,6 +25,7 @@ import ModelCard from '../components/ModelCard.jsx';
 import { Banner } from '../components/form/Fields.jsx';
 import Button from '../components/ui/Button.jsx';
 import ReadinessStrip from '../components/settings/ReadinessStrip.jsx';
+import AiModelsSection from '../components/settings/AiModelsSection.jsx';
 import EssentialsSection from '../components/settings/EssentialsSection.jsx';
 import AdvancedSection from '../components/settings/AdvancedSection.jsx';
 import UniversityAccessPanel from '../components/settings/UniversityAccessPanel.jsx';
@@ -39,7 +40,9 @@ export default function Settings() {
 
   const [form, setForm] = useState(null);
   const [savedBanner, setSavedBanner] = useState('');
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  // Controls the AI Models editor disclosure so the Active-Models summary rows
+  // can expand + scroll it (the readiness LLM pill jumps to the region above it).
+  const [modelsOpen, setModelsOpen] = useState(false);
   // Zotero paths are written through the dedicated /api/setup/paths route, so
   // they live OUTSIDE the GoalsConfig form (and outside its dirty-check).
   const [pathForm, setPathForm] = useState({ zotero_data_dir: '', pdf_root: '' });
@@ -158,7 +161,7 @@ export default function Settings() {
   return (
     <div className="pb-10 space-y-4">
       <header className="glass rounded-2xl border border-slate-200 p-4">
-        <h2 className="text-lg font-bold text-slate-900">Triage Preferences</h2>
+        <h2 className="text-lg font-bold text-slate-900">Settings</h2>
         <p className="text-xs text-slate-500 mt-1">
           Edits replace <span className="font-mono">goals.yaml</span> on save.
           Changes apply immediately to in-flight daemon ticks.
@@ -168,26 +171,34 @@ export default function Settings() {
       <ReadinessStrip />
 
       <form onSubmit={handleSave} className="space-y-4">
+        {/* AI Models — first (Serial Position): the live "what's running now" view
+            + the single providers/stage-routing editor (temperature · thinking). */}
+        <AiModelsSection
+          routing={form.llm_routing}
+          onChange={(next) => updateField('llm_routing', next)}
+          isDirty={isDirty}
+          open={modelsOpen}
+          onToggle={setModelsOpen}
+        />
+
+        {/* Triage — research goals, criteria, output language, Zotero paths. */}
         <EssentialsSection
           form={form}
           onUpdate={updateField}
-          onOpenAdvanced={() => setAdvancedOpen(true)}
           pathForm={pathForm}
           onUpdatePath={updatePathField}
-        />
-
-        <AdvancedSection
-          form={form}
-          isDirty={isDirty}
-          open={advancedOpen}
-          onToggle={setAdvancedOpen}
-          onUpdate={updateField}
-          onToggleDropPriority={toggleDropPriority}
         />
 
         {/* University-access config — folded into the one form so the single sticky
             Save commits it (the panel keeps only its login action). */}
         <UniversityAccessPanel form={form} onUpdate={updateField} />
+
+        {/* Classifier — the optional fast-reject gate (collapsed by default). */}
+        <AdvancedSection
+          form={form}
+          onUpdate={updateField}
+          onToggleDropPriority={toggleDropPriority}
+        />
 
         {/* Save bar — sticky-bottom so the action target stays within reach (Fitts's
             Law). ONE status slot: error wins, then unsaved, then saved/idle. */}

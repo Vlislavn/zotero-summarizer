@@ -19,7 +19,7 @@ stay in the ``models`` layer. Resolving a profile to a live client is the job of
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, model_validator
@@ -61,6 +61,16 @@ class ProviderConfig(BaseModel):
     # budget — 16384 — or the thinking phase eats the whole allowance; chat models are
     # fine at 4096.
     max_tokens: int = Field(default=4096, ge=1)
+    # OpenAI-path sampling temperature. Default 0 preserves the previously-hardcoded
+    # deterministic triage behavior. Threaded into build_llm for openai-type providers;
+    # the native Anthropic adapter ignores it (Opus 4.x returns 400 on temperature).
+    temperature: float = Field(default=0.0, ge=0, le=2)
+    # Reasoning/"thinking" effort for this provider. None = leave the provider untouched
+    # (back-compat: inject nothing, deep_review's per-call override still governs). The
+    # services.llm.thinking translator maps the level per backend dialect: anthropic →
+    # a thinking budget; plain OpenAI reasoning models → reasoning_effort; vLLM/qwen
+    # (extra_body.chat_template_kwargs) → enable_thinking on/off (graded collapses there).
+    thinking_effort: Optional[Literal["off", "low", "medium", "high"]] = None
     # Use the cheaper deep-review TIER when this provider runs the `deep_review` stage:
     # smaller text cap, 1 self-consistency run, batched goal summaries. Set it on a
     # prefill-bound backend (e.g. ollama) that is too slow for the full review. This is

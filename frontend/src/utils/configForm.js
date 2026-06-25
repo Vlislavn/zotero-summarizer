@@ -15,6 +15,20 @@
 
 const ALL_PRIORITIES = ['must_read', 'should_read', 'could_read', 'dont_read'];
 
+// Resolve a stage's effective provider+model on the client, mirroring the
+// backend resolve_stage (zotero_summarizer/models/providers.py): an unset stage
+// field inherits the global `default`. Lets ActiveModelsSummary answer "what's
+// running for this stage right now" instantly from the loaded config — no probe.
+export function resolveStage(routing, stage) {
+  const r = routing || {};
+  const sel = r[stage] || {};
+  const def = r.default || {};
+  const providerName = sel.provider || def.provider || null;
+  const model = sel.model || def.model || null;
+  const provider = (r.providers || []).find((p) => p?.name === providerName) || null;
+  return { stage, providerName, model, provider, inherits: !sel.provider && !sel.model };
+}
+
 export function splitLines(text) {
   return String(text || '')
     .split('\n')

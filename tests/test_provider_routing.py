@@ -40,6 +40,24 @@ def test_anthropic_provider_needs_no_base_url():
     assert p.base_url is None
 
 
+def test_temperature_defaults_zero_and_enforces_bounds():
+    p = ProviderConfig(name="p", base_url="u", api_key_env="K")
+    assert p.temperature == 0.0  # deterministic-triage default preserved
+    assert ProviderConfig(name="p", base_url="u", api_key_env="K", temperature=0.7).temperature == 0.7
+    with pytest.raises(ValueError):
+        ProviderConfig(name="p", base_url="u", api_key_env="K", temperature=-0.1)
+    with pytest.raises(ValueError):
+        ProviderConfig(name="p", base_url="u", api_key_env="K", temperature=2.5)
+
+
+def test_thinking_effort_defaults_none_and_accepts_levels():
+    assert ProviderConfig(name="p", base_url="u", api_key_env="K").thinking_effort is None
+    for level in ("off", "low", "medium", "high"):
+        assert ProviderConfig(name="p", base_url="u", api_key_env="K", thinking_effort=level).thinking_effort == level
+    with pytest.raises(ValueError):
+        ProviderConfig(name="p", base_url="u", api_key_env="K", thinking_effort="extreme")
+
+
 def test_routing_rejects_duplicate_provider_names():
     with pytest.raises(ValueError, match="unique"):
         LLMRoutingConfig(
@@ -206,6 +224,28 @@ def test_config_round_trips_provider_type_enum_through_yaml(tmp_path):
     assert by_name["claude"].type is ProviderType.anthropic
 
 
+def test_config_round_trips_temperature_and_thinking_effort(tmp_path):
+    """A provider's temperature + thinking_effort must survive PUT /api/config's
+    dump → yaml → reload cycle so the Settings knobs actually persist."""
+    from zotero_summarizer.models import GoalsConfig
+    from zotero_summarizer.services._common import read_config, write_config_atomic
+
+    payload = _minimal_goals()
+    payload["llm_routing"] = {
+        "providers": [
+            {"name": "local", "base_url": "http://h/v1", "api_key_env": "K",
+             "temperature": 0.7, "thinking_effort": "high"},
+        ],
+        "default": {"provider": "local", "model": "m1"},
+    }
+    cfg = GoalsConfig.model_validate(payload)
+    out_path = tmp_path / "goals.yaml"
+    write_config_atomic(out_path, cfg.model_dump(mode="json"))
+    again = read_config(out_path)
+    p = again.llm_routing.providers[0]
+    assert p.temperature == 0.7 and p.thinking_effort == "high"
+
+
 # --- factory dispatch ------------------------------------------------------
 
 def test_factory_openai_reuses_build_llm(monkeypatch):
@@ -215,11 +255,13 @@ def test_factory_openai_reuses_build_llm(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         factory, "build_llm",
-        lambda url, model, key, max_tokens, extra_body: captured.update(
-            url=url, model=model, key=key, max_tokens=max_tokens, extra_body=extra_body) or "OPENAI_CLIENT",
+        lambda url, model, key, max_tokens, temperature, extra_body: captured.update(
+            url=url, model=model, key=key, max_tokens=max_tokens,
+            temperature=temperature, extra_body=extra_body) or "OPENAI_CLIENT",
     )
     # extra_body carries provider-specific kwargs (e.g. an MLX/vLLM model served
-    # with reasoning disabled). It must reach build_llm untouched.
+    # with reasoning disabled). With thinking_effort unset it must reach build_llm
+    # untouched; temperature defaults to 0 (deterministic triage).
     extra = {"chat_template_kwargs": {"enable_thinking": False}}
     provider = ProviderConfig(
         name="mlx", base_url="http://localhost:8080/v1", api_key_env="LOCAL_KEY",
@@ -229,8 +271,49 @@ def test_factory_openai_reuses_build_llm(monkeypatch):
     assert client == "OPENAI_CLIENT"
     assert captured == {
         "url": "http://localhost:8080/v1", "model": "m", "key": "secret",
-        "max_tokens": 8192, "extra_body": extra,
+        "max_tokens": 8192, "temperature": 0.0, "extra_body": extra,
     }
+
+
+def test_factory_openai_threads_temperature_and_effort(monkeypatch):
+    # A per-provider temperature + thinking_effort must reach build_llm: temperature
+    # directly, effort folded into extra_body (plain dialect → reasoning_effort).
+    from zotero_summarizer.services.llm import factory
+
+    monkeypatch.setenv("LOCAL_KEY", "secret")
+    captured = {}
+    monkeypatch.setattr(
+        factory, "build_llm",
+        lambda url, model, key, max_tokens, temperature, extra_body: captured.update(
+            temperature=temperature, extra_body=extra_body) or "C",
+    )
+    provider = ProviderConfig(
+        name="oa", base_url="https://api.openai.com/v1", api_key_env="LOCAL_KEY",
+        temperature=0.5, thinking_effort="high",
+    )
+    factory.build_client_for_provider(provider, "o3")
+    assert captured["temperature"] == 0.5
+    assert captured["extra_body"] == {"reasoning_effort": "high"}
+
+
+def test_factory_anthropic_threads_thinking_budget(monkeypatch):
+    from zotero_summarizer.services.llm import factory
+    from zotero_summarizer.integrations import llm_anthropic
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    seen = {}
+
+    class _StubAnthropic:
+        def __init__(self, *, model, api_key, max_tokens, base_url, thinking_budget=None):
+            seen.update(thinking_budget=thinking_budget)
+
+    monkeypatch.setattr(llm_anthropic, "AnthropicLLMClient", _StubAnthropic)
+    provider = ProviderConfig(
+        name="c", type=ProviderType.anthropic, api_key_env="ANTHROPIC_API_KEY",
+        thinking_effort="medium",
+    )
+    factory.build_client_for_provider(provider, "claude-opus-4-8")
+    assert seen["thinking_budget"] == 8192  # medium → budget tokens
 
 
 def test_factory_enable_thinking_override(monkeypatch):
@@ -243,7 +326,7 @@ def test_factory_enable_thinking_override(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         factory, "build_llm",
-        lambda url, model, key, max_tokens, extra_body: captured.update(extra_body=extra_body) or "C",
+        lambda url, model, key, max_tokens, temperature, extra_body: captured.update(extra_body=extra_body) or "C",
     )
     base = {"chat_template_kwargs": {"enable_thinking": False}, "keep": 1}
     provider = ProviderConfig(name="p", base_url="http://localhost:8080/v1",
@@ -263,7 +346,7 @@ def test_factory_enable_thinking_noop_without_chat_template_kwargs(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         factory, "build_llm",
-        lambda url, model, key, max_tokens, extra_body: captured.update(extra_body=extra_body) or "C",
+        lambda url, model, key, max_tokens, temperature, extra_body: captured.update(extra_body=extra_body) or "C",
     )
     provider = ProviderConfig(name="oa", base_url="https://api.openai.com/v1",
                               api_key_env="LOCAL_KEY", extra_body=None)
@@ -279,14 +362,16 @@ def test_factory_anthropic_builds_native_adapter(monkeypatch):
     seen = {}
 
     class _StubAnthropic:
-        def __init__(self, *, model, api_key, max_tokens, base_url):
-            seen.update(model=model, api_key=api_key, max_tokens=max_tokens, base_url=base_url)
+        def __init__(self, *, model, api_key, max_tokens, base_url, thinking_budget=None):
+            seen.update(model=model, api_key=api_key, max_tokens=max_tokens,
+                        base_url=base_url, thinking_budget=thinking_budget)
 
     monkeypatch.setattr(llm_anthropic, "AnthropicLLMClient", _StubAnthropic)
     provider = ProviderConfig(name="c", type=ProviderType.anthropic, api_key_env="ANTHROPIC_API_KEY")
     client = factory.build_client_for_provider(provider, "claude-opus-4-8")
     assert isinstance(client, _StubAnthropic)
     assert seen["model"] == "claude-opus-4-8" and seen["api_key"] == "sk-test"
+    assert seen["thinking_budget"] is None  # no thinking_effort set → thinking off
 
 
 def test_factory_missing_key_raises_apierror(monkeypatch):
@@ -359,116 +444,4 @@ def test_reachability_check_reports_per_stage(monkeypatch):
     assert by_stage["deep_review"]["reachable"] is False
     assert "connection refused" in by_stage["deep_review"]["detail"]
 
-
-# --- model listing (Settings model-picker) ---------------------------------
-
-def test_list_openai_models_parses_data_ids(monkeypatch):
-    from zotero_summarizer.integrations import llm_models
-
-    class _Resp:
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {"data": [{"id": "m2"}, {"id": "m1"}, {"no_id": True}]}
-
-    captured = {}
-
-    def _fake_get(url, headers, timeout):
-        captured.update(url=url, headers=headers, timeout=timeout)
-        return _Resp()
-
-    monkeypatch.setattr(llm_models.httpx, "get", _fake_get)
-    ids = llm_models.list_openai_models("http://localhost:11434/v1/", "secret")
-    # base_url trailing slash normalized; auth header carries the key; rows
-    # without an id are skipped.
-    assert captured["url"] == "http://localhost:11434/v1/models"
-    assert captured["headers"]["Authorization"] == "Bearer secret"
-    assert ids == ["m2", "m1"]  # parse order preserved (service sorts/dedupes)
-
-
-def test_list_models_for_provider_openai_sorts_and_dedupes(monkeypatch):
-    from zotero_summarizer.services.llm import model_list
-    from zotero_summarizer.integrations import llm_models
-
-    monkeypatch.setenv("LOCAL_KEY", "secret")
-    seen = {}
-    monkeypatch.setattr(
-        llm_models, "list_openai_models",
-        lambda base_url, api_key: seen.update(base_url=base_url, api_key=api_key) or ["b", "a", "a"],
-    )
-    provider = ProviderConfig(name="local", base_url="http://h/v1", api_key_env="LOCAL_KEY")
-    out = model_list.list_models_for_provider(provider)
-    assert out == ["a", "b"]  # sorted + de-duplicated
-    assert seen == {"base_url": "http://h/v1", "api_key": "secret"}
-
-
-def test_list_openai_models_raises_model_list_error_on_transport_failure(monkeypatch):
-    import httpx
-
-    from zotero_summarizer.integrations import llm_models
-
-    def _boom(url, headers, timeout):
-        raise httpx.ConnectError("Connection refused")
-
-    monkeypatch.setattr(llm_models.httpx, "get", _boom)
-    with pytest.raises(llm_models.ModelListError) as ei:
-        llm_models.list_openai_models("http://localhost:11434/v1", "secret")
-    assert "Connection refused" in str(ei.value)
-
-
-def test_list_models_for_provider_maps_unreachable_to_502(monkeypatch):
-    from zotero_summarizer.api.errors import APIError
-    from zotero_summarizer.integrations import llm_models
-    from zotero_summarizer.services.llm import model_list
-
-    monkeypatch.setenv("LOCAL_KEY", "secret")
-
-    def _boom(base_url, api_key):
-        raise llm_models.ModelListError("could not list models from http://h/v1/models: refused")
-
-    monkeypatch.setattr(llm_models, "list_openai_models", _boom)
-    provider = ProviderConfig(name="local", base_url="http://h/v1", api_key_env="LOCAL_KEY")
-    with pytest.raises(APIError) as ei:
-        model_list.list_models_for_provider(provider)
-    # A bad URL/down endpoint surfaces as a clean 502 with the reason, not a 500.
-    assert ei.value.error == "provider_unreachable" and ei.value.status_code == 502
-    assert "refused" in ei.value.message
-
-
-def test_list_models_for_provider_anthropic_dispatch(monkeypatch):
-    from zotero_summarizer.services.llm import model_list
-    from zotero_summarizer.integrations import llm_models
-
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    seen = {}
-    monkeypatch.setattr(
-        llm_models, "list_anthropic_models",
-        lambda api_key, base_url: seen.update(api_key=api_key, base_url=base_url)
-        or ["claude-opus-4-8", "claude-haiku-4-5"],
-    )
-    provider = ProviderConfig(name="claude", type=ProviderType.anthropic, api_key_env="ANTHROPIC_API_KEY")
-    out = model_list.list_models_for_provider(provider)
-    assert out == ["claude-haiku-4-5", "claude-opus-4-8"]
-    assert seen == {"api_key": "sk-test", "base_url": None}
-
-
-def test_list_models_for_provider_missing_key_raises_apierror(monkeypatch):
-    from zotero_summarizer.api.errors import APIError
-    from zotero_summarizer.services.llm import model_list
-
-    monkeypatch.delenv("LOCAL_KEY", raising=False)
-    provider = ProviderConfig(name="local", base_url="http://h/v1", api_key_env="LOCAL_KEY")
-    with pytest.raises(APIError) as ei:
-        model_list.list_models_for_provider(provider)
-    assert ei.value.error == "missing_api_key" and ei.value.status_code == 400
-
-
-def test_llm_models_route_returns_provider_shape(monkeypatch):
-    from zotero_summarizer.api.routes import llm as llm_route
-    from zotero_summarizer.services.llm import model_list
-
-    monkeypatch.setattr(model_list, "list_models_for_provider", lambda provider: ["a", "b"])
-    provider = ProviderConfig(name="claude", type=ProviderType.anthropic, api_key_env="ANTHROPIC_API_KEY")
-    result = asyncio.run(llm_route.list_provider_models(provider))
-    assert result == {"provider": "claude", "type": "anthropic", "models": ["a", "b"]}
+# Model listing (Settings model-picker) lives in test_model_listing.py.

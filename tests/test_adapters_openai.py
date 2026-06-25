@@ -36,3 +36,19 @@ def test_build_llm_with_extra_body_forwards_it():
         _adapters.build_llm("https://localhost:8000/v1", "qwen3:8b", "k", extra_body=extra)
     kwargs = fake_llm_class.call_args.kwargs
     assert kwargs["extra_body"] == extra
+
+
+def test_build_llm_defaults_temperature_to_zero():
+    """No temperature passed → deterministic triage (the previously-hardcoded 0)."""
+    fake_llm_class = MagicMock()
+    with patch.object(_adapters, "_load_onprem", return_value=(fake_llm_class, None)):
+        _adapters.build_llm("https://x", "m", "k")
+    assert fake_llm_class.call_args.kwargs["temperature"] == 0
+
+
+def test_build_llm_threads_explicit_temperature():
+    """A configured per-provider temperature must reach the underlying client."""
+    fake_llm_class = MagicMock()
+    with patch.object(_adapters, "_load_onprem", return_value=(fake_llm_class, None)):
+        _adapters.build_llm("https://x", "m", "k", temperature=0.7)
+    assert fake_llm_class.call_args.kwargs["temperature"] == 0.7

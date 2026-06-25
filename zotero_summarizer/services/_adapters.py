@@ -33,6 +33,7 @@ def build_llm(
     api_key: str,
     max_tokens: int = 4096,
     *,
+    temperature: float = 0,
     extra_body: dict[str, Any] | None = None,
 ) -> InstrumentedLLMClient:
     llm_cls, _ = _load_onprem()
@@ -40,7 +41,7 @@ def build_llm(
         model_url=model_url,
         model=model_name,
         openai_api_key=api_key,
-        temperature=0,
+        temperature=temperature,
         max_tokens=max_tokens,
         mute_stream=True,
         verbose=False,

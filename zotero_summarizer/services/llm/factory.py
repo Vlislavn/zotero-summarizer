@@ -18,6 +18,7 @@ from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.integrations.llm import LLMClient
 from zotero_summarizer.models.providers import ProviderConfig, ProviderType, ResolvedStage
 from zotero_summarizer.services._adapters import build_llm
+from zotero_summarizer.services.llm.thinking import apply_effort_openai, effort_to_anthropic_budget
 
 
 def resolve_api_key(provider: ProviderConfig) -> str:
@@ -69,14 +70,19 @@ def build_client_for_provider(
     api_key = resolve_api_key(provider)
 
     if provider.type == ProviderType.openai:
-        extra_body = provider.extra_body
+        # First fold the provider's configured thinking_effort into extra_body
+        # (reasoning_effort or enable_thinking, per dialect), THEN apply any
+        # per-call override on top so deep_review's digest can still force
+        # thinking on for chat_template providers.
+        extra_body = apply_effort_openai(provider.thinking_effort, provider.extra_body)
         if enable_thinking is not None:
-            extra_body = _override_thinking(provider.extra_body, enable_thinking)
+            extra_body = _override_thinking(extra_body, enable_thinking)
         return build_llm(
             provider.base_url,
             model,
             api_key,
             max_tokens=provider.max_tokens,
+            temperature=provider.temperature,
             extra_body=extra_body,
         )
 
@@ -88,6 +94,7 @@ def build_client_for_provider(
             api_key=api_key,
             max_tokens=provider.max_tokens,
             base_url=provider.base_url,
+            thinking_budget=effort_to_anthropic_budget(provider.thinking_effort),
         )
 
     raise APIError(
