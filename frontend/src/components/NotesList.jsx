@@ -54,7 +54,7 @@ export default function NotesList({ notes = [] }) {
   const list = Array.isArray(notes) ? notes : [];
   return (
     <div>
-      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
         User notes ({list.length})
       </h3>
       {list.length === 0 ? (

@@ -152,9 +152,21 @@ def sort_unread(unread: list[dict[str, Any]], *, model_ready: bool) -> None:
     priority-tier then recency. Only ORDER changes; banding stays from the gate
     score. See ``_blended_sort`` / ``rank_blend.GOAL_BLEND_WEIGHT``."""
     if model_ready:
-        goal_sims = _goal_affinity([r["item_key"] for r in unread]) if GOAL_BLEND_WEIGHT > 0 else {}
-        for r in unread:
-            r["goal_sim"] = goal_sims.get(r["item_key"])
+        # goal_sim is precomputed at rescore time and carried on each rec from the
+        # score cache (_build_recs). Only items still missing it — legacy cache
+        # entries or rows not yet rescored — need a live lookup; that's cheap (the
+        # corpus matrix is process-cached). A scored row with no corpus embedding
+        # stays None and is simply re-checked (a dict miss), never blocking.
+        if GOAL_BLEND_WEIGHT > 0:
+            missing = [
+                r["item_key"] for r in unread
+                if r.get("relevance_score") is not None and r.get("goal_sim") is None
+            ]
+            if missing:
+                sims = _goal_affinity(missing)
+                for r in unread:
+                    if r["item_key"] in sims:
+                        r["goal_sim"] = sims[r["item_key"]]
         # One ordering path: the blend self-degrades to pure relevance when no
         # goal/prestige signal exists, so the prestige lift applies even with no
         # goals set ("best of the best on top" regardless of goal config).
@@ -209,6 +221,10 @@ def _build_recs(
             "read": is_read,
             "relevance_score": entry["relevance_score"] if entry else None,
             "why_reason": entry["why_reason"] if entry else None,
+            # Carried from the score cache (computed at rescore time) so the open
+            # path skips the corpus matmul; None when absent (legacy entry / no
+            # embedding) — sort_unread does a cheap live lookup for those.
+            "goal_sim": entry.get("goal_sim") if entry else None,
             "prestige_score": prestige_score,
             "prestige_known": prestige_known,
             "proposed_verdict": proposed_verdicts.get(it["item_key"]),

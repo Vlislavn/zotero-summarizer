@@ -35,7 +35,7 @@ export default function ScoreHistogram({ distribution, onBandClick = null, activ
   const max = Math.max(1, ...bins.map((b) => b.count));
 
   return (
-    <div className="mb-4 rounded-lg border border-slate-200 bg-white p-2.5">
+    <div className="rounded-lg bg-slate-50/60 p-2.5">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 mb-1.5">
         <span className="text-[11px] font-semibold text-slate-600">
           Relevance to you · {total_scored} scored
@@ -84,7 +84,7 @@ export default function ScoreHistogram({ distribution, onBandClick = null, activ
                   type="button"
                   onClick={() => onBandClick(b.band)}
                   aria-pressed={activeSet.has(b.band)}
-                  className="w-full cursor-pointer"
+                  className="w-full cursor-pointer no-tap-min"
                 >
                   {bar}
                 </button>

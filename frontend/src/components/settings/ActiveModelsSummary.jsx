@@ -65,7 +65,7 @@ export default function ActiveModelsSummary({ routing, onEdit }) {
   return (
     <div className="space-y-2">
       <div className="flex items-baseline justify-between">
-        <h4 className="text-sm font-bold uppercase tracking-wider text-slate-500">Active models</h4>
+        <h4 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Active models</h4>
         <span className="text-xs text-slate-400">resolved per stage · click a row to edit</span>
       </div>
       <ul className="space-y-1.5">

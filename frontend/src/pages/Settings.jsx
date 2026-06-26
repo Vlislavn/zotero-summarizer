@@ -161,7 +161,7 @@ export default function Settings() {
   return (
     <div className="pb-10 space-y-4">
       <header className="glass rounded-2xl border border-slate-200 p-4">
-        <h2 className="text-lg font-bold text-slate-900">Settings</h2>
+        <h2 className="font-display text-xl font-light text-slate-900">Settings</h2>
         <p className="text-xs text-slate-500 mt-1">
           Edits replace <span className="font-mono">goals.yaml</span> on save.
           Changes apply immediately to in-flight daemon ticks.

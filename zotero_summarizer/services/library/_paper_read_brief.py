@@ -21,6 +21,9 @@ from zotero_summarizer.services.library import _quality_prompts as qp
 
 _BAND_LABEL = {"flag": "FLAG", "neutral": "NEUTRAL", "highlight": "HIGHLIGHT", "uncertain": "UNCERTAIN", "": "—"}
 _STATE_LABEL = {"hit": "● addressed", "miss": "○ not addressed", "not_retrieved": "⚠ not retrieved"}
+# Needle position (%) on the evidence-grade gauge — the band's calibrated place on
+# the stain-uptake scale: low (eosin / tentative) → high (hematoxylin / strong).
+_GAUGE_POS = {"flag": 18, "uncertain": 38, "neutral": 58, "highlight": 85, "": 50}
 
 # The reference-free band, in one plain-language line (trusted constants → HTML).
 _BAND_GLOSS = {
@@ -118,45 +121,66 @@ def brief_html(
     agreed = int((quality or {}).get("passes_agreed") or 0)
     total = int((quality or {}).get("passes_total") or 0)
 
-    # The verdict is the loudest line. For a flagged-but-relevant paper, inline
-    # the actual red flag so the warning is readable without scrolling.
+    # The verdict is the loudest line — the "diagnosis". For a flagged-but-relevant
+    # paper, inline the actual red flag so the warning is readable without scrolling.
     vkey, vlabel, vreason = _read_verdict(n_fired, band)
     if band == "flag" and n_fired:
         rf = [str(x).strip() for x in ((quality or {}).get("red_flags") or []) if str(x).strip()]
         if rf:
             vreason = f"relevant, but rigor is FLAGGED — {rf[0]}. Read critically."
-    verdict = f'<div class="verdict v-{vkey}"><b>{vlabel}</b> — {_h(vreason)}</div>' if (goals or quality) else ""
-
-    passes = f"{agreed}/{total} agree" if total else ""
-    rigor = (
-        f'<div class="chip band-{_h(band or "none")}"><div class="chip-h">RIGOR</div>'
-        f'<div class="chip-v">{_h(_BAND_LABEL.get(band, "—"))}'
-        f'{f" · {passes}" if passes else ""}</div></div>'
-    ) if quality else ""
+    # Relevance folds INTO the diagnosis reason line (the separate chip is gone).
     rel_verdict = _relevance_verdict(n_fired, max_score)
-    relevance = (
-        f'<div class="chip rel"><div class="chip-h">RELEVANCE</div>'
-        f'<div class="chip-v">{_h(rel_verdict)} · {n_fired} goal{"s" if n_fired != 1 else ""} · '
-        f'{max_score:.1f}/3</div></div>'
+    rel_line = (
+        f'<div class="v-rel">{_h(rel_verdict)} · {n_fired} goal{"s" if n_fired != 1 else ""} '
+        f'matched · {max_score:.1f}/3</div>'
     )
+    verdict = (
+        f'<div class="verdict v-{vkey}"><div class="v-eyebrow">Diagnosis</div>'
+        f'<div class="v-word">{_h(vlabel)}</div>'
+        f'<div class="v-why">{_h(vreason)}</div>{rel_line}</div>'
+    ) if (goals or quality) else ""
+
+    gauge = _gauge_html(band, agreed, total) if quality else ""
     board = _goal_board_html(goals) if goals else ""
     return (
-        '\n  <section class="brief fade-in">\n'
+        '\n  <section class="brief fade-in focus-in">\n'
         f'    {verdict}\n'
-        f'    <div class="spine">{rigor}{relevance}</div>\n'
+        f'    {gauge}\n'
         f'    {board}\n  </section>'
     )
 
 
+def _gauge_html(band: str, agreed: int, total: int) -> str:
+    """The single evidence-grade gauge that REPLACES the RIGOR/RELEVANCE chips: a
+    calibrated eosin→hematoxylin track (low→high stain uptake = evidence strength)
+    with a teal needle placed by band, the band label, and the N/M passes. It OWNS
+    the band interpretation (a position on a scale) so the reader doesn't decode it."""
+    pct = _GAUGE_POS.get(band, 50)
+    passes = f"{agreed}/{total} passes agree" if total else ""
+    passes_html = f'<span class="gauge-passes">{_h(passes)}</span>' if passes else ""
+    return (
+        '<div class="gauge"><div class="gauge-h">Evidence grade</div>'
+        f'<div class="gauge-track"><span class="gauge-needle" style="left:{pct}%"></span></div>'
+        '<div class="gauge-scale"><span>Tentative</span><span>Moderate</span><span>Strong</span></div>'
+        f'<div class="gauge-read"><span class="gauge-band">{_h(_BAND_LABEL.get(band, "—"))}</span>'
+        f'{passes_html}</div>'
+        '<div class="gauge-method">reference-free · author-blind · self-consistency</div></div>'
+    )
+
+
 def _goal_board_html(goals: list[dict[str, Any]]) -> str:
-    """6-cell board — the SINGLE home of per-goal relevance. Fired cells carry
-    the full grounded summary, the key sections to read, and the quote on demand."""
+    """6-cell board — the SINGLE home of per-goal relevance. A HIT-and-relevant cell
+    is "stained" (eosin wash) and binds its summary (the claim) to its supporting
+    quote (the evidence) via the hematoxylin tether rail; the quote is surfaced
+    inline so the binding reads at a glance (Uniform Connectedness). Miss / not-
+    retrieved cells stay "unstained" — tissue that didn't take the stain."""
     cells = ""
     for g in goals:
         state = str(g.get("retrieval_state") or "not_retrieved")
         score = float(g.get("score") or 0.0)
         width = int(max(0.0, min(1.0, score / 3.0)) * 100)
-        extra = ""
+        is_hit = state == "hit" and bool(g.get("relevant"))
+        extra, has_ev = "", ""
         if state == "hit":
             why = str(g.get("summary") or "").strip() or "relevant — grounded summary withheld"
             secs = ", ".join(_h(s) for s in (g.get("key_sections") or []) if str(s).strip())
@@ -164,13 +188,15 @@ def _goal_board_html(goals: list[dict[str, Any]]) -> str:
             if secs:
                 extra += f'<div class="g-sec">Read for you: {secs}</div>'
             if quotes:
-                extra += f'<details class="g-quote"><summary>evidence</summary>“{_h(quotes[0])}”</details>'
+                has_ev = " has-evidence"  # gates the tether rail (only when evidence exists)
+                extra += f'<div class="g-quote">“{_h(quotes[0])}”</div>'
         elif state == "miss":
             why = "not addressed in this paper"
         else:
             why = "retrieval degraded — not assessed"
+        stain = "stained" if is_hit else "unstained"
         cells += (
-            f'<div class="gcell state-{state}">'
+            f'<div class="gcell state-{state} {stain}{has_ev}">'
             f'<div class="g-label">{_h(_short_goal(g.get("goal", "")))}</div>'
             f'<div class="g-state">{_h(_STATE_LABEL.get(state, state))}</div>'
             f'<div class="g-bar"><span style="width:{width}%"></span></div>'
@@ -265,11 +291,11 @@ def quality_panel_html(quality: dict[str, Any] | None) -> str:
         signals += f'<div class="q-decisive"><div class="q-sig-h">{heading}</div><ul>{lis}</ul>{cap}</div>'
     if overs:
         items = "".join(f"<li>{_h(x)}</li>" for x in overs[:3])
-        signals += f'<div class="q-overs"><div class="q-sig-h">Overstated claims</div><ul>{items}</ul></div>'
+        signals += f'<div class="q-overs unstained"><div class="q-sig-h">Overstated claims</div><ul>{items}</ul></div>'
 
     return (
         '\n  <section id="quality" class="fade-in">\n'
-        f'    <h2 class="q-title">Quality — {_h(_BAND_LABEL.get(band, "—"))}</h2>\n'
+        f'    <h2 class="q-title">Quality</h2>\n'
         f'    <div class="quality-card band-{_h(band or "none")}">\n'
         f'      <div class="q-gloss">{_gloss(band, bool(red_flags))}</div>\n'
         f'      <div class="q-method">{_h(_METHOD_CLAUSE)}{_h(passes)}</div>\n'
@@ -281,66 +307,77 @@ def quality_panel_html(quality: dict[str, Any] | None) -> str:
 
 
 def brief_css() -> str:
+    """H&E "specimen slide" styling. The verdict is the one loud element (Von
+    Restorff); the gauge OWNS band interpretation (Tesler); a stained goal cell
+    binds claim→evidence with the hematoxylin tether (Uniform Connectedness).
+    Palette/font vars come from `_paper_read_html._css` (concatenated before this)."""
     return """
-.brief{margin:0 0 8px}
-.verdict{border-radius:13px;padding:16px 20px 16px 22px;font-size:16px;line-height:1.5;margin-bottom:18px;border:1px solid var(--border);border-left:5px solid var(--muted);box-shadow:var(--shadow)}
-.verdict b{font-weight:800;font-size:18px;letter-spacing:.01em;margin-right:2px}
-.v-deep{background:rgba(5,150,105,.09);border-color:rgba(5,150,105,.4);border-left-color:#059669}
-.v-skim{background:rgba(217,119,6,.1);border-color:rgba(217,119,6,.45);border-left-color:#d97706}
-.v-skip{background:rgba(98,112,138,.08);border-left-color:#64748b}
-.v-deep b{color:#047857}.v-skim b{color:#b45309}.v-skip b{color:var(--muted)}
-body.dark .v-deep b{color:#34d399}body.dark .v-skim b{color:#fbbf24}
-.spine{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
-.chip{border:1px solid var(--border);border-radius:10px;padding:11px 14px;background:var(--card);box-shadow:var(--shadow)}
-.chip-h{font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
-.chip-v{font-size:15px;font-weight:700;margin-top:4px}
-.chip.band-flag{border-left:3px solid #dc2626}
-.chip.band-highlight{border-left:3px solid #059669}
-.chip.band-uncertain{border-left:3px solid #d97706}
-.goal-board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
-.gcell{border:1px solid var(--border);border-radius:10px;padding:11px 12px;background:var(--card);box-shadow:var(--shadow)}
-.gcell.state-hit{border-left:3px solid #059669}
-.gcell.state-miss{border-left:3px solid #94a3b8;opacity:.7}
-.gcell.state-not_retrieved{border-left:3px solid #d97706;opacity:.66}
-.g-label{font-weight:700;font-size:13px;line-height:1.3}
-.g-state{font-size:11px;color:var(--muted);margin:3px 0}
-.g-bar{height:5px;background:var(--hair);border-radius:3px;overflow:hidden;margin:5px 0}
-.g-bar span{display:block;height:100%;background:var(--accent)}
-.g-why{font-size:13px;color:var(--text);line-height:1.45}
-.g-sec{font-size:12px;color:var(--muted);margin-top:7px}
-.g-quote{font-size:12px;color:var(--muted);margin-top:5px}
-.g-quote summary{cursor:pointer;color:var(--accent);font-weight:600;list-style:none}
-.g-quote summary::-webkit-details-marker{display:none}.g-quote summary::before{content:'“ ';opacity:.6}
-.q-title{margin:32px 0 12px;font-size:18px;font-weight:600;letter-spacing:-.01em}
-.quality-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:14px;box-shadow:var(--shadow)}
-.quality-card.band-flag{border-left:4px solid #dc2626}
-.quality-card.band-highlight{border-left:4px solid #059669}
-.quality-card.band-uncertain{border-left:4px solid #d97706}
-.q-gloss{font-size:15px;line-height:1.5}
-.q-method{font-size:12px;color:var(--muted);line-height:1.45}
-.q-legend{font-size:11px;color:var(--muted);border-top:1px solid var(--hair);padding-top:11px}
-.q-sig-h{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:5px}
-.q-redflags{background:rgba(220,38,38,.07);border:1px solid rgba(220,38,38,.45);border-radius:9px;padding:11px 14px}
-.q-redflags .q-sig-h{color:#dc2626}
-.q-redflags ul,.q-overs ul,.q-decisive ul{margin:0;padding-left:18px;font-size:14px;line-height:1.55}
+.brief{margin:0 0 10px}
+.verdict{border:1px solid var(--border);border-left:4px solid var(--muted);border-radius:12px;padding:18px 22px;margin-bottom:18px;background:var(--card);box-shadow:var(--shadow)}
+.v-eyebrow{font-family:var(--font-display);font-size:11px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--hema)}
+.v-word{font-family:var(--font-display);font-size:clamp(25px,4.2vw,38px);font-weight:500;line-height:1;letter-spacing:0;text-transform:uppercase;margin:6px 0 8px}
+.v-why{font-family:var(--font-read);font-size:16px;line-height:1.5;color:var(--text)}
+.v-rel{font-family:var(--font-mono);font-size:12px;color:var(--muted);margin-top:8px;letter-spacing:.02em}
+.v-deep{border-left-color:var(--readout)}.v-deep .v-word{color:var(--readout)}
+.v-skim{border-left-color:var(--caution)}.v-skim .v-word{color:var(--caution)}
+.v-skip{border-left-color:var(--muted)}.v-skip .v-word{color:var(--muted)}
+.gauge{border:1px solid var(--border);border-radius:12px;padding:15px 18px;margin-bottom:16px;background:var(--card);box-shadow:var(--shadow)}
+.gauge-h{font-family:var(--font-display);font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.gauge-track{position:relative;height:9px;border-radius:5px;margin:11px 0 6px;background:linear-gradient(90deg,var(--eosin) 0%,var(--hair) 50%,var(--hema) 100%)}
+.gauge-needle{position:absolute;top:-4px;width:2px;height:17px;background:var(--text)}
+.gauge-needle::after{content:"";position:absolute;top:-3px;left:-3px;width:8px;height:8px;background:var(--text);transform:rotate(45deg)}
+.gauge-scale{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:11px;color:var(--muted)}
+.gauge-read{display:flex;align-items:baseline;gap:10px;margin-top:9px}
+.gauge-band{font-family:var(--font-display);font-size:14px;font-weight:500;letter-spacing:.02em;color:var(--text)}
+.gauge-passes{font-family:var(--font-mono);font-size:12px;color:var(--muted)}
+.gauge-method{font-family:var(--font-mono);font-size:11px;color:var(--muted);margin-top:5px;letter-spacing:.01em}
+.goal-board{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:11px;margin-bottom:6px}
+.gcell{position:relative;border:1px solid var(--border);border-radius:11px;padding:12px 13px 13px;background:var(--card);box-shadow:var(--shadow)}
+.gcell.stained{border-left:3px solid var(--hema)}
+.gcell.unstained{border-left:2px dotted var(--hair);opacity:.72}
+.gcell.state-not_retrieved{opacity:.6}
+.g-label{font-family:var(--font-display);font-weight:600;font-size:13px;line-height:1.3;color:var(--text)}
+.g-state{font-family:var(--font-mono);font-size:11px;color:var(--muted);margin:4px 0}
+.g-bar{height:5px;background:var(--hair);border-radius:3px;overflow:hidden;margin:5px 0 7px}
+.g-bar span{display:block;height:100%;background:linear-gradient(90deg,var(--eosin),var(--hema))}
+.g-why{font-family:var(--font-read);font-size:14px;color:var(--text);line-height:1.5}
+.g-sec{font-family:var(--font-mono);font-size:11px;color:var(--muted);margin-top:8px;letter-spacing:.01em}
+.g-quote{font-family:var(--font-read);font-style:italic;font-size:13px;line-height:1.5;color:var(--text);margin-top:9px;padding:8px 11px;border-radius:8px;background:var(--eosin-wash)}
+.gcell.has-evidence .g-quote{position:relative;margin-left:11px}
+.gcell.has-evidence .g-quote::before{content:"";position:absolute;left:-11px;top:-9px;bottom:7px;width:2px;background:var(--hema);border-radius:1px;transform-origin:top}
+.gcell.has-evidence .g-quote::after{content:"";position:absolute;left:-14px;top:13px;width:8px;height:8px;border-radius:50%;background:var(--hema)}
+.q-title{font-family:var(--font-display);margin:30px 0 12px;font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.quality-card{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--muted);border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:14px;box-shadow:var(--shadow)}
+.quality-card.band-flag{border-left-color:var(--alert)}
+.quality-card.band-highlight{border-left-color:var(--readout)}
+.quality-card.band-uncertain{border-left-color:var(--caution)}
+.q-gloss{font-family:var(--font-read);font-size:15px;line-height:1.5;color:var(--text)}
+.q-method{font-family:var(--font-mono);font-size:12px;color:var(--muted);line-height:1.5}
+.q-legend{font-family:var(--font-mono);font-size:11px;color:var(--muted);border-top:1px solid var(--hair);padding-top:11px}
+.q-sig-h{font-family:var(--font-display);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px}
+.q-redflags{background:var(--alert-wash);border:1px solid var(--alert);border-radius:9px;padding:11px 14px}
+.q-redflags .q-sig-h{color:var(--alert)}
+.q-redflags ul,.q-overs ul,.q-decisive ul{margin:0;padding-left:18px;font-family:var(--font-read);font-size:14px;line-height:1.55;color:var(--text)}
 .q-decisive,.q-overs{border-top:1px solid var(--hair);padding-top:12px}
 .q-decisive ul{list-style:none;padding-left:0}
 .q-decisive li{display:flex;gap:9px;align-items:baseline;padding:2px 0}
-.q-mark{font-weight:800}.q-d-ok .q-mark{color:#059669}.q-d-no .q-mark{color:#dc2626}
-.q-cap{font-size:12px;color:var(--muted);margin-top:6px}
-.q-overs .q-sig-h{color:#d97706}
+.q-mark{font-family:var(--font-mono);font-weight:500}.q-d-ok .q-mark{color:var(--readout)}.q-d-no .q-mark{color:var(--alert)}
+.q-cap{font-family:var(--font-mono);font-size:12px;color:var(--muted);margin-top:6px}
+.q-overs .q-sig-h{color:var(--caution)}
+.q-overs.unstained li{text-decoration:underline dotted var(--hair);text-underline-offset:3px}
 .q-full{border-top:1px solid var(--hair);padding-top:11px}
-.q-full>summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--accent);list-style:none}
+.q-full>summary{cursor:pointer;font-family:var(--font-mono);font-size:13px;font-weight:500;color:var(--readout);list-style:none}
 .q-full>summary::-webkit-details-marker{display:none}.q-full>summary::before{content:'▸ '}
 .q-full[open]>summary::before{content:'▾ '}
 .q-full-body{display:flex;flex-direction:column;gap:4px;margin-top:10px}
 .rb-item{border-bottom:1px solid var(--hair);padding:8px 2px}
 .rb-item:last-child{border-bottom:none}
-.rb-item summary{cursor:pointer;font-size:14px;line-height:1.45;list-style:none}.rb-item summary::-webkit-details-marker{display:none}
-.rb-v{display:inline-block;min-width:30px;text-align:center;font-weight:700;font-size:10px;text-transform:uppercase;border-radius:4px;padding:2px 6px;margin-right:8px}
-.rb-yes>summary .rb-v{background:rgba(5,150,105,.18);color:#059669}
-.rb-no>summary .rb-v{background:rgba(220,38,38,.16);color:#dc2626}
+.rb-item summary{cursor:pointer;font-family:var(--font-read);font-size:14px;line-height:1.45;list-style:none;color:var(--text)}.rb-item summary::-webkit-details-marker{display:none}
+.rb-v{display:inline-block;min-width:30px;text-align:center;font-family:var(--font-mono);font-weight:500;font-size:10px;text-transform:uppercase;border-radius:4px;padding:2px 6px;margin-right:8px}
+.rb-yes>summary .rb-v{background:var(--accent-soft);color:var(--readout)}
+.rb-no>summary .rb-v{background:var(--alert-wash);color:var(--alert)}
 .rb-na>summary .rb-v{background:var(--hair);color:var(--muted)}
-.rb-ev{font-size:13px;color:var(--muted);margin-top:7px;font-style:italic;line-height:1.5}
-@media(max-width:600px){.spine,.goal-board{grid-template-columns:1fr}.quality-card{padding:16px}}
+.rb-ev{font-family:var(--font-read);font-size:13px;color:var(--muted);margin-top:7px;font-style:italic;line-height:1.5}
+@media(prefers-reduced-motion:no-preference){.gcell.has-evidence .g-quote::before{animation:draw .6s ease .25s both}@keyframes draw{from{transform:scaleY(0)}to{transform:scaleY(1)}}}
+@media(max-width:600px){.goal-board{grid-template-columns:1fr}.quality-card{padding:16px}}
 """

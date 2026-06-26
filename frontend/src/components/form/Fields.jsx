@@ -12,7 +12,7 @@ const INPUT_CLS_ERR =
 export function SectionCard({ title, description, children }) {
   return (
     <div className="glass rounded-2xl border border-slate-200 p-4">
-      <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500">
+      <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
         {title}
       </h3>
       {description && (

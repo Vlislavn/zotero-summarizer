@@ -67,7 +67,7 @@ export default function Library() {
               className={[
                 'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border',
                 active
-                  ? 'bg-slate-900 text-white border-slate-900'
+                  ? 'bg-forest-800 text-white border-forest-800'
                   : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100',
               ].join(' ')}
             >

@@ -70,6 +70,11 @@ class PaperRenderBuildRequest(BaseModel):
     # Explicit consent gate for arXiv source tarball download. When false, the
     # builder still uses local TeX but falls back to PDF instead of downloading.
     allow_arxiv_source: bool = Field(default=False)
+    # When the Zotero item has no attached local PDF, try the same full-text
+    # acquisition chain used by deep review: arXiv/OA first, then the configured
+    # university/Chrome browser session. The acquired file is rendered from cache;
+    # this route does not write an attachment back into Zotero.
+    allow_acquire_missing: bool = Field(default=False)
 
 
 async def get_reading_queue(
@@ -140,6 +145,7 @@ async def build_paper_render(item_key: str, req: PaperRenderBuildRequest) -> dic
         item_key,
         force=req.force,
         allow_arxiv_source=req.allow_arxiv_source,
+        allow_acquire_missing=req.allow_acquire_missing,
     )
 
 
@@ -157,6 +163,19 @@ async def get_paper_presentation(item_key: str) -> FileResponse:
     path = await asyncio.to_thread(paper_render.presentation_path, item_key)
     return FileResponse(
         path, media_type="text/html", filename=path.name, content_disposition_type="inline"
+    )
+
+
+async def get_paper_render_pdf(item_key: str) -> FileResponse:
+    """Serve the PDF used to build the paper-read artifact.
+
+    This covers acquired cache PDFs as well as Zotero-attached PDFs, so a paper
+    can visibly expose the fetched source even when Zotero still has no local
+    attachment.
+    """
+    path = await asyncio.to_thread(paper_render.source_pdf_path, item_key)
+    return FileResponse(
+        path, media_type="application/pdf", filename=path.name, content_disposition_type="inline"
     )
 
 
@@ -297,6 +316,7 @@ router.add_api_route("/api/library/pdf/{item_key}", get_item_pdf, methods=["GET"
 router.add_api_route("/api/library/render/{item_key}", get_paper_render, methods=["GET"])
 router.add_api_route("/api/library/render/{item_key}/build", build_paper_render, methods=["POST"])
 router.add_api_route("/api/library/render/{item_key}/presentation", get_paper_presentation, methods=["GET"])
+router.add_api_route("/api/library/render/{item_key}/pdf", get_paper_render_pdf, methods=["GET"])
 router.add_api_route("/api/library/render/{item_key}/figures/{name}", get_paper_figure, methods=["GET"])
 router.add_api_route("/api/library/ask", ask_paper, methods=["POST"])
 router.add_api_route("/api/library/deep-review/run", run_deep_review, methods=["POST"])

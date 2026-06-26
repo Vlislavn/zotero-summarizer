@@ -13,23 +13,21 @@ from zotero_summarizer.integrations._zotero_read_common import (
 
 
 class ZoteroItemsMixin:
-    def get_items(
+    def _build_list_query(
         self,
-        collection_key: str | None = None,
-        search: str | None = None,
-        tag: str | None = None,
-        limit: int = 100,
-        offset: int = 0,
-        include_abstract: bool = True,
-    ) -> dict[str, Any]:
-        """Return paginated top-level library items with tags and PDF hints.
+        *,
+        collection_key: str | None,
+        search: str | None,
+        tag: str | None,
+        include_abstract: bool,
+    ) -> tuple[str, str, list[Any]]:
+        """Build the shared item-listing SQL → ``(list_sql, count_sql, params)``.
 
-        ``include_abstract=False`` omits the (often large) abstract correlated
-        subquery and returns ``abstract=""`` — used by the whole-library display
-        and rank/tag write paths, which never read the abstract, to avoid hauling
-        ~megabytes of unused text per scan. The scoring path keeps it True."""
-        safe_limit = max(1, min(limit, 500))
-        safe_offset = max(0, offset)
+        ``list_sql`` is the full SELECT…WHERE…ORDER BY with NO ``LIMIT/OFFSET`` —
+        :meth:`get_items` appends a page clause, :meth:`get_all_items` runs it
+        whole. One definition so the paged and whole-library readers can never
+        drift. ``include_abstract=False`` omits the (often large) abstract
+        correlated subquery (the display + rank/tag write paths never read it)."""
         where_clauses = [
             f"i.libraryID = ({_USER_LIBRARY_ID_SELECT})",
             "di.itemID IS NULL",
@@ -190,38 +188,57 @@ class ZoteroItemsMixin:
             LEFT JOIN deletedItems di ON di.itemID = i.itemID
             WHERE {where_sql}
             ORDER BY i.dateModified DESC, i.itemID DESC
-            LIMIT ? OFFSET ?
         """
+
+        return list_sql, count_sql, params
+
+    def _row_to_item(self, row: sqlite3.Row) -> dict[str, Any]:
+        """Map one listing row to the shared item dict (paged + whole-library)."""
+        pdf_path = self._resolve_attachment_path(
+            attachment_key=str(row["pdf_attachment_key"] or ""),
+            stored_path=str(row["pdf_attachment_path"] or ""),
+        )
+        tags = self._split_blob(str(row["tag_blob"] or ""))
+        return {
+            "item_key": str(row["item_key"]),
+            "title": str(row["title"] or "Untitled"),
+            "authors": str(row["authors"] or ""),
+            "publication_date": str(row["publication_date"] or ""),
+            "abstract": str(row["abstract"] or ""),
+            "tags": tags,
+            "collections": self._split_blob(str(row["collection_blob"] or "")),
+            "reading_priority": self._priority_from_tags(tags),
+            "has_pdf": bool(pdf_path),
+            "pdf_path": pdf_path,
+            "date_added": str(row["dateAdded"] or ""),
+            "date_modified": str(row["dateModified"] or ""),
+        }
+
+    def get_items(
+        self,
+        collection_key: str | None = None,
+        search: str | None = None,
+        tag: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        include_abstract: bool = True,
+    ) -> dict[str, Any]:
+        """Return ONE page of top-level library items with tags and PDF hints
+        (clamped to 500 per call). For a whole-library pass use
+        :meth:`get_all_items`, which runs the same query un-paged in one read."""
+        safe_limit = max(1, min(limit, 500))
+        safe_offset = max(0, offset)
+        list_sql, count_sql, params = self._build_list_query(
+            collection_key=collection_key, search=search, tag=tag,
+            include_abstract=include_abstract,
+        )
+        paged_sql = f"{list_sql}\n            LIMIT ? OFFSET ?"
 
         def _read(conn: sqlite3.Connection) -> dict[str, Any]:
             total = int(conn.execute(count_sql, params).fetchone()["total"])
-            rows = conn.execute(list_sql, [*params, safe_limit, safe_offset]).fetchall()
-            items: list[dict[str, Any]] = []
-            for row in rows:
-                pdf_path = self._resolve_attachment_path(
-                    attachment_key=str(row["pdf_attachment_key"] or ""),
-                    stored_path=str(row["pdf_attachment_path"] or ""),
-                )
-                tags = self._split_blob(str(row["tag_blob"] or ""))
-                items.append(
-                    {
-                        "item_key": str(row["item_key"]),
-                        "title": str(row["title"] or "Untitled"),
-                        "authors": str(row["authors"] or ""),
-                        "publication_date": str(row["publication_date"] or ""),
-                        "abstract": str(row["abstract"] or ""),
-                        "tags": tags,
-                        "collections": self._split_blob(str(row["collection_blob"] or "")),
-                        "reading_priority": self._priority_from_tags(tags),
-                        "has_pdf": bool(pdf_path),
-                        "pdf_path": pdf_path,
-                        "date_added": str(row["dateAdded"] or ""),
-                        "date_modified": str(row["dateModified"] or ""),
-                    }
-                )
-
+            rows = conn.execute(paged_sql, [*params, safe_limit, safe_offset]).fetchall()
             return {
-                "items": items,
+                "items": [self._row_to_item(row) for row in rows],
                 "total": total,
                 "limit": safe_limit,
                 "offset": safe_offset,
@@ -234,43 +251,25 @@ class ZoteroItemsMixin:
         collection_key: str | None = None,
         search: str | None = None,
         tag: str | None = None,
-        page_size: int = 500,
         include_abstract: bool = True,
     ) -> dict[str, Any]:
-        """Every matching top-level item, paginating internally past ``get_items``'
-        500-per-call clamp. Loops ``offset`` by the returned page length, using the
-        reported ``total`` (or a short page) as the stop condition. Same row shape as
-        ``get_items``; returns ``{items, total}``. Use for whole-library passes
-        (full-library scoring, the Zotero rank/tag writes).
+        """Every matching top-level item in a SINGLE un-paged query — one
+        connection, so at most ONE snapshot copy under contention (the old paged
+        loop paid the whole-DB snapshot fallback once PER 500-item page). Same row
+        shape as ``get_items``; returns ``{items, total}``. Use for whole-library
+        passes (full-library scoring, the Zotero rank/tag writes). Deterministic
+        order (dateModified DESC, itemID DESC); one row per item (no pagination →
+        nothing to dedupe). ``include_abstract=False`` skips the abstract subquery."""
+        list_sql, _count_sql, params = self._build_list_query(
+            collection_key=collection_key, search=search, tag=tag,
+            include_abstract=include_abstract,
+        )
 
-        Contract: deterministic order (dateModified DESC, itemID DESC tiebreaker)
-        and AT-MOST-ONCE per ``item_key`` — an item is de-duplicated across pages,
-        so a concurrent write that shifts a row between pages can't double-emit it
-        (completeness is best-effort under concurrent mutation; the at-most-once
-        guarantee is what keeps the resulting Zotero ranking unambiguous).
-        ``include_abstract=False`` skips the abstract subquery on every page."""
-        safe_page = max(1, min(page_size, 500))
-        out: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        offset = 0
-        while True:
-            page = self.get_items(
-                collection_key=collection_key, search=search, tag=tag,
-                limit=safe_page, offset=offset, include_abstract=include_abstract,
-            )
-            rows = page.get("items") or []
-            for row in rows:
-                key = str(row.get("item_key") or "")
-                if key and key in seen:
-                    continue  # paging artifact under a concurrent write — emit once
-                if key:
-                    seen.add(key)
-                out.append(row)
-            offset += len(rows)
-            total = int(page.get("total") or 0)
-            if not rows or len(rows) < safe_page or offset >= total:
-                break
-        return {"items": out, "total": len(out)}
+        def _read(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+            return [self._row_to_item(row) for row in conn.execute(list_sql, params).fetchall()]
+
+        items = self._execute_read(_read)
+        return {"items": items, "total": len(items)}
 
     def get_item_notes(self, item_key: str) -> list[dict[str, Any]]:
         """Return child notes for a specific parent item key."""

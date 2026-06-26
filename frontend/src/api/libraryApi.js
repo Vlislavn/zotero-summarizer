@@ -263,11 +263,18 @@ export async function fetchPaperRender(itemKey) {
   return request(`/api/library/render/${encodeURIComponent(itemKey)}`);
 }
 
-/** POST /api/library/render/{itemKey}/build { force, allow_arxiv_source }. */
-export async function buildPaperRender(itemKey, { force = false, allowArxivSource = false } = {}) {
+/** POST /api/library/render/{itemKey}/build { force, allow_arxiv_source, allow_acquire_missing }. */
+export async function buildPaperRender(
+  itemKey,
+  { force = false, allowArxivSource = false, allowAcquireMissing = false } = {},
+) {
   return request(`/api/library/render/${encodeURIComponent(itemKey)}/build`, {
     method: 'POST',
-    body: JSON.stringify({ force, allow_arxiv_source: allowArxivSource }),
+    body: JSON.stringify({
+      force,
+      allow_arxiv_source: allowArxivSource,
+      allow_acquire_missing: allowAcquireMissing,
+    }),
   });
 }
 
@@ -279,6 +286,13 @@ export async function buildPaperRender(itemKey, { force = false, allowArxivSourc
  * query param; it only busts the browser cache. */
 export function paperPresentationUrl(itemKey, version) {
   const base = `/api/library/render/${encodeURIComponent(itemKey)}/presentation`;
+  return version ? `${base}?v=${encodeURIComponent(version)}` : base;
+}
+
+/** URL of the PDF used to build the paper-read artifact. This may be Zotero's
+ * local attachment or an Open Access/browser-acquired cache PDF. */
+export function paperRenderPdfUrl(itemKey, version) {
+  const base = `/api/library/render/${encodeURIComponent(itemKey)}/pdf`;
   return version ? `${base}?v=${encodeURIComponent(version)}` : base;
 }
 

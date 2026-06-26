@@ -4,6 +4,7 @@ import {
   buildPaperRender,
   fetchPaperRender,
   paperPresentationUrl,
+  paperRenderPdfUrl,
   paperFigureUrl,
 } from '../../api/libraryApi.js';
 import Spinner from '../ui/Spinner.jsx';
@@ -15,7 +16,7 @@ import { Disclosure } from '../paper/review/primitives.jsx';
 // the whole document (which was a second design system embedded inside the app —
 // "embedding in embedding"). Instead it shows the figures as native thumbnails
 // and links out to the standalone/printable brief, and owns the build controls.
-export default function PaperReaderPane({ itemKey, open, onOpenChange }) {
+export default function PaperReaderPane({ itemKey, open, onOpenChange, hasPdf = true }) {
   const queryClient = useQueryClient();
   const [allowArxivSource, setAllowArxivSource] = useState(false);
   const staleRebuiltRef = useRef(false);
@@ -27,7 +28,7 @@ export default function PaperReaderPane({ itemKey, open, onOpenChange }) {
   });
   const buildMutation = useMutation({
     mutationFn: ({ force = false } = {}) =>
-      buildPaperRender(itemKey, { force, allowArxivSource }),
+      buildPaperRender(itemKey, { force, allowArxivSource, allowAcquireMissing: !hasPdf }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['paper-render', itemKey] }),
   });
   const render = renderQuery.data;
@@ -61,17 +62,22 @@ export default function PaperReaderPane({ itemKey, open, onOpenChange }) {
     <Disclosure summary={summary} open={Boolean(open)} onToggle={onOpenChange}>
       <div className="space-y-3 text-[13px] leading-relaxed text-slate-700">
         {renderQuery.isLoading && <div className="text-slate-500">Checking generated paper brief…</div>}
+        {!hasPdf && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
+            No local PDF is attached to this Zotero item. Build will try Open Access and your configured Chrome/university session, then render the acquired cache file without attaching it to Zotero.
+          </div>
+        )}
         {renderQuery.error && (
           <div className="text-rose-700">Render status failed: {renderQuery.error.message || String(renderQuery.error)}</div>
         )}
         {render?.status === 'missing' && (
           <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
-            No paper brief yet. Build will write notes, the HTML brief, figures and audit files next to the PDF.
+            No paper brief yet. Build will write notes, the HTML brief, figures and audit files next to the PDF it uses.
           </div>
         )}
         {render?.status === 'error' && (
           <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-rose-800">
-            Build failed: {render.error || render.message}
+            Build failed: {render.message || render.error}
           </div>
         )}
         {render?.stale && completed && (
@@ -115,9 +121,18 @@ export default function PaperReaderPane({ itemKey, open, onOpenChange }) {
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-slate-500">
             <span>
               {render.sections_count || 0} sections · {render.figures_count || 0} figures · {render.references_count || 0} references
+              {render.acquired_pdf ? ' · PDF acquired to cache' : ''}
               {render.audit?.status ? ` · audit ${render.audit.status}` : ''}
               {render.audit?.blocking?.length ? ` (${render.audit.blocking.length} blocking)` : ''}
             </span>
+            <a
+              href={paperRenderPdfUrl(itemKey, version)}
+              target="_blank"
+              rel="noreferrer"
+              className="font-semibold text-teal-700 hover:text-teal-800"
+            >
+              Open PDF used ↗
+            </a>
             <a
               href={paperPresentationUrl(itemKey, version)}
               target="_blank"
@@ -145,7 +160,7 @@ export default function PaperReaderPane({ itemKey, open, onOpenChange }) {
             onClick={() => buildMutation.mutate({ force: false })}
             className="rounded-lg bg-teal-700 px-3.5 py-2 text-[13px] text-white font-semibold hover:bg-teal-800 disabled:opacity-50"
           >
-            {completed ? 'Refresh if changed' : 'Build paper brief'}
+            {completed ? 'Refresh if changed' : hasPdf ? 'Build paper brief' : 'Fetch & build paper brief'}
           </button>
           {completed && (
             <button

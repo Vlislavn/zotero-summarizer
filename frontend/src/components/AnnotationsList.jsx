@@ -6,7 +6,7 @@ export default function AnnotationsList({ annotations = [] }) {
   const list = Array.isArray(annotations) ? annotations : [];
   return (
     <div>
-      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
         Annotations ({list.length})
       </h3>
       {list.length === 0 ? (

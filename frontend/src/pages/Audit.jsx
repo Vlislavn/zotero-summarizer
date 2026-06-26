@@ -237,6 +237,7 @@ export default function Audit() {
       {metrics && (
         <div className="mt-4 p-3 rounded border border-violet-300 bg-violet-50 text-sm">
           <div className="font-bold mb-2">Reliability metrics (n={metrics.n_paired})</div>
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <tbody>
               <tr>
@@ -276,6 +277,7 @@ export default function Audit() {
               </tr>
             </tbody>
           </table>
+          </div>
           {metrics.by_age_bucket && (
             <div className="mt-3 text-xs text-slate-600">
               <span className="font-semibold">By age bucket:</span>{' '}

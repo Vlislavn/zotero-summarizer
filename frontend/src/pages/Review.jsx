@@ -45,7 +45,7 @@ function ReviewItem({ item, localState, onAction }) {
       ? 'bg-rose-50 border-rose-300'
       : 'bg-white border-slate-200';
   return (
-    <div className={`border rounded-xl p-3 ${wrapperClass}`}>
+    <div className={`review-prose border rounded-xl p-3 ${wrapperClass}`}>
       <div className="flex items-baseline justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-xs">

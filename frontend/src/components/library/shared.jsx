@@ -25,14 +25,21 @@ export function truncateAuthors(authors) {
 // Canonical status/error banner for the whole app. Carries the a11y role +
 // aria-live so screen readers announce it; pages import this instead of
 // re-defining their own (they used to, with weaker or no a11y).
-export function StatusBanner({ message, isError }) {
+export function StatusBanner({ message, isError, tone }) {
   if (!message) return null;
-  const cls = isError
+  // `tone` ('error' | 'warn' | 'success') wins; `isError` is the legacy boolean.
+  // 'warn' (caution/ochre) is for RECOVERABLE conditions — e.g. "Zotero is busy,
+  // close it and retry" — so a retryable hiccup isn't painted max-severity clay
+  // (which trains banner-blindness). Clay/error stays reserved for fatal.
+  const t = tone || (isError ? 'error' : 'success');
+  const cls = t === 'error'
     ? 'bg-rose-50 border-rose-200 text-rose-800'
-    : 'bg-emerald-50 border-emerald-200 text-emerald-800';
+    : t === 'warn'
+      ? 'bg-amber-50 border-amber-200 text-amber-900'
+      : 'bg-emerald-50 border-emerald-200 text-emerald-800';
   return (
     <div
-      role={isError ? 'alert' : 'status'}
+      role={t === 'error' ? 'alert' : 'status'}
       aria-live="polite"
       className={`my-2 p-2 rounded-lg border text-xs ${cls}`}
     >

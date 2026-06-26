@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import types
+from pathlib import Path
 
 import fitz
 import pytest
@@ -322,3 +323,84 @@ def test_facade_status_presentation_and_figure_guards(tmp_path, monkeypatch):
             paper_render.figure_path("KEY1", bad)
     state = json.loads((tmp_path / "render" / "KEY1" / "paper_read.json").read_text())
     assert state["pdf_key"] == built["pdf_key"]
+
+
+def test_missing_presentation_output_is_rebuildable(tmp_path, monkeypatch):
+    pdf = tmp_path / "paper.pdf"
+    _make_pdf(pdf)
+
+    class _Reader:
+        def get_item_detail(self, key):
+            return {"title": "GlassNet", "pdf_path": str(pdf)}
+
+    fake_settings = types.SimpleNamespace(paper_render_dir=tmp_path / "render", pdf_root=tmp_path)
+    monkeypatch.setattr(paper_render, "settings", lambda: fake_settings)
+    monkeypatch.setattr(
+        "zotero_summarizer.services.zotero.zotero.get_zotero_reader_or_raise",
+        lambda: _Reader(),
+    )
+
+    built = paper_render.build_paper_read("KEY2")
+    presentation = Path(built["outputs"]["presentation"])
+    assert presentation.read_text(encoding="utf-8")
+    presentation.unlink()
+
+    status = paper_render.render_paper("KEY2")
+    assert status["status"] == "missing"
+    assert status["stale"] is True
+    assert "Generated HTML brief is missing" in status["message"]
+
+    rebuilt = paper_render.build_paper_read("KEY2")
+    assert rebuilt["status"] == "completed"
+    assert Path(rebuilt["outputs"]["presentation"]).read_text(encoding="utf-8")
+
+
+def test_build_paper_read_acquires_missing_pdf_when_allowed(tmp_path, monkeypatch):
+    acquired = tmp_path / "acquired.pdf"
+    _make_pdf(acquired)
+    seen: dict = {}
+
+    class _Reader:
+        def get_item_detail(self, key):
+            return {
+                "title": "AgentClinic",
+                "pdf_path": "",
+                "has_pdf": False,
+                "url": "https://www.nature.com/articles/s41746-024-01074-z",
+                "doi": "10.1038/s41746-024-01074-z",
+            }
+
+    def _acquire(item_key, detail, *, allow_headed_fallback):
+        seen.update(
+            item_key=item_key,
+            url=detail["url"],
+            allow_headed_fallback=allow_headed_fallback,
+        )
+        return types.SimpleNamespace(path=acquired, needs_login=False, login_url="")
+
+    fake_settings = types.SimpleNamespace(paper_render_dir=tmp_path / "render", pdf_root=tmp_path)
+    monkeypatch.setattr(paper_render, "settings", lambda: fake_settings)
+    monkeypatch.setattr(
+        "zotero_summarizer.services.zotero.zotero.get_zotero_reader_or_raise",
+        lambda: _Reader(),
+    )
+    monkeypatch.setattr(
+        "zotero_summarizer.services.library._pdf_acquire.acquire_pdf_for",
+        _acquire,
+    )
+
+    status = paper_render.render_paper("KEY3")
+    assert status["status"] == "missing"
+    assert status["needs_pdf"] is True
+
+    built = paper_render.build_paper_read("KEY3", allow_acquire_missing=True)
+    assert built["status"] == "completed"
+    assert built["acquired_pdf"] is True
+    assert built["item_key"] == "KEY3"
+    assert paper_render.source_pdf_path("KEY3") == acquired.resolve()
+    assert Path(built["outputs"]["presentation"]).is_file()
+    assert seen == {
+        "item_key": "KEY3",
+        "url": "https://www.nature.com/articles/s41746-024-01074-z",
+        "allow_headed_fallback": True,
+    }

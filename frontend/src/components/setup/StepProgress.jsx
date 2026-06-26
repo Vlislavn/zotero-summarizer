@@ -16,7 +16,7 @@ export default function StepProgress({ current, validity, maxReached = 0 }) {
         const done = Boolean(validity?.[i]) && i <= maxReached;
         const active = i === current;
         const stateCls = active
-          ? 'bg-slate-900 text-white border-slate-900'
+          ? 'bg-forest-800 text-white border-forest-800'
           : done
             ? 'bg-emerald-500 text-white border-emerald-500'
             : 'bg-white text-slate-400 border-slate-300';

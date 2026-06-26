@@ -28,10 +28,17 @@ from zotero_summarizer.services._common import now_iso_z, settings
 from zotero_summarizer.services.library import (
     _paper_read_brief,
     _paper_read_html,
+    _paper_read_meta,
     _paper_read_pdf,
     _paper_read_tex,
     deep_review,
 )
+from zotero_summarizer.services.library._paper_read_meta import (  # re-exported for qa.py + tests
+    artifact_text,
+    qa_body_text,
+)
+
+__all__ = ["artifact_text", "qa_body_text"]
 
 LOGGER = logging.getLogger(__name__)
 
@@ -52,7 +59,7 @@ def _compute_renderer_rev() -> str:
     """Short hash of the renderer source so editing any extractor/HTML module
     invalidates cached artifacts automatically (the cache key folds this in)."""
     digest = hashlib.sha256()
-    for module in (_paper_read_brief, _paper_read_html, _paper_read_pdf, _paper_read_tex):
+    for module in (_paper_read_brief, _paper_read_html, _paper_read_meta, _paper_read_pdf, _paper_read_tex):
         try:
             digest.update(Path(module.__file__).read_bytes())
         except OSError:  # pragma: no cover - source always readable in practice
@@ -63,43 +70,6 @@ def _compute_renderer_rev() -> str:
 # Code-derived renderer revision — recomputed at import; changes when any
 # renderer module's source changes (P0-1 stale-cache fix).
 _RENDERER_REV = _compute_renderer_rev()
-
-# TeX-extracted authors are often garbage (Author 1, Author 2… or bare \cmd residue).
-_GARBAGE_AUTHOR_RE = re.compile(r"(?i)\bAuthor\s*\d+|\\[a-zA-Z]")
-# Zotero storage folder names are 8-char uppercase alphanumeric keys — not useful as a title.
-_ZOTERO_KEY_RE = re.compile(r"^[A-Z0-9]{8}$")
-
-
-def _format_zotero_authors(raw: Any) -> str:
-    """Flatten Zotero creator list (dicts or strings) into a single comma-joined string."""
-    if not raw:
-        return ""
-    names = []
-    for a in (raw if isinstance(raw, list) else [raw]):
-        if isinstance(a, dict):
-            name = " ".join(filter(None, [str(a.get("firstName") or ""), str(a.get("lastName") or "")])).strip()
-            if not name:
-                name = str(a.get("name") or "").strip()
-        else:
-            name = str(a).strip()
-        if name:
-            names.append(name)
-    return ", ".join(names)
-
-
-def _tags_as_keywords(tags: Any) -> list[str]:
-    """Convert Zotero tags to a keyword list, filtering out internal zs: and emoji-only tags."""
-    if not tags:
-        return []
-    result = []
-    for t in (tags if isinstance(tags, list) else []):
-        tag = str(t.get("tag", "") if isinstance(t, dict) else t).strip()
-        if not tag or tag.startswith("zs:") or len(tag) > 60:
-            continue
-        if not any(c.isalpha() for c in tag):  # drop pure-symbol / emoji-only tags
-            continue
-        result.append(tag)
-    return result[:8]
 
 
 def _render_dir(item_key: str) -> Path:
@@ -127,13 +97,17 @@ def _write_state(item_key: str, payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _pdf_for_item(item_key: str) -> tuple[Path, dict[str, Any]]:
+def _item_detail(item_key: str) -> dict[str, Any]:
     from zotero_summarizer.services.zotero.zotero import get_zotero_reader_or_raise
 
     reader = get_zotero_reader_or_raise()
     detail = reader.get_item_detail(item_key)
     if detail is None:
         raise APIError(error="not_found", message=f"Item {item_key} not found", status_code=404)
+    return detail
+
+
+def _pdf_from_detail(item_key: str, detail: dict[str, Any]) -> Path:
     pdf_path = Path(str(detail.get("pdf_path") or ""))
     if not str(pdf_path) or not pdf_path.is_file():
         raise APIError(error="needs_pdf", message=f"No local PDF for item {item_key}", status_code=404)
@@ -141,7 +115,60 @@ def _pdf_for_item(item_key: str) -> tuple[Path, dict[str, Any]]:
     resolved = pdf_path.expanduser().resolve()
     if allowed not in [resolved, *resolved.parents]:
         raise APIError(error="path_not_allowed", message="PDF path is outside configured PDF_ROOT", status_code=403)
-    return resolved, detail
+    return resolved
+
+
+def _pdf_for_item(item_key: str) -> tuple[Path, dict[str, Any]]:
+    detail = _item_detail(item_key)
+    return _pdf_from_detail(item_key, detail), detail
+
+
+def _pdf_for_item_or_acquire(item_key: str, *, allow_acquire_missing: bool) -> tuple[Path, dict[str, Any]]:
+    """Return a local PDF path, optionally acquiring one into the fetch cache.
+
+    The normal paper-render path uses Zotero's attached PDF. The Library brief
+    shortcut can opt into the same acquisition chain the deep-review path uses:
+    arXiv/OA first, then the university/Chrome browser session. Acquired PDFs are
+    rendered from the cache and are not written back into Zotero.
+    """
+    detail = _item_detail(item_key)
+    try:
+        return _pdf_from_detail(item_key, detail), detail
+    except APIError as exc:
+        if exc.error != "needs_pdf" or not allow_acquire_missing:
+            raise
+
+    from zotero_summarizer.services.library import _pdf_acquire  # lazy: browser stack is optional
+
+    acquired = _pdf_acquire.acquire_pdf_for(item_key, detail, allow_headed_fallback=True)
+    if acquired.path is not None:
+        path = Path(acquired.path).expanduser().resolve()
+        if not path.is_file():
+            raise APIError(
+                error="needs_pdf",
+                message=f"PDF acquisition for item {item_key} returned a missing file",
+                status_code=404,
+            )
+        return path, {**detail, "pdf_path": str(path), "has_pdf": True, "acquired_pdf": True}
+    if acquired.needs_login:
+        raise APIError(
+            error="needs_library_login",
+            message=(
+                "The paper has no local Zotero PDF, and the browser/university "
+                "session could not fetch it. Open the publisher page in Chrome or "
+                "refresh University access, then retry."
+            ),
+            status_code=424,
+            details={"login_url": acquired.login_url},
+        )
+    raise APIError(
+        error="needs_pdf",
+        message=(
+            f"No local PDF for item {item_key}, and no fetchable full-text source "
+            "was found through arXiv, Open Access, or the browser acquisition path."
+        ),
+        status_code=404,
+    )
 
 
 def _pdf_key(pdf_path: Path) -> str:
@@ -156,6 +183,15 @@ def _key_is_current(pdf_key: str) -> bool:
     segment differs are stale → the pane prompts a rebuild."""
     parts = (pdf_key or "").split(":")
     return len(parts) == 4 and parts[0] == _PAPER_READ_VERSION and parts[1] == _RENDERER_REV
+
+
+def _completed_outputs_missing(state: dict[str, Any]) -> bool:
+    """True when a completed state points at generated files that no longer exist."""
+    if state.get("status") != "completed":
+        return False
+    outputs = state.get("outputs") or {}
+    presentation = Path(str(outputs.get("presentation") or ""))
+    return not str(presentation) or not presentation.is_file()
 
 
 def _get_item_lock(item_key: str) -> threading.Lock:
@@ -175,11 +211,34 @@ def render_paper(item_key: str) -> dict[str, Any]:
             return dict(job)
     state = _read_state(item_key)
     if state is not None:
-        if state.get("status") == "completed" and not _key_is_current(str(state.get("pdf_key") or "")):
-            # Renderer code changed since this artifact was built → flag for rebuild.
-            return {**state, "stale": True}
+        if state.get("status") == "completed":
+            if _completed_outputs_missing(state):
+                return {
+                    **state,
+                    "status": "missing",
+                    "stale": True,
+                    "message": "Generated HTML brief is missing; rebuild the paper-read artifact.",
+                }
+            if not _key_is_current(str(state.get("pdf_key") or "")):
+                # Renderer code changed since this artifact was built → flag for rebuild.
+                return {**state, "stale": True}
         return state
-    pdf_path, detail = _pdf_for_item(item_key)
+    try:
+        pdf_path, detail = _pdf_for_item(item_key)
+    except APIError as exc:
+        if exc.error != "needs_pdf":
+            raise
+        detail = _item_detail(item_key)
+        return {
+            "status": "missing",
+            "item_key": item_key,
+            "title": str(detail.get("title") or item_key),
+            "needs_pdf": True,
+            "message": (
+                "No local Zotero PDF is attached. Building the brief can try the "
+                "browser/university full-text acquisition path."
+            ),
+        }
     return {
         "status": "missing",
         "item_key": item_key,
@@ -190,7 +249,8 @@ def render_paper(item_key: str) -> dict[str, Any]:
 
 
 def start_build(
-    item_key: str, *, force: bool = False, allow_arxiv_source: bool = False
+    item_key: str, *, force: bool = False, allow_arxiv_source: bool = False,
+    allow_acquire_missing: bool = False,
 ) -> dict[str, Any]:
     """Start a background paper-read build, single-flight per item."""
     with _LOCK:
@@ -202,21 +262,42 @@ def start_build(
             "item_key": item_key,
             "started_at": now_iso_z(),
             "allow_arxiv_source": allow_arxiv_source,
+            "allow_acquire_missing": allow_acquire_missing,
             "message": "Building paper-read artifact.",
         }
         _JOBS[item_key] = payload
 
     _BUILD_POOL.submit(
-        _build_job, item_key, force=force, allow_arxiv_source=allow_arxiv_source
+        _build_job, item_key, force=force, allow_arxiv_source=allow_arxiv_source,
+        allow_acquire_missing=allow_acquire_missing,
     )
     return payload
 
 
-def _build_job(item_key: str, *, force: bool, allow_arxiv_source: bool) -> None:
+def _build_job(
+    item_key: str, *, force: bool, allow_arxiv_source: bool, allow_acquire_missing: bool
+) -> None:
     try:
-        result = build_paper_read(item_key, force=force, allow_arxiv_source=allow_arxiv_source)
+        result = build_paper_read(
+            item_key,
+            force=force,
+            allow_arxiv_source=allow_arxiv_source,
+            allow_acquire_missing=allow_acquire_missing,
+        )
         with _LOCK:
             _JOBS[item_key] = result
+    except APIError as exc:
+        payload = {
+            "status": "error",
+            "item_key": item_key,
+            "error": exc.error,
+            "message": exc.message,
+            "details": exc.details,
+            "completed_at": now_iso_z(),
+        }
+        _write_state(item_key, payload)
+        with _LOCK:
+            _JOBS[item_key] = payload
     except Exception as exc:  # noqa: BLE001 - background boundary
         LOGGER.exception("paper-read build failed for %s", item_key)
         payload = {
@@ -231,18 +312,27 @@ def _build_job(item_key: str, *, force: bool, allow_arxiv_source: bool) -> None:
 
 
 def build_paper_read(
-    item_key: str, *, force: bool = False, allow_arxiv_source: bool = False
+    item_key: str, *, force: bool = False, allow_arxiv_source: bool = False,
+    allow_acquire_missing: bool = False,
 ) -> dict[str, Any]:
     """Build and persist the artifact for a Zotero item.
 
     Serialized per item so a synchronous ``ensure_artifact`` and a concurrent
     background ``/build`` never build the same paper twice (which would race the
     non-atomic figure writes)."""
-    pdf_path, detail = _pdf_for_item(item_key)
+    pdf_path, detail = _pdf_for_item_or_acquire(
+        item_key, allow_acquire_missing=allow_acquire_missing
+    )
     key = _pdf_key(pdf_path)
     with _get_item_lock(item_key):
         existing = _read_state(item_key)
-        if existing and not force and existing.get("pdf_key") == key and existing.get("status") == "completed":
+        if (
+            existing
+            and not force
+            and existing.get("pdf_key") == key
+            and existing.get("status") == "completed"
+            and not _completed_outputs_missing(existing)
+        ):
             return existing
         artifact = build_paper_read_for_pdf(
             pdf_path,
@@ -252,6 +342,8 @@ def build_paper_read(
             zotero_detail=detail,
         )
         artifact.update({"pdf_key": key, "item_key": item_key})
+        if detail.get("acquired_pdf"):
+            artifact["acquired_pdf"] = True
         return _write_state(item_key, artifact)
 
 
@@ -293,24 +385,10 @@ def build_paper_read_for_pdf(
         content["figures"] = _paper_read_pdf.extract_pdf_figures(pdf_path, figures_dir)
         source_tier = "pdf"
 
-    # P0/P2: prefer Zotero metadata over garbage TeX extraction where it's available
-    if zotero_detail:
-        if _GARBAGE_AUTHOR_RE.search(str(content.get("authors") or "")) or not content.get("authors"):
-            zotero_authors = _format_zotero_authors(zotero_detail.get("authors"))
-            if zotero_authors:
-                content["authors"] = zotero_authors
-        if not content.get("keywords"):
-            zotero_kw = _tags_as_keywords(zotero_detail.get("tags"))
-            if zotero_kw:
-                content["keywords"] = zotero_kw
-
-    # P2: title from Zotero when TeX gives a Zotero storage key or the PDF stem
-    if title and (
-        not content.get("title")
-        or content.get("title") == pdf_path.stem
-        or _ZOTERO_KEY_RE.match(str(content.get("title") or ""))
-    ):
-        content["title"] = title
+    # P0/P2: prefer Zotero metadata (authors/keywords/title) over garbage TeX extraction
+    _paper_read_meta.apply_metadata_fallbacks(
+        content, zotero_detail=zotero_detail, title=title, pdf_stem=pdf_path.stem
+    )
     content.update(
         {
             "status": "completed",
@@ -365,6 +443,32 @@ def presentation_path(item_key: str) -> Path:
     return path
 
 
+def source_pdf_path(item_key: str) -> Path:
+    """Validated path to the PDF that the paper-read artifact was built from.
+
+    This may be Zotero's attached PDF or a browser/OA-acquired cache PDF. It is
+    served through the API so the UI can link to it without exposing a local file
+    URL.
+    """
+    state = _read_state(item_key)
+    if state is None or state.get("status") != "completed":
+        raise APIError(error="not_ready", message="Paper-read artifact has not been built", status_code=404)
+    path = Path(str(state.get("pdf_path") or ""))
+    if not path.is_file():
+        raise APIError(error="not_found", message="Source PDF for this brief is missing", status_code=404)
+
+    from zotero_summarizer.integrations.pdf_fetch import _DEFAULT_CACHE_DIR
+
+    resolved = path.expanduser().resolve()
+    roots = [
+        settings().pdf_root.expanduser().resolve(),
+        _DEFAULT_CACHE_DIR.expanduser().resolve(),
+    ]
+    if not any(root in [resolved, *resolved.parents] for root in roots):
+        raise APIError(error="path_not_allowed", message="Source PDF path is outside allowed roots", status_code=403)
+    return resolved
+
+
 def figure_path(item_key: str, name: str) -> Path:
     """Validated path for a generated figure next to the paper PDF."""
     if not _FIGURE_NAME_RE.match(name or ""):
@@ -381,29 +485,3 @@ def figure_path(item_key: str, name: str) -> Path:
     if not resolved.is_file():
         raise APIError(error="not_found", message=f"figure {name} not generated", status_code=404)
     return resolved
-
-
-def qa_body_text(artifact: dict[str, Any]) -> str:
-    """The paper's PDF-extracted body text used for grounding, all tiers.
-
-    ``qa_text`` is the clean PDF extraction persisted for TeX papers (whose own
-    ``full_text`` is noisy ``_clean_tex`` output); PDF-tier papers fall back to
-    their ``full_text`` (same extraction)."""
-    return str(artifact.get("qa_text") or artifact.get("full_text") or "")
-
-
-def artifact_text(artifact: dict[str, Any], *, max_chars: int) -> str:
-    """Comprehensive Q&A context: metadata, generated notes, then paper body."""
-    parts = [
-        f"Title: {artifact.get('title') or ''}",
-        f"Pages: {artifact.get('n_pages') or 0}",
-        f"Figures: {artifact.get('figures_count') or 0}",
-        f"References: {artifact.get('references_count') or 0}",
-    ]
-    notes_path = Path(str((artifact.get("outputs") or {}).get("notes") or ""))
-    if notes_path.is_file():
-        parts.append(notes_path.read_text(encoding="utf-8"))
-    body = qa_body_text(artifact)
-    if body:
-        parts.append(body)
-    return "\n\n".join(parts)[:max_chars]

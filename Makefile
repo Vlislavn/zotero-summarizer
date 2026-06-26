@@ -1,4 +1,8 @@
-.PHONY: ui api dev ui-build test lint scan scan-diff
+.PHONY: ui api iphone dev ui-build test lint scan scan-diff
+
+# Prefer the project venv binary so targets work without activating it; fall
+# back to PATH if there's no venv.
+ZS := $(if $(wildcard .venv/bin/zotero-summarizer),.venv/bin/zotero-summarizer,zotero-summarizer)
 
 # --- code-health scan knobs (system-owned defaults; override only when needed) ---
 # Base branch for `scan-diff` (what "changed" is measured against).
@@ -18,14 +22,23 @@ ui:
 
 # Backend API server (FastAPI/uvicorn) on :8000.
 api:
-	zotero-summarizer serve --host 127.0.0.1 --port 8000
+	$(ZS) serve --host 127.0.0.1 --port 8000
+
+# Serve to your phone on the same WiFi: binds all interfaces (0.0.0.0) so other
+# LAN devices can reach it, and prints the URL to open. Serves the BUILT SPA —
+# run `make ui-build` first if you changed the frontend. Remote access: use
+# Tailscale (http://<tailscale-ip>:8000), never port-forward (the API has no auth).
+iphone:
+	@ip=$$(ipconfig getifaddr en0 || ipconfig getifaddr en1); \
+	  echo "Open on your phone (same WiFi):  http://$$ip:8000"; \
+	  $(ZS) serve --host 0.0.0.0 --port 8000
 
 # Run backend + frontend together (Ctrl+C stops both). This is what you want
 # for local UI work: the Vite proxy has a live backend to talk to.
 dev:
 	@echo "Starting backend (:8000) + frontend (:5173). Ctrl+C stops both."
 	@trap 'kill 0' INT TERM EXIT; \
-	  zotero-summarizer serve --host 127.0.0.1 --port 8000 & \
+	  $(ZS) serve --host 127.0.0.1 --port 8000 & \
 	  cd frontend && npm run dev; \
 	  wait
 

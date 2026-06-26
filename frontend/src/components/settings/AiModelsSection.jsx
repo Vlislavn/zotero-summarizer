@@ -23,7 +23,7 @@ export default function AiModelsSection({ routing, onChange, isDirty, open, onTo
   return (
     <section id="ai-models" className="glass rounded-2xl border border-slate-200 p-4 space-y-4 scroll-mt-20">
       <div>
-        <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500">AI models</h3>
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">AI models</h3>
         <p className="text-xs text-slate-500 mt-1">
           Which LLM scores your feed, drains the backlog, and writes deep reviews —
           and how hard each one thinks.

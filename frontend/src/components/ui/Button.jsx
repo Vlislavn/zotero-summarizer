@@ -4,8 +4,11 @@
 // Law). Pass `variant` + `size`; everything else (onClick, disabled, type, title…)
 // flows through. Not a framework — just the shared shape these buttons already wanted.
 
+// Primary = the ONE saturated action color (Ease Health Forest Ink). It must be
+// the same Forest the rest of the app already uses (the remapped teal/forest
+// ramp) — never neutral near-black, which would make nav chrome the loudest mark.
 const VARIANTS = {
-  primary: 'bg-slate-900 text-white hover:bg-slate-700 disabled:bg-slate-300 disabled:text-slate-100',
+  primary: 'bg-forest-800 text-white hover:bg-forest-700 disabled:bg-slate-300 disabled:text-slate-100',
   secondary: 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 disabled:opacity-50',
   ghost: 'text-slate-600 hover:bg-slate-100 disabled:opacity-50',
   danger: 'bg-rose-600 text-white hover:bg-rose-700 disabled:bg-slate-300',
@@ -26,7 +29,7 @@ export default function Button({
   return (
     <button
       type={type}
-      className={`rounded-lg font-semibold transition-colors disabled:cursor-not-allowed ${
+      className={`rounded-lg font-medium transition-colors disabled:cursor-not-allowed ${
         SIZES[size] || SIZES.md
       } ${VARIANTS[variant] || VARIANTS.primary} ${className}`}
       {...rest}

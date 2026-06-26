@@ -271,6 +271,14 @@ def _compute_scores_into_cache(gate_sha: str, *, full: bool = False) -> None:
                     "why_reason": _why_reason(scoring),
                     "scoring": scoring,
                 }
+            # Precompute the goal-text similarity HERE (rescore time) and store it
+            # per entry, so opening the queue never re-runs the corpus matmul — the
+            # open path reads goal_sim straight from this cache (_build_recs). float
+            # or None (no corpus embedding); the key is always present, which is how
+            # sort_unread tells "already computed" from "legacy/needs a live lookup".
+            goal_sims = _goal_affinity([it["item_key"] for it in chunk])
+            for it in chunk:
+                cached[it["item_key"]]["goal_sim"] = goal_sims.get(it["item_key"])
             _write_cache(gate_sha, cached)
         if full:
             # Complete pass: now (and only now) drop entries for items no longer

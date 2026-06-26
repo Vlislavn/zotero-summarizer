@@ -4,11 +4,40 @@ Mixed into EmbeddingCache; methods use ``self`` helpers from that class.
 """
 from __future__ import annotations
 
+import os
 import sqlite3  # noqa: F401  (type hints)
+import threading
 
 import numpy as np
 
 from zotero_summarizer.storage.corpus_types import CorpusMatchResult
+
+# Module-level (PROCESS-wide) cache of the whole normalized corpus-embedding
+# matrix, keyed by a corpus-file fingerprint. The reading queue builds a FRESH
+# EmbeddingCache per open, so the instance-level _affinity_cache never survives
+# across opens — goal/query affinity re-pulled + re-parsed ~2k embeddings from
+# JSON every time (~0.5s). This shares one parse across instances and rebuilds
+# only when the corpus changes. The fingerprint folds in the -wal file's mtime
+# because the DB is WAL-mode: a write lands in corpus.db-wal and the main file's
+# mtime needn't move until a checkpoint, so main-mtime alone would miss writes.
+_TARGET_EMB_LOCK = threading.Lock()
+# {db_path: (fingerprint, {item_id: row_index}, normalized_matrix, valid_mask)}
+_TARGET_EMB_CACHE: dict[str, tuple[tuple, dict[str, int], np.ndarray, np.ndarray]] = {}
+
+
+def _corpus_fingerprint(db_path: str) -> tuple:
+    """``(main mtime_ns, main size, wal mtime_ns, wal size)`` — changes on any
+    corpus write, WAL-resident or checkpointed, so the cached matrix never goes
+    stale. The -wal size is included so a write is caught even where the
+    filesystem's mtime granularity is too coarse to move on a sub-second commit."""
+    st = os.stat(db_path)
+    wal = f"{db_path}-wal"
+    if os.path.exists(wal):
+        wst = os.stat(wal)
+        wal_sig = (wst.st_mtime_ns, wst.st_size)
+    else:
+        wal_sig = (0, 0)
+    return (st.st_mtime_ns, st.st_size, *wal_sig)
 
 
 class CorpusReadMixin:
@@ -123,35 +152,61 @@ class CorpusReadMixin:
             goal_sims = acc or None
         return affinity, goal_sims
 
+    def _normalized_corpus_matrix(self) -> tuple[dict[str, int], np.ndarray, np.ndarray]:
+        """``(item_id→row, normalized_matrix, valid_mask)`` for the WHOLE corpus,
+        cached process-wide and rebuilt only when the corpus file's mtime changes.
+
+        The reading queue opens a fresh EmbeddingCache each time, so this — not the
+        instance ``_affinity_cache`` — is what keeps goal/query affinity cheap
+        across queue opens (one JSON parse of the embedding set, reused until the
+        corpus is re-embedded). An empty corpus table → empty matrix."""
+        path = str(self.db_path)
+        fp = _corpus_fingerprint(path)  # EmbeddingCache.__init__ always creates the file
+        with _TARGET_EMB_LOCK:
+            hit = _TARGET_EMB_CACHE.get(path)
+            if hit is not None and hit[0] == fp:
+                return hit[1], hit[2], hit[3]
+        conn = self._conn()
+        try:
+            rows = conn.execute("SELECT item_id, embedding_json FROM corpus_embeddings").fetchall()
+        finally:
+            conn.close()
+        if rows:
+            mat = np.asarray([self._parse_embedding(r["embedding_json"]) for r in rows], dtype=np.float32)
+            norms = np.linalg.norm(mat, axis=1, keepdims=True)
+            valid = norms[:, 0] > 0
+            mat = mat / np.where(norms > 0, norms, 1.0)
+        else:
+            mat = np.zeros((0, self._vector_dim()), dtype=np.float32)
+            valid = np.zeros((0,), dtype=bool)
+        index = {str(r["item_id"]): i for i, r in enumerate(rows)}
+        with _TARGET_EMB_LOCK:
+            _TARGET_EMB_CACHE.clear()  # one corpus per process — keep only the latest
+            _TARGET_EMB_CACHE[path] = (fp, index, mat, valid)
+        return index, mat, valid
+
     def _affinity_to_targets(self, item_ids: list[str], target_mat: np.ndarray) -> dict[str, float]:
         """``{item_id: max cosine to the rows of target_mat}`` over the items'
         ALREADY-CACHED corpus embeddings (no model load, no re-embed).
 
         ``target_mat`` is a ``(G×dim)`` array of ALREADY-L2-normalized target
         vectors — the research-goal embeddings (``goal_affinity_for_items``) or a
-        ``1×dim`` query vector (``query_affinity_for_items``). One IN-query + one
+        ``1×dim`` query vector (``query_affinity_for_items``). Looks the items up in
+        the process-cached normalized corpus matrix, then one
         ``(n×dim)·(dim×G)`` matmul → per-item max cosine; items with no cached
         embedding or a zero-norm vector are omitted (caller falls back)."""
         ids = [str(i) for i in item_ids if str(i or "").strip()]
         if not ids or target_mat.shape[0] == 0:
             return {}
-        conn = self._conn()
-        try:
-            placeholders = ",".join("?" * len(ids))
-            item_rows = conn.execute(
-                f"SELECT item_id, embedding_json FROM corpus_embeddings WHERE item_id IN ({placeholders})",
-                ids,
-            ).fetchall()
-        finally:
-            conn.close()
-        if not item_rows:
+        index, mat, valid = self._normalized_corpus_matrix()
+        if mat.shape[0] == 0:
             return {}
-        ids_out = [str(r["item_id"]) for r in item_rows]
-        mat = np.asarray([self._parse_embedding(r["embedding_json"]) for r in item_rows], dtype=np.float32)
-        norms = np.linalg.norm(mat, axis=1, keepdims=True)
-        best = (mat / np.where(norms > 0, norms, 1.0) @ target_mat.T).max(axis=1)
-        valid = norms[:, 0] > 0
-        return {ids_out[i]: float(best[i]) for i in range(len(ids_out)) if valid[i]}
+        rows = [(i, index[i]) for i in dict.fromkeys(ids) if i in index and valid[index[i]]]
+        if not rows:
+            return {}
+        sel_idx = [r[1] for r in rows]
+        best = (mat[sel_idx] @ target_mat.T).max(axis=1)
+        return {rows[j][0]: float(best[j]) for j in range(len(rows))}
 
     def goal_affinity_for_items(self, item_ids: list[str]) -> dict[str, float]:
         """``{item_id: max cosine to the research-goal embeddings}`` — the

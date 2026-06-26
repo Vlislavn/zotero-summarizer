@@ -1,6 +1,8 @@
-"""Decision-ordered brief: verdict (flag reason inlined) → ARR spine → goal
-board (now the home of per-goal relevance) → self-explaining quality panel.
-The full paper body is NOT embedded; the digest is collapsed."""
+"""Decision-ordered brief: verdict/diagnosis (flag reason inlined) → evidence-grade
+gauge (one calibrated band, replacing the Rigor/Relevance chips) → goal board (the
+home of per-goal relevance; fired+relevant cells are "stained" and tether their
+summary to its quote) → self-explaining quality panel. The full paper body is NOT
+embedded; the digest is collapsed."""
 from __future__ import annotations
 
 from zotero_summarizer.services.library import _paper_read_brief as brief
@@ -34,13 +36,23 @@ GOALS = [
 ]
 
 
-def test_board_renders_all_states_and_spine():
+def test_board_renders_all_states_and_gauge():
     html = brief.brief_html(CONTENT, quality=QUALITY, goal_summaries=GOALS)
     assert 'class="goal-board"' in html
     for state in ("state-hit", "state-miss", "state-not_retrieved"):
         assert state in html
-    assert ">RIGOR<" in html and ">RELEVANCE<" in html
-    assert "2/3 agree" in html  # self-consistency, not cryptic dots
+    # the two ARR chips (RIGOR/RELEVANCE) collapsed into one evidence-grade gauge
+    assert 'class="gauge"' in html and "gauge-needle" in html
+    assert "2/3 passes" in html  # self-consistency, surfaced on the gauge
+    # the fired+relevant goal "takes the stain"; miss/not-retrieved stay unstained
+    assert "state-hit stained" in html and "unstained" in html
+
+
+def test_gauge_needle_position_tracks_band():
+    # the gauge OWNS band interpretation: a calibrated position, not a bare label
+    flag = brief.brief_html(CONTENT, quality=FLAG_Q, goal_summaries=GOALS)
+    hi = brief.brief_html(CONTENT, quality=HIGHLIGHT_Q, goal_summaries=GOALS)
+    assert "left:18%" in flag and "left:85%" in hi
 
 
 def test_board_absorbs_per_goal_summary_sections_and_quote():
@@ -85,7 +97,7 @@ def test_quality_panel_flag_leads_with_red_flags():
 
 def test_presentation_integrates_brief_no_sections_dump_no_cdn():
     html = h._render_presentation(CONTENT, "AgentClinic", DIGEST, QUALITY, GOALS)
-    assert 'class="spine"' in html and 'id="quality"' in html
+    assert 'class="gauge"' in html and 'id="quality"' in html
     assert 'id="sections"' not in html and 'id="per-goal"' not in html  # the dumps are gone
     assert 'class="fade-in digest-fold"' in html  # digest collapsed by default
     assert "cdn.jsdelivr" not in html

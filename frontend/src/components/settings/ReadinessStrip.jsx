@@ -46,11 +46,17 @@ export default function ReadinessStrip() {
   const { pillars, subsystemIssues, isLoading, isError } = useSetupStatus();
 
   if (isLoading || isError) return null;
+  // An all-green strip tells the user nothing actionable (it just restates that
+  // setup is done, and the LLM dot already lives in Active models below). Surface
+  // it ONLY when something needs fixing — success is silent (Tesler / Occam).
+  const allReady = pillars.zotero && pillars.llm && pillars.goals && pillars.model
+    && subsystemIssues.length === 0;
+  if (allReady) return null;
 
   return (
-    <div className="glass rounded-2xl border border-slate-200 p-3 flex flex-wrap items-center gap-2">
-      <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 mr-1">
-        Readiness
+    <div className="rounded-xl bg-amber-50/50 p-2.5 flex flex-wrap items-center gap-2">
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mr-1">
+        Needs attention
       </span>
       <Pill
         label="Zotero"

@@ -146,6 +146,35 @@ def test_blended_sort_is_order_only_never_mutates_relevance(monkeypatch):
     assert before == after
 
 
+def test_sort_unread_reuses_cached_goal_sim_without_recompute(monkeypatch):
+    """D: goal_sim is precomputed at rescore time and carried on each rec; the
+    open path must NOT re-run the corpus matmul when every row already has it."""
+    calls: list[list[str]] = []
+    monkeypatch.setattr(_ranking, "_goal_affinity", lambda keys: calls.append(list(keys)) or {})
+    # Equal relevance so the cached goal_sim is the unambiguous tiebreaker.
+    recs = [_rec("A", 3.0, 0.1), _rec("B", 3.0, 0.9)]  # both carry a cached goal_sim
+    _ranking.sort_unread(recs, model_ready=True)
+    assert calls == []                                   # no live corpus lookup at all
+    assert [r["item_key"] for r in recs] == ["B", "A"]   # B's stronger goal_sim floats it up
+
+
+def test_sort_unread_live_lookup_only_for_missing_goal_sim(monkeypatch):
+    """A scored row with NO cached goal_sim (legacy entry / not-yet-rescored)
+    triggers a live lookup — for that key alone, not the whole queue."""
+    calls: list[list[str]] = []
+
+    def _fake(keys):
+        calls.append(list(keys))
+        return {"A": 0.9}
+
+    monkeypatch.setattr(_ranking, "_goal_affinity", _fake)
+    a = _rec("A", 3.0, None)   # missing → needs a lookup
+    b = _rec("B", 4.0, 0.0)    # already cached → skipped
+    _ranking.sort_unread([a, b], model_ready=True)
+    assert calls == [["A"]]    # only the missing key, never B
+    assert a["goal_sim"] == 0.9
+
+
 def test_goal_affinity_for_items_returns_max_cosine(tmp_path):
     cache = EmbeddingCache(tmp_path / "corpus.db", "stub-model")
     conn = cache._conn()

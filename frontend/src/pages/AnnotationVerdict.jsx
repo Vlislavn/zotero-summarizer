@@ -533,7 +533,7 @@ export default function AnnotationVerdict() {
         className="glass rounded-2xl border border-slate-200 p-3 lg:col-span-4 flex flex-col max-h-[calc(100vh-7rem)]"
       >
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
             Papers
           </h2>
           <span className="text-[11px] text-slate-500">

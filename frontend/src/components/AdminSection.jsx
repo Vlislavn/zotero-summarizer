@@ -136,7 +136,7 @@ export default function AdminSection() {
 
   return (
     <div className="glass rounded-2xl border border-slate-200 p-4 mt-4">
-      <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500">
+      <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
         Model lifecycle
       </h3>
       <p className="text-xs text-slate-500 mt-1 mb-4">

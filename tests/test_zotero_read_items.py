@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from tests._zotero_fixtures import add_library_item, build_zotero_db
-from zotero_summarizer.integrations._zotero_read_items import ZoteroItemsMixin
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 
 
@@ -42,57 +41,41 @@ def test_get_all_items_excludes_annotations(zotero_dir: Path):
     assert out["total"] == 1
 
 
-# --- get_all_items pagination (uses the real loop with a fake get_items) ------
-
-class _PagingReader(ZoteroItemsMixin):
-    """Exercises the real ``get_all_items`` loop against a fake paged source."""
-
-    def __init__(self, total_items: int):
-        self._all = [{"item_key": f"K{i}", "title": f"t{i}"} for i in range(total_items)]
-        self.offsets: list[int] = []
-
-    def get_items(self, *, collection_key=None, search=None, tag=None, limit=100, offset=0, include_abstract=True):
-        self.offsets.append(offset)
-        chunk = self._all[offset:offset + limit]
-        return {"items": chunk, "total": len(self._all), "limit": limit, "offset": offset}
+# --- get_all_items: ONE un-paged query (perf-regression contract for fix A) ---
 
 
-def test_get_all_items_paginates_until_short_page():
-    reader = _PagingReader(total_items=5)
-    out = reader.get_all_items(page_size=2)
-    assert [it["item_key"] for it in out["items"]] == ["K0", "K1", "K2", "K3", "K4"]
-    assert out["total"] == 5
-    assert reader.offsets == [0, 2, 4]  # third page is short (1 row) → stop
+def test_get_all_items_runs_a_single_execute_read(zotero_dir: Path, monkeypatch):
+    """A whole-library pass must be ONE connection — so under Zotero-open
+    contention it copies the 176 MB DB snapshot at most ONCE, not once per
+    500-item page (the regression this fix removes). Counts ``_execute_read``."""
+    db = zotero_dir / "zotero.sqlite"
+    for i in range(3):
+        add_library_item(db, item_key=f"P{i}", title=f"paper {i}", abstract="a")
+    reader = ZoteroReader(zotero_dir)
+    calls = {"n": 0}
+    original = reader._execute_read
+
+    def _counting(fn):
+        calls["n"] += 1
+        return original(fn)
+
+    monkeypatch.setattr(reader, "_execute_read", _counting)
+    out = reader.get_all_items()
+    assert {it["item_key"] for it in out["items"]} == {"P0", "P1", "P2"}
+    assert calls["n"] == 1  # single read for the whole library, regardless of size
 
 
-def test_get_all_items_stops_on_exact_multiple_without_extra_fetch():
-    reader = _PagingReader(total_items=4)
-    out = reader.get_all_items(page_size=2)
-    assert out["total"] == 4
-    assert reader.offsets == [0, 2]  # offset >= total stops it; no wasted empty page
+def test_get_all_items_returns_more_than_one_get_items_page(zotero_dir: Path):
+    """``get_items`` clamps to 500/call; ``get_all_items`` must NOT inherit that
+    cap — the single query returns the whole library past the 500 boundary."""
+    db = zotero_dir / "zotero.sqlite"
+    for i in range(501):
+        add_library_item(db, item_key=f"K{i:04d}", title=f"t{i}", abstract="a")
+    out = ZoteroReader(zotero_dir).get_all_items()
+    assert out["total"] == 501
+    assert len({it["item_key"] for it in out["items"]}) == 501  # none truncated/duped
 
 
-def test_get_all_items_empty_library():
-    reader = _PagingReader(total_items=0)
-    out = reader.get_all_items(page_size=2)
+def test_get_all_items_empty_library(zotero_dir: Path):
+    out = ZoteroReader(zotero_dir).get_all_items()
     assert out == {"items": [], "total": 0}
-    assert reader.offsets == [0]
-
-
-def test_get_all_items_dedups_item_key_across_pages():
-    """A concurrent write can shift a row across a page boundary so the same
-    item_key appears on two pages — get_all_items must emit it AT MOST ONCE."""
-
-    class _DupReader(ZoteroItemsMixin):
-        def get_items(self, *, collection_key=None, search=None, tag=None, limit=100, offset=0, include_abstract=True):
-            pages = [
-                [{"item_key": "A"}, {"item_key": "B"}],
-                [{"item_key": "B"}, {"item_key": "C"}],  # B repeats (paging artifact)
-            ]
-            idx = offset // 2
-            chunk = pages[idx] if idx < len(pages) else []
-            return {"items": chunk, "total": 4, "limit": 2, "offset": offset}
-
-    out = _DupReader().get_all_items(page_size=2)
-    assert [it["item_key"] for it in out["items"]] == ["A", "B", "C"]  # B deduped
-    assert out["total"] == 3

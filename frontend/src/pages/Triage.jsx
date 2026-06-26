@@ -55,7 +55,7 @@ function feedbackButtonClass(current, verdict) {
 // Handlers + verdict/submitting state are passed in unchanged.
 function ResultCard({ result, current, submitting, onFeedback }) {
   return (
-    <div className="border border-slate-200 rounded bg-slate-50 text-sm overflow-hidden">
+    <div className="rounded-lg bg-slate-50 text-sm overflow-hidden">
       <div className="p-2 pb-1">
         <div className="font-medium">{result.title}</div>
         <div className="text-xs text-slate-600">
@@ -283,7 +283,7 @@ export default function Triage() {
     <div className="glass rounded-2xl border border-slate-200 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-lg font-bold">Triage Monitor</h2>
+          <h2 className="font-display text-xl font-light text-slate-900">Triage Monitor</h2>
           <p className="text-sm text-slate-600">
             Watch active triage jobs and review calibration metrics. Start new jobs from the
             Library tab.

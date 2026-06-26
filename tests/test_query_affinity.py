@@ -66,3 +66,26 @@ def test_goal_affinity_unchanged_after_refactor(tmp_path):
     # No goals → empty (caller falls back to gate order).
     cache2 = _cache_with_items(tmp_path / "x", {"A": [1.0, 0.0]})
     assert cache2.goal_affinity_for_items(["A"]) == {}
+
+
+def test_normalized_corpus_matrix_cached_until_corpus_changes(tmp_path):
+    """The process-wide matrix cache (fix C) must reuse the parsed embeddings
+    across calls — the reading queue builds a fresh EmbeddingCache per open — and
+    rebuild only when the corpus actually changes."""
+    cache = _cache_with_items(tmp_path, {"A": [1.0, 0.0], "B": [0.0, 1.0]})
+    _, mat1, _ = cache._normalized_corpus_matrix()
+    _, mat2, _ = cache._normalized_corpus_matrix()
+    assert mat2 is mat1  # cache HIT → exact same object, no re-parse
+
+    conn = cache._conn()
+    try:
+        conn.execute(
+            "INSERT INTO corpus_embeddings (item_id, title, content_hash, embedding_json) VALUES (?,?,?,?)",
+            ("C", "C", "h", json.dumps([1.0, 1.0])),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    index3, mat3, _ = cache._normalized_corpus_matrix()
+    assert mat3 is not mat1  # corpus changed → rebuilt
+    assert "C" in index3

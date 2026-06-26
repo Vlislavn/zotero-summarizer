@@ -43,7 +43,7 @@ export default function ModelCard() {
   return (
     <div className="glass rounded-2xl border border-slate-200 p-4 mt-4">
       <div className="flex items-baseline justify-between">
-        <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500">
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
           Current model
         </h3>
         <button

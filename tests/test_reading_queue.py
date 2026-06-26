@@ -369,6 +369,18 @@ def test_unscorable_item_gets_sentinel_and_stops_recompute(monkeypatch):
     assert u["relevance_score"] is None
 
 
+def test_rescore_stores_goal_sim_in_cache(monkeypatch):
+    """D: goal_sim is computed at rescore time and persisted per entry (float or
+    None, key always present), so opening the queue reads it from the cache
+    instead of re-running the corpus matmul on every load."""
+    _patch_state(monkeypatch, _FakeReader([_item("A"), _item("B")]), _FakeGate("sha1", {"A": 3.0, "B": 4.0}))
+    monkeypatch.setattr(reading_queue, "_goal_affinity", lambda keys: {"A": 0.7})
+    reading_queue._compute_scores_into_cache("sha1", full=True)
+    cached = reading_queue._read_cache("sha1")
+    assert cached["A"]["goal_sim"] == 0.7
+    assert cached["B"]["goal_sim"] is None  # no goal embedding → None, but key present
+
+
 def test_full_library_scoring_includes_read_items(monkeypatch):
     """The whole-library scan scores read AND unread items (read item carries a
     🧠 emoji). Needed so every paper has a cached score for the global Zotero rank."""

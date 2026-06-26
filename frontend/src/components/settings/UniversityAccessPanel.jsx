@@ -44,7 +44,7 @@ export default function UniversityAccessPanel({ form, onUpdate }) {
   return (
     <div className="glass rounded-2xl border border-slate-200 p-4 space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500">University access</h3>
+        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">University access</h3>
         <span
           className={`text-[11px] px-2 py-0.5 rounded-full border ${
             loggedIn

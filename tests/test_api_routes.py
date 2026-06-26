@@ -29,6 +29,7 @@ def test_library_pdf_route_registered():
     assert "/api/library/pdf/{item_key}" in paths
     assert "/api/library/render/{item_key}/build" in paths
     assert "/api/library/render/{item_key}/presentation" in paths
+    assert "/api/library/render/{item_key}/pdf" in paths
 
 
 def test_get_item_pdf_serves_stored_file(monkeypatch, tmp_path):
@@ -68,6 +69,16 @@ def test_get_paper_presentation_serves_inline(monkeypatch, tmp_path):
     assert "inline" in disposition and "attachment" not in disposition
 
 
+def test_get_paper_render_pdf_serves_inline(monkeypatch, tmp_path):
+    pdf = tmp_path / "source.pdf"
+    pdf.write_bytes(b"%PDF-1.4 source")
+    monkeypatch.setattr(library_routes.paper_render, "source_pdf_path", lambda item_key: pdf)
+    resp = asyncio.run(library_routes.get_paper_render_pdf("K1"))
+    assert Path(resp.path) == pdf and resp.media_type == "application/pdf"
+    disposition = resp.headers.get("content-disposition", "")
+    assert "inline" in disposition and "attachment" not in disposition
+
+
 def test_get_paper_figure_route_rejects_traversal_name():
     # The filename guard fires before any state lookup (422, no artifact needed).
     with pytest.raises(APIError) as excinfo:
@@ -78,18 +89,26 @@ def test_get_paper_figure_route_rejects_traversal_name():
 def test_build_paper_render_route_passes_flags(monkeypatch):
     seen: dict = {}
 
-    def _start(item_key, *, force, allow_arxiv_source):
-        seen.update(item_key=item_key, force=force, allow=allow_arxiv_source)
+    def _start(item_key, *, force, allow_arxiv_source, allow_acquire_missing):
+        seen.update(
+            item_key=item_key,
+            force=force,
+            allow=allow_arxiv_source,
+            acquire=allow_acquire_missing,
+        )
         return {"status": "running", "item_key": item_key}
 
     monkeypatch.setattr(library_routes.paper_render, "start_build", _start)
     out = asyncio.run(
         library_routes.build_paper_render(
-            "K1", library_routes.PaperRenderBuildRequest(force=True, allow_arxiv_source=True)
+            "K1",
+            library_routes.PaperRenderBuildRequest(
+                force=True, allow_arxiv_source=True, allow_acquire_missing=True
+            ),
         )
     )
     assert out["status"] == "running"
-    assert seen == {"item_key": "K1", "force": True, "allow": True}
+    assert seen == {"item_key": "K1", "force": True, "allow": True, "acquire": True}
 
 
 def test_ask_paper_route_returns_grounded_and_abstained(monkeypatch):

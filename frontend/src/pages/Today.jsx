@@ -16,7 +16,6 @@ import { useNavigate } from 'react-router-dom';
 import PaperCard from '../components/today/PaperCard.jsx';
 import NotConfiguredCard from '../components/setup/NotConfiguredCard.jsx';
 import Spinner from '../components/ui/Spinner.jsx';
-import HintBanner from '../components/ui/HintBanner.jsx';
 import { ErrorBanner } from '../components/library/shared.jsx';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import {
@@ -28,12 +27,6 @@ import {
 } from '../api/dailyApi.js';
 import { fetchReview } from '../api/reviewApi.js';
 import { reviewPaperUrl } from './reviewHelpers.js';
-
-const HINT_STORAGE_KEY = 'today_hint_dismissed_v2';
-const HINT_TEXT =
-  'Today = cull. Read the abstract, tick the papers worth reading, then ' +
-  'Add to library (or Trash). You give the real labels later, in Library → Read next.';
-
 
 // ---------------------------------------------------------------------------
 // Spot-check — a capped, clearly-labeled sample of papers the filter rejected,
@@ -145,7 +138,7 @@ function SpotCheck({ onNavigate }) {
             item={item}
             busy={busy}
             onAdd={(id) => act(addMut, id, 'Added')}
-            onTrash={(id) => act(trashMut, id, 'Confirmed reject of')}
+            onTrash={(id) => act(trashMut, id, 'Trashed')}
           />
         ))}
       </div>
@@ -285,7 +278,7 @@ export default function Today() {
       <NotConfiguredCard />
       <header className="mb-3 flex items-baseline justify-between flex-wrap gap-2">
         <div>
-          <h2 className="text-lg font-bold text-slate-900">Today’s reading</h2>
+          <h2 className="font-display text-xl font-light text-slate-900">Today’s reading</h2>
           <p className="text-xs text-slate-500 mt-0.5">
             Cull the feed: keep what’s worth reading into your library, trash the rest.
           </p>
@@ -323,7 +316,6 @@ export default function Today() {
         </div>
       </header>
 
-      <HintBanner storageKey={HINT_STORAGE_KEY}>{HINT_TEXT}</HintBanner>
       <ErrorBanner error={slateQuery.error} title="Slate load failed" />
       <ErrorBanner error={actionError} title="Action failed" />
       {/* The drain needs a live ML gate. A 503 here (e.g. lightgbm not
@@ -364,6 +356,15 @@ export default function Today() {
               {triageStatus?.error && <span className="text-rose-700"> — {triageStatus.error}</span>}
             </div>
           )}
+          {/* Empty state as an invitation, not a void: point to the next real action. */}
+          {!triageStatus?.running && (
+            <p className="my-2 text-xs text-slate-500">
+              Nothing to cull right now — your feed is clear. Pick up your reading queue in{' '}
+              <button type="button" onClick={() => navigate('/library')} className="text-teal-700 underline hover:text-teal-900">
+                Library → Read next
+              </button>.
+            </p>
+          )}
           <SpotCheck onNavigate={navigate} />
         </>
       )}
@@ -383,7 +384,6 @@ export default function Today() {
               <><strong>{slate.low_relevance_hidden}</strong> below-the-bar paper
                 {slate.low_relevance_hidden === 1 ? '' : 's'} hidden. </>
             )}
-            Run “Triage backlog” to pull in newer papers.
           </span>
         </div>
       )}

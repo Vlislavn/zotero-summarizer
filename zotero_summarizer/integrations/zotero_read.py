@@ -29,7 +29,12 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
     """
 
     _RETRY_DELAYS_SECONDS = (0.0, 0.05)
-    _SQLITE_TIMEOUT_SECONDS = 0.2
+    # Zotero runs the live DB in WAL mode, where a read-only connection does NOT
+    # block on a writer — the only contention is the brief exclusive lock during
+    # a checkpoint. A 0.2s budget tripped on those routinely, sending every read
+    # to the whole-DB snapshot copy (176 MB × once PER page). 2s lets the rare
+    # checkpoint clear in place, so the snapshot fallback is a true last resort.
+    _SQLITE_TIMEOUT_SECONDS = 2.0
 
     def __init__(self, zotero_data_dir: str | Path | None = None) -> None:
         data_dir = Path(zotero_data_dir or (Path.home() / "Zotero")).expanduser().resolve()

@@ -25,7 +25,7 @@ export default function AdvancedSection({ form, onUpdate, onToggleDropPriority }
         >
           ▸
         </span>
-        <span className="text-sm font-bold uppercase tracking-wider text-slate-500">
+        <span className="text-sm font-semibold uppercase tracking-wider text-slate-500">
           Classifier gate
         </span>
         <span className="text-xs text-slate-400 font-normal normal-case">
