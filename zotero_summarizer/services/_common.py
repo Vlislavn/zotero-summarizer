@@ -1,23 +1,24 @@
 from __future__ import annotations
 
+import csv
 from datetime import datetime, timezone
 import json
 import logging
 import os
 from pathlib import Path
 import re
-from typing import Any
+import sqlite3
+from typing import Any, Callable
 
-from fastapi.responses import FileResponse
 import yaml
 
 from zotero_summarizer.models import GoalsConfig, SummarizeRequest
+from zotero_summarizer.models.providers import ProviderConfig
 from zotero_summarizer.runtime import get_context
 from zotero_summarizer.settings import Settings
 
 
 LOGGER = logging.getLogger("zotero_summarizer")
-PACKAGE_WEB_DIR = Path(__file__).resolve().parents[1] / "web"
 
 
 def settings() -> Settings:
@@ -26,6 +27,76 @@ def settings() -> Settings:
 
 def state() -> Any:
     return get_context().state
+
+
+def band_primary_enabled() -> bool:
+    """Order-time deep-review QUALITY mode, shared by BOTH rank consumers (the
+    Library queue ``_ranking`` and the Today slate allocator): grade-only (default
+    — the shipped, measured behaviour) vs band-primary (highlight ↑ / flag ↓;
+    neutral & uncertain → exactly 0.0), a Phase-2-MEASURED arm. Config
+    ``quality_review.quality_band_primary``, overridden by ``ZS_QUALITY_BAND_PRIMARY``.
+    Optional-feature boundary: no config / no state → the grade-only default."""
+    env = os.environ.get("ZS_QUALITY_BAND_PRIMARY")
+    if env is not None:
+        return env.strip().lower() in ("1", "true", "yes", "on")
+    app_state = getattr(state(), "app_state", None)
+    config = getattr(app_state, "config", None) if app_state is not None else None
+    qr = getattr(config, "quality_review", None) if config is not None else None
+    return bool(getattr(qr, "quality_band_primary", False))
+
+
+def effective_llm_concurrency(provider: ProviderConfig | None, item_count: int) -> int:
+    """Worker count for a per-item LLM fan-out, conditional on the provider.
+
+    A **local** provider (loopback ``base_url``) runs **serial** (1) so one big
+    on-device model isn't asked to serve concurrent inference and thrash host
+    RAM. A **remote** provider uses the configured ``TRIAGE_JOB_CONCURRENCY`` cap,
+    never more than the work on hand. ``provider=None`` falls to the remote
+    branch — the safe default never silently serialises a real remote run.
+    """
+    n = max(1, int(item_count))
+    if provider is not None and provider.is_local:
+        return 1
+    return max(1, min(settings().triage_job_concurrency, n))
+
+
+def deep_review_fleet_concurrency(provider: ProviderConfig | None, item_count: int) -> int:
+    """Worker count for the MULTI-paper deep-review fan-out (the N "Read next" picks the
+    fleet / prewarm review at once).
+
+    A **local** provider stays **serial** (1) — one on-device model can't serve
+    concurrent inference without thrashing host RAM. A **remote** provider fans out to
+    the work on hand, capped by its own ``max_sub_concurrency`` (the per-provider remote
+    concurrency budget) when set, else **all N at once** (an API has no host-RAM
+    constraint). Deliberately NOT the global ``TRIAGE_JOB_CONCURRENCY`` — that knob
+    serialises LOCAL triage for RAM safety, so it must never throttle a genuinely remote,
+    RAM-free batch (the bug: with ``TRIAGE_JOB_CONCURRENCY=1`` a 5-pick remote batch ran
+    serially). ``provider=None`` falls to the remote branch (never silently serialises a
+    real remote run). Peak concurrent calls is this × ``deep_review_sub_concurrency`` (the
+    within-paper sub-calls), both bounded by ``max_sub_concurrency`` for a capped provider."""
+    n = max(1, int(item_count))
+    if provider is not None and provider.is_local:
+        return 1
+    cap = getattr(provider, "max_sub_concurrency", None) if provider else None
+    return min(n, cap) if cap else n
+
+
+def deep_review_sub_concurrency(provider: ProviderConfig | None) -> int:
+    """Number of LLM SUB-calls (self-consistency rubric samples / per-goal
+    summaries) to run in parallel WITHIN one paper's deep review.
+
+    A **local** provider stays serial (1) — one big on-device model can't absorb
+    concurrent inference without thrashing host RAM. A **remote** provider uses its
+    own ``max_sub_concurrency`` cap, falling back to ``TRIAGE_JOB_CONCURRENCY`` when
+    unset. ``provider=None`` falls to the remote branch (never silently serialises a
+    real remote run). Shared by the background job and the ``verify-deep-review`` CLI
+    so the two never drift."""
+    if provider is not None and provider.is_local:
+        return 1
+    configured = getattr(provider, "max_sub_concurrency", None) if provider else None
+    if configured is not None:
+        return max(1, int(configured))
+    return max(1, settings().triage_job_concurrency)
 
 
 def setup_logging() -> None:
@@ -73,23 +144,6 @@ def write_config_atomic(config_path: Path, payload: dict[str, Any]) -> None:
     tmp_path.replace(config_path)
 
 
-def web_file(name: str) -> Path:
-    # Project-level overrides are kept for local development, but packaged files
-    # are the supported source after repo cleanup.
-    project_file = settings().project_root / name
-    if project_file.exists():
-        return project_file
-    return PACKAGE_WEB_DIR / name
-
-
-def html_file_response(path: Path) -> FileResponse:
-    response = FileResponse(str(path), media_type="text/html")
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-    return response
-
-
 def to_text(value: Any) -> str:
     if isinstance(value, str):
         return value
@@ -108,7 +162,7 @@ def extract_json_blob(text: str) -> dict[str, Any]:
         parsed = json.loads(stripped)
         if isinstance(parsed, dict):
             return parsed
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as _:
         pass
 
     fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", stripped, flags=re.DOTALL | re.IGNORECASE)
@@ -117,7 +171,7 @@ def extract_json_blob(text: str) -> dict[str, Any]:
             parsed = json.loads(fenced.group(1))
             if isinstance(parsed, dict):
                 return parsed
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as _:
             pass
 
     decoder = json.JSONDecoder()
@@ -148,7 +202,35 @@ def safe_parse_response_json(raw: Any, context: str = "") -> dict[str, Any]:
 
 
 def clamp(value: float, low: float, high: float) -> float:
+    # NaN must never silently pass: `max(low, min(high, NaN))` returns `high`,
+    # which would make a NaN score the top-ranked item. Surface it instead so
+    # the bad upstream value (e.g. a malformed LLM number) fails loudly.
+    if value != value:
+        raise ValueError(f"clamp received NaN (low={low}, high={high})")
     return max(low, min(high, value))
+
+
+def atomic_write(path: Path, write: Callable[[Path], None]) -> None:
+    """Write via a temp file + ``os.replace`` so a crash/race can never leave a
+    half-written or truncated file at ``path`` (POSIX rename is atomic). Used for
+    irreplaceable artifacts like the golden CSV and the model joblib.
+    """
+    tmp_path = path.with_name(path.name + ".tmp")
+    write(tmp_path)
+    os.replace(tmp_path, path)
+
+
+def connect_sqlite_ro(db_path: Path, *, timeout: float = 5.0) -> sqlite3.Connection:
+    """Open a SQLite DB read-only with a ``Row`` factory.
+
+    Pre-checks existence so a missing file raises a clear ``FileNotFoundError``
+    instead of an opaque ``sqlite3.OperationalError`` from URI mode.
+    """
+    if not db_path.exists():
+        raise FileNotFoundError(f"database not found at {db_path}")
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=timeout)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def unique_non_empty_strings(values: Any) -> list[str]:
@@ -168,6 +250,38 @@ def unique_non_empty_strings(values: Any) -> list[str]:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def now_iso_z() -> str:
+    """UTC timestamp, second precision, ``Z`` suffix (e.g. ``2026-05-23T12:00:00Z``)."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    """Write ``payload`` as JSON to ``path`` via tmp + ``replace`` (atomic on POSIX),
+    creating parent dirs. A crash/race can never leave a half-written cache file.
+    The caller owns the envelope (e.g. ``{"updated_at": now_iso_z(), ...}``)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
+
+
+def load_golden_rows(csv_path: Path) -> list[dict[str, str]]:
+    """Read the golden CSV into a list of row dicts. Fail-fast if missing."""
+    if not csv_path.exists():
+        raise FileNotFoundError(f"golden CSV not found at {csv_path}")
+    with csv_path.open(newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_HTML_WS_RE = re.compile(r"\s+")
+
+
+def html_to_text(html: str) -> str:
+    """Strip HTML tags and collapse whitespace to a single trimmed line."""
+    return _HTML_WS_RE.sub(" ", _HTML_TAG_RE.sub(" ", html or "")).strip()
 
 
 def log_context(prefix: str, message: str, *args: Any) -> None:

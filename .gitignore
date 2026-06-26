@@ -1,6 +1,7 @@
 .venv/
 venv/
 env/
+.claude/skills
 __pycache__/
 *.pyc
 *.pyo
@@ -17,12 +18,26 @@ build/
 .env
 .env.*
 !.env.example
-triage_history.db
-corpus_cache.db
-triage.db
+
+# Personal config (research goals + mailto). Copy goals.example.yaml ->
+# goals.yaml and edit; the real file is never committed.
+goals.yaml
+
+# All app-generated state lives here: SQLite DBs, the personal golden-label
+# dataset, logs, and ML eval/run artifacts. Never commit. See settings.data_dir.
+data/
+
+# Generic safety nets (data/ already covers the in-app paths).
 *.sqlite
 *.sqlite3
-server.log
 *.log
-tmp_review_logs/
 *.tmp
+*.bak
+tmp_review_logs/
+
+# Frontend e2e: vendored deps, screenshots, and generated audit reports.
+tests/e2e/node_modules/
+tests/e2e/screenshots/
+tests/e2e/screenshots-pre/
+tests/e2e/audit-shots/
+tests/e2e/*-report*.json

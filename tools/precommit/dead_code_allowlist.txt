@@ -1,0 +1,13 @@
+# Grandfathered public symbols with no consumer inside zotero_summarizer/.
+# A symbol lands here when no RUNTIME code references it. References from tests/
+# do NOT count — the guard greps only the runtime package, so a "# test-only"
+# helper still shows up here (that's intentional: it flags runtime code no
+# runtime path reaches). The rule mirrors loc_allowlist.txt: entries may be
+# REMOVED (wire a real consumer, or delete the symbol) but a new entry needs a
+# one-line justification. Goal: shrink to empty.
+#
+# Regenerate the raw list with:
+#   python3 tools/precommit/check_dead_code.py dump-orphans
+#
+# Format: <path>:<symbol>   # reason
+#

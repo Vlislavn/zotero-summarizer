@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* "Ease Health" design system — see frontend/DESIGN.md. Light clinical: flat
+   Linen-White canvas (no gradient), one saturated Forest Ink, no shadows. */
+:root {
+  --brand-ink: #171614;     /* warm near-black body text */
+  --brand-teal: #0f3e17;    /* Forest Ink — the one saturated color */
+  --brand-moss: #225f38;
+  --brand-paper: #fffefc;   /* Linen White */
+  --brand-hairline: #e5e7eb;
+}
+
+body {
+  font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+  font-feature-settings: "tnum" 0;
+  letter-spacing: -0.011em;
+  background: #fffefc; /* flat Linen White — elevation comes from tint, not gradient/shadow */
+  color: var(--brand-ink);
+  min-height: 100vh;
+}
+
+/* Display face for headings / the loud line (light weight only — no bold). */
+.font-display {
+  font-family: "Fraunces", "Newsreader", Georgia, serif;
+  font-weight: 300;
+  letter-spacing: -0.01em;
+}
+
+.glass {
+  background: rgba(255, 254, 252, 0.92);
+  backdrop-filter: blur(6px);
+}
+
+.mono {
+  font-family: "Inter", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.slim-scroll::-webkit-scrollbar { width: 5px; }
+.slim-scroll::-webkit-scrollbar-track { background: transparent; }
+.slim-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+.slim-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* Mobile: stop long IDs/scores/URLs from overflowing the review/brief panel.
+   overflow-wrap:anywhere (not break-words) also lets flex/grid children shrink
+   below min-content, which is what actually prevents horizontal overflow. */
+.review-prose, .review-prose * { overflow-wrap: anywhere; }
+.review-prose .font-mono,
+.review-prose .mono,
+.review-prose code { word-break: break-all; }
+
+@media (max-width: 640px) {
+  /* .no-tap-min opts out viz/inline controls whose height is meaningful */
+  button:not(.no-tap-min), [role="button"]:not(.no-tap-min) { min-height: 44px; }
+  /* !important beats Tailwind's .text-sm/.text-xs utility classes (a class out-
+     specifies this element selector); <16px triggers iOS Safari zoom-on-focus. */
+  input, select, textarea { font-size: 16px !important; }
+}

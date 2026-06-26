@@ -1,0 +1,6 @@
+# Grandfathered files that exceed the 500-LOC limit (frozen ceilings).
+# These may SHRINK but must not GROW. Goal: split each and delete its line.
+# Format: <path> <ceiling-LOC>
+#
+# (empty) — all files are within the 500-LOC limit.
+tests/test_reading_queue.py 551

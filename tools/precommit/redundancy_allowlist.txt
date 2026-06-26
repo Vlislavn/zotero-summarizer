@@ -1,0 +1,17 @@
+# Grandfathered redundancy findings — frozen so only NEW redundancy is surfaced.
+#
+# Two key formats (one entry per line; `#` starts a comment):
+#   <path>:<line>:<kind>                          a BLOCKing redundant transform
+#   <path>:<qualname>::<path>:<qualname>          an advisory near-duplicate pair
+#
+# Same rule as loc_allowlist.txt / dead_code_allowlist.txt: entries may be REMOVED
+# (extract a shared helper, or rewrite the transform) but a NEW entry needs a
+# one-line justification. Goal: shrink to empty.
+#
+# Regenerate after a deliberate change:
+#   python3 tools/precommit/check_redundancy.py dump > tools/precommit/redundancy_allowlist.txt
+#   # then re-add this header
+#
+# Current contents: 0 blocking transforms; the near-duplicate function pairs below
+# are pre-existing parallel implementations (copy-paste helpers / parallel adapters),
+# frozen as known tech debt — advisory only, they never block a commit.

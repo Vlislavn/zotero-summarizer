@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from zotero_summarizer.models import TriageRunResponse
-from zotero_summarizer.services import triage_jobs
+from zotero_summarizer.services.triage import triage_jobs
 
 router = APIRouter()
 router.add_api_route("/api/triage/run", triage_jobs.run_triage_job, methods=["POST"], response_model=TriageRunResponse)

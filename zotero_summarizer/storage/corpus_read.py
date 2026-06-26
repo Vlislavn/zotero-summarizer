@@ -1,0 +1,470 @@
+"""Read/query side of EmbeddingCache (match + metadata).
+
+Mixed into EmbeddingCache; methods use ``self`` helpers from that class.
+"""
+from __future__ import annotations
+
+import os
+import sqlite3  # noqa: F401  (type hints)
+import threading
+
+import numpy as np
+
+from zotero_summarizer.storage.corpus_types import CorpusMatchResult
+
+# Module-level (PROCESS-wide) cache of the whole normalized corpus-embedding
+# matrix, keyed by a corpus-file fingerprint. The reading queue builds a FRESH
+# EmbeddingCache per open, so the instance-level _affinity_cache never survives
+# across opens — goal/query affinity re-pulled + re-parsed ~2k embeddings from
+# JSON every time (~0.5s). This shares one parse across instances and rebuilds
+# only when the corpus changes. The fingerprint folds in the -wal file's mtime
+# because the DB is WAL-mode: a write lands in corpus.db-wal and the main file's
+# mtime needn't move until a checkpoint, so main-mtime alone would miss writes.
+_TARGET_EMB_LOCK = threading.Lock()
+# {db_path: (fingerprint, {item_id: row_index}, normalized_matrix, valid_mask)}
+_TARGET_EMB_CACHE: dict[str, tuple[tuple, dict[str, int], np.ndarray, np.ndarray]] = {}
+
+
+def _corpus_fingerprint(db_path: str) -> tuple:
+    """``(main mtime_ns, main size, wal mtime_ns, wal size)`` — changes on any
+    corpus write, WAL-resident or checkpointed, so the cached matrix never goes
+    stale. The -wal size is included so a write is caught even where the
+    filesystem's mtime granularity is too coarse to move on a sub-second commit."""
+    st = os.stat(db_path)
+    wal = f"{db_path}-wal"
+    if os.path.exists(wal):
+        wst = os.stat(wal)
+        wal_sig = (wst.st_mtime_ns, wst.st_size)
+    else:
+        wal_sig = (0, 0)
+    return (st.st_mtime_ns, st.st_size, *wal_sig)
+
+
+class CorpusReadMixin:
+
+    def _corpus_arrays(self, stale_days: int) -> tuple[np.ndarray, np.ndarray]:
+        """``(matrix, weights)`` for the corpus, cached until the corpus changes.
+
+        ``matrix``: (N, dim) float32 normalized embeddings; ``weights``: (N,)
+        engagement weights for ``stale_days``. Parsing the (large) embedding set
+        is the expensive part — done once and reused across scored items, rebuilt
+        only when ``_corpus_version`` (bumped on any corpus write) or
+        ``stale_days`` changes."""
+        cache = self._affinity_cache
+        if (
+            cache is not None
+            and cache["version"] == self._corpus_version
+            and cache["stale_days"] == stale_days
+        ):
+            return cache["matrix"], cache["weights"]
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                "SELECT tags_json, collections_json, annotation_count, manual_note_count, "
+                "created_at, embedding_json FROM corpus_embeddings"
+            ).fetchall()
+        finally:
+            conn.close()
+        if not rows:
+            matrix = np.zeros((0, self._vector_dim()), dtype=np.float32)
+            weights = np.zeros((0,), dtype=np.float32)
+        else:
+            matrix = np.asarray(
+                [self._parse_embedding(r["embedding_json"]) for r in rows], dtype=np.float32
+            )
+            weights = np.asarray(
+                [
+                    self._engagement_weight(
+                        tags=self._parse_list(r["tags_json"]),
+                        annotation_count=int(r["annotation_count"] or 0),
+                        manual_note_count=int(r["manual_note_count"] or 0),
+                        created_at=r["created_at"],
+                        stale_days_for_weak_negative=stale_days,
+                    )
+                    for r in rows
+                ],
+                dtype=np.float32,
+            )
+        self._affinity_cache = {
+            "version": self._corpus_version,
+            "stale_days": stale_days,
+            "matrix": matrix,
+            "weights": weights,
+        }
+        return matrix, weights
+
+    def affinity_and_goals(
+        self, title: str, abstract: str, stale_days_for_weak_negative: int = 30
+    ) -> tuple[float, dict[str, float] | None]:
+        """ONE candidate embed → ``(engagement affinity, per-goal cosines)``.
+
+        The single computational definition of both per-candidate corpus
+        signals, from the same ``_build_text(title, abstract)`` input:
+
+        * ``affinity`` — engagement-weighted pos−neg cosine over the corpus
+          (what the user DID; the gate's ``corpus_affinity`` feature).
+          Identical math to :meth:`match_candidate`'s affinity but ~1000×
+          cheaper at scale (one numpy matmul over the cached corpus matrix vs
+          a Python cosine loop with a JSON re-parse each call); the full
+          ``match_candidate`` (collections / goals / top items) stays for the
+          review UI.
+        * ``goal_sims`` — ``{goal text: cosine}`` against each stored
+          research-goal embedding (what the user SAID they want), or ``None``
+          when no goals are stored — strictly "signal unavailable", never a
+          fake 0.0. Aggregation (max / weighting) is the caller's policy.
+
+        Distinct numbers, deliberately computed from one embedding so they can
+        never drift apart the way two separate embed paths would."""
+        matrix, weights = self._corpus_arrays(stale_days_for_weak_negative)
+        conn = self._conn()
+        try:
+            goal_rows = conn.execute("SELECT goal, embedding_json FROM goal_embeddings").fetchall()
+        finally:
+            conn.close()
+        if matrix.shape[0] == 0 and not goal_rows:
+            return 0.0, None
+        cand = np.asarray(self._embed(self._build_text(title, abstract)), dtype=np.float32)
+        norm = float(np.linalg.norm(cand))
+        if norm > 0:
+            cand = cand / norm
+
+        affinity = 0.0
+        if matrix.shape[0] > 0:
+            sims = matrix @ cand
+            pos = weights > 0
+            neg = weights < 0
+            pos_den = float(weights[pos].sum())
+            neg_w = -weights[neg]
+            neg_den = float(neg_w.sum())
+            positive_similarity = float((sims[pos] * weights[pos]).sum() / pos_den) if pos_den > 0 else 0.0
+            negative_similarity = float((sims[neg] * neg_w).sum() / neg_den) if neg_den > 0 else 0.0
+            affinity = round(self._clamp(positive_similarity - negative_similarity, -1.0, 1.0), 4)
+
+        goal_sims: dict[str, float] | None = None
+        if goal_rows:
+            acc: dict[str, float] = {}
+            for row in goal_rows:
+                gvec = np.asarray(self._parse_embedding(row["embedding_json"]), dtype=np.float32)
+                gnorm = float(np.linalg.norm(gvec))
+                if gnorm == 0:
+                    continue  # unembeddable goal text — no cosine exists for it
+                acc[str(row["goal"])] = round(float((gvec / gnorm) @ cand), 4)
+            goal_sims = acc or None
+        return affinity, goal_sims
+
+    def _normalized_corpus_matrix(self) -> tuple[dict[str, int], np.ndarray, np.ndarray]:
+        """``(item_id→row, normalized_matrix, valid_mask)`` for the WHOLE corpus,
+        cached process-wide and rebuilt only when the corpus file's mtime changes.
+
+        The reading queue opens a fresh EmbeddingCache each time, so this — not the
+        instance ``_affinity_cache`` — is what keeps goal/query affinity cheap
+        across queue opens (one JSON parse of the embedding set, reused until the
+        corpus is re-embedded). An empty corpus table → empty matrix."""
+        path = str(self.db_path)
+        fp = _corpus_fingerprint(path)  # EmbeddingCache.__init__ always creates the file
+        with _TARGET_EMB_LOCK:
+            hit = _TARGET_EMB_CACHE.get(path)
+            if hit is not None and hit[0] == fp:
+                return hit[1], hit[2], hit[3]
+        conn = self._conn()
+        try:
+            rows = conn.execute("SELECT item_id, embedding_json FROM corpus_embeddings").fetchall()
+        finally:
+            conn.close()
+        if rows:
+            mat = np.asarray([self._parse_embedding(r["embedding_json"]) for r in rows], dtype=np.float32)
+            norms = np.linalg.norm(mat, axis=1, keepdims=True)
+            valid = norms[:, 0] > 0
+            mat = mat / np.where(norms > 0, norms, 1.0)
+        else:
+            mat = np.zeros((0, self._vector_dim()), dtype=np.float32)
+            valid = np.zeros((0,), dtype=bool)
+        index = {str(r["item_id"]): i for i, r in enumerate(rows)}
+        with _TARGET_EMB_LOCK:
+            _TARGET_EMB_CACHE.clear()  # one corpus per process — keep only the latest
+            _TARGET_EMB_CACHE[path] = (fp, index, mat, valid)
+        return index, mat, valid
+
+    def _affinity_to_targets(self, item_ids: list[str], target_mat: np.ndarray) -> dict[str, float]:
+        """``{item_id: max cosine to the rows of target_mat}`` over the items'
+        ALREADY-CACHED corpus embeddings (no model load, no re-embed).
+
+        ``target_mat`` is a ``(G×dim)`` array of ALREADY-L2-normalized target
+        vectors — the research-goal embeddings (``goal_affinity_for_items``) or a
+        ``1×dim`` query vector (``query_affinity_for_items``). Looks the items up in
+        the process-cached normalized corpus matrix, then one
+        ``(n×dim)·(dim×G)`` matmul → per-item max cosine; items with no cached
+        embedding or a zero-norm vector are omitted (caller falls back)."""
+        ids = [str(i) for i in item_ids if str(i or "").strip()]
+        if not ids or target_mat.shape[0] == 0:
+            return {}
+        index, mat, valid = self._normalized_corpus_matrix()
+        if mat.shape[0] == 0:
+            return {}
+        rows = [(i, index[i]) for i in dict.fromkeys(ids) if i in index and valid[index[i]]]
+        if not rows:
+            return {}
+        sel_idx = [r[1] for r in rows]
+        best = (mat[sel_idx] @ target_mat.T).max(axis=1)
+        return {rows[j][0]: float(best[j]) for j in range(len(rows))}
+
+    def goal_affinity_for_items(self, item_ids: list[str]) -> dict[str, float]:
+        """``{item_id: max cosine to the research-goal embeddings}`` — the
+        goal-anchored relevance signal.
+
+        Uses ALREADY-CACHED corpus embeddings (no model load, no re-embed), so it
+        is cheap at queue-build time even for the whole library: one IN-query +
+        a (n×dim)·(dim×G) matmul. Items with no cached embedding, or when no goals
+        are set, are omitted (caller falls back to the gate-only order). Distinct
+        from the engagement affinity of :meth:`affinity_and_goals` (pos−neg to the
+        saved library) — this is similarity to what the user SAID they want, which
+        the gate does not feature."""
+        if not [i for i in item_ids if str(i or "").strip()]:
+            return {}
+        conn = self._conn()
+        try:
+            goal_rows = conn.execute("SELECT embedding_json FROM goal_embeddings").fetchall()
+        finally:
+            conn.close()
+        if not goal_rows:
+            return {}
+        gmat = np.asarray([self._parse_embedding(r["embedding_json"]) for r in goal_rows], dtype=np.float32)
+        gnorms = np.linalg.norm(gmat, axis=1, keepdims=True)
+        gmat = gmat / np.where(gnorms > 0, gnorms, 1.0)
+        return self._affinity_to_targets(item_ids, gmat)
+
+    def query_affinity_for_items(self, query: str, item_ids: list[str]) -> dict[str, float]:
+        """``{item_id: cosine of the item's cached embedding to the QUERY text}``
+        — ad-hoc semantic-search relevance (the dense leg of Library hybrid
+        search). Embeds the query ONCE via the resident model, then reuses the
+        cached-corpus matmul (``_affinity_to_targets``). Distinct from
+        :meth:`goal_affinity_for_items`: similarity to a search string, not the
+        stored research goals. Empty query / unembeddable → ``{}``."""
+        q = str(query or "").strip()
+        if not q:
+            return {}
+        qvec = np.asarray(self._embed(q), dtype=np.float32)
+        n = float(np.linalg.norm(qvec))
+        if n == 0:
+            return {}
+        qmat = (qvec / n).reshape(1, -1)
+        return self._affinity_to_targets(item_ids, qmat)
+
+    def match_candidate(
+        self,
+        title: str,
+        abstract: str,
+        stale_days_for_weak_negative: int = 30,
+        top_k: int = 3,
+    ) -> CorpusMatchResult:
+        candidate_embedding = self._embed(self._build_text(title, abstract))
+
+        conn = self._conn()
+        try:
+            corpus_rows = conn.execute(
+                """
+                SELECT item_id, title, tags_json, collections_json, annotation_count,
+                       manual_note_count, created_at, embedding_json
+                FROM corpus_embeddings
+                """
+            ).fetchall()
+            goal_rows = conn.execute("SELECT goal, embedding_json FROM goal_embeddings").fetchall()
+        finally:
+            conn.close()
+
+        if not corpus_rows:
+            return CorpusMatchResult(
+                has_corpus=False,
+                affinity_score=0.0,
+                positive_similarity=0.0,
+                negative_similarity=0.0,
+                matched_goal="",
+                matched_goal_similarity=0.0,
+                suggested_collections=[],
+                top_similar_items=[],
+            )
+
+        scored_rows: list[tuple[float, sqlite3.Row, float]] = []
+        pos_num = 0.0
+        pos_den = 0.0
+        neg_num = 0.0
+        neg_den = 0.0
+        collection_num: dict[str, float] = {}
+        collection_den: dict[str, float] = {}
+
+        for row in corpus_rows:
+            embedding = self._parse_embedding(row["embedding_json"])
+            sim = self._cosine(candidate_embedding, embedding)
+            weight = self._engagement_weight(
+                tags=self._parse_list(row["tags_json"]),
+                annotation_count=int(row["annotation_count"] or 0),
+                manual_note_count=int(row["manual_note_count"] or 0),
+                created_at=row["created_at"],
+                stale_days_for_weak_negative=stale_days_for_weak_negative,
+            )
+            scored_rows.append((sim, row, weight))
+
+            if weight > 0:
+                pos_num += sim * weight
+                pos_den += weight
+                collections = self._parse_list(row["collections_json"])
+                for collection_name in collections:
+                    if not collection_name:
+                        continue
+                    collection_num[collection_name] = collection_num.get(collection_name, 0.0) + sim * weight
+                    collection_den[collection_name] = collection_den.get(collection_name, 0.0) + weight
+            elif weight < 0:
+                w = abs(weight)
+                neg_num += sim * w
+                neg_den += w
+
+        positive_similarity = pos_num / pos_den if pos_den > 0 else 0.0
+        negative_similarity = neg_num / neg_den if neg_den > 0 else 0.0
+        affinity = self._clamp(positive_similarity - negative_similarity, -1.0, 1.0)
+
+        top_titles = [
+            str(row[1]["title"])
+            for row in sorted(scored_rows, key=lambda x: x[0], reverse=True)[:top_k]
+            if row[0] > 0
+        ]
+
+        collection_scores: list[tuple[str, float]] = []
+        for name, num in collection_num.items():
+            den = collection_den.get(name, 0.0)
+            if den <= 0:
+                continue
+            collection_scores.append((name, num / den))
+        collection_scores.sort(key=lambda x: x[1], reverse=True)
+        suggested_collections = [name for name, _ in collection_scores[:3]]
+
+        matched_goal = ""
+        matched_goal_similarity = 0.0
+        for row in goal_rows:
+            score = self._cosine(candidate_embedding, self._parse_embedding(row["embedding_json"]))
+            if score > matched_goal_similarity:
+                matched_goal_similarity = score
+                matched_goal = str(row["goal"])
+
+        return CorpusMatchResult(
+            has_corpus=True,
+            affinity_score=round(affinity, 4),
+            positive_similarity=round(positive_similarity, 4),
+            negative_similarity=round(negative_similarity, 4),
+            matched_goal=matched_goal,
+            matched_goal_similarity=round(matched_goal_similarity, 4),
+            suggested_collections=suggested_collections,
+            top_similar_items=top_titles,
+        )
+
+    def get_item_metadata(
+        self,
+        item_id: str,
+        stale_days_for_weak_negative: int = 30,
+    ) -> dict[str, object] | None:
+        safe_item_id = str(item_id or "").strip()
+        if not safe_item_id:
+            return None
+
+        conn = self._conn()
+        try:
+            row = conn.execute(
+                """
+                SELECT item_id, title, abstract, tags_json, collections_json,
+                       annotation_count, manual_note_count, created_at, updated_at
+                FROM corpus_embeddings
+                WHERE item_id = ?
+                LIMIT 1
+                """,
+                (safe_item_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+
+        if not row:
+            return None
+        return self._metadata_from_row(row, stale_days_for_weak_negative)
+
+    def list_items_metadata(
+        self,
+        limit: int = 200,
+        offset: int = 0,
+        search: str | None = None,
+        stale_days_for_weak_negative: int = 30,
+        sort_by: str = "updated_at",
+        order: str = "desc",
+    ) -> dict[str, object]:
+        safe_limit = max(1, min(int(limit), 1000))
+        safe_offset = max(0, int(offset))
+        safe_search = str(search or "").strip()
+        safe_sort_by = sort_by if sort_by in {"updated_at", "created_at", "title", "item_id"} else "updated_at"
+        safe_order = "asc" if str(order or "").lower() == "asc" else "desc"
+
+        where_sql = ""
+        params: list[object] = []
+        if safe_search:
+            where_sql = " WHERE lower(item_id) LIKE ? OR lower(title) LIKE ? "
+            token = f"%{safe_search.lower()}%"
+            params.extend([token, token])
+
+        conn = self._conn()
+        try:
+            total_row = conn.execute(
+                f"SELECT COUNT(*) AS total FROM corpus_embeddings{where_sql}",
+                params,
+            ).fetchone()
+            rows = conn.execute(
+                f"""
+                SELECT item_id, title, abstract, tags_json, collections_json,
+                       annotation_count, manual_note_count, created_at, updated_at
+                FROM corpus_embeddings
+                {where_sql}
+                ORDER BY {safe_sort_by} {safe_order}
+                LIMIT ? OFFSET ?
+                """,
+                [*params, safe_limit, safe_offset],
+            ).fetchall()
+        finally:
+            conn.close()
+
+        items = [self._metadata_from_row(row, stale_days_for_weak_negative) for row in rows]
+        total = int(total_row["total"] or 0) if total_row else 0
+        return {
+            "total": total,
+            "items": items,
+            "limit": safe_limit,
+            "offset": safe_offset,
+        }
+
+    def _metadata_from_row(self, row: sqlite3.Row, stale_days_for_weak_negative: int) -> dict[str, object]:
+        tags = self._parse_list(row["tags_json"])
+        collections = self._parse_list(row["collections_json"])
+        annotation_count = int(row["annotation_count"] or 0)
+        manual_note_count = int(row["manual_note_count"] or 0)
+        created_at = str(row["created_at"] or "") or None
+        signals = self._engagement_signals(
+            tags=tags,
+            annotation_count=annotation_count,
+            manual_note_count=manual_note_count,
+            created_at=created_at,
+            stale_days_for_weak_negative=stale_days_for_weak_negative,
+        )
+        engagement_weight = self._engagement_weight(
+            tags=tags,
+            annotation_count=annotation_count,
+            manual_note_count=manual_note_count,
+            created_at=created_at,
+            stale_days_for_weak_negative=stale_days_for_weak_negative,
+        )
+        return {
+            "item_id": str(row["item_id"] or ""),
+            "title": str(row["title"] or ""),
+            "abstract": str(row["abstract"] or ""),
+            "tags": tags,
+            "collections": collections,
+            "annotation_count": annotation_count,
+            "manual_note_count": manual_note_count,
+            "created_at": created_at,
+            "updated_at": str(row["updated_at"] or "") or None,
+            "engagement_weight": round(float(engagement_weight), 3),
+            "signals": signals,
+        }

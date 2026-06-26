@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.domain import (
     TRIAGE_APPROVED_TAG,
     TRIAGE_REJECTED_TAG,
-    ReadingPriority,
     feedback_signal_from_verdict,
     feedback_verdict_from_signal,
     is_positive_priority,
@@ -16,14 +14,11 @@ from zotero_summarizer.domain import (
 )
 from zotero_summarizer.models import (
     CalibrationPeriodMetrics,
-    TriageDimensionOverrideRequest,
-    TriageDimensions,
     TriageFeedbackRequest,
     TriageFeedbackResponse,
-    TriageResult,
 )
-from zotero_summarizer.services import scoring
-from zotero_summarizer.services._common import LOGGER, clamp, now_iso, safe_parse_response_json
+from zotero_summarizer.services import interaction_log
+from zotero_summarizer.services._common import LOGGER, safe_parse_response_json
 from zotero_summarizer.storage import repositories as triage_db
 
 
@@ -129,12 +124,6 @@ async def dashboard_results(
     return {"scope": safe_scope, "total": total, "items": rows, "selected_batch_ids": selected_batch_ids}
 
 
-async def dashboard_batches(limit: int = 20) -> dict[str, Any]:
-    safe_limit = max(1, min(limit, 100))
-    items = await asyncio.to_thread(triage_db.get_batch_runs, safe_limit)
-    return {"items": items}
-
-
 async def dashboard_result_detail(item_id: str, batch_id: str | None = None) -> dict[str, Any]:
     row = await asyncio.to_thread(triage_db.get_result_by_item_id, item_id, batch_id)
     if not row:
@@ -171,6 +160,14 @@ async def submit_triage_feedback(item_key: str, req: TriageFeedbackRequest) -> T
         ],
     )
 
+    interaction_log.log_human_feedback(
+        item_key=safe_item_key,
+        item_key_kind=interaction_log.key_kind(safe_item_key),
+        surface="triage_result_feedback",
+        model={"priority": original_priority, "composite_score": result_row.get("composite_score")},
+        human={"kind": "feedback", "value": req.verdict, "inferred_relevance": inferred_relevance},
+    )
+
     item_title = str(result_row.get("title") or safe_item_key)
     add_tag = TRIAGE_APPROVED_TAG if req.verdict == "approve" else TRIAGE_REJECTED_TAG
     remove_tag = TRIAGE_REJECTED_TAG if req.verdict == "approve" else TRIAGE_APPROVED_TAG
@@ -182,137 +179,3 @@ async def submit_triage_feedback(item_key: str, req: TriageFeedbackRequest) -> T
     )
     LOGGER.info("Feedback saved item_key=%s verdict=%s queued=%s", safe_item_key, req.verdict, queued)
     return TriageFeedbackResponse(item_id=safe_item_key, verdict=req.verdict, signal=signal, queued=queued)
-
-
-async def override_triage_dimensions(item_key: str, req: TriageDimensionOverrideRequest) -> dict[str, Any]:
-    safe_item_key = str(item_key or "").strip()
-    if not safe_item_key:
-        raise APIError(error="validation_error", message="item_key is required", status_code=422)
-
-    result_row = await asyncio.to_thread(triage_db.get_result_by_item_id, safe_item_key, None)
-    if not result_row:
-        raise APIError(error="not_found", message="Item has no triage result yet", status_code=404)
-
-    response_json = result_row.get("response_json") or {}
-    if isinstance(response_json, str):
-        try:
-            response_json = json.loads(response_json)
-        except json.JSONDecodeError as exc:
-            raise APIError(error="invalid_result_payload", message="Stored result JSON is invalid", status_code=500) from exc
-    if not isinstance(response_json, dict):
-        raise APIError(error="invalid_result_payload", message="Stored result payload is not an object", status_code=500)
-
-    try:
-        original_dimensions_obj = TriageDimensions.model_validate(response_json.get("triage_dimensions") or {})
-        original_dimensions = original_dimensions_obj.model_dump(mode="python")
-    except Exception:
-        original_dimensions_obj = TriageDimensions()
-        original_dimensions = original_dimensions_obj.model_dump(mode="python")
-
-    override_dimensions = req.to_partial_dimensions()
-    merged_dimensions_payload = {**original_dimensions, **override_dimensions}
-    merged_dimensions_obj = TriageDimensions.model_validate(merged_dimensions_payload)
-
-    try:
-        triage_score = int(response_json.get("relevance_score", result_row.get("relevance_score")))
-    except (TypeError, ValueError):
-        triage_score = 3
-    triage_score = max(1, min(5, triage_score))
-
-    try:
-        triage_confidence = float(response_json.get("triage_confidence", result_row.get("confidence")))
-    except (TypeError, ValueError):
-        triage_confidence = 0.5
-    triage_confidence = clamp(triage_confidence, 0.0, 1.0)
-
-    try:
-        corpus_affinity = float(response_json.get("corpus_affinity_score"))
-    except (TypeError, ValueError):
-        corpus_affinity = 0.0
-    corpus_affinity = clamp(corpus_affinity, -1.0, 1.0)
-
-    triage_for_scoring = TriageResult(
-        score=triage_score,
-        reading_priority=str(result_row.get("reading_priority") or ReadingPriority.COULD_READ.value),
-        tags=list(response_json.get("tags") or []),
-        rationale=str(response_json.get("triage_rationale") or "manual override"),
-        dimensions=merged_dimensions_obj,
-        confidence=triage_confidence,
-    )
-    new_composite_score = scoring.compute_composite_score(triage_for_scoring, corpus_affinity)
-    new_priority = scoring.map_priority_from_score(new_composite_score)
-
-    original_priority = str(result_row.get("forced_priority") or result_row.get("reading_priority") or "").strip()
-    try:
-        original_composite_score = float(result_row.get("composite_score"))
-    except (TypeError, ValueError):
-        original_composite_score = None
-
-    merged_dimensions = merged_dimensions_obj.model_dump(mode="python")
-    response_json["triage_dimensions"] = merged_dimensions
-    response_json["composite_relevance_score"] = new_composite_score
-    response_json["reading_priority"] = new_priority
-    response_json["triage_manual_override"] = {
-        "applied_at": now_iso(),
-        "override_dimensions": override_dimensions,
-        "source": "ui",
-    }
-
-    result_row_id = int(result_row.get("id") or 0)
-    updated = await asyncio.to_thread(
-        triage_db.update_result_row_after_override,
-        result_row_id,
-        response_json,
-        new_composite_score,
-        new_priority,
-        new_priority,
-    )
-    if not updated:
-        raise APIError(error="conflict", message="Failed to update triage result", status_code=409)
-
-    override_id = await asyncio.to_thread(
-        triage_db.insert_triage_dimension_override,
-        safe_item_key,
-        result_row_id,
-        original_dimensions,
-        override_dimensions,
-        merged_dimensions,
-        corpus_affinity,
-        original_composite_score,
-        new_composite_score,
-        original_priority,
-        new_priority,
-    )
-    await asyncio.to_thread(
-        triage_db.insert_feedback_events,
-        [
-            {
-                "item_id": safe_item_key,
-                "feedback_type": "manual_dimension_override",
-                "signal": "manual_dimension_override",
-                "original_priority": original_priority,
-                "inferred_relevance": float(new_composite_score),
-            }
-        ],
-    )
-
-    LOGGER.info(
-        "Dimension override applied item=%s override_id=%s old_score=%s new_score=%.2f old_priority=%s new_priority=%s",
-        safe_item_key,
-        override_id,
-        original_composite_score,
-        new_composite_score,
-        original_priority,
-        new_priority,
-    )
-    return {
-        "item_id": safe_item_key,
-        "override_id": override_id,
-        "old_composite_score": original_composite_score,
-        "new_composite_score": new_composite_score,
-        "old_priority": original_priority,
-        "new_priority": new_priority,
-        "original_dimensions": original_dimensions,
-        "override_dimensions": override_dimensions,
-        "merged_dimensions": merged_dimensions,
-    }

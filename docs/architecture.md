@@ -1,93 +1,124 @@
-# How It Works
+# Architecture
 
-Zotero Summarizer is a local FastAPI app backed by SQLite. The supported user workflow is:
+The whole app in one mental model, plus the rules the pre-commit hooks enforce.
+Read this before editing; every package also has its own `README.md`.
 
-1. Browse local Zotero items in the browser UI.
-2. Select PDF-backed papers.
-3. Start a triage job.
-4. Review queued Zotero changes.
-5. Explicitly apply or reject those changes.
+## The loop
 
-The app is intentionally local-first. It reads from the local Zotero SQLite database, writes its own triage/corpus state to local SQLite files, and writes to Zotero only through the pending-change apply flow.
+```
+  RSS feeds (in Zotero) ─┐
+                         ▼
+   [triage]  cheap ML gate ──reject──> dropped
+                         │
+                         │ survivors → LLM summary + relevance score
+                         ▼
+   SQLite (data/) ──> [api] ──> React UI  (Today / Library / Annotate / Settings)
+        ▲                                   │
+        │                                   │ you cull / read / label
+   retrain [model] <── [golden] dataset <───┘
+                                            │ approve changes
+                                 [zotero] ──> writes back to Zotero (backup first)
+```
 
-## Package Layout
+1. **triage** scores RSS papers (gate first, LLM for survivors) into SQLite.
+2. **model** is the relevance gate — trained on your labels, it ranks everything.
+3. **api** serves the React UI and the JSON API; routes are thin.
+4. **you** cull on *Today*, read on *Library*, fine-label on *Annotate*.
+5. **golden** is your label dataset; **model** retrains on it — the loop closes.
+6. **zotero** is the only write path: changes are queued, reviewed, then applied.
 
-| Path | Purpose |
+## Triage trigger: daemon vs UI
+
+Triage (the pipeline above) runs identically whether it is triggered by:
+
+- the **UI** — the *Today* tab's "Triage backlog" button (`POST /api/daily/triage-backlog`),
+  on demand; or
+- the **daemon** — `zotero-summarizer feeds serve`, a separate long-running process
+  that ticks on a timer and auto-materializes a daily pick; or
+- the **CLI** — `feeds run` / `feeds tick` one-shots.
+
+The daemon is optional automation, not a separate engine. The `feeds.*` block in
+`goals.yaml` only applies when the daemon runs.
+
+## Where things live
+
+| You want to… | Go to |
 |---|---|
-| `zotero_summarizer/api/` | FastAPI app factory, error handlers, and thin route modules |
-| `zotero_summarizer/services/` | Business logic for summarization, triage jobs, pending changes, Zotero actions, corpus, results, and config |
-| `zotero_summarizer/storage/` | SQLite migrations, repositories, and embedding corpus cache |
-| `zotero_summarizer/integrations/` | Zotero reader/writer, PDF extraction adapter, and LLM adapter protocols |
-| `zotero_summarizer/mcp/` | MCP server and tools that call the local API |
-| `zotero_summarizer/web/` | Static browser UI and results dashboard |
-| `zotero_summarizer/settings.py` | Explicit settings loader from `.env`, environment, and project root |
-| `goals.yaml` | Research goals, triage criteria, model names, prompt templates, and corpus settings |
+| add/change an HTTP endpoint | `api/routes/` (logic → `services/`) |
+| change scoring / the ML gate | `services/model/` |
+| change labels / training data | `services/golden/` |
+| change the feed daemon / Today slate | `services/triage/` |
+| change reading / review surfaces | `services/library/` |
+| change what gets written to Zotero | `services/zotero/` |
+| touch the DB / SQL | `storage/` |
+| talk to Zotero / PDFs / LLM / OpenAlex | `integrations/` |
+| change the agent (MCP) surface | `mcp/` (HTTP client only) |
+| wire process-wide singletons at startup | `services/lifecycle.py` → `runtime.RuntimeState` |
 
-There are no supported root-module compatibility imports. Use the package modules and CLI.
+The live JSON API is self-documenting: run `serve` and open `/docs` (OpenAPI).
 
-## Runtime Lifecycle
+## Layering (lower never imports higher)
 
-`zotero_summarizer.api.app:create_app()` builds the FastAPI app. During lifespan startup, `services.lifecycle.startup()`:
+```
+api → services → storage / integrations → models · contracts · domain · settings · runtime
+mcp → (HTTP only; imports none of the above)
+```
 
-1. Loads settings and `goals.yaml`.
-2. Builds the LLM client and PDF extractor.
-3. Opens or creates local SQLite stores.
-4. Initializes the embedding corpus cache.
-5. Initializes Zotero reader/writer adapters when `ZOTERO_DATA_DIR` is available.
-6. Marks interrupted triage jobs and resumes eligible ones.
-7. Starts background corpus import when enabled.
+- `integrations/`, `storage/` never import `services/` or `api/`.
+- `mcp/` never imports `services/`, `api/`, or `storage/`.
+- `services/` may import `api.errors` only (never `api.app` / `api.routes`).
 
-Service modules access runtime dependencies through `runtime.AppContext`, not through import-time FastAPI globals.
+## Data & config
 
-## Triage Pipeline
+- All app state lives under `data/` (gitignored): the two SQLite DBs
+  (`triage_history.db`, `corpus_cache.db`), your golden dataset, logs, the
+  append-only **agentic interaction log** (`interaction-events.jsonl` — the
+  immutable human-decision + model-prediction trajectory for offline improvement;
+  see `services/interaction_log.py`), and ML artifacts. Every path comes from
+  `Settings` — never hardcode `project_root / "..."`.
+- Config: `.env` (secrets/paths) + `goals.yaml` (research goals, models, prompts).
+  Both are gitignored; copy the `*.example` templates to bootstrap. See the README.
+- Schema changes are version-gated migrations (`storage/migrations.py`): add a new
+  numbered `Migration` step, never an inline `ALTER`.
 
-For each selected Zotero item:
+## Guardrails (enforced by `pre-commit` and CI)
 
-1. `ZoteroReader` loads item metadata and local PDF path.
-2. `summarization.run_pipeline()` extracts PDF text through the PDF adapter.
-3. `corpus.run_corpus_match()` compares the paper against the local corpus.
-4. Low-affinity papers can be fast-rejected before LLM calls.
-5. The refine prompt produces a structured research note.
-6. The triage prompt produces score, priority, tags, dimensions, and confidence.
-7. `scoring.compute_composite_score()` combines LLM dimensions and corpus affinity.
-8. The result is persisted to `triage_history.db`.
-9. `pending.queue_changes_for_item()` creates pending Zotero changes for review.
+Install once: `pre-commit install`. CI runs the same checks plus the test suites.
 
-Long PDFs are split into two chunks before the final refine prompt. LLM and SQLite operations run in worker threads so the FastAPI event loop remains responsive.
+1. **≤500 LOC per `.py`** (`tools/precommit/check_file_loc.py`). Split, don't extend.
+2. **Layering / structure policy** (`check_import_policy.py`) — the rules above; new
+   service modules must live in a domain subpackage, not at `services/` top level.
+3. **Module READMEs** (`check_module_readme.py`) — every package has one, and editing
+   a package's code requires staging its `README.md` in the same commit.
+4. **Redundancy** (`check_redundancy.py`) — new *provably* redundant transforms
+   (idempotent `f(f(x))`, faithful round-trips, identity comprehensions, involutions)
+   BLOCK; conditionally-redundant transforms and near-duplicate functions are advisory.
+   Existing findings frozen in `redundancy_allowlist.txt`.
+5. **AI-slop** (`check_slop.py`) — adopts [aislop](https://github.com/scanaislop/aislop)'s
+   deterministic slop/dead-code detectors (swallowed exceptions, debug leftovers, mutable
+   defaults, untracked TODOs, narrative/trivial comments, generic names, Long-Method
+   complexity). Only a committed `breakpoint()`/`pdb.set_trace()` BLOCKs; the rest are
+   advisory. Existing findings frozen in `slop_allowlist.txt`.
 
-## Storage
+**Seeing findings (advisory, not enforced):** two commands, differing only in scope —
+`make scan` (every detector across the whole tree) and `make scan-diff` (the same, scoped to
+the `.py` changed vs the base branch). Both always exit 0 and never block; `EMBED=1` adds the
+semantic code-model overlap pass, `BASE=<branch>` retargets the diff. The all-pairs **function-
+overlap audit** (`tools/precommit/check_overlaps.py`) runs inside them — every function against
+every function, ranked by a hybrid of a local code-embedding cosine + graded structural
+similarity + API-Jaccard — surfacing consolidation candidates whose intent overlaps even across
+different shapes; it degrades to deterministic-only when no embedding model is available.
 
-`triage_history.db` stores:
+## Verify a change
 
-- `triage_results`
-- `batch_runs`
-- `user_feedback`
-- `pending_changes`
-- `triage_jobs`
-- manual dimension overrides
+```bash
+zotero-summarizer smoke-test                       # app constructs
+pre-commit run --all-files                         # guardrails
+KMP_DUPLICATE_LIB_OK=TRUE pytest -q --forked       # backend suite *
+cd frontend && npm run lint && npm test && npm run build
+```
 
-`corpus_cache.db` stores corpus metadata, embeddings, and schema migration metadata.
-
-Both stores are local runtime data and should not be committed.
-
-## Zotero Write Safety
-
-Triage jobs do not mutate Zotero. They queue reviewed changes:
-
-- `tag_changes`
-- `add_note`
-- `add_to_collection`
-- `remove_from_collection`
-
-Only `POST /api/pending/apply` writes to Zotero. The writer checks whether Zotero is running, supports explicit force apply, wraps changes in SQLite savepoints, and creates a Zotero database backup before applying changes.
-
-After successful apply, the app refreshes corpus metadata for affected items and removes applied items from the `Inbox` collection when possible.
-
-## Feedback Loop
-
-Feedback comes from two sources:
-
-- Explicit approve/reject actions in the UI.
-- Inferred corpus signals from tags, notes, annotations, and stale untouched papers.
-
-Feedback is stored in `user_feedback` and is used by corpus matching and calibration metrics. Calibration compares model-positive priorities (`must_read`, `should_read`) against user-positive feedback (`approve`).
+\* On macOS this repo hits a known LightGBM/torch native fork crash; `--forked`
+isolates it so one segfaulting test can't sink the run. A handful of those tests
+fail for environment reasons, not code — diff against a clean baseline rather than
+expecting zero failures.

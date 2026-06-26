@@ -1,0 +1,229 @@
+"""Stage-1 (Today) keep/trash actions for the two-stage reading flow.
+
+``add_to_library`` materializes selected Today cards into the Zotero "Inbox"
+collection AND records a positive training label. ``trash`` records a strong
+negative training label and marks the feed items read. Both are batch
+(multi-select), idempotent, and report per-row failures rather than aborting
+the whole batch (the same batch contract as
+``services.review.apply_all_approved``).
+
+The fine must/should/could/don't priority is NOT chosen here — the user makes
+a coarse keep/trash call before reading. Stage-2 annotation refines it later
+(manual-wins, already shipped).
+"""
+from __future__ import annotations
+
+import sqlite3
+from typing import Any
+
+from zotero_summarizer.domain import VERDICT_SOURCE_MACHINE_ADD, VERDICT_SOURCE_USER
+from zotero_summarizer.integrations.zotero_read import ZoteroReader
+from zotero_summarizer.integrations.zotero_write import ZoteroWriter
+from zotero_summarizer.services import interaction_log
+from zotero_summarizer.services.library import fulltext, review
+from zotero_summarizer.services._common import LOGGER
+from zotero_summarizer.services._common import settings as get_settings
+from zotero_summarizer.storage import feeds as feeds_storage
+from zotero_summarizer.storage import repositories
+
+# Provisional positive label for "add to library": the user signalled the
+# paper is worth reading, but hasn't read it yet. Stage-2 annotation overrides
+# this (the verdict overlay makes the manual label win on retrain).
+_ADD_PRIORITY = "should_read"
+
+
+def _db_path():
+    return get_settings().triage_db_path
+
+
+def _load_rows(item_ids: list[int]) -> list[dict[str, Any]]:
+    """Fetch processed_feed_items rows for the given PKs (missing PKs skipped)."""
+    conn = sqlite3.connect(str(_db_path()))
+    conn.row_factory = sqlite3.Row
+    try:
+        rows: list[dict[str, Any]] = []
+        for pk in item_ids:
+            row = feeds_storage.get_processed_feed_item_by_pk(conn, int(pk))
+            if row is not None:
+                rows.append(dict(row))
+        return rows
+    finally:
+        conn.close()
+
+
+def _golden_key(row: dict[str, Any]) -> str:
+    fid = int(row.get("feed_item_id") or 0)
+    return f"feed:{fid}" if fid else f"processed:{row.get('id')}"
+
+
+def _record_label(
+    row: dict[str, Any], priority: str, note: str, *,
+    signal_tier: str = "feed_user_label", original_priority: str | None = None,
+    source: str = VERDICT_SOURCE_USER, surface: str,
+) -> None:
+    """Write the training label two ways: golden CSV (for retrain) + the
+    label_verdicts overlay (so it persists, wins, and excludes the card from
+    the slate via the shipped handled-paper filter).
+
+    ``signal_tier`` sets the golden row's training weight tier — `feed_interest`
+    for the soft pre-read "Add to library" signal, `feed_user_label` (default)
+    for a confident decision like trash.
+
+    ``source`` marks verdict provenance: ``machine_add`` for the provisional
+    pre-read "Add" verdict (superseded by the 7-day materialization outcome at
+    train time — see ``services.golden.hybrid_gt``), ``user`` (default) for a
+    deliberate decision like trash.
+
+    ``original_priority`` records the gate/model's derived priority on the
+    verdict overlay. Callers that mutate ``row["reading_priority"]`` before
+    labelling (e.g. ``add_to_library``) MUST pass the pre-mutation value here,
+    or the overlay would store the user's new label as the "original"."""
+    if original_priority is None:
+        original_priority = (row.get("reading_priority") or "").strip() or "unknown"
+    review.append_to_golden(row, label=priority, note=note, signal_tier=signal_tier)
+    item_key = _golden_key(row)
+    repositories.insert_or_update_label_verdict(
+        _db_path(),
+        item_key=item_key,
+        original_derived_priority=original_priority,
+        user_priority=priority,
+        comment=note,
+        source=source,
+    )
+    interaction_log.log_feed_decision(
+        row=row, item_key=item_key, surface=surface, source=source,
+        model_priority=original_priority, comment=note,
+        human={"kind": "keep" if priority != "dont_read" else "trash", "value": priority},
+    )
+
+
+def _set_decision(row: dict[str, Any], decision: str, reason: str) -> None:
+    conn = sqlite3.connect(str(_db_path()))
+    try:
+        feeds_storage.update_to_decision(
+            conn,
+            feed_library_id=int(row["feed_library_id"]),
+            feed_item_id=int(row["feed_item_id"]),
+            decision=decision,
+            decision_reason=reason,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def add_to_library(item_ids: list[int]) -> dict[str, Any]:
+    """Materialize each selected card into the Zotero Inbox + record a positive
+    training label. Returns ``{added, failed_count, failed}``."""
+    rows = _load_rows(item_ids)
+    writer = ZoteroWriter(get_settings().zotero_data_dir)
+    used_keys: set[str] = set()
+    added = 0
+    new_keys: list[str] = []
+    failed: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            # Capture the gate/model's derived priority BEFORE overriding it, so
+            # the verdict overlay records the original (e.g. "dont_read"), not the
+            # "add" label we're about to write below.
+            original_priority = (row.get("reading_priority") or "").strip() or "unknown"
+            # Gate-rejected rows carry reading_priority="dont_read"; override it
+            # so the Zotero tag reflects the user's positive "add" intent, not the
+            # gate's verdict.
+            row["reading_priority"] = _ADD_PRIORITY
+            new_key = review.materialize_row(row, writer=writer, used_keys=used_keys, reason="today_add")
+            new_keys.append(new_key)
+            # Soft, low-weight training signal: "Add" is pre-read interest, not
+            # endorsement — feed_interest → WEIGHT_INTEREST (0.3). A later read +
+            # label (or Zotero engagement) on the materialized library item
+            # carries full weight and dominates this.
+            _record_label(
+                row, _ADD_PRIORITY, "added from Today",
+                signal_tier="feed_interest", original_priority=original_priority,
+                source=VERDICT_SOURCE_MACHINE_ADD, surface="today_keep",
+            )
+            added += 1
+        except Exception as exc:
+            # Batch contract: a Zotero-locked / bad row must not strand the
+            # rest of the user's selection. Surface per-row failures instead.
+            LOGGER.exception("add_to_library failed for row id=%s", row.get("id"))
+            failed.append({
+                "id": row.get("id"),
+                "title": str(row.get("title") or ""),
+                "error": str(exc),
+            })
+    return {
+        "added": added, "failed_count": len(failed), "failed": failed[:20],
+        # Auto-fetch arXiv full text for the just-added papers (user-requested,
+        # 2026-06). Best-effort: the items are already in Zotero, so a fetch
+        # failure (arXiv down, Zotero reopened) must NOT fail the add — it's a
+        # bonus the bulk "Fetch full text" button can complete later.
+        "fulltext": _attach_fulltext_best_effort(new_keys),
+    }
+
+
+def _attach_fulltext_best_effort(new_keys: list[str]) -> dict[str, Any]:
+    """Fetch + attach arXiv PDFs for freshly-materialized items. Never raises —
+    a failure here is non-fatal to the add (documented best-effort boundary)."""
+    if not new_keys:
+        return {"attached": 0}
+    try:
+        reader = ZoteroReader(get_settings().zotero_data_dir)
+        urls = reader.get_field_values("url")
+        dois = reader.get_field_values("DOI")
+        items = [
+            {"item_key": k, "has_pdf": False, "url": urls.get(k, ""), "doi": dois.get(k, "")}
+            for k in new_keys
+        ]
+        res = fulltext.fetch_fulltext_for_items(items)
+        return {"attached": res.get("attached", 0), "no_arxiv": res.get("no_arxiv", 0),
+                "failed": res.get("failed_count", 0)}
+    except Exception as exc:  # noqa: BLE001 — best-effort; the add already succeeded
+        LOGGER.exception("add_to_library: arXiv full-text fetch failed (non-fatal)")
+        return {"attached": 0, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def trash(item_ids: list[int]) -> dict[str, Any]:
+    """Record a strong negative (dont_read) training label for each selected
+    card, flip it to user_rejected, and mark the feed items read. Returns
+    ``{trashed, marked_read, failed_count, failed}``."""
+    rows = _load_rows(item_ids)
+    writer = ZoteroWriter(get_settings().zotero_data_dir)
+    trashed = 0
+    failed: list[dict[str, Any]] = []
+    read_ids: list[int] = []
+    for row in rows:
+        try:
+            _record_label(row, "dont_read", "trashed from Today", surface="today_trash")
+            _set_decision(row, feeds_storage.DECISION_USER_REJECTED, "trashed_from_today")
+            fid = int(row.get("feed_item_id") or 0)
+            if fid:
+                read_ids.append(fid)
+            trashed += 1
+        except Exception as exc:
+            # Batch contract: per-row failure is reported, not fatal.
+            LOGGER.exception("trash failed for row id=%s", row.get("id"))
+            failed.append({
+                "id": row.get("id"),
+                "title": str(row.get("title") or ""),
+                "error": str(exc),
+            })
+    # The labels above are the source of truth and are already committed. Marking
+    # the feed items read in Zotero is a best-effort convenience (its own docstring
+    # says so) — if Zotero holds the DB lock it must NOT 500 the whole batch and
+    # leave the user thinking the trash failed when the labels actually saved.
+    marked = 0
+    marked_read_error: str | None = None
+    if read_ids:
+        try:
+            marked = writer.mark_feed_items_read(read_ids)
+        except Exception as exc:
+            LOGGER.warning("trash: mark_feed_items_read failed (labels already saved): %s", exc)
+            marked_read_error = str(exc)
+    return {
+        "trashed": trashed,
+        "marked_read": marked,
+        "marked_read_error": marked_read_error,
+        "failed_count": len(failed),
+        "failed": failed[:20],
+    }

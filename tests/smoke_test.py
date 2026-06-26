@@ -242,43 +242,6 @@ def main() -> int:
         _expect_status(status, 200, "GET /api/pending/count")
         return f"pending_count={int(data.get('count') or 0)}"
 
-    def check_priority_override_queue() -> str:
-        item_key = state.get("item_key")
-        item_title = state.get("item_title") or item_key
-        if not item_key:
-            raise SmokeFailure("No item key available for priority override")
-
-        current = str(state.get("item_priority_before") or "").strip()
-        ordered = ["must_read", "should_read", "could_read", "dont_read"]
-        new_priority = next((value for value in ordered if value != current), "must_read")
-
-        status, data = _request(
-            "POST",
-            "/api/pending/override-priority",
-            {
-                "item_key": item_key,
-                "item_title": item_title,
-                "new_priority": new_priority,
-            },
-        )
-        _expect_status(status, 200, "POST /api/pending/override-priority")
-
-        state["override_queued"] = int(data.get("queued") or 0)
-
-        status_after, data_after = _request("GET", "/api/pending?status=pending&limit=1000")
-        _expect_status(status_after, 200, "GET /api/pending after override")
-        pending_after = data_after.get("items") or []
-        after_ids = {int(item["id"]) for item in pending_after if int(item.get("id") or 0) > 0}
-
-        before_ids = state.get("pending_before_ids") or set()
-        created_ids = sorted(after_ids - before_ids)
-        state["created_pending_ids"] = created_ids
-
-        if state["override_queued"] > 0 and not created_ids:
-            raise SmokeFailure("Override queued changes but no new pending IDs were detected")
-
-        return f"override_queued={state['override_queued']} created_pending_ids={len(created_ids)}"
-
     def check_reject_created_pending() -> str:
         created_ids = state.get("created_pending_ids") or []
         if not created_ids:
@@ -331,7 +294,6 @@ def main() -> int:
         ("triage_run", check_run_triage_job),
         ("triage_jobs", check_triage_jobs_list),
         ("pending_count", check_pending_count),
-        ("priority_override_queue", check_priority_override_queue),
         ("reject_created_pending", check_reject_created_pending),
         ("pending_apply_noop", check_apply_endpoint_noop),
         ("results", check_results_endpoints),

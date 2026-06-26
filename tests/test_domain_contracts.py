@@ -10,8 +10,30 @@ from zotero_summarizer.domain import (
     feedback_signal_from_verdict,
     feedback_verdict_from_signal,
     normalize_reading_priority,
+    paper_group_id,
 )
 from zotero_summarizer.models import PendingPriorityOverrideRequest, RefinedSummary, TriageResult
+
+
+def test_paper_group_id_unites_feed_and_zotero_rows_by_doi() -> None:
+    # The same paper as a feed:* triage row and a Zotero-key library row must
+    # share a group (DOI scheme variants normalise to the same id).
+    feed = {"item_key": "feed:42", "doi": "https://doi.org/10.1/AB", "title": "T"}
+    zot = {"item_key": "ABCD1234", "doi": "10.1/ab", "title": "different title"}
+    assert paper_group_id(feed) == paper_group_id(zot) == "doi:10.1/ab"
+
+
+def test_paper_group_id_falls_back_to_title_then_key() -> None:
+    a = {"item_key": "feed:1", "doi": "", "title": "  Hello   World "}
+    b = {"item_key": "ZZZ", "doi": "", "title": "hello world"}
+    assert paper_group_id(a) == paper_group_id(b) == "title:hello world"
+    # No DOI and no title → the row's own key, so distinct rows never merge.
+    assert paper_group_id({"item_key": "K1"}) == "key:K1"
+    assert paper_group_id({"item_key": "K2"}) != paper_group_id({"item_key": "K1"})
+
+
+def test_paper_group_id_distinct_papers_differ() -> None:
+    assert paper_group_id({"doi": "10.1/x"}) != paper_group_id({"doi": "10.1/y"})
 
 
 def test_feedback_signal_round_trip() -> None:

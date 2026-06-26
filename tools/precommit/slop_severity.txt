@@ -1,0 +1,18 @@
+# Per-rule severity overrides for the Tier-7 AI-slop sweep (check_slop.py).
+#
+# Optional — this file may be empty. Without an override, each rule uses its
+# editorial default in SEVERITY (check_slop.py): the one unambiguous defect
+# (debug-leftover) BLOCKs; every heuristic rule is ADVISE.
+#
+# Format: <rule>=off|advise|block   (one per line; `#` starts a comment)
+#   off     drop the rule entirely
+#   advise  print but never block (the heuristic default)
+#   block   fail the commit on a new finding
+#
+# Rules: debug-leftover, swallowed-exception, silent-recovery, mutable-default,
+#        todo-stub, comment-slop, generic-naming, function-too-long,
+#        too-many-params, deep-nesting.
+#
+# Example (commented out — no overrides are active):
+#   todo-stub=block
+#   generic-naming=off

@@ -1,0 +1,452 @@
+"""Stage-2 (Library) reading queue: rank UNREAD library items by the gate's
+relevance score, with a one-line reason, so "what to read next" is explainable.
+
+Why background-cached: scoring an item needs its SPECTER2 embedding, which is
+~0.5s/item when not cached — too slow to do for the whole library on every
+request. So scores are computed in a background job and cached, mirroring
+``services.border_cache``.
+
+Key design points (see the plan):
+  * Scoring is NEVER auto-triggered on open. Opening the queue only reads the
+    cache, so it's instant; recompute happens solely on an explicit Rescore
+    (``refresh=True``). This is the fix for "scoring re-runs slowly on open".
+  * Scores survive a gate retrain: the cache stores the gate's
+    ``golden_csv_sha256`` only to flag staleness (``scores_stale``), not to wipe
+    scores — a retrain no longer forces a full rescore on the next open.
+  * Read-status is applied LIVE at request time (current Zotero emoji tags), so
+    a paper you just tagged 🧠 drops out immediately, no rescore.
+  * The annotation detail reuses these exact cached scores
+    (``get_cached_scoring``), so the queue and the "Why this score?" panel agree.
+"""
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from zotero_summarizer.services._common import now_iso_z, write_json_atomic
+
+from zotero_summarizer.services._common import settings as get_settings
+from zotero_summarizer.services.library import _flight
+from zotero_summarizer.services._common import state as get_state
+from zotero_summarizer.services.library._ranking import (  # noqa: F401 — re-export the seam
+    _blended_sort,
+    _build_recs,
+    _content_key,
+    _dedup_by_content,
+    _goal_affinity,
+    _order_and_dedup,
+    sort_unread,
+)
+from zotero_summarizer.services.library._score_distribution import (
+    _HIST_EDGES,  # noqa: F401 — re-export for the stable public seam
+    _entry_prestige,
+    prestige_floor,
+    score_distribution as _score_distribution,
+)
+
+_CACHE_FILENAME = "reading_queue.json"
+
+# Human labels for the top SHAP reason. (A long-gone PrestigeWaterfall frontend
+# component used to mirror this map; the queue card's "why" text is now the only
+# consumer.) ``corpus_affinity`` is the ENGAGEMENT signal (pos−neg cosine to the
+# library you saved) — the goal-text signal is ``goal_sim``, which is not a SHAP
+# feature; labeling affinity "Goal match" here was the label-drift bug.
+_FRIENDLY: dict[str, str] = {
+    "semantic_match_specter2": "Topic match",
+    "corpus_affinity": "Library affinity",
+    "prestige_score": "Prestige",
+    "nearest_kept_cosine": "Like papers you kept",
+    "positive_centroid_cosine": "Like your library",
+    "recent_centroid_cosine": "Like recent reads",
+    "topic_drift": "Topic drift",
+    "author_overlap_count": "Author overlap",
+    "has_doi": "Has DOI",
+    "has_venue": "Has venue",
+    "year_recency": "Recency",
+    "title_log_len": "Title length",
+    "abstract_log_len": "Abstract length",
+}
+
+# ---------------------------------------------------------------------------
+# Single-flight background-job state (separate from border_cache's).
+# ---------------------------------------------------------------------------
+_LATCH = _flight.FlightLatch()
+
+
+def is_running() -> bool:
+    return _LATCH.is_running()
+
+
+def last_error() -> str | None:
+    return _LATCH.last_error()
+
+
+def try_start() -> bool:
+    return _LATCH.try_start()
+
+
+def finish(error: str | None = None) -> None:
+    _LATCH.finish(error)
+
+
+run_in_background = _flight.run_in_background
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _reader():
+    reader = getattr(get_state(), "zotero_reader", None)
+    if reader is None:
+        raise RuntimeError(
+            "Zotero reader unavailable; cannot build the reading queue "
+            "(check ZOTERO_DATA_DIR)"
+        )
+    return reader
+
+
+def _gate():
+    return getattr(get_state(), "classifier_gate", None)
+
+
+def _gate_sha() -> str | None:
+    gate = _gate()
+    return gate.golden_csv_sha256 if gate is not None else None
+
+
+def _cache_path():
+    from zotero_summarizer.services.model.classifier_persistence import DEFAULT_MODEL_DIR
+    return DEFAULT_MODEL_DIR / _CACHE_FILENAME
+
+
+def _read_cache(gate_sha: str) -> dict[str, Any]:
+    """Return the per-item score dict (whatever is on disk, even if it was
+    computed against a different gate). Empty only when no cache file exists."""
+    return _read_cache_with_meta(gate_sha)[0]
+
+
+def _read_cache_with_meta(gate_sha: str) -> tuple[dict[str, Any], str | None, bool]:
+    """Return ``(scores, computed_at, stale)``.
+
+    Scores are returned even when the cache's ``gate_sha`` differs from the
+    loaded gate's — we never wipe scores on a retrain (that would force a slow
+    full rescore on the next open). ``stale`` flags that mismatch so the UI can
+    nudge the user to Rescore for scores against the current model.
+    ``({}, None, False)`` when no cache file exists.
+    """
+    path = _cache_path()
+    if not path.exists():
+        return {}, None, False
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    stale = payload.get("gate_sha") != gate_sha
+    return payload.get("scores") or {}, payload.get("computed_at"), stale
+
+
+def _write_cache(gate_sha: str, scores: dict[str, Any]) -> None:
+    write_json_atomic(_cache_path(), {"gate_sha": gate_sha, "computed_at": now_iso_z(), "scores": scores})
+
+
+def scoring_from_prediction(pred: Any) -> dict[str, Any]:
+    """Convert a gate ``FeedPrediction`` into the ``scoring`` shape the
+    PrestigeWaterfall renders. composite == the gate's raw_score (1–5): the SHAP
+    bars sum to it, so the waterfall is internally consistent."""
+    from zotero_summarizer.services.model.prestige import percentile_to_score
+
+    aux = pred.aux_context or {}
+    # Prestige = field+year-normalized citation percentile mapped to [1,5] via the
+    # SAME function the gate feature uses (single source). With no percentile yet
+    # (cold-start / uncited) we fall back to the provisional author-reputation
+    # prior (``cold_start_prestige``, computed once in _compute_aux_with_context);
+    # that may itself be None when the lift is off or no author signal exists.
+    # Either way ``citation_percentile`` stays None, so _entry_prestige reports
+    # the paper as UNKNOWN and the quality floor never demotes it — raw
+    # h-index/venue/cites remain "why" panel context only.
+    pct = aux.get("citation_percentile")
+    prestige = percentile_to_score(pct) if pct is not None else aux.get("cold_start_prestige")
+    shap_top = [
+        {"feature": str(c.get("feature") or ""), "value": float(c.get("contribution") or 0.0)}
+        for c in (pred.shap_contribs or [])
+    ]
+    prestige_inputs = {
+        k: aux[k]
+        for k in (
+            "citation_percentile", "max_author_h_index", "venue_works_count",
+            "cited_by_count", "max_author_field_percentile", "cold_start_prestige",
+        )
+        if aux.get(k) is not None
+    }
+    return {
+        "composite_score": float(pred.raw_score),
+        "prestige_score": prestige,
+        "shap_top": shap_top,
+        "prestige_inputs": prestige_inputs or None,
+    }
+
+
+def _why_reason(scoring: dict[str, Any]) -> str | None:
+    """One-line reason = the top contributing feature (excluding the baseline)."""
+    candidates = [s for s in (scoring.get("shap_top") or []) if s["feature"] != "bias"]
+    if not candidates:
+        return None
+    top = max(candidates, key=lambda s: s["value"])
+    if top["value"] <= 0:
+        top = max(candidates, key=lambda s: abs(s["value"]))
+    name = top["feature"]
+    return _FRIENDLY.get(name, name.replace("_", " ").title())
+
+
+def _score_items(
+    items: list[dict[str, Any]], *, return_shap: bool, prestige_network: bool = True,
+) -> dict[str, Any]:
+    """Score items with the loaded gate → ``{item_key: FeedPrediction}``.
+    Empty when the gate is unavailable (caller falls back).
+
+    ``prestige_network=False`` makes the gate's OpenAlex prestige lookup
+    cache-only (no network) — used by the interactive ``live_scoring`` path so
+    opening a paper never blocks on a multi-second OpenAlex search."""
+    gate = _gate()
+    if gate is None or not items:
+        return {}
+    settings_ = get_settings()
+    config = get_state().app_state.config
+    preds = gate.predict(
+        items,
+        corpus_db_path=settings_.corpus_db_path,
+        goals_config=config,
+        return_shap=return_shap,
+        prestige_network=prestige_network,
+    )
+    return {p.item_key: p for p in preds}
+
+
+_SCORE_BATCH = 50
+
+# Cache entry for an item the gate produced no prediction for. Recording it
+# (rather than skipping) is what stops the perpetual "Scoring…" spinner: an
+# un-scorable item is marked attempted once, so it no longer counts as
+# "missing" and never re-triggers the background pass.
+_UNSCORABLE = {"relevance_score": None, "why_reason": None, "scoring": None, "unscorable": True}
+
+
+def _compute_scores_into_cache(gate_sha: str, *, full: bool = False) -> None:
+    """Background: score unread library items for ``gate_sha``.
+
+    Every *attempted* item gets a cache entry — a real score or an
+    ``_UNSCORABLE`` sentinel — so an item the gate can't score is recorded once
+    and never re-triggers the pass. ``full=True`` (manual Rescore) re-attempts
+    EVERY item (including prior sentinels) but starts from the EXISTING cache
+    and overwrites entries batch by batch — mid-run readers (the queue, the
+    rank/tag syncs) see "old score until replaced by new score", and a mid-run
+    crash keeps the old scores. The old wipe-up-front semantics left the cache
+    near-empty for the minutes a whole-library pass takes and truncated on a
+    crash. Entries for items that left the library are purged only after the
+    pass COMPLETES (what the wipe used to provide). Batched with a flush after
+    each so partial results appear while a large run is still in progress.
+    """
+    try:
+        # Whole-library scan (read AND unread) so every scorable paper gets a
+        # cached score — needed for the global Zotero rank. The displayed queue
+        # routes read items aside separately; here we score them too. No-abstract
+        # items are skipped (the gate needs an abstract) and handled at rank time.
+        page = _reader().get_all_items()
+        items = [
+            it for it in page.get("items", [])
+            if (it.get("abstract") or "").strip()
+        ]
+        cached = _read_cache(gate_sha)
+        todo = items if full else [it for it in items if it["item_key"] not in cached]
+        for start in range(0, len(todo), _SCORE_BATCH):
+            chunk = todo[start:start + _SCORE_BATCH]
+            preds = _score_items(chunk, return_shap=True)
+            for it in chunk:
+                pred = preds.get(it["item_key"])
+                if pred is None:
+                    cached[it["item_key"]] = dict(_UNSCORABLE)
+                    continue
+                scoring = scoring_from_prediction(pred)
+                cached[it["item_key"]] = {
+                    "relevance_score": float(pred.raw_score),
+                    "why_reason": _why_reason(scoring),
+                    "scoring": scoring,
+                }
+            # Precompute the goal-text similarity HERE (rescore time) and store it
+            # per entry, so opening the queue never re-runs the corpus matmul — the
+            # open path reads goal_sim straight from this cache (_build_recs). float
+            # or None (no corpus embedding); the key is always present, which is how
+            # sort_unread tells "already computed" from "legacy/needs a live lookup".
+            goal_sims = _goal_affinity([it["item_key"] for it in chunk])
+            for it in chunk:
+                cached[it["item_key"]]["goal_sim"] = goal_sims.get(it["item_key"])
+            _write_cache(gate_sha, cached)
+        if full:
+            # Complete pass: now (and only now) drop entries for items no longer
+            # in the library, so deletions don't linger in the cache forever.
+            current_keys = {it["item_key"] for it in items}
+            cached = {k: v for k, v in cached.items() if k in current_keys}
+        # Persist once more so a full rebuild with an empty todo still lands.
+        _write_cache(gate_sha, cached)
+    except Exception as exc:  # noqa: BLE001 — surfaced via last_error + re-raised
+        finish(error=f"{type(exc).__name__}: {exc}")
+        raise
+    finish(error=None)
+
+
+def live_scoring(item: dict[str, Any]) -> dict[str, Any] | None:
+    """Score a single item on-demand → ``scoring`` dict (or None if the gate is
+    off or the item has no abstract). Used by the annotation detail when the
+    item isn't in the queue cache yet, so an opened paper still explains itself."""
+    if not str(item.get("title") or "").strip() or not str(item.get("abstract") or "").strip():
+        return None
+    key = item.get("item_key") or item.get("item_id")
+    # Cache-only prestige: this runs on the request path (opening a paper's "why
+    # this score?" detail), so it must never block on an OpenAlex network search.
+    # The score for an item that was triaged/rescored is already in the cache.
+    preds = _score_items([item], return_shap=True, prestige_network=False)
+    pred = preds.get(key)
+    return scoring_from_prediction(pred) if pred is not None else None
+
+
+def read_score_cache_with_staleness() -> tuple[dict[str, dict[str, Any]], bool]:
+    """``(scores, stale)`` — per-item ``{relevance, prestige, prestige_known}``;
+    ``stale`` is True when the cache was computed against a DIFFERENT gate than
+    the loaded one (retrained since the last Rescore). The Zotero sync writers
+    guard on this so stale bands/ranks are never stamped into Zotero."""
+    gate_sha = _gate_sha()
+    if gate_sha is None:
+        return {}, False
+    cached, _computed_at, stale = _read_cache_with_meta(gate_sha)
+    out: dict[str, dict[str, Any]] = {}
+    for key, entry in cached.items():
+        score = entry.get("relevance_score")
+        if score is None:
+            continue
+        prestige_score, prestige_known = _entry_prestige(entry)
+        out[str(key)] = {
+            "relevance": float(score),
+            "prestige": prestige_score,
+            "prestige_known": prestige_known,
+        }
+    return out, bool(stale and out)
+
+
+def get_cached_scoring(item_key: str) -> dict[str, Any] | None:
+    """Return the cached ``scoring`` dict for an item (for the annotation detail
+    to reuse, so the queue and the waterfall show the same score). None when the
+    gate is off or the item hasn't been scored yet."""
+    gate_sha = _gate_sha()
+    if gate_sha is None:
+        return None
+    entry = _read_cache(gate_sha).get(item_key)
+    return entry.get("scoring") if entry else None
+
+
+def _verdict_priorities() -> dict[str, str]:
+    """``{item_key: user_priority}`` for the user's manual verdicts (``label_verdicts``).
+
+    Only ``dont_read`` is "handled" (drops out of Read next, like the Today
+    slate); a POSITIVE verdict is a reading intent, so the paper stays and pins
+    to the top (``_ranking.sort_unread``) — a label makes it findable, not hidden.
+    UNCAPPED reader: a paged fetch un-hides handled papers once the table outgrows
+    it (the 500-cap training-bug failure class).
+    """
+    from zotero_summarizer.storage import repositories
+
+    return repositories.list_label_verdict_priorities(get_settings().triage_db_path)
+
+
+def build_reading_queue(
+    *,
+    include_read: bool = False,
+    limit: int = 30,
+    refresh: bool = False,
+    collection: str = "",
+    tag: str = "",
+    search: str = "",
+    semantic: bool = False,
+) -> dict[str, Any]:
+    """Ranked queue over the WHOLE library. Read/handled status is applied live;
+    scores come from the background cache. Scoring is NEVER auto-triggered on open
+    — it runs only on an explicit ``refresh`` (the Rescore button), so opening just
+    reads + ranks the library (no scoring) even right after a gate retrain (stale
+    scores show with ``scores_stale``). ``limit`` caps the returned list (the
+    frontend requests the whole library and reveals it incrementally).
+
+    ``collection``/``tag``/``search`` filter the rows via the reader's own
+    filtering; the score cache is global (a Rescore scans the whole library), so
+    filters only select which cached scores appear.
+
+    Returns ``{status, items, total_unread, read_hidden, model_ready, error,
+    computed_at, scores_stale}``."""
+    # "Meaning" search ranks the WHOLE (collection/tag-scoped) library by hybrid
+    # relevance, so the substring filter is bypassed; "Exact" keeps it.
+    semantic_requested = bool(semantic and str(search or "").strip())
+    rows = _reader().get_all_items(
+        collection_key=collection or None,
+        tag=tag or None,
+        search=None if semantic_requested else (search or None),
+        include_abstract=False,  # the queue never displays the abstract
+    ).get("items", [])
+    gate_sha = _gate_sha()
+    model_ready = gate_sha is not None
+    cached, computed_at, stale = (
+        _read_cache_with_meta(gate_sha) if model_ready else ({}, None, False)
+    )
+    verdict_priority = _verdict_priorities()
+    # Two display-only sidecars merged into each row (never fed to the hide/pin
+    # logic): the review-fleet verdict SUGGESTION + deep-review quality (which also
+    # drives a bounded sort lift + the "quality papers" client filter).
+    from zotero_summarizer.services.library.review_fleet import verdict_store  # lazy: it imports us
+    from zotero_summarizer.services.library import deep_review as _dr  # lazy: it imports us
+
+    unread, read = _build_recs(
+        rows, cached=cached, verdict_priority=verdict_priority,
+        reviews=_dr._read_all(), proposed_verdicts=verdict_store.read_all(),
+    )
+    unread, read, search_flags = _order_and_dedup(
+        unread, read, search=search, semantic_requested=semantic_requested,
+        model_ready=model_ready,
+    )
+
+    # Compute ONLY on an explicit refresh (Rescore). A prior crash (last_error
+    # set) is surfaced and not auto-retried — Rescore clears it.
+    err = last_error() if model_ready else None
+    if model_ready and refresh:
+        if try_start():
+            run_in_background(lambda: _compute_scores_into_cache(gate_sha, full=True))
+        status = "computing"
+    elif is_running():
+        status = "computing"
+    elif err:
+        status = "error"
+    else:
+        status = "ready"
+
+    items = unread[:limit]
+    if include_read:
+        read.sort(key=lambda c: c["date_added"], reverse=True)
+        items = items + read[:limit]
+
+    return {
+        "status": status,
+        "items": items,
+        "total_unread": len(unread),
+        "read_hidden": len(read),
+        "model_ready": model_ready,
+        "error": err if status == "error" else None,
+        "computed_at": computed_at,
+        "scores_stale": bool(stale and cached),
+        # Hybrid-search flags for the UI (absent/False in normal/Exact mode).
+        "semantic": bool(search_flags.get("semantic")),
+        "reranked": bool(search_flags.get("reranked")),
+        "reranker_loading": bool(search_flags.get("reranker_loading")),
+        "semantic_unavailable": bool(semantic_requested and not search_flags.get("semantic")),
+        # Distribution over the full unread queue (not just the shown slice), so
+        # the histogram reflects everything the current filter selects. The
+        # prestige floor (median of the library's KNOWN prestige) gates the
+        # effective top bands so the legend matches the quality-gated tags.
+        "distribution": _score_distribution(
+            unread, prestige_floor([_entry_prestige(e) for e in cached.values()])
+        ),
+    }

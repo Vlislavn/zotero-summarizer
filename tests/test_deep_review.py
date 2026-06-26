@@ -1,0 +1,500 @@
+"""Deep review (Stage-2 Read-next): per-item DIGEST, per-item job registry, cache,
+detail surfacing, and route registration. (Concurrency — remote-parallel /
+local-queue / per-item single-flight — lives in ``test_deep_review_concurrency.py``.)
+
+The full reader + Zotero-DB endpoint behavior is covered by the live smoke
+(see the plan); these tests pin the novel wiring with stubs.
+"""
+from __future__ import annotations
+
+import types
+
+import pytest
+
+from zotero_summarizer.services.library import deep_review
+from zotero_summarizer.services.zotero import zotero as zotero_svc
+from zotero_summarizer.services._common import read_config, settings as _settings
+
+
+@pytest.fixture(scope="module")
+def config():
+    return read_config(_settings().config_path)
+
+
+@pytest.fixture(autouse=True)
+def _reset_state(tmp_path, monkeypatch):
+    """Isolate the per-item job registry + cache file for every test."""
+    with deep_review._LOCK:
+        deep_review._JOBS.clear()
+    monkeypatch.setattr(deep_review, "_cache_path", lambda: tmp_path / "deep_reviews.json")
+    yield
+
+
+def _run(items, *, focus_prompt=""):
+    """Synchronously review ``items`` via the new per-item path (build the run ctx
+    once, then run each worker inline) — mirrors the old ``_run_job`` for the
+    cache + per-item status assertions, with no pool/threads."""
+    ctx = deep_review._build_ctx()
+    for item in items:
+        deep_review._review_worker(item, ctx, focus_prompt)
+
+
+class _StubLLM:
+    """Returns a PaperDigest. Raises if 'BAD' appears in the prompt (the prompt
+    embeds the title), so a per-item failure can be simulated."""
+
+    def pydantic_prompt(self, *, prompt, pydantic_model):
+        if "BAD" in prompt:
+            raise RuntimeError("LLM blew up on this one")
+        return pydantic_model(
+            tldr="What it is.", read_decision="read", read_why="useful",
+            read_parts=["Methods"], relevance="fits goals", controversies="c",
+            impact="i", unknown_unknowns="u", implementation=["step1"],
+            grade="A", soundness=5, novelty=4, significance=4,
+            reproducibility=3, clarity=4, key_strength="s", key_weakness="w", confidence=0.9,
+        )
+
+
+class _StubExtractor:
+    def __init__(self, text="BODY"):
+        self._t = text
+
+    def extract_text(self, pdf_path):
+        return self._t
+
+
+class _StubReader:
+    def __init__(self, details):
+        self._d = details
+
+    def get_item_detail(self, key):
+        return self._d.get(key)
+
+
+def _fake_state(config, *, extractor, reader):
+    return types.SimpleNamespace(
+        app_state=types.SimpleNamespace(config=config),
+        pdf_extractor=extractor,
+        unpaywall_client=None,
+        zotero_reader=reader,
+        # The deep_review stage now resolves its client via the runtime state.
+        resolve_stage_client=lambda stage, **_k: _StubLLM(),
+        # Provider drives concurrency (is_local → serial) AND the deep-review tier
+        # (lean_deep_review → cheap tier). A local+lean stub keeps the job
+        # single-threaded, deterministic, and on the lean tier in tests.
+        resolve_stage_provider=lambda stage: types.SimpleNamespace(is_local=True, lean_deep_review=True),
+    )
+
+
+def _detail(*, title="T", pdf_path="/x/p.pdf", doi="10.1/x", url="", abstract="a"):
+    return {
+        "title": title, "pdf_path": pdf_path, "doi": doi, "url": url, "abstract": abstract,
+        "authors": [], "tags": [], "collections": [], "annotations": [], "notes": [],
+        "has_pdf": bool(pdf_path), "publication_date": "2025", "date_added": "",
+    }
+
+
+def _wire(monkeypatch, config, *, reader, extractor, note_fn=None):
+    monkeypatch.setattr(deep_review, "get_state", lambda: _fake_state(config, extractor=extractor, reader=reader))
+    # The digest is upserted to Zotero inside _review_one; stub it (no real lib).
+    monkeypatch.setattr(zotero_svc, "zotero_upsert_digest_note", note_fn or (lambda _ik, _d: None))
+    # Keep ORCHESTRATION tests hermetic: stub the heavy enrichment layers (real
+    # quality-eval + goal-summaries pull a local LLM + a 1.3GB embedder and have
+    # their own unit tests). This test asserts the orchestrator ATTACHES them.
+    def _stub_layers(ctx):
+        goals = list(getattr(ctx.config, "research_goals", []) or [])
+        return ({"quality_band": "neutral"},
+                [{"goal": g, "retrieval_state": "miss"} for g in goals],
+                {"type": "empirical_ml", "confidence": 0.9, "source": "llm"},
+                None)  # section_overlay (4th layer; None when no sections)
+    monkeypatch.setattr(deep_review._deep_review_layers, "extra_layers", _stub_layers)
+
+
+def test_status_exposes_progress_field():
+    """The polled status carries a `progress` dict (live phase + sub-step) so the
+    UI can show what a running review is doing; {} when idle."""
+    s = deep_review.status()
+    assert "progress" in s and s["progress"] == {}
+
+
+def test_run_job_clears_progress_when_done(config, monkeypatch):
+    """A finished run resets progress to {} so the next poll doesn't show a stale
+    phase from the last review."""
+    reader = _StubReader({"K1": _detail()})
+    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"))
+    _run([{"item_key": "K1", "title": "T"}])
+    assert deep_review.status()["progress"] == {}
+
+
+def test_run_job_writes_digest_entry(config, monkeypatch):
+    reader = _StubReader({"K1": _detail()})
+    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"))
+
+    _run([{"item_key": "K1", "title": "T", "gate_relevance": 3.0}])
+
+    entry = deep_review.get_cached_review("K1")
+    assert entry is not None
+    assert entry["digest"]["grade"] == "A" and entry["digest"]["basis"] == "full_text"
+    assert entry["digest"]["read_decision"] == "read"
+    assert entry["digest"]["tldr"] == "What it is."
+    assert entry["gate_relevance"] == 3.0
+    assert entry["needs_pdf"] is False
+    assert entry["zotero_note_written"] is True and entry["zotero_note_error"] is None
+    assert entry["reviewed_at"]
+    # The confusing relevance re-score is gone; the goal-aligned layers are attached
+    # (quality verdict + per-goal board), each independently-skippable.
+    assert "fulltext_composite" not in entry
+    assert "quality" in entry and "goal_summaries" in entry
+    assert isinstance(entry["goal_summaries"], list)
+    assert deep_review.status()["status"] == "ready"
+    assert deep_review.status()["completed"] == 1
+
+
+def test_run_job_marks_needs_pdf_without_local_pdf_and_never_fetches(config, monkeypatch):
+    reader = _StubReader({"K1": _detail(pdf_path="", url="https://www.biorxiv.org/x")})
+
+    def _boom_extract(pdf_path):
+        raise AssertionError("extract_text must not run without a local PDF")
+
+    def _boom_note(_ik, _d):
+        raise AssertionError("no note write without a digest")
+
+    _wire(monkeypatch, config, reader=reader,
+          extractor=types.SimpleNamespace(extract_text=_boom_extract), note_fn=_boom_note)
+
+    _run([{"item_key": "K1", "title": "T", "gate_relevance": None}])
+
+    entry = deep_review.get_cached_review("K1")
+    assert entry["needs_pdf"] is True
+    assert entry["digest"] is None
+    assert entry["zotero_note_written"] is False
+
+
+def _run_acquiring(monkeypatch, config, *, extractor, acquired_path, needs_login=False, login_url=""):
+    """Run one per-paper worker with acquire_missing=True; _pdf_acquire stubbed to
+    return ``acquired_path`` (None = unfetchable) + optional needs_login/login_url.
+    Returns the cached review entry."""
+    from zotero_summarizer.services.library import _pdf_acquire
+    reader = _StubReader({"K1": _detail(pdf_path="", url="https://www.nature.com/articles/x")})
+    _wire(monkeypatch, config, reader=reader, extractor=extractor)
+    monkeypatch.setattr(_pdf_acquire, "acquire_for_item",
+                        lambda key: _pdf_acquire.AcquireResult(path=acquired_path, needs_login=needs_login, login_url=login_url))
+    ctx = deep_review._build_ctx()
+    ctx["_acquire_missing"] = True
+    deep_review._review_worker({"item_key": "K1", "title": "T", "pdf_path": ""}, ctx, "")
+    return deep_review.get_cached_review("K1")
+
+
+def test_acquire_missing_fetches_pdf_then_reviews(config, monkeypatch):
+    """acquire_missing=True: a pick with no Zotero PDF gets one fetched via _pdf_acquire
+    and is reviewed FROM it (not flagged needs_pdf)."""
+    from pathlib import Path
+    seen = {}
+
+    def _capture(p):
+        seen["p"] = p
+        return "BODY"
+
+    extractor = types.SimpleNamespace(extract_text=_capture)
+    entry = _run_acquiring(monkeypatch, config, extractor=extractor, acquired_path=Path("/cache/acquired.pdf"))
+    assert entry["needs_pdf"] is False and entry["digest"]["grade"] == "A"
+    assert seen["p"] == "/cache/acquired.pdf"  # reviewed from the ACQUIRED PDF
+
+
+def test_acquire_missing_unfetchable_surfaces_needs_login(config, monkeypatch):
+    """Gated source (paywall/no session) → honest needs_pdf + no digest, AND the
+    actionable needs_login/login_url threaded onto the entry (for the sign-in link)."""
+    def _boom(p):
+        raise AssertionError("must not extract — no PDF was acquired")
+    entry = _run_acquiring(monkeypatch, config, extractor=types.SimpleNamespace(extract_text=_boom),
+                           acquired_path=None, needs_login=True, login_url="https://www.nature.com/x")
+    assert entry["needs_pdf"] is True and entry["digest"] is None
+    assert entry["needs_login"] is True and entry["login_url"] == "https://www.nature.com/x"
+
+
+def test_run_job_records_note_failure_without_dropping_digest(config, monkeypatch):
+    reader = _StubReader({"K1": _detail()})
+
+    def _failing_note(_ik, _d):
+        raise RuntimeError("Zotero is open")
+
+    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"), note_fn=_failing_note)
+    _run([{"item_key": "K1", "title": "T"}])
+
+    entry = deep_review.get_cached_review("K1")
+    assert entry["digest"]["grade"] == "A"  # digest still produced
+    assert entry["zotero_note_written"] is False
+    assert "Zotero is open" in entry["zotero_note_error"]
+
+
+def test_run_job_isolates_per_item_failure(config, monkeypatch):
+    reader = _StubReader({"GOOD": _detail(title="GOOD"), "BAD": _detail(title="BAD")})
+    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"))
+
+    _run(
+        [{"item_key": "GOOD", "title": "GOOD"}, {"item_key": "BAD", "title": "BAD"}],
+    )
+
+    # Each paper is its OWN job: one failing never blocks or masks the other.
+    assert deep_review.get_cached_review("GOOD") is not None
+    assert deep_review.get_cached_review("BAD") is None  # failed item skipped, not masked
+    assert deep_review.status("GOOD")["status"] == "ready" and deep_review.status("GOOD")["error"] is None
+    bad = deep_review.status("BAD")
+    assert bad["status"] == "error" and "LLM blew up" in bad["error"]
+
+
+def _wire_provider_endpoint(monkeypatch, config, reader, llm, base_url):
+    """get_state stub whose resolved deep_review provider advertises ``base_url``."""
+    monkeypatch.setattr(
+        deep_review, "get_state",
+        lambda: types.SimpleNamespace(
+            app_state=types.SimpleNamespace(config=config),
+            pdf_extractor=_StubExtractor("BODY"), unpaywall_client=None, zotero_reader=reader,
+            resolve_stage_client=lambda stage, **_k: llm,
+            resolve_stage_provider=lambda stage: types.SimpleNamespace(
+                is_local=True, base_url=base_url
+            ),
+        ),
+    )
+
+
+def test_run_job_all_items_failed_surfaces_job_error(config, monkeypatch):
+    """When EVERY item raises, the job must surface a job-level error — not report a
+    clean 'ready' with an empty cache, which silently hid the failure in the UI.
+
+    Regression for the 2026-06-14 'Run deeper review does nothing' report (status
+    must be 'error', not 'ready') AND the 2026-06-18 misattribution: a NON-connectivity
+    failure (the endpoint responded, the digest just couldn't be built) must NOT be
+    blamed on the network — that suffix once sent debugging down the wrong path."""
+    reader = _StubReader({"BAD": _detail(title="BAD")})
+    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"))
+    # _StubLLM raises a non-connectivity RuntimeError ("LLM blew up on this one").
+    _wire_provider_endpoint(monkeypatch, config, reader, _StubLLM(), "http://127.0.0.1:8080/v1")
+
+    _run([{"item_key": "BAD", "title": "BAD"}])
+
+    assert deep_review.get_cached_review("BAD") is None  # nothing cached
+    s = deep_review.status()
+    assert s["status"] == "error"
+    assert s["completed"] == 1
+    assert "LLM blew up" in s["error"]            # the per-item cause is surfaced
+    assert "may be unreachable" not in s["error"]  # not mislabelled a network failure
+    assert "127.0.0.1:8080" not in s["error"]      # endpoint NOT blamed for a bad body
+
+
+def test_run_job_all_failed_names_endpoint_only_on_connectivity_error(config, monkeypatch):
+    """The flip side: when the per-item failure actually looks like a connection
+    problem, the message DOES name the resolved endpoint (preserves the 2026-06-14
+    unreachable-MLX intent), so a genuinely-down backend stays actionable."""
+
+    class _DownLLM:
+        def pydantic_prompt(self, *, prompt, pydantic_model):
+            raise RuntimeError("Connection refused")
+
+    reader = _StubReader({"BAD": _detail(title="BAD")})
+    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"))
+    _wire_provider_endpoint(monkeypatch, config, reader, _DownLLM(), "http://127.0.0.1:8080/v1")
+
+    _run([{"item_key": "BAD", "title": "BAD"}])
+
+    s = deep_review.status()
+    assert s["status"] == "error"
+    assert "Connection refused" in s["error"]
+    assert "127.0.0.1:8080" in s["error"]          # the dead endpoint IS named
+    assert "may be unreachable" in s["error"]
+
+
+def test_lean_tier_uses_lean_max_text_chars(config, monkeypatch):
+    """A provider flagged lean_deep_review feeds assess_digest the cheaper
+    lean_max_text_chars; a non-lean provider feeds the full max_text_chars
+    (the tier-aware speedup, keyed on provider.lean_deep_review)."""
+    reader = _StubReader({"K1": _detail()})
+    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY TEXT"))
+    seen: list[int | None] = []
+    real = deep_review.quality_review.assess_digest
+    monkeypatch.setattr(
+        deep_review.quality_review, "assess_digest",
+        lambda **kw: (seen.append(kw.get("max_chars")), real(**kw))[1],
+    )
+    # _wire's fake provider is lean_deep_review=True → lean tier.
+    _run([{"item_key": "K1", "title": "T"}])
+    assert seen[-1] == config.quality_review.lean_max_text_chars
+
+    # A non-lean provider → full max_text_chars.
+    monkeypatch.setattr(deep_review, "get_state", lambda: types.SimpleNamespace(
+        app_state=types.SimpleNamespace(config=config), pdf_extractor=_StubExtractor("BODY TEXT"),
+        unpaywall_client=None, zotero_reader=reader,
+        resolve_stage_client=lambda s, **_k: _StubLLM(),
+        resolve_stage_provider=lambda s: types.SimpleNamespace(is_local=False, lean_deep_review=False),
+    ))
+    _run([{"item_key": "K1", "title": "T"}])
+    assert seen[-1] == config.quality_review.max_text_chars
+
+
+def test_mlx_shape_loopback_but_not_lean_uses_full_tier(config, monkeypatch):
+    """Regression (2026-06-15 /verify finding): a loopback-but-not-lean provider —
+    the MLX shape `is_local=True, lean_deep_review=False` — must get the FULL tier:
+    full max_text_chars on the digest, the full self_consistency_runs, and per-goal
+    summaries (NOT batched). Before the fix the tier keyed on is_local, so MLX (on
+    127.0.0.1:8080) wrongly ran the lean tier and silently degraded the digest."""
+    from zotero_summarizer.services.library import _paper_goal_summaries, quality_eval
+
+    reader = _StubReader({"K1": _detail()})
+    # NOT _wire: we want the real _extra_layers so we can capture the tier values it
+    # forwards to evaluate_quality + summarize_for_goals.
+    monkeypatch.setattr(deep_review, "get_state", lambda: types.SimpleNamespace(
+        app_state=types.SimpleNamespace(config=config), pdf_extractor=_StubExtractor("BODY TEXT"),
+        unpaywall_client=None, zotero_reader=reader,
+        resolve_stage_client=lambda s, **_k: _StubLLM(),
+        resolve_stage_provider=lambda s: types.SimpleNamespace(is_local=True, lean_deep_review=False),
+    ))
+    monkeypatch.setattr(zotero_svc, "zotero_upsert_digest_note", lambda _ik, _d: None)
+
+    seen_digest: list[int | None] = []
+    real = deep_review.quality_review.assess_digest
+    monkeypatch.setattr(
+        deep_review.quality_review, "assess_digest",
+        lambda **kw: (seen_digest.append(kw.get("max_chars")), real(**kw))[1],
+    )
+    captured = {}
+    monkeypatch.setattr(
+        quality_eval, "evaluate_quality",
+        lambda **kw: captured.update(runs=kw.get("self_consistency_runs"), eval_max=kw.get("max_chars"))
+        or types.SimpleNamespace(model_dump=lambda: {"quality_band": "neutral"}),
+    )
+    monkeypatch.setattr(
+        _paper_goal_summaries, "summarize_for_goals",
+        lambda **kw: captured.update(batch=kw.get("batch")) or [],
+    )
+
+    _run([{"item_key": "K1", "title": "T"}])
+
+    assert seen_digest[-1] == config.quality_review.max_text_chars          # full digest cap, not lean
+    assert captured["runs"] == config.quality_review.self_consistency_runs  # full rubric runs (3), not 1
+    assert captured["eval_max"] == config.quality_review.max_text_chars     # full eval cap
+    assert captured["batch"] is False                                       # per-goal, NOT batched
+
+
+def test_assess_digest_maps_fields_and_injects_goals(config):
+    captured = {}
+
+    class LLM:
+        def pydantic_prompt(self, *, prompt, pydantic_model):
+            captured["prompt"] = prompt
+            return pydantic_model(tldr="t", read_decision="SKIM", grade="b")
+
+    from zotero_summarizer.services.library import quality_review
+
+    d = quality_review.assess_digest(title="My Paper", full_text="BODY TEXT", config=config, llm=LLM())
+    assert d.read_decision == "skim" and d.grade == "B" and d.basis == "full_text"
+    assert "My Paper" in captured["prompt"] and "BODY TEXT" in captured["prompt"]
+    assert "{research_goals}" not in captured["prompt"]  # goals placeholder was filled
+
+
+def test_assess_digest_salvages_raw_json_string_and_fails_loud_on_empty(config):
+    """Regression for the 2026-06-18 deep-review crash: onprem's pydantic_prompt
+    returns the RAW string (not the model) when its own parser can't build it, and
+    assess_digest then `.model_copy()`'d a str → opaque AttributeError. It now
+    salvages a JSON blob with the stronger extractor; a truly empty completion
+    raises cleanly (caught at deep_review's per-item boundary), never an
+    AttributeError."""
+    from zotero_summarizer.services.library import quality_review
+
+    class _StrLLM:
+        def __init__(self, out):
+            self.out = out
+
+        def pydantic_prompt(self, *, prompt, pydantic_model):
+            return self.out  # a STR, exactly as onprem returns on a parse failure
+
+    # Markdown-fenced JSON (onprem's parser fails; extract_json_blob recovers it).
+    raw = '```json\n{"read_decision": "read", "grade": "A", "tldr": "ok"}\n```'
+    d = quality_review.assess_digest(title="T", full_text="BODY", config=config, llm=_StrLLM(raw))
+    assert d.read_decision == "read" and d.grade == "A" and d.basis == "full_text"
+
+    # An empty completion is unsalvageable → raises (NOT an opaque .model_copy crash).
+    with pytest.raises(Exception):
+        quality_review.assess_digest(title="T", full_text="BODY", config=config, llm=_StrLLM(""))
+
+
+def test_build_digest_note_html_marked_and_escaped():
+    from zotero_summarizer.models import PaperDigest
+    from zotero_summarizer.services.zotero.pending import DIGEST_NOTE_MARKER, build_digest_note_html
+
+    d = PaperDigest(read_decision="read", grade="A", tldr="About <x> & y")
+    h = build_digest_note_html(d)
+    assert DIGEST_NOTE_MARKER in h
+    assert "&lt;x&gt;" in h and "&amp;" in h          # HTML-escaped
+    assert "Quality A" in h and "read" in h
+
+
+def test_start_accepts_concurrently_no_single_flight(monkeypatch):
+    """The old global single-flight is gone: a 2nd start is ACCEPTED (submitted), not
+    rejected — that's what lets you deep-review a 2nd paper while a 1st runs. (Per-item
+    single-flight — the SAME paper twice — is covered in test_deep_review_concurrency.py.)"""
+    monkeypatch.setattr(deep_review, "_build_ctx", lambda: {"_provider": None})
+    monkeypatch.setattr(deep_review.reading_queue, "get_cached_scoring", lambda key: None)
+    submitted: list[str] = []
+    monkeypatch.setattr(deep_review, "_submit", lambda item, ctx, fp: submitted.append(item["item_key"]))
+
+    a = deep_review.start(item_keys=["A"])
+    b = deep_review.start(item_keys=["B"])  # NOT blocked by A's in-flight review
+    assert a["accepted"] is True and b["accepted"] is True
+    assert submitted == ["A", "B"]
+
+
+def test_start_empty_queue_submits_nothing(monkeypatch):
+    monkeypatch.setattr(deep_review.reading_queue, "build_reading_queue", lambda **k: {"items": []})
+    monkeypatch.setattr(deep_review, "_build_ctx", lambda: {"_provider": None})
+    monkeypatch.setattr(
+        deep_review, "_submit", lambda *a, **k: pytest.fail("nothing to submit for an empty queue")
+    )
+    out = deep_review.start(top_k=5)
+    assert out["status"] == "idle" and out["total"] == 0
+
+
+def test_start_with_item_keys_skips_queue(monkeypatch):
+    """The per-paper 'Run deeper review' button: an explicit item_keys run must
+    review exactly those papers (not the top-K queue), pulling gate_relevance
+    from the score cache."""
+    def _should_not_run(**_):
+        raise AssertionError("build_reading_queue must not run for an explicit item_keys run")
+
+    monkeypatch.setattr(deep_review.reading_queue, "build_reading_queue", _should_not_run)
+    monkeypatch.setattr(
+        deep_review.reading_queue, "get_cached_scoring",
+        lambda key: {"composite_score": 4.1} if key == "K1" else None,
+    )
+    monkeypatch.setattr(deep_review, "_build_ctx", lambda: {"_provider": None})
+    submitted: list[dict] = []
+    monkeypatch.setattr(deep_review, "_submit", lambda item, ctx, fp: submitted.append(item))
+
+    out = deep_review.start(item_keys=["K1"])
+    assert out["accepted"] is True
+    assert submitted == [{"item_key": "K1", "title": "", "gate_relevance": 4.1, "pdf_path": ""}]
+
+
+def test_build_library_detail_surfaces_deep_review(monkeypatch):
+    from zotero_summarizer.services.library import reading_queue, review_detail
+
+    entry = {
+        "digest": {"grade": "B", "read_decision": "skim", "tldr": "x", "basis": "full_text"},
+        "needs_pdf": False, "gate_relevance": 3.0, "reviewed_at": "2026-05-23T00:00:00Z",
+        "zotero_note_written": True, "zotero_note_error": None,
+    }
+    monkeypatch.setattr(deep_review, "get_cached_review", lambda key: entry if key == "K1" else None)
+    monkeypatch.setattr(reading_queue, "get_cached_scoring", lambda key: None)
+    monkeypatch.setattr(reading_queue, "live_scoring", lambda item: None)
+
+    payload = review_detail.build_library_detail(_StubReader({"K1": _detail()}), "K1")
+    assert payload["deep_review"] == entry
+    assert payload["source"] == review_detail.SOURCE_LIBRARY
+
+
+def test_deep_review_routes_registered():
+    from zotero_summarizer.api.app import create_app
+
+    paths = {getattr(route, "path", "") for route in create_app().routes}
+    assert "/api/library/deep-review/run" in paths
+    assert "/api/library/deep-review/status" in paths
+    assert "/api/library/reject-tag" in paths

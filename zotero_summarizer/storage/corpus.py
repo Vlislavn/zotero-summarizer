@@ -7,10 +7,10 @@ import math
 import os
 import re
 import sqlite3
-from dataclasses import dataclass
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from zotero_summarizer.domain import (
     FeedbackSignal,
@@ -20,6 +20,8 @@ from zotero_summarizer.domain import (
     TRIAGE_REJECTED_TAG_TOKEN,
 )
 from zotero_summarizer.models import CorpusItem
+from zotero_summarizer.storage.corpus_read import CorpusReadMixin
+from zotero_summarizer.storage.corpus_types import EMBEDDING_DIM, CorpusMatchResult  # noqa: F401
 
 try:
     from sentence_transformers import SentenceTransformer
@@ -28,23 +30,13 @@ except Exception:  # pragma: no cover - optional dependency fallback
 
 
 LOGGER = logging.getLogger("zotero_summarizer.embedding_cache")
-EMBEDDING_DIM = 384
 
 
-@dataclass
-class CorpusMatchResult:
-    has_corpus: bool
-    affinity_score: float
-    positive_similarity: float
-    negative_similarity: float
-    matched_goal: str
-    matched_goal_similarity: float
-    suggested_collections: list[str]
-    top_similar_items: list[str]
+class EmbeddingCache(CorpusReadMixin):
+    """Stores and queries library embeddings for corpus-aware triage.
 
-
-class EmbeddingCache:
-    """Stores and queries library embeddings for corpus-aware triage."""
+    Read/query methods (match + metadata) live in ``CorpusReadMixin``.
+    """
 
     def __init__(self, db_path: Path, model_name: str) -> None:
         self.db_path = db_path
@@ -53,6 +45,17 @@ class EmbeddingCache:
         self._dim = None
         self._model_load_attempted = False
         self._warned_fallback = False
+        # SentenceTransformer/torch inference is not safe to call from multiple
+        # threads on one shared model; the backlog drain scores survivors on a
+        # thread pool, so serialize the embedding forward pass. Only the fast
+        # torch step is guarded — the slow LLM HTTP calls still overlap.
+        self._embed_lock = threading.Lock()
+        # Cached corpus matrix for the vectorized affinity_and_goals() fast path:
+        # {version, stale_days, matrix (np float32 N×dim), weights (np N)}.
+        # Rebuilt when _corpus_version changes (bumped on any corpus write) so we
+        # parse the (large) embedding set once, not per scored item.
+        self._affinity_cache: dict[str, Any] | None = None
+        self._corpus_version = 0
         self._init_db()
 
     def _conn(self) -> sqlite3.Connection:
@@ -60,7 +63,7 @@ class EmbeddingCache:
         conn.row_factory = sqlite3.Row
         try:
             conn.execute("PRAGMA journal_mode=WAL")
-        except sqlite3.Error:
+        except sqlite3.Error as _:
             pass
         return conn
 
@@ -140,6 +143,7 @@ class EmbeddingCache:
             row = conn.execute("SELECT COUNT(*) AS total FROM corpus_embeddings").fetchone()
             conn.execute("DELETE FROM corpus_embeddings")
             conn.commit()
+            self._corpus_version += 1  # invalidate the cached affinity matrix
             return int(row["total"] or 0) if row else 0
         finally:
             conn.close()
@@ -248,226 +252,9 @@ class EmbeddingCache:
             conn.commit()
         finally:
             conn.close()
+        if imported or updated:
+            self._corpus_version += 1  # invalidate the cached affinity matrix
         return imported, updated
-
-    def match_candidate(
-        self,
-        title: str,
-        abstract: str,
-        stale_days_for_weak_negative: int = 30,
-        top_k: int = 3,
-    ) -> CorpusMatchResult:
-        candidate_embedding = self._embed(self._build_text(title, abstract))
-
-        conn = self._conn()
-        try:
-            corpus_rows = conn.execute(
-                """
-                SELECT item_id, title, tags_json, collections_json, annotation_count,
-                       manual_note_count, created_at, embedding_json
-                FROM corpus_embeddings
-                """
-            ).fetchall()
-            goal_rows = conn.execute("SELECT goal, embedding_json FROM goal_embeddings").fetchall()
-        finally:
-            conn.close()
-
-        if not corpus_rows:
-            return CorpusMatchResult(
-                has_corpus=False,
-                affinity_score=0.0,
-                positive_similarity=0.0,
-                negative_similarity=0.0,
-                matched_goal="",
-                matched_goal_similarity=0.0,
-                suggested_collections=[],
-                top_similar_items=[],
-            )
-
-        scored_rows: list[tuple[float, sqlite3.Row, float]] = []
-        pos_num = 0.0
-        pos_den = 0.0
-        neg_num = 0.0
-        neg_den = 0.0
-        collection_num: dict[str, float] = {}
-        collection_den: dict[str, float] = {}
-
-        for row in corpus_rows:
-            embedding = self._parse_embedding(row["embedding_json"])
-            sim = self._cosine(candidate_embedding, embedding)
-            weight = self._engagement_weight(
-                tags=self._parse_list(row["tags_json"]),
-                annotation_count=int(row["annotation_count"] or 0),
-                manual_note_count=int(row["manual_note_count"] or 0),
-                created_at=row["created_at"],
-                stale_days_for_weak_negative=stale_days_for_weak_negative,
-            )
-            scored_rows.append((sim, row, weight))
-
-            if weight > 0:
-                pos_num += sim * weight
-                pos_den += weight
-                collections = self._parse_list(row["collections_json"])
-                for collection_name in collections:
-                    if not collection_name:
-                        continue
-                    collection_num[collection_name] = collection_num.get(collection_name, 0.0) + sim * weight
-                    collection_den[collection_name] = collection_den.get(collection_name, 0.0) + weight
-            elif weight < 0:
-                w = abs(weight)
-                neg_num += sim * w
-                neg_den += w
-
-        positive_similarity = pos_num / pos_den if pos_den > 0 else 0.0
-        negative_similarity = neg_num / neg_den if neg_den > 0 else 0.0
-        affinity = self._clamp(positive_similarity - negative_similarity, -1.0, 1.0)
-
-        top_titles = [
-            str(row[1]["title"])
-            for row in sorted(scored_rows, key=lambda x: x[0], reverse=True)[:top_k]
-            if row[0] > 0
-        ]
-
-        collection_scores: list[tuple[str, float]] = []
-        for name, num in collection_num.items():
-            den = collection_den.get(name, 0.0)
-            if den <= 0:
-                continue
-            collection_scores.append((name, num / den))
-        collection_scores.sort(key=lambda x: x[1], reverse=True)
-        suggested_collections = [name for name, _ in collection_scores[:3]]
-
-        matched_goal = ""
-        matched_goal_similarity = 0.0
-        for row in goal_rows:
-            score = self._cosine(candidate_embedding, self._parse_embedding(row["embedding_json"]))
-            if score > matched_goal_similarity:
-                matched_goal_similarity = score
-                matched_goal = str(row["goal"])
-
-        return CorpusMatchResult(
-            has_corpus=True,
-            affinity_score=round(affinity, 4),
-            positive_similarity=round(positive_similarity, 4),
-            negative_similarity=round(negative_similarity, 4),
-            matched_goal=matched_goal,
-            matched_goal_similarity=round(matched_goal_similarity, 4),
-            suggested_collections=suggested_collections,
-            top_similar_items=top_titles,
-        )
-
-    def get_item_metadata(
-        self,
-        item_id: str,
-        stale_days_for_weak_negative: int = 30,
-    ) -> dict[str, object] | None:
-        safe_item_id = str(item_id or "").strip()
-        if not safe_item_id:
-            return None
-
-        conn = self._conn()
-        try:
-            row = conn.execute(
-                """
-                SELECT item_id, title, abstract, tags_json, collections_json,
-                       annotation_count, manual_note_count, created_at, updated_at
-                FROM corpus_embeddings
-                WHERE item_id = ?
-                LIMIT 1
-                """,
-                (safe_item_id,),
-            ).fetchone()
-        finally:
-            conn.close()
-
-        if not row:
-            return None
-        return self._metadata_from_row(row, stale_days_for_weak_negative)
-
-    def list_items_metadata(
-        self,
-        limit: int = 200,
-        offset: int = 0,
-        search: str | None = None,
-        stale_days_for_weak_negative: int = 30,
-        sort_by: str = "updated_at",
-        order: str = "desc",
-    ) -> dict[str, object]:
-        safe_limit = max(1, min(int(limit), 1000))
-        safe_offset = max(0, int(offset))
-        safe_search = str(search or "").strip()
-        safe_sort_by = sort_by if sort_by in {"updated_at", "created_at", "title", "item_id"} else "updated_at"
-        safe_order = "asc" if str(order or "").lower() == "asc" else "desc"
-
-        where_sql = ""
-        params: list[object] = []
-        if safe_search:
-            where_sql = " WHERE lower(item_id) LIKE ? OR lower(title) LIKE ? "
-            token = f"%{safe_search.lower()}%"
-            params.extend([token, token])
-
-        conn = self._conn()
-        try:
-            total_row = conn.execute(
-                f"SELECT COUNT(*) AS total FROM corpus_embeddings{where_sql}",
-                params,
-            ).fetchone()
-            rows = conn.execute(
-                f"""
-                SELECT item_id, title, abstract, tags_json, collections_json,
-                       annotation_count, manual_note_count, created_at, updated_at
-                FROM corpus_embeddings
-                {where_sql}
-                ORDER BY {safe_sort_by} {safe_order}
-                LIMIT ? OFFSET ?
-                """,
-                [*params, safe_limit, safe_offset],
-            ).fetchall()
-        finally:
-            conn.close()
-
-        items = [self._metadata_from_row(row, stale_days_for_weak_negative) for row in rows]
-        total = int(total_row["total"] or 0) if total_row else 0
-        return {
-            "total": total,
-            "items": items,
-            "limit": safe_limit,
-            "offset": safe_offset,
-        }
-
-    def _metadata_from_row(self, row: sqlite3.Row, stale_days_for_weak_negative: int) -> dict[str, object]:
-        tags = self._parse_list(row["tags_json"])
-        collections = self._parse_list(row["collections_json"])
-        annotation_count = int(row["annotation_count"] or 0)
-        manual_note_count = int(row["manual_note_count"] or 0)
-        created_at = str(row["created_at"] or "") or None
-        signals = self._engagement_signals(
-            tags=tags,
-            annotation_count=annotation_count,
-            manual_note_count=manual_note_count,
-            created_at=created_at,
-            stale_days_for_weak_negative=stale_days_for_weak_negative,
-        )
-        engagement_weight = self._engagement_weight(
-            tags=tags,
-            annotation_count=annotation_count,
-            manual_note_count=manual_note_count,
-            created_at=created_at,
-            stale_days_for_weak_negative=stale_days_for_weak_negative,
-        )
-        return {
-            "item_id": str(row["item_id"] or ""),
-            "title": str(row["title"] or ""),
-            "abstract": str(row["abstract"] or ""),
-            "tags": tags,
-            "collections": collections,
-            "annotation_count": annotation_count,
-            "manual_note_count": manual_note_count,
-            "created_at": created_at,
-            "updated_at": str(row["updated_at"] or "") or None,
-            "engagement_weight": round(float(engagement_weight), 3),
-            "signals": signals,
-        }
 
     def _load_model(self):
         if self._model_load_attempted:
@@ -481,7 +268,13 @@ class EmbeddingCache:
         LOGGER.info("Loading embedding model: %s", self.model_name)
         try:
             self._model = SentenceTransformer(self.model_name)
-            if hasattr(self._model, "get_sentence_embedding_dimension"):
+            # sentence-transformers renamed the API; prefer the new name
+            # when available and fall back to the old one for older
+            # installations. Both are documented as the canonical way to
+            # read the embedding dimension.
+            if hasattr(self._model, "get_embedding_dimension"):
+                self._dim = int(self._model.get_embedding_dimension() or 0) or None
+            elif hasattr(self._model, "get_sentence_embedding_dimension"):
                 self._dim = int(self._model.get_sentence_embedding_dimension() or 0) or None
         except Exception:
             LOGGER.exception("Failed to load embedding model: %s", self.model_name)
@@ -493,15 +286,16 @@ class EmbeddingCache:
         if not cleaned:
             return [0.0] * self._vector_dim()
 
-        model = self._load_model()
-        if model is not None:
-            vector = model.encode(cleaned, normalize_embeddings=True)
-            if hasattr(vector, "tolist"):
-                values = [float(v) for v in vector.tolist()]
-            else:
-                values = [float(v) for v in vector]
-            self._dim = len(values) or self._dim
-            return values
+        with self._embed_lock:  # torch encode is not thread-safe (see __init__)
+            model = self._load_model()
+            if model is not None:
+                vector = model.encode(cleaned, normalize_embeddings=True)
+                if hasattr(vector, "tolist"):
+                    values = [float(v) for v in vector.tolist()]
+                else:
+                    values = [float(v) for v in vector]
+                self._dim = len(values) or self._dim
+                return values
         if not self._warned_fallback:
             LOGGER.warning("Using hashed fallback embeddings; corpus similarity quality will be degraded")
             self._warned_fallback = True
@@ -542,7 +336,7 @@ class EmbeddingCache:
             value = json.loads(raw or "[]")
             if isinstance(value, list):
                 return [float(v) for v in value]
-        except Exception:
+        except Exception as _:
             pass
         return [0.0] * EMBEDDING_DIM
 
@@ -555,7 +349,7 @@ class EmbeddingCache:
             value = json.loads(raw or "[]")
             if isinstance(value, list):
                 return [str(v) for v in value if str(v).strip()]
-        except Exception:
+        except Exception as _:
             pass
         return []
 

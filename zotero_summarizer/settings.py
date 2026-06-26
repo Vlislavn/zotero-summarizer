@@ -30,6 +30,9 @@ def _env_int(name: str, default: int) -> int:
 @dataclass(frozen=True)
 class Settings:
     project_root: Path
+    # All app-generated state (SQLite DBs, golden dataset, logs, eval/run
+    # artifacts) lives under ``data_dir`` so the project root stays clean.
+    data_dir: Path
     config_path: Path
     env_path: Path
     summary_timeout_seconds: int
@@ -40,6 +43,15 @@ class Settings:
     app_log_file: Path
     triage_db_path: Path
     corpus_db_path: Path
+    golden_csv_path: Path
+    golden_jsonl_path: Path
+    # Append-only agentic interaction log (immutable human-decision trajectory).
+    interaction_log_path: Path
+    faithbench_dir: Path
+    paper_render_dir: Path
+    # App-owned browser profile for university institutional access (persistent
+    # login session). Default under data/; overridable via UniversityAccessConfig.
+    browser_profile_dir: Path
 
     @classmethod
     def load(
@@ -50,18 +62,20 @@ class Settings:
         env_path: str | Path | None = None,
     ) -> "Settings":
         root = Path(project_root).expanduser().resolve() if project_root else default_project_root()
+        data_dir = root / "data"
         env_file = Path(env_path).expanduser().resolve() if env_path else root / ".env"
         if env_file.exists():
             load_dotenv(env_file, override=True)
 
         config_file = Path(config_path).expanduser().resolve() if config_path else root / "goals.yaml"
         configured_log_file = Path(os.getenv("APP_LOG_FILE", "server.log")).expanduser()
-        app_log_file = configured_log_file if configured_log_file.is_absolute() else root / configured_log_file
+        app_log_file = configured_log_file if configured_log_file.is_absolute() else data_dir / configured_log_file
 
         concurrency = max(1, min(_env_int("TRIAGE_JOB_CONCURRENCY", 4), 16))
 
         return cls(
             project_root=root,
+            data_dir=data_dir,
             config_path=config_file,
             env_path=env_file,
             summary_timeout_seconds=_env_int("SUMMARY_TIMEOUT_SECONDS", 420),
@@ -70,6 +84,12 @@ class Settings:
             zotero_data_dir=Path(os.getenv("ZOTERO_DATA_DIR", str(Path.home() / "Zotero"))).expanduser().resolve(),
             app_log_level=os.getenv("APP_LOG_LEVEL", "INFO").upper(),
             app_log_file=app_log_file,
-            triage_db_path=root / "triage_history.db",
-            corpus_db_path=root / "corpus_cache.db",
+            triage_db_path=data_dir / "triage_history.db",
+            corpus_db_path=data_dir / "corpus_cache.db",
+            golden_csv_path=data_dir / "zotero-summarizer-golden.csv",
+            golden_jsonl_path=data_dir / "zotero-summarizer-golden.jsonl",
+            interaction_log_path=data_dir / "interaction-events.jsonl",
+            faithbench_dir=data_dir / "faithbench",
+            paper_render_dir=data_dir / "paper_render",
+            browser_profile_dir=data_dir / "browser_profile",
         )

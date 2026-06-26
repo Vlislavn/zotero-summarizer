@@ -233,12 +233,66 @@ async def list_pending_changes(
     return response
 
 
+# --- MCP safety boundary against indirect-prompt-injection-driven writes -----
+# Defense in depth: an injection in a paper abstract (already wrapped in
+# <untrusted_input> in goals.yaml) should never be able to trick the agent into
+# auto-creating Zotero items or auto-promoting from the Inbox via MCP. These
+# change types are reserved for the human-driven CLI/UI flow.
+#
+# Reference: Greshake et al., USENIX Security 2024 (arXiv:2302.12173v3);
+# Anthropic "Defending against indirect prompt injection" Dec 2024.
+MCP_RESTRICTED_CHANGE_TYPE_PREFIXES = ("create_", "inbox_", "promote_", "mark_feed_")
+MCP_RESTRICTED_CHANGE_TYPES_EXACT = frozenset({"mark_feed_item_read"})
+
+
+def _is_restricted_change_type(change_type: str) -> bool:
+    ct = str(change_type or "").strip().lower()
+    if ct in MCP_RESTRICTED_CHANGE_TYPES_EXACT:
+        return True
+    return any(ct.startswith(prefix) for prefix in MCP_RESTRICTED_CHANGE_TYPE_PREFIXES)
+
+
+async def _filter_mcp_restricted_change_ids(
+    change_ids: list[int],
+) -> tuple[list[int], list[dict[str, Any]], dict[str, Any] | None]:
+    """Split candidate change IDs into (allowed, blocked, error).
+
+    Fetches the pending change rows over the local API and removes any whose
+    change_type is in the MCP restricted set. Returns the IDs that may proceed
+    plus the rows that were blocked (for an audit-friendly response).
+    """
+    if not change_ids:
+        return [], [], None
+    # Pull pending rows containing these IDs. We use the existing list endpoint
+    # and filter client-side because there's no by-id batch endpoint.
+    pending_rows, fetch_error = await _fetch_pending_rows("all", BACKEND_PENDING_MAX_LIMIT)
+    if fetch_error is not None:
+        return [], [], fetch_error
+    ids_set = {int(i) for i in change_ids}
+    allowed: list[int] = []
+    blocked: list[dict[str, Any]] = []
+    for row in pending_rows:
+        rid = _as_int(row.get("id"), 0)
+        if rid not in ids_set:
+            continue
+        if _is_restricted_change_type(str(row.get("change_type") or "")):
+            blocked.append({"id": rid, "change_type": row.get("change_type")})
+        else:
+            allowed.append(rid)
+    return allowed, blocked, None
+
+
 @mcp.tool()
 async def apply_pending_changes(
     change_ids: list[int] | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
-    """Apply queued changes to Zotero. If change_ids is empty, applies all pending."""
+    """Apply queued changes to Zotero. If change_ids is empty, applies all pending.
+
+    Restricted change types (`create_*`, `inbox_*`, `promote_*`) are NEVER applied
+    via this MCP entry point — they're reserved for the human-driven CLI flow to
+    defend against indirect-prompt-injection-driven auto-promotions.
+    """
     normalized_ids, collect_error = await _collect_pending_ids_for_apply(change_ids)
     if collect_error is not None:
         return collect_error
@@ -246,9 +300,25 @@ async def apply_pending_changes(
     if not normalized_ids:
         return _ok(applied=0, failed=0, message="No pending changes to apply")
 
-    apply_summary, apply_error = await _apply_pending_chunks(normalized_ids, bool(force))
+    # MCP safety filter: drop restricted change types.
+    safe_ids, blocked, filter_error = await _filter_mcp_restricted_change_ids(normalized_ids)
+    if filter_error is not None:
+        return filter_error
+    if not safe_ids:
+        return _error(
+            "mcp_restricted",
+            "All requested changes are restricted from MCP application (create_*/inbox_*/promote_*). "
+            "Use the CLI or web UI to apply.",
+            details={"blocked": blocked},
+        )
+
+    apply_summary, apply_error = await _apply_pending_chunks(safe_ids, bool(force))
     if apply_error is not None:
         return apply_error
 
     summary = apply_summary or {}
-    return _ok(requested_change_ids=normalized_ids, **summary)
+    response = _ok(requested_change_ids=safe_ids, **summary)
+    if blocked:
+        # Surface the skips so the user (or agent) knows why some IDs didn't apply.
+        response["mcp_blocked_change_ids"] = blocked
+    return response

@@ -76,3 +76,29 @@ def test_zotero_error_handlers_return_503():
     assert isinstance(write_response, JSONResponse)
     assert read_response.status_code == 503
     assert write_response.status_code == 503
+
+
+def test_sort_collection_nodes_pins_inbox_then_readnext():
+    """Inbox lands first, the read-next queue second, then everything else
+    alphabetical — the two workflow collections are no longer buried."""
+    nodes = [
+        {"name": "Zebra"},
+        {"name": "Read Next"},
+        {"name": "Apple"},
+        {"name": "Inbox"},
+        {"name": "Methods"},
+    ]
+    ZoteroReader._sort_collection_nodes(nodes)
+    assert [n["name"] for n in nodes] == ["Inbox", "Read Next", "Apple", "Methods", "Zebra"]
+
+
+def test_sort_collection_nodes_pins_recursively_and_matches_readnext_variants():
+    """The pin applies at every depth and the read-next matcher is tolerant of
+    spacing/casing variants (mirrors the frontend READ_NEXT_RE)."""
+    nodes = [
+        {"name": "Topics", "children": [{"name": "later stuff"}, {"name": "ReadNext"}, {"name": "AAA"}]},
+        {"name": "Inbox"},
+    ]
+    ZoteroReader._sort_collection_nodes(nodes)
+    assert [n["name"] for n in nodes] == ["Inbox", "Topics"]
+    assert [c["name"] for c in nodes[1]["children"]] == ["ReadNext", "AAA", "later stuff"]

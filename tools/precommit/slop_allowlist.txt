@@ -1,0 +1,23 @@
+# Grandfathered slop findings — frozen so only NEW slop surfaces (Tier 7).
+#
+# Key format: <path>:<line>:<rule>  (one per line; `#` starts a comment).
+# Same rule as the other gate allowlists: an entry may be REMOVED (clean the code)
+# but a NEW entry needs a one-line justification. Goal: shrink to empty.
+#
+# Regenerate after a deliberate change:
+#   python3 tools/precommit/check_slop.py dump > tools/precommit/slop_allowlist.txt
+#   # then re-add this header
+#
+# Current contents: 0 blocking findings (debug-leftover path is clean). The advisory
+# entries below are pre-existing — long functions, the WAL-pragma / best-effort
+# `except: pass` idiom, a few long param lists — frozen as known debt, never blocking.
+#
+# Frozen-contract benchmark/quality orchestrators: keyword-only entry points whose
+# param count IS the public interface; splitting them would push the params into
+# extracted helpers (no net reduction) and bundling args adds an abstraction layer
+# for an advisory nit. Sanctioned, not refactored.
+zotero_summarizer/services/faithbench/_judge.py:236:slop/too-many-params    # judge_claim — kw-only judge entry
+zotero_summarizer/services/faithbench/_judge.py:296:slop/function-too-long  # judge_run orchestrator
+zotero_summarizer/services/faithbench/_judge.py:296:slop/too-many-params    # judge_run orchestrator
+zotero_summarizer/services/faithbench/_runner.py:196:slop/function-too-long # run_benchmark orchestrator
+zotero_summarizer/services/faithbench/_runner.py:196:slop/too-many-params   # run_benchmark orchestrator

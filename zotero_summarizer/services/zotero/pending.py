@@ -1,0 +1,357 @@
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+
+from zotero_summarizer.api.errors import APIError
+from zotero_summarizer.contracts import PendingChange
+from zotero_summarizer.domain import (
+    LABEL_TAG_CASEFOLDED,
+    ChangeStatus,
+    ReadingPriority,
+    label_tag_for_priority,
+)
+from zotero_summarizer.models import (
+    PendingChangeMutationRequest,
+    PendingChangeUpdateRequest,
+    PendingChangesResponse,
+    SummarizeResponse,
+)
+from zotero_summarizer.services._common import LOGGER, unique_non_empty_strings
+# Re-exported so callers keep using `pending.build_*` / `from ...pending import *`.
+from zotero_summarizer.services.zotero._notes import (  # noqa: F401
+    DIGEST_NOTE_MARKER,
+    NOTE_PROVENANCE_NAMESPACE,
+    NOTE_PROVENANCE_SOURCE,
+    NOTE_VERSION,
+    VERDICT_NOTE_MARKER,
+    build_digest_note_html,
+    build_provenance_comment,
+    build_triage_note_html,
+    build_verdict_note_html,
+)
+from zotero_summarizer.storage import repositories as triage_db
+
+SYSTEM_TAG_FEEDS_V3 = "/zs/feeds-v3"
+
+
+PRIORITY_TAGS = {
+    ReadingPriority.MUST_READ.value,
+    ReadingPriority.SHOULD_READ.value,
+    ReadingPriority.COULD_READ.value,
+    ReadingPriority.DONT_READ.value,
+}
+
+# ML-relevance band tags — a DISTINCT namespace (`zs:rel/<band>`) from the
+# priority tags (`zs:<band>`). Written by the Library "Sync relevance tags"
+# action so the user can filter their Zotero library by what the gate scores
+# highly, WITHOUT touching manually-set priority or emoji tags (manual-wins).
+REL_TAG_PREFIX = "zs:rel/"
+REL_TAG_CASEFOLDED = {f"{REL_TAG_PREFIX}{band}".casefold() for band in PRIORITY_TAGS}
+
+
+class PendingChangePlanner:
+    """Build reviewed Zotero changes from triage outcomes."""
+
+    def triage_changes(
+        self,
+        *,
+        item_key: str,
+        item_title: str,
+        tags: list[str],
+        note_html: str,
+        suggested_collections: list[str] | None = None,
+    ) -> list[PendingChange]:
+        # Triage no longer auto-writes a machine priority tag: the user's
+        # explicit `label:<priority>` is the only priority namespace now
+        # (user-confirmed 2026-06 — retire zs:<priority>). LLM topical tags only.
+        normalized_tags = unique_non_empty_strings(tags)
+        changes: list[PendingChange] = [
+            PendingChange(
+                item_key=item_key,
+                item_title=item_title,
+                change_type="tag_changes",
+                payload={"add_tags": normalized_tags, "remove_tags": []},
+            )
+        ]
+
+        safe_note = str(note_html or "").strip()
+        if safe_note:
+            changes.append(
+                PendingChange(
+                    item_key=item_key,
+                    item_title=item_title,
+                    change_type="add_note",
+                    payload={
+                        "note_title": f"Triage: {item_title[:80]}",
+                        "note_html": safe_note,
+                    },
+                )
+            )
+
+        for collection in normalize_collection_suggestions(suggested_collections or []):
+            changes.append(
+                PendingChange(
+                    item_key=item_key,
+                    item_title=item_title,
+                    change_type="add_to_collection",
+                    payload={"collection_path": collection},
+                )
+            )
+
+        return changes
+
+    @staticmethod
+    def to_repository_rows(changes: list[PendingChange]) -> list[dict[str, Any]]:
+        return [
+            {
+                "change_type": change.change_type,
+                "payload": dict(change.payload),
+            }
+            for change in changes
+        ]
+
+
+def normalize_tag_values(value: Any) -> list[str]:
+    if value is None:
+        candidates: list[str] = []
+    elif isinstance(value, list):
+        candidates = [str(item or "") for item in value]
+    elif isinstance(value, str):
+        candidates = [part.strip() for part in value.split(",")]
+    else:
+        candidates = [str(value)]
+    return unique_non_empty_strings(candidates)
+
+
+def _build_exclusive_tag_change(
+    current_tags: list[str], target_tag: str, namespace_casefolded: frozenset[str] | set[str],
+) -> dict[str, list[str]]:
+    """Add ``target_tag`` and remove any OTHER tag in its mutually-exclusive
+    namespace, leaving every tag outside that namespace untouched. Idempotent
+    (empty add when the target is already present). The single implementation
+    behind the per-namespace builders below."""
+    target_folded = target_tag.casefold()
+    has_target = False
+    remove_tags: list[str] = []
+    seen: set[str] = set()
+    for tag in current_tags:
+        folded = tag.casefold()
+        if folded == target_folded:
+            has_target = True
+        if folded in namespace_casefolded and folded != target_folded and folded not in seen:
+            seen.add(folded)
+            remove_tags.append(tag)
+    add_tags = [] if has_target else [target_tag]
+    return {"add_tags": add_tags, "remove_tags": remove_tags}
+
+
+def build_label_tag_change(current_tags: list[str], priority: str) -> dict[str, list[str]]:
+    """Mutually-exclusive explicit ground-truth label tag (``label:<priority>``).
+
+    The user's deliberate verdict — now the single priority namespace (the machine
+    ``zs:<priority>`` tag was retired). Adds ``label:<priority>`` and removes any
+    other ``label:*`` tag, never touching emoji feedback, ``zs:rel/*`` bands, or
+    topical tags. Raises on an unknown priority (a validated 4-class enum upstream)."""
+    return _build_exclusive_tag_change(
+        current_tags, label_tag_for_priority(priority), LABEL_TAG_CASEFOLDED,
+    )
+
+
+def build_rel_tag_change(current_tags: list[str], band: str) -> dict[str, list[str]]:
+    """Mutually-exclusive ML-relevance band tag (``zs:rel/<band>``).
+
+    The DISTINCT ``zs:rel/`` namespace — only adds/removes ``zs:rel/*`` tags, never
+    the human label (``label:<band>``) or emoji feedback tags, so manual decisions
+    are preserved."""
+    return _build_exclusive_tag_change(
+        current_tags, f"{REL_TAG_PREFIX}{band}", REL_TAG_CASEFOLDED,
+    )
+
+
+def normalize_pending_tag_payload(payload: dict[str, Any]) -> dict[str, list[str]]:
+    add_tags = normalize_tag_values(payload.get("add_tags", []))
+    remove_tags = normalize_tag_values(payload.get("remove_tags", []))
+    add_folded = {tag.casefold() for tag in add_tags}
+    filtered_remove = [tag for tag in remove_tags if tag.casefold() not in add_folded]
+    return {"add_tags": add_tags, "remove_tags": filtered_remove}
+
+
+def normalize_pending_collection_payload(payload: dict[str, Any]) -> dict[str, str]:
+    collection_key = str(payload.get("collection_key") or "").strip()
+    collection_path = str(
+        payload.get("collection_path")
+        or payload.get("collection_name")
+        or ""
+    ).strip()
+    if not collection_key and not collection_path:
+        raise ValueError("collection_key or collection_path must be provided")
+
+    normalized: dict[str, str] = {}
+    if collection_key:
+        normalized["collection_key"] = collection_key
+    if collection_path:
+        normalized["collection_path"] = collection_path
+    return normalized
+
+
+def normalize_pending_note_payload(payload: dict[str, Any]) -> dict[str, str]:
+    note_title = str(payload.get("note_title") or "").strip() or "Triage note"
+    note_html = str(payload.get("note_html") or payload.get("note_text") or "").strip()
+    if not note_html:
+        raise ValueError("note_html must be a non-empty string")
+    return {"note_title": note_title, "note_html": note_html}
+
+
+def effective_tag_payload(current_tags: list[str], payload: dict[str, list[str]]) -> dict[str, list[str]]:
+    current_folded = {tag.casefold() for tag in current_tags}
+    add_tags = [tag for tag in payload.get("add_tags", []) if tag.casefold() not in current_folded]
+    add_folded = {tag.casefold() for tag in add_tags}
+    remove_tags = [
+        tag
+        for tag in payload.get("remove_tags", [])
+        if tag.casefold() in current_folded and tag.casefold() not in add_folded
+    ]
+    return {"add_tags": add_tags, "remove_tags": remove_tags}
+
+
+def normalize_collection_suggestions(collections: list[str]) -> list[str]:
+    return unique_non_empty_strings(collections)
+
+
+def queue_changes_for_item(item_key: str, title: str, summary: SummarizeResponse) -> int:
+    planner = PendingChangePlanner()
+    changes = planner.triage_changes(
+        item_key=item_key,
+        item_title=title,
+        tags=summary.tags,
+        note_html=build_triage_note_html(title, summary),
+        suggested_collections=summary.suggested_collections,
+    )
+    return triage_db.insert_pending_changes(item_key=item_key, item_title=title, changes=planner.to_repository_rows(changes))
+
+
+async def list_pending_changes(status: str = ChangeStatus.PENDING.value, limit: int = 500) -> PendingChangesResponse:
+    safe_status = str(status or "").strip().lower()
+    if not safe_status:
+        safe_status = ChangeStatus.PENDING.value
+    elif safe_status == "all":
+        safe_status = None
+    items = await asyncio.to_thread(triage_db.get_pending_changes, safe_status, limit)
+    return PendingChangesResponse(items=items)
+
+
+async def update_pending_change(change_id: int, req: PendingChangeUpdateRequest) -> dict[str, Any]:
+    safe_change_id = int(change_id)
+    if safe_change_id <= 0:
+        raise APIError(error="validation_error", message="change_id must be a positive integer", status_code=422)
+
+    rows = await asyncio.to_thread(triage_db.get_pending_changes_by_ids, [safe_change_id], ChangeStatus.PENDING.value)
+    if not rows:
+        raise APIError(error="not_found", message="Pending change not found", status_code=404)
+
+    change_type = str(rows[0].get("change_type") or "").strip()
+    try:
+        if change_type == "tag_changes":
+            payload: dict[str, Any] = normalize_pending_tag_payload(req.payload)
+        elif change_type in {"add_to_collection", "remove_from_collection"}:
+            payload = normalize_pending_collection_payload(req.payload)
+        elif change_type == "add_note":
+            payload = normalize_pending_note_payload(req.payload)
+        else:
+            raise APIError(
+                error="validation_error",
+                message=f"{change_type} cannot be edited from the UI",
+                status_code=422,
+            )
+    except ValueError as exc:
+        raise APIError(error="validation_error", message=str(exc), status_code=422) from exc
+
+    updated = await asyncio.to_thread(triage_db.update_pending_change_payload, safe_change_id, payload)
+    if not updated:
+        raise APIError(error="conflict", message="Pending change is no longer editable", status_code=409)
+
+    LOGGER.info("Pending change updated change_id=%s change_type=%s", safe_change_id, change_type)
+    return {"updated": 1, "change_id": safe_change_id, "change_type": change_type, "payload": payload}
+
+
+async def pending_change_count(status: str = ChangeStatus.PENDING.value) -> dict[str, int]:
+    count = await asyncio.to_thread(triage_db.get_pending_change_count, status)
+    return {"count": count}
+
+
+async def reject_pending_changes(req: PendingChangeMutationRequest) -> dict[str, int]:
+    updated = await asyncio.to_thread(triage_db.set_pending_changes_status, req.change_ids, ChangeStatus.REJECTED.value, "")
+    return {"updated": updated}
+
+
+async def apply_pending_changes(req: PendingChangeMutationRequest) -> dict[str, Any]:
+    from zotero_summarizer.services.corpus import refresh_corpus_items_by_keys
+    from zotero_summarizer.services.zotero.zotero import get_zotero_writer_or_raise
+
+    writer = get_zotero_writer_or_raise()
+    if writer.is_connector_running() and not req.force:
+        return {
+            "error": "zotero_running",
+            "message": "Zotero appears to be running; close Zotero or confirm force apply.",
+            "requires_force": True,
+        }
+
+    # retry re-applies FAILED rows via the SAME writer path (success → APPLIED,
+    # failure → FAILED again); the default applies PENDING rows.
+    source_status = ChangeStatus.FAILED.value if req.retry else ChangeStatus.PENDING.value
+    changes = await asyncio.to_thread(triage_db.get_pending_changes_by_ids, req.change_ids, source_status)
+    if not changes:
+        return {"applied": 0, "failed": 0, "backup_path": None, "failed_items": []}
+
+    result = await asyncio.to_thread(writer.apply_changes, changes, True)
+    applied_ids = [int(change_id) for change_id in result.get("applied_ids", []) if int(change_id) > 0]
+    failed_items = list(result.get("failed", []))
+    applied_id_set = set(applied_ids)
+
+    if applied_ids:
+        await asyncio.to_thread(triage_db.set_pending_changes_status, applied_ids, ChangeStatus.APPLIED.value, "")
+
+    for failed in failed_items:
+        failed_id = int(failed.get("id") or 0)
+        if failed_id > 0:
+            await asyncio.to_thread(
+                triage_db.set_pending_changes_status,
+                [failed_id],
+                ChangeStatus.FAILED.value,
+                str(failed.get("error") or ""),
+            )
+
+    refreshed_item_keys = [
+        str(change.get("item_key") or "").strip()
+        for change in changes
+        if int(change.get("id") or 0) in applied_id_set and str(change.get("item_key") or "").strip()
+    ]
+
+    inbox_removed = 0
+    if refreshed_item_keys:
+        try:
+            inbox_removed = await asyncio.to_thread(
+                writer.remove_items_from_collection,
+                refreshed_item_keys,
+                "Inbox",
+                True,
+            )
+        except Exception:
+            LOGGER.warning("Failed removing applied items from Inbox collection", exc_info=True)
+        await refresh_corpus_items_by_keys(refreshed_item_keys)
+
+    LOGGER.info(
+        "Pending apply completed requested=%s applied=%s failed=%s inbox_removed=%s",
+        len(req.change_ids),
+        len(applied_ids),
+        len(failed_items),
+        inbox_removed,
+    )
+    return {
+        "applied": len(applied_ids),
+        "failed": len(failed_items),
+        "backup_path": result.get("backup_path"),
+        "failed_items": failed_items,
+        "inbox_removed": inbox_removed,
+    }
