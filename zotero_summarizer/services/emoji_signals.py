@@ -182,3 +182,10 @@ def strength_for_score(score: float, num_signals: int) -> str:
 
 # All emoji characters we recognise — used to build SQL LIKE clauses.
 ALL_EMOJIS: tuple[str, ...] = tuple(s.emoji for s in SIGNALS)
+
+# Emojis that represent actual user ENGAGEMENT (non-zero score_delta).
+# Meta-tier emojis (🤖, 🔮, ⚪, 🗣) are informational only — they do NOT
+# count as "read/handled" for the reading-queue partition.
+READ_EMOJIS: frozenset[str] = frozenset(
+    s.emoji for s in SIGNALS if s.score_delta != 0.0
+)

@@ -105,7 +105,8 @@ def _wire(monkeypatch, config, *, reader, extractor, note_fn=None):
         goals = list(getattr(ctx.config, "research_goals", []) or [])
         return ({"quality_band": "neutral"},
                 [{"goal": g, "retrieval_state": "miss"} for g in goals],
-                {"type": "empirical_ml", "confidence": 0.9, "source": "llm"})
+                {"type": "empirical_ml", "confidence": 0.9, "source": "llm"},
+                None)  # section_overlay (4th layer; None when no sections)
     monkeypatch.setattr(deep_review._deep_review_layers, "extra_layers", _stub_layers)
 
 

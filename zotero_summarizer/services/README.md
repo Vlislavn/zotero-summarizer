@@ -71,7 +71,8 @@ outcome daemon — `results` also calls it),
 does not validate provider availability; an edit to `research_goals` schedules a
 background Today-slate rescore so persisted per-item `goal_sims` — the slate's
 rank-blend input — don't go stale against the new goals), `health`, `results`,
-`corpus` (embeddings/affinity), `emoji_signals`.
+`corpus` (embeddings/affinity), `emoji_signals`
+(emoji→engagement taxonomy; `READ_EMOJIS` = non-meta engagement emojis only, used by the library read/hide partition).
 
 **Boundaries:** may import `storage/`, `integrations/`, `models`, and
 `api.errors`. Must NOT import `api.app` or `api.routes` (enforced). New modules

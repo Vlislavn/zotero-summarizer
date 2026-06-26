@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
-import { fetchPaperRender, buildPaperRender, paperPresentationUrl } from '../../api/libraryApi.js';
+import { fetchPaperRender, buildPaperRender } from '../../api/libraryApi.js';
 import Spinner from '../ui/Spinner.jsx';
 
-// One-click access to the standalone HTML brief from a Read-next row. The brief
-// is a build artifact (notes/figures/HTML next to the Zotero PDF) reached today
-// only via a 4-level drill-down; this button collapses that to a single click:
-// open if already built, else build-on-demand (spinner) then open. Reuses the
-// existing render helpers — no backend change. A sibling of the row's expand
-// <button> (never nested inside it — nested interactive elements are invalid).
+// One-click access to the full review from a Read-next row. The paper-read render
+// artifact (notes/figures/HTML next to the Zotero PDF) used to be reached only
+// via a 4-level drill-down; this button collapses that to a single click: ensure
+// the artifact is built (build-on-demand + spinner), then open the review route
+// (/paper/:key) in a new tab — which carries the verdict/collection/tag controls
+// the static HTML brief never had. Reuses the existing render helpers — no
+// backend change. A sibling of the row's expand <button> (never nested inside it
+// — nested interactive elements are invalid).
 
 const POLL_MS = 1500;
 const MAX_POLLS = 240;  // ponytail: ~6 min cap; raise if real builds exceed it.
-const NO_PDF_MESSAGE = 'No local PDF attached. Try Open Access and your configured Chrome/university session, then build the brief.';
+const NO_PDF_MESSAGE = 'No local PDF attached. Try Open Access and your configured Chrome/university session, then open the review.';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -25,9 +27,9 @@ function briefErrorMessage(error) {
     return 'Chrome/university access could not fetch the publisher PDF. Open the paper in Chrome or refresh University access, then retry.';
   }
   if (code === 'not_found' && /presentation|generated/i.test(message)) {
-    return 'The generated HTML brief is missing. Rebuild the paper brief, then open it again.';
+    return 'The generated paper artifact is missing. Rebuild it, then open the review again.';
   }
-  return message || 'Could not open the brief.';
+  return message || 'Could not open the review.';
 }
 
 export default function OpenBriefButton({ itemKey, hasPdf = true, label = null }) {
@@ -49,11 +51,11 @@ export default function OpenBriefButton({ itemKey, hasPdf = true, label = null }
     if (tab) {
       tab.opener = null;
       tab.document.write(
-        '<!doctype html><meta charset="utf-8"><title>Opening brief…</title>'
+        '<!doctype html><meta charset="utf-8"><title>Opening review…</title>'
         + '<body style="font:16px/1.5 system-ui;color:#334155;margin:0;display:flex;'
         + 'align-items:center;justify-content:center;height:100vh;text-align:center">'
-        + '<p style="max-width:32em;padding:0 1.5em">Preparing the paper brief — building '
-        + 'it first if needed. This can take a few minutes…</p>',
+        + '<p style="max-width:32em;padding:0 1.5em">Preparing the paper review — building '
+        + 'the readable artifact first if needed. This can take a few minutes…</p>',
       );
     }
     setWorking(true);
@@ -84,8 +86,11 @@ export default function OpenBriefButton({ itemKey, hasPdf = true, label = null }
           }
         }
       }
-      if (render?.status !== 'completed') throw new Error('timed out building the brief');
-      const url = paperPresentationUrl(itemKey, render.built_at || render.pdf_key);
+      if (render?.status !== 'completed') throw new Error('timed out building the paper artifact');
+      // Open the INTERACTIVE full review (React route) — not the static HTML
+      // artifact — so the new tab carries the verdict / collection / tag controls.
+      // The build above still runs so the route's reader pane has a built brief.
+      const url = `/paper/${encodeURIComponent(itemKey)}`;
       if (tab) tab.location.href = url;
       else window.open(url, '_blank', 'noopener');  // popup blocked → best-effort
     } catch (e) {
@@ -134,14 +139,14 @@ export default function OpenBriefButton({ itemKey, hasPdf = true, label = null }
         type="button"
         onClick={handleClick}
         disabled={working}
-        aria-label={hasPdf ? 'Open the rendered brief' : 'Fetch and open the rendered brief'}
+        aria-label={hasPdf ? 'Open full review' : 'Fetch and open full review'}
         aria-busy={working}
         aria-describedby={error ? `${itemKey}-brief-error` : undefined}
         title={
           error
-            ? `Couldn't open the brief: ${error}`
+            ? `Couldn't open the review: ${error}`
             : hasPdf
-              ? 'Open the rendered brief (builds it first if needed)'
+              ? 'Open the full review (builds the paper artifact first if needed)'
               : NO_PDF_MESSAGE
         }
         className={`shrink-0 flex items-center justify-center w-7 h-7 rounded text-sm hover:bg-teal-50 disabled:opacity-60 ${

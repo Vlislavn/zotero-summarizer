@@ -7,7 +7,43 @@ yet publish versioned releases, so everything currently lives under
 
 ## [Unreleased]
 
+### Fixed
+
+- **Library "read hidden" count inflated; read papers not hidden.** The read/handled
+  partition in `_ranking._is_read()` used `ALL_EMOJIS`, which includes 4 meta-tier
+  emojis (🤖, ⚪, 🔮, 🗣) with `score_delta=0.0` — informational markers that don't
+  represent user engagement. Papers tagged with only meta emojis were falsely
+  classified as "read" and hidden from the queue. Additionally, the automated
+  `✅ triage-approved` tag contains ✅ (an engagement emoji), so triage-approved
+  papers were hidden without any user action. Fix: a new `READ_EMOJIS` constant
+  (`score_delta != 0.0` only) replaces `ALL_EMOJIS` in the read-check set, and tags
+  containing `triage-approved` are skipped entirely.
+
 ### Changed
+
+- **Figure lightbox → native `<dialog>`; TOC `aria-current`.** The story-page figure
+  zoom now uses the platform `<dialog>` (top-layer, native Esc + backdrop dismiss,
+  focus-trap, `::backdrop` scrim) — removed the hand-rolled fixed-overlay + manual Esc
+  listener + z-index. The active scroll-spy TOC link gets `aria-current="location"`.
+
+- **Single-scroll paper "story" page.** `/paper/:key` is now a dedicated 3-zone page
+  (sticky TOC · reading column · action+chat rail): auto-generates the review on open,
+  overlays deep-review findings onto the paper's own sections via located `§ Title·p.N`
+  chips → a collapsed Paper map, figures inline + lightbox, grounded Ask side chat.
+  Findings are located inside the review run (stable section-id join, no cross-extractor
+  substring match); two-tier locate (grounded span → coarse `approx` section fallback).
+
+- **Story-page UX grounded in reading-research (Scim/CiteRead/Paper Plain).** The full
+  digest folds with Key findings surfaced above it; red flags/overstatements are framed
+  as "model judgment" and demoted to "low confidence, verify" when self-consistency
+  disagreed; a located chip degrades to a muted `≈ § Section` on a coarse-only match; the
+  rail chat offers standing clinician starter questions (same grounded/abstaining QA).
+
+- **Interactive full review + quick filing.** "Open full review ↗" now opens a React
+  page (`/paper/:key`) to set the verdict, file to a collection (Read Next default) and
+  add/remove tags — was a static read-only brief. The row-card lifts the collection
+  picker out of the disclosure + adds a one-tap verdict; the tag input autocompletes from
+  your existing Zotero tags. Library rows are unchanged (not widened).
 
 - **Library row → terse Jira/Linear-style decision card.** Clicking a paper now shows
   one banner chip-row (verdict word + grade + quality band + ⚠red-flag count, each

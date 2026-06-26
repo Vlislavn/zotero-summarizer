@@ -1,0 +1,104 @@
+{
+  "s1_desktop": {
+    "body": {
+      "fontSize": "16px",
+      "color": "rgb(23, 22, 20)"
+    },
+    "viewport": {
+      "w": 1440,
+      "h": 900,
+      "scrollW": 1440
+    },
+    "h_overflow": false,
+    "row": null
+  },
+  "s3_desktop": {
+    "collection_select": {
+      "value": "4GMNXPRY",
+      "firstOptions": [
+        "Add to collection\u2026",
+        "Inbox",
+        "Read Next",
+        "00_Ongoing Writing",
+        "Inbox",
+        "Selected"
+      ],
+      "count": 101,
+      "firstOptionText": "\u00a0\u00a0Read Next"
+    },
+    "tag_datalist": {
+      "options": 300,
+      "sample": [
+        "zs:rel/dont_read",
+        "zs:rel/could_read",
+        "/zs/feeds-v3",
+        "Computer Science - Artificial Intelligence",
+        "zs:should_read"
+      ]
+    },
+    "tag_input": {
+      "h": 22
+    },
+    "body": {
+      "fontSize": "16px",
+      "color": "rgb(23, 22, 20)"
+    },
+    "viewport": {
+      "w": 1440,
+      "h": 900,
+      "scrollW": 1440
+    },
+    "h_overflow": false
+  },
+  "s1_narrow": {
+    "body": {
+      "fontSize": "16px",
+      "color": "rgb(23, 22, 20)"
+    },
+    "viewport": {
+      "w": 390,
+      "h": 844,
+      "scrollW": 390
+    },
+    "h_overflow": false,
+    "row": null
+  },
+  "s3_narrow": {
+    "collection_select": {
+      "value": "4GMNXPRY",
+      "firstOptions": [
+        "Add to collection\u2026",
+        "Inbox",
+        "Read Next",
+        "00_Ongoing Writing",
+        "Inbox",
+        "Selected"
+      ],
+      "count": 101,
+      "firstOptionText": "\u00a0\u00a0Read Next"
+    },
+    "tag_datalist": {
+      "options": 300,
+      "sample": [
+        "zs:rel/dont_read",
+        "zs:rel/could_read",
+        "/zs/feeds-v3",
+        "Computer Science - Artificial Intelligence",
+        "zs:should_read"
+      ]
+    },
+    "tag_input": {
+      "h": 26
+    },
+    "body": {
+      "fontSize": "16px",
+      "color": "rgb(23, 22, 20)"
+    },
+    "viewport": {
+      "w": 390,
+      "h": 844,
+      "scrollW": 390
+    },
+    "h_overflow": false
+  }
+}

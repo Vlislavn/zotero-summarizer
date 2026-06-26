@@ -33,8 +33,11 @@ class ExtraLayersCtx:
     item_type: str | None = None  # Zotero typeName — weak prior for paper-type detection
 
 
-def extra_layers(ctx: ExtraLayersCtx) -> tuple[dict[str, Any] | None, list[dict[str, Any]] | None, dict[str, Any]]:
-    """Paper-type detection + reference-free quality eval + goal-conditioned summaries.
+def extra_layers(
+    ctx: ExtraLayersCtx,
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]] | None, dict[str, Any], dict[str, Any] | None]:
+    """Paper-type detection + reference-free quality eval + goal-conditioned summaries
+    + the section overlay (findings located onto the paper's own sections).
 
     Each is an INDEPENDENTLY-SKIPPABLE layer (per the design): a failure degrades
     to no panel / no board rather than blocking the digest. The broad excepts are
@@ -90,7 +93,40 @@ def extra_layers(ctx: ExtraLayersCtx) -> tuple[dict[str, Any] | None, list[dict[
             goal_dump = [g.model_dump() for g in summaries]
     except Exception as exc:  # noqa: BLE001 — independently-skippable layer (design)
         LOGGER.warning("goal summaries for %s failed: %s", ctx.item_key, exc)
-    return quality_dump, goal_dump, paper_type_dump
+
+    # Per-section "what it covers" one-liners for the story page's Paper map — ONE
+    # grounded call, FULL tier only (the lean local path deliberately minimizes call
+    # count, so the map there shows titles+pages without summaries). Skippable.
+    section_summaries: dict[str, str] = {}
+    if not ctx.lean_tier:
+        try:
+            from zotero_summarizer.services.library import _paper_section_summaries
+            section_summaries = _paper_section_summaries.summarize_sections(sections, ctx.llm)
+        except Exception as exc:  # noqa: BLE001 — independently-skippable layer (design)
+            LOGGER.warning("section summaries for %s failed: %s", ctx.item_key, exc)
+
+    # Section overlay: locate the findings just computed onto the SAME `sections`
+    # they were grounded against (stable id join, no cross-extractor mismatch). Pure
+    # assembly; an independently-skippable layer like the three above.
+    section_overlay: dict[str, Any] | None = None
+    try:
+        from zotero_summarizer.services.library import _review_section_overlay
+        section_overlay = _review_section_overlay.build_section_overlay(
+            sections, quality_dump, goal_dump, section_summaries=section_summaries,
+        )
+        if section_overlay and not section_overlay.get("degraded"):
+            # Log the per-review localization operating point — accumulated across the
+            # real corpus, these INFO lines are how the chip-confidence threshold gets
+            # CALIBRATED (exact/fuzzy = asserted, approx = the low-confidence fallback).
+            loc = _review_section_overlay.localization_stats(section_overlay)
+            LOGGER.info(
+                "[overlay %s] located %.0f%% of %d findings: exact=%d fuzzy=%d approx=%d unplaced=%d",
+                ctx.item_key, loc["located_rate"] * 100, loc["total"],
+                loc["exact"], loc["fuzzy"], loc["approx"], loc["unplaced"],
+            )
+    except Exception as exc:  # noqa: BLE001 — independently-skippable layer (design)
+        LOGGER.warning("section overlay for %s failed: %s", ctx.item_key, exc)
+    return quality_dump, goal_dump, paper_type_dump, section_overlay
 
 
 __all__ = ["ExtraLayersCtx", "extra_layers"]

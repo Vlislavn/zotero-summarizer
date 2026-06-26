@@ -89,13 +89,16 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
   return (
     <div className="space-y-3">
       {llm && llm.reachable === false && (
-        <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[13px] leading-relaxed text-rose-800" role="alert">
+        // Amber, not rose: this is an APP-STATE notice (a server is down), not a
+        // finding about the paper. Rose is reserved for the paper's own red-flags
+        // below, so the two never compete (one-code-one-meaning / Von Restorff).
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] leading-relaxed text-amber-800" role="alert">
           <span className="font-semibold">Deep-review model unreachable.</span>{' '}
           <span className="font-mono text-[12px]">{llm.model || '(model unset)'}</span> at{' '}
           <span className="font-mono text-[12px]">{llm.base_url || '(no base URL)'}</span> isn’t responding,
           so a review will produce no digest. Start that server, or pick a reachable model in{' '}
           <span className="font-semibold">Settings → LLM routing</span>.
-          {llm.detail && <div className="mt-1 text-[11px] text-rose-600 break-words">{llm.detail}</div>}
+          {llm.detail && <div className="mt-1 text-[11px] text-amber-600 break-words">{llm.detail}</div>}
         </div>
       )}
       {deep && deep.needs_pdf && deep.needs_login && deep.login_url && (

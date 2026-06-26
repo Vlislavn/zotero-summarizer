@@ -8,6 +8,18 @@ const MODE_HELP =
   'Fast retrieval: only the top matching passages. ' +
   'Full text: the raw extracted paper body only.';
 
+// Standing, clinician-relevant starter questions for the rail chat. Research
+// (AI2 Paper Plain) found a curated key-question index was readers' single
+// most-preferred feature (18/20). Each runs the SAME grounded/abstaining QA and
+// maps to a rubric concern the deep review already evaluates; they vanish after
+// the first question.
+const SUGGESTED_QUESTIONS = [
+  'Is there external validation?',
+  'What was the cohort / sample size?',
+  'Is the data split at the patient level?',
+  'Which figure shows the main result?',
+];
+
 // One metadata line per answer: latency (hidden for deterministic answers),
 // the mode that actually ran, passages used, then the real model id.
 function metaLine(entry) {
@@ -22,7 +34,7 @@ function metaLine(entry) {
 // "Ask the paper": grounded Q&A against the LOCAL model with enforced
 // abstention — an abstained answer renders as "not in the paper", never an
 // invented one. Session-local history (newest first); nothing persists.
-export default function AskPaperBox({ itemKey }) {
+export default function AskPaperBox({ itemKey, variant = 'disclosure', allowRawPdfModes = true }) {
   const [question, setQuestion] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -33,13 +45,17 @@ export default function AskPaperBox({ itemKey }) {
 
   useEffect(() => () => { mountedRef.current = false; }, []);
 
-  async function handleAsk(e) {
-    e.preventDefault();
-    const q = question.trim();
+  useEffect(() => {
+    if (!allowRawPdfModes && mode !== 'comprehensive') setMode('comprehensive');
+  }, [allowRawPdfModes, mode]);
+
+  async function ask(raw) {
+    const q = String(raw || '').trim();
     if (!q || busy) return;
     const askedKey = itemKey;
     setBusy(true);
     setError(null);
+    setQuestion(q);
     try {
       const res = await askPaper(itemKey, q, { mode });
       // Drop a late answer if the component unmounted or the row changed.
@@ -55,10 +71,31 @@ export default function AskPaperBox({ itemKey }) {
     }
   }
 
-  return (
-    <Disclosure summary="Ask the paper">
+  function handleAsk(e) {
+    e.preventDefault();
+    ask(question);
+  }
+
+  const rail = variant === 'rail';
+
+  const inner = (
       <div className="space-y-3">
-        <form onSubmit={handleAsk} className="flex flex-wrap items-center gap-2">
+        {rail && history.length === 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {SUGGESTED_QUESTIONS.map((q) => (
+              <button
+                key={q}
+                type="button"
+                disabled={busy}
+                onClick={() => ask(q)}
+                className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-500 hover:border-teal-300 hover:text-teal-700 disabled:opacity-50"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
+        <form onSubmit={handleAsk} className={rail ? 'space-y-2' : 'flex flex-wrap items-center gap-2'}>
           <label className="sr-only" htmlFor="ask-q">Question about this paper</label>
           <input
             id="ask-q"
@@ -67,32 +104,42 @@ export default function AskPaperBox({ itemKey }) {
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             placeholder="e.g. What dataset did they train on?"
-            className="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg border border-slate-300 text-[13px] focus:outline-none focus:ring-1 focus:ring-teal-500"
+            className={`${rail ? 'w-full' : 'flex-1 min-w-0'} px-2.5 py-1.5 rounded-lg border border-slate-300 text-[13px] focus:outline-none focus:ring-1 focus:ring-teal-500`}
             disabled={busy}
           />
-          <label className="sr-only" htmlFor="ask-mode">Answer mode</label>
-          <select
-            id="ask-mode"
-            aria-label="Answer mode"
-            value={mode}
-            onChange={(e) => setMode(e.target.value)}
-            disabled={busy}
-            className="px-2 py-1.5 rounded-lg border border-slate-300 text-[13px] bg-white"
-            title={MODE_HELP}
-          >
-            <option value="comprehensive">Comprehensive</option>
-            <option value="retrieval">Fast retrieval</option>
-            <option value="full_text">Full text</option>
-          </select>
-          <button
-            type="submit"
-            disabled={busy || !question.trim()}
-            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-teal-700 text-white text-[13px] font-semibold hover:bg-teal-800 disabled:opacity-50"
-            title="Answered from this paper's generated artifact and text only"
-          >
-            {busy && <Spinner size="sm" color="teal-on-fill" />}
-            {busy ? 'Reading…' : 'Ask'}
-          </button>
+          <div className={rail ? 'flex items-center gap-2' : 'contents'}>
+            {allowRawPdfModes ? (
+              <>
+                <label className="sr-only" htmlFor="ask-mode">Answer mode</label>
+                <select
+                  id="ask-mode"
+                  aria-label="Answer mode"
+                  value={mode}
+                  onChange={(e) => setMode(e.target.value)}
+                  disabled={busy}
+                  className={`${rail ? 'min-w-0 flex-1' : ''} px-2 py-1.5 rounded-lg border border-slate-300 text-[13px] bg-white`}
+                  title={MODE_HELP}
+                >
+                  <option value="comprehensive">Comprehensive</option>
+                  <option value="retrieval">Fast retrieval</option>
+                  <option value="full_text">Full text</option>
+                </select>
+              </>
+            ) : (
+              <span className={`${rail ? 'min-w-0 flex-1' : ''} px-2 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-[13px] text-slate-500`}>
+                Comprehensive
+              </span>
+            )}
+            <button
+              type="submit"
+              disabled={busy || !question.trim()}
+              className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-teal-700 text-white text-[13px] font-semibold hover:bg-teal-800 disabled:opacity-50"
+              title="Answered from this paper's generated artifact and text only"
+            >
+              {busy && <Spinner size="sm" color="teal-on-fill" />}
+              {busy ? 'Reading…' : 'Ask'}
+            </button>
+          </div>
         </form>
         {busy && (
           <div role="status" aria-live="polite" className="sr-only">Reading the paper…</div>
@@ -122,6 +169,18 @@ export default function AskPaperBox({ itemKey }) {
           </div>
         )}
       </div>
-    </Disclosure>
   );
+
+  // The story-page rail keeps the chat always open (a calm grounded inspector, not
+  // a fold); every other surface keeps the disclosure (Jakob's Law — unchanged).
+  if (variant === 'rail') {
+    return (
+      <div>
+        <div className="mb-2 text-[11px] uppercase tracking-[0.08em] font-semibold text-slate-400">Ask this paper</div>
+        <p className="mb-2 text-[11px] text-slate-400">Answered only from this paper — it abstains if the answer isn't there.</p>
+        {inner}
+      </div>
+    );
+  }
+  return <Disclosure summary="Ask the paper">{inner}</Disclosure>;
 }

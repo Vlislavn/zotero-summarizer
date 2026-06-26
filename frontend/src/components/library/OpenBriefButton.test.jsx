@@ -2,12 +2,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 
-// Mock the render API the button drives. paperPresentationUrl stays a real-ish
-// pure fn so we can assert the final URL (incl. the built_at cache-buster).
 vi.mock('../../api/libraryApi.js', () => ({
   fetchPaperRender: vi.fn(),
   buildPaperRender: vi.fn(),
-  paperPresentationUrl: (k, v) => `/api/library/render/${k}/presentation${v ? `?v=${v}` : ''}`,
 }));
 
 import { fetchPaperRender, buildPaperRender } from '../../api/libraryApi.js';
@@ -23,33 +20,33 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-const clickBtn = () => fireEvent.click(screen.getByRole('button', { name: 'Open the rendered brief' }));
+const clickBtn = () => fireEvent.click(screen.getByRole('button', { name: 'Open full review' }));
 
 describe('OpenBriefButton', () => {
-  it('tries full-text acquisition before opening a no-local-PDF brief', async () => {
+  it('tries full-text acquisition before opening a no-local-PDF review', async () => {
     fetchPaperRender
       .mockResolvedValueOnce({ status: 'missing', needs_pdf: true })
       .mockResolvedValue({ status: 'completed', built_at: 'V0' });
     buildPaperRender.mockResolvedValue({ status: 'running' });
     render(<OpenBriefButton itemKey="K0" hasPdf={false} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Fetch and open the rendered brief' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Fetch and open full review' }));
     await waitFor(() => expect(buildPaperRender).toHaveBeenCalledWith('K0', { allowAcquireMissing: true }));
     await waitFor(
-      () => expect(tab.location.href).toBe('/api/library/render/K0/presentation?v=V0'),
+      () => expect(tab.location.href).toBe('/paper/K0'),
       { timeout: 4000 },
     );
   });
 
-  it('opens an already-built brief without triggering a build', async () => {
+  it('opens an already-built review artifact without triggering a build', async () => {
     fetchPaperRender.mockResolvedValue({ status: 'completed', built_at: 'V1' });
     render(<OpenBriefButton itemKey="K1" />);
     clickBtn();
-    await waitFor(() => expect(tab.location.href).toBe('/api/library/render/K1/presentation?v=V1'));
+    await waitFor(() => expect(tab.location.href).toBe('/paper/K1'));
     expect(window.open).toHaveBeenCalledWith('about:blank', '_blank');
     expect(buildPaperRender).not.toHaveBeenCalled();
   });
 
-  it('builds on demand, polls, then opens the brief', async () => {
+  it('builds on demand, polls, then opens the review route', async () => {
     fetchPaperRender
       .mockResolvedValueOnce({ status: 'missing' })   // initial: nothing built
       .mockResolvedValue({ status: 'completed', built_at: 'V2' }); // after build
@@ -58,7 +55,7 @@ describe('OpenBriefButton', () => {
     clickBtn();
     await waitFor(() => expect(buildPaperRender).toHaveBeenCalledWith('K2', { allowAcquireMissing: false }));
     await waitFor(
-      () => expect(tab.location.href).toBe('/api/library/render/K2/presentation?v=V2'),
+      () => expect(tab.location.href).toBe('/paper/K2'),
       { timeout: 4000 },
     );
   });
@@ -67,7 +64,7 @@ describe('OpenBriefButton', () => {
     fetchPaperRender.mockResolvedValue({ status: 'completed', built_at: 'V4' });
     render(<OpenBriefButton itemKey="K4" label="Open full review ↗" />);
     fireEvent.click(screen.getByRole('button', { name: 'Open full review ↗' }));
-    await waitFor(() => expect(tab.location.href).toBe('/api/library/render/K4/presentation?v=V4'));
+    await waitFor(() => expect(tab.location.href).toBe('/paper/K4'));
     expect(buildPaperRender).not.toHaveBeenCalled();
   });
 
@@ -78,7 +75,7 @@ describe('OpenBriefButton', () => {
     render(<OpenBriefButton itemKey="K3" />);
     clickBtn();
     await waitFor(
-      () => expect(tab.location.href).toBe('/api/library/render/K3/presentation?v=V3'),
+      () => expect(tab.location.href).toBe('/paper/K3'),
       { timeout: 4000 },
     );
     expect(buildPaperRender).not.toHaveBeenCalled();

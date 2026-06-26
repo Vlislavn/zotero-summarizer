@@ -90,9 +90,13 @@ frontend/
                                    DefaultProviderField, ClassifierGateFields
       setup/                       SetupGate, StepProgress, Step{ConnectZotero,
                                    ConnectLlm,DescribeResearch,Done}, NotConfiguredCard
-      library/PaperReaderPane.jsx  paper-read build/status/presentation controls
-      library/AskPaperBox.jsx      correctness-first paper Q&A
-      paper/DeepReviewSection.jsx  run deep review + live phase progress + DigestBlock
+      library/PaperReaderPane.jsx  paper-read build/status controls + figure grid (inline card)
+      library/PaperFigures.jsx     always-visible figure grid + lightbox (story page)
+      library/AskPaperBox.jsx      correctness-first paper Q&A (disclosure | rail variant)
+      paper/DeepReviewSection.jsx  run deep review + live phase progress (inline card)
+      paper/review/{StoryToc,SectionMap,ActionRail}.jsx  story-page rails + paper map
+      pages/PaperReviewPage.jsx    /paper/:key — single-scroll "story" page (3-zone)
+      hooks/{useDeepReviewRunner,useScrollSpy}.js  auto-run review + TOC scroll-spy
 ```
 
 ## First-run setup & simplified Settings
@@ -142,17 +146,41 @@ NavBar:  [Library]            [Today] [Settings] [Ops]
   `/audit → /library` (the audit page is de-linked but still routable at
   `/audit-page`). No old bookmark 404s.
 
-## Deep review + paper brief (shared across Read-next and Batch-label)
+## Deep review + paper brief (inline card vs the full story page)
 
-`DeepReviewSection` (run + live progress + digest), `PaperReaderPane` (the
-generated brief embedded as an `<iframe>`), and `AskPaperBox` (grounded Q&A) render
-on **both** Library's Read-next mode (via `library/InlineAnnotate.jsx`, expand a row)
-and its Batch-label mode (`pages/AnnotationVerdict.jsx`), gated on `detail.has_pdf`.
+`DeepReviewSection` (run + live progress), `PaperReaderPane` (build controls +
+native figure thumbnails — **not** an iframe; the digest renders natively in
+`PaperReview`), and `AskPaperBox` (grounded Q&A) render on Library's Read-next mode
+(via `library/InlineAnnotate.jsx`, expand a row) and Batch-label mode
+(`pages/AnnotationVerdict.jsx`), gated on `detail.has_pdf` — all through the shared
+`PaperDetailView` (`compact`) assembly.
 
-The brief iframe src is cache-busted on the render's `built_at`
-(`paperPresentationUrl(itemKey, version)` in `api/libraryApi.js`): when a deep review
-rebuilds the brief to bake in the digest, `built_at` changes → the iframe reloads and
-shows the new DIGEST + figures, instead of the browser's cached digest-less HTML.
+`/paper/:key` (`pages/PaperReviewPage.jsx`) is the **full single-scroll "story"
+page** — a different surface, NOT the row-card un-compacted. A 3-zone layout
+(sticky TOC · reading column · sticky action + chat rail) renders everything up
+front: `<PaperReview flat sectionOverlay>` (verdict + relevance + quality + full
+digest inline, with each red-flag / goal annotated by a located `§ title · p.N`
+chip from `deep_review.section_overlay`), `<PaperFigures>` (auto-built figure grid
++ lightbox), `<SectionMap>` (the collapsed Paper map — section titles, pages, and
+the Phase-C "what it covers" one-liners, the scroll target for the located-finding
+chips), the abstract, and `<ActionRail>` (verdict / +Read Next / tags / the
+grounded Ask chat in its `variant="rail"`). `useDeepReviewRunner` auto-generates
+the review on open for a paper with a PDF (ref-guarded once-per-key; the user opted
+into the Zotero-note side effect); below `lg` it collapses to one column + a sticky
+bottom verdict bar.
+
+Story-page refinements grounded in the deep-research on reading/triage UX (Scim,
+CiteRead, Paper Plain, Traceable Text — see the cited report): the full **digest
+folds** behind one disclosure with **Key findings surfaced** above it (decision-first;
+the long reference tail is one click, not a wall); **red flags / overstatements are
+framed as "model judgment"** and demoted to "low confidence, verify" when the
+self-consistency runs disagreed (`critiqueIsTentative`, named floors) — the brittle
+critique signal is never asserted as fact; a **located chip degrades to `≈ § Section`
+(muted)** when only the coarse section fallback matched (overlay `match: "approx"`),
+and the Paper-map `⚑` only marks a section on a confident (exact/fuzzy) location;
+and the rail chat offers **standing clinician starter questions** (Paper Plain's
+key-question pattern) that run the same grounded/abstaining QA and vanish after the
+first question.
 
 ## Confirm/Override card (review fleet, Phase 2)
 

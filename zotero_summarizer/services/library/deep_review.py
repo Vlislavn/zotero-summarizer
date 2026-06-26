@@ -273,6 +273,7 @@ def _review_one(
     quality_dump: dict[str, Any] | None = None
     goal_dump: list[dict[str, Any]] | None = None
     paper_type_dump: dict[str, Any] | None = None
+    section_overlay: dict[str, Any] | None = None
     note_written = False
     note_error: str | None = None
 
@@ -292,7 +293,7 @@ def _review_one(
                 focus_prompt=focus_prompt, max_chars=max_chars,
             )
             digest_dump = digest.model_dump()
-            quality_dump, goal_dump, paper_type_dump = _deep_review_layers.extra_layers(_deep_review_layers.ExtraLayersCtx(
+            quality_dump, goal_dump, paper_type_dump, section_overlay = _deep_review_layers.extra_layers(_deep_review_layers.ExtraLayersCtx(
                 item_key=item_key, title=title, pdf_path=pdf_path, text=text,
                 digest_dump=digest_dump, llm=llm, config=config,
                 prestige=(prestige_scores or {}).get(item_key),
@@ -314,6 +315,7 @@ def _review_one(
         "quality": quality_dump,
         "goal_summaries": goal_dump,
         "paper_type": paper_type_dump,
+        "section_overlay": section_overlay,
         "needs_pdf": not bool(pdf_path),
         # Set by _review_worker from the acquire result when a fetch was DECLARED-but-
         # gated (paywall/no session) — the per-paper pane shows login_url as a

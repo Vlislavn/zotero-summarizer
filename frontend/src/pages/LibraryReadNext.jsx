@@ -25,6 +25,7 @@ import {
   EMPTY_FILTERS, buildPredicate, goalHighKeys, isFilterActive,
   serializeFilters, hydrateFilters,
 } from '../utils/relevanceBands.js';
+import { isMachineTag } from '../utils/tags.js';
 
 // Library page — a single "Read next" surface (Stage 2). The former Browse tab
 // and Triage monitor are merged in: the sidebar collection/tag filters + a
@@ -73,15 +74,13 @@ export default function LibraryReadNext() {
   const [tags, setTags] = useState([]);
   const [selectedCollection, setSelectedCollection] = useState('');
   const [selectedTag, setSelectedTag] = useState('');
-  // "Browse & filter" drawer (collections + tags + smart filters). Default open on
-  // desktop / collapsed on mobile, then remembered — frequent collection switching
-  // shouldn't cost a click on a wide screen, and shouldn't eat height on a phone.
+  // "Browse & filter" drawer (collections + tags + smart filters). Default
+  // COLLAPSED everywhere so the ranked queue — the task — owns the fold (Serial
+  // Position); the collapsed summary still shows the active scope, so nothing is
+  // hidden. Power-users who open it are remembered (localStorage).
   const [browseOpen, setBrowseOpen] = useState(() => {
     const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('zs:libraryBrowseOpen') : null;
-    if (saved !== null) return saved === '1';
-    return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-      ? window.matchMedia('(min-width: 1024px)').matches
-      : true;
+    return saved === '1';
   });
   function toggleBrowse(open) {
     setBrowseOpen(open);
@@ -172,7 +171,10 @@ export default function LibraryReadNext() {
         const [cData, tData] = await Promise.all([fetchCollections(), fetchTags({ limit: 300 })]);
         if (cancelled) return;
         setCollections(cData?.items || []);
-        setTags(tData?.items || []);
+        // Drop the app's own machine tags from the human-facing "Top Tags"
+        // browse filter (see utils/tags.js) — the biggest "tags" are internal
+        // relevance/feed bookkeeping no one browses by.
+        setTags((tData?.items || []).filter((t) => !isMachineTag(t.tag)));
       } catch (err) {
         if (!cancelled) {
           setMessage(`Failed to load sidebar: ${err.message || err}`);

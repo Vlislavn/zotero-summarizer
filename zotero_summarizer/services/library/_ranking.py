@@ -14,7 +14,7 @@ from typing import Any
 from zotero_summarizer.services._common import band_primary_enabled
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services._common import state as get_state
-from zotero_summarizer.services.emoji_signals import ALL_EMOJIS, HARD_VETO_EMOJIS
+from zotero_summarizer.services.emoji_signals import HARD_VETO_EMOJIS, READ_EMOJIS
 from zotero_summarizer.services.library._score_distribution import _entry_prestige
 from zotero_summarizer.services.model.rank_blend import (
     GOAL_BLEND_WEIGHT,
@@ -22,12 +22,21 @@ from zotero_summarizer.services.model.rank_blend import (
     quality_bonus,
 )
 
-# "Read / handled" = engaged-with (any signal emoji) or vetoed.
-_HANDLED_EMOJIS: frozenset[str] = frozenset(ALL_EMOJIS) | HARD_VETO_EMOJIS
+# "Read / handled" = engaged-with (any non-meta engagement emoji) or vetoed.
+# Meta emojis (🤖, 🔮, ⚪, 🗣) are excluded — they carry no engagement signal.
+# The automated "✅ triage-approved" tag is also excluded: ✅ is an engagement
+# emoji, but the triage system applies this tag without user action.
+_READ_TAGS: frozenset[str] = READ_EMOJIS | HARD_VETO_EMOJIS
+_TRIAGE_APPROVED_TOKEN = "triage-approved"
 
 
 def _is_read(tags: list[str]) -> bool:
-    return any(tag in _HANDLED_EMOJIS for tag in tags)
+    return any(
+        emoji in tag
+        for tag in tags
+        if tag and _TRIAGE_APPROVED_TOKEN not in tag
+        for emoji in _READ_TAGS
+    )
 
 # The blend math + weights (0.4 goal / 0.15 prestige, blind-judge provenance)
 # live in ``services/model/rank_blend`` — shared with the Today slate: same

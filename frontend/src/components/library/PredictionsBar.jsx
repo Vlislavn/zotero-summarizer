@@ -57,10 +57,12 @@ function stateLine(fleetStatus, proposedCount, coolCount, autoActive, stopping) 
     return { tone: 'text-slate-600', text: 'All cool papers reviewed — Confirm or Override on the rows below.' };
   }
   if (coolCount > 0) {
-    const ready = proposedCount > 0 ? ` ${proposedCount} already ready below.` : '';
-    return { tone: 'text-slate-500', text: `Deep-review the ${coolCount} undecided cool paper${coolCount === 1 ? '' : 's'} (must/should-read) and propose a verdict for each — from each paper’s full text.${ready}` };
+    // State, not instructions — the "what it does" explanation lives in the
+    // button's title (Paradox of the Active User: don't re-teach daily users).
+    const ready = proposedCount > 0 ? ` · ${proposedCount} ready below` : '';
+    return { tone: 'text-slate-500', text: `${coolCount} cool paper${coolCount === 1 ? '' : 's'} undecided${ready}` };
   }
-  return { tone: 'text-slate-500', text: 'No undecided cool papers — every high-relevance pick already has a deep review.' };
+  return { tone: 'text-slate-500', text: 'No undecided cool papers.' };
 }
 
 export default function PredictionsBar({ fleetStatus, onRun, onStop, autoActive = false, stopping = false, coolCount = 0, proposedCount = 0 }) {
@@ -69,7 +71,12 @@ export default function PredictionsBar({ fleetStatus, onRun, onStop, autoActive 
   // refresh the publisher session, then run again. Only items that carry a URL.
   const loginItems = (fleetStatus?.needs_login_items || []).filter((it) => it && it.url);
   return (
-    <div className="rounded-lg border-l-[3px] border-indigo-300 bg-indigo-50/40 pl-3.5 pr-3 py-2.5">
+    // Quiet by default: no tinted box, no filled button — this gates a small,
+    // occasional action (often 1 paper), so it must NOT out-shout the ranked list
+    // it sits above (Von Restorff: the one warm accent on this page is the amber
+    // "Rescore — model updated", not this). A thin indigo rule keeps the tie to
+    // the Confirm/Override cards it spawns.
+    <div className="border-l-2 border-indigo-200 pl-3 py-1">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <span className="text-[11px] uppercase tracking-[0.06em] font-semibold text-indigo-500">
           ✨ Review cool papers
@@ -97,7 +104,7 @@ export default function PredictionsBar({ fleetStatus, onRun, onStop, autoActive 
             type="button"
             onClick={onRun}
             disabled={coolCount === 0}
-            className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-1 rounded-lg border border-indigo-300 bg-white text-indigo-700 text-[13px] font-semibold hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed"
             title="Deep-review every undecided high-relevance paper and propose a verdict for each. Suggestions only — nothing is written until you Confirm. Results stream in; click Stop to end early."
           >
             {coolCount > 0 ? `Review cool papers (${coolCount})` : 'All reviewed'}

@@ -275,6 +275,72 @@ def test_read_items_hidden_live_and_shown_with_toggle(monkeypatch):
     assert shown["total_unread"] == 1  # include_read must NOT inflate total_unread
 
 
+def test_read_items_hidden_when_engagement_emoji_is_inside_task_tag(monkeypatch):
+    _patch_state(
+        monkeypatch,
+        _FakeReader([
+            _item("A"),
+            _item("EYES", tags=["👀 skimmed"]),
+            _item("BRAIN", tags=["🧠 distilled"]),
+        ]),
+        _FakeGate("sha1"),
+    )
+    _seed("sha1", A=3.0)
+
+    hidden = reading_queue.build_reading_queue(include_read=False)
+    assert [i["item_key"] for i in hidden["items"]] == ["A"]
+    assert hidden["read_hidden"] == 2
+
+    shown = reading_queue.build_reading_queue(include_read=True)
+    by_key = {i["item_key"]: i for i in shown["items"]}
+    assert by_key["EYES"]["read"] is True
+    assert by_key["BRAIN"]["read"] is True
+
+
+def test_meta_emojis_do_not_mark_paper_as_read(monkeypatch):
+    """REGRESSION: meta-tier emojis (🤖, 🔮, ⚪, 🗣) carry score_delta=0.0
+    and represent informational markers, NOT user engagement.  Papers tagged
+    with only meta emojis must stay visible in the reading queue."""
+    _patch_state(
+        monkeypatch,
+        _FakeReader([
+            _item("A"),
+            _item("ROBOT", tags=["🤖 ai-generated"]),
+            _item("CRYSTAL", tags=["🔮 vision"]),
+            _item("CIRCLE", tags=["⚪ neutral"]),
+            _item("SPEECH", tags=["🗣 recommended"]),
+        ]),
+        _FakeGate("sha1"),
+    )
+    _seed("sha1", A=3.0)
+
+    res = reading_queue.build_reading_queue(include_read=False)
+    keys = [i["item_key"] for i in res["items"]]
+    # All meta-tagged papers remain visible — none are hidden as "read".
+    assert set(keys) == {"A", "ROBOT", "CRYSTAL", "CIRCLE", "SPEECH"}
+    assert res["read_hidden"] == 0
+
+
+def test_triage_approved_tag_does_not_mark_paper_as_read(monkeypatch):
+    """REGRESSION: the automated ``✅ triage-approved`` tag contains ✅, which
+    is an engagement emoji.  But the triage system applies this tag without
+    user action, so it must NOT cause the paper to be classified as "read"."""
+    _patch_state(
+        monkeypatch,
+        _FakeReader([
+            _item("A"),
+            _item("APPROVED", tags=["✅ triage-approved"]),
+        ]),
+        _FakeGate("sha1"),
+    )
+    _seed("sha1", A=3.0)
+
+    res = reading_queue.build_reading_queue(include_read=False)
+    keys = [i["item_key"] for i in res["items"]]
+    assert "APPROVED" in keys  # triage-approved paper stays visible
+    assert res["read_hidden"] == 0
+
+
 def test_gate_off_falls_back_to_priority_then_recency(monkeypatch):
     _patch_state(monkeypatch, _FakeReader([_item("A", "could_read"), _item("B", "must_read")]), None)
     res = reading_queue.build_reading_queue()

@@ -6,7 +6,6 @@ import { StatusBanner, formatShortDate, truncateAuthors } from './shared.jsx';
 import { pretty } from '../../utils/priorityLabels.js';
 import { CHIP_TONE, bandTone, gradeTone, BAND_LABEL } from '../paper/review/tones.js';
 import { Disclosure } from '../paper/review/primitives.jsx';
-import { isHighPrestige } from '../../utils/relevanceBands.js';
 import { humanizeError } from '../../utils/humanizeError.js';
 import Spinner from '../ui/Spinner.jsx';
 
@@ -105,9 +104,6 @@ export default function ReadNextView({
   // `searchQuery`; `rerankerLoading` = the cross-encoder is still downloading (we
   // show fusion order meanwhile); `semanticUnavailable` = corpus off (text match).
   semantic = false, searchQuery = '', rerankerLoading = false, semanticUnavailable = false,
-  // Library quality floor (median of known prestige) — drives the per-card "top
-  // author/venue" badge so the highest-quality papers are visibly marked.
-  prestigeFloor = null,
 }) {
   const computing = status === 'computing';
   const errored = status === 'error';
@@ -173,27 +169,23 @@ export default function ReadNextView({
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {modelReady && (
-            <span className="flex items-center gap-2 text-[11px] text-slate-500">
-              {computedAt && (
-                <span title="When these relevance scores were last computed">
-                  scores as of {formatShortDate(computedAt)}
-                </span>
-              )}
-              {scoresStale && (
-                <span className="text-amber-600" title="The model was retrained since these scores — Rescore for the latest ranking">
-                  · model updated, rescore for latest
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={onRescore}
-                disabled={computing}
-                className="px-2 py-0.5 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Recompute relevance scores for your whole library (read + unread) against the current model. The first full scan covers ~2,400 papers and can take a few minutes; results appear as they compute and re-scans are fast."
-              >
-                {computing ? 'Scoring…' : 'Rescore'}
-              </button>
-            </span>
+            // One control, not three. The score date is reference (→ title); the
+            // only thing worth saying out loud is "the model changed, rescore" —
+            // so the stale state IS the button (amber + named), the single accent
+            // (Von Restorff). Quiet when current.
+            <button
+              type="button"
+              onClick={onRescore}
+              disabled={computing}
+              title={`Recompute relevance scores for your whole library against the current model${computedAt ? ` · scores as of ${formatShortDate(computedAt)}` : ''}. First full scan (~2,400 papers) can take a few minutes; re-scans are fast.`}
+              className={`px-2 py-0.5 rounded-md border text-[11px] disabled:opacity-50 disabled:cursor-not-allowed ${
+                scoresStale
+                  ? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                  : 'border-slate-300 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              {computing ? 'Scoring…' : scoresStale ? 'Rescore — model updated' : 'Rescore'}
+            </button>
           )}
           <button
             type="button"
@@ -244,7 +236,7 @@ export default function ReadNextView({
           <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
             <input type="checkbox" checked={includeRead} onChange={onToggleIncludeRead}
               className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500" />
-            Show already-read (🧠/👀)
+            Show already-read
           </label>
         </div>
       </div>
@@ -384,19 +376,11 @@ export default function ReadNextView({
                           not scored yet
                         </span>
                       )}
-                      {/* Von Restorff: mark the "best of the best" — high author/
-                          venue prestige (≥ the library's quality floor) — so the
-                          top-quality papers the blend floats up are identifiable.
-                          Distinct ◆/violet from the ★/teal relevance score, and
-                          from the full-text A–D Quality grade. */}
-                      {isHighPrestige(it, prestigeFloor) && (
-                        <span
-                          className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full bg-violet-50 text-violet-800 border border-violet-200 font-semibold"
-                          title="High author/venue prestige — citation percentile at or above your library's median. A quality signal that floats this paper toward the top; distinct from the full-text Quality grade."
-                        >
-                          ◆ top author/venue
-                        </span>
-                      )}
+                      {/* Author/venue prestige is NOT a row chip — it's already
+                          baked into the best-first order (position encodes it), so
+                          a per-row violet "◆ top author/venue" pill was the 4th
+                          colour for a signal the rank already carries. Subtracted;
+                          it stays in the paper's detail. */}
                       {/* The deep-review QUALITY cause for the lift — ONE word per
                           card: the decisive verdict (Highlight/Flag) when present,
                           else the A–D grade. "Quality", never "band" (band = the

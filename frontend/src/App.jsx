@@ -3,6 +3,7 @@ import NavBar from './components/NavBar.jsx';
 import Today from './pages/Today.jsx';
 import Settings from './pages/Settings.jsx';
 import Library from './pages/Library.jsx';
+import PaperReviewPage from './pages/PaperReviewPage.jsx';
 import Ops from './pages/Ops.jsx';
 import Audit from './pages/Audit.jsx';
 import SetupFlow from './pages/SetupFlow.jsx';
@@ -40,6 +41,10 @@ export default function App() {
 
             {/* Library: Read next (default) + Batch label (?mode=batch). */}
             <Route path="/library" element={<Library />} />
+            {/* Full-page interactive deep review — opened in a new tab from a
+                row's "Open full review ↗" (replaces the old static HTML brief as
+                the in-app open target; the HTML artifact still ships for Zotero). */}
+            <Route path="/paper/:itemKey" element={<PaperReviewPage />} />
             {/* Annotate folded into Library's Batch-label mode. */}
             <Route path="/annotate" element={<RedirectTo to="/library" extra={{ mode: 'batch' }} />} />
 

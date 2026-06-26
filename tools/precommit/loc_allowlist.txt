@@ -3,3 +3,4 @@
 # Format: <path> <ceiling-LOC>
 #
 # (empty) — all files are within the 500-LOC limit.
+tests/test_reading_queue.py 551

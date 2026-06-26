@@ -6,6 +6,7 @@ import PaperReaderPane from '../../library/PaperReaderPane.jsx';
 import AskPaperBox from '../../library/AskPaperBox.jsx';
 import OpenBriefButton from '../../library/OpenBriefButton.jsx';
 import VerdictPanel from '../../VerdictPanel.jsx';
+import VerdictPicker from '../../VerdictPicker.jsx';
 import AbstractBlock from './AbstractBlock.jsx';
 import { Section, Disclosure } from '../review/primitives.jsx';
 
@@ -86,9 +87,10 @@ export default function PaperDetailView({
   if (editable) {
     return (
       <>
-        {/* compact: the Abstract/DOI links are low-salience — demote them to a
-            muted strip at the very bottom (below) instead of the top. */}
-        {showLinks && !compact && <LinksRow detail={detail} itemKey={itemKey} />}
+        {/* The Abstract/DOI/PDF links are low-salience navigation — they live in
+            a muted strip at the very BOTTOM (below) on both surfaces, so the page
+            opens on the verdict banner, the decision (Serial Position), never on
+            links. */}
         <div className="divide-y divide-slate-200/60">
           {/* compact drops the "Decide"/"Act" eyebrows — the chip banner + the
               verdict picker are self-evidently those zones (Occam). */}
@@ -116,9 +118,27 @@ export default function PaperDetailView({
             </div>
           </Section>
 
+          {/* Act zone, three salience tiers (Von Restorff: one loud accent):
+              verdict (loud) → collection (quiet, Read Next default) → tags (long
+              tail). The compact card uses the one-tap VerdictPicker; the full
+              page uses the VerdictPanel (comment + delete live there — Tesler:
+              the rare op gets the larger surface). */}
           <Section label={compact ? undefined : 'Act'}>
             <div className="space-y-4">
-              {showVerdict && (
+              {showVerdict && (compact ? (
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 mb-2">Your verdict</h3>
+                  <VerdictPicker
+                    value={verdict.existing?.user_priority ?? null}
+                    onPick={(p) => verdict.onSubmit({ user_priority: p, comment: '' })}
+                    disabled={verdict.submitting}
+                    size="md"
+                  />
+                  {verdict.submitError && (
+                    <div className="mt-1 text-[11px] text-rose-700">{verdict.submitError}</div>
+                  )}
+                </div>
+              ) : (
                 <VerdictPanel
                   itemKey={itemKey}
                   derivedPriority={verdict.derivedPriority}
@@ -130,31 +150,32 @@ export default function PaperDetailView({
                   deleting={verdict.deleting}
                   deleteError={verdict.deleteError}
                 />
+              ))}
+              {/* Collection lifted OUT of the disclosure — filing into Read Next
+                  is a daily primary action, not the long tail (Pareto / Serial
+                  Position): one click, default preselected. */}
+              {showCollection && (
+                <CollectionEditor
+                  itemKey={itemKey}
+                  current={detail.collections}
+                  collections={collections}
+                  onChanged={onCollectionsChanged}
+                />
               )}
-              {/* Tags + collections behind ONE disclosure — secondary filing the
-                  verdict doesn't depend on (Hick's Law: the Act zone leads with
-                  the verdict, not three stacked editors). */}
-              {(showTags || showCollection) && (
-                <Disclosure summary="Tags & collections">
-                  <div className="space-y-4">
-                    {showTags && (
-                      <TagOfInterestEditor itemKey={itemKey} tags={detail.tags} onChanged={onTagsChanged} />
-                    )}
-                    {showCollection && (
-                      <CollectionEditor
-                        itemKey={itemKey}
-                        current={detail.collections}
-                        collections={collections}
-                        onChanged={onCollectionsChanged}
-                      />
-                    )}
-                  </div>
+              {/* Tags = the long tail — folded behind a disclosure on BOTH
+                  surfaces (Miller / subtract-20%): a paper can carry 10+ subject
+                  tags that would wrap into a noisy strip next to the decision. The
+                  verdict (loud) and collection (visible) stay; tags are one click
+                  away when you want to change them. */}
+              {showTags && (
+                <Disclosure summary="Tags">
+                  <TagOfInterestEditor itemKey={itemKey} tags={detail.tags} onChanged={onTagsChanged} />
                 </Disclosure>
               )}
             </div>
           </Section>
         </div>
-        {showLinks && compact && (
+        {showLinks && (
           <div className="pt-3 text-[11px]">
             <LinksRow detail={detail} itemKey={itemKey} />
           </div>
