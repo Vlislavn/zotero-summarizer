@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchReviewDetail, submitVerdict, deleteVerdict } from '../../api/goldenApi.js';
 import { queueRejectTag } from '../../api/libraryApi.js';
@@ -35,8 +34,6 @@ export default function InlineAnnotate({
     },
   });
   const deleteMutation = useMutation({ mutationFn: () => deleteVerdict(itemKey) });
-  // Open/closed state of the embedded paper-brief pane.
-  const [readerOpen, setReaderOpen] = useState(false);
   const detail = detailQuery.data;
 
   function refreshDetail() {
@@ -57,8 +54,11 @@ export default function InlineAnnotate({
           detail={detail}
           itemKey={itemKey}
           collections={collections}
-          readerOpen={readerOpen}
-          onReaderOpenChange={setReaderOpen}
+          // Compact decision card: the full digest/figures/abstract live in the
+          // new-tab brief — show the verdict spine + "Open full review", not a
+          // duplicate of the brief. Reader/abstract off via the show flags.
+          compact
+          show={{ reader: false, abstract: false }}
           onDeepReviewDone={refreshDetail}
           onTagsChanged={() => { refreshDetail(); onQueueRefresh?.(); }}
           onCollectionsChanged={() => { refreshDetail(); onQueueRefresh?.(); }}

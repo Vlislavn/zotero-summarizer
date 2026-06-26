@@ -4,6 +4,7 @@ import TagOfInterestEditor from '../TagOfInterestEditor.jsx';
 import CollectionEditor from '../CollectionEditor.jsx';
 import PaperReaderPane from '../../library/PaperReaderPane.jsx';
 import AskPaperBox from '../../library/AskPaperBox.jsx';
+import OpenBriefButton from '../../library/OpenBriefButton.jsx';
 import VerdictPanel from '../../VerdictPanel.jsx';
 import AbstractBlock from './AbstractBlock.jsx';
 import { Section, Disclosure } from '../review/primitives.jsx';
@@ -51,6 +52,10 @@ export default function PaperDetailView({
   detail,
   itemKey,
   show = {},
+  // compact (Library row card): drop the per-goal board, demote Ask behind a
+  // disclosure, and lead the Decide zone with "Open full review" — the full
+  // digest/figures/abstract live in the new-tab brief, not duplicated inline.
+  compact = false,
   readerOpen = false,
   onReaderOpenChange,
   collections = [],
@@ -67,7 +72,7 @@ export default function PaperDetailView({
   // Per-mode defaults that mirror what each surface renders today.
   const showLinks = show.links ?? true;
   const showDeepReview = show.deepReview ?? true;
-  const showReader = (show.reader ?? true) && hasPdf;
+  const showReader = show.reader ?? true;
   const showAsk = (show.ask ?? true) && hasPdf;
   const showAbstract = show.abstract ?? true;
   const showTags = show.tags ?? true; // both surfaces render the tag editor
@@ -81,25 +86,37 @@ export default function PaperDetailView({
   if (editable) {
     return (
       <>
-        {showLinks && <LinksRow detail={detail} itemKey={itemKey} />}
+        {/* compact: the Abstract/DOI links are low-salience — demote them to a
+            muted strip at the very bottom (below) instead of the top. */}
+        {showLinks && !compact && <LinksRow detail={detail} itemKey={itemKey} />}
         <div className="divide-y divide-slate-200/60">
-          <Section label="Decide">
+          {/* compact drops the "Decide"/"Act" eyebrows — the chip banner + the
+              verdict picker are self-evidently those zones (Occam). */}
+          <Section label={compact ? undefined : 'Decide'}>
             <div className="space-y-4">
+              {compact && (
+                <OpenBriefButton itemKey={itemKey} hasPdf={hasPdf} label="Open full review ↗" />
+              )}
               <DeepReviewSection
                 itemKey={itemKey}
                 deep={detail.deep_review}
                 hasPdf={hasPdf}
                 onDone={onDeepReviewDone}
+                compact={compact}
               />
               {showReader && (
-                <PaperReaderPane itemKey={itemKey} open={readerOpen} onOpenChange={onReaderOpenChange} />
+                <PaperReaderPane itemKey={itemKey} open={readerOpen} onOpenChange={onReaderOpenChange} hasPdf={hasPdf} />
               )}
               {showAbstract && <AbstractBlock abstract={detail.abstract} variant="details" />}
-              {showAsk && <AskPaperBox itemKey={itemKey} />}
+              {showAsk && (
+                compact
+                  ? <Disclosure summary="Ask this paper"><AskPaperBox itemKey={itemKey} /></Disclosure>
+                  : <AskPaperBox itemKey={itemKey} />
+              )}
             </div>
           </Section>
 
-          <Section label="Act">
+          <Section label={compact ? undefined : 'Act'}>
             <div className="space-y-4">
               {showVerdict && (
                 <VerdictPanel
@@ -137,6 +154,11 @@ export default function PaperDetailView({
             </div>
           </Section>
         </div>
+        {showLinks && compact && (
+          <div className="pt-3 text-[11px]">
+            <LinksRow detail={detail} itemKey={itemKey} />
+          </div>
+        )}
         {extras}
       </>
     );
@@ -161,7 +183,7 @@ export default function PaperDetailView({
           <Section>
             <div className="space-y-4">
               {showReader && (
-                <PaperReaderPane itemKey={itemKey} open={readerOpen} onOpenChange={onReaderOpenChange} />
+                <PaperReaderPane itemKey={itemKey} open={readerOpen} onOpenChange={onReaderOpenChange} hasPdf={hasPdf} />
               )}
               {showAsk && <AskPaperBox itemKey={itemKey} />}
             </div>

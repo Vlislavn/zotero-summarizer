@@ -1,6 +1,6 @@
 import { Section, SectionLabel, Disclosure, Chip, KeyVal, Bullets } from './primitives.jsx';
 import {
-  gradeTone, BAND_LABEL, VERDICT_ACCENT,
+  gradeTone, bandTone, BAND_LABEL, VERDICT_ACCENT,
 } from './tones.js';
 import {
   bandGloss, METHOD_CLAUSE, LEGEND, rubricLabel, paperTypeLabel,
@@ -18,7 +18,7 @@ const STATE_LABEL = {
 // language, reading-grade type, flat hierarchy (Common Region / Uniform
 // Connectedness: hairline dividers + whitespace, not nested boxes). Reads the
 // SAME as the standalone presentation.html (briefModel mirrors the server).
-export default function PaperReview({ deep }) {
+export default function PaperReview({ deep, compact = false }) {
   if (!deep) return null;
   const digest = deep.digest || null;
   const quality = deep.quality || null;
@@ -60,13 +60,23 @@ export default function PaperReview({ deep }) {
   const tldr = digest?.tldr || '';
 
   return (
-    <div className="text-slate-800">
-      {/* Verdict banner — the single loud element (Von Restorff). */}
+    <div className="review-prose text-slate-800">
+      {/* Verdict banner — the single loud element (Von Restorff). In the compact
+          Library card every signal is a chip on this ONE row (grade + band +
+          red-flag count), each hide-when-empty, so the glance is pre-attentive
+          (colour carries the verdict) and the gloss/coverage/flag-text all move
+          into Details. Full surfaces keep the labelled "Quality {grade}" chip. */}
       <div className={`rounded-lg border-l-[3px] px-3.5 py-3 ${VERDICT_ACCENT[verdict.key] || VERDICT_ACCENT.skip}`}>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[15px] font-extrabold tracking-tight text-slate-900">{verdict.label}</span>
+          <span className="font-display text-[22px] font-light tracking-tight text-slate-900">{verdict.label}</span>
           {grade && (
-            <Chip tone={gradeTone(grade)} title="Reference-free full-text quality grade">Quality {grade}</Chip>
+            <Chip tone={gradeTone(grade)} title="Reference-free full-text quality grade">
+              {compact ? grade : `Quality ${grade}`}
+            </Chip>
+          )}
+          {compact && band && <Chip tone={bandTone(band)}>{BAND_LABEL[band] || '—'}</Chip>}
+          {compact && redFlags.length > 0 && (
+            <Chip tone="rose" title={redFlags.slice(0, 3).join('; ')}>⚠ {redFlags.length}</Chip>
           )}
         </div>
         {verdict.reason && (
@@ -78,13 +88,18 @@ export default function PaperReview({ deep }) {
           sections immediately below it, "Relevance to your goals" + "Quality —
           {band}", which carry the same numbers with their own labels.) */}
       <div className="mt-2 divide-y divide-slate-200/60">
-        {goals.length > 0 && (
+        {/* compact (Library row card): the per-goal board is the biggest block and
+            is reachable in the new-tab brief — drop it, keep the decision spine. */}
+        {!compact && goals.length > 0 && (
           <Section label="Relevance to your goals">
             <GoalBoard goals={goals} />
           </Section>
         )}
 
-        {quality && (
+        {/* Full quality headline on the full surfaces; in compact the band +
+            red-flag count already live as chips in the banner row above, so the
+            standalone section is dropped (gloss/coverage move into Details). */}
+        {quality && !compact && (
           <Section label={`Quality — ${BAND_LABEL[band] || '—'}`}>
             <QualityHeadline quality={quality} band={band} />
           </Section>
@@ -93,11 +108,12 @@ export default function PaperReview({ deep }) {
         {/* Decision-only by default (Cognitive Load / Miller): everything below the
             call — the TLDR, how the grade was reached, the full rubric, the
             structured digest — lives behind ONE disclosure. Quiet by default, deep
-            on demand. */}
+            on demand. In compact, the full quality headline lives here too. */}
         {(tldr || quality || digest) && (
           <Section>
             <Disclosure summary="Details">
               <div className="space-y-4">
+                {compact && quality && <QualityHeadline quality={quality} band={band} />}
                 {tldr && (
                   <p className="text-[14px] leading-relaxed text-slate-800 max-w-[66ch]">{tldr}</p>
                 )}
@@ -108,13 +124,21 @@ export default function PaperReview({ deep }) {
                     <div className="mt-1.5"><DigestRows digest={digest} /></div>
                   </div>
                 )}
+                {/* compact: the reviewed/saved provenance is low-salience — it
+                    lives in the Details tail, not on the glance surface. */}
+                {compact && (deep.reviewed_at || deep.zotero_note_written) && (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-400">
+                    {deep.reviewed_at && <span>reviewed {formatShortDate(deep.reviewed_at)}</span>}
+                    {deep.zotero_note_written && <span className="text-emerald-600">saved to Zotero ✓</span>}
+                  </div>
+                )}
               </div>
             </Disclosure>
           </Section>
         )}
       </div>
 
-      {(deep.reviewed_at || deep.zotero_note_written || deep.zotero_note_error) && (
+      {!compact && (deep.reviewed_at || deep.zotero_note_written || deep.zotero_note_error) && (
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-400">
           {deep.reviewed_at && <span>reviewed {formatShortDate(deep.reviewed_at)}</span>}
           {deep.zotero_note_written && <span className="text-emerald-600">saved to Zotero ✓</span>}
@@ -204,7 +228,7 @@ function QualityHeadline({ quality, band }) {
           it met, and which critical ones are missing (each is a grounded checklist item
           in the full checklist below). */}
       {applicable > 0 && (
-        <div className="rounded-md border border-slate-200/70 bg-white/60 px-3 py-2">
+        <div>
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[13px]">
             {standard && <span className="font-semibold text-slate-900">{standard}</span>}
             <span className="text-slate-700">{met}/{applicable} applicable items met</span>

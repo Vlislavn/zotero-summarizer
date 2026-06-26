@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import InlineAnnotate from './InlineAnnotate.jsx';
-import ProposedVerdictCard from './ProposedVerdictCard.jsx';
+import OpenBriefButton from './OpenBriefButton.jsx';
 import ScoreHistogram from './ScoreHistogram.jsx';
 import { StatusBanner, formatShortDate, truncateAuthors } from './shared.jsx';
+import { pretty } from '../../utils/priorityLabels.js';
 import { CHIP_TONE, bandTone, gradeTone, BAND_LABEL } from '../paper/review/tones.js';
+import { Disclosure } from '../paper/review/primitives.jsx';
 import { isHighPrestige } from '../../utils/relevanceBands.js';
 import { humanizeError } from '../../utils/humanizeError.js';
 import Spinner from '../ui/Spinner.jsx';
@@ -13,12 +15,79 @@ import Spinner from '../ui/Spinner.jsx';
 // Read/handled items are hidden unless toggled. An opt-in "Select" mode reveals
 // checkboxes for bulk triage (the merged Browse/triage flow), kept secondary.
 const REVEAL_STEP = 60;  // rows revealed initially and per "Show more" click
+const DESKTOP_QUERY = '(min-width: 1024px)';
 
 // Your explicit verdict label. A positive verdict pins the paper to the top of
 // Read next (the backend sort) — this chip marks it so a labelled paper is
 // instantly recognisable instead of vanishing (dont_read is handled-filtered,
 // so it never reaches the queue and isn't in this map).
 const USER_PRIORITY_LABEL = { must_read: 'must read', should_read: 'should read', could_read: 'could read' };
+
+function useMediaQuery(query) {
+  const getMatches = () => (
+    typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia(query).matches
+  );
+  const [matches, setMatches] = useState(getMatches);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
+    const mql = window.matchMedia(query);
+    const onChange = (event) => setMatches(event.matches);
+    setMatches(mql.matches);
+    if (typeof mql.addEventListener === 'function') {
+      mql.addEventListener('change', onChange);
+      return () => mql.removeEventListener('change', onChange);
+    }
+    mql.addListener(onChange);
+    return () => mql.removeListener(onChange);
+  }, [query]);
+
+  return matches;
+}
+
+function ExpandedPaperPanel({
+  item, collections, onClose, onSaved, onQueueRefresh, panelRef, variant = 'mobile',
+}) {
+  const desktop = variant === 'desktop';
+  return (
+    <aside
+      ref={panelRef}
+      data-testid="expanded-paper-panel"
+      aria-label={`Review ${item.title || item.item_key}`}
+      className={
+        desktop
+          ? 'mt-2 lg:mt-0 lg:w-[44%] lg:shrink-0 lg:sticky lg:top-2 lg:self-start lg:max-h-[86vh] lg:overflow-auto rounded-xl border border-teal-200 bg-white shadow-sm'
+          : 'mt-2 rounded-xl border border-teal-200 bg-white'
+      }
+    >
+      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-100">
+        <span className="min-w-0 text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-400 truncate">
+          {item.title || '(untitled)'}
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          title="Close review"
+          aria-label="Close review"
+          className="shrink-0 px-2 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+        >
+          ✕
+        </button>
+      </div>
+      <div className={desktop ? 'p-1' : 'p-2 overflow-x-hidden'}>
+        <InlineAnnotate
+          itemKey={item.item_key}
+          collections={collections}
+          derivedPriorityOverride={item.proposed_verdict?.proposed || null}
+          onSaved={onSaved}
+          onQueueRefresh={onQueueRefresh}
+        />
+      </div>
+    </aside>
+  );
+}
 
 export default function ReadNextView({
   items, loading, err, includeRead, onToggleIncludeRead,
@@ -43,6 +112,8 @@ export default function ReadNextView({
   const computing = status === 'computing';
   const errored = status === 'error';
   const [expandedKey, setExpandedKey] = useState(null);
+  const expandedPanelRef = useRef(null);
+  const isDesktop = useMediaQuery(DESKTOP_QUERY);
   // Target for the bulk "Add to collection" action. Defaults to the last-used
   // collection (validated against the current list) so the routine "send picks
   // to my reading collection" is select → one click.
@@ -59,9 +130,29 @@ export default function ReadNextView({
   // reset the reveal here instead.
   useEffect(() => { setVisibleCount(REVEAL_STEP); }, [filterSig]);
   const shown = items.slice(0, visibleCount);
-  // The expanded review renders in a RIGHT-SIDE panel (not full-width below the row),
-  // so the list stays readable while you decide — "чуть правее, не размером с основную".
+  // Desktop keeps the review beside the list. Mobile renders it directly under
+  // the tapped row; otherwise the panel lands after the whole revealed list.
   const expandedItem = expandedKey ? items.find((it) => it.item_key === expandedKey) : null;
+  useEffect(() => {
+    if (!expandedKey || isDesktop) return;
+    const node = expandedPanelRef.current;
+    if (node && typeof node.scrollIntoView === 'function') {
+      const schedule = typeof window.requestAnimationFrame === 'function'
+        ? window.requestAnimationFrame
+        : (fn) => setTimeout(fn, 0);
+      schedule(() => node.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+    }
+  }, [expandedKey, isDesktop]);
+
+  function closeExpanded() {
+    setExpandedKey(null);
+  }
+
+  function saveExpanded() {
+    setExpandedKey(null);
+    onSaved?.();
+  }
+
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
@@ -157,8 +248,18 @@ export default function ReadNextView({
           </label>
         </div>
       </div>
-      {modelReady && (
-        <ScoreHistogram distribution={distribution} activeBands={activeBands} onBandClick={onBandClick} />
+      {/* Score distribution is reference, not the task — fold it behind the shared
+          Disclosure (closed by default) so the ranked queue owns the top of the
+          surface (Serial Position). Active band-filters surface in the summary. */}
+      {modelReady && distribution && (
+        <div className="mb-3">
+          <Disclosure
+            summary="Score distribution"
+            count={activeBands?.length ? `${activeBands.length} band filter${activeBands.length === 1 ? '' : 's'}` : null}
+          >
+            <ScoreHistogram distribution={distribution} activeBands={activeBands} onBandClick={onBandClick} />
+          </Disclosure>
+        </div>
       )}
       {rerankerLoading && (
         <div className="mb-2 flex items-center gap-2 text-xs text-slate-600">
@@ -190,7 +291,7 @@ export default function ReadNextView({
                   ? 'Zotero database was busy. Close Zotero if it’s open, then retry.'
                   : `Failed to load queue: ${humanizeError(err)}`
             }
-            isError
+            tone={err.status === 503 ? 'warn' : 'error'}
           />
           {onReload && (
             <button
@@ -223,8 +324,8 @@ export default function ReadNextView({
           </div>
         )
       )}
-      <div className={expandedItem ? 'lg:flex lg:gap-3 lg:items-start' : ''}>
-      <ol className={`space-y-2 ${expandedItem ? 'lg:flex-1 lg:min-w-0' : ''}`}>
+      <div className={expandedItem && isDesktop ? 'lg:flex lg:gap-3 lg:items-start' : ''}>
+      <ol className={`space-y-2 ${expandedItem && isDesktop ? 'lg:flex-1 lg:min-w-0' : ''}`}>
         {shown.map((it, idx) => (
           <li key={it.item_key}>
             <div
@@ -244,14 +345,14 @@ export default function ReadNextView({
                 type="button"
                 onClick={() => setExpandedKey(expandedKey === it.item_key ? null : it.item_key)}
                 aria-expanded={expandedKey === it.item_key}
-                className="min-w-0 flex-1 text-left flex items-start gap-3"
+                className="min-w-0 flex-1 text-left flex items-start gap-2 sm:gap-3"
               >
                 <span className="mono text-xs text-slate-400 mt-0.5 w-6 shrink-0 text-right">{idx + 1}</span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium text-slate-900 truncate">{it.title || '(untitled)'}</span>
-                  <span className="block text-xs text-slate-500 truncate">{truncateAuthors(it.authors)}</span>
-                  {(it.user_priority || typeof it.relevance_score === 'number') && (
-                    <span className="mt-0.5 flex items-center gap-2 text-[11px]">
+                  <span className="block text-sm font-medium text-slate-900 line-clamp-2 sm:truncate">{it.title || '(untitled)'}</span>
+                  <span className="block text-xs text-slate-500 line-clamp-1 sm:truncate">{truncateAuthors(it.authors)}</span>
+                  {(it.user_priority || it.proposed_verdict?.proposed || typeof it.relevance_score === 'number') && (
+                    <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-5">
                       {/* Your label leads the row (Von Restorff): a paper you
                           marked is pinned to the top of Read next and flagged
                           here, so labelling makes it findable, never hidden. */}
@@ -261,6 +362,17 @@ export default function ReadNextView({
                           title="Your label — you set this paper's reading priority, so it's pinned to the top of Read next."
                         >
                           🏷 {USER_PRIORITY_LABEL[it.user_priority]}
+                        </span>
+                      )}
+                      {/* The fleet's pre-decided verdict — quiet, info-only (one
+                          chip, not a card). Open the row to confirm/change it (it's
+                          pre-selected there). Hidden once you've set your own label. */}
+                      {!it.user_priority && it.proposed_verdict?.proposed && (
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200"
+                          title="The review fleet's suggested reading verdict (from cached deep-review signals). Open the paper to confirm or change it — it's pre-selected."
+                        >
+                          ◇ {pretty(it.proposed_verdict.proposed)}
                         </span>
                       )}
                       {typeof it.relevance_score === 'number' ? (
@@ -318,56 +430,40 @@ export default function ReadNextView({
                     </span>
                   )}
                 </span>
-                <span className="flex items-center gap-2 shrink-0">
+                <span className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 shrink-0">
                   {it.read && <span title="already read" className="text-xs">🧠</span>}
                   <span className={`inline-block w-2.5 h-2.5 rounded-full ${it.has_pdf ? 'bg-emerald-500' : 'bg-slate-300'}`} title={it.has_pdf ? 'PDF attached' : 'No PDF'} />
                 </span>
               </button>
+              {/* Direct shortcut to the standalone HTML brief — a sibling of the
+                  expand button (not nested inside it). Builds on demand if the
+                  brief hasn't been generated yet, then opens it in a new tab. */}
+              <OpenBriefButton itemKey={it.item_key} hasPdf={Boolean(it.has_pdf)} />
             </div>
-            {/* The fleet pre-decided a verdict → the Confirm/Override card (Phase
-                2). One-tap ratify, or Override to expand the full editor below
-                with the proposal pre-selected. Hidden once the row is expanded
-                (the editor takes over) — exactly two paths, never both at once. */}
-            {/* The fleet's Confirm/Override card stays inline on the row (small,
-                one-tap). The FULL expanded editor moves to the right-side panel. */}
-            {it.proposed_verdict && expandedKey !== it.item_key && (
-              <ProposedVerdictCard
-                itemKey={it.item_key}
-                proposal={it.proposed_verdict}
-                onSaved={() => { setExpandedKey(null); onSaved?.(); }}
-                onOverride={() => setExpandedKey(it.item_key)}
+            {expandedKey === it.item_key && !isDesktop && (
+              <ExpandedPaperPanel
+                item={it}
+                collections={collections}
+                panelRef={expandedPanelRef}
+                onClose={closeExpanded}
+                onSaved={saveExpanded}
+                onQueueRefresh={() => onSaved?.()}
               />
             )}
           </li>
         ))}
       </ol>
       {/* Right-side review panel — the expanded paper detail, sticky beside the list
-          (stacks below on mobile). Narrower than the list, so the queue stays usable. */}
-      {expandedItem && (
-        <aside className="mt-2 lg:mt-0 lg:w-[44%] lg:shrink-0 lg:sticky lg:top-2 lg:self-start lg:max-h-[86vh] lg:overflow-auto rounded-xl border border-teal-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-slate-100">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-400 truncate">
-              {expandedItem.title || '(untitled)'}
-            </span>
-            <button
-              type="button"
-              onClick={() => setExpandedKey(null)}
-              title="Close review"
-              className="shrink-0 px-1.5 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-            >
-              ✕
-            </button>
-          </div>
-          <div className="p-1">
-            <InlineAnnotate
-              itemKey={expandedItem.item_key}
-              collections={collections}
-              derivedPriorityOverride={expandedItem.proposed_verdict?.proposed || null}
-              onSaved={() => { setExpandedKey(null); onSaved?.(); }}
-              onQueueRefresh={() => onSaved?.()}
-            />
-          </div>
-        </aside>
+          on desktop. Narrower than the list, so the queue stays usable. */}
+      {expandedItem && isDesktop && (
+        <ExpandedPaperPanel
+          item={expandedItem}
+          collections={collections}
+          onClose={closeExpanded}
+          onSaved={saveExpanded}
+          onQueueRefresh={() => onSaved?.()}
+          variant="desktop"
+        />
       )}
       </div>
       {items.length > shown.length && (

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { PRIORITY_LABELS, pretty } from '../utils/priorityLabels.js';
+import { formatShortDate } from './library/shared.jsx';
 
 // Verdict editor for a single paper.
 // Props:
@@ -89,7 +90,7 @@ export default function VerdictPanel({
               {pretty(existingVerdict.user_priority)}
             </span>
             {existingVerdict.created_at && (
-              <span className="text-slate-400">{' '}· {existingVerdict.created_at}</span>
+              <span className="text-slate-400">{' '}· {formatShortDate(existingVerdict.created_at)}</span>
             )}
           </span>
           {existingVerdict.comment && (

@@ -19,7 +19,7 @@ function formatDuration(seconds) {
 // owns the run control: a button that runs a full-text LLM digest and polls
 // until done, then calls onDone() to refetch. Pre-empts a missing PDF, an
 // unreachable model, and an already-running review. Shared by Library + Annotate.
-export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true }) {
+export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true, compact = false }) {
   const [status, setStatus] = useState({ status: 'idle', completed: 0, total: 0, error: null });
   const [error, setError] = useState(null);
   const [focusPrompt, setFocusPrompt] = useState('');
@@ -116,7 +116,7 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
         </div>
       )}
 
-      {reviewed && <PaperReview deep={deep} />}
+      {reviewed && <PaperReview deep={deep} compact={compact} />}
 
       {!hasPdf && !reviewed && (
         <div className="text-[12px] text-slate-500">
@@ -124,6 +124,12 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
           (open access, PubMed Central, then your library session).
         </div>
       )}
+      {/* In the compact Library card a FINISHED review needs no run controls —
+          textarea + Re-run are pure clutter on a done paper, so the whole block is
+          hidden when compact && reviewed && !running. It still shows when there's
+          no review yet (to build one) or while one is running. Re-run-with-focus
+          lives in the full review / Annotate. */}
+      {!(compact && reviewed && !running) && (
       <div className="space-y-2">
           <textarea
             value={focusPrompt}
@@ -137,7 +143,7 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
           <button
             type="button"
             onClick={handleRun}
-            disabled={running}
+            disabled={running || llm?.reachable === false}
             className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-teal-700 text-white text-[13px] font-semibold hover:bg-teal-800 disabled:opacity-50"
             title="Run a condensed full-text digest (what it's about + how to use it + quality)"
           >
@@ -151,6 +157,7 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
               : reviewed ? 'Re-run deeper review' : 'Run deeper review'}
           </button>
       </div>
+      )}
       {running && (
         <div className="text-[12px] text-teal-700 space-y-0.5">
           <div>This paper's deep review is running — it appears here when it's done.</div>

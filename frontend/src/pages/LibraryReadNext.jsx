@@ -73,6 +73,20 @@ export default function LibraryReadNext() {
   const [tags, setTags] = useState([]);
   const [selectedCollection, setSelectedCollection] = useState('');
   const [selectedTag, setSelectedTag] = useState('');
+  // "Browse & filter" drawer (collections + tags + smart filters). Default open on
+  // desktop / collapsed on mobile, then remembered — frequent collection switching
+  // shouldn't cost a click on a wide screen, and shouldn't eat height on a phone.
+  const [browseOpen, setBrowseOpen] = useState(() => {
+    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('zs:libraryBrowseOpen') : null;
+    if (saved !== null) return saved === '1';
+    return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(min-width: 1024px)').matches
+      : true;
+  });
+  function toggleBrowse(open) {
+    setBrowseOpen(open);
+    try { localStorage.setItem('zs:libraryBrowseOpen', open ? '1' : '0'); } catch { /* storage unavailable — keep in-memory */ }
+  }
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [selectMode, setSelectMode] = useState(false);
@@ -457,80 +471,23 @@ export default function LibraryReadNext() {
     );
   }
 
+  // Active scope shown in the collapsed drawer summary so folding it never hides
+  // what's applied (Working Memory). Collection name (not key), tag, filters-on.
+  const browseScope = [
+    flatCollections.find((c) => c.key === selectedCollection)?.name,
+    selectedTag && `# ${selectedTag}`,
+    filtersActive && 'filters on',
+  ].filter(Boolean);
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-      {/* ----- Sidebar: collections + top tags ----- */}
-      <aside className="glass rounded-2xl border border-slate-200 p-3 lg:col-span-1">
-        <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Collections</h2>
-        <div className="max-h-72 overflow-auto pr-1 slim-scroll">
-          <button
-            type="button"
-            onClick={() => selectCollection('')}
-            className={`w-full text-left text-xs px-2 py-1 rounded mb-1 ${
-              selectedCollection === ''
-                ? 'bg-teal-600 text-white'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-            }`}
-          >
-            All items
-          </button>
-          {flatCollections.map((entry) => (
-            <button
-              type="button"
-              key={entry.key}
-              onClick={() => selectCollection(entry.key)}
-              style={{ paddingLeft: 8 + entry.depth * 14 }}
-              className={`w-full text-left text-xs px-2 py-1 rounded mb-1 ${
-                selectedCollection === entry.key
-                  ? 'bg-teal-600 text-white'
-                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
-            >
-              <span>{entry.name}</span>
-              <span className="mono opacity-70"> ({entry.item_count})</span>
-            </button>
-          ))}
-        </div>
-
-        <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500 mt-4 mb-2">Top Tags</h2>
-        <div className="max-h-64 overflow-auto pr-1 slim-scroll">
-          <button
-            type="button"
-            onClick={() => selectTag('')}
-            className={`w-full text-left text-xs px-2 py-1 rounded mb-1 ${
-              selectedTag === ''
-                ? 'bg-amber-600 text-white'
-                : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
-            }`}
-          >
-            All tags
-          </button>
-          {tags.slice(0, 100).map((tagEntry) => (
-            <button
-              type="button"
-              key={tagEntry.tag}
-              onClick={() => selectTag(tagEntry.tag)}
-              className={`w-full text-left text-xs px-2 py-1 rounded mb-1 ${
-                selectedTag === tagEntry.tag
-                  ? 'bg-amber-600 text-white'
-                  : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
-              }`}
-            >
-              <span>{tagEntry.tag}</span>
-              <span className="mono opacity-70"> ({tagEntry.item_count})</span>
-            </button>
-          ))}
-        </div>
-      </aside>
-
-      {/* ----- Main: the single Read-next surface, three labelled regions so the
-          read-only FIND, the suggestion-making REVIEW QUEUE, and the
-          whole-library-WRITE EXPORT can't be confused for one another (the old
-          one-column jumble put "Predict" next to the Zotero "last synced" line, so
-          a click on Predict looked like it should change a Sync timestamp). One
-          outer border; sections separated by the hairline rhythm only. ----- */}
-      <div className="glass rounded-2xl border border-slate-200 p-3 lg:col-span-3 divide-y divide-slate-200/60">
-        {/* Region A — FIND: read-only, instant scoping (search + smart filters). */}
+    <div>
+      {/* ----- Single full-width Read-next surface (Stage 2). Collections, tags,
+          and smart filters fold into ONE "Browse & filter" drawer so the ranked
+          queue + decision card own the whole width. Three labelled regions keep
+          read-only FIND, suggestion-making REVIEW QUEUE, and whole-library WRITE
+          EXPORT distinct; one outer border, hairline rhythm between. ----- */}
+      <div className="glass rounded-2xl border border-slate-200 p-3 divide-y divide-slate-200/60">
+        {/* Region A — FIND: read-only, instant scoping (search + browse drawer). */}
         <Section label="Find">
           <div className="flex flex-wrap gap-2 items-center">
             <input
@@ -554,21 +511,108 @@ export default function LibraryReadNext() {
             )}
           </div>
 
-          {/* Smart client-side filters live WITH search (same cluster: scope the
-              queue). Only meaningful once the model has scored the library
-              (bands/prestige/goal all key off the relevance score). */}
-          {queueMeta.model_ready && queue.length > 0 && (
-            <div className="mt-3">
-              <LibraryFilterBar
-                filters={clientFilters}
-                onChange={setClientFilters}
-                whyOptions={whyOptions}
-                goalEnabled={goalEnabled}
-                qualityEnabled={qualityEnabled}
-                onClear={clearClientFilters}
-              />
+          {/* Collections + tags + smart filters in ONE collapsible drawer. The
+              summary carries the active scope (Working Memory), so a collapsed
+              drawer never hides what's filtering the queue. */}
+          <details
+            open={browseOpen}
+            onToggle={(e) => toggleBrowse(e.currentTarget.open)}
+            className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60"
+          >
+            <summary className="cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden px-3 py-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 rounded-xl">
+              <span className="font-semibold uppercase tracking-wider text-slate-400">Browse &amp; filter</span>
+              {browseScope.length === 0 ? (
+                <span className="text-slate-400">all items</span>
+              ) : (
+                browseScope.map((s) => (
+                  <span key={s} className="inline-flex items-center px-1.5 py-0 rounded-full bg-white border border-slate-200 text-slate-600">{s}</span>
+                ))
+              )}
+              <span className="ml-auto text-slate-400" aria-hidden="true">{browseOpen ? '▾' : '▸'}</span>
+            </summary>
+
+            <div className="px-3 pb-3 pt-1 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
+              <div>
+                <h2 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-2">Collections</h2>
+                <div className="max-h-56 overflow-auto pr-1 slim-scroll">
+                  <button
+                    type="button"
+                    onClick={() => selectCollection('')}
+                    className={`w-full text-left text-xs px-2 py-1 rounded mb-1 ${
+                      selectedCollection === ''
+                        ? 'bg-teal-600 text-white'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    All items
+                  </button>
+                  {flatCollections.map((entry) => (
+                    <button
+                      type="button"
+                      key={entry.key}
+                      onClick={() => selectCollection(entry.key)}
+                      style={{ paddingLeft: 8 + entry.depth * 14 }}
+                      className={`w-full text-left text-xs px-2 py-1 rounded mb-1 ${
+                        selectedCollection === entry.key
+                          ? 'bg-teal-600 text-white'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      <span>{entry.name}</span>
+                      <span className="mono opacity-70"> ({entry.item_count})</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <h2 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-2">Top Tags</h2>
+                <div className="max-h-56 overflow-auto pr-1 slim-scroll">
+                  <button
+                    type="button"
+                    onClick={() => selectTag('')}
+                    className={`w-full text-left text-xs px-2 py-1 rounded mb-1 ${
+                      selectedTag === ''
+                        ? 'bg-amber-600 text-white'
+                        : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+                    }`}
+                  >
+                    All tags
+                  </button>
+                  {tags.slice(0, 100).map((tagEntry) => (
+                    <button
+                      type="button"
+                      key={tagEntry.tag}
+                      onClick={() => selectTag(tagEntry.tag)}
+                      className={`w-full text-left text-xs px-2 py-1 rounded mb-1 ${
+                        selectedTag === tagEntry.tag
+                          ? 'bg-amber-600 text-white'
+                          : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+                      }`}
+                    >
+                      <span>{tagEntry.tag}</span>
+                      <span className="mono opacity-70"> ({tagEntry.item_count})</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
-          )}
+
+            {/* Smart client-side filters — only meaningful once the model has scored
+                the library (bands/prestige/goal all key off the relevance score). */}
+            {queueMeta.model_ready && queue.length > 0 && (
+              <div className="px-3 pb-3">
+                <LibraryFilterBar
+                  filters={clientFilters}
+                  onChange={setClientFilters}
+                  whyOptions={whyOptions}
+                  goalEnabled={goalEnabled}
+                  qualityEnabled={qualityEnabled}
+                  onClear={clearClientFilters}
+                />
+              </div>
+            )}
+          </details>
         </Section>
 
         {/* Region B — REVIEW QUEUE: the work surface. Predict lives HERE, atop the

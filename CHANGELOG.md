@@ -7,6 +7,29 @@ yet publish versioned releases, so everything currently lives under
 
 ## [Unreleased]
 
+### Changed
+
+- **Library row → terse Jira/Linear-style decision card.** Clicking a paper now shows
+  one banner chip-row (verdict word + grade + quality band + ⚠red-flag count, each
+  hide-when-empty, colour carrying the call) + a single reason line + a prominent
+  "Open full review ↗" — everything else (full digest, quality gloss/coverage, figures,
+  abstract, re-run controls, provenance) folds behind one "Details" disclosure or lives
+  in the new-tab brief (not duplicated). The cached digest stays reachable inline under
+  Details (no build), so a paper whose brief can't build isn't lost. The mid-list
+  Proposed/Override card is replaced by a quiet ◇ row chip; the verdict's saved date is
+  humanised (was a raw ISO timestamp). Collections, Tags, and smart filters fold into one
+  "Browse & filter" drawer (open on desktop / collapsed on mobile, remembered; active
+  scope in the summary), freeing the full width for the list + card.
+
+### Fixed
+
+- **Mobile (<640px) overflow + tap-targets.** `.review-prose` (overflow-wrap:anywhere)
+  on the brief/review block (`PaperReview`) and feed cards (`Review`) stops long
+  DOIs/scores/URLs forcing horizontal scroll; 44px min tap-height and 16px inputs
+  (no iOS zoom-on-focus) via `index.css` media query — score-histogram bars opt out
+  (`.no-tap-min`) so the distribution isn't flattened; wrapped the unwrapped Audit
+  metrics table in `overflow-x-auto`.
+
 ### Added
 
 - **Legible model config: Active-Models summary + per-provider temperature & graded
@@ -19,8 +42,35 @@ yet publish versioned releases, so everything currently lives under
   back-compat. `/settings` regrouped into AI Models / Triage / Classifier; the duplicate
   slim default-provider editor is gone (one editor); the readiness "Model" pill renamed to
   "Classifier" (it's the trained classifier, not the LLM).
+- **One-click "open brief" (ℹ) button on every Read-next row** (`OpenBriefButton.jsx`).
+  The standalone HTML brief was reachable only via a 4-level drill-down (expand row →
+  review panel → "Figures & full brief" disclosure → Build → "Open full brief"); the row
+  button collapses that to one click — opens the brief if built, else builds it on demand
+  (spinner) then opens. Reuses the existing render API helpers; no backend change.
 
 ### Changed
+
+- **Frontend adopts the "Ease Health" design system (whole app + brief).** A light-clinical
+  language (`frontend/DESIGN.md`, sourced from Refero Styles): one saturated Forest Ink on
+  Linen-White, surface-tint elevation (no shadows, no bold), Fraunces + Inter. Wired by
+  remapping Tailwind's color ramps + radii/shadows so every existing utility and `tones.js`
+  inherit it — forest/sage greens, mist-blue info, ochre caution, clay flag. The standalone
+  paper brief is re-skinned to match; its decision-aid structure (diagnosis verdict, one
+  evidence-grade gauge replacing the Rigor/Relevance chips with relevance folded into the
+  diagnosis, the stain→tether goal board, cut keyword-tags — a Laws-of-UX subtraction) is
+  unchanged. CSS/tokens only; no data change.
+- **"Read next" opens much faster (whole-library read).** `get_all_items` now runs one
+  un-paged query — at most ONE DB snapshot copy instead of one per 500-item page — and the
+  Zotero read budget rose 0.2s→2s, so a WAL checkpoint lock no longer routes routine reads
+  to the 176 MB snapshot fallback.
+- **Goal-similarity no longer recomputed on every queue open.** The corpus-embedding matrix
+  is cached process-wide (main+`-wal` fingerprint) and each item's `goal_sim` is persisted
+  in the score cache at Rescore time, so opening reads it from cache instead of paying a
+  ~0.5s corpus matmul; a live lookup runs only for scored rows still missing it.
+- **Widened + made the standalone paper brief responsive.** `.content` max-width
+  740px → `min(960px,92vw)` (kills wasted side-margins on wide screens), the goal board
+  reflows via `auto-fit/minmax` (3→2→1 cols), and the digest rows stack at ≤760px instead
+  of only ≤600px. CSS-only (`_paper_read_html._css`, `_paper_read_brief.brief_css`).
 
 - **Code-health cleanup (advisory `make scan`):** removed dead `contracts.TriageJob`;
   lifted the duplicated `_RateLimiter` (openalex/pubmed) into shared
