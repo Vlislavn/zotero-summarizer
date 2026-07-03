@@ -15,6 +15,7 @@ from zotero_summarizer.models import SummarizeResponse
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.golden.goldenset import GoldenSample, _PRIORITY_TO_RELEVANCE
 from zotero_summarizer.storage import feeds as feeds_storage
+from zotero_summarizer.storage.feed_identity import row_feed_keys
 
 LOGGER = logging.getLogger(__name__)
 
@@ -107,17 +108,56 @@ def _build_summary_for_queue(row: dict[str, Any], new_priority: str) -> Summariz
     )
 
 
-def _fetch_feed_metadata(*, feed_library_id: int, feed_item_id: int) -> dict[str, str]:
-    """Read the live abstract/authors/venue/year from Zotero's feedItems table.
+def _fetch_app_rss_metadata(*, rss_feed_id: int, rss_item_id: int) -> dict[str, str]:
+    settings_ = get_settings()
+    conn = sqlite3.connect(str(settings_.triage_db_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        feeds_storage.init_feeds_schema(conn)
+        row = conn.execute(
+            """
+            SELECT abstract, authors, publication_title, publication_date, url
+            FROM rss_items
+            WHERE id = ? AND rss_feed_id = ?
+            """,
+            (int(rss_item_id), int(rss_feed_id)),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return {}
+    pub_date = str(row["publication_date"] or "")
+    return {
+        "abstract": str(row["abstract"] or ""),
+        "authors": str(row["authors"] or ""),
+        "publication_title": str(row["publication_title"] or ""),
+        "venue": str(row["publication_title"] or ""),
+        "year": pub_date[:4] if pub_date[:4].isdigit() else "",
+        "url": str(row["url"] or ""),
+    }
+
+
+def _fetch_feed_metadata(
+    *,
+    feed_library_id: int,
+    feed_item_id: int,
+    source_type: str = "zotero",
+) -> dict[str, str]:
+    """Read full feed metadata from app RSS storage or Zotero's feedItems table.
 
     Returns ``{}`` when the feed item is gone (user manually deleted it from
-    Zotero between triage and review). That's the only "absence" we tolerate;
+    the source between triage and review). That's the only "absence" we tolerate;
     every other failure (Zotero DB unreadable, schema mismatch) propagates.
     """
     from zotero_summarizer.integrations.zotero_read import ZoteroReader
 
     if feed_library_id <= 0 or feed_item_id <= 0:
         return {}
+    if source_type == "app_rss":
+        return _fetch_app_rss_metadata(
+            rss_feed_id=feed_library_id,
+            rss_item_id=feed_item_id,
+        )
     reader = ZoteroReader(get_settings().zotero_data_dir)
     items = reader.get_feed_items(feed_library_id=feed_library_id, limit=5000)
     match = next((i for i in items if int(i.get("item_id") or 0) == feed_item_id), None)
@@ -134,6 +174,22 @@ def _fetch_feed_metadata(*, feed_library_id: int, feed_item_id: int) -> dict[str
         "publication_title": str(match.get("publication_title") or ""),
         "venue": str(match.get("publication_title") or ""),
         "year": pub_date[:4] if pub_date[:4].isdigit() else "",
+    }
+
+
+def feed_meta_from_rss_item(rss_meta: dict[str, Any]) -> dict[str, str]:
+    """Feed display metadata from an app-owned ``rss_items`` row (keyed by stable_feed_key)
+    — the Zotero-INDEPENDENT counterpart of :func:`_fetch_feed_metadata` (which reads
+    Zotero's feedItems table and raises when Zotero is absent). Same shape so callers are
+    interchangeable. ``{}`` in → all-empty out."""
+    pub_date = str(rss_meta.get("publication_date") or "")
+    return {
+        "abstract": str(rss_meta.get("abstract") or ""),
+        "authors": str(rss_meta.get("authors") or ""),
+        "publication_title": str(rss_meta.get("publication_title") or ""),
+        "venue": str(rss_meta.get("publication_title") or rss_meta.get("feed_name") or ""),
+        "year": pub_date[:4] if pub_date[:4].isdigit() else "",
+        "url": str(rss_meta.get("url") or rss_meta.get("canonical_url") or ""),
     }
 
 
@@ -231,7 +287,7 @@ def append_to_golden(
         )
 
     feed_item_id = int(row.get("feed_item_id") or 0)
-    new_key = f"feed:{feed_item_id}" if feed_item_id else f"processed:{row.get('id')}"
+    new_key = row_feed_keys(row)[0]
     # Resolve abstract + authors + venue from the live Zotero feedItems table.
     # `summary.abstract_preview` is 200-char truncated and gate-only synth rows
     # don't have it at all, leaving training rows useless. The feed item is
@@ -239,6 +295,7 @@ def append_to_golden(
     feed_meta = _fetch_feed_metadata(
         feed_library_id=int(row.get("feed_library_id") or 0),
         feed_item_id=feed_item_id,
+        source_type=str(row.get("source_type") or "zotero"),
     )
     abstract = feed_meta.get("abstract", "")
     authors = feed_meta.get("authors", "")

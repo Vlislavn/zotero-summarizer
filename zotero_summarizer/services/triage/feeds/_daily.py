@@ -315,6 +315,7 @@ def run_daily_selection(
 
     # 4. Materialize selected items directly.
     materialized_count = 0
+    materialized_keys: list[str] = []
     errors: list[dict[str, Any]] = []
     used_keys: set[str] = set()
     if not dry_run:
@@ -330,6 +331,12 @@ def run_daily_selection(
             )
             if err is None:
                 materialized_count += 1
+                # The Zotero library key materialize_pick generated + wrote to
+                # processed_feed_items.materialized_zotero_key — what the deep
+                # review job + the ranking cache both key on.
+                new_key = str(pick.row.get("planned_zotero_key") or "").strip()
+                if new_key:
+                    materialized_keys.append(new_key)
             else:
                 errors.append(err)
 
@@ -343,6 +350,7 @@ def run_daily_selection(
     return {
         "run_id": run_id,
         "materialized": materialized_count,
+        "materialized_keys": materialized_keys,
         "rejected": rejected_count,
         "black_swans": len(bs_picks),
         "errors": errors,

@@ -17,29 +17,36 @@ import types
 
 import pytest
 
-from zotero_summarizer.services.library import deep_review
+from zotero_summarizer.services.library import _review_cache, deep_review
+
+
+def _shutdown_pool(*, wait: bool) -> None:
+    pool = deep_review._POOL
+    if pool is not None:
+        pool.shutdown(wait=wait, cancel_futures=True)
+    deep_review._POOL = None
+    deep_review._POOL_SIZE = 0
 
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     """Fresh job registry + pool + cache file per test; shut the pool down after."""
+    _shutdown_pool(wait=True)
     with deep_review._LOCK:
         deep_review._JOBS.clear()
-    monkeypatch.setattr(deep_review, "_cache_path", lambda: tmp_path / "deep_reviews.json")
-    monkeypatch.setattr(deep_review, "_POOL", None)
-    monkeypatch.setattr(deep_review, "_POOL_SIZE", 0)
+    monkeypatch.setattr(_review_cache, "_cache_path", lambda: tmp_path / "deep_reviews.json")
     monkeypatch.setattr(deep_review, "_try_rebuild_render", lambda _k: None)
     yield
-    pool = deep_review._POOL
-    if pool is not None:
-        pool.shutdown(wait=False)
+    _shutdown_pool(wait=False)
+    with deep_review._LOCK:
+        deep_review._JOBS.clear()
 
 
 def _wire(monkeypatch, *, is_local, max_sub=None):
     """Stub the run ctx so only the provider's locality/cap matters (the fake
     ``_review_one`` ignores the rest)."""
     provider = types.SimpleNamespace(is_local=is_local, max_sub_concurrency=max_sub, lean_deep_review=False)
-    monkeypatch.setattr(deep_review, "_build_ctx", lambda: {"_provider": provider})
+    monkeypatch.setattr(deep_review, "_build_ctx", lambda reader=None: {"_provider": provider})
     monkeypatch.setattr(deep_review.reading_queue, "get_cached_scoring", lambda _key: None)
 
 

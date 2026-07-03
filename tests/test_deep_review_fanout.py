@@ -14,7 +14,7 @@ from zotero_summarizer.services._common import deep_review_fleet_concurrency
 
 def _remote(max_sub=None):
     return ProviderConfig(
-        name="kather", base_url="https://api.kather.ai/v1", api_key_env="K", max_sub_concurrency=max_sub
+        name="remote", base_url="https://remote.example/v1", api_key_env="K", max_sub_concurrency=max_sub
     )
 
 

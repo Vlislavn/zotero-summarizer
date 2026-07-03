@@ -124,7 +124,7 @@ def row_goal_sim(payload: dict[str, Any]) -> float | None:
 
 
 def row_prestige(row: dict[str, Any], payload: dict[str, Any]) -> float:
-    """Prestige in [0, 1]. Source priority (SOTA signal first):
+    """Prestige in [0, 1]. Source priority (best signal first):
 
       0. ``aux_context.citation_percentile`` — OpenAlex field+year-normalized
          citation percentile, already in [0, 1]. The robust, non-gameable signal
@@ -242,6 +242,17 @@ def row_citation_percentile(payload: dict[str, Any]) -> float | None:
     return float(pct) if pct is not None else None
 
 
+def _paper_url(row: dict[str, Any]) -> str:
+    """Best available direct link: doi.org from DOI, else arxiv.org from arxiv_id."""
+    doi = str(row.get("doi") or "").strip()
+    if doi:
+        return f"https://doi.org/{doi}"
+    arxiv_id = str(row.get("arxiv_id") or "").strip()
+    if arxiv_id:
+        return f"https://arxiv.org/abs/{arxiv_id}"
+    return ""
+
+
 def make_candidate(row: dict[str, Any]) -> dict[str, Any]:
     """Normalise a DB row into the candidate dict used during allocation."""
     payload = parse_payload(row)
@@ -261,6 +272,10 @@ def make_candidate(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": int(row_id),
         "item_key": _row_item_key(row),
+        # Durable feed identity — the key the IN-PLACE Today deep review caches under
+        # (AppLibraryReader resolves it without a Zotero write) and the pre-materialize
+        # join handle to the deep_review cache.
+        "stable_feed_key": str(row.get("stable_feed_key") or ""),
         # The library item.key written at materialization — the join handle to the
         # deep_review cache (feed GUID can't key it). None until materialized.
         "materialized_zotero_key": row.get("materialized_zotero_key"),
@@ -287,6 +302,7 @@ def make_candidate(row: dict[str, Any]) -> dict[str, Any]:
         # composite/5 fallback would be circular as a ranking input).
         "goal_sim": row_goal_sim(payload),
         "citation_percentile": row_citation_percentile(payload),
+        "url": _paper_url(row),
         # Order key for the slate + model/diversity pickers. Assembly overwrites
         # this with the shared relevance×goal×prestige blend (rank_blend) once
         # the whole cohort is known; the composite default keeps direct callers
@@ -324,22 +340,29 @@ def attach_quality_from_reviews(candidates: list[dict[str, Any]]) -> int:
     from zotero_summarizer.services.library import deep_review  # lazy cross-domain read
 
     reviews = deep_review._read_all()
-    materialized = 0
+    joinable = 0
     matched = 0
     for cand in candidates:
-        key = (cand.get("materialized_zotero_key") or "").strip()
-        if not key:
+        # The IN-PLACE Today review caches under stable_feed_key; a materialized pick
+        # caches under its Zotero key. Try the library key first (post-materialize wins),
+        # then the feed key.
+        mkey = (cand.get("materialized_zotero_key") or "").strip()
+        skey = (cand.get("stable_feed_key") or "").strip()
+        if not mkey and not skey:
             continue
-        materialized += 1
-        entry = reviews.get(key)
+        joinable += 1
+        entry = (reviews.get(mkey) if mkey else None) or (reviews.get(skey) if skey else None)
         if entry is None:
             continue
+        # The QualityEval carries the coverage-based signal the card + brief render
+        # (grade, band, coverage_met/applicable, red_flags) — the honest replacement
+        # for the digest's unvalidated 1-5 self-scores. No digest merge needed.
         cand["quality"] = entry.get("quality") or {}
         matched += 1
-    if reviews and materialized and not matched:
+    if reviews and joinable and not matched:
         LOGGER.warning(
-            "deep-review quality bridge matched 0/%d materialized candidates against "
-            "%d cached reviews — GUID↔item_key join may be broken", materialized, len(reviews),
+            "deep-review quality bridge matched 0/%d joinable candidates against "
+            "%d cached reviews — feed-key/item-key join may be broken", joinable, len(reviews),
         )
     return matched
 

@@ -7,7 +7,7 @@ module drives a REAL browser instead, reusing a PERSISTENT profile the user logs
 into once (``open_login_window``), so the EZproxy/Shibboleth/OpenAthens session and
 the Cloudflare ``cf_clearance`` cookie carry across runs.
 
-SOTA "just import" stack: **patchright** (a drop-in patched Playwright with
+The "just import" stack: **patchright** (a drop-in patched Playwright with
 undetectable CDP — passes Cloudflare managed challenges), falling back to plain
 ``playwright`` when patchright isn't installed. Both expose the same
 ``sync_playwright`` API, so the code below is identical either way.

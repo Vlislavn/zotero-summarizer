@@ -39,6 +39,10 @@ OUTCOME_DELETED_ALL = "deleted_all"  # removed from every collection — strong 
 OUTCOME_TRASHED = "trashed"  # moved to Zotero trash — strong negative
 OUTCOME_ENGAGED = "engaged"  # has 🧠 or 👀 tag — strong positive
 OUTCOME_UNKNOWN = "unknown"  # item key resolved to nothing (hard-delete, merge edge case)
+OUTCOME_OPENED_DETAIL = "opened_detail"  # app-side detail view opened
+OUTCOME_DEEP_REVIEW_RUN = "deep_review_run"  # app-side deep review requested
+OUTCOME_USER_LABELED = "user_labeled"  # explicit app-side label/verdict
+OUTCOME_KEPT_UNREAD_APP = "kept_unread"  # app-side kept but no Zotero materialization/read yet
 
 # Signal weights — asymmetric per Schnabel et al. ICML 2016
 # (Recommendations as Treatments, arXiv:1602.05352). Industrial-feed convention
@@ -50,6 +54,10 @@ OUTCOME_WEIGHT = {
     OUTCOME_DELETED_ALL: -3.0,
     OUTCOME_TRASHED: -3.0,
     OUTCOME_UNKNOWN: -1.0,
+    OUTCOME_OPENED_DETAIL: 0.5,
+    OUTCOME_DEEP_REVIEW_RUN: 1.0,
+    OUTCOME_USER_LABELED: 3.0,
+    OUTCOME_KEPT_UNREAD_APP: -0.5,
 }
 
 # Outcomes that carry OBSERVED user behaviour on the materialized item.
@@ -58,7 +66,8 @@ OUTCOME_WEIGHT = {
 # neither may correct a training label (see services.golden.hybrid_gt).
 BEHAVIORAL_OUTCOMES = frozenset(
     {OUTCOME_ENGAGED, OUTCOME_MOVED_COLLECTION, OUTCOME_KEPT_INBOX,
-     OUTCOME_DELETED_ALL, OUTCOME_TRASHED}
+     OUTCOME_DELETED_ALL, OUTCOME_TRASHED, OUTCOME_OPENED_DETAIL,
+     OUTCOME_DEEP_REVIEW_RUN, OUTCOME_USER_LABELED, OUTCOME_KEPT_UNREAD_APP}
 )
 
 

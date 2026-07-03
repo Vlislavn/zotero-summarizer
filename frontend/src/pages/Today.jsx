@@ -96,11 +96,11 @@ function SpotCheck({ onNavigate }) {
   const busy = addMut.isPending || trashMut.isPending;
 
   const act = useCallback(
-    (mutation, id, verb) => {
+    (mutation, id, verb, note = '') => {
       mutation.mutate([id], {
         onSuccess: () => {
           setDismissed((prev) => new Set(prev).add(id));
-          setMsg(`${verb} 1 paper.`);
+          setMsg(`${verb} 1 paper${note}.`);
           queryClient.invalidateQueries({ queryKey: ['daily-pipeline'] });
         },
       });
@@ -137,7 +137,7 @@ function SpotCheck({ onNavigate }) {
             key={item.id}
             item={item}
             busy={busy}
-            onAdd={(id) => act(addMut, id, 'Added')}
+            onAdd={(id) => act(addMut, id, 'Added', ' — saved to Zotero')}
             onTrash={(id) => act(trashMut, id, 'Trashed')}
           />
         ))}
@@ -153,11 +153,8 @@ function SpotCheck({ onNavigate }) {
 export default function Today() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  // Gate the Zotero/scoring-backed slate on a connected reader — otherwise the
-  // first-run "finish setup" card sits behind a "Slate load failed" error.
   const { status } = useSetupStatus();
-  const zoteroReady = status?.zotero?.db_found === true;
-  const zoteroKnownMissing = Boolean(status) && !status?.zotero?.db_found;
+  const setupStatusKnown = Boolean(status);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [actionMsg, setActionMsg] = useState('');
   const triageKicked = useRef(false);
@@ -168,7 +165,7 @@ export default function Today() {
   const slateQuery = useQuery({
     queryKey: ['daily-slate', { K: 15, lookback_hours: 168 }],
     queryFn: () => fetchDailySlate({ K: 15, lookback_hours: 168 }),
-    enabled: zoteroReady,
+    enabled: setupStatusKnown,
   });
 
   const addMutation = useMutation({ mutationFn: addToLibrary });
@@ -179,7 +176,7 @@ export default function Today() {
   const triageStatusQuery = useQuery({
     queryKey: ['triage-status'],
     queryFn: getTriageStatus,
-    enabled: zoteroReady,
+    enabled: setupStatusKnown,
     refetchInterval: (q) => (q.state.data?.running ? 3000 : false),
   });
   const triageStatus = triageStatusQuery.data;
@@ -210,6 +207,19 @@ export default function Today() {
     [papers, feedFilter],
   );
 
+  // Store the visible slate order so the full review page's j/k Prev/Next pages
+  // through Today's list — the card links to /paper/:stable_feed_key, the same key
+  // used here, so this mirrors Read-next's zs.reviewOrder write and makes the
+  // switching hotkeys work when a review is opened from Today (not just Read next).
+  useEffect(() => {
+    if (visiblePapers.length) {
+      localStorage.setItem(
+        'zs.reviewOrder',
+        JSON.stringify(visiblePapers.map((p) => p.stable_feed_key).filter(Boolean)),
+      );
+    }
+  }, [visiblePapers]);
+
   const toggleSelect = useCallback((id) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -232,13 +242,13 @@ export default function Today() {
   const busy = addMutation.isPending || trashMutation.isPending;
 
   const commit = useCallback(
-    (mutation, verb) => {
+    (mutation, verb, note = '') => {
       const ids = [...selectedIds];
       if (ids.length === 0) return;
       mutation.mutate(ids, {
         onSuccess: (res) => {
           const n = res?.added ?? res?.trashed ?? ids.length;
-          setActionMsg(`${verb} ${n} paper${n === 1 ? '' : 's'}.`);
+          setActionMsg(`${verb} ${n} paper${n === 1 ? '' : 's'}${note}.`);
           setSelectedIds(new Set());
           queryClient.invalidateQueries({ queryKey: ['daily-slate'] });
         },
@@ -263,15 +273,6 @@ export default function Today() {
 
   const actionError = addMutation.error || trashMutation.error;
   const selectedCount = selectedIds.size;
-
-  // Zotero not connected → the cull queue can't load. Show only the setup card.
-  if (zoteroKnownMissing) {
-    return (
-      <section className="glass rounded-2xl border border-slate-200 p-4">
-        <NotConfiguredCard />
-      </section>
-    );
-  }
 
   return (
     <section className="glass rounded-2xl border border-slate-200 p-4">
@@ -358,12 +359,25 @@ export default function Today() {
           )}
           {/* Empty state as an invitation, not a void: point to the next real action. */}
           {!triageStatus?.running && (
-            <p className="my-2 text-xs text-slate-500">
-              Nothing to cull right now — your feed is clear. Pick up your reading queue in{' '}
-              <button type="button" onClick={() => navigate('/library')} className="text-teal-700 underline hover:text-teal-900">
-                Library → Read next
-              </button>.
-            </p>
+            <div className="my-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-center">
+              <p className="text-sm font-medium text-slate-700">You&apos;re all caught up.</p>
+              <p className="text-xs text-slate-500 mt-1">
+                Pick up your reading queue in{' '}
+                <button type="button" onClick={() => navigate('/library')} className="text-teal-700 underline hover:text-teal-900">
+                  Library → Read next
+                </button>
+                {' '}or{' '}
+                <button
+                  type="button"
+                  onClick={() => triageMutation.mutate()}
+                  disabled={draining}
+                  className="text-teal-700 underline hover:text-teal-900 disabled:opacity-50"
+                >
+                  run a triage
+                </button>
+                {' '}to process your backlog.
+              </p>
+            </div>
           )}
           <SpotCheck onNavigate={navigate} />
         </>
@@ -421,7 +435,7 @@ export default function Today() {
             <div className="flex-1" />
             <button
               type="button"
-              onClick={() => commit(addMutation, 'Added')}
+              onClick={() => commit(addMutation, 'Added', ' — saved to Zotero')}
               disabled={selectedCount === 0 || busy}
               className="px-3 py-1.5 rounded-lg border text-xs font-semibold bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
             >

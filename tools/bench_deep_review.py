@@ -1,24 +1,24 @@
 #!/usr/bin/env python
 """Benchmark a CANDIDATE deep-review model's digest quality against a REFERENCE
-(SOTA) model, judged by an independent pinned LLM judge.
+(remote reference) model, judged by an independent pinned LLM judge.
 
-Goal: prove a LOCAL model (thinking disabled) reaches SOTA-level digest quality.
+Goal: prove a LOCAL model (thinking disabled) reaches remote-reference digest quality.
 
 Method (firewalled, per the project's grader discipline):
   1. For each built paper (cached ``qa_text``), generate the deep-review DIGEST
-     with the reference provider (SOTA, e.g. kather/sota) AND the candidate
+     with the reference provider (the remote model) AND the candidate
      provider (e.g. local ollama/qwen3) at the SAME text budget — isolating model
      quality from tier. Both run with whatever ``extra_body`` their provider
      carries (we disable thinking via config, not here).
   2. Deterministic check FIRST: per-digest field-completeness (fraction of the
      substantive PaperDigest fields that are non-empty) — a cheap, model-free
      quality floor that catches the "thinking-off drops key_findings" failure.
-  3. Pinned LLM judge (default Qwen3.5-397B-A17B-FP8 on kather — independent of
+  3. Pinned LLM judge (default Qwen3.5-397B-A17B-FP8 on the remote endpoint — independent of
      BOTH candidate and reference) scores the two digests PAIRWISE and BLINDED
      (A/B order randomised per paper to cancel position bias) on faithfulness,
      insight and completeness, and picks a winner.
   4. Aggregate: candidate win/tie/loss vs reference, mean judge scores, mean
-     field-completeness, per-paper table. The candidate "reaches SOTA level" when
+     field-completeness, per-paper table. The candidate "reaches reference level" when
      its loss-rate is low and its mean score ≈ the reference's.
 
 Everything run-specific (providers, models, judge, papers, budget) is a CLI flag;
@@ -28,7 +28,7 @@ judge constants (pinned model + endpoint).
 
 Usage (from repo root, with .env sourced):
   uv run python tools/bench_deep_review.py \
-      --reference-provider kather --reference-model sota \
+      --reference-provider remote --reference-model <model> \
       --candidate-provider default --candidate-model qwen3:8b \
       --papers 4NIMLFMV,QRPEWC69,R2HRV4JA,YJQWHD6X --max-text-chars 60000
 """
@@ -150,7 +150,7 @@ def _thinking_client(provider: ProviderConfig, model: str, mode: str) -> Any:
     """Build a client whose reasoning is forced ``on``/``off`` (via
     ``chat_template_kwargs.enable_thinking``) or left at the provider default
     (``provider``). Only meaningful for endpoints that honor the flag (ollama
-    qwen3, kather sota, vLLM) — exactly the reasoning models this benchmark uses."""
+    qwen3, a remote vLLM endpoint) — exactly the reasoning models this benchmark uses."""
     if mode == "provider":
         return build_client_for_provider(provider, model)
     eb = dict(provider.extra_body or {})
@@ -249,7 +249,7 @@ def main() -> int:
     ap.add_argument("--judge-model", default=DEFAULT_JUDGE_MODEL)
     ap.add_argument("--judge-provider", default=None,
                     help="Provider NAME (from goals.yaml routing) for the judge. Default: the "
-                         "pinned faithbench kather endpoint. Set e.g. 'default' for a LOCAL judge "
+                         "pinned faithbench remote endpoint. Set e.g. 'default' for a LOCAL judge "
                          "(ollama) when the cloud budget is exhausted — flag results as indicative.")
     ap.add_argument("--reference-thinking", choices=["on", "off", "provider"], default="provider",
                     help="Force the reference digest's reasoning on/off (or use the provider default).")
@@ -259,6 +259,10 @@ def main() -> int:
     ap.add_argument("--max-text-chars", type=int, default=60000, help="Default budget for BOTH (isolates model).")
     ap.add_argument("--reference-max-chars", type=int, default=None, help="Override the reference budget (default: --max-text-chars).")
     ap.add_argument("--candidate-max-chars", type=int, default=None, help="Override the candidate budget — e.g. 12000 to match a local LEAN tier (lighter on RAM, production-realistic).")
+    ap.add_argument("--candidate-max-tokens", type=int, default=None,
+                    help="Override the candidate provider's OUTPUT max_tokens (the knob under test in a "
+                         "max_tokens sweep). The reference keeps its provider default. Isolates the "
+                         "output-budget effect on digest completeness/faithfulness from the model itself.")
     ap.add_argument("--judge-chars", type=int, default=24000, help="Paper chars shown to the judge.")
     ap.add_argument("--max-swap-start-mb", type=float, default=6000.0,
                     help="Pre-flight: refuse to START a run that loads a LOCAL model when swap is "
@@ -283,8 +287,13 @@ def main() -> int:
     routing = config.llm_routing
     ref_provider = routing.provider_by_name(args.reference_provider)
     cand_provider = routing.provider_by_name(args.candidate_provider)
+    # Output-budget sweep: override the candidate's max_tokens in isolation
+    # (the reference keeps its provider default). model_copy keeps this a pure
+    # config override — no mutation of the shared routing provider.
+    if args.candidate_max_tokens is not None:
+        cand_provider = cand_provider.model_copy(update={"max_tokens": args.candidate_max_tokens})
 
-    # Judge: by default the pinned 397B on the faithbench (kather) endpoint, thinking
+    # Judge: by default the pinned 397B on the faithbench remote endpoint, thinking
     # ON (extra_body=None) for the most careful comparison. ``--judge-provider`` swaps
     # in any routing provider (e.g. a LOCAL ollama judge when the cloud budget is
     # exhausted — independence is then weaker, so flag such runs as indicative).
@@ -333,7 +342,8 @@ def main() -> int:
             "reference": {"provider": args.reference_provider, "model": args.reference_model,
                           "thinking": args.reference_thinking, "max_chars": args.reference_max_chars or args.max_text_chars},
             "candidate": {"provider": args.candidate_provider, "model": args.candidate_model,
-                          "thinking": args.candidate_thinking, "max_chars": args.candidate_max_chars or args.max_text_chars},
+                          "thinking": args.candidate_thinking, "max_chars": args.candidate_max_chars or args.max_text_chars,
+                          "max_tokens": args.candidate_max_tokens},
             "judge_model": args.judge_model, "judge_base_url": judge_provider.base_url,
             "papers": keys, "seed": args.seed,
         }

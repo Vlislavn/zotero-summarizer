@@ -67,10 +67,18 @@ model version. The live verdict tables UPSERT/DELETE and lose the trajectory; th
 for offline improvement. Best-effort: a log failure warns, never blocks the durable write.
 Emitted by the verdict routes, Today keep/trash, the review queue, triage feedback, and the
 outcome daemon — `results` also calls it),
-`config` (GET/PUT `/api/config`; PUT persists + invalidates stage clients,
-does not validate provider availability; an edit to `research_goals` schedules a
+`config` (GET/PUT `/api/config`; PUT persists via `_common.write_user_config` — only
+the `USER_OWNED_KEYS` (intent + LLM connection + university access), so `goals.yaml`
+stays intent-only; re-applies `ZS_*` env before the hot-swap; invalidates stage
+clients; does not validate provider availability; an edit to `research_goals` schedules a
 background Today-slate rescore so persisted per-item `goal_sims` — the slate's
-rank-blend input — don't go stale against the new goals), `health`, `results`,
+rank-blend input — don't go stale against the new goals),
+`config_overrides` (the auto-derived `ZS_*` env override registry for every
+system-owned knob — `apply_env_overrides` re-validates, `render_overrides_doc`
+generates `docs/overrides.md`; precedence: code default < `goals.yaml` < `ZS_*` env;
+`read_config` additionally forces `prestige.enabled` off under `ZS_OFFLINE` so the
+now-default-on OpenAlex prestige never hits the network air-gapped),
+`health`, `results`,
 `corpus` (embeddings/affinity), `emoji_signals`
 (emoji→engagement taxonomy; `READ_EMOJIS` = non-meta engagement emojis only, used by the library read/hide partition).
 

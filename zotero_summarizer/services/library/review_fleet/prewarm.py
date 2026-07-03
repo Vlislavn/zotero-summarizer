@@ -13,8 +13,8 @@ Configured by ``quality_review.prewarm_on_startup_k`` (the SAME knob the
 deep-review prewarm uses — the fleet pre-decides exactly the picks deep review
 warms), overridable by ``ZS_REVIEW_FLEET_PREWARM_K``; ``0`` disables. Best-effort
 at the daemon-thread boundary: a failure is logged and swallowed so prewarm never
-blocks or crashes startup. Skipped when deep review is disabled or Zotero is
-unavailable (no local PDFs → no reviews → nothing to pre-decide).
+blocks or crashes startup. Zotero is optional: kept feed papers can acquire PDFs
+into the app cache before the fleet pre-decides them.
 """
 from __future__ import annotations
 
@@ -45,10 +45,10 @@ def _prewarm_worker(k: int) -> None:
 
 def schedule_on_startup(config: Any, app_state: Any) -> bool:
     """Spawn the prewarm worker when enabled; return whether it was scheduled (for
-    the startup log). Skipped when ``prewarm_on_startup_k`` is 0, deep review is
-    disabled, or Zotero is unavailable (no local PDFs to review)."""
+    the startup log). Skipped when ``prewarm_on_startup_k`` is 0 or deep review is
+    disabled."""
     k = resolve_prewarm_k(config)
-    if k <= 0 or not config.quality_review.enabled or getattr(app_state, "zotero_reader", None) is None:
+    if k <= 0 or not config.quality_review.enabled:
         return False
     _flight.run_in_background(lambda: _prewarm_worker(k))
     return True

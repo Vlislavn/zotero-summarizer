@@ -204,9 +204,9 @@ class _OllamaChat:
 
 def _client(provider_name: str, base_url: str, model: str):
     """Local default = the native-/api/chat think:false shim (see _OllamaChat).
-    ``--provider sota`` instead routes to the SAME client production deep-review uses
-    (kather/sota, from goals.yaml ``llm_routing.deep_review``) — measures the real grader."""
-    if provider_name == "sota":
+    ``--provider remote`` instead routes to the SAME client production deep-review uses
+    (the remote provider, from goals.yaml ``llm_routing.deep_review``) — measures the real grader."""
+    if provider_name == "remote":
         from zotero_summarizer.models.providers import resolve_stage
         from zotero_summarizer.services._common import read_config
         from zotero_summarizer.services.llm.factory import build_client_for_stage

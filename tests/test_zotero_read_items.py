@@ -30,6 +30,18 @@ def test_get_items_excludes_annotations(zotero_dir: Path):
     assert "ANNO1" not in keys  # annotation excluded
 
 
+def test_get_items_reads_venue(zotero_dir: Path):
+    """publicationTitle is surfaced as `venue` (the Library journal filter); a row
+    with no journal (e.g. a preprint) reads as ''."""
+    db = zotero_dir / "zotero.sqlite"
+    add_library_item(db, item_key="J1", title="journal paper", venue="Nature Medicine")
+    add_library_item(db, item_key="PRE1", title="a preprint", item_type="preprint")
+
+    by_key = {it["item_key"]: it for it in ZoteroReader(zotero_dir).get_items(limit=500)["items"]}
+    assert by_key["J1"]["venue"] == "Nature Medicine"
+    assert by_key["PRE1"]["venue"] == ""
+
+
 def test_get_all_items_excludes_annotations(zotero_dir: Path):
     db = zotero_dir / "zotero.sqlite"
     add_library_item(db, item_key="PAPER1", title="A real paper", abstract="abs")

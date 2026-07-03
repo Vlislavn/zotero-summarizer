@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS processed_feed_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     feed_library_id INTEGER NOT NULL,
     feed_item_id INTEGER NOT NULL,
+    source_type TEXT NOT NULL DEFAULT 'zotero',
+    stable_feed_key TEXT,
     guid TEXT NOT NULL,
     title TEXT NOT NULL,
     doi TEXT,
@@ -35,6 +37,7 @@ CREATE TABLE IF NOT EXISTS processed_feed_items (
     error TEXT,
     -- Phase 1.5 outcome-feedback columns
     materialized_zotero_key TEXT,
+    zotero_sync_status TEXT,
     outcome_eligible_at TEXT,
     outcome_detected_at TEXT,
     final_outcome TEXT,
@@ -50,12 +53,79 @@ CREATE TABLE IF NOT EXISTS processed_feed_items (
 )
 """
 
+CREATE_RSS_FEEDS_TABLE = """
+CREATE TABLE IF NOT EXISTS rss_feeds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    source TEXT NOT NULL DEFAULT 'app',
+    imported_zotero_library_id INTEGER,
+    last_fetched_at TEXT,
+    last_error TEXT,
+    etag TEXT,
+    modified TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(url)
+)
+"""
+
+CREATE_RSS_ITEMS_TABLE = """
+CREATE TABLE IF NOT EXISTS rss_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rss_feed_id INTEGER NOT NULL,
+    stable_feed_key TEXT NOT NULL,
+    guid TEXT,
+    entry_id TEXT,
+    title TEXT NOT NULL,
+    abstract TEXT,
+    url TEXT,
+    canonical_url TEXT,
+    doi TEXT,
+    arxiv_id TEXT,
+    publication_date TEXT,
+    publication_title TEXT,
+    authors TEXT,
+    item_type TEXT NOT NULL DEFAULT 'journalArticle',
+    raw_json TEXT,
+    fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+    read_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY(rss_feed_id) REFERENCES rss_feeds(id) ON DELETE CASCADE,
+    UNIQUE(stable_feed_key)
+)
+"""
+
+CREATE_FEED_KEY_ALIASES_TABLE = """
+CREATE TABLE IF NOT EXISTS feed_key_aliases (
+    old_key TEXT PRIMARY KEY,
+    stable_feed_key TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)
+"""
+
+CREATE_FEED_KEY_ALIAS_AMBIGUITIES_TABLE = """
+CREATE TABLE IF NOT EXISTS feed_key_alias_ambiguities (
+    old_key TEXT PRIMARY KEY,
+    stable_feed_keys_json TEXT NOT NULL,
+    row_count INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)
+"""
+
 INDEX_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_processed_feed_run ON processed_feed_items(run_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_processed_feed_guid ON processed_feed_items(guid)",
+    "CREATE INDEX IF NOT EXISTS idx_processed_feed_stable_key ON processed_feed_items(stable_feed_key)",
     "CREATE INDEX IF NOT EXISTS idx_processed_feed_decision ON processed_feed_items(decision, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_processed_feed_zotero_key ON processed_feed_items(materialized_zotero_key)",
     "CREATE INDEX IF NOT EXISTS idx_processed_feed_outcome_due ON processed_feed_items(outcome_eligible_at, outcome_detected_at)",
+    "CREATE INDEX IF NOT EXISTS idx_rss_feeds_enabled ON rss_feeds(enabled, updated_at)",
+    "CREATE INDEX IF NOT EXISTS idx_rss_items_feed_read ON rss_items(rss_feed_id, read_at, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_rss_items_stable_key ON rss_items(stable_feed_key)",
+    "CREATE INDEX IF NOT EXISTS idx_feed_key_aliases_stable ON feed_key_aliases(stable_feed_key)",
 )
 
 # Phase 1.5 migration: add new columns to pre-existing Phase 1 databases.
@@ -65,7 +135,10 @@ INDEX_STATEMENTS = (
 # converge. Existing Phase 1 rows get NULL for ``updated_at`` until their
 # next update.
 MIGRATION_COLUMNS = (
+    ("source_type", "TEXT NOT NULL DEFAULT 'zotero'"),
+    ("stable_feed_key", "TEXT"),
     ("materialized_zotero_key", "TEXT"),
+    ("zotero_sync_status", "TEXT"),
     ("outcome_eligible_at", "TEXT"),
     ("outcome_detected_at", "TEXT"),
     ("final_outcome", "TEXT"),

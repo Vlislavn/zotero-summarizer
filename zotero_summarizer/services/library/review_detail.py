@@ -33,7 +33,10 @@ from typing import Any
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.services.triage.daily_select import _candidate
 from zotero_summarizer.services.library.review import _fetch_feed_metadata
+from zotero_summarizer.services.library.review_summary import feed_meta_from_rss_item
 from zotero_summarizer.storage import feeds as feeds_storage
+from zotero_summarizer.storage import rss as rss_storage
+from zotero_summarizer.storage.feed_identity import is_stable_feed_key
 
 
 SOURCE_FEED = "feed"
@@ -89,6 +92,13 @@ def parse_feed_key(item_key: str) -> int:
         return int(suffix)
     except ValueError as exc:
         raise InvalidItemKey(f"feed id must be an integer: {item_key!r}") from exc
+
+
+def parse_feed_item_key(item_key: str) -> int | str:
+    """Return a legacy integer feed id or a stable feed key string."""
+    if is_stable_feed_key(item_key):
+        return item_key
+    return parse_feed_key(item_key)
 
 
 def parse_note_key(item_key: str) -> tuple[str, int]:
@@ -238,10 +248,10 @@ def normalize_authors(raw: Any, *, top_author_h: int | None = None) -> list[dict
 # ---------------------------------------------------------------------------
 
 
-def build_feed_detail(
+def build_feed_detail_by_key(
     triage_db_path: Path,
     zotero_data_dir: Path,
-    feed_item_id: int,
+    feed_key: int | str,
 ) -> dict[str, Any] | None:
     """Assemble the feed-source review-detail payload.
 
@@ -251,20 +261,32 @@ def build_feed_detail(
     from a hard error matches the route's existing contract for missing
     library items.
     """
+    # A stable_feed_key sources metadata from app-owned rss_items (Zotero-independent — the
+    # SAME source the in-place review/AppLibraryReader use), so the feed /paper detail works
+    # WITHOUT a live Zotero DB. A legacy int feed-id key falls back to Zotero's feedItems.
+    is_stable = isinstance(feed_key, str) and is_stable_feed_key(feed_key)
     conn = sqlite3.connect(str(triage_db_path))
     conn.row_factory = sqlite3.Row
     try:
-        row = feeds_storage.get_processed_feed_item_by_id(conn, feed_item_id)
+        if is_stable:
+            row = feeds_storage.get_processed_feed_item_by_stable_key(conn, feed_key)
+            rss_meta = rss_storage.get_rss_item_by_stable_key(conn, str(feed_key))
+        else:
+            row = feeds_storage.get_processed_feed_item_by_id(conn, int(feed_key))
+            rss_meta = None
     finally:
         conn.close()
     if row is None:
         return None
 
-    feed_lib_id = int(row.get("feed_library_id") or 0)
-    feed_meta = _fetch_feed_metadata(
-        feed_library_id=feed_lib_id,
-        feed_item_id=feed_item_id,
-    )
+    if is_stable:
+        feed_meta = feed_meta_from_rss_item(rss_meta or {})
+    else:
+        feed_meta = _fetch_feed_metadata(
+            feed_library_id=int(row.get("feed_library_id") or 0),
+            feed_item_id=int(row.get("feed_item_id") or 0),
+            source_type=str(row.get("source_type") or "zotero"),
+        )
     scoring = build_scoring(row)
 
     aux = (_candidate.parse_payload(row).get("aux_context") or {})
@@ -276,6 +298,17 @@ def build_feed_detail(
     authors_raw = feed_meta.get("authors") or summary_authors or ""
     authors = normalize_authors(authors_raw, top_author_h=top_author_h_int)
 
+    # The IN-PLACE Today review caches under stable_feed_key, so a feed paper reviewed
+    # before materialization shows its review on the SAME /paper page the library uses.
+    # A feed-item-id (int) key never has a review entry → None.
+    from zotero_summarizer.services.library import deep_review
+
+    cached_review = (
+        deep_review.get_cached_review(feed_key)
+        if isinstance(feed_key, str) and is_stable_feed_key(feed_key)
+        else None
+    )
+
     return {
         "source": SOURCE_FEED,
         "title": str(row.get("title") or ""),
@@ -283,7 +316,7 @@ def build_feed_detail(
         "venue": feed_meta.get("publication_title", "") or feed_meta.get("venue", ""),
         "year": feed_meta.get("year", ""),
         "doi": str(row.get("doi") or ""),
-        "url": "",
+        "url": feed_meta.get("url", "") or "",
         "abstract": feed_meta.get("abstract", "") or "",
         "has_pdf": False,
         "pdf_path": None,
@@ -293,7 +326,7 @@ def build_feed_detail(
         "notes": [],
         "date_added": "",
         "scoring": scoring,
-        "deep_review": None,
+        "deep_review": cached_review,
     }
 
 

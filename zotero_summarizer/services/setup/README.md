@@ -20,7 +20,7 @@ logic is duplicated between the two front-ends.
               + paths.exists() + zotero_status_payload + feed count + model_card
               + readiness.all_statuses() → SetupStatusResponse.subsystems[]
               → SetupStatusResponse; `ready` = config.valid & goals>0 &
-                api_key_present & zotero.db_found  (reachable/classifier/subsystems advisory)
+                api_key_present  (Zotero/reachable/classifier/subsystems advisory)
  detect.py   ─ per-OS probe dirs + current settings().zotero_data_dir(source=env)
               → DetectedZoteroDir[], db_exists first. READ-ONLY (Path.exists only).
  env_writer.py ─ _ALLOWED_ENV_KEYS=(PDF_ROOT,ZOTERO_DATA_DIR); reject others (422);
@@ -32,6 +32,35 @@ logic is duplicated between the two front-ends.
                (if absent, COMMENTED secret placeholder — never a real key) +
                migrate DB (if absent, reuses storage.migrations.migrate_existing).
                Idempotent; never overwrites an existing file. Called from serve.
+ calibration.py ─ per-user calibration → data/calibration.json (precedence between
+               goals.yaml and ZS_* env; applied by config_overrides.apply_calibration).
+               TIER 1: tier1_env_calibrate — one bounded completion measures the
+               deep-review endpoint throughput → picks the lean/full text+consistency
+               profile (auto-detecting the manual lean_deep_review flag; a REMOTE
+               endpoint is always 'full'). Idempotent on the `tier1` stamp.
+               TIER 2: tier2_calibrate / run_full_calibration ("Calibrate to my setup",
+               via the `calibrate` CLI + POST /api/setup/calibrate) — sweeps the
+               deep-review text budget on the user's endpoint, scoring deterministic
+               digest completeness (no judge) and picking the FASTEST budget at equal
+               completeness (latency-as-cost). Foreground + memory-pre-flighted for a
+               local provider; remotes load no local model. ``run_full_calibration``
+               takes an optional ``progress`` callback ({phase, completed, total}) so the
+               UI can show live "reviewed N of M" (total = budgets × papers).
+               upsert_calibration_entries is the shared writer for every tier.
+ calibration_job.py ─ background-thread wrapper for "Calibrate to my setup" so the card
+               POLLS live progress instead of blocking: start() kicks the sweep off on a
+               daemon thread (single-flight) + threads a progress callback into the module
+               job dict; status() returns {status, completed, total, phase, result, error}
+               (same run+poll shape deep_review uses). Backs POST /api/setup/calibrate +
+               GET /api/setup/calibrate/status. The "no built briefs" precondition surfaces
+               as a status `error` the card turns into "open a paper's deep review first".
+ profiles.py ─ DEPLOYMENT profiles (fully-local vs hybrid local+API) + stage-cost
+               measurement. PROFILES presets → apply_profile rewrites llm_routing (which
+               stage local vs API) + sets lean_deep_review (superficial local / deep API).
+               set_profile / detect_profile back the `profile` CLI + /api/setup/profile[s].
+               measure_stage_costs (real tokens+secs per stage×provider) → summarize_costs
+               + recommend_profile (pure, tested) back `profile --measure`. Remote-only by
+               default — a local gen loads a multi-GB model (swap spike); --include-local opts in.
 ```
 
 ## Security invariants (load-bearing)

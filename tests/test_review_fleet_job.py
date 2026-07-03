@@ -240,7 +240,7 @@ def test_run_over_fulltextless_papers_reports_done_empty(monkeypatch):
     # cached review EXISTS but carries no usable full text (the deep_review needs_pdf case)
     monkeypatch.setattr(fleet.deep_review, "get_cached_review",
                         lambda key: {"needs_pdf": True, "digest": None})
-    monkeypatch.setattr(zmod, "get_zotero_reader_or_raise", lambda: types.SimpleNamespace(
+    monkeypatch.setattr(zmod, "get_library_reader", lambda: types.SimpleNamespace(
         get_item_detail=lambda k: {"has_pdf": False, "url": "", "doi": ""}))
     # No source can be acquired, and it's NOT a login issue → no_fetchable_source.
     monkeypatch.setattr(_pdf_acquire, "acquire_pdf_for",
@@ -270,7 +270,7 @@ def test_needs_library_login_when_proxied_source_unreachable(monkeypatch):
     monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: _queue("A"))
     monkeypatch.setattr(fleet.deep_review, "get_cached_review",
                         lambda key: {"needs_pdf": True, "digest": None})
-    monkeypatch.setattr(zmod, "get_zotero_reader_or_raise", lambda: types.SimpleNamespace(
+    monkeypatch.setattr(zmod, "get_library_reader", lambda: types.SimpleNamespace(
         get_item_detail=lambda k: {"has_pdf": False, "url": "https://www.nature.com/x", "doi": "10.1/x"}))
     monkeypatch.setattr(_pdf_acquire, "acquire_pdf_for",
                         lambda key, detail: _pdf_acquire.AcquireResult(path=None, needs_login=True))
@@ -330,7 +330,7 @@ def test_needs_pdf_pick_acquires_then_re_reviews_and_proposes(monkeypatch):
     monkeypatch.setattr(fleet.deep_review, "start", _start)
     monkeypatch.setattr(fleet.deep_review, "status", lambda: {"status": "ready"})
     monkeypatch.setattr(fleet.time, "sleep", lambda _s: None)
-    monkeypatch.setattr(zmod, "get_zotero_reader_or_raise", lambda: types.SimpleNamespace(
+    monkeypatch.setattr(zmod, "get_library_reader", lambda: types.SimpleNamespace(
         get_item_detail=lambda k: {"has_pdf": False, "url": "", "doi": ""}))
     monkeypatch.setattr(_pdf_acquire, "acquire_pdf_for",
                         lambda key, detail: _pdf_acquire.AcquireResult(path="/tmp/A.pdf"))

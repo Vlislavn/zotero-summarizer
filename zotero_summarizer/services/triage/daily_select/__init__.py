@@ -49,6 +49,7 @@ from zotero_summarizer.services.triage.daily_select._querying import (
     fetch_trashed_guids,
     open_ro,
 )
+from zotero_summarizer.storage.feed_identity import row_feed_keys
 
 LOGGER = logging.getLogger(__name__)
 
@@ -108,8 +109,7 @@ def _drop_handled(
         guid = str(row.get("guid") or "").strip()
         if guid and guid in handled_guids:
             continue
-        fid = row.get("feed_item_id")
-        if fid is not None and f"feed:{int(fid)}" in handled_label_keys:
+        if any(key in handled_label_keys for key in row_feed_keys(row)):
             continue
         out.append(row)
     return out

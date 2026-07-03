@@ -161,6 +161,24 @@ def test_quality_bonus_band_primary_precedence_over_grade() -> None:
     assert quality_bonus("highlight", "D", use_band=True) > 0.0
 
 
+def test_quality_bonus_gates_ranking_grade_a_above_grade_d() -> None:
+    # The auto-on-tick quality review writes a grade (A/B/C/D) onto materialized
+    # picks; this proves it actually GATES ranking — two papers with identical
+    # relevance/goal/prestige are reordered by the grade alone, A above D. This
+    # is the regression test for the "verify gating" ask: the full-text review's
+    # grade is not decoration, it moves the order-time rank.
+    base = [0.80, 0.80]          # identical relevance
+    goal = [0.50, 0.50]          # identical goal_sim
+    prestige = [0.40, 0.40]      # identical prestige
+    blended = blend_scores(base, goal, prestige)
+    # Paper 0 gets grade A (lift), paper 1 gets grade D (penalty).
+    keys = [blended[0] + quality_bonus(None, "A"), blended[1] + quality_bonus(None, "D")]
+    assert keys[0] > keys[1]
+    # The lift magnitude is the full A-vs-D spread, not a no-op.
+    assert keys[0] - keys[1] == pytest.approx(DEFAULT_QUALITY_BONUS["A"] - DEFAULT_QUALITY_BONUS["D"])
+
+
+
 def test_quality_bonus_grade_is_a_secondary_nudge_within_a_band() -> None:
     # Same band, better grade → strictly larger lift (the secondary nudge), but
     # the nudge never flips the band's sign.

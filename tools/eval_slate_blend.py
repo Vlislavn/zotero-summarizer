@@ -199,38 +199,46 @@ def _fmt(lo: float, hi: float) -> str:
     return f"[{lo:.3f}, {hi:.3f}]"
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    import argparse
     from zotero_summarizer.services._common import settings as get_settings
     from zotero_summarizer.models import GoalsConfig
     from zotero_summarizer.services.model.rank_blend import blend_scores, quality_bonus
     from zotero_summarizer.services.library import deep_review
     from zotero_summarizer.storage.corpus import EmbeddingCache
+    # tools/ is not a package (scripts run directly); put its dir on sys.path to import a sibling.
+    import os as _os
+    sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+    from _eval_labels import load_firewalled_labels, legacy_decision_labels  # type: ignore[import-not-found]
     import yaml
+
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument(
+        "--legacy-decision-labels", action="store_true",
+        help="use the OLD leaked source (processed_feed_items.decision: user_approved vs "
+             "user_rejected) instead of the de-leaked label_verdicts firewall. Receipt-only: "
+             "reproduces the pre-de-leak baseline, do not ship a number from it.")
+    parser.add_argument(
+        "--prestige-sweep", action="store_true",
+        help="after the embed pass, sweep prestige_w over {0,.05,.1,.15,.2,.3} (goal_w=0.4) "
+             "and print AUC + bootstrap 95%% CI + P@10 per arm. Closes the prestige-weight GAP.")
+    args = parser.parse_args(argv)
 
     settings_ = get_settings()
     config = GoalsConfig.model_validate(yaml.safe_load(settings_.config_path.read_text()))
 
-    # ---- load labeled rows (firewalled) ----
-    all_labels = (*KEPT, *TRASHED)
-    conn = sqlite3.connect(f"file:{settings_.triage_db_path}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    try:
-        placeholders = ",".join("?" * len(all_labels))
-        cur = conn.execute(
-            f"""SELECT id, title, abstract, decision, composite_score,
-                       shap_contribs_json, materialized_zotero_key
-                FROM processed_feed_items
-                WHERE decision IN ({placeholders}) AND composite_score IS NOT NULL""",
-            all_labels,
-        )
-        rows = [dict(r) for r in cur.fetchall()]
-    finally:
-        conn.close()
-    rows = [r for r in rows if (r["abstract"] or "").strip()]
-    labels = [0 if r["decision"] in TRASHED else 1 for r in rows]
+    # ---- load labeled rows (firewalled, DE-LEAKED) ----
+    # Default: label_verdicts (Zotero-native GT, source='user' only). --legacy-decision-labels
+    # reproduces the pre-de-leak leaked baseline (15 kept / 901 trashed live) as a receipt.
+    if args.legacy_decision_labels:
+        rows, labels = legacy_decision_labels(settings_.triage_db_path)
+        src = "LEAKED(decision: user_approved/user_rejected) — receipt only"
+    else:
+        rows, labels = load_firewalled_labels(settings_.triage_db_path)
+        src = "DE-LEAKED(label_verdicts: user must/should/could vs dont_read)"
     n_kept, n_trashed = sum(labels), len(labels) - sum(labels)
-    print(f"firewalled labels: kept(user_approved)={n_kept} trashed(user_rejected)={n_trashed} "
-          f"[selected/black_swan EXCLUDED from the firewall]")
+    print(f"firewalled labels [{src}]: kept={n_kept} trashed={n_trashed} "
+          f"[machine_add/auto_quality/selected/black_swan EXCLUDED from the firewall]")
     if len(rows) < 20:
         raise SystemExit(f"only {len(rows)} firewalled labeled rows — too few to measure")
 
@@ -279,6 +287,23 @@ def main() -> None:
     report("blend+band", blend_band)
     goal_only = [g if g is not None else min(x for x in goal if x is not None) for g in goal]
     report("goal_sim alone", goal_only)
+
+    # ---- prestige-weight ablation (closes the prestige-weight GAP) ----
+    # goal_weight fixed at 0.4 (the measured lever); sweep prestige_weight. The embed pass
+    # already ran — only the blend arithmetic varies per arm. Ship a prestige lift ONLY if an
+    # arm's AUC bootstrap CI excludes the prestige_weight=0.0 baseline AND beats 0.15.
+    if args.prestige_sweep:
+        print("\n=== prestige-weight sweep (goal_w=0.4, quality_w=0) ===")
+        print(f"{'prestige_w':>10}  {'AUC':>6}  {'95%CI':>20}  {'P@10':>5}")
+        baseline_auc = _auc(blend_scores(composite, goal, prestige, goal_weight=0.4, prestige_weight=0.0), labels)
+        for pw in (0.0, 0.05, 0.10, 0.15, 0.20, 0.30):
+            keys = blend_scores(composite, goal, prestige, goal_weight=0.4, prestige_weight=pw)
+            auc = _auc(keys, labels)
+            lo, hi = _bootstrap_ci(keys, labels, _auc, require_both_classes=True)
+            star = "  <- baseline" if pw == 0.0 else ("  <- shipped" if pw == 0.15 else "")
+            print(f"{pw:>10.2f}  {auc:>6.3f}  {_fmt(lo, hi):>20}  {_p_at(keys, labels, 10):>5.2f}{star}")
+        print(f"\nprestige_present={n_prest}/{len(rows)} rows; baseline(prestige_w=0) AUC={baseline_auc:.3f}. "
+              f"Promote prestige only if an arm's CI excludes {baseline_auc:.3f}.")
 
     # ---- within-reviewed-subset ranking metric (AUC's blind spot) ----
     if reviewed:

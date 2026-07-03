@@ -4,7 +4,8 @@ import asyncio
 
 from zotero_summarizer.models import AppState, GoalsConfig
 from zotero_summarizer.services import corpus
-from zotero_summarizer.services._common import LOGGER, settings, state, write_config_atomic
+from zotero_summarizer.services._common import LOGGER, settings, state, write_user_config
+from zotero_summarizer.services.config_overrides import apply_calibration, apply_env_overrides
 from zotero_summarizer.storage.corpus import EmbeddingCache
 
 
@@ -24,9 +25,14 @@ async def update_runtime_config(new_config: GoalsConfig) -> dict:
     is local and load-bearing for corpus matching, is rebuilt eagerly.
     """
     current_settings = settings()
-    # JSON mode is required for persistence: ``write_config_atomic`` feeds this
-    # to ``yaml.safe_dump``, which cannot serialize ProviderType enum objects
-    # (mode="python" leaves them). JSON mode coerces enums to their .value.
+    # Re-apply per-user calibration THEN ``ZS_*`` env so both survive a UI save (the
+    # request body carries only user-owned keys; calibration + env stay authoritative
+    # over system-owned defaults after the hot-swap, env winning). config_overrides.py.
+    new_config = apply_calibration(new_config, current_settings.calibration_path)
+    new_config = apply_env_overrides(new_config)
+    # JSON mode coerces ProviderType enums to their .value. This payload is the
+    # full EFFECTIVE config returned to the caller; the DISK write below persists
+    # only the user-owned keys (write_user_config).
     payload = new_config.model_dump(mode="json")
 
     app_state = state()
@@ -54,7 +60,7 @@ async def update_runtime_config(new_config: GoalsConfig) -> dict:
             cleared = await asyncio.to_thread(new_embedding_cache.clear_corpus_embeddings)
             LOGGER.info("Embedding model changed; cleared %s corpus embeddings", cleared)
 
-        write_config_atomic(current_settings.config_path, payload)
+        write_user_config(current_settings.config_path, new_config)
         app_state.app_state = AppState(config=new_config)
         app_state.invalidate_stage_clients()
         app_state.embedding_cache = new_embedding_cache

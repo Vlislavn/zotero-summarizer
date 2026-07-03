@@ -179,6 +179,17 @@ CREATE TABLE IF NOT EXISTS label_verdicts (
 );
 """
 
+# Review notes — one editable free-text note per paper, jotted during a review.
+# Decoupled from label_verdicts (a verdict is a decision; a note is thinking).
+# One row per item_key; the app save UPSERTs and best-effort mirrors to Zotero.
+_CREATE_REVIEW_NOTES_TABLE = """
+CREATE TABLE IF NOT EXISTS review_notes (
+    item_key    TEXT PRIMARY KEY,
+    note        TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+"""
+
 _INDEX_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_results_item_id ON triage_results(item_id)",
     "CREATE INDEX IF NOT EXISTS idx_results_batch_id ON triage_results(batch_id)",
@@ -257,6 +268,7 @@ def apply_schema(conn: sqlite3.Connection) -> None:
     conn.execute(_CREATE_ROLE_VALUE_VERDICTS_TABLE)
     conn.execute(_CREATE_WEEKLY_AB_VERDICTS_TABLE)
     conn.execute(_CREATE_LABEL_VERDICTS_TABLE)
+    conn.execute(_CREATE_REVIEW_NOTES_TABLE)
     feeds_storage.init_feeds_schema(conn)
 
     # June 2026 — verdict provenance. Pre-existing DBs get the column via the
@@ -275,6 +287,7 @@ def apply_schema(conn: sqlite3.Connection) -> None:
             "UPDATE label_verdicts SET source = 'machine_add'"
             " WHERE comment = 'added from Today'"
         )
+        feeds_storage.init_feeds_schema(conn)
 
     columns = _get_columns(conn, "triage_results")
     if "batch_id" not in columns:

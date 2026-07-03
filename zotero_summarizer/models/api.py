@@ -32,6 +32,7 @@ __all__ = [
     "PendingPriorityOverrideRequest",
     "PendingChangeUpdateRequest",
     "ZoteroItemPriorityUpdateRequest",
+    "ZoteroAttachFiguresRequest",
     "ZoteroItemTagUpdateRequest",
     "ZoteroCollectionRef",
     "ZoteroItemCollectionUpdateRequest",
@@ -181,6 +182,13 @@ class ZoteroItemPriorityUpdateRequest(BaseModel):
     @classmethod
     def _normalize_priority(cls, value: str) -> str:
         return _normalized_priority_or_raise(value, "priority")
+
+
+class ZoteroAttachFiguresRequest(BaseModel):
+    # Attach the paper's already-extracted figures to its Zotero item as child
+    # image attachments. `force` mirrors the other write requests: apply even while
+    # Zotero is running (the connector-ping gate returns requires_force otherwise).
+    force: bool = False
 
 
 class ZoteroItemTagUpdateRequest(BaseModel):

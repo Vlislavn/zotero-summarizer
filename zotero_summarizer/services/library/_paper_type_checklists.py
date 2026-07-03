@@ -47,6 +47,10 @@ class PaperType(str, Enum):
     EDITORIAL = "editorial"
     GENERIC_EMPIRICAL = "generic_empirical"
     GENERIC_REVIEW = "generic_review"
+    # Not a research paper (blog / news / web page). Has no scientific reporting
+    # standard, so the quality engine SHORT-CIRCUITS it to a relevance-only read (no
+    # A–D grade / red-flags); detected from metadata, never picked by the LLM rubric.
+    NON_PAPER = "non_paper"
 
 
 class Family(str, Enum):

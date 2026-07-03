@@ -8,7 +8,7 @@ Design choices:
 * **Field- AND year-normalized citation percentile** (OpenAlex
   ``citation_normalized_percentile``) is the signal — robust and comparable
   across fields and years, unlike raw citation counts, author h-index, or venue
-  size (gameable, field-biased, and unfair to new work). SOTA per the Leiden
+  size (gameable, field-biased, and unfair to new work). field-normalized per the Leiden
   Manifesto / OpenAlex guidance.
 * **No record / no percentile yet** → neutral ``3.0`` (cold-start protection:
   never floor a young or uncited paper at 1.0).

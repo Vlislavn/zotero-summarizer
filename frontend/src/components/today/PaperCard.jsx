@@ -14,8 +14,9 @@
 
 import AuthorByline from '../AuthorByline.jsx';
 import { scoreToBand, BAND_ACTIVE_CLS } from '../../utils/relevanceBands.js';
+import { Link } from 'react-router-dom';
 import { Chip } from '../paper/review/primitives.jsx';
-import { gradeTone } from '../paper/review/tones.js';
+import { gradeTone, bandTone, BAND_LABEL } from '../paper/review/tones.js';
 
 // Relevance-band → card accent + tint (Von Restorff): treasures full-weight,
 // trash desaturated. Keyed by the same band names as relevanceBands.scoreToBand.
@@ -45,25 +46,25 @@ function parseAuthorsString(s) {
 
 // ---------------------------------------------------------------------------
 // Quality — full-text peer-review assessment (services.quality_review), shown
-// SEPARATELY from relevance. Grade + verdict inline; rubric on expand.
+// SEPARATELY from relevance. Grade + rigor band inline; the coverage-based
+// checklist signal on expand — mirrors the brief's QualityHeadline. NOT the
+// digest's unvalidated 1-5 self-scores (coverage_fraction is their honest
+// replacement — see models/triage.py QualityEval).
 // ---------------------------------------------------------------------------
-
-function QualityBar({ label, value }) {
-  const v = Math.max(0, Math.min(5, Number(value) || 0));
-  return (
-    <div className="flex items-center gap-2 text-[11px]">
-      <span className="w-28 shrink-0 text-slate-500">{label}</span>
-      <span className="flex-1 h-1.5 rounded bg-slate-100 overflow-hidden">
-        <span className="block h-full bg-teal-500" style={{ width: `${(v / 5) * 100}%` }} />
-      </span>
-      <span className="w-4 text-right text-slate-600 mono">{v}</span>
-    </div>
-  );
-}
 
 function QualityBlock({ quality }) {
   const q = quality || {};
   const grade = q.grade || '';
+  if (q.basis === 'non_paper') {
+    // Not a research paper (blog/news/web page) — scientific quality criteria don't
+    // apply; it was read for relevance only, so don't imply a missing assessment.
+    return (
+      <div className="mt-1.5 text-[11px] text-slate-500">
+        <span className="uppercase tracking-wider font-semibold text-slate-500">Quality</span>{' '}
+        relevance read <span className="text-slate-400">(not a research paper)</span>
+      </div>
+    );
+  }
   if (!grade) {
     const why = q.basis === 'not_assessed' ? 'no open-access PDF' : 'not in the top-K reviewed set';
     return (
@@ -73,30 +74,46 @@ function QualityBlock({ quality }) {
       </div>
     );
   }
+  const band = String(q.quality_band || '');
+  const redFlags = (q.red_flags || []).map((x) => String(x || '').trim()).filter(Boolean);
+  const met = Number(q.coverage_met) || 0;
+  const applicable = Number(q.coverage_applicable) || 0;
+  const standard = String(q.coverage_standard || '');
   return (
     <div className="mt-1.5">
-      <div className="flex items-start gap-2 text-xs">
-        <span className="uppercase tracking-wider font-semibold text-slate-500 mt-0.5">Quality</span>
+      <div className="flex items-center gap-2 text-xs flex-wrap">
+        <span className="uppercase tracking-wider font-semibold text-slate-500">Quality</span>
         <Chip
           tone={gradeTone(grade)}
           title="Full-text peer-review grade (A best – D weak), independent of relevance to you"
         >
           {grade}
         </Chip>
-        {q.verdict && <span className="text-slate-700 italic">{q.verdict}</span>}
+        {BAND_LABEL[band] && (
+          <Chip tone={bandTone(band)} title="Reference-free rigor band from the full-text checklist">
+            {BAND_LABEL[band]}
+          </Chip>
+        )}
       </div>
       <details className="group mt-1">
         <summary className="cursor-pointer text-[11px] uppercase tracking-wider font-semibold text-slate-500 hover:text-slate-700 select-none">
           Quality review <span className="text-slate-400 normal-case font-normal">· from full text</span>
         </summary>
-        <div className="mt-1.5 space-y-1">
-          <QualityBar label="soundness" value={q.soundness} />
-          <QualityBar label="novelty" value={q.novelty} />
-          <QualityBar label="significance" value={q.significance} />
-          <QualityBar label="reproducibility" value={q.reproducibility} />
-          <QualityBar label="clarity" value={q.clarity} />
-          {q.key_strength && <p className="text-[11px] text-emerald-800 mt-1">＋ {q.key_strength}</p>}
-          {q.key_weakness && <p className="text-[11px] text-rose-800">－ {q.key_weakness}</p>}
+        <div className="mt-1.5 space-y-1 text-[11px] text-slate-600">
+          {applicable > 0 ? (
+            <p>
+              {standard && <span className="font-semibold text-slate-700">{standard} · </span>}
+              {met}/{applicable} applicable checklist items met
+            </p>
+          ) : (
+            <p className="text-slate-400">no checklist coverage recorded</p>
+          )}
+          {redFlags.length > 0 && (
+            <ul className="list-disc pl-4 text-rose-800">
+              {redFlags.slice(0, 3).map((f) => <li key={f}>{f}</li>)}
+            </ul>
+          )}
+          <p className="text-[10px] text-slate-400 mt-1.5">A = exceptional · B = solid · C = mixed · D = weak</p>
         </div>
       </details>
     </div>
@@ -206,6 +223,18 @@ export default function PaperCard({ paper, selected, onToggleSelect }) {
           )}
 
           <QualityBlock quality={paper.quality} />
+
+          {/* Open the full brief — the SAME library review page (/paper/:key), keyed by
+              the durable stable_feed_key (the top feed papers carry a rendered brief +
+              the in-place review; others show the review). Reuse, not a new view. */}
+          {paper.stable_feed_key && (
+            <Link
+              to={`/paper/${encodeURIComponent(paper.stable_feed_key)}`}
+              className="mt-2 inline-block text-[11px] font-medium text-teal-700 hover:text-teal-900 hover:underline underline-offset-2"
+            >
+              Open full brief ↗
+            </Link>
+          )}
         </div>
       </div>
     </article>

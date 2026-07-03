@@ -37,7 +37,7 @@ PHASE_LABELS: dict[str, str] = {
 }
 
 # Median wall-clock per phase (seconds), seeded from real selective-thinking runs
-# on kather sota (digest thinks; the rest run fast) so the FIRST review's ETA is
+# on the remote reasoning model (digest thinks; the rest run fast) so the FIRST review's ETA is
 # already accurate. Self-corrects at runtime (EMA) as phases complete.
 _PHASE_MEDIANS: dict[str, float] = {
     "extract": 5.0,

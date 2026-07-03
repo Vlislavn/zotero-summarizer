@@ -17,7 +17,7 @@ import AnnotationVerdict from './AnnotationVerdict.jsx';
 
 const MODES = [
   { id: 'read', label: 'Read next' },
-  { id: 'batch', label: 'Batch label' },
+  { id: 'batch', label: 'Select & label' },
 ];
 
 const VALID_MODES = new Set(MODES.map((m) => m.id));

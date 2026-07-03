@@ -25,6 +25,7 @@ dependencies = [
     "pandas>=2.0.0",
     "rank-bm25>=0.2.2",
     "lightgbm>=4.0.0",
+    "feedparser>=6.0.12",
 ]
 
 [project.optional-dependencies]

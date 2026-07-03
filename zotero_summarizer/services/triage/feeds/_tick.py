@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from zotero_summarizer.integrations.app_rss import AppRssReader
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.storage import feeds as feeds_storage
@@ -38,6 +39,9 @@ from zotero_summarizer.services.triage.feeds._tick_phases import (
     record_tick_decisions,
     recover_abstractless_rescues,
     run_triage_stage,
+)
+from zotero_summarizer.services.triage.feeds._rescue_l1 import (
+    recover_abstractless_l1_candidates,
 )
 
 
@@ -112,6 +116,117 @@ def _build_tick_report(
     return report
 
 
+def _maybe_auto_review(tick_id: str, materialized_keys: list[str]) -> None:
+    """Fire the full-text quality review for the just-materialized Today picks.
+
+    This is the fix for "I never see the deep review during triage": before this
+    hook, ``deep_review`` only ran at startup (prewarm) or on a manual button/API
+    trigger. Daily selection has just materialized these items into Zotero, so
+    their PDFs are fetchable and their library keys are real — the first point a
+    full-text review can run. Reuses ``deep_review.start`` (single-flight: skips
+    already-running + cached; provider-aware pool: parallel on a remote provider,
+    queued on a local one) — the SAME ``assess_digest`` path the per-paper button
+    and the library use, not a second review. Fire-and-forget: ``start`` submits
+    to its pool and returns, so the tick is never blocked.
+
+    Gated by ``quality_review.auto_on_tick_k`` (0 disables). Capped to that many
+    keys per tick. A failure to *submit* is a daemon-tick boundary (logged, never
+    crashes the tick); per-paper review failures are recorded on each item's job
+    by the deep_review worker, not here.
+    """
+    config = _load_config()
+    qr = config.get("quality_review") or {}
+    k = int(qr.get("auto_on_tick_k") or 0)
+    if k <= 0 or not materialized_keys:
+        return
+    keys = [str(key).strip() for key in materialized_keys if str(key).strip()]
+    if not keys:
+        return
+    if len(keys) > k:
+        keys = keys[:k]
+    try:
+        from zotero_summarizer.services.library import deep_review
+
+        deep_review.start(item_keys=keys)
+        LOGGER.info("[%s] auto-review: submitted %d materialized pick(s) for full-text review", tick_id, len(keys))
+    except Exception:
+        LOGGER.exception("[%s] auto-review submit failed", tick_id)
+
+
+def _auto_review_slate(tick_id: str) -> None:
+    """In-place full-text review of the TOP Today slate candidates so Today cards show a
+    real quality grade — WITHOUT a Zotero write (the user asked: review in place, persist
+    if later added). Resolves each candidate by its ``stable_feed_key`` (``AppLibraryReader``,
+    decision-independent), acquires a PDF into the local cache, and reviews on the shared
+    deep_review pool (provider-aware: parallel remote, queued local). The review caches under
+    ``stable_feed_key`` — the Today quality bridge joins on it, and ``add_to_library`` copies it
+    onto the new library key. Already-cached feed keys are skipped so re-ticks stay cheap.
+    Gated by ``quality_review.auto_on_tick_k`` (0 disables). Daemon-tick boundary: a failure is
+    logged, never crashes the tick."""
+    config = _load_config()
+    k = int((config.get("quality_review") or {}).get("auto_on_tick_k") or 0)
+    if k <= 0:
+        return
+    try:
+        from zotero_summarizer.services._common import settings
+        from zotero_summarizer.services.library import deep_review
+        from zotero_summarizer.services.library.app_library_reader import AppLibraryReader
+        from zotero_summarizer.services.triage.daily_select import assemble_daily_slate
+
+        db_path = settings().triage_db_path
+        slate = assemble_daily_slate(db_path=db_path, K=k)
+        done = deep_review.cached_review_keys()
+        keys = [p.stable_feed_key for p in slate.papers
+                if p.stable_feed_key and p.stable_feed_key not in done][:k]
+        if not keys:
+            return
+        deep_review.start(item_keys=keys, acquire_missing=True, reader=AppLibraryReader(db_path))
+        LOGGER.info("[%s] auto-review (in-place): submitted %d slate pick(s)", tick_id, len(keys))
+    except Exception:
+        LOGGER.exception("[%s] in-place auto-review submit failed", tick_id)
+
+
+def _auto_render_slate(tick_id: str) -> None:
+    """Build the full, heavy paper RENDER (notes.md / presentation.html / figures) for the
+    TOP-``render_on_tick_k`` Today feed papers, so a top feed paper opens with the same brief
+    as a library item. Renders only keys ALREADY reviewed (``cached_review_keys`` — so the
+    brief folds the cached review in, one tick after ``_auto_review_slate``, never racing it)
+    and NOT already rendered. Reuses ``paper_render.start_build`` (its own pool + single-flight;
+    the PDF is a cache hit from the review, and the digest is cached → NO extra LLM). Resolves
+    the feed key via the key-aware reader (``paper_render._item_detail`` → ``resolve_reader_for_key``).
+    Gated by ``quality_review.render_on_tick_k`` (0 disables). Daemon-tick boundary: a failure is
+    logged, never crashes the tick."""
+    config = _load_config()
+    k = int((config.get("quality_review") or {}).get("render_on_tick_k") or 0)
+    if k <= 0:
+        return
+    try:
+        from zotero_summarizer.services._common import settings
+        from zotero_summarizer.services.library import deep_review, paper_render
+        from zotero_summarizer.services.triage.daily_select import assemble_daily_slate
+
+        db_path = settings().triage_db_path
+        slate = assemble_daily_slate(db_path=db_path, K=max(k, 5))
+        reviewed = deep_review.cached_review_keys()
+        # Top-K by composite rank, restricted to reviewed feed keys (so the brief has the
+        # review folded in). slate.papers is role-grouped, so sort by composite_score.
+        ranked = sorted(
+            (p for p in slate.papers if p.stable_feed_key and p.stable_feed_key in reviewed),
+            key=lambda p: p.composite_score, reverse=True,
+        )
+        submitted = 0
+        for paper in ranked[:k]:
+            state = paper_render._read_state(paper.stable_feed_key)
+            if state is not None and state.get("status") == "completed":
+                continue  # already rendered — skip (self-heals a failed/missing one)
+            paper_render.start_build(paper.stable_feed_key, allow_acquire_missing=True)
+            submitted += 1
+        if submitted:
+            LOGGER.info("[%s] auto-render: submitted %d top feed paper(s)", tick_id, submitted)
+    except Exception:
+        LOGGER.exception("[%s] auto-render submit failed", tick_id)
+
+
 def run_daemon_tick(
     *,
     reader: ZoteroReader | None = None,
@@ -163,13 +278,33 @@ def run_daemon_tick(
     config = _load_config()
     feeds_cfg = config["feeds"]
 
-    reader = reader or ZoteroReader(get_settings().zotero_data_dir)
-    writer = writer or ZoteroWriter(get_settings().zotero_data_dir)
+    reader = reader or AppRssReader(get_settings().triage_db_path)
+    if writer is None:
+        try:
+            writer = ZoteroWriter(get_settings().zotero_data_dir)
+        except Exception as exc:  # noqa: BLE001 — Zotero is now an optional adapter
+            writer = None
+            LOGGER.info("[%s] Zotero writer unavailable; app RSS read-state only: %s", tick_id, exc)
 
     # batch_size semantics: None = unlimited (feeds run full-exhaust); int = bounded.
     effective_batch: int | None = batch_size
     flags = _resolve_tick_flags(feeds_cfg)
     LOGGER.info("[%s] tick start batch=%s", tick_id, effective_batch if effective_batch is not None else "unlimited")
+
+    if hasattr(reader, "refresh_feeds"):
+        refresh_cfg = feeds_cfg.get("startup_refresh") or feeds_cfg.get("refresh") or {}
+        max_feeds = int(refresh_cfg.get("max_feeds_per_pass") or feeds_cfg.get("max_feeds_per_pass") or 10)
+        max_new = int(refresh_cfg.get("max_new_items_per_feed") or feeds_cfg.get("max_new_items_per_feed") or 25)
+        timeout = float(refresh_cfg.get("per_feed_timeout_secs") or feeds_cfg.get("per_feed_timeout_secs") or 10.0)
+        try:
+            refreshed = reader.refresh_feeds(
+                max_feeds=max_feeds,
+                max_new_items_per_feed=max_new,
+                per_feed_timeout=timeout,
+            )
+            LOGGER.info("[%s] app RSS refresh: %s", tick_id, refreshed)
+        except Exception:
+            LOGGER.exception("[%s] app RSS refresh failed", tick_id)
 
     # 1. Pick unread items (round-robin when bounded, full-exhaust when None).
     raw = pick_and_log(
@@ -206,6 +341,26 @@ def run_daemon_tick(
         to_triage, tick_id=tick_id, gate_only=gate_only, triage_llm=triage_llm,
     )
     triaged_results = rescued + triaged_results
+
+    # 3.5 Acquire-before-score for L1-hide candidates (G10): an abstract-less row scored
+    #     <= llm_floor was scored on its TITLE alone — re-score it on the full text before the
+    #     verdict is recorded + the L1 gate acts, so the hide decision is content-grounded (not
+    #     a title-grounded false-positive). No-op when recover_abstract is off or in gate_only
+    #     (no LLM). Reuses the SAME llm_floor the auto quality-gate reads (quality_gate._gate_config).
+    #     Non-blocking (mirrors fire_full at step 7.6): the rescue is a precision step; an
+    #     expected failure (bad config value, PDF/LLM I/O) is logged + skipped — fire_full then
+    #     reads its own floor and the title-grounded verdict stands. A real bug propagates.
+    if not gate_only:
+        from zotero_summarizer.services.library import quality_gate
+        try:
+            _g_enabled, _g_floor, _g_grades, _g_bands = quality_gate._gate_config()
+            if _g_enabled:
+                triaged_results, _n_rescued = recover_abstractless_l1_candidates(
+                    triaged_results, tick_id=tick_id, llm_floor=_g_floor,
+                )
+        except (ValueError, AttributeError, OSError) as exc:  # config/I/O only — bugs propagate
+            LOGGER.warning("[%s] recover-abstract-l1 skipped: %s", tick_id, exc)
+
     results = _TickResults(
         triaged=triaged_results,
         fast_rejected=fast_rejected_results,
@@ -234,11 +389,52 @@ def run_daemon_tick(
 
     # 7. Daily selection trigger (skipped entirely in review_mode).
     daily_ran, daily_materialized, daily_rejected = False, 0, 0
+    daily_materialized_keys: list[str] = []
     if not review_mode and allow_daily_selection:
-        daily_ran, daily_materialized, daily_rejected = maybe_run_daily(
+        daily_ran, daily_materialized, daily_rejected, daily_materialized_keys = maybe_run_daily(
             feeds_cfg, reader=reader, writer=writer, tick_id=tick_id,
             feed_library_ids=feed_library_ids, force=force_daily_selection, dry_run=dry_run,
         )
+
+    # 7.5 Auto full-text quality review of the just-materialized Today picks.
+    # Before this, deep_review only fired at startup (prewarm) or on a manual
+    # button/API trigger — so papers triaged in during a tick got NO full-text
+    # review. Daily selection just materialized them into Zotero (real keys +
+    # fetchable PDFs), so this is the first point they can be reviewed. Fire-
+    # and-forget on the deep_review job pool (provider-aware: parallel on a
+    # remote provider, queued on a local one) — never blocks the tick. Reuses
+    # the SAME assess_digest path the library/per-paper button uses (not a
+    # second review). Skipped in dry_run. See QualityReviewConfig.auto_on_tick_k.
+    if daily_materialized_keys and not dry_run:
+        _maybe_auto_review(tick_id, daily_materialized_keys)
+
+    # 7.55 In-place review of the broader Today slate (no Zotero write) so EVERY shown
+    # card can carry a quality grade, not just the few daily picks materialized above.
+    # Keyed by stable_feed_key; cheap on re-ticks (skips already-reviewed keys).
+    if not dry_run:
+        _auto_review_slate(tick_id)
+
+    # 7.56 Heavy paper RENDER for the TOP-K feed papers (reviewed last tick), so a top
+    # feed paper opens with the same full brief as a library item. Lags the review by a
+    # tick (renders only already-reviewed keys), cheap (skips already-rendered, no LLM).
+    if not dry_run:
+        _auto_render_slate(tick_id)
+
+    # 7.6 Auto QUALITY GATE — hide bad-quality shown rows (precision mode). The
+    # LLM relevance_score just landed in shap_contribs_json for the triaged rows, so
+    # this is the first point L1 (score floor) can reach them; L2 (grade D | flag) also
+    # re-runs over the deep-review cache. Conjunctive: quality is a HARD filter (a bad
+    # paper on-topic is hidden, even if goal-matched); match stays the ranker among
+    # survivors. Writes dont_read with source=auto_quality (one-tap reversible, never
+    # clobbers a user verdict). Non-blocking; skipped in dry_run. See quality_gate.
+    if not dry_run:
+        try:
+            from zotero_summarizer.services.library import quality_gate
+            hidden = quality_gate.fire_full()
+            if hidden:
+                LOGGER.info("[%s] auto quality-gate hid %d bad-quality row(s)", tick_id, hidden)
+        except Exception:
+            LOGGER.exception("[%s] auto quality-gate fire_full failed", tick_id)
 
     return _build_tick_report(
         tick_id=tick_id,

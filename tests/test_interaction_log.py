@@ -104,6 +104,8 @@ def test_emit_failure_is_warned_not_swallowed(tmp_path: Path, monkeypatch, caplo
         raise OSError("disk full")
 
     monkeypatch.setattr(run_log, "append_run", boom)
+    logger = logging.getLogger("zotero_summarizer")
+    monkeypatch.setattr(logger, "propagate", True)
 
     with caplog.at_level(logging.WARNING, logger="zotero_summarizer"):
         interaction_log.log_human_feedback(  # must NOT raise

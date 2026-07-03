@@ -13,6 +13,7 @@ __all__ = [
     "TriageDimensions",
     "TriageResult",
     "QualityReview",
+    "PaperParameters",
     "PaperDigest",
     "GoalSummary",
     "QualityEval",
@@ -87,6 +88,22 @@ class QualityReview(BaseModel):
         return v if v in {"A", "B", "C", "D"} else ""
 
 
+class PaperParameters(BaseModel):
+    """Structured technical parameters extracted from the paper's FULL TEXT during
+    the deep review (top-K only — the triage feed stage stays abstract-based). This
+    is the "pre-extraction of parameters" the user asked for: datasets, baselines,
+    sample size, metrics, architecture, external-validation flag. Every field
+    defaults to empty/None — absent is the documented empty contract, NEVER a
+    fabricated guess (faithbench-hardened abstention: unknown → null)."""
+
+    dataset: str = Field(default="")
+    baselines: List[str] = Field(default_factory=list)
+    sample_size: str = Field(default="")
+    metrics: List[str] = Field(default_factory=list)
+    architecture: str = Field(default="")
+    external_validation: Optional[bool] = Field(default=None)
+
+
 class PaperDigest(QualityReview):
     """Condensed, scannable analysis of a paper's FULL TEXT — what it's about and
     how to use it (the user's 7-point investigation) — plus the inherited quality
@@ -109,6 +126,9 @@ class PaperDigest(QualityReview):
     limitations: str = Field(default="")
     industry_impact: str = Field(default="")
     academy_impact: str = Field(default="")
+    # Structured technical parameters extracted from the full text (top-K only).
+    # None when not assessed; absent fields inside are the empty contract, not guesses.
+    parameters: Optional[PaperParameters] = Field(default=None)
 
     @field_validator("read_decision", mode="before")
     @classmethod

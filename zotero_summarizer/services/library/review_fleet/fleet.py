@@ -235,7 +235,7 @@ def _acquire_missing_pdfs(keys: list[str], outcomes: dict[str, str]) -> tuple[di
     genuine extraction failure, not a missing source — skipped. A per-key acquisition
     failure is isolated to that key (recorded ``failed`` in ``outcomes``)."""
     from zotero_summarizer.services.library import _pdf_acquire
-    from zotero_summarizer.services.zotero.zotero import get_zotero_reader_or_raise
+    from zotero_summarizer.services.zotero.zotero import get_library_reader
 
     overrides: dict[str, str] = {}
     login: dict[str, dict[str, str]] = {}
@@ -246,7 +246,7 @@ def _acquire_missing_pdfs(keys: list[str], outcomes: dict[str, str]) -> tuple[di
         if not (review is None or review.get("needs_pdf") or review.get("digest") is None):
             continue  # already has a digest — nothing to acquire
         try:
-            detail = get_zotero_reader_or_raise().get_item_detail(item_key) or {}
+            detail = get_library_reader().get_item_detail(item_key) or {}
             if detail.get("has_pdf"):
                 continue  # has a local PDF but no digest → extraction failure, not a missing source
             result = _pdf_acquire.acquire_pdf_for(item_key, detail)

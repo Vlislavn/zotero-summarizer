@@ -11,7 +11,7 @@ import types
 
 import pytest
 
-from zotero_summarizer.services.library import deep_review
+from zotero_summarizer.services.library import _map_reduce, _review_cache, deep_review
 from zotero_summarizer.services.zotero import zotero as zotero_svc
 from zotero_summarizer.services._common import read_config, settings as _settings
 
@@ -26,7 +26,7 @@ def _reset_state(tmp_path, monkeypatch):
     """Isolate the per-item job registry + cache file for every test."""
     with deep_review._LOCK:
         deep_review._JOBS.clear()
-    monkeypatch.setattr(deep_review, "_cache_path", lambda: tmp_path / "deep_reviews.json")
+    monkeypatch.setattr(_review_cache, "_cache_path", lambda: tmp_path / "deep_reviews.json")
     yield
 
 
@@ -82,7 +82,7 @@ def _fake_state(config, *, extractor, reader):
         # Provider drives concurrency (is_local → serial) AND the deep-review tier
         # (lean_deep_review → cheap tier). A local+lean stub keeps the job
         # single-threaded, deterministic, and on the lean tier in tests.
-        resolve_stage_provider=lambda stage: types.SimpleNamespace(is_local=True, lean_deep_review=True),
+        resolve_stage_provider=lambda stage: types.SimpleNamespace(is_local=True, lean_deep_review=True, thinking_on=True),
     )
 
 
@@ -106,7 +106,7 @@ def _wire(monkeypatch, config, *, reader, extractor, note_fn=None):
         return ({"quality_band": "neutral"},
                 [{"goal": g, "retrieval_state": "miss"} for g in goals],
                 {"type": "empirical_ml", "confidence": 0.9, "source": "llm"},
-                None)  # section_overlay (4th layer; None when no sections)
+                None, None)   # section_overlay (4th) + code_link (5th) — None when absent
     monkeypatch.setattr(deep_review._deep_review_layers, "extra_layers", _stub_layers)
 
 
@@ -178,7 +178,7 @@ def _run_acquiring(monkeypatch, config, *, extractor, acquired_path, needs_login
     reader = _StubReader({"K1": _detail(pdf_path="", url="https://www.nature.com/articles/x")})
     _wire(monkeypatch, config, reader=reader, extractor=extractor)
     monkeypatch.setattr(_pdf_acquire, "acquire_for_item",
-                        lambda key: _pdf_acquire.AcquireResult(path=acquired_path, needs_login=needs_login, login_url=login_url))
+                        lambda key, reader=None: _pdf_acquire.AcquireResult(path=acquired_path, needs_login=needs_login, login_url=login_url))
     ctx = deep_review._build_ctx()
     ctx["_acquire_missing"] = True
     deep_review._review_worker({"item_key": "K1", "title": "T", "pdf_path": ""}, ctx, "")
@@ -252,7 +252,7 @@ def _wire_provider_endpoint(monkeypatch, config, reader, llm, base_url):
             pdf_extractor=_StubExtractor("BODY"), unpaywall_client=None, zotero_reader=reader,
             resolve_stage_client=lambda stage, **_k: llm,
             resolve_stage_provider=lambda stage: types.SimpleNamespace(
-                is_local=True, base_url=base_url
+                is_local=True, base_url=base_url, thinking_on=True
             ),
         ),
     )
@@ -311,9 +311,9 @@ def test_lean_tier_uses_lean_max_text_chars(config, monkeypatch):
     reader = _StubReader({"K1": _detail()})
     _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY TEXT"))
     seen: list[int | None] = []
-    real = deep_review.quality_review.assess_digest
+    real = _map_reduce.assess_digest
     monkeypatch.setattr(
-        deep_review.quality_review, "assess_digest",
+        _map_reduce, "assess_digest",
         lambda **kw: (seen.append(kw.get("max_chars")), real(**kw))[1],
     )
     # _wire's fake provider is lean_deep_review=True → lean tier.
@@ -325,7 +325,7 @@ def test_lean_tier_uses_lean_max_text_chars(config, monkeypatch):
         app_state=types.SimpleNamespace(config=config), pdf_extractor=_StubExtractor("BODY TEXT"),
         unpaywall_client=None, zotero_reader=reader,
         resolve_stage_client=lambda s, **_k: _StubLLM(),
-        resolve_stage_provider=lambda s: types.SimpleNamespace(is_local=False, lean_deep_review=False),
+        resolve_stage_provider=lambda s: types.SimpleNamespace(is_local=False, lean_deep_review=False, thinking_on=True),
     ))
     _run([{"item_key": "K1", "title": "T"}])
     assert seen[-1] == config.quality_review.max_text_chars
@@ -346,14 +346,14 @@ def test_mlx_shape_loopback_but_not_lean_uses_full_tier(config, monkeypatch):
         app_state=types.SimpleNamespace(config=config), pdf_extractor=_StubExtractor("BODY TEXT"),
         unpaywall_client=None, zotero_reader=reader,
         resolve_stage_client=lambda s, **_k: _StubLLM(),
-        resolve_stage_provider=lambda s: types.SimpleNamespace(is_local=True, lean_deep_review=False),
+        resolve_stage_provider=lambda s: types.SimpleNamespace(is_local=True, lean_deep_review=False, thinking_on=True),
     ))
     monkeypatch.setattr(zotero_svc, "zotero_upsert_digest_note", lambda _ik, _d: None)
 
     seen_digest: list[int | None] = []
-    real = deep_review.quality_review.assess_digest
+    real = _map_reduce.assess_digest
     monkeypatch.setattr(
-        deep_review.quality_review, "assess_digest",
+        _map_reduce, "assess_digest",
         lambda **kw: (seen_digest.append(kw.get("max_chars")), real(**kw))[1],
     )
     captured = {}
@@ -432,7 +432,7 @@ def test_start_accepts_concurrently_no_single_flight(monkeypatch):
     """The old global single-flight is gone: a 2nd start is ACCEPTED (submitted), not
     rejected — that's what lets you deep-review a 2nd paper while a 1st runs. (Per-item
     single-flight — the SAME paper twice — is covered in test_deep_review_concurrency.py.)"""
-    monkeypatch.setattr(deep_review, "_build_ctx", lambda: {"_provider": None})
+    monkeypatch.setattr(deep_review, "_build_ctx", lambda reader=None: {"_provider": None})
     monkeypatch.setattr(deep_review.reading_queue, "get_cached_scoring", lambda key: None)
     submitted: list[str] = []
     monkeypatch.setattr(deep_review, "_submit", lambda item, ctx, fp: submitted.append(item["item_key"]))
@@ -445,7 +445,7 @@ def test_start_accepts_concurrently_no_single_flight(monkeypatch):
 
 def test_start_empty_queue_submits_nothing(monkeypatch):
     monkeypatch.setattr(deep_review.reading_queue, "build_reading_queue", lambda **k: {"items": []})
-    monkeypatch.setattr(deep_review, "_build_ctx", lambda: {"_provider": None})
+    monkeypatch.setattr(deep_review, "_build_ctx", lambda reader=None: {"_provider": None})
     monkeypatch.setattr(
         deep_review, "_submit", lambda *a, **k: pytest.fail("nothing to submit for an empty queue")
     )
@@ -465,7 +465,7 @@ def test_start_with_item_keys_skips_queue(monkeypatch):
         deep_review.reading_queue, "get_cached_scoring",
         lambda key: {"composite_score": 4.1} if key == "K1" else None,
     )
-    monkeypatch.setattr(deep_review, "_build_ctx", lambda: {"_provider": None})
+    monkeypatch.setattr(deep_review, "_build_ctx", lambda reader=None: {"_provider": None})
     submitted: list[dict] = []
     monkeypatch.setattr(deep_review, "_submit", lambda item, ctx, fp: submitted.append(item))
 

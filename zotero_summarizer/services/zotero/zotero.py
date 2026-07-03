@@ -7,6 +7,7 @@ from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter, ZoteroWriteError
 from zotero_summarizer.models import (
+    ZoteroAttachFiguresRequest,
     ZoteroCollectionsResponse,
     ZoteroItemCollectionUpdateRequest,
     ZoteroItemPriorityUpdateRequest,
@@ -30,6 +31,39 @@ def get_zotero_reader_or_raise() -> ZoteroReader:
         error_message = getattr(app_state, "zotero_error", "Zotero library is not configured")
         raise APIError(error="zotero_unavailable", message=error_message, status_code=503)
     return reader
+
+
+def get_library_reader(app_state: Any | None = None) -> Any:
+    """Resolve the reader for the READ path: the live Zotero reader when a Zotero
+    DB is configured, else the app-owned library over kept feed papers
+    (:class:`AppLibraryReader`). Both expose ``get_all_items`` / ``get_item_detail``,
+    the only surface the reading stack uses. Never raises — the app reader is
+    always constructible — so brief / deep-review / ask / the reading queue work
+    with Zotero absent. The WRITE path keeps :func:`get_zotero_reader_or_raise`."""
+    app_state = app_state or state()
+    reader: ZoteroReader | None = getattr(app_state, "zotero_reader", None)
+    if reader is not None:
+        return reader
+    from zotero_summarizer.services.library.app_library_reader import AppLibraryReader
+
+    return AppLibraryReader(settings().triage_db_path)
+
+
+def resolve_reader_for_key(item_key: str) -> Any:
+    """Resolve the reader by the KEY's shape, not by Zotero presence: a
+    ``stable_feed_key`` (``feed:<ns>:<sha>``) is an un-materialized Today feed item that
+    only the app library can resolve (by stable_feed_key, decision-independent), so it
+    routes to :class:`AppLibraryReader` even when a live Zotero reader is configured;
+    anything else (a Zotero item_key) routes to :func:`get_library_reader`. This is what
+    lets the deep-review/render/detail paths serve an in-place-reviewed feed paper that
+    has no Zotero item yet."""
+    from zotero_summarizer.storage.feed_identity import is_stable_feed_key
+
+    if is_stable_feed_key(item_key):
+        from zotero_summarizer.services.library.app_library_reader import AppLibraryReader
+
+        return AppLibraryReader(settings().triage_db_path)
+    return get_library_reader()
 
 
 def get_zotero_writer_or_raise() -> ZoteroWriter:
@@ -154,6 +188,56 @@ async def zotero_set_item_priority(item_key: str, req: ZoteroItemPriorityUpdateR
     }
 
 
+async def zotero_attach_figures(item_key: str, req: ZoteroAttachFiguresRequest) -> dict[str, Any]:
+    """Attach the paper's already-extracted figures to its Zotero item as child image
+    attachments (they render in Zotero next to the paper). Dedups by filename so a
+    re-click never duplicates. Force-gated like the other writes: refuses while Zotero
+    is open unless ``req.force`` (a forced write only shows after a Zotero restart)."""
+    reader = get_zotero_reader_or_raise()
+    writer = get_zotero_writer_or_raise()
+    safe_item_key = str(item_key or "").strip()
+    if not safe_item_key:
+        raise APIError(error="validation_error", message="item_key is required", status_code=422)
+
+    detail = await asyncio.to_thread(reader.get_item_detail, safe_item_key)
+    if detail is None:
+        raise APIError(error="not_found", message="Item not found", status_code=404)
+
+    from zotero_summarizer.services.library.paper_figures import attachable_figures
+    figures = await asyncio.to_thread(attachable_figures, safe_item_key)
+    # Skip figures already attached (Zotero stores the path as "storage:<filename>").
+    existing = {
+        str(a.get("stored_path") or "").split("storage:", 1)[-1]
+        for a in (detail.get("attachments") or [])
+        if str(a.get("stored_path") or "").startswith("storage:")
+    }
+    pending = [f for f in figures if f["name"] not in existing]
+    if not pending:
+        message = ("No new figures to attach — they're already on the item"
+                   if figures else "No figures generated yet — build the review first.")
+        return {"updated": 0, "item_key": safe_item_key, "message": message}
+
+    if writer.is_connector_running() and not req.force:
+        return {
+            "error": "zotero_running",
+            "message": "Zotero appears to be running; close Zotero or confirm force apply.",
+            "requires_force": True,
+        }
+
+    changes = [
+        {"id": 0, "item_key": safe_item_key, "change_type": "add_attachment",
+         "payload_json": {"source_path": fig["path"], "filename": fig["name"],
+                          "title": fig["name"], "content_type": "image/png"}}
+        for fig in pending
+    ]
+    result = await asyncio.to_thread(writer.apply_changes, changes, True)
+    failed = list(result.get("failed") or [])
+    if failed:
+        first_error = str(failed[0].get("error") or "Failed to attach figures")
+        raise APIError(error="zotero_write_failed", message=first_error, status_code=500)
+    return {"updated": len(changes), "item_key": safe_item_key, "figures": [fig["name"] for fig in pending]}
+
+
 async def zotero_update_item_tags(item_key: str, req: ZoteroItemTagUpdateRequest) -> dict[str, Any]:
     reader = get_zotero_reader_or_raise()
     writer = get_zotero_writer_or_raise()
@@ -237,6 +321,37 @@ def zotero_upsert_verdict_note(item_key: str, user_priority: str, comment: str) 
     failed = list(result.get("failed") or [])
     if failed:
         raise ZoteroWriteError(str(failed[0].get("error") or "verdict note write failed"))
+
+
+def zotero_upsert_user_note(item_key: str, note: str) -> None:
+    """Write (or update in place) the user's free-text review note as a Zotero note.
+
+    Mirrors :func:`zotero_upsert_verdict_note` — a direct upsert under its own
+    marker so the note lives on the Zotero item too. Raises on failure so the
+    caller can report it; the note is already saved in-app and must not be blocked
+    by this. Refuses while Zotero is open (DB-lock risk)."""
+    from zotero_summarizer.services.zotero.pending import USER_NOTE_MARKER, build_user_note_html
+
+    writer = get_zotero_writer_or_raise()
+    if writer.is_connector_running():
+        raise ZoteroWriteError("Zotero is open; close it to save your notes.")
+    note_html = build_user_note_html(note)
+    result = writer.apply_changes(
+        [{
+            "id": 0,
+            "item_key": item_key,
+            "change_type": "upsert_note",
+            "payload_json": {
+                "note_html": note_html,
+                "marker": USER_NOTE_MARKER,
+                "note_title": "My notes",
+            },
+        }],
+        False,
+    )
+    failed = list(result.get("failed") or [])
+    if failed:
+        raise ZoteroWriteError(str(failed[0].get("error") or "user note write failed"))
 
 
 def zotero_set_label_tag(item_key: str, priority: str) -> None:

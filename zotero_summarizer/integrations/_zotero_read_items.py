@@ -12,6 +12,18 @@ from zotero_summarizer.integrations._zotero_read_common import (
 )
 
 
+def _field_value_sql(field_name: str) -> str:
+    """Correlated subquery for one Zotero ``itemData`` field's value on the current
+    item (``i.itemID``), '' when absent. ``field_name`` is a hardcoded field constant
+    (never user input), so inlining the literal is injection-safe."""
+    return (
+        "COALESCE((SELECT v.value FROM itemData id "
+        "JOIN fields f ON f.fieldID = id.fieldID "
+        "JOIN itemDataValues v ON v.valueID = id.valueID "
+        f"WHERE id.itemID = i.itemID AND f.fieldName = '{field_name}' LIMIT 1), '')"
+    )
+
+
 class ZoteroItemsMixin:
     def _build_list_query(
         self,
@@ -64,24 +76,10 @@ class ZoteroItemsMixin:
         if search and search.strip():
             token = f"%{search.strip().lower()}%"
             where_clauses.append(
-                """
+                f"""
                 (
-                    lower(COALESCE((
-                        SELECT v.value
-                        FROM itemData id
-                        JOIN fields f ON f.fieldID = id.fieldID
-                        JOIN itemDataValues v ON v.valueID = id.valueID
-                        WHERE id.itemID = i.itemID AND f.fieldName = 'title'
-                        LIMIT 1
-                    ), '')) LIKE ?
-                    OR lower(COALESCE((
-                        SELECT v.value
-                        FROM itemData id
-                        JOIN fields f ON f.fieldID = id.fieldID
-                        JOIN itemDataValues v ON v.valueID = id.valueID
-                        WHERE id.itemID = i.itemID AND f.fieldName = 'abstractNote'
-                        LIMIT 1
-                    ), '')) LIKE ?
+                    lower({_field_value_sql('title')}) LIKE ?
+                    OR lower({_field_value_sql('abstractNote')}) LIKE ?
                     OR lower(COALESCE((
                         SELECT group_concat(t.name, ' ')
                         FROM itemTags itg
@@ -95,18 +93,7 @@ class ZoteroItemsMixin:
 
         where_sql = " AND ".join(where_clauses)
 
-        abstract_sql = (
-            """COALESCE((
-                    SELECT v.value
-                    FROM itemData id
-                    JOIN fields f ON f.fieldID = id.fieldID
-                    JOIN itemDataValues v ON v.valueID = id.valueID
-                    WHERE id.itemID = i.itemID AND f.fieldName = 'abstractNote'
-                    LIMIT 1
-                ), '')"""
-            if include_abstract
-            else "''"
-        )
+        abstract_sql = _field_value_sql("abstractNote") if include_abstract else "''"
 
         count_sql = f"""
             SELECT COUNT(*) AS total
@@ -122,23 +109,9 @@ class ZoteroItemsMixin:
                 i.key AS item_key,
                 i.dateAdded,
                 i.dateModified,
-                COALESCE((
-                    SELECT v.value
-                    FROM itemData id
-                    JOIN fields f ON f.fieldID = id.fieldID
-                    JOIN itemDataValues v ON v.valueID = id.valueID
-                    WHERE id.itemID = i.itemID AND f.fieldName = 'title'
-                    LIMIT 1
-                ), '') AS title,
+                {_field_value_sql('title')} AS title,
                 {abstract_sql} AS abstract,
-                COALESCE((
-                    SELECT v.value
-                    FROM itemData id
-                    JOIN fields f ON f.fieldID = id.fieldID
-                    JOIN itemDataValues v ON v.valueID = id.valueID
-                    WHERE id.itemID = i.itemID AND f.fieldName = 'date'
-                    LIMIT 1
-                ), '') AS publication_date,
+                {_field_value_sql('date')} AS publication_date,
                 COALESCE((
                     SELECT group_concat(author_name, '; ')
                     FROM (
@@ -153,6 +126,7 @@ class ZoteroItemsMixin:
                         ORDER BY ic.orderIndex
                     )
                 ), '') AS authors,
+                {_field_value_sql('publicationTitle')} AS venue,
                 COALESCE((
                     SELECT group_concat(t.name, '|||')
                     FROM itemTags itg
@@ -203,6 +177,7 @@ class ZoteroItemsMixin:
             "item_key": str(row["item_key"]),
             "title": str(row["title"] or "Untitled"),
             "authors": str(row["authors"] or ""),
+            "venue": str(row["venue"] or ""),
             "publication_date": str(row["publication_date"] or ""),
             "abstract": str(row["abstract"] or ""),
             "tags": tags,

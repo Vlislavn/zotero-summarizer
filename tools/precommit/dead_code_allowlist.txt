@@ -11,3 +11,5 @@
 #
 # Format: <path>:<symbol>   # reason
 #
+zotero_summarizer/services/library/border_cache.py:read_cache  # consumed by api/routes/_golden_border.py (untracked pending first commit)
+zotero_summarizer/storage/feeds.py:feed_key_alias_validation_report  # test-only migration diagnostic (tests/test_app_rss_identity.py)

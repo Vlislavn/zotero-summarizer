@@ -45,7 +45,7 @@ class OpenAlexWork:
     cited_by_count: int
     is_oa: bool
     oa_url: str | None
-    # Field- AND year-normalized citation impact (SOTA, robust vs raw counts):
+    # Field- AND year-normalized citation impact (field-normalized, robust vs raw counts):
     # citation_percentile in [0,1] (None for too-new / uncited works → cold-start);
     # fwci = field-weighted citation impact (1.0 == field average).
     citation_percentile: float | None = None

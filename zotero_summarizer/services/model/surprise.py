@@ -5,7 +5,7 @@ stated interests but rigorous and novel enough to warrant attention. Plain
 relevance ranking systematically misses these — by construction, a high-affinity
 score correlates with "topics you already track."
 
-Approach (per the SOTA plan, refined for unit balance):
+Approach (per the design plan, refined for unit balance):
 
     dim_quality = ((rigor + novelty) / 2) / 5    # normalize to [0, 1]
     surprise_score = max(0, dim_quality - corpus_affinity)  # affinity is in [-1, 1]

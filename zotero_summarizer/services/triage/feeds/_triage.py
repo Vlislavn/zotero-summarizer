@@ -37,7 +37,7 @@ def _triage_one(
     subsequent call (401, connection error, etc.) — caller should abort.
 
     ``triage_llm`` optionally overrides the LLM provider for this scoring
-    pass (the backlog drain uses the custom ``sota``); ``None`` uses the
+    pass (the backlog drain uses the custom remote provider); ``None`` uses the
     default refine client.
     """
     try:

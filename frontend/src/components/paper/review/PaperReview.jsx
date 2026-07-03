@@ -6,7 +6,7 @@ import {
   bandGloss, METHOD_CLAUSE, LEGEND, rubricLabel, paperTypeLabel,
   summarizeGoals, readVerdict, decisiveRows, fullChecklist, shortGoal,
 } from './briefModel.js';
-import { formatShortDate } from '../../library/shared.jsx';
+import { formatShortDate, timeAgo } from '../../library/shared.jsx';
 
 const STATE_LABEL = {
   hit: '● addressed', miss: '○ not addressed', not_retrieved: '⚠ not retrieved',
@@ -56,11 +56,15 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
   }
   if (!digest && !quality && !goals.length) return null;
 
-  const band = String(quality?.quality_band || '');
-  const redFlags = (quality?.red_flags || []).map((x) => String(x || '').trim()).filter(Boolean);
+  // Non-paper (web article / blog / news): scientific quality criteria don't apply —
+  // reviewed for relevance only, so suppress the rigor panels + grade and lead with the
+  // digest's own read decision instead of the goals×rigor verdict.
+  const isNonPaper = quality?.basis === 'non_paper';
+  const band = isNonPaper ? '' : String(quality?.quality_band || '');
+  const redFlags = isNonPaper ? [] : (quality?.red_flags || []).map((x) => String(x || '').trim()).filter(Boolean);
   const { nFired } = summarizeGoals(goals);
   const nHitGoals = goals.filter((g) => String(g?.retrieval_state || '') === 'hit').length;
-  const hasBrief = Boolean(quality || goals.length);
+  const hasBrief = Boolean((quality && !isNonPaper) || goals.length);
 
   // Lead verdict: the synthesized goals×rigor call when we have those layers;
   // otherwise fall back to the digest's own read decision.
@@ -77,7 +81,12 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
   } else {
     verdict = { key: 'skip', label: 'REVIEW', reason: digest?.verdict || '' };
   }
-  const grade = digest?.grade || quality?.grade || '';
+  // Deterministic checklist grade FIRST: quality.grade comes from grounded
+  // coverage (stable run-to-run); digest.grade is the LLM's holistic guess and can
+  // flip A↔B between reviews. The chip's tooltip says "reference-free", which is
+  // quality.grade — so show that, and only fall back to the digest for legacy
+  // caches. None for non-papers.
+  const grade = isNonPaper ? '' : (quality?.grade || digest?.grade || '');
   const tldr = digest?.tldr || '';
 
   // Located findings (the story page passes the section overlay; the compact card
@@ -93,11 +102,17 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
   // to read the paper's information).
   const detailsInner = (
     <div className="space-y-4">
-      {compact && quality && <QualityHeadline quality={quality} band={band} />}
+      {isNonPaper && (
+        <p className="text-[12px] text-slate-500 border border-slate-200 rounded-md px-2 py-1 bg-slate-50">
+          Not a research paper — reviewed for <span className="font-semibold">relevance</span> only;
+          scientific quality criteria (grade, rigor) don't apply.
+        </p>
+      )}
+      {compact && quality && !isNonPaper && <QualityHeadline quality={quality} band={band} />}
       {tldr && (
         <p className="text-[14px] leading-relaxed text-slate-800 max-w-[66ch]">{tldr}</p>
       )}
-      {quality && <QualityDetails quality={quality} band={band} />}
+      {quality && !isNonPaper && <QualityDetails quality={quality} band={band} />}
       {/* Decision-relevant findings stay visible; the long reference digest folds on
           the full page (Scim: keep the salient signal up top, collapse the rest —
           one click, not a wall). The compact card keeps it inline (it's already one
@@ -119,8 +134,8 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
         </div>
       ))}
       {compact && (deep.reviewed_at || deep.zotero_note_written) && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-400">
-          {deep.reviewed_at && <span>reviewed {formatShortDate(deep.reviewed_at)}</span>}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
+          {deep.reviewed_at && <span title={formatShortDate(deep.reviewed_at)}>reviewed {timeAgo(deep.reviewed_at)}</span>}
           {deep.zotero_note_written && <span className="text-emerald-600">saved to Zotero ✓</span>}
         </div>
       )}
@@ -129,6 +144,11 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
 
   return (
     <div className="review-prose text-slate-800">
+      {/* Code repository, pulled to the very top (the first thing you want when
+          deciding to reproduce). Full surfaces only — the compact Library card
+          stays clean. Older cached reviews have no code_link → renders nothing. */}
+      {!compact && deep.code_link && <CodeLink codeLink={deep.code_link} />}
+
       {/* Verdict banner — the single loud element (Von Restorff). In the compact
           Library card every signal is a chip on this ONE row (grade + band +
           red-flag count), each hide-when-empty, so the glance is pre-attentive
@@ -140,6 +160,14 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
           {grade && (
             <Chip tone={gradeTone(grade)} title="Reference-free full-text quality grade">
               {compact ? grade : `Quality ${grade}`}
+            </Chip>
+          )}
+          {/* Non-paper (blog/news/web): no scientific grade applies — say so loudly
+              (amber) so a non-peer-reviewed source is never mistaken for a graded
+              paper. The full "reviewed for relevance only" note stays in Details. */}
+          {isNonPaper && (
+            <Chip tone="amber" title="Web article / blog / news — not peer-reviewed. Reviewed for relevance only; no scientific quality grade applies.">
+              Not peer-reviewed
             </Chip>
           )}
           {compact && band && <Chip tone={bandTone(band)}>{BAND_LABEL[band] || '—'}</Chip>}
@@ -185,12 +213,53 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
       </div>
 
       {!compact && (deep.reviewed_at || deep.zotero_note_written || deep.zotero_note_error) && (
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-400">
-          {deep.reviewed_at && <span>reviewed {formatShortDate(deep.reviewed_at)}</span>}
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
+          {deep.reviewed_at && <span title={formatShortDate(deep.reviewed_at)}>reviewed {timeAgo(deep.reviewed_at)}</span>}
           {deep.zotero_note_written && <span className="text-emerald-600">saved to Zotero ✓</span>}
           {deep.zotero_note_error && <span className="text-amber-600">note not written: {deep.zotero_note_error}</span>}
         </div>
       )}
+    </div>
+  );
+}
+
+// The paper's code repository, extracted + validated during deep review
+// (services.library._code_link). Shows liveness (✓ live / not reachable) and
+// whether the repo plausibly belongs to THIS paper vs a cited dependency. One
+// code → one meaning: emerald = live & matches, amber = dead link, slate =
+// live-but-verify / could-not-check / none.
+function CodeLink({ codeLink }) {
+  const cl = codeLink || {};
+  if (!cl.found) {
+    return (
+      <div className="mb-2 rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2 text-[12px] text-slate-500">
+        No code repository linked in the paper.
+      </div>
+    );
+  }
+  const label = String(cl.url || '').replace(/^https?:\/\//, '');
+  const live = cl.exists === true;
+  const dead = cl.exists === false;
+  const matched = cl.relevance === 'matched';
+  let tone, note;
+  if (dead) {
+    tone = 'border-amber-200 bg-amber-50 text-amber-800';
+    note = `not reachable${cl.status ? ` (${cl.status})` : ''} — may be renamed or private`;
+  } else if (live && matched) {
+    tone = 'border-emerald-200 bg-emerald-50 text-emerald-800';
+    note = '✓ live · matches the paper';
+  } else if (live) {
+    tone = 'border-slate-200 bg-slate-50 text-slate-700';
+    note = '✓ live · confirm it’s this paper’s repo';
+  } else {
+    tone = 'border-slate-200 bg-slate-50 text-slate-700';
+    note = cl.checked === false ? 'not validated (offline)' : 'could not validate';
+  }
+  return (
+    <div className={`mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-lg border px-3.5 py-2 text-[12px] ${tone}`}>
+      <span className="text-[11px] font-semibold uppercase tracking-[0.06em]">Code</span>
+      <a href={cl.url} target="_blank" rel="noopener noreferrer" className="font-mono font-medium break-all hover:underline">{label}</a>
+      <span className="opacity-80">· {note}</span>
     </div>
   );
 }

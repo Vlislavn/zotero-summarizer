@@ -265,9 +265,14 @@ class EmbeddingCache(CorpusReadMixin):
         if SentenceTransformer is None:
             LOGGER.warning("sentence-transformers is unavailable; corpus matching will fall back to hashed embeddings")
             return None
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            # Avoid optional model/proxy/native initialization inside forked pytest workers.
+            LOGGER.info("pytest detected; corpus matching will fall back to hashed embeddings")
+            return None
         LOGGER.info("Loading embedding model: %s", self.model_name)
         try:
-            self._model = SentenceTransformer(self.model_name)
+            kwargs: dict[str, Any] = {"device": "cpu"}
+            self._model = SentenceTransformer(self.model_name, **kwargs)
             # sentence-transformers renamed the API; prefer the new name
             # when available and fall back to the old one for older
             # installations. Both are documented as the canonical way to

@@ -93,6 +93,28 @@ def _feed_payload_from_row(row: dict[str, Any]) -> dict[str, Any]:
     """
     feed_library_id = int(row.get("feed_library_id") or 0)
     feed_item_id = int(row.get("feed_item_id") or 0)
+    if str(row.get("source_type") or "") == "app_rss":
+        with _triage_conn() as conn:
+            match = conn.execute(
+                """
+                SELECT title, abstract, url, doi, publication_date,
+                       publication_title, authors, item_type
+                FROM rss_items
+                WHERE id = ? AND rss_feed_id = ?
+                """,
+                (feed_item_id, feed_library_id),
+            ).fetchone()
+        if match is not None:
+            return {
+                "title": match["title"] or row.get("title") or "Untitled",
+                "abstract": match["abstract"] or "",
+                "url": match["url"] or "",
+                "doi": match["doi"] or row.get("doi") or "",
+                "publication_date": match["publication_date"] or "",
+                "publication_title": match["publication_title"] or "",
+                "authors": match["authors"] or "",
+                "item_type": match["item_type"] or "journalArticle",
+            }
     reader = ZoteroReader(get_settings().zotero_data_dir)
     items = reader.get_feed_items(feed_library_id=feed_library_id, limit=5000)
     match = next((i for i in items if int(i.get("item_id") or 0) == feed_item_id), None)

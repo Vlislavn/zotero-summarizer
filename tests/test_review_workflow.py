@@ -281,6 +281,51 @@ def test_relabel_rejects_unknown_priority(patched_settings):
         review.relabel(row_id, "garbage")
 
 
+def test_apply_all_approved_without_zotero_marks_pending_sync(patched_settings, monkeypatch):
+    db = sqlite3.connect(str(patched_settings / "triage.db"))
+    db.row_factory = sqlite3.Row
+    row_id = _insert_awaiting(db, feed_item_id=333)
+    fs.update_to_decision(
+        db,
+        feed_library_id=2,
+        feed_item_id=333,
+        decision=fs.DECISION_USER_APPROVED,
+        decision_reason="approved",
+    )
+    db.commit()
+    db.close()
+
+    from zotero_summarizer.integrations import zotero_write
+
+    class _UnavailableWriter:
+        def __init__(self, *a, **k):
+            raise RuntimeError("zotero unavailable")
+
+    monkeypatch.setattr(zotero_write, "ZoteroWriter", _UnavailableWriter)
+    res = review.apply_all_approved()
+
+    assert res["applied"] == 0
+    assert res["pending_sync"] == 1
+    assert "zotero unavailable" in res["zotero_sync_error"]
+
+    db = sqlite3.connect(str(patched_settings / "triage.db"))
+    db.row_factory = sqlite3.Row
+    try:
+        row = db.execute(
+            """
+            SELECT decision, zotero_sync_status, final_outcome
+            FROM processed_feed_items
+            WHERE id = ?
+            """,
+            (row_id,),
+        ).fetchone()
+    finally:
+        db.close()
+    assert row["decision"] == fs.DECISION_USER_APPROVED
+    assert row["zotero_sync_status"] == "pending"
+    assert row["final_outcome"] == fs.OUTCOME_KEPT_UNREAD_APP
+
+
 def test_action_on_missing_row_raises_keyerror(patched_settings):
     with pytest.raises(KeyError):
         review.approve(99999)

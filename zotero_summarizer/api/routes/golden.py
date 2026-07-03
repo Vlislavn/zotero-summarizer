@@ -28,13 +28,14 @@ from zotero_summarizer.services.golden import hybrid_gt, label_provenance
 from zotero_summarizer.services.library import review_detail as review_detail_svc
 from zotero_summarizer.services.zotero.zotero import (
     zotero_set_label_tag,
+    zotero_upsert_user_note,
     zotero_upsert_verdict_note,
 )
 from zotero_summarizer.storage import repositories
+from zotero_summarizer.api.routes._golden_border import router as _border_router
 from zotero_summarizer.api.routes._golden_helpers import (
     _append_verdict_golden,
     _build_source_payload,
-    _compute_border_into_cache,
     _db_path,
     _golden_csv_path,
     _load_all,
@@ -52,6 +53,12 @@ router = APIRouter()
 _VALID_USER_PRIORITIES = ("must_read", "should_read", "could_read", "dont_read")
 
 
+def _is_optional_zotero_unavailable(exc: BaseException) -> bool:
+    """The local verdict is already persisted; a missing Zotero DB is an optional
+    mirror failure and should not leak into the verdict response."""
+    return isinstance(exc, APIError) and exc.error == "zotero_unavailable"
+
+
 class VerdictRequest(BaseModel):
     item_key: str = Field(..., min_length=1, description="Zotero item key.")
     user_priority: str = Field(
@@ -61,6 +68,14 @@ class VerdictRequest(BaseModel):
     comment: str = Field(
         default="",
         description="Optional free-text rationale; empty string is allowed.",
+    )
+
+
+class ReviewNoteRequest(BaseModel):
+    item_key: str = Field(..., min_length=1, description="Zotero item key.")
+    note: str = Field(
+        default="",
+        description="Free-text review note; empty string clears the body.",
     )
 
 
@@ -256,6 +271,7 @@ async def review_detail(item_key: str) -> dict[str, Any]:
             if prov_match is not None else None
         ),
         "verdict": verdict_row,
+        "user_note": repositories.get_review_note(_db_path(), safe_item_key) or "",
     }
 
 
@@ -320,8 +336,11 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
             await asyncio.to_thread(zotero_set_label_tag, req.item_key, req.user_priority)
             label_written = True
         except Exception as exc:  # noqa: BLE001 — label write must not block the verdict
-            label_error = f"{type(exc).__name__}: {exc}"
-            LOGGER.warning("verdict label tag write for %s failed: %s", req.item_key, exc)
+            if _is_optional_zotero_unavailable(exc):
+                LOGGER.info("verdict label tag mirror skipped for %s: Zotero unavailable", req.item_key)
+            else:
+                label_error = f"{type(exc).__name__}: {exc}"
+                LOGGER.warning("verdict label tag write for %s failed: %s", req.item_key, exc)
     # Save the comment to Zotero as a single (upserted) note. Direct write, but
     # the verdict is ALREADY durable above — a note failure (e.g. Zotero open)
     # must never block it, so it's reported, not raised. The user authorized
@@ -335,8 +354,11 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
             )
             note_written = True
         except Exception as exc:  # noqa: BLE001 — note write must not block the verdict
-            note_error = f"{type(exc).__name__}: {exc}"
-            LOGGER.warning("verdict note write for %s failed: %s", req.item_key, exc)
+            if _is_optional_zotero_unavailable(exc):
+                LOGGER.info("verdict note mirror skipped for %s: Zotero unavailable", req.item_key)
+            else:
+                note_error = f"{type(exc).__name__}: {exc}"
+                LOGGER.warning("verdict note write for %s failed: %s", req.item_key, exc)
 
     stored = repositories.get_label_verdict(_db_path(), req.item_key)
     if stored is None:
@@ -353,8 +375,39 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
     }
 
 
-async def list_verdicts(user_priority: str | None = None) -> dict[str, Any]:
-    """List recorded verdicts, optionally filtered by user_priority."""
+async def save_review_note(req: ReviewNoteRequest) -> dict[str, Any]:
+    """Save the user's free-text review note. Local save always succeeds; the
+    Zotero mirror is best-effort (it refuses while Zotero is open — surfaced as a
+    soft status, exactly like the verdict note). Feed/note keys have no Zotero item
+    to mirror to and skip the write, matching the verdict route."""
+    safe_item_key = str(req.item_key or "").strip()
+    if not safe_item_key:
+        raise APIError(error="validation_error", message="item_key is required", status_code=422)
+    await asyncio.to_thread(
+        repositories.upsert_review_note, _db_path(), safe_item_key, req.note,
+    )
+    note_written = False
+    note_error: str | None = None
+    source = review_detail_svc.classify_item_key(safe_item_key)
+    if source not in (review_detail_svc.SOURCE_FEED, review_detail_svc.SOURCE_NOTE):
+        try:
+            await asyncio.to_thread(zotero_upsert_user_note, safe_item_key, req.note)
+            note_written = True
+        except Exception as exc:  # noqa: BLE001 — note is already saved; mirror is best-effort
+            if _is_optional_zotero_unavailable(exc):
+                LOGGER.info("review note mirror skipped for %s: Zotero unavailable", safe_item_key)
+            else:
+                note_error = f"{type(exc).__name__}: {exc}"
+                LOGGER.warning("review note write for %s failed: %s", safe_item_key, exc)
+    return {"saved": True, "note_written": note_written, "note_error": note_error}
+
+
+async def list_verdicts(
+    user_priority: str | None = None, source: str | None = None,
+) -> dict[str, Any]:
+    """List recorded verdicts, optionally filtered by ``user_priority`` and/or
+    ``source`` provenance (e.g. ``source=auto_quality`` for the auto quality-gate's
+    hides, so the UI can list + one-tap-restore them without paging all dont_read)."""
     if user_priority is not None and user_priority not in _VALID_USER_PRIORITIES:
         raise APIError(
             error="validation_error",
@@ -367,6 +420,8 @@ async def list_verdicts(user_priority: str | None = None) -> dict[str, Any]:
     verdicts = repositories.list_label_verdicts(
         _db_path(), user_priority=user_priority
     )
+    if source is not None:
+        verdicts = [v for v in verdicts if v.get("source") == source]
     return {"verdicts": verdicts, "total": len(verdicts)}
 
 
@@ -417,68 +472,11 @@ async def effective_labels_list() -> dict[str, Any]:
 
 
 
-async def border_suggestions(top_k: int = 20, refresh: bool = False) -> dict[str, Any]:
-    """Active-learning endpoint: library rows whose re-labelling would most
-    help the model, ranked by distance to the nearest priority threshold.
-
-    Cached + background-computed (see ``services.border_cache``). Scoring
-    every library row is ~1 s/row, so a synchronous compute took >10 min.
-    Now:
-      * ``status="ready"`` + items — cache hit for the current golden sha.
-      * ``status="computing"`` — a background scoring pass is in flight;
-        the client should poll.
-      * ``status="error"`` — the last background pass failed (message set).
-
-    ``refresh=true`` forces a recompute even when a fresh cache exists.
-    """
-    from zotero_summarizer.services.library import border_cache
-    from zotero_summarizer.services import run_log
-    from zotero_summarizer.services.model.classifier_persistence import DEFAULT_MODEL_DIR
-
-    if not (1 <= int(top_k) <= 2000):
-        raise APIError(
-            error="validation_error",
-            message=f"top_k must be between 1 and 2000; got {top_k}",
-            status_code=422,
-        )
-
-    csv_path = _golden_csv_path()
-    if not csv_path.exists():
-        raise APIError(
-            error="not_found",
-            message=f"golden CSV missing at {csv_path}",
-            status_code=404,
-        )
-
-    golden_sha = run_log.file_sha256(csv_path, prefix_len=64)
-    cached = None if refresh else border_cache.read_cache(DEFAULT_MODEL_DIR, golden_sha)
-    if cached is not None:
-        items = cached["items"][: int(top_k)]
-        return {
-            "status": "ready",
-            "items": items,
-            "total": len(items),
-            "cached_total": cached.get("total", len(items)),
-            "computed_at": cached.get("computed_at"),
-        }
-
-    # No fresh cache — ensure a background compute is running.
-    if border_cache.try_start():
-        border_cache.run_in_background(
-            lambda: _compute_border_into_cache(golden_sha, int(top_k))
-        )
-        return {"status": "computing", "items": [], "total": 0}
-
-    err = border_cache.last_error()
-    if err is not None and not border_cache.is_running():
-        return {"status": "error", "items": [], "total": 0, "message": err}
-    return {"status": "computing", "items": [], "total": 0}
-
-
 router.add_api_route("/api/golden/provenance", get_one, methods=["GET"])
 router.add_api_route("/api/golden/provenance/list", list_all, methods=["GET"])
 router.add_api_route("/api/golden/review-detail", review_detail, methods=["GET"])
 router.add_api_route("/api/golden/verdict", submit_verdict, methods=["POST"])
+router.add_api_route("/api/golden/review-note", save_review_note, methods=["POST"])
 router.add_api_route("/api/golden/verdicts", list_verdicts, methods=["GET"])
 router.add_api_route("/api/golden/verdict", remove_verdict, methods=["DELETE"])
 router.add_api_route(
@@ -486,11 +484,7 @@ router.add_api_route(
     effective_labels_summary,
     methods=["GET"],
 )
-router.add_api_route(
-    "/api/golden/border-suggestions",
-    border_suggestions,
-    methods=["GET"],
-)
+router.include_router(_border_router)  # mounts /api/golden/border-suggestions
 router.add_api_route(
     "/api/golden/effective-labels",
     effective_labels_list,

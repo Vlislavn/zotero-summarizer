@@ -31,6 +31,10 @@ _ATTACHMENT_TYPE = "attachment"
 _LINK_MODE_IMPORTED_URL = 1
 _SYNC_STATE_TO_UPLOAD = 0
 _PDF_CONTENT_TYPE = "application/pdf"
+# Content types this writer knows how to name (extension is forced to match so
+# Zotero renders the attachment correctly). PDFs are the default (back-compat);
+# PNG is for extracted paper figures.
+_CONTENT_TYPE_EXT = {"application/pdf": ".pdf", "image/png": ".png"}
 
 
 class ZoteroAttachmentWriteMixin:
@@ -44,13 +48,15 @@ class ZoteroAttachmentWriteMixin:
         item_data_columns: set[str],
         item_data_value_columns: set[str],
     ) -> None:
-        """Attach a local PDF (``payload['source_path']``) to the parent item
-        ``item_key`` as a native imported_url Zotero attachment.
+        """Attach a local file (``payload['source_path']``) to the parent item
+        ``item_key`` as a native imported_url Zotero attachment. Defaults to a PDF;
+        ``payload['content_type']`` (e.g. ``image/png`` for a figure) overrides.
 
-        payload: ``{source_path, filename, source_url, title}``."""
+        payload: ``{source_path, filename, source_url, title, content_type}``."""
         source_path = Path(str(payload.get("source_path") or "")).expanduser()
         if not source_path.is_file():
-            raise ZoteroWriteError(f"add_attachment: source PDF not found: {source_path}")
+            raise ZoteroWriteError(f"add_attachment: source file not found: {source_path}")
+        content_type = str(payload.get("content_type") or _PDF_CONTENT_TYPE)
         if not {"itemID", "fieldID", "valueID"}.issubset(item_data_columns):
             raise ZoteroWriteError("Unsupported Zotero schema: required itemData columns missing")
 
@@ -66,7 +72,9 @@ class ZoteroAttachmentWriteMixin:
             raise ZoteroWriteError("add_attachment: no user library")
         library_id = int(lib["libraryID"])
 
-        filename = self._safe_pdf_filename(payload.get("filename"), fallback="fulltext.pdf")
+        filename = self._safe_attachment_filename(
+            payload.get("filename"), content_type, fallback="fulltext.pdf",
+        )
         att_key = self._new_item_key(conn)
 
         # File FIRST (orphan-on-rollback is harmless; a missing-file DB row is not).
@@ -93,7 +101,7 @@ class ZoteroAttachmentWriteMixin:
         conn.execute(
             "INSERT INTO itemAttachments (itemID, parentItemID, linkMode, contentType, path, syncState) "
             "VALUES (?, ?, ?, ?, ?, ?)",
-            (att_id, parent_id, _LINK_MODE_IMPORTED_URL, _PDF_CONTENT_TYPE,
+            (att_id, parent_id, _LINK_MODE_IMPORTED_URL, content_type,
              f"storage:{filename}", _SYNC_STATE_TO_UPLOAD),
         )
 
@@ -122,9 +130,11 @@ class ZoteroAttachmentWriteMixin:
         raise ZoteroWriteError("add_attachment: could not generate a unique item key")  # pragma: no cover
 
     @staticmethod
-    def _safe_pdf_filename(name: Any, *, fallback: str) -> str:
-        """Strip path separators / control chars; force a .pdf suffix."""
+    def _safe_attachment_filename(name: Any, content_type: str, *, fallback: str) -> str:
+        """Strip path separators / control chars; force the extension that matches
+        ``content_type`` (so Zotero renders it). Unknown types keep the given name."""
+        ext = _CONTENT_TYPE_EXT.get(content_type, "")
         base = "".join(c for c in str(name or "").strip() if c not in '/\\\x00').strip() or fallback
-        if not base.lower().endswith(".pdf"):
-            base += ".pdf"
+        if ext and not base.lower().endswith(ext):
+            base += ext
         return base[:120]

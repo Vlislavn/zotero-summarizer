@@ -217,9 +217,9 @@ def _verify_deep_review(args: argparse.Namespace) -> int:
     print(f"deep_review → {resolved.provider.name}/{resolved.model} @ {resolved.provider.base_url}", flush=True)
     print(f"paper: {title!r} ({len(qa_text)} chars)\n", flush=True)
     llm = build_client_for_stage(resolved)
-    # Mirror production: the digest thinks (quality), the trivial calls don't (speed).
+    # Mirror production: the digest thinks (quality) unless the provider sets thinking_effort=off; trivial calls ride the feed model.
     from zotero_summarizer.services.llm.factory import build_client_for_provider
-    llm_digest = build_client_for_provider(resolved.provider, resolved.model, enable_thinking=True)
+    llm_digest = build_client_for_provider(resolved.provider, resolved.model, enable_thinking=resolved.provider.thinking_on)
 
     lean_tier = bool(getattr(resolved.provider, "lean_deep_review", False))
     qr = config.quality_review

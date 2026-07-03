@@ -306,12 +306,49 @@ def quality_panel_html(quality: dict[str, Any] | None) -> str:
     )
 
 
+def code_link_html(code_link: dict[str, Any] | None) -> str:
+    """The paper's code repo, pulled to the top of the brief (mirrors the in-app
+    ``CodeLink``). ``''`` when the deep review recorded none (older artifacts)."""
+    if not code_link:
+        return ""
+    if not code_link.get("found"):
+        return '<div class="codelink none">No code repository linked in the paper.</div>'
+    url = str(code_link.get("url") or "")
+    label = re.sub(r"^https?://", "", url)
+    exists = code_link.get("exists")
+    matched = code_link.get("relevance") == "matched"
+    if exists is False:
+        status = code_link.get("status")
+        cls = "dead"
+        note = f"not reachable{f' ({status})' if status else ''} — may be renamed or private"
+    elif exists is True and matched:
+        cls, note = "live", "✓ live · matches the paper"
+    elif exists is True:
+        cls, note = "live-weak", "✓ live · confirm it’s this paper’s repo"
+    else:
+        cls = "unchecked"
+        note = "not validated (offline)" if code_link.get("checked") is False else "could not validate"
+    return (
+        f'<div class="codelink {cls}"><span class="cl-h">Code</span> '
+        f'<a href="{_h(url)}" target="_blank" rel="noopener noreferrer">{_h(label)}</a> '
+        f'<span class="cl-note">· {_h(note)}</span></div>'
+    )
+
+
 def brief_css() -> str:
     """H&E "specimen slide" styling. The verdict is the one loud element (Von
     Restorff); the gauge OWNS band interpretation (Tesler); a stained goal cell
     binds claim→evidence with the hematoxylin tether (Uniform Connectedness).
     Palette/font vars come from `_paper_read_html._css` (concatenated before this)."""
     return """
+.codelink{font-family:var(--font-mono);font-size:13px;border:1px solid var(--border);border-left:3px solid var(--hair);border-radius:10px;padding:9px 13px;margin:0 0 12px;background:var(--card);box-shadow:var(--shadow)}
+.codelink .cl-h{font-family:var(--font-display);font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-right:4px}
+.codelink a{color:var(--readout);font-weight:600;text-decoration:none;word-break:break-all}
+.codelink a:hover{text-decoration:underline}
+.codelink .cl-note{color:var(--muted)}
+.codelink.live{border-left-color:var(--readout)}
+.codelink.dead{border-left-color:var(--caution)}
+.codelink.none{color:var(--muted)}
 .brief{margin:0 0 10px}
 .verdict{border:1px solid var(--border);border-left:4px solid var(--muted);border-radius:12px;padding:18px 22px;margin-bottom:18px;background:var(--card);box-shadow:var(--shadow)}
 .v-eyebrow{font-family:var(--font-display);font-size:11px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--hema)}

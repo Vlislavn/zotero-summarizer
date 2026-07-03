@@ -62,3 +62,28 @@ def test_itemtype_case_contradiction_forces_case_report_fallback():
                     full_text="patient presented", item_type="case", llm=llm)
     # LLM said empirical with high conf, but itemType=case contradicts → fallback
     assert out["uncertain"] is True and out["source"] == "fallback"
+
+
+class _ExplodingLLM:
+    """Fails if the classifier LLM is called — proves the metadata short-circuit."""
+
+    def pydantic_prompt(self, *, prompt, pydantic_model):  # noqa: D401
+        raise AssertionError("LLM must not be called for a non-paper metadata signal")
+
+
+def test_web_article_flag_routes_to_non_paper_without_llm():
+    out = pt.detect(title="A blog post", abstract="", headings=[], full_text="some prose",
+                    llm=_ExplodingLLM(), web_article=True)
+    assert out["type"] == PaperType.NON_PAPER.value
+    assert out["source"] == "metadata" and out["uncertain"] is False
+
+
+def test_nonpaper_itemtype_routes_to_non_paper_without_llm():
+    out = pt.detect(title="x", abstract="", headings=[], full_text="t",
+                    item_type="blogPost", llm=_ExplodingLLM())
+    assert out["type"] == PaperType.NON_PAPER.value
+
+
+def test_non_paper_is_not_an_llm_classifiable_leaf_type():
+    # The rubric must never PICK non_paper; it's metadata-only.
+    assert PaperType.NON_PAPER.value not in pt._LEAF_TYPES

@@ -10,8 +10,8 @@ browser + paper Q&A feature.
 Zotero PDFs ──► [_corpus]──► papers/<key>.txt   │                         │                    │
                    │         (frozen + sha256)  │                         │                    │
 builder LLM ──► [_build_qa] ─► benchmark_vN.jsonl ─► [_runner] ──► responses.jsonl ─► [_judge] ─► judgments.jsonl ─► [_stats/_report]
-(remote,           │  QA span-verified + traps     │  model under test       │  hard ladder        │   report.{json,md}
- api.kather.ai)    └─► benchmark_vN.review.csv     │  (deep_review stage,    │  then pinned        └─► faithbench-runs.jsonl
+(remote API)       │  QA span-verified + traps     │  model under test       │  hard ladder        │   report.{json,md}
+                   └─► benchmark_vN.review.csv     │  (deep_review stage,    │  then pinned        └─► faithbench-runs.jsonl
                                                    │   full_text|retrieval)  │  LLM judge
                                           [_build_claims] digest→claims      │  (residual only)
 ```
@@ -125,6 +125,5 @@ to be re-used:
 | `_stats.py` | `calculate_statistics` — single source of truth |
 | `_report.py` | report.json / report.md rendering + master log |
 
-SOTA provenance: ARE/Gaia2 patterns (hard-before-soft judge, pinned judge
-model, typed failure taxonomy, run-level variance) — cards under
-`~/.claude/skills/sota-pattern-index/knowledge/are/`.
+Design provenance: ARE/Gaia2 agent-benchmark patterns (hard-before-soft judge,
+pinned judge model, typed failure taxonomy, run-level variance).

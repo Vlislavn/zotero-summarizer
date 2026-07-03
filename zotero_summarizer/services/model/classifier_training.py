@@ -364,6 +364,16 @@ def train_and_save(
     # Out-of-fold per-class quality (honest — predictions never saw their own
     # fold), on the EFFECTIVE (post-calibration) bins the shipped gate will assign.
     oof_metrics = _oof_quality_metrics(train_rows, eff_oof)
+    # Label-drift visibility: the golden CSV is re-exported from live Zotero each
+    # train, so labels shift silently. Surface the distribution + n_train delta vs
+    # the prior run (read-only; logged + carried into the run-log entry).
+    from zotero_summarizer.services.model.classifier_drift import log_label_drift
+
+    gold_labels = [r.get("gold_priority_final") or "" for r in train_rows]
+    label_drift = log_label_drift(
+        gold_labels, n_train, classifier_name=classifier_name,
+        runs_log_path=runs_log_path,
+    )
 
     # 3c. Forward-looking Spearman: train on the oldest 80%, score the newest
     # 20% — the number production actually delivers (the shuffled OOF above
@@ -405,6 +415,7 @@ def train_and_save(
             "classifier": classifier_name,
             "type": "train_artifact",
             "cv": {"n_rows": n_train, "auc": None, "metrics_vs_gold": oof_metrics},
+            "label_drift": label_drift,
             "input_csv_sha256_prefix": sha256[:12],
         })
     LOGGER.info(
@@ -416,10 +427,19 @@ def train_and_save(
 
 
 def save_trained(trained: TrainedClassifier, output_dir: Path) -> tuple[Path, Path]:
-    """Write the joblib payload + JSON metadata mirror (atomically)."""
+    """Write the joblib payload + JSON metadata mirror (atomically).
+
+    Before overwriting, the prior model is snapshotted to a versioned history dir
+    (``classifier_backup.snapshot_current``) so a retrain that later looks wrong has
+    a rollback target. A failed snapshot RAISES — the invariant is *never overwrite
+    the live model without a successful backup* (``--force`` is reversible).
+    """
+    from zotero_summarizer.services.model.classifier_backup import snapshot_current
+
     output_dir.mkdir(parents=True, exist_ok=True)
     joblib_path = output_dir / f"{trained.classifier_name}.joblib"
     json_path = output_dir / f"{trained.classifier_name}.json"
+    snapshot_current(output_dir, trained.classifier_name)
     # tmp + os.replace: a crash mid-dump must not leave a truncated .joblib that
     # then fails to unpickle and bricks the gate on the next startup.
     atomic_write(joblib_path, lambda target: joblib.dump(trained, target))

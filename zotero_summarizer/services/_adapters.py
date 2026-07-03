@@ -31,8 +31,13 @@ def build_llm(
     model_url: str,
     model_name: str,
     api_key: str,
+    # PROVISIONAL: 4096 is an operational baseline, not measured (OnPrem.LLM's own default is
+    # 512; reasoning providers raise it to 16384). Per-provider override via ProviderConfig.
+    # See docs/onprem_llm_evidence.md.
     max_tokens: int = 4096,
     *,
+    # temperature 0 = GROUNDED (preserves the previously-hardcoded deterministic-triage value;
+    # asserted in test_adapters_openai / test_provider_routing). Override per provider.
     temperature: float = 0,
     extra_body: dict[str, Any] | None = None,
 ) -> InstrumentedLLMClient:

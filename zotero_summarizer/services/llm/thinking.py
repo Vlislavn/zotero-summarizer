@@ -24,6 +24,9 @@ from typing import Any, Dict, Optional
 
 # Anthropic extended-thinking budget per effort level (tokens). The adapter
 # clamps max_tokens up to budget+slack since the API requires max_tokens > budget.
+# PROVISIONAL (unmeasured — see docs/onprem_llm_evidence.md): a geometric 2K/8K/16K
+# ladder, no Anthropic-doc citation or eval behind the exact values. Only used when a
+# provider sets thinking_effort (default None → never injected).
 _ANTHROPIC_BUDGET: dict[str, int] = {"low": 2048, "medium": 8192, "high": 16384}
 
 

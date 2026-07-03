@@ -17,6 +17,7 @@ from zotero_summarizer.models import (
 from zotero_summarizer.domain import ReadingPriority
 from zotero_summarizer.services import corpus
 from zotero_summarizer.services.model import scoring
+from zotero_summarizer.services.triage.prompts import DEFAULT_REFINE_PROMPT, DEFAULT_TRIAGE_PROMPT
 from zotero_summarizer.services._common import (
     LOGGER,
     build_log_prefix,
@@ -53,11 +54,9 @@ def _extract_pdf_text(pdf_path: str) -> str:
 
 
 def _build_refine_prompt(config: GoalsConfig, req: SummarizeRequest, paper_text: str) -> str:
-    template = config.prompts.refine or (
-        "Refine the draft summary into structured JSON with keys executive_summary, should_deep_read, "
-        "key_sections_to_read, relevance_to_research, controversial_points, industry_academy_impact, "
-        "unknown_unknowns, implementation_quickstart, key_findings, methods, limitations."
-    )
+    # Default is the security-hardened prompt (feed fields wrapped, injection
+    # directive) — see services/triage/prompts.py. A null override = use it.
+    template = config.prompts.refine or DEFAULT_REFINE_PROMPT
     return template.format(
         title=req.title,
         doi=req.doi or "N/A",
@@ -75,10 +74,9 @@ def _build_triage_prompt(
     refined: RefinedSummary,
     corpus_context: dict[str, Any],
 ) -> str:
-    template = config.prompts.triage or (
-        "You are a strict triage reviewer. Default stance: NOT relevant unless proven by concrete evidence. "
-        "Return JSON with score, reading_priority, tags, rationale, dimensions, confidence."
-    )
+    # Default is the security-hardened prompt (feed fields wrapped, anti-inflation
+    # directive) — see services/triage/prompts.py. A null override = use it.
+    template = config.prompts.triage or DEFAULT_TRIAGE_PROMPT
     return template.format(
         research_goals="\n".join(f"- {g}" for g in config.research_goals),
         triage_criteria="\n".join(f"- {c}" for c in config.triage_criteria),

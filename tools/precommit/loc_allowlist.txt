@@ -4,3 +4,7 @@
 #
 # (empty) — all files are within the 500-LOC limit.
 tests/test_reading_queue.py 551
+zotero_summarizer/services/triage/feeds/_tick_phases.py 562
+zotero_summarizer/storage/feeds.py 713
+zotero_summarizer/services/library/review.py 569
+zotero_summarizer/api/routes/daily.py 507

@@ -93,8 +93,8 @@ class SubsystemStatus(BaseModel):
 
 
 class SetupStatusResponse(BaseModel):
-    # ``ready`` = config.valid AND research_goals_count>0 AND llm.api_key_present
-    # AND zotero.db_found. reachable/classifier are advisory, NOT part of ready.
+    # ``ready`` = config.valid AND research_goals_count>0 AND llm.api_key_present.
+    # zotero.db_found + reachable + classifier are advisory, NOT part of ready.
     ready: bool
     config: ConfigStatus
     llm: LlmStatus

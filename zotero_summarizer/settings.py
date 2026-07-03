@@ -34,6 +34,10 @@ class Settings:
     # artifacts) lives under ``data_dir`` so the project root stays clean.
     data_dir: Path
     config_path: Path
+    # Per-user calibration artifact (Tier 1-3): system-owned knobs the app derived for
+    # THIS setup (env-probe + opt-in sweep + data-driven recal). Precedence sits between
+    # goals.yaml and ZS_* env. Derived, like the model joblib — never hand-authored.
+    calibration_path: Path
     env_path: Path
     summary_timeout_seconds: int
     triage_job_concurrency: int
@@ -77,6 +81,7 @@ class Settings:
             project_root=root,
             data_dir=data_dir,
             config_path=config_file,
+            calibration_path=data_dir / "calibration.json",
             env_path=env_file,
             summary_timeout_seconds=_env_int("SUMMARY_TIMEOUT_SECONDS", 420),
             triage_job_concurrency=concurrency,

@@ -20,8 +20,13 @@ from zotero_summarizer.services.library import (
     university_access,
 )
 from zotero_summarizer.services.library.review_fleet import fleet as review_fleet
-from zotero_summarizer.services.zotero.zotero import get_zotero_reader_or_raise
+from zotero_summarizer.services.zotero.zotero import (
+    get_library_reader,
+    get_zotero_reader_or_raise,
+    resolve_reader_for_key,
+)
 from zotero_summarizer.storage import repositories as triage_db
+from zotero_summarizer.storage.feed_identity import is_stable_feed_key
 
 
 router = APIRouter()
@@ -98,11 +103,6 @@ async def get_reading_queue(
             message=f"limit must be between 1 and 10000 inclusive; got {limit}",
             status_code=422,
         )
-    # Zotero not configured is an EXPECTED state (first run), not a server fault:
-    # fail fast at the boundary with a clean 503 — matching the /api/zotero/*
-    # routes — instead of letting build_reading_queue's reader-unavailable
-    # RuntimeError surface as a 500 "Unexpected server error".
-    get_zotero_reader_or_raise()
     return await asyncio.to_thread(
         reading_queue.build_reading_queue,
         include_read=include_read, limit=limit, refresh=refresh,
@@ -119,10 +119,10 @@ async def get_reading_queue_status() -> dict[str, Any]:
 
 
 async def get_item_pdf(item_key: str) -> FileResponse:
-    """Stream the Zotero-stored PDF for a library item so the UI can link to the
-    full text. 404 when the item or its local PDF is missing. The path comes
-    from Zotero (not user input); we still verify it's a real file."""
-    reader = get_zotero_reader_or_raise()
+    """Stream the reader-owned local PDF for a library item. With Zotero present
+    this is the Zotero attachment; without Zotero the app reader reports no
+    attachment and callers should use the paper-render acquire path."""
+    reader = get_library_reader()
     detail = await asyncio.to_thread(reader.get_item_detail, item_key)
     if detail is None:
         raise APIError(error="not_found", message=f"Item {item_key} not found", status_code=404)
@@ -194,16 +194,21 @@ async def run_deep_review(req: DeepReviewRunRequest) -> dict[str, Any]:
     local one — so a 2nd paper isn't blocked by a 1st. Poll ``GET
     /api/library/deep-review/status?item_key=…``."""
     if req.item_key:
-        # acquire_missing: a single paper with no Zotero PDF gets one fetched first
-        # (OA/PMC/browser session) and reviewed from it — not flagged needs_pdf. Scoped
-        # to this single-key path: acquisition is one stateful browser session.
+        key = req.item_key
+        if not is_stable_feed_key(key) and not (len(key) == 8 and key.isalnum()):
+            raise APIError(
+                error="validation_error",
+                message=f"item_key must be a Zotero key (8 alnum) or stable feed key: {key!r}",
+                status_code=422,
+            )
         await asyncio.to_thread(
             deep_review.start,
-            item_keys=[req.item_key],
+            item_keys=[key],
             focus_prompt=req.focus_prompt,
             acquire_missing=True,
+            reader=resolve_reader_for_key(key),
         )
-        return deep_review.status(req.item_key)
+        return deep_review.status(key)
     return await asyncio.to_thread(deep_review.start, req.top_k, focus_prompt=req.focus_prompt)
 
 
@@ -221,6 +226,15 @@ async def run_review_fleet(req: ReviewFleetRunRequest) -> dict[str, Any]:
     SUGGESTIONS surfaced on the queue as ``proposed_verdict`` — never auto-applied
     labels. Single-flight: returns the in-flight status when a run is already going.
     Poll ``GET /api/library/review-fleet/status``."""
+    if req.item_keys:
+        bad = [k for k in req.item_keys if is_stable_feed_key(k)]
+        if bad:
+            raise APIError(
+                error="validation_error",
+                message="review-fleet only accepts library (Zotero) keys; feed: keys are not supported",
+                status_code=422,
+                details={"feed_keys": bad},
+            )
     return await asyncio.to_thread(review_fleet.start, req.top_k, item_keys=req.item_keys)
 
 

@@ -12,9 +12,47 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import ValidationError
+
 from zotero_summarizer.models import GoalsConfig, PaperDigest
 from zotero_summarizer.services._common import extract_json_blob, to_text
 from zotero_summarizer.services.library._review_text import select_review_text
+
+# Reinforced-retry suffix: a reasoning model (e.g. a remote endpoint) occasionally
+# emits a digest with out-of-range scores (0) or malformed JSON. Re-ask once, strictly,
+# before propagating the error to the caller's per-item boundary.
+_STRICT_RETRY_SUFFIX = (
+    "\n\nIMPORTANT: your previous reply was not valid. Return ONE JSON object only "
+    "(no prose, no code fences). Every score field (soundness/novelty/significance/"
+    "reproducibility/clarity) MUST be an integer from 1 to 5 — never 0."
+)
+
+
+def build_response_format(model: type) -> dict[str, Any]:
+    """Build the OpenAI-compatible ``response_format`` for decoder-level JSON Schema
+    constraint (the decoder-level structured-output path). Forwards ``PaperDigest``'s schema as
+    ``{type: json_schema, json_schema: {name, schema, strict}}`` so a vLLM-style
+    endpoint constrains decoding to the schema at the LOGIT level — a real guarantee, not
+    a prompt hint. MEASURED on a vLLM endpoint (2026-06-27): forces enum/range compliance AND
+    reasoning survives (unlike Ollama native format+think, #10929). OnPrem's
+    ``pydantic_prompt`` forwards this kwarg to the wire (base.py:728-748)."""
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": model.__name__,
+            "schema": model.model_json_schema(),
+            "strict": True,
+        },
+    }
+
+
+
+def _coerce_digest(raw: Any) -> PaperDigest:
+    """Build a ``PaperDigest`` from an LLM reply, salvaging prose-embedded/fenced JSON.
+    Raises ``ValidationError``/``ValueError`` when the reply can't yield a valid digest."""
+    if isinstance(raw, PaperDigest):
+        return raw
+    return PaperDigest.model_validate(extract_json_blob(to_text(raw)))
 
 # Fallback when goals.yaml has no `prompts.paper_digest`. A referee-grade digest
 # (NeurIPS/ICLR rubric) condensed into scannable fields, personalised to the
@@ -58,6 +96,13 @@ _DEFAULT_DIGEST_PROMPT = (
     '- "limitations": the stated limitations and the most material gaps, in one sentence.\n'
     '- "industry_impact": likely effect on industry/practice in one short line ("" if none).\n'
     '- "academy_impact": likely effect on academic research in one short line ("" if none).\n'
+    '- "parameters": a JSON object of technical parameters extracted VERBATIM from the full text — '
+    '"dataset" (name(s) + scale, one clause), "baselines" (<=3 named comparison methods), '
+    '"sample_size" (the reported N/cohort/epochs as a short string), "metrics" (<=3 named metrics '
+    'with their reported values when stated), "architecture" (model/system architecture in one '
+    'clause), "external_validation" (true/false/omit — was it validated on an external/out-of-sample '
+    'set?). OMIT any field the paper does not state; an empty/omitted field is correct, an invented '
+    'one is a failure. Set "parameters" to null for non-empirical papers (perspectives, surveys).\n'
     '- "key_strength": the single strongest aspect, grounded in the text (one clause).\n'
     '- "key_weakness": the single most material limitation or threat to validity (one clause).\n'
     '- "grade": overall quality A (excellent)/B (solid)/C (borderline)/D (weak).\n'
@@ -73,13 +118,19 @@ _DEFAULT_DIGEST_PROMPT = (
 
 def assess_digest(
     *, title: str, full_text: str, config: GoalsConfig, llm: Any, focus_prompt: str = "",
-    max_chars: int | None = None,
+    max_chars: int | None = None, prefix: bool = False, response_format: dict[str, Any] | None = None,
 ) -> PaperDigest:
     """Condensed paper digest (quality + the user's 7-point investigation) from
     the full text (must be non-empty). Personalised to ``config.research_goals``.
     When ``focus_prompt`` is set, the reviewer emphasises or de-emphasises aspects
     the user highlighted before running the review. ``max_chars`` overrides the
-    text cap (the deep_review orchestrator passes a smaller cap for the local tier)."""
+    text cap (the deep_review orchestrator passes a smaller cap for the local tier).
+    ``prefix=True`` skips budget-aware chunk ranking and uses a naive ``[:cap]``
+    slice — the A/B baseline (``chunk_strategy=prefix``); the default keeps the
+    section-aware + BM25 ranking in ``select_review_text``. ``response_format`` (from
+    ``build_response_format``) switches to decoder-level JSON Schema constraint —
+    pass it only when the provider advertises ``structured_output`` (vLLM-style); it's
+    a no-op fall-through to the prompt-level path when None."""
     template = config.prompts.paper_digest or _DEFAULT_DIGEST_PROMPT
     cap = int(max_chars if max_chars is not None else config.quality_review.max_text_chars)
     # Budget-aware selection instead of a blind prefix slice. ``full_text`` here is
@@ -88,7 +139,8 @@ def assess_digest(
     # digest 100% onprem-sourced and self-consistent. Byte-identical to
     # ``full_text[:cap]`` for papers that fit; relevant chunks (not a blind prefix)
     # for those that exceed the cap (see services/library/_review_text.py).
-    text = select_review_text([], full_text, budget=cap)
+    # ``prefix`` bypasses ranking for the naive-truncate A/B baseline.
+    text = full_text[:cap] if prefix else select_review_text([], full_text, budget=cap)
     goals = "; ".join(g for g in (config.research_goals or []) if str(g).strip()) or "(not specified)"
     prompt = template.format(title=title or "Untitled", full_text=text, research_goals=goals)
     if focus_prompt:
@@ -96,13 +148,17 @@ def assess_digest(
             f"\n\nReader's focus note: {focus_prompt}\n"
             "Please adjust your review emphasis to highlight or downplay aspects matching this focus."
         )
-    digest = llm.pydantic_prompt(prompt=prompt, pydantic_model=PaperDigest)
-    if not isinstance(digest, PaperDigest):
-        # onprem returns the raw (often empty) string when its own parser can't
-        # build the model. Salvage with the stronger 3-strategy extractor
-        # (markdown-fenced / prose-embedded JSON), mirroring services/triage/
-        # summarization. If THAT fails too (a truly empty completion) model_validate
-        # RAISES — caught at deep_review's per-item boundary and surfaced, instead of
-        # the opaque `'str' object has no attribute 'model_copy'` this once produced.
-        digest = PaperDigest.model_validate(extract_json_blob(to_text(digest)))
+    # onprem/remote returns the raw (often empty or out-of-range) string when its own
+    # parser can't build the model; ``_coerce_digest`` salvages prose-embedded/fenced
+    # JSON (mirrors services/triage/summarization). A reasoning model occasionally
+    # malforms (e.g. all scores 0) — re-ask ONCE strictly before giving up. If the retry
+    # also fails, the error RAISES, caught at deep_review's per-item boundary and surfaced
+    # (never a fabricated review). ``response_format`` (decoder-level constraint) makes a
+    # parse failure rare on a supporting endpoint, but the retry still re-asks with it.
+    extra = {"response_format": response_format} if response_format else {}
+    try:
+        digest = _coerce_digest(llm.pydantic_prompt(prompt=prompt, pydantic_model=PaperDigest, **extra))
+    except (ValidationError, ValueError):
+        retry = llm.pydantic_prompt(prompt=prompt + _STRICT_RETRY_SUFFIX, pydantic_model=PaperDigest, **extra)
+        digest = _coerce_digest(retry)
     return digest.model_copy(update={"basis": "full_text"})

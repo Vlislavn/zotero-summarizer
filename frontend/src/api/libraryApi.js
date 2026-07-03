@@ -50,11 +50,11 @@ export async function startTriage(itemKeys, { queueChanges = true } = {}) {
  * straight to the Zotero item. Engagement tags also mark the paper "handled",
  * so it drops out of the reading queue on the next refresh.
  */
-export async function updateItemTags(itemKey, { addTags = [], removeTags = [] } = {}) {
+export async function updateItemTags(itemKey, { addTags = [], removeTags = [], force = false } = {}) {
   if (!itemKey) throw new Error('updateItemTags: itemKey is required');
   return request(`/api/zotero/items/${encodeURIComponent(itemKey)}/tags`, {
     method: 'POST',
-    body: JSON.stringify({ add_tags: addTags, remove_tags: removeTags }),
+    body: JSON.stringify({ add_tags: addTags, remove_tags: removeTags, force }),
   });
 }
 
@@ -247,6 +247,20 @@ export async function updateItemCollections(itemKey, { add = [], remove = [], fo
       remove: remove.map((collection_key) => ({ collection_key })),
       force,
     }),
+  });
+}
+
+/**
+ * POST /api/zotero/items/{itemKey}/figures { force }
+ * Attach the paper's already-extracted figures to its Zotero item as child image
+ * attachments (so they render in Zotero next to the paper). Dedups by filename, so
+ * a re-click never duplicates. Same connector force-handshake as the other writes.
+ * Resolves to { updated, item_key, figures } | { updated: 0, message } | { requires_force, message }.
+ */
+export async function attachFiguresToZotero(itemKey, { force = false } = {}) {
+  return request(`/api/zotero/items/${encodeURIComponent(itemKey)}/figures`, {
+    method: 'POST',
+    body: JSON.stringify({ force }),
   });
 }
 

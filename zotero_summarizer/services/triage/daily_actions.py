@@ -20,11 +20,13 @@ from zotero_summarizer.domain import VERDICT_SOURCE_MACHINE_ADD, VERDICT_SOURCE_
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.services import interaction_log
-from zotero_summarizer.services.library import fulltext, review
+from zotero_summarizer.services.library import deep_review, fulltext, review
 from zotero_summarizer.services._common import LOGGER
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.storage import feeds as feeds_storage
+from zotero_summarizer.storage.feed_identity import row_feed_keys
 from zotero_summarizer.storage import repositories
+from zotero_summarizer.storage import rss as rss_storage
 
 # Provisional positive label for "add to library": the user signalled the
 # paper is worth reading, but hasn't read it yet. Stage-2 annotation overrides
@@ -52,8 +54,7 @@ def _load_rows(item_ids: list[int]) -> list[dict[str, Any]]:
 
 
 def _golden_key(row: dict[str, Any]) -> str:
-    fid = int(row.get("feed_item_id") or 0)
-    return f"feed:{fid}" if fid else f"processed:{row.get('id')}"
+    return row_feed_keys(row)[0]
 
 
 def _record_label(
@@ -112,17 +113,82 @@ def _set_decision(row: dict[str, Any], decision: str, reason: str) -> None:
         conn.close()
 
 
+def _mark_zotero_sync(row: dict[str, Any], status: str) -> None:
+    conn = sqlite3.connect(str(_db_path()))
+    try:
+        feeds_storage.record_zotero_sync_status(
+            conn,
+            feed_library_id=int(row["feed_library_id"]),
+            feed_item_id=int(row["feed_item_id"]),
+            status=status,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _record_app_outcome(row: dict[str, Any], outcome: str) -> None:
+    conn = sqlite3.connect(str(_db_path()))
+    try:
+        feeds_storage.record_app_outcome(
+            conn,
+            feed_library_id=int(row["feed_library_id"]),
+            feed_item_id=int(row["feed_item_id"]),
+            final_outcome=outcome,
+            signal_weight=feeds_storage.OUTCOME_WEIGHT[outcome],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _open_optional_writer() -> tuple[Any | None, Exception | None]:
+    try:
+        return ZoteroWriter(get_settings().zotero_data_dir), None
+    except Exception as exc:  # noqa: BLE001 - Zotero is an optional sync target.
+        LOGGER.warning("Zotero writer unavailable; local RSS action will continue: %s", exc)
+        return None, exc
+
+
+def _is_app_rss_row(row: dict[str, Any]) -> bool:
+    source = str(row.get("source_type") or row.get("source") or "").strip()
+    return source == "app_rss"
+
+
+def _mark_app_rss_rows_read(rows: list[dict[str, Any]]) -> int:
+    item_ids = [int(row.get("feed_item_id") or 0) for row in rows]
+    conn = sqlite3.connect(str(_db_path()))
+    try:
+        feeds_storage.init_feeds_schema(conn)
+        marked = rss_storage.mark_rss_items_read(conn, item_ids)
+        for row in rows:
+            feeds_storage.record_read_marked(
+                conn,
+                feed_library_id=int(row["feed_library_id"]),
+                feed_item_id=int(row["feed_item_id"]),
+            )
+        conn.commit()
+        return marked
+    finally:
+        conn.close()
+
+
 def add_to_library(item_ids: list[int]) -> dict[str, Any]:
     """Materialize each selected card into the Zotero Inbox + record a positive
     training label. Returns ``{added, failed_count, failed}``."""
     rows = _load_rows(item_ids)
-    writer = ZoteroWriter(get_settings().zotero_data_dir)
+    writer, writer_error = _open_optional_writer()
     used_keys: set[str] = set()
     added = 0
+    pending_sync = 0
     new_keys: list[str] = []
+    materialized: list[tuple[str, str]] = []  # (stable_feed_key, new_zotero_key) for render carry
     failed: list[dict[str, Any]] = []
     for row in rows:
         try:
+            if row.get("materialized_zotero_key"):
+                LOGGER.info("add_to_library: skipping already-materialized row id=%s", row.get("id"))
+                continue
             # Capture the gate/model's derived priority BEFORE overriding it, so
             # the verdict overlay records the original (e.g. "dont_read"), not the
             # "add" label we're about to write below.
@@ -131,8 +197,6 @@ def add_to_library(item_ids: list[int]) -> dict[str, Any]:
             # so the Zotero tag reflects the user's positive "add" intent, not the
             # gate's verdict.
             row["reading_priority"] = _ADD_PRIORITY
-            new_key = review.materialize_row(row, writer=writer, used_keys=used_keys, reason="today_add")
-            new_keys.append(new_key)
             # Soft, low-weight training signal: "Add" is pre-read interest, not
             # endorsement — feed_interest → WEIGHT_INTEREST (0.3). A later read +
             # label (or Zotero engagement) on the materialized library item
@@ -142,6 +206,29 @@ def add_to_library(item_ids: list[int]) -> dict[str, Any]:
                 signal_tier="feed_interest", original_priority=original_priority,
                 source=VERDICT_SOURCE_MACHINE_ADD, surface="today_keep",
             )
+            if writer is None:
+                _set_decision(row, feeds_storage.DECISION_USER_APPROVED, "today_add_zotero_pending")
+                _mark_zotero_sync(row, "pending")
+                _record_app_outcome(row, feeds_storage.OUTCOME_KEPT_UNREAD_APP)
+                pending_sync += 1
+            else:
+                try:
+                    new_key = review.materialize_row(row, writer=writer, used_keys=used_keys, reason="today_add")
+                    new_keys.append(new_key)
+                    # Carry the in-place Today review (cached under stable_feed_key) onto
+                    # the new library key so the deep review persists into the library.
+                    sfk = str(row.get("stable_feed_key") or "")
+                    deep_review.copy_review(sfk, new_key)
+                    materialized.append((sfk, new_key))
+                except Exception as exc:
+                    _set_decision(row, feeds_storage.DECISION_USER_APPROVED, "today_add_zotero_pending")
+                    _mark_zotero_sync(row, "pending")
+                    _record_app_outcome(row, feeds_storage.OUTCOME_KEPT_UNREAD_APP)
+                    pending_sync += 1
+                    LOGGER.warning(
+                        "add_to_library: Zotero export pending for row id=%s: %s",
+                        row.get("id"), exc,
+                    )
             added += 1
         except Exception as exc:
             # Batch contract: a Zotero-locked / bad row must not strand the
@@ -152,14 +239,39 @@ def add_to_library(item_ids: list[int]) -> dict[str, Any]:
                 "title": str(row.get("title") or ""),
                 "error": str(exc),
             })
+    # Auto-fetch arXiv full text for the just-added papers (user-requested, 2026-06).
+    # Best-effort: the items are already in Zotero, so a fetch failure must NOT fail the
+    # add — the bulk "Fetch full text" button can complete it later.
+    fulltext = _attach_fulltext_best_effort(new_keys)
+    # Carry the heavy brief onto the library: a feed paper that already had a render
+    # rebuilds under its new Zotero key (after fulltext attach, so the real PDF is present).
+    _carry_renders_best_effort(materialized)
     return {
-        "added": added, "failed_count": len(failed), "failed": failed[:20],
-        # Auto-fetch arXiv full text for the just-added papers (user-requested,
-        # 2026-06). Best-effort: the items are already in Zotero, so a fetch
-        # failure (arXiv down, Zotero reopened) must NOT fail the add — it's a
-        # bonus the bulk "Fetch full text" button can complete later.
-        "fulltext": _attach_fulltext_best_effort(new_keys),
+        "added": added, "pending_sync": pending_sync,
+        "zotero_sync_error": str(writer_error) if writer_error is not None else None,
+        "failed_count": len(failed), "failed": failed[:20],
+        "fulltext": fulltext,
     }
+
+
+def _carry_renders_best_effort(pairs: list[tuple[str, str]]) -> None:
+    """For each ``(stable_feed_key, new_zotero_key)`` whose feed paper already had a
+    COMPLETED in-place render, rebuild the brief under the new library key — so the library
+    opens with the same brief. REBUILD (not copy): the digest is already carried by
+    ``deep_review.copy_review``, and the renderer reads the real Zotero PDF so artifact paths
+    are correct. Best-effort (user-requested persistence): a render failure never fails the
+    add. ``start_build`` is async (its own pool + single-flight), so this does not block."""
+    from zotero_summarizer.services.library import paper_render
+
+    for stable_feed_key, new_key in pairs:
+        if not stable_feed_key:
+            continue
+        try:
+            state = paper_render._read_state(stable_feed_key)
+            if state is not None and state.get("status") == "completed":
+                paper_render.start_build(new_key, allow_acquire_missing=True)
+        except Exception:  # noqa: BLE001 — best-effort render carry; never fail the add
+            LOGGER.warning("add_to_library: render carry failed for %s", new_key, exc_info=True)
 
 
 def _attach_fulltext_best_effort(new_keys: list[str]) -> dict[str, Any]:
@@ -188,17 +300,21 @@ def trash(item_ids: list[int]) -> dict[str, Any]:
     card, flip it to user_rejected, and mark the feed items read. Returns
     ``{trashed, marked_read, failed_count, failed}``."""
     rows = _load_rows(item_ids)
-    writer = ZoteroWriter(get_settings().zotero_data_dir)
+    writer, writer_error = _open_optional_writer()
     trashed = 0
     failed: list[dict[str, Any]] = []
-    read_ids: list[int] = []
+    zotero_read_ids: list[int] = []
+    app_rss_rows: list[dict[str, Any]] = []
     for row in rows:
         try:
             _record_label(row, "dont_read", "trashed from Today", surface="today_trash")
             _set_decision(row, feeds_storage.DECISION_USER_REJECTED, "trashed_from_today")
+            _record_app_outcome(row, feeds_storage.OUTCOME_TRASHED)
             fid = int(row.get("feed_item_id") or 0)
-            if fid:
-                read_ids.append(fid)
+            if fid and _is_app_rss_row(row):
+                app_rss_rows.append(row)
+            elif fid:
+                zotero_read_ids.append(fid)
             trashed += 1
         except Exception as exc:
             # Batch contract: per-row failure is reported, not fatal.
@@ -214,12 +330,20 @@ def trash(item_ids: list[int]) -> dict[str, Any]:
     # leave the user thinking the trash failed when the labels actually saved.
     marked = 0
     marked_read_error: str | None = None
-    if read_ids:
+    if app_rss_rows:
         try:
-            marked = writer.mark_feed_items_read(read_ids)
+            marked += _mark_app_rss_rows_read(app_rss_rows)
+        except Exception as exc:  # noqa: BLE001 - local read marking is best-effort.
+            LOGGER.warning("trash: app rss mark read failed (labels already saved): %s", exc)
+            marked_read_error = str(exc)
+    if zotero_read_ids and writer is not None:
+        try:
+            marked += writer.mark_feed_items_read(zotero_read_ids)
         except Exception as exc:
             LOGGER.warning("trash: mark_feed_items_read failed (labels already saved): %s", exc)
             marked_read_error = str(exc)
+    elif zotero_read_ids and writer_error is not None:
+        marked_read_error = str(writer_error)
     return {
         "trashed": trashed,
         "marked_read": marked,

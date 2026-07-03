@@ -258,6 +258,16 @@ def evaluate_quality(
         resolved = pc.PaperType(paper_type or "").value
     except ValueError:
         resolved = pc.PaperType.GENERIC_EMPIRICAL.value
+
+    # Non-paper (web article / blog / news): no scientific reporting standard applies,
+    # so SHORT-CIRCUIT the rubric — no A–D grade, no red flags, zero LLM calls. The
+    # digest still summarizes it and the triage stage already scored its relevance;
+    # ``basis='non_paper'`` tells the UI to show "relevance read, not a research paper".
+    if resolved == pc.PaperType.NON_PAPER.value:
+        return QualityEval(
+            quality_band="", grade="", basis="non_paper", paper_type=resolved,
+            coverage_standard="Not a research paper — relevance only", confidence=0.0,
+        )
     spec = pc.spec_for(resolved)
 
     # Budget-aware selection (referee-critical sections + ranked chunks); the

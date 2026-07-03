@@ -24,10 +24,12 @@ from zotero_summarizer.services.zotero._notes import (  # noqa: F401
     NOTE_PROVENANCE_NAMESPACE,
     NOTE_PROVENANCE_SOURCE,
     NOTE_VERSION,
+    USER_NOTE_MARKER,
     VERDICT_NOTE_MARKER,
     build_digest_note_html,
     build_provenance_comment,
     build_triage_note_html,
+    build_user_note_html,
     build_verdict_note_html,
 )
 from zotero_summarizer.storage import repositories as triage_db

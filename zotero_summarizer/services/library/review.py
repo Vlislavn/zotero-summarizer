@@ -19,6 +19,8 @@ from zotero_summarizer.services import interaction_log
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.golden.goldenset import _PRIORITY_TO_RELEVANCE
 from zotero_summarizer.storage import feeds as feeds_storage
+from zotero_summarizer.storage.feed_identity import row_feed_keys
+from zotero_summarizer.storage import repositories
 
 LOGGER = logging.getLogger(__name__)
 
@@ -98,9 +100,30 @@ def _log_review(row: dict[str, Any], surface: str, value: str) -> None:
     column, not this dict), so the model block records what the human overrode.
     """
     interaction_log.log_feed_decision(
-        row=row, item_key=f"feed:{int(row.get('feed_item_id') or 0)}",
+        row=row, item_key=row_feed_keys(row)[0],
         surface=surface, human={"kind": "priority", "value": value},
     )
+
+
+def _priority_for_positive_review(row: dict[str, Any]) -> str:
+    priority = str(row.get("reading_priority") or "").strip()
+    if priority in _PRIORITY_TO_RELEVANCE and priority != "dont_read":
+        return priority
+    return "should_read"
+
+
+def _record_label_verdict(row: dict[str, Any], priority: str, comment: str) -> None:
+    """Persist a review decision into ``label_verdicts`` when the table exists."""
+    try:
+        repositories.insert_or_update_label_verdict(
+            get_settings().triage_db_path,
+            item_key=row_feed_keys(row)[0],
+            original_derived_priority=str(row.get("reading_priority") or "").strip() or "unknown",
+            user_priority=priority,
+            comment=comment,
+        )
+    except sqlite3.Error as exc:
+        LOGGER.warning("review label verdict could not be saved: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +155,8 @@ def approve(processed_id: int) -> dict[str, Any]:
             decision_reason="user_approved_in_review_ui",
         )
         conn.commit()
+    priority = _priority_for_positive_review(row)
+    _record_label_verdict(row, priority, "approved in review UI")
     return {"processed_id": processed_id, "state": feeds_storage.DECISION_USER_APPROVED}
 
 
@@ -191,6 +216,11 @@ def relabel(processed_id: int, new_priority: str) -> dict[str, Any]:
         label=new_priority,
         note=f"relabel via review UI ({new_priority}; from {row.get('decision')})",
     )
+    _record_label_verdict(
+        row,
+        new_priority,
+        f"relabel via review UI ({new_priority}; from {row.get('decision')})",
+    )
     _log_review(row, "review_relabel", new_priority)
     return {
         "processed_id": processed_id,
@@ -245,6 +275,7 @@ def _confirm_or_reject_to_dont_read(processed_id: int) -> dict[str, Any]:
         label="dont_read",
         note=f"relabel via review UI (dont_read; from {prior_state})",
     )
+    _record_label_verdict(row, "dont_read", f"relabel via review UI (dont_read; from {prior_state})")
     _log_review(row, "review_relabel", "dont_read")
     return {"processed_id": processed_id, "golden_csv_row_added": appended}
 
@@ -377,9 +408,6 @@ def apply_all_approved(since_hours: int = 720) -> dict[str, Any]:
     """
     from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 
-    settings_ = get_settings()
-    writer = ZoteroWriter(settings_.zotero_data_dir)
-
     with _conn() as conn:
         rows = feeds_storage.select_by_decisions(
             conn,
@@ -387,6 +415,44 @@ def apply_all_approved(since_hours: int = 720) -> dict[str, Any]:
             since_hours=since_hours,
             limit=5000,
         )
+
+    if not rows:
+        return {
+            "applied": 0,
+            "pending_sync": 0,
+            "zotero_sync_error": None,
+            "failed_count": 0,
+            "failed": [],
+        }
+
+    settings_ = get_settings()
+    try:
+        writer = ZoteroWriter(settings_.zotero_data_dir)
+    except Exception as exc:  # noqa: BLE001 - Zotero is optional for approved feed rows.
+        LOGGER.warning("apply_all_approved: Zotero writer unavailable; rows remain pending sync: %s", exc)
+        with _conn() as conn:
+            for row in rows:
+                feeds_storage.record_zotero_sync_status(
+                    conn,
+                    feed_library_id=int(row["feed_library_id"]),
+                    feed_item_id=int(row["feed_item_id"]),
+                    status="pending",
+                )
+                feeds_storage.record_app_outcome(
+                    conn,
+                    feed_library_id=int(row["feed_library_id"]),
+                    feed_item_id=int(row["feed_item_id"]),
+                    final_outcome=feeds_storage.OUTCOME_KEPT_UNREAD_APP,
+                    signal_weight=feeds_storage.OUTCOME_WEIGHT[feeds_storage.OUTCOME_KEPT_UNREAD_APP],
+                )
+            conn.commit()
+        return {
+            "applied": 0,
+            "pending_sync": len(rows),
+            "zotero_sync_error": str(exc),
+            "failed_count": 0,
+            "failed": [],
+        }
 
     applied = 0
     failed: list[dict[str, Any]] = []
@@ -409,6 +475,8 @@ def apply_all_approved(since_hours: int = 720) -> dict[str, Any]:
 
     return {
         "applied": applied,
+        "pending_sync": 0,
+        "zotero_sync_error": None,
         "failed_count": len(failed),
         "failed": failed[:20],
     }
@@ -453,6 +521,7 @@ def _label_and_terminate(
     appended = False
     if write_to_golden:
         appended = append_to_golden(row, label=label, note=f"{reason} via review UI")
+    _record_label_verdict(row, label, f"{reason} via review UI")
     _log_review(row, "review_reject", label)
     return {"processed_id": processed_id, "golden_csv_row_added": appended}
 

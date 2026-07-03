@@ -12,13 +12,16 @@ from __future__ import annotations
 from typing import Any
 
 from zotero_summarizer.services._common import band_primary_enabled
+from zotero_summarizer.services._common import quality_promote_enabled
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services._common import state as get_state
 from zotero_summarizer.services.emoji_signals import HARD_VETO_EMOJIS, READ_EMOJIS
 from zotero_summarizer.services.library._score_distribution import _entry_prestige
+from zotero_summarizer.services.library._score_distribution import entry_prestige_evidence
 from zotero_summarizer.services.model.rank_blend import (
     GOAL_BLEND_WEIGHT,
     blend_scores,
+    promote_band,
     quality_bonus,
 )
 
@@ -218,27 +221,52 @@ def _build_recs(
         user_priority = verdict_priority.get(it["item_key"], "")
         entry = cached.get(it["item_key"])
         prestige_score, prestige_known = _entry_prestige(entry)
+        author_h_index, prestige_evidence = entry_prestige_evidence(entry)
         qual = (reviews.get(it["item_key"]) or {}).get("quality") or {}
+        quality_grade = qual.get("grade") or None
+        quality_band = qual.get("quality_band") or None
+        relevance_score = entry["relevance_score"] if entry else None
+        goal_sim = entry.get("goal_sim") if entry else None
+        # Quality → must_read promotion (OFF by default; ZS_QUALITY_PROMOTE). The
+        # gate's compressed regressor never reaches the must_read band on its own,
+        # so a high-quality + on-goal + gate-confirmed paper is lifted here. The
+        # raw gate band is the floor; promotion only crosses ONE band up (never
+        # invents must_read from dont_read). A None signal → no promotion (no
+        # hide-on-absent-evidence contract). User verdicts still win (sort_unread).
+        reading_priority = it.get("reading_priority") or ""
+        if quality_promote_enabled():
+            reading_priority = promote_band(
+                reading_priority,
+                grade=quality_grade,
+                relevance_score=relevance_score,
+                goal_sim=goal_sim,
+            )
         rec = {
             "item_key": it["item_key"],
             "title": it.get("title") or "",
             "authors": it.get("authors") or "",
-            "reading_priority": it.get("reading_priority") or "",
+            "venue": it.get("venue") or "",
+            "reading_priority": reading_priority,
             "user_priority": user_priority,
             "has_pdf": bool(it.get("has_pdf")),
             "date_added": it.get("date_added") or "",
             "read": is_read,
-            "relevance_score": entry["relevance_score"] if entry else None,
+            "relevance_score": relevance_score,
             "why_reason": entry["why_reason"] if entry else None,
             # Carried from the score cache (computed at rescore time) so the open
             # path skips the corpus matmul; None when absent (legacy entry / no
             # embedding) — sort_unread does a cheap live lookup for those.
-            "goal_sim": entry.get("goal_sim") if entry else None,
+            "goal_sim": goal_sim,
             "prestige_score": prestige_score,
             "prestige_known": prestige_known,
+            # `prestige_evidence` (citation OR author h-index) drives the client
+            # Prestige FILTER; `prestige_known` (citation only) stays the conservative
+            # banding-FLOOR signal — kept separate on purpose.
+            "prestige_evidence": prestige_evidence,
+            "max_author_h_index": author_h_index,
             "proposed_verdict": proposed_verdicts.get(it["item_key"]),
-            "quality_grade": qual.get("grade") or None,
-            "quality_band": qual.get("quality_band") or None,
+            "quality_grade": quality_grade,
+            "quality_band": quality_band,
         }
         (read if (is_read or user_priority == "dont_read") else unread).append(rec)
     return unread, read

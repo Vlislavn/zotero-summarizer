@@ -135,9 +135,8 @@ def get_label_priorities_by_pks(
 ) -> dict[int, str]:
     """Return ``{processed_feed_items.id: user_priority}`` for the given PKs.
 
-    Labels live in ``label_verdicts`` keyed ``feed:<feed_item_id>`` while the
-    slate carries the ``processed_feed_items`` PK, so this joins the two to
-    hydrate the Today card's must/should/could/don't button after a reload.
+    Labels now prefer ``processed_feed_items.stable_feed_key``. Legacy
+    ``feed:<feed_item_id>`` labels remain readable through aliases/fallback.
     PKs without a manual label are absent from the result.
     """
     safe_pks = [int(p) for p in pks if isinstance(p, int) or str(p).isdigit()]
@@ -148,17 +147,32 @@ def get_label_priorities_by_pks(
     try:
         rows = conn.execute(
             f"""
-            SELECT p.id AS pk, lv.user_priority AS user_priority
+            SELECT p.id AS pk, lv.user_priority AS user_priority,
+                   CASE
+                     WHEN lv.item_key = p.stable_feed_key THEN 0
+                     WHEN a.old_key IS NOT NULL THEN 1
+                     ELSE 2
+                   END AS priority_order
             FROM processed_feed_items p
             JOIN label_verdicts lv
-              ON lv.item_key = 'feed:' || p.feed_item_id
+              ON lv.item_key = p.stable_feed_key
+                 OR lv.item_key = 'feed:' || p.feed_item_id
+            LEFT JOIN feed_key_aliases a
+              ON a.old_key = lv.item_key
+             AND a.stable_feed_key = p.stable_feed_key
             WHERE p.id IN ({placeholders})
+            ORDER BY priority_order ASC
             """,
             safe_pks,
         ).fetchall()
     finally:
         conn.close()
-    return {int(r["pk"]): str(r["user_priority"]) for r in rows}
+    out: dict[int, str] = {}
+    for row in rows:
+        pk = int(row["pk"])
+        if pk not in out:
+            out[pk] = str(row["user_priority"])
+    return out
 
 
 def list_role_verdicts_summary(db_path: Path) -> dict[str, dict[str, Any]]:

@@ -1,6 +1,6 @@
 """Temporal-holdout eval of the gate: honest forward-looking metrics + objective A/B.
 
-Two SOTA-hygiene questions the shuffled GroupKFold OOF numbers can't answer:
+Two ML-hygiene questions the shuffled GroupKFold OOF numbers can't answer:
 
 1. **Temporal honesty.** Production always predicts the FUTURE (today's feed)
    from the PAST (everything labeled so far), but the logged OOF Spearman

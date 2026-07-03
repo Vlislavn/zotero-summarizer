@@ -27,6 +27,24 @@ Read this before editing; every package also has its own `README.md`.
 5. **golden** is your label dataset; **model** retrains on it — the loop closes.
 6. **zotero** is the only write path: changes are queued, reviewed, then applied.
 
+## Why it's built this way (decisions + evidence)
+
+The loop above is the *what*; the *why* — every technical choice with its measured number and the
+rejected alternatives (with the numbers that killed them) — lives in three companion docs kept
+locally under `docs/internal/` (untracked rationale notes, not part of the shared repo):
+
+```
+ docs/internal/decisions.md          ADRs: decision → evidence → reproduce command → rejected alt
+ docs/internal/validated_defaults.md Tier-0 provenance ledger for each shipped knob default
+ docs/internal/knowledge_map.md      parameters × models × status (M measured / P provisional / G guess)
+```
+
+Status legend (used across all three): **✅ MEASURED** (real data + reproduce), **⚠️ PROVISIONAL**
+(operational baseline; harness built, head-to-head deferred — the open measurement is in
+`decisions.md` §GAP), **❓ GUESS** (labelled in code), **❌ REJECTED** (measured-worse; do not
+re-propose without new evidence). **Before re-proposing a ❌ or flipping a ⚠️ default, rerun the
+cited eval on the same real data and beat the recorded number.** No new evidence → no re-litigation.
+
 ## Triage trigger: daemon vs UI
 
 Triage (the pipeline above) runs identically whether it is triggered by:
@@ -76,8 +94,13 @@ mcp → (HTTP only; imports none of the above)
   immutable human-decision + model-prediction trajectory for offline improvement;
   see `services/interaction_log.py`), and ML artifacts. Every path comes from
   `Settings` — never hardcode `project_root / "..."`.
-- Config: `.env` (secrets/paths) + `goals.yaml` (research goals, models, prompts).
-  Both are gitignored; copy the `*.example` templates to bootstrap. See the README.
+- Config: `.env` (secrets/paths) + `goals.yaml` (**intent only** — research goals,
+  triage criteria, rubric, language + the LLM connection; the `USER_OWNED_KEYS`
+  allowlist in `models/config.py`). Technical knobs (corpus, prestige,
+  quality_review, classifier_gate, prompts) are validated code defaults, overridable
+  via `ZS_*` env (`services/config_overrides.py`, `docs/overrides.md`) and refined
+  per-user by calibration (planned). Both files are gitignored; copy the `*.example`
+  templates to bootstrap. See the README.
 - Schema changes are version-gated migrations (`storage/migrations.py`): add a new
   numbered `Migration` step, never an inline `ALTER`.
 

@@ -35,6 +35,7 @@ def _to_slate_paper(cand: dict[str, Any], *, role: str) -> SlatePaper:
     return SlatePaper(
         item_key=cand["item_key"],
         item_id=cand["id"],
+        stable_feed_key=cand.get("stable_feed_key", ""),
         title=cand["title"],
         authors=cand["authors"],
         venue=cand["venue"],
@@ -53,6 +54,7 @@ def _to_slate_paper(cand: dict[str, Any], *, role: str) -> SlatePaper:
         pub_year=cand.get("pub_year"),
         why=cand.get("why", []),
         goal_sim=cand.get("goal_sim"),
+        url=cand.get("url", ""),
     )
 
 

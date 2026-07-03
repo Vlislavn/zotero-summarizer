@@ -14,6 +14,7 @@ from typing import Any
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.storage import feeds as feeds_storage
+from zotero_summarizer.storage import rss as rss_storage
 from zotero_summarizer.services.triage.feeds._common import (
     LOGGER,
     TriagedCandidate,
@@ -156,7 +157,7 @@ def pick_and_log(
 
 def prepare_unprocessed(
     raw: list[dict[str, Any]], *, tick_id: str
-) -> tuple[list[dict[str, Any]], int, list[tuple[int, int]]]:
+) -> tuple[list[dict[str, Any]], int, list[tuple[int, int, str]]]:
     """Dedup against processed rows; collect stale-unread + clear retryable errors.
 
     Returns ``(unprocessed, skipped_processed, stale_to_mark)``. Already-decided
@@ -166,7 +167,16 @@ def prepare_unprocessed(
     """
     with _triage_conn() as conn:
         unprocessed, skipped_processed = feeds_storage.filter_unprocessed(conn, raw)
-        stale_to_mark = feeds_storage.select_stale_unread_to_mark(conn, raw)
+        stale_pairs = feeds_storage.select_stale_unread_to_mark(conn, raw)
+        source_by_pair = {
+            (int(item.get("feed_library_id") or 0), int(item.get("item_id") or 0)):
+            str(item.get("source_type") or item.get("source") or "zotero")
+            for item in raw
+        }
+        stale_to_mark = [
+            (fl, fi, source_by_pair.get((fl, fi), "zotero"))
+            for fl, fi in stale_pairs
+        ]
         cleared = feeds_storage.clear_error_rows(conn, unprocessed)
         if cleared:
             conn.commit()
@@ -297,8 +307,13 @@ def recover_abstractless_rescues(
     ``max_per_tick`` so the browser/paywall fetch never runs across a whole
     journal backlog (the cap is logged, never silent).
     """
+    # No-work early-exit FIRST, before dereferencing app_state — an empty
+    # gate_rejected has nothing to rescue regardless of config (and lets the unit
+    # tick tests run without bootstrapping app_state).
+    if not gate_rejected:
+        return [], gate_rejected
     cfg = getattr(get_state().app_state.config, "recover_abstract", None)
-    if cfg is None or not cfg.enabled or not gate_rejected:
+    if cfg is None or not cfg.enabled:
         return [], gate_rejected
 
     rescued: list[tuple[dict[str, Any], TriagedCandidate]] = []
@@ -412,9 +427,9 @@ def record_tick_decisions(results: _TickResults, *, tick_id: str, review_mode: b
 
 def mark_processed_read(
     results: _TickResults,
-    stale_to_mark: list[tuple[int, int]],
+    stale_to_mark: list[tuple[int, int, str]],
     *,
-    writer: ZoteroWriter,
+    writer: ZoteroWriter | None,
     tick_id: str,
 ) -> int:
     """Mark every item the tick touched read in Zotero; return the marked count.
@@ -425,41 +440,92 @@ def mark_processed_read(
     failure is logged and the tick proceeds (the rows stay unread, retried next
     tick).
     """
-    processed_ids: list[int] = []
+    zotero_ids: list[int] = []
+    app_rss_ids: list[int] = []
+
+    def _collect(item: dict[str, Any]) -> None:
+        item_id = int(item.get("item_id") or 0)
+        if item_id <= 0:
+            return
+        if str(item.get("source_type") or item.get("source") or "") == "app_rss":
+            app_rss_ids.append(item_id)
+        else:
+            zotero_ids.append(item_id)
+
     for item, _cand in results.triaged + results.fast_rejected:
-        processed_ids.append(int(item.get("item_id") or 0))
+        _collect(item)
     for item in results.library_skipped + results.processed_dup_skipped:
-        processed_ids.append(int(item.get("item_id") or 0))
+        _collect(item)
     for item, _pred in results.gate_rejected:
-        processed_ids.append(int(item.get("item_id") or 0))
-    for _fl, _fi in stale_to_mark:
-        processed_ids.append(int(_fi))
-    processed_ids = [i for i in processed_ids if i > 0]
-    if not processed_ids:
+        _collect(item)
+    for _fl, _fi, source_type in stale_to_mark:
+        if source_type == "app_rss":
+            app_rss_ids.append(int(_fi))
+        else:
+            zotero_ids.append(int(_fi))
+    zotero_ids = [i for i in zotero_ids if i > 0]
+    app_rss_ids = [i for i in app_rss_ids if i > 0]
+    if not zotero_ids and not app_rss_ids:
         return 0
     marked = 0
-    try:
-        marked = writer.mark_feed_items_read(processed_ids)
+    touched_items = [
+        item
+        for item, _ in (
+            results.triaged
+            + results.fast_rejected
+            + results.gate_rejected
+        )
+    ] + list(results.library_skipped) + list(results.processed_dup_skipped)
+
+    def _is_app(item: dict[str, Any]) -> bool:
+        return str(item.get("source_type") or item.get("source") or "") == "app_rss"
+
+    if app_rss_ids:
         with _triage_conn() as conn:
-            for item, _ in results.triaged + results.fast_rejected:
+            marked += rss_storage.mark_rss_items_read(conn, app_rss_ids)
+            for item in touched_items:
+                if not _is_app(item):
+                    continue
                 feeds_storage.record_read_marked(
                     conn,
                     feed_library_id=int(item.get("feed_library_id") or 0),
                     feed_item_id=int(item.get("item_id") or 0),
                 )
-            for item in results.library_skipped + results.processed_dup_skipped:
-                feeds_storage.record_read_marked(
-                    conn,
-                    feed_library_id=int(item.get("feed_library_id") or 0),
-                    feed_item_id=int(item.get("item_id") or 0),
-                )
-            for _fl, _fi in stale_to_mark:
+            for _fl, _fi, _source_type in stale_to_mark:
+                if _source_type != "app_rss":
+                    continue
                 feeds_storage.record_read_marked(
                     conn, feed_library_id=int(_fl), feed_item_id=int(_fi),
                 )
             conn.commit()
+
+    if not zotero_ids:
+        return marked
+    if writer is None:
+        LOGGER.info("[%s] Zotero writer unavailable; skipped %d legacy readTime updates", tick_id, len(zotero_ids))
+        return marked
+    try:
+        zotero_marked = writer.mark_feed_items_read(zotero_ids)
     except Exception as exc:
         LOGGER.warning("[%s] mark_feed_items_read failed: %s", tick_id, exc)
+        return marked
+    marked += zotero_marked
+    with _triage_conn() as conn:
+        for item in touched_items:
+            if _is_app(item):
+                continue
+            feeds_storage.record_read_marked(
+                conn,
+                feed_library_id=int(item.get("feed_library_id") or 0),
+                feed_item_id=int(item.get("item_id") or 0),
+            )
+        for _fl, _fi, _source_type in stale_to_mark:
+            if _source_type == "app_rss":
+                continue
+            feeds_storage.record_read_marked(
+                conn, feed_library_id=int(_fl), feed_item_id=int(_fi),
+            )
+        conn.commit()
     return marked
 
 
@@ -467,26 +533,30 @@ def maybe_run_daily(
     feeds_cfg: dict[str, Any],
     *,
     reader: ZoteroReader,
-    writer: ZoteroWriter,
+    writer: ZoteroWriter | None,
     tick_id: str,
     feed_library_ids: list[int] | None,
     force: bool = False,
     dry_run: bool = False,
-) -> tuple[bool, int, int]:
-    """Run daily selection when forced or due; return (ran, materialized, rejected).
+) -> tuple[bool, int, int, list[str]]:
+    """Run daily selection when forced or due; return (ran, materialized, rejected, materialized_keys).
 
-    When ``force`` (``feeds run``) and ``feed_library_ids`` is set, the candidate
-    pool is scoped to those feeds; normal daemon ticks pool across all feeds. A
-    selection failure is logged and reported as not-run.
+    ``materialized_keys`` are the Zotero library keys just created — the tick
+    auto-reviews them via deep_review when ``quality_review.auto_on_tick_k`` is set.
+    ``force`` + ``feed_library_ids`` scopes the pool to those feeds. A selection
+    failure is logged and reported as not-run (empty keys).
     """
     if not (force or _should_run_daily_selection(feeds_cfg)):
-        return False, 0, 0
+        return False, 0, 0, []
+    if writer is None:
+        LOGGER.info("[%s] daily selection skipped: Zotero writer unavailable", tick_id)
+        return False, 0, 0, []
     try:
         scoped_ids = feed_library_ids if force else None
         sel = run_daily_selection(
             reader=reader, writer=writer, feed_library_ids=scoped_ids, dry_run=dry_run,
         )
-        return True, sel.get("materialized", 0), sel.get("rejected", 0)
+        return True, sel.get("materialized", 0), sel.get("rejected", 0), list(sel.get("materialized_keys") or [])
     except Exception:
         LOGGER.exception("[%s] daily selection failed", tick_id)
-        return False, 0, 0
+        return False, 0, 0, []

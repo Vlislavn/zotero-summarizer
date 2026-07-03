@@ -15,6 +15,7 @@ from zotero_summarizer.services.triage import daily_actions
 from zotero_summarizer.services.library import review
 from zotero_summarizer.storage import feeds as fs
 from zotero_summarizer.storage import repositories as repo
+from zotero_summarizer.storage import rss as rss_storage
 
 
 class _FakeWriter:
@@ -134,6 +135,41 @@ def test_add_to_library_records_original_gate_priority_not_add_label(env, monkey
     assert verdict["original_derived_priority"] == "dont_read"  # the gate's verdict, preserved
 
 
+def test_add_to_library_without_zotero_records_pending_local_approval(env, monkeypatch):
+    db, appended = env
+    pk = _record(db, 260)
+
+    class _UnavailableWriter:
+        def __init__(self, *a, **k):
+            raise RuntimeError("zotero unavailable")
+
+    monkeypatch.setattr(daily_actions, "ZoteroWriter", _UnavailableWriter)
+    res = daily_actions.add_to_library([pk])
+
+    assert res["added"] == 1
+    assert res["pending_sync"] == 1
+    assert "zotero unavailable" in res["zotero_sync_error"]
+    assert repo.get_label_verdict(db, "feed:260")["user_priority"] == "should_read"
+    assert (260, "should_read", "feed_interest") in appended
+
+    conn = sqlite3.connect(str(db))
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            """
+            SELECT decision, zotero_sync_status, final_outcome
+            FROM processed_feed_items
+            WHERE id = ?
+            """,
+            (pk,),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row["decision"] == fs.DECISION_USER_APPROVED
+    assert row["zotero_sync_status"] == "pending"
+    assert row["final_outcome"] == fs.OUTCOME_KEPT_UNREAD_APP
+
+
 def test_add_to_library_runs_real_materialize_row(tmp_path, monkeypatch):
     """Regression: the REAL ``review.materialize_row`` path must succeed.
 
@@ -165,6 +201,68 @@ def test_add_to_library_runs_real_materialize_row(tmp_path, monkeypatch):
     res = daily_actions.add_to_library([pk])
     assert res["added"] == 1, res.get("failed")          # NOT the silent "added: 0"
     assert isinstance(captured.get("tags"), list)        # _tags_from_row ran without a positional crash
+
+
+def test_trash_app_rss_row_marks_local_item_read(env, monkeypatch):
+    db, _appended = env
+    conn = sqlite3.connect(str(db))
+    conn.row_factory = sqlite3.Row
+    try:
+        fs.init_feeds_schema(conn)
+        feed_id = rss_storage.upsert_rss_feed(
+            conn,
+            name="App Feed",
+            url="https://example.com/rss",
+        )
+        rss_item_id, _inserted = rss_storage.upsert_rss_item(
+            conn,
+            rss_feed_id=feed_id,
+            item={
+                "feed_library_id": feed_id,
+                "item_id": 0,
+                "guid": "app-rss-trash-guid",
+                "title": "App RSS Paper",
+            },
+        )
+        fs.record_decision(
+            conn,
+            run_id="r",
+            feed_item={
+                "feed_library_id": feed_id,
+                "item_id": rss_item_id,
+                "source_type": "app_rss",
+                "guid": "app-rss-trash-guid",
+                "title": "App RSS Paper",
+            },
+            decision=fs.DECISION_TRIAGED_PENDING,
+        )
+        conn.commit()
+        pk = int(conn.execute(
+            "SELECT id FROM processed_feed_items WHERE feed_item_id = ?",
+            (rss_item_id,),
+        ).fetchone()["id"])
+    finally:
+        conn.close()
+
+    class _UnavailableWriter:
+        def __init__(self, *a, **k):
+            raise RuntimeError("zotero unavailable")
+
+    monkeypatch.setattr(daily_actions, "ZoteroWriter", _UnavailableWriter)
+    res = daily_actions.trash([pk])
+
+    assert res["trashed"] == 1
+    assert res["marked_read"] == 1
+    conn = sqlite3.connect(str(db))
+    conn.row_factory = sqlite3.Row
+    try:
+        read_at = conn.execute(
+            "SELECT read_at FROM rss_items WHERE id = ?",
+            (rss_item_id,),
+        ).fetchone()["read_at"]
+    finally:
+        conn.close()
+    assert read_at
 
 
 def test_batch_handles_multiple_ids(env, monkeypatch):
@@ -208,3 +306,22 @@ def test_append_to_golden_writes_signal_tier_to_csv(tmp_path, monkeypatch):
     assert rows["feed:777"]["gold_signal_tier"] == "feed_interest"
     assert rows["feed:777"]["gold_priority_final"] == "should_read"
     assert rows["feed:778"]["gold_signal_tier"] == "feed_user_label"  # default preserved
+
+
+def test_carry_renders_best_effort_rebuilds_only_completed_feed_renders(monkeypatch):
+    """Render persistence on Add: only a feed paper that ALREADY had a completed render
+    rebuilds under its new Zotero key; running/absent/empty are skipped. Best-effort."""
+    from zotero_summarizer.services.library import paper_render
+
+    built: list[str] = []
+    monkeypatch.setattr(paper_render, "start_build", lambda key, **kw: built.append(key))
+    states = {"feed:d:DONE": {"status": "completed"}, "feed:d:RUN": {"status": "running"}}
+    monkeypatch.setattr(paper_render, "_read_state", lambda key: states.get(key))
+
+    daily_actions._carry_renders_best_effort([
+        ("feed:d:DONE", "ZK1"),   # completed → rebuild under the new key
+        ("feed:d:RUN", "ZK2"),    # not completed → skip
+        ("feed:d:NONE", "ZK3"),   # no render state → skip
+        ("", "ZK4"),              # no feed key → skip
+    ])
+    assert built == ["ZK1"]

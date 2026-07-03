@@ -4,10 +4,10 @@ import json
 import random
 import sqlite3
 import time
+from http.client import HTTPConnection
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence, TypeVar
-from urllib.request import urlopen
 
 from zotero_summarizer.integrations._zotero_write_common import (  # noqa: F401
     LOGGER,
@@ -45,11 +45,16 @@ class ZoteroWriter(
 
     def is_connector_running(self) -> bool:
         """Return True when Zotero connector HTTP server responds locally."""
+        conn: HTTPConnection | None = None
         try:
-            with urlopen("http://127.0.0.1:23119/connector/ping", timeout=0.8) as response:
-                return int(getattr(response, "status", 0)) == 200
+            conn = HTTPConnection("127.0.0.1", 23119, timeout=0.8)
+            conn.request("GET", "/connector/ping")
+            return int(getattr(conn.getresponse(), "status", 0)) == 200
         except Exception:
             return False
+        finally:
+            if conn is not None:
+                conn.close()
 
     @staticmethod
     def _is_db_locked(exc: Exception) -> bool:

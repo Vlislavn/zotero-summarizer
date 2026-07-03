@@ -1,9 +1,11 @@
-import { Link, useParams } from 'react-router-dom';
+import { useCallback, useMemo, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { fetchCollections, fetchPaperRender } from '../api/libraryApi.js';
+import { fetchCollections, fetchPaperRender, attachFiguresToZotero } from '../api/libraryApi.js';
 import { flattenCollections } from './pendingHelpers.js';
 import usePaperReview from '../hooks/usePaperReview.js';
 import useDeepReviewRunner from '../hooks/useDeepReviewRunner.js';
+import useKeyboardNav from '../hooks/useKeyboardNav.js';
 import AuthorByline from '../components/AuthorByline.jsx';
 import LinksRow from '../components/paper/LinksRow.jsx';
 import AbstractBlock from '../components/paper/PaperDetailView/AbstractBlock.jsx';
@@ -14,7 +16,7 @@ import StoryToc from '../components/paper/review/StoryToc.jsx';
 import ActionRail from '../components/paper/review/ActionRail.jsx';
 import VerdictPicker from '../components/VerdictPicker.jsx';
 import { Chip } from '../components/paper/review/primitives.jsx';
-import { StatusBanner } from '../components/library/shared.jsx';
+import { StatusBanner, timeAgo, formatShortDate } from '../components/library/shared.jsx';
 import { gradeTone, bandTone, BAND_LABEL } from '../components/paper/review/tones.js';
 import Spinner from '../components/ui/Spinner.jsx';
 
@@ -108,6 +110,62 @@ function ReviewZone({ deep, runner, sectionOverlay }) {
 // tags, ask) lives in the rail and a mobile bottom bar so it's always reachable.
 export default function PaperReviewPage() {
   const { itemKey } = useParams();
+  const navigate = useNavigate();
+  // Prev/Next through the ranked list the originating page (Read next) stored in
+  // localStorage — same tab (useParams re-reads the key, usePaperReview refetches,
+  // auto-run fires). Re-read per paper so a list refreshed in the other tab is
+  // picked up. Key not in the order (opened from elsewhere) → idx -1, buttons hide.
+  const reviewOrder = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem('zs.reviewOrder') || '[]'); }
+    catch { return []; }
+    // itemKey dep is deliberate: re-read the stored order on each paper so a list
+    // the Read-next tab refreshed mid-session is picked up.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itemKey]);
+  const navIdx = reviewOrder.indexOf(itemKey);
+  const prevKey = navIdx > 0 ? reviewOrder[navIdx - 1] : null;
+  const nextKey = navIdx >= 0 && navIdx < reviewOrder.length - 1 ? reviewOrder[navIdx + 1] : null;
+  // Stepping to another paper unmounts this page (and the notes textarea), so an
+  // unsaved note would be silently lost — confirm first when there are unsaved edits.
+  const [notesDirty, setNotesDirty] = useState(false);
+  const goToKey = useCallback(
+    (key) => {
+      if (!key) return;
+      if (notesDirty && !window.confirm('You have unsaved notes on this paper. Leave without saving them?')) return;
+      navigate(`/paper/${encodeURIComponent(key)}`);
+    },
+    [navigate, notesDirty],
+  );
+  // j = next, k = prev (auto-disabled while typing in the notes / Ask fields).
+  useKeyboardNav({
+    onPrev: () => goToKey(prevKey),
+    onNext: () => goToKey(nextKey),
+    deps: [prevKey, nextKey],
+  });
+  // Attach the extracted figures to the Zotero item (Zotero renders images in
+  // notes' sibling attachments). One retry through the connector force-gate, like
+  // the other writes; a forced write only appears after a Zotero restart.
+  const [attachMsg, setAttachMsg] = useState('');
+  const [attaching, setAttaching] = useState(false);
+  const onAttachFigures = useCallback(async () => {
+    setAttaching(true); setAttachMsg('');
+    try {
+      let data = await attachFiguresToZotero(itemKey, { force: false });
+      if (data?.requires_force) {
+        if (!window.confirm("Zotero is open — attach anyway? The figures won't appear until you restart Zotero.")) {
+          setAttaching(false); return;
+        }
+        data = await attachFiguresToZotero(itemKey, { force: true });
+      }
+      setAttachMsg(data?.updated
+        ? `Attached ${data.updated} figure${data.updated > 1 ? 's' : ''} to Zotero ✓`
+        : (data?.message || 'Nothing to attach.'));
+    } catch (e) {
+      setAttachMsg(`Failed: ${e?.message || e}`);
+    } finally {
+      setAttaching(false);
+    }
+  }, [itemKey]);
   const collectionsQuery = useQuery({
     queryKey: ['zotero-collections'], queryFn: fetchCollections, staleTime: 5 * 60_000,
   });
@@ -141,7 +199,9 @@ export default function PaperReviewPage() {
   const dg = deep?.digest || null;
   const ql = deep?.quality || null;
   const goalsArr = deep?.goal_summaries || [];
-  const grade = dg?.grade || ql?.grade || '';
+  // Deterministic checklist grade (ql.grade) first — digest.grade is the LLM's and
+  // flips A↔B between runs; the chip is labelled "reference-free", which is ql.grade.
+  const grade = ql?.grade || dg?.grade || '';
   const band = String(ql?.quality_band || '');
   const redFlagCount = (ql?.red_flags || []).filter(Boolean).length;
   const nHit = goalsArr.filter((g) => String(g?.retrieval_state || '') === 'hit').length;
@@ -156,7 +216,32 @@ export default function PaperReviewPage() {
 
   return (
     <div className="pb-24 lg:pb-6">
-      <Link to="/library" className="inline-block text-xs text-slate-500 hover:text-teal-700">← Read next</Link>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+        <Link to="/library" className="hover:text-teal-700">← Read next</Link>
+        {navIdx >= 0 && (
+          <>
+            <span className="text-slate-300" aria-hidden="true">·</span>
+            <button
+              type="button"
+              onClick={() => goToKey(prevKey)}
+              disabled={!prevKey}
+              className="hover:text-teal-700 disabled:opacity-40"
+            >
+              ‹ Prev
+            </button>
+            <span className="tabular-nums text-slate-400">{navIdx + 1} / {reviewOrder.length}</span>
+            <button
+              type="button"
+              onClick={() => goToKey(nextKey)}
+              disabled={!nextKey}
+              className="hover:text-teal-700 disabled:opacity-40"
+            >
+              Next ›
+            </button>
+            <span className="hidden text-slate-400 sm:inline" title="Keyboard: j = next, k = previous">j / k</span>
+          </>
+        )}
+      </div>
 
       <header className="mb-5 mt-2">
         <h1 className="max-w-[30ch] font-display text-[28px] font-light leading-[1.12] tracking-tight text-slate-900 sm:text-[32px]">
@@ -168,12 +253,18 @@ export default function PaperReviewPage() {
             <span className="text-slate-600">{detail.venue}</span>{detail.venue && detail.year ? ' · ' : ''}{detail.year}
           </div>
         )}
-        {(grade || band || redFlagCount > 0 || goalsArr.length > 0) && (
+        {(grade || band || redFlagCount > 0 || goalsArr.length > 0 || deep?.reviewed_at) && (
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {grade && <Chip tone={gradeTone(grade)} title="Reference-free full-text quality grade">Quality {grade}</Chip>}
             {band && <Chip tone={bandTone(band)}>{BAND_LABEL[band] || '—'}</Chip>}
             {redFlagCount > 0 && <Chip tone="rose" title="Red flags found in the review">⚑ {redFlagCount}</Chip>}
             {goalsArr.length > 0 && <Chip tone="emerald">◎ {nHit}/{goalsArr.length} goals</Chip>}
+            {/* When the deep review ran — a stale review is a weaker signal. Exact date on hover. */}
+            {deep?.reviewed_at && (
+              <span className="text-[11px] text-slate-500" title={`Deep review generated ${formatShortDate(deep.reviewed_at)}`}>
+                reviewed {timeAgo(deep.reviewed_at)}
+              </span>
+            )}
           </div>
         )}
         <div className="mt-3"><LinksRow detail={detail} itemKey={itemKey} /></div>
@@ -189,7 +280,19 @@ export default function PaperReviewPage() {
 
           {showFigures && (
             <section id="figures" className="scroll-mt-20 py-6">
-              <div className={EYEBROW}>Figures</div>
+              <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                <div className={`${EYEBROW} mb-0`}>Figures</div>
+                <button
+                  type="button"
+                  onClick={onAttachFigures}
+                  disabled={attaching}
+                  className="text-[11px] font-medium text-teal-700 hover:text-teal-800 disabled:opacity-50"
+                  title="Attach these figures to the paper's Zotero item so they show in Zotero. Skips any already attached; needs Zotero closed (or confirm force)."
+                >
+                  {attaching ? 'Attaching…' : '+ Attach to Zotero'}
+                </button>
+                {attachMsg && <span className="text-[11px] text-slate-500">{attachMsg}</span>}
+              </div>
               <PaperFigures itemKey={itemKey} hasPdf={hasPdf} canBuild={hasPdf} />
             </section>
           )}
@@ -216,6 +319,8 @@ export default function PaperReviewPage() {
             verdict={verdict}
             onTagsChanged={onTagsChanged}
             onCollectionsChanged={onCollectionsChanged}
+            onNoteSaved={refreshDetail}
+            onNotesDirtyChange={setNotesDirty}
             hasPdf={hasPdf}
             canAsk={canAsk}
           />

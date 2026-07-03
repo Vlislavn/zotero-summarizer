@@ -60,19 +60,19 @@ def _feeds_run(args: argparse.Namespace) -> int:
 
 
 def _feeds_list(args: argparse.Namespace) -> int:
-    """Show every Zotero RSS feed (one feed library per row)."""
+    """Show every app-owned RSS feed."""
     settings = Settings.load(project_root=args.project_root)
-    from zotero_summarizer.integrations.zotero_read import ZoteroReader
+    from zotero_summarizer.integrations.app_rss import AppRssReader
     from zotero_summarizer.services.triage.feeds import list_feed_groups
 
-    feeds = list_feed_groups(ZoteroReader(settings.zotero_data_dir))
+    feeds = list_feed_groups(AppRssReader(settings.triage_db_path))
     if args.json:
         print(json.dumps(feeds, indent=2))
         return 0
 
     # Human-friendly table
     if not feeds:
-        print("(no Zotero RSS feeds configured)")
+        print("(no app RSS feeds configured; import from Zotero or add one in Settings)")
         return 0
     name_w = min(60, max(len(f["name"]) for f in feeds))
     print(f"{'ID':>6}  {'NAME':<{name_w}}  LAST UPDATE")
@@ -179,14 +179,14 @@ def _feeds_tick(args: argparse.Namespace) -> int:
 def _feeds_preview(args: argparse.Namespace) -> int:
     """Peek at the most recent feed items for one feed (read-only)."""
     settings = Settings.load(project_root=args.project_root)
-    from zotero_summarizer.integrations.zotero_read import ZoteroReader
+    from zotero_summarizer.integrations.app_rss import AppRssReader
     from zotero_summarizer.services.triage.feeds import preview_feed
 
     items = preview_feed(
         feed_library_id=args.feed_id,
         since_days=args.since,
         limit=args.limit,
-        reader=ZoteroReader(settings.zotero_data_dir),
+        reader=AppRssReader(settings.triage_db_path),
         unread_only=args.unread_only,
     )
     if args.json:
@@ -342,4 +342,3 @@ def register_feeds(subparsers) -> None:
     )
     feeds_daily.add_argument("--project-root", default=None)
     feeds_daily.set_defaults(func=_feeds_select_daily)
-

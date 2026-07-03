@@ -299,3 +299,22 @@ def test_transformer_like_methods_paper_not_capped_to_flag():
     assert not any("near-perfect" in f for f in out.red_flags)
     assert out.quality_band == "neutral"
     assert out.grade == "A"
+
+
+class _ExplodingLLM:
+    """Fails if called — proves the non-paper short-circuit makes no LLM call."""
+
+    def pydantic_prompt(self, *args, **kwargs):  # noqa: D401
+        raise AssertionError("LLM must not be called for a NON_PAPER")
+
+
+def test_non_paper_short_circuits_to_relevance_only():
+    """A NON_PAPER (web article) gets NO scientific grade/band and makes ZERO LLM
+    calls — scientific quality criteria don't apply; relevance is judged elsewhere."""
+    q = quality_eval.evaluate_quality(
+        title="A blog post", full_text="some web prose", sections=[], digest={"grade": "A"},
+        llm=_ExplodingLLM(), max_chars=2000, paper_type="non_paper",
+    )
+    assert q.grade == "" and q.quality_band == ""
+    assert q.basis == "non_paper" and q.paper_type == "non_paper"
+    assert q.red_flags == [] and q.coverage_standard.startswith("Not a research paper")

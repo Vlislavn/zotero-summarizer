@@ -22,8 +22,19 @@ from zotero_summarizer.services.library._paper_type_checklists import CHECKLISTS
 # Below this LLM confidence we don't trust the leaf type → safe supertype.
 _CONF_FLOOR = 0.55
 
-# Leaf types the classifier may pick (the GENERIC_* supertypes are fallback-only).
-_LEAF_TYPES = tuple(t.value for t in PaperType if not t.value.startswith("generic_"))
+# Leaf types the classifier may pick (the GENERIC_* supertypes are fallback-only;
+# NON_PAPER is metadata-detected below, never LLM-classified).
+def _is_llm_type(t: PaperType) -> bool:
+    return not t.value.startswith("generic_") and t is not PaperType.NON_PAPER
+
+
+_LEAF_TYPES = tuple(t.value for t in PaperType if _is_llm_type(t))
+
+# Zotero itemTypes (lowercased) that are NOT research papers → relevance-only review.
+_NONPAPER_ITEMTYPES = frozenset({
+    "webpage", "blogpost", "forumpost", "magazinearticle", "newspaperarticle",
+    "podcast", "videorecording", "tvbroadcast", "radiobroadcast", "post", "presentation",
+})
 
 # Structural signals over section headings + body (hints for the LLM + the fallback).
 _SIGNALS: dict[str, re.Pattern[str]] = {
@@ -75,7 +86,7 @@ class _TypeVerdict(BaseModel):
 
 
 _TYPE_DEFS = "\n".join(
-    f"- {t.value}: {CHECKLISTS[t].label}" for t in PaperType if not t.value.startswith("generic_")
+    f"- {t.value}: {CHECKLISTS[t].label}" for t in PaperType if _is_llm_type(t)
 )
 
 _PROMPT = (
@@ -132,12 +143,15 @@ def _contradicts_metadata(ptype: str, item_type: str | None) -> bool:
 def detect(
     *, title: str, abstract: str, headings: list[str] | None, full_text: str,
     item_type: str | None = None, llm: Any, override: str | None = None,
+    web_article: bool = False,
 ) -> dict[str, Any]:
     """Return ``{type, confidence, source, reasoning, secondary, uncertain, signals}``.
 
-    ``override`` (a per-item user correction) wins outright. Otherwise: structural
-    prior → one LLM call → safe-supertype fallback when low-confidence or contradicting
-    a hard metadata fact."""
+    ``override`` (a per-item user correction) wins outright. ``web_article`` (the
+    text was rendered from a web page, not a paper PDF) OR a non-paper Zotero
+    itemType is a HARD signal → ``NON_PAPER`` (relevance-only, no scientific grade),
+    skipping the LLM. Otherwise: structural prior → one LLM call → safe-supertype
+    fallback when low-confidence or contradicting a hard metadata fact."""
     signals = _structural_signals(headings, full_text)
     if override:
         ov = override.strip().lower()
@@ -145,6 +159,13 @@ def detect(
             return {"type": ov, "confidence": 1.0, "source": "override",
                     "reasoning": "user override", "secondary": "", "uncertain": False,
                     "signals": signals}
+
+    # Hard metadata signal: a web article / non-research itemType has no scientific
+    # reporting standard, so route straight to NON_PAPER (no LLM, no rubric).
+    if web_article or (item_type or "").strip().lower() in _NONPAPER_ITEMTYPES:
+        return {"type": PaperType.NON_PAPER.value, "confidence": 1.0, "source": "metadata",
+                "reasoning": "web article / non-research item — relevance only",
+                "secondary": "", "uncertain": False, "signals": signals}
 
     active = ", ".join(k for k, v in signals.items() if v) or "none"
     verdict = llm.pydantic_prompt(
@@ -179,7 +200,8 @@ def detect_safe(ctx: Any, sections: list[dict[str, Any]], body: str, logger: Any
                             for k in ("tldr", "executive_summary")).strip()
         return detect(title=ctx.title, abstract=abstract, headings=headings, full_text=body,
                       item_type=getattr(ctx, "item_type", None), llm=ctx.llm,
-                      override=getattr(ctx, "paper_type_override", None))
+                      override=getattr(ctx, "paper_type_override", None),
+                      web_article=bool(getattr(ctx, "web_article", False)))
     except Exception as exc:  # noqa: BLE001 — independently-skippable layer (design)
         logger.warning("paper-type detection failed: %s", exc)
         return {"type": PaperType.GENERIC_EMPIRICAL.value, "confidence": 0.0,

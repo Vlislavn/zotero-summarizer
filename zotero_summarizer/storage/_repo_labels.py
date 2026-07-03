@@ -24,6 +24,7 @@ from zotero_summarizer.storage.repositories import (  # noqa: F401
     _rows_to_dicts,
     _sort_expression,
 )
+from zotero_summarizer.storage.feed_identity import is_legacy_feed_key
 
 
 def _row_to_label_verdict(row: sqlite3.Row) -> dict[str, Any]:
@@ -118,15 +119,48 @@ def get_label_verdict(db_path: Path, item_key: str) -> dict[str, Any] | None:
         raise ValueError("item_key is required")
     conn = _connect_to(db_path)
     try:
-        row = conn.execute(
-            """
-            SELECT id, item_key, original_derived_priority, user_priority,
-                   comment, created_at, source
-            FROM label_verdicts
-            WHERE item_key = ?
-            """,
-            (safe_item_key,),
-        ).fetchone()
+        lookup_keys = [safe_item_key]
+        if is_legacy_feed_key(safe_item_key):
+            stable = ""
+            try:
+                alias = conn.execute(
+                    "SELECT stable_feed_key FROM feed_key_aliases WHERE old_key = ?",
+                    (safe_item_key,),
+                ).fetchone()
+                stable = str(alias["stable_feed_key"] or "").strip() if alias is not None else ""
+                if not stable:
+                    feed_item_id = int(safe_item_key.removeprefix("feed:"))
+                    rows = conn.execute(
+                        """
+                        SELECT DISTINCT stable_feed_key
+                        FROM processed_feed_items
+                        WHERE feed_item_id = ?
+                          AND stable_feed_key IS NOT NULL
+                          AND stable_feed_key != ''
+                        """,
+                        (feed_item_id,),
+                    ).fetchall()
+                    stable_keys = {str(row["stable_feed_key"] or "").strip() for row in rows}
+                    if len(stable_keys) == 1:
+                        stable = next(iter(stable_keys))
+            except sqlite3.OperationalError as exc:
+                if "no such table:" not in str(exc).lower():
+                    raise
+            if stable and stable not in lookup_keys:
+                lookup_keys.insert(0, stable)
+        row = None
+        for key in lookup_keys:
+            row = conn.execute(
+                """
+                SELECT id, item_key, original_derived_priority, user_priority,
+                       comment, created_at, source
+                FROM label_verdicts
+                WHERE item_key = ?
+                """,
+                (key,),
+            ).fetchone()
+            if row is not None:
+                break
     finally:
         conn.close()
     if row is None:
@@ -264,6 +298,54 @@ def delete_label_verdict(db_path: Path, item_key: str) -> bool:
         conn.close()
 
 
+def upsert_review_note(db_path: Path, item_key: str, note: str) -> None:
+    """Insert or REPLACE the single free-text review note for ``item_key``.
+
+    One editable note per paper (mirrors the ``label_verdicts`` UPSERT shape).
+    ``note`` must be a string; empty is allowed (clears the note's body).
+    """
+    safe_item_key = str(item_key or "").strip()
+    if not safe_item_key:
+        raise ValueError("item_key is required")
+    if not isinstance(note, str):
+        raise ValueError(f"note must be a string; got {type(note).__name__}")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    conn = _connect_to(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO review_notes (item_key, note, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(item_key) DO UPDATE SET
+                note = excluded.note,
+                updated_at = excluded.updated_at
+            """,
+            (safe_item_key, note, now_iso),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_review_note(db_path: Path, item_key: str) -> str | None:
+    """Return the saved review note for ``item_key``, or None if none exists.
+
+    None signals absence (boundary contract), not an error.
+    """
+    safe_item_key = str(item_key or "").strip()
+    if not safe_item_key:
+        raise ValueError("item_key is required")
+    conn = _connect_to(db_path)
+    try:
+        row = conn.execute(
+            "SELECT note FROM review_notes WHERE item_key = ?",
+            (safe_item_key,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return None if row is None else str(row["note"])
+
+
 __all__ = [
     "_row_to_label_verdict",
     "insert_or_update_label_verdict",
@@ -273,4 +355,6 @@ __all__ = [
     "list_label_verdict_keys",
     "list_label_verdict_priorities",
     "delete_label_verdict",
+    "upsert_review_note",
+    "get_review_note",
 ]
