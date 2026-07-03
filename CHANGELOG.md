@@ -7,6 +7,10 @@ yet publish versioned releases, so everything currently lives under
 
 ## [Unreleased]
 
+### Removed
+
+- `docs/benchmarking.md` untracked from the repo (now gitignored, kept local-only); `tools/README.md` links updated to note it.
+
 ### Fixed
 
 - **Library "read hidden" count inflated; read papers not hidden.** The read/handled

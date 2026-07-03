@@ -41,3 +41,4 @@ tests/e2e/screenshots/
 tests/e2e/screenshots-pre/
 tests/e2e/audit-shots/
 tests/e2e/*-report*.json
+docs/benchmarking.md
