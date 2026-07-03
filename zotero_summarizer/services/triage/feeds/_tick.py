@@ -18,6 +18,7 @@ from zotero_summarizer.storage import feeds as feeds_storage
 from zotero_summarizer.services.triage.feeds._common import (
     LOGGER,
     DaemonTickReport,
+    TriagedCandidate,
     _load_config,
     get_settings,
 )
@@ -114,6 +115,43 @@ def _build_tick_report(
         len(results.gate_rejected), len(results.errors), marked_read, outcomes_resolved, daily_ran,
     )
     return report
+
+
+def _maybe_refresh_app_rss(reader: ZoteroReader, feeds_cfg: dict[str, Any], tick_id: str) -> None:
+    """Refresh app-RSS feeds in place before picking, when the reader supports it."""
+    if hasattr(reader, "refresh_feeds"):
+        refresh_cfg = feeds_cfg.get("startup_refresh") or feeds_cfg.get("refresh") or {}
+        max_feeds = int(refresh_cfg.get("max_feeds_per_pass") or feeds_cfg.get("max_feeds_per_pass") or 10)
+        max_new = int(refresh_cfg.get("max_new_items_per_feed") or feeds_cfg.get("max_new_items_per_feed") or 25)
+        timeout = float(refresh_cfg.get("per_feed_timeout_secs") or feeds_cfg.get("per_feed_timeout_secs") or 10.0)
+        try:
+            refreshed = reader.refresh_feeds(
+                max_feeds=max_feeds,
+                max_new_items_per_feed=max_new,
+                per_feed_timeout=timeout,
+            )
+            LOGGER.info("[%s] app RSS refresh: %s", tick_id, refreshed)
+        except Exception:
+            LOGGER.exception("[%s] app RSS refresh failed", tick_id)
+
+
+def _maybe_rescue_l1(
+    triaged_results: list[tuple[dict[str, Any], TriagedCandidate]],
+    tick_id: str,
+    gate_only: bool,
+) -> list[tuple[dict[str, Any], TriagedCandidate]]:
+    """Acquire-before-score for L1-hide candidates (G10); no-op in gate_only (no LLM)."""
+    if not gate_only:
+        from zotero_summarizer.services.library import quality_gate
+        try:
+            _g_enabled, _g_floor, _g_grades, _g_bands = quality_gate._gate_config()
+            if _g_enabled:
+                triaged_results, _n_rescued = recover_abstractless_l1_candidates(
+                    triaged_results, tick_id=tick_id, llm_floor=_g_floor,
+                )
+        except (ValueError, AttributeError, OSError) as exc:  # config/I/O only — bugs propagate
+            LOGGER.warning("[%s] recover-abstract-l1 skipped: %s", tick_id, exc)
+    return triaged_results
 
 
 def _maybe_auto_review(tick_id: str, materialized_keys: list[str]) -> None:
@@ -227,6 +265,18 @@ def _auto_render_slate(tick_id: str) -> None:
         LOGGER.exception("[%s] auto-render submit failed", tick_id)
 
 
+def _maybe_auto_quality_gate(tick_id: str, dry_run: bool) -> None:
+    """Hide bad-quality shown rows (precision mode); skipped in dry_run. See quality_gate."""
+    if not dry_run:
+        try:
+            from zotero_summarizer.services.library import quality_gate
+            hidden = quality_gate.fire_full()
+            if hidden:
+                LOGGER.info("[%s] auto quality-gate hid %d bad-quality row(s)", tick_id, hidden)
+        except Exception:
+            LOGGER.exception("[%s] auto quality-gate fire_full failed", tick_id)
+
+
 def run_daemon_tick(
     *,
     reader: ZoteroReader | None = None,
@@ -291,20 +341,7 @@ def run_daemon_tick(
     flags = _resolve_tick_flags(feeds_cfg)
     LOGGER.info("[%s] tick start batch=%s", tick_id, effective_batch if effective_batch is not None else "unlimited")
 
-    if hasattr(reader, "refresh_feeds"):
-        refresh_cfg = feeds_cfg.get("startup_refresh") or feeds_cfg.get("refresh") or {}
-        max_feeds = int(refresh_cfg.get("max_feeds_per_pass") or feeds_cfg.get("max_feeds_per_pass") or 10)
-        max_new = int(refresh_cfg.get("max_new_items_per_feed") or feeds_cfg.get("max_new_items_per_feed") or 25)
-        timeout = float(refresh_cfg.get("per_feed_timeout_secs") or feeds_cfg.get("per_feed_timeout_secs") or 10.0)
-        try:
-            refreshed = reader.refresh_feeds(
-                max_feeds=max_feeds,
-                max_new_items_per_feed=max_new,
-                per_feed_timeout=timeout,
-            )
-            LOGGER.info("[%s] app RSS refresh: %s", tick_id, refreshed)
-        except Exception:
-            LOGGER.exception("[%s] app RSS refresh failed", tick_id)
+    _maybe_refresh_app_rss(reader, feeds_cfg, tick_id)
 
     # 1. Pick unread items (round-robin when bounded, full-exhaust when None).
     raw = pick_and_log(
@@ -350,16 +387,7 @@ def run_daemon_tick(
     #     Non-blocking (mirrors fire_full at step 7.6): the rescue is a precision step; an
     #     expected failure (bad config value, PDF/LLM I/O) is logged + skipped — fire_full then
     #     reads its own floor and the title-grounded verdict stands. A real bug propagates.
-    if not gate_only:
-        from zotero_summarizer.services.library import quality_gate
-        try:
-            _g_enabled, _g_floor, _g_grades, _g_bands = quality_gate._gate_config()
-            if _g_enabled:
-                triaged_results, _n_rescued = recover_abstractless_l1_candidates(
-                    triaged_results, tick_id=tick_id, llm_floor=_g_floor,
-                )
-        except (ValueError, AttributeError, OSError) as exc:  # config/I/O only — bugs propagate
-            LOGGER.warning("[%s] recover-abstract-l1 skipped: %s", tick_id, exc)
+    triaged_results = _maybe_rescue_l1(triaged_results, tick_id, gate_only)
 
     results = _TickResults(
         triaged=triaged_results,
@@ -427,14 +455,7 @@ def run_daemon_tick(
     # paper on-topic is hidden, even if goal-matched); match stays the ranker among
     # survivors. Writes dont_read with source=auto_quality (one-tap reversible, never
     # clobbers a user verdict). Non-blocking; skipped in dry_run. See quality_gate.
-    if not dry_run:
-        try:
-            from zotero_summarizer.services.library import quality_gate
-            hidden = quality_gate.fire_full()
-            if hidden:
-                LOGGER.info("[%s] auto quality-gate hid %d bad-quality row(s)", tick_id, hidden)
-        except Exception:
-            LOGGER.exception("[%s] auto quality-gate fire_full failed", tick_id)
+    _maybe_auto_quality_gate(tick_id, dry_run)
 
     return _build_tick_report(
         tick_id=tick_id,

@@ -12,6 +12,10 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ### Changed
 
+- `run_daemon_tick` slimmed 222→193 LOC: app-RSS refresh, L1 abstract-less rescue, and auto quality-gate blocks extracted into `_maybe_*` helpers in `_tick.py`, following the module's existing thin-orchestrator pattern. No behavior change.
+
+### Changed
+
 - Deduped eight near-identical helper clones found by the semantic overlap scan: shared `_inline_file` (routes), `_validate_choice` (4 config validators), `_quality_toggle_enabled`, storage `_col`, `_flight.run_in_background(name=)`, `_h` escape, `corpus_bm25.tokenize` as the single tokenizer, and one canonical `_parse_pub_year`. Zero behavior change; two validator error strings now use the sorted-list format.
 
 ### Removed
