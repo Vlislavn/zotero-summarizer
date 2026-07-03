@@ -10,6 +10,10 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+### Fixed
+
+- `pre-commit run --all-files` is green again: `services/config_overrides.py` (cross-domain env/calibration override engine, consumed by shared `config.py` + `_common.py`) added to the import-policy shared set — it predates tracking, so the gate had never seen it.
+
 ### Changed
 
 - Guardrail allowlists regenerated against live findings after the sweep: every stale grandfather removed (reconcile exit 0), every kept entry re-justified inline. Slop 5 entries→6 (3 fixed, 4 surfaced from newly tracked WIP), redundancy pairs re-frozen under rule-of-three.
