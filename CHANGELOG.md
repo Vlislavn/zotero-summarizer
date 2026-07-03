@@ -12,6 +12,10 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ### Changed
 
+- faithbench: `PaperSubstrate` bundles the per-paper text/norm/index trio (`judge_claim` 9→7 params), `judge_run` split into per-track row helpers, `run_benchmark` takes a `RunOptions` dataclass (16→10 params) with trial closures extracted. Public entry points unchanged in behavior; `RunOptions` exported.
+
+### Changed
+
 - `run_daemon_tick` slimmed 222→193 LOC: app-RSS refresh, L1 abstract-less rescue, and auto quality-gate blocks extracted into `_maybe_*` helpers in `_tick.py`, following the module's existing thin-orchestrator pattern. No behavior change.
 
 ### Changed

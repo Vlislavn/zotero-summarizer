@@ -8,9 +8,8 @@ import json
 import pytest
 
 from zotero_summarizer.services.faithbench._corpus import (
-    PaperChunkIndex,
+    PaperSubstrate,
     freeze_paper_text,
-    normalize_text,
 )
 from zotero_summarizer.services.faithbench._dataset import (
     BenchmarkMeta,
@@ -171,12 +170,11 @@ def test_judge_equivalence_verdicts_and_error_tri_state():
 
 
 def test_judge_claim_verbatim_skips_judge_and_nei_gets_full_text_pass():
-    index = PaperChunkIndex(PAPER_TEXT)
+    substrate = PaperSubstrate.from_text(PAPER_TEXT)
     judge = FakeJudge([])
     verbatim = judge_claim(
         judge, claim="The top-1 accuracy was 85.3 percent",
-        paper_text=PAPER_TEXT, norm_paper=normalize_text(PAPER_TEXT),
-        index=index, max_chars=60_000, judge_model="J",
+        substrate=substrate, max_chars=60_000, judge_model="J",
     )
     assert verbatim.success is True and verbatim.method == JudgeMethod.VERBATIM
     assert judge.calls == 0
@@ -187,16 +185,14 @@ def test_judge_claim_verbatim_skips_judge_and_nei_gets_full_text_pass():
     ])
     supported = judge_claim(
         nei_then_yes, claim="GlassNet uses residual connections",
-        paper_text=PAPER_TEXT, norm_paper=normalize_text(PAPER_TEXT),
-        index=index, max_chars=60_000, judge_model="J",
+        substrate=substrate, max_chars=60_000, judge_model="J",
     )
     assert supported.success is True and nei_then_yes.calls == 2
 
     unsupported = judge_claim(
         FakeJudge([{"verdict": "unsupported", "evidence": ""}]),
         claim="GlassNet was trained on 12 GPUs",
-        paper_text=PAPER_TEXT, norm_paper=normalize_text(PAPER_TEXT),
-        index=index, max_chars=60_000, judge_model="J",
+        substrate=substrate, max_chars=60_000, judge_model="J",
     )
     assert unsupported.failure_reason == FailureReason.UNSUPPORTED_CLAIM
 
@@ -206,8 +202,7 @@ def test_read_why_claim_is_judged_against_paper_plus_goals():
     judge = FakeJudge([{"verdict": "supported", "evidence": "builds on residual connections"}])
     verdict = judge_claim(
         judge, claim="GlassNet addresses agent autonomy in vision pipelines",
-        paper_text=PAPER_TEXT, norm_paper=normalize_text(PAPER_TEXT),
-        index=PaperChunkIndex(PAPER_TEXT), max_chars=60_000, judge_model="J",
+        substrate=PaperSubstrate.from_text(PAPER_TEXT), max_chars=60_000, judge_model="J",
         field="read_why", research_goals=goals,
     )
     assert verdict.success is True
@@ -223,8 +218,7 @@ def test_other_claims_keep_the_paper_only_standard(field, goals):
     judge = FakeJudge([{"verdict": "unsupported", "evidence": ""}])
     verdict = judge_claim(
         judge, claim="GlassNet was trained on 12 GPUs",
-        paper_text=PAPER_TEXT, norm_paper=normalize_text(PAPER_TEXT),
-        index=PaperChunkIndex(PAPER_TEXT), max_chars=60_000, judge_model="J",
+        substrate=PaperSubstrate.from_text(PAPER_TEXT), max_chars=60_000, judge_model="J",
         field=field, research_goals=goals,
     )
     assert verdict.failure_reason == FailureReason.UNSUPPORTED_CLAIM

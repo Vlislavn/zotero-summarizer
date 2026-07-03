@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -27,7 +28,7 @@ from zotero_summarizer.services.faithbench._constants import (
     NUMERIC_REL_TOL,
 )
 from zotero_summarizer.services.faithbench._corpus import (
-    PaperChunkIndex,
+    PaperSubstrate,
     load_frozen_text,
     normalize_text,
 )
@@ -234,11 +235,11 @@ def judge_equivalence(
 
 
 def judge_claim(
-    judge_llm: Any, *, claim: str, paper_text: str, norm_paper: str,
-    index: PaperChunkIndex, max_chars: int, judge_model: str,
+    judge_llm: Any, *, claim: str, substrate: PaperSubstrate,
+    max_chars: int, judge_model: str,
     field: str = "", research_goals: str = "",
 ) -> Judgment:
-    if normalize_text(claim) and normalize_text(claim) in norm_paper:
+    if normalize_text(claim) and normalize_text(claim) in substrate.norm:
         return Judgment(success=True, method=JudgeMethod.VERBATIM)
 
     # Goal-conditioned field → goal-aware standard (see _RELEVANCE_CLAIM_PROMPT).
@@ -252,14 +253,14 @@ def judge_claim(
             )
         return _CLAIM_PROMPT.format(claim=claim, context=context)
 
-    chunks = index.top_chunks(claim, CLAIM_JUDGE_TOP_K)
-    context = "\n\n[...]\n\n".join(chunks) if chunks else paper_text[:max_chars]
+    chunks = substrate.index.top_chunks(claim, CLAIM_JUDGE_TOP_K)
+    context = "\n\n[...]\n\n".join(chunks) if chunks else substrate.text[:max_chars]
     try:
         payload = _judge_json(judge_llm, render(context))
         verdict = str(payload.get("verdict") or "").strip().lower()
         if verdict == "not_enough_info":
             # Retrieval miss ≠ unfaithful claim: one second pass with full text.
-            payload = _judge_json(judge_llm, render(paper_text[:max_chars]))
+            payload = _judge_json(judge_llm, render(substrate.text[:max_chars]))
             verdict = str(payload.get("verdict") or "").strip().lower()
     except Exception as exc:  # tri-state contract: judge failure ≠ model failure
         return Judgment(
@@ -293,6 +294,91 @@ def _judged_keys(rows: list[dict[str, Any]]) -> set[tuple[str, str, int, int | N
     }
 
 
+_JudgedKey = tuple[str, str, int, int | None]
+_Emit = Callable[[dict[str, Any], Judgment, int | None], None]
+
+
+@dataclass(frozen=True)
+class _JudgeContext:
+    """Shared judging state threaded through the per-row track helpers."""
+
+    by_id: dict[str, BenchmarkItem]
+    harness_faults: dict[str, str]
+    substrates: dict[str, PaperSubstrate]
+    already: set[_JudgedKey]
+    judge_llm: Any
+    judge_model: str
+    max_text_chars: int
+    research_goals: str
+    emit: _Emit
+    counts: dict[str, int]
+
+
+def _judge_qa_row(row: dict[str, Any], *, item_id: str, ctx: _JudgeContext) -> None:
+    paper_key = item_id.split(":", 2)[1] if ":" in item_id else ""
+    key = (item_id, str(row["condition"]), int(row["run_number"]), None)
+    if key in ctx.already:
+        ctx.counts["skipped"] += 1
+        return
+    if paper_key in ctx.harness_faults:
+        ctx.emit(row, Judgment(success=None, failure_reason=FailureReason.HARNESS_FAULT,
+                               details=ctx.harness_faults[paper_key]), None)
+        return
+    item = ctx.by_id.get(item_id)
+    if item is None:
+        ctx.emit(row, Judgment(success=None, failure_reason=FailureReason.HARNESS_FAULT,
+                               details=f"{item_id} not in benchmark file"), None)
+        return
+    verdict = hard_qa_judgment(item, row)
+    if verdict is None:
+        ctx.counts["escalated"] += 1
+        assert isinstance(item, QAItem)
+        verdict = judge_equivalence(
+            ctx.judge_llm, item=item,
+            answer=str((row.get("parsed") or {}).get("answer") or ""),
+            judge_model=ctx.judge_model,
+        )
+    ctx.emit(row, verdict, None)
+
+
+def _judge_claims_row(row: dict[str, Any], *, item_id: str, paper_key: str, ctx: _JudgeContext) -> None:
+    if row.get("status") != "ok":
+        key = (item_id, str(row["condition"]), int(row["run_number"]), None)
+        if key not in ctx.already:
+            ctx.emit(row, Judgment(success=False, failure_reason=FailureReason.MODEL_ERROR,
+                                   details=str(row.get("error") or "trial raised")), None)
+        return
+    if paper_key in ctx.harness_faults:
+        key = (item_id, str(row["condition"]), int(row["run_number"]), None)
+        if key not in ctx.already:
+            ctx.emit(row, Judgment(success=None, failure_reason=FailureReason.HARNESS_FAULT,
+                                   details=ctx.harness_faults[paper_key]), None)
+        return
+    # Mirror the QA track: an unknown/empty paper (rebuilt/edited benchmark)
+    # is a harness fault, not an uncaught KeyError on substrates[paper_key].
+    if not paper_key or paper_key not in ctx.substrates:
+        key = (item_id, str(row["condition"]), int(row["run_number"]), None)
+        if key not in ctx.already:
+            ctx.emit(row, Judgment(success=None, failure_reason=FailureReason.HARNESS_FAULT,
+                                   details=f"paper {paper_key!r} not in benchmark file"), None)
+        return
+    claims = list(((row.get("parsed") or {}).get("claims")) or [])
+    for claim_idx, entry in enumerate(claims):
+        key = (item_id, str(row["condition"]), int(row["run_number"]), claim_idx)
+        if key in ctx.already:
+            ctx.counts["skipped"] += 1
+            continue
+        verdict = judge_claim(
+            ctx.judge_llm, claim=str(entry.get("claim") or ""),
+            substrate=ctx.substrates[paper_key], max_chars=ctx.max_text_chars,
+            judge_model=ctx.judge_model,
+            field=str(entry.get("field") or ""),
+            research_goals=ctx.research_goals,
+        )
+        verdict.extra["field"] = str(entry.get("field") or "")
+        ctx.emit(row, verdict, claim_idx)
+
+
 def judge_run(
     *,
     meta: BenchmarkMeta,
@@ -318,19 +404,19 @@ def judge_run(
         paths.judgments.unlink()
     already = _judged_keys(load_jsonl(paths.judgments))
 
-    texts: dict[str, str] = {}
-    norms: dict[str, str] = {}
-    indexes: dict[str, PaperChunkIndex] = {}
+    substrates: dict[str, PaperSubstrate] = {}
     harness_faults: dict[str, str] = {}
     for paper in meta.papers:
         try:
-            texts[paper.item_key] = load_frozen_text(
+            text = load_frozen_text(
                 papers_dir, paper.item_key, expected_sha256=paper.text_sha256
             )
         except (FileNotFoundError, ValueError) as exc:
             # Documented contract: a broken substrate is a HARNESS_FAULT for
             # that paper's trials, never a model failure (reason preserved).
             harness_faults[paper.item_key] = f"{type(exc).__name__}: {exc}"
+            continue
+        substrates[paper.item_key] = PaperSubstrate.from_text(text)
 
     counts = {"judged": 0, "skipped": 0, "escalated": 0}
 
@@ -345,75 +431,21 @@ def judge_run(
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
         counts["judged"] += 1
 
+    ctx = _JudgeContext(
+        by_id=by_id, harness_faults=harness_faults, substrates=substrates,
+        already=already, judge_llm=judge_llm, judge_model=judge_model,
+        max_text_chars=max_text_chars, research_goals=research_goals,
+        emit=emit, counts=counts,
+    )
     for row in responses:
         item_id = str(row["item_id"])
         track = str(row.get("track") or "qa")
         paper_key = item_id.split(":", 2)[1] if ":" in item_id else ""
 
         if track == "qa":
-            key = (item_id, str(row["condition"]), int(row["run_number"]), None)
-            if key in already:
-                counts["skipped"] += 1
-                continue
-            if paper_key in harness_faults:
-                emit(row, Judgment(success=None, failure_reason=FailureReason.HARNESS_FAULT,
-                                   details=harness_faults[paper_key]))
-                continue
-            item = by_id.get(item_id)
-            if item is None:
-                emit(row, Judgment(success=None, failure_reason=FailureReason.HARNESS_FAULT,
-                                   details=f"{item_id} not in benchmark file"))
-                continue
-            verdict = hard_qa_judgment(item, row)
-            if verdict is None:
-                counts["escalated"] += 1
-                assert isinstance(item, QAItem)
-                verdict = judge_equivalence(
-                    judge_llm, item=item,
-                    answer=str((row.get("parsed") or {}).get("answer") or ""),
-                    judge_model=judge_model,
-                )
-            emit(row, verdict)
+            _judge_qa_row(row, item_id=item_id, ctx=ctx)
         else:  # claims: one judgment per claim
-            if row.get("status") != "ok":
-                key = (item_id, str(row["condition"]), int(row["run_number"]), None)
-                if key not in already:
-                    emit(row, Judgment(success=False, failure_reason=FailureReason.MODEL_ERROR,
-                                       details=str(row.get("error") or "trial raised")))
-                continue
-            if paper_key in harness_faults:
-                key = (item_id, str(row["condition"]), int(row["run_number"]), None)
-                if key not in already:
-                    emit(row, Judgment(success=None, failure_reason=FailureReason.HARNESS_FAULT,
-                                       details=harness_faults[paper_key]))
-                continue
-            # Mirror the QA track: an unknown/empty paper (rebuilt/edited benchmark)
-            # is a harness fault, not an uncaught KeyError on texts[paper_key].
-            if not paper_key or paper_key not in texts:
-                key = (item_id, str(row["condition"]), int(row["run_number"]), None)
-                if key not in already:
-                    emit(row, Judgment(success=None, failure_reason=FailureReason.HARNESS_FAULT,
-                                       details=f"paper {paper_key!r} not in benchmark file"))
-                continue
-            claims = list(((row.get("parsed") or {}).get("claims")) or [])
-            if paper_key not in indexes:
-                norms[paper_key] = normalize_text(texts[paper_key])
-                indexes[paper_key] = PaperChunkIndex(texts[paper_key])
-            for claim_idx, entry in enumerate(claims):
-                key = (item_id, str(row["condition"]), int(row["run_number"]), claim_idx)
-                if key in already:
-                    counts["skipped"] += 1
-                    continue
-                verdict = judge_claim(
-                    judge_llm, claim=str(entry.get("claim") or ""),
-                    paper_text=texts[paper_key], norm_paper=norms[paper_key],
-                    index=indexes[paper_key], max_chars=max_text_chars,
-                    judge_model=judge_model,
-                    field=str(entry.get("field") or ""),
-                    research_goals=research_goals,
-                )
-                verdict.extra["field"] = str(entry.get("field") or "")
-                emit(row, verdict, claim_idx=claim_idx)
+            _judge_claims_row(row, item_id=item_id, paper_key=paper_key, ctx=ctx)
         if progress_cb:
             progress_cb(f"judged {item_id} ({counts['judged']} verdicts, {counts['escalated']} escalations)")
 

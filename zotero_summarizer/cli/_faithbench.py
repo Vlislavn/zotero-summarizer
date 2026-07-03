@@ -146,7 +146,7 @@ def _faithbench_run(args: argparse.Namespace) -> int:
     from zotero_summarizer.models.providers import resolve_stage
     from zotero_summarizer.services import run_log
     from zotero_summarizer.services._common import read_config
-    from zotero_summarizer.services.faithbench import run_benchmark
+    from zotero_summarizer.services.faithbench import RunOptions, run_benchmark
     from zotero_summarizer.services.faithbench import _dataset
     from zotero_summarizer.services.faithbench._runner import write_or_check_manifest
     from zotero_summarizer.services.llm.factory import build_client_for_stage
@@ -214,10 +214,12 @@ def _faithbench_run(args: argparse.Namespace) -> int:
         run_id=run_id, meta=meta, items=items,
         papers_dir=settings.faithbench_dir / "papers",
         paths=paths, llm=llm, config=config, decompose_llm=decompose_llm,
-        conditions=conditions, tracks=tracks, runs=args.runs,
-        limit=args.limit, retry_errors=args.retry_errors,
-        serial=resolved.provider.is_local,
-        max_workers=settings.triage_job_concurrency,
+        options=RunOptions(
+            conditions=conditions, tracks=tracks, runs=args.runs,
+            limit=args.limit, retry_errors=args.retry_errors,
+            serial=resolved.provider.is_local,
+            max_workers=settings.triage_job_concurrency,
+        ),
         progress_cb=_print_progress,
     )
     print(json.dumps({"run_id": run_id, "manifest": str(paths.manifest), **counts,
