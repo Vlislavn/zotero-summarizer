@@ -86,7 +86,6 @@ from zotero_summarizer.storage.feed_identity import (
 )
 from zotero_summarizer.storage.feeds_lookup import (  # noqa: F401  (re-exported)
     fetch_processed_content_pairs,
-    fetch_resolved_outcomes,
     fetch_resolved_outcomes_by_key,
     fetch_trashed_guids,
     get_processed_feed_item_by_id,
@@ -595,7 +594,7 @@ def count_all_by_decision(conn: sqlite3.Connection) -> dict[str, int]:
     """Full per-decision histogram across every processed feed item.
 
     Backs the Today pipeline-funnel overview (came in / filtered / awaiting /
-    added / trashed). Mirrors :func:`get_run_summary` but spans all runs.
+    added / trashed). Spans all runs, grouped by decision.
     """
     rows = conn.execute(
         "SELECT decision, COUNT(*) AS n FROM processed_feed_items GROUP BY decision"
@@ -705,8 +704,6 @@ def record_read_marked(
 # Selection + outcome/history queries live in feeds_history (re-exported).
 from zotero_summarizer.storage.feeds_history import (  # noqa: F401,E402
     due_outcome_checks,
-    get_run_summary,
-    list_recent_decisions,
     record_outcome,
     select_by_decisions,
     select_pending_triaged,

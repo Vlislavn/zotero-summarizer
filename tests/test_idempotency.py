@@ -130,42 +130,6 @@ def test_record_decision_is_idempotent():
     assert row["decision"] == feeds_storage.DECISION_SELECTED
 
 
-def test_run_summary_aggregates_by_decision():
-    conn = _open()
-    feeds_storage.record_decision(conn, run_id="r1", feed_item=_item(2, 100), decision=feeds_storage.DECISION_SELECTED)
-    feeds_storage.record_decision(conn, run_id="r1", feed_item=_item(2, 101), decision=feeds_storage.DECISION_SELECTED)
-    feeds_storage.record_decision(conn, run_id="r1", feed_item=_item(2, 102), decision=feeds_storage.DECISION_BLACK_SWAN)
-    feeds_storage.record_decision(conn, run_id="r1", feed_item=_item(2, 103), decision=feeds_storage.DECISION_REJECTED_ELBOW)
-    feeds_storage.record_decision(conn, run_id="r2", feed_item=_item(2, 104), decision=feeds_storage.DECISION_SELECTED)
-    conn.commit()
-
-    summary = feeds_storage.get_run_summary(conn, "r1")
-    assert summary["run_id"] == "r1"
-    assert summary["total"] == 4
-    assert summary["by_decision"][feeds_storage.DECISION_SELECTED] == 2
-    assert summary["by_decision"][feeds_storage.DECISION_BLACK_SWAN] == 1
-    assert summary["by_decision"][feeds_storage.DECISION_REJECTED_ELBOW] == 1
-
-
-def test_list_recent_decisions_ordered_desc():
-    conn = _open()
-    feeds_storage.record_decision(conn, run_id="r1", feed_item=_item(2, 100), decision=feeds_storage.DECISION_SELECTED)
-    feeds_storage.record_decision(conn, run_id="r1", feed_item=_item(2, 101), decision=feeds_storage.DECISION_REJECTED_ELBOW)
-    conn.commit()
-    rows = feeds_storage.list_recent_decisions(conn, limit=10)
-    assert len(rows) == 2
-
-
-def test_list_recent_decisions_filters_by_decision():
-    conn = _open()
-    feeds_storage.record_decision(conn, run_id="r1", feed_item=_item(2, 100), decision=feeds_storage.DECISION_SELECTED)
-    feeds_storage.record_decision(conn, run_id="r1", feed_item=_item(2, 101), decision=feeds_storage.DECISION_REJECTED_ELBOW)
-    conn.commit()
-    rows = feeds_storage.list_recent_decisions(conn, decision=feeds_storage.DECISION_SELECTED)
-    assert len(rows) == 1
-    assert rows[0]["decision"] == feeds_storage.DECISION_SELECTED
-
-
 def test_new_run_id_is_unique_per_invocation():
     a = feeds_storage.new_run_id()
     b = feeds_storage.new_run_id()

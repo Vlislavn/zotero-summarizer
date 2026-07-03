@@ -12,6 +12,10 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ### Removed
 
+- Dead code sweep: `fetch_resolved_outcomes` (orphan; the README claim about it was stale — the real consumer uses `fetch_resolved_outcomes_by_key`), test-only `get_user_library_id`, `get_run_summary`, `list_recent_decisions` + their tests; vulture allowlist shrunk 6→2.
+
+### Removed
+
 - `docs/benchmarking.md` untracked from the repo (now gitignored, kept local-only); `tools/README.md` links updated to note it.
 
 ### Fixed

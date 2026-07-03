@@ -147,17 +147,6 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
 
         return self._execute_read(_read)
 
-    def get_user_library_id(self) -> int:
-        """Return the libraryID of the user's personal library (type='user')."""
-
-        def _read(conn: sqlite3.Connection) -> int:
-            row = conn.execute(_USER_LIBRARY_ID_SELECT).fetchone()
-            if not row:
-                raise ZoteroReadError("No user library found in Zotero database")
-            return int(row["libraryID"])
-
-        return self._execute_read(_read)
-
     def _connect(self) -> sqlite3.Connection:
         return self._connect_db(self.db_path)
 
