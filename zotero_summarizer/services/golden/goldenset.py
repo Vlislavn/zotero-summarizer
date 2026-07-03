@@ -24,6 +24,7 @@ from zotero_summarizer.domain import LABEL_TAG_PREFIX
 from zotero_summarizer.services import emoji_signals
 from zotero_summarizer.services._common import atomic_write, connect_sqlite_ro
 from zotero_summarizer.services.golden import user_labels
+from zotero_summarizer.storage.feeds import _parse_pub_year
 
 
 LOGGER = logging.getLogger(__name__)
@@ -397,12 +398,8 @@ def _format_tier_audit(
 
 
 def _extract_year(date_str: Any) -> str:
-    if not date_str:
-        return ""
-    s = str(date_str).strip()
-    if len(s) >= 4 and s[:4].isdigit():
-        return s[:4]
-    return ""
+    y = _parse_pub_year(date_str)
+    return str(y) if y is not None else ""
 
 
 def _days_since(date_str: Any, now: datetime) -> int:

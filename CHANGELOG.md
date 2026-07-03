@@ -10,6 +10,10 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+### Changed
+
+- Deduped eight near-identical helper clones found by the semantic overlap scan: shared `_inline_file` (routes), `_validate_choice` (4 config validators), `_quality_toggle_enabled`, storage `_col`, `_flight.run_in_background(name=)`, `_h` escape, `corpus_bm25.tokenize` as the single tokenizer, and one canonical `_parse_pub_year`. Zero behavior change; two validator error strings now use the sorted-list format.
+
 ### Removed
 
 - Dead code sweep: `fetch_resolved_outcomes` (orphan; the README claim about it was stale — the real consumer uses `fetch_resolved_outcomes_by_key`), test-only `get_user_library_id`, `get_run_summary`, `list_recent_decisions` + their tests; vulture allowlist shrunk 6→2.

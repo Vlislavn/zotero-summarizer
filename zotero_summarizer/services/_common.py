@@ -31,6 +31,16 @@ def state() -> Any:
     return get_context().state
 
 
+def _quality_toggle_enabled(env_var: str, attr: str) -> bool:
+    env = os.environ.get(env_var)
+    if env is not None:
+        return env.strip().lower() in ("1", "true", "yes", "on")
+    app_state = getattr(state(), "app_state", None)
+    config = getattr(app_state, "config", None) if app_state is not None else None
+    qr = getattr(config, "quality_review", None) if config is not None else None
+    return bool(getattr(qr, attr, False))
+
+
 def band_primary_enabled() -> bool:
     """Order-time deep-review QUALITY mode, shared by BOTH rank consumers (the
     Library queue ``_ranking`` and the Today slate allocator): grade-only (default
@@ -38,13 +48,7 @@ def band_primary_enabled() -> bool:
     neutral & uncertain → exactly 0.0), a Phase-2-MEASURED arm. Config
     ``quality_review.quality_band_primary``, overridden by ``ZS_QUALITY_BAND_PRIMARY``.
     Optional-feature boundary: no config / no state → the grade-only default."""
-    env = os.environ.get("ZS_QUALITY_BAND_PRIMARY")
-    if env is not None:
-        return env.strip().lower() in ("1", "true", "yes", "on")
-    app_state = getattr(state(), "app_state", None)
-    config = getattr(app_state, "config", None) if app_state is not None else None
-    qr = getattr(config, "quality_review", None) if config is not None else None
-    return bool(getattr(qr, "quality_band_primary", False))
+    return _quality_toggle_enabled("ZS_QUALITY_BAND_PRIMARY", "quality_band_primary")
 
 
 def quality_promote_enabled() -> bool:
@@ -55,13 +59,7 @@ def quality_promote_enabled() -> bool:
     1.00 must/should precision on firewalled user verdicts). Config
     ``quality_review.quality_promote``, overridden by ``ZS_QUALITY_PROMOTE=0``.
     Optional-feature boundary: no config / no state → OFF (safe when uninitialised)."""
-    env = os.environ.get("ZS_QUALITY_PROMOTE")
-    if env is not None:
-        return env.strip().lower() in ("1", "true", "yes", "on")
-    app_state = getattr(state(), "app_state", None)
-    config = getattr(app_state, "config", None) if app_state is not None else None
-    qr = getattr(config, "quality_review", None) if config is not None else None
-    return bool(getattr(qr, "quality_promote", False))
+    return _quality_toggle_enabled("ZS_QUALITY_PROMOTE", "quality_promote")
 
 
 def effective_llm_concurrency(provider: ProviderConfig | None, item_count: int) -> int:

@@ -13,11 +13,11 @@ disclosure. Consumes the ``quality`` + ``goal_summaries`` cached by
 """
 from __future__ import annotations
 
-import html
 import re
 from typing import Any
 
 from zotero_summarizer.services.library import _quality_prompts as qp
+from zotero_summarizer.services.library._paper_read_html import _h
 
 _BAND_LABEL = {"flag": "FLAG", "neutral": "NEUTRAL", "highlight": "HIGHLIGHT", "uncertain": "UNCERTAIN", "": "—"}
 _STATE_LABEL = {"hit": "● addressed", "miss": "○ not addressed", "not_retrieved": "⚠ not retrieved"}
@@ -70,10 +70,6 @@ def _gloss(band: str, has_red_flags: bool) -> str:
         return ("<b>Mostly sound, with caveats.</b> It clears the bar overall, but our "
                 "independent checks flagged the issues below — weigh them before relying on it.")
     return _BAND_GLOSS.get(band, "")
-
-
-def _h(value: Any) -> str:
-    return html.escape(str(value or ""), quote=True)
 
 
 def _short_goal(goal: str, words: int = 4) -> str:

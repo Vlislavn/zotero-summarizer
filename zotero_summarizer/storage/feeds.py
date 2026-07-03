@@ -85,6 +85,7 @@ from zotero_summarizer.storage.feed_identity import (
     stable_feed_key_from_item,
 )
 from zotero_summarizer.storage.feeds_lookup import (  # noqa: F401  (re-exported)
+    _col,
     fetch_processed_content_pairs,
     fetch_resolved_outcomes_by_key,
     fetch_trashed_guids,
@@ -94,13 +95,6 @@ from zotero_summarizer.storage.feeds_lookup import (  # noqa: F401  (re-exported
 )
 
 LOGGER = logging.getLogger("zotero_summarizer.storage.feeds")
-
-
-def _col(row: Any, index: int, name: str) -> Any:
-    try:
-        return row[name]
-    except (TypeError, KeyError, IndexError):
-        return row[index]
 
 
 def _parse_pub_year(date_str: Any) -> int | None:

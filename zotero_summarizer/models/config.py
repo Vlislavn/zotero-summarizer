@@ -27,6 +27,13 @@ __all__ = [
 ]
 
 
+def _validate_choice(value: str, allowed: frozenset[str], field: str) -> str:
+    v = (value or "").strip().lower()
+    if v not in allowed:
+        raise ValueError(f"{field} must be one of {sorted(allowed)}, got {value!r}")
+    return v
+
+
 class LLMConfig(BaseModel):
     draft_model: str = Field(..., min_length=1)
     refine_model: str = Field(..., min_length=1)
@@ -269,10 +276,7 @@ class QualityReviewConfig(BaseModel):
     @field_validator("chunk_strategy")
     @classmethod
     def _validate_chunk_strategy(cls, value: str) -> str:
-        v = (value or "").strip().lower()
-        if v not in {"rank", "prefix", "map_reduce"}:
-            raise ValueError(f"chunk_strategy must be rank/prefix/map_reduce, got {value!r}")
-        return v
+        return _validate_choice(value, frozenset({"rank", "prefix", "map_reduce"}), "chunk_strategy")
 
 
 class UniversityAccessConfig(BaseModel):
@@ -311,21 +315,15 @@ class UniversityAccessConfig(BaseModel):
     @field_validator("cookie_browser")
     @classmethod
     def _validate_cookie_browser(cls, value: str) -> str:
-        v = (value or "").strip().lower()
-        allowed = {"", "chrome", "chromium", "firefox", "edge", "brave", "safari", "opera", "vivaldi"}
-        if v not in allowed:
-            raise ValueError(f"cookie_browser must be one of {sorted(allowed)}, got {value!r}")
-        return v
+        allowed = frozenset({"", "chrome", "chromium", "firefox", "edge", "brave", "safari", "opera", "vivaldi"})
+        return _validate_choice(value, allowed, "cookie_browser")
 
     @field_validator("browser_channel")
     @classmethod
     def _validate_browser_channel(cls, value: str) -> str:
-        v = (value or "").strip().lower()
-        allowed = {"", "chromium", "chrome", "chrome-beta", "chrome-dev", "chrome-canary",
-                   "msedge", "msedge-beta", "msedge-dev", "msedge-canary"}
-        if v not in allowed:
-            raise ValueError(f"browser_channel must be one of {sorted(allowed)}, got {value!r}")
-        return v
+        allowed = frozenset({"", "chromium", "chrome", "chrome-beta", "chrome-dev", "chrome-canary",
+                              "msedge", "msedge-beta", "msedge-dev", "msedge-canary"})
+        return _validate_choice(value, allowed, "browser_channel")
 
 
 class ClassifierGateConfig(BaseModel):
@@ -375,12 +373,7 @@ class ClassifierGateConfig(BaseModel):
     @field_validator("model_name")
     @classmethod
     def _validate_model_name(cls, value: str) -> str:
-        v = (value or "").strip().lower()
-        if v not in {"tabpfn", "lightgbm", "logreg"}:
-            raise ValueError(
-                f"model_name must be one of tabpfn/lightgbm/logreg, got {value!r}"
-            )
-        return v
+        return _validate_choice(value, frozenset({"tabpfn", "lightgbm", "logreg"}), "model_name")
 
     @field_validator("drop_priorities")
     @classmethod

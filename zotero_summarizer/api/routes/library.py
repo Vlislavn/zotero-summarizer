@@ -156,14 +156,16 @@ async def get_paper_figure(item_key: str, name: str) -> FileResponse:
     return FileResponse(path, media_type=media)
 
 
+async def _inline_file(getter, item_key: str, media_type: str) -> FileResponse:
+    path = await asyncio.to_thread(getter, item_key)
+    return FileResponse(path, media_type=media_type, filename=path.name, content_disposition_type="inline")
+
+
 async def get_paper_presentation(item_key: str) -> FileResponse:
     """Serve the generated single-file HTML "paper brief". Disposition is
     ``inline`` so the reader pane can embed it in an <iframe> (a ``filename``
     alone would force ``attachment`` → a download instead of rendering)."""
-    path = await asyncio.to_thread(paper_render.presentation_path, item_key)
-    return FileResponse(
-        path, media_type="text/html", filename=path.name, content_disposition_type="inline"
-    )
+    return await _inline_file(paper_render.presentation_path, item_key, "text/html")
 
 
 async def get_paper_render_pdf(item_key: str) -> FileResponse:
@@ -173,10 +175,7 @@ async def get_paper_render_pdf(item_key: str) -> FileResponse:
     can visibly expose the fetched source even when Zotero still has no local
     attachment.
     """
-    path = await asyncio.to_thread(paper_render.source_pdf_path, item_key)
-    return FileResponse(
-        path, media_type="application/pdf", filename=path.name, content_disposition_type="inline"
-    )
+    return await _inline_file(paper_render.source_pdf_path, item_key, "application/pdf")
 
 
 async def ask_paper(req: AskPaperRequest) -> dict[str, Any]:

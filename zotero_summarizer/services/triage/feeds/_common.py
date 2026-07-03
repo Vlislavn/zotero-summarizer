@@ -223,15 +223,7 @@ def _load_config() -> dict[str, Any]:
 
 
 def _parse_year(date_str: Any) -> int | None:
-    if not date_str:
-        return None
-    s = str(date_str).strip()
-    if len(s) >= 4 and s[:4].isdigit():
-        try:
-            return int(s[:4])
-        except ValueError:
-            return None
-    return None
+    return feeds_storage._parse_pub_year(date_str)
 
 
 def _triage_result_from_summary(summary: SummarizeResponse):
