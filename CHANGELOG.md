@@ -12,6 +12,10 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ### Changed
 
+- Guardrail allowlists regenerated against live findings after the sweep: every stale grandfather removed (reconcile exit 0), every kept entry re-justified inline. Slop 5 entries→6 (3 fixed, 4 surfaced from newly tracked WIP), redundancy pairs re-frozen under rule-of-three.
+
+### Changed
+
 - faithbench: `PaperSubstrate` bundles the per-paper text/norm/index trio (`judge_claim` 9→7 params), `judge_run` split into per-track row helpers, `run_benchmark` takes a `RunOptions` dataclass (16→10 params) with trial closures extracted. Public entry points unchanged in behavior; `RunOptions` exported.
 
 ### Changed

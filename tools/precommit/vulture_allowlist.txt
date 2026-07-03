@@ -14,9 +14,13 @@
 #   python3 tools/precommit/check_dead_code.py make-allowlist > tools/precommit/vulture_allowlist.txt
 #   # then re-add this header
 #
-# Current residue: one public helper kept as the tests' storage entry point
-# (no facade object to construct) and one model-field attribute set via
-# assignment (read later through a dict, invisible to Vulture).
+# Current residue: two helpers consumed outside the runtime grep's scope
+# (tools/ scripts, with drift tests), one test-infrastructure API, one test-only
+# migration diagnostic, and one model-field attribute set via assignment (read
+# later through a dict, invisible to Vulture).
 
-zotero_summarizer/services/triage/feeds/_triage.py:prestige_venue   # SummarizeResponse field set here, read later via dict
-zotero_summarizer/storage/repositories.py:with_db_path              # test-infrastructure API (test_modular_services + _gate_db/_verdict_db helpers, ~17 tests)
+zotero_summarizer/services/config_overrides.py:render_overrides_doc  # consumed by tools/gen_overrides_doc.py; drift-tested (tests/test_config_overrides.py)
+zotero_summarizer/services/setup/calibration.py:measure_latency      # consumed by tools/eval_small_models.py; unit-tested (tests/test_calibration.py)
+zotero_summarizer/services/triage/feeds/_triage.py:prestige_venue    # SummarizeResponse field set here, read later via dict
+zotero_summarizer/storage/feeds.py:feed_key_alias_validation_report  # test-only migration diagnostic (tests/test_app_rss_identity.py)
+zotero_summarizer/storage/repositories.py:with_db_path               # test-infrastructure API (test_modular_services + _gate_db/_verdict_db helpers, ~17 tests)

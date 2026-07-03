@@ -12,6 +12,9 @@
 #   python3 tools/precommit/check_redundancy.py dump > tools/precommit/redundancy_allowlist.txt
 #   # then re-add this header
 #
-# Current contents: 0 blocking transforms; the near-duplicate function pairs below
-# are pre-existing parallel implementations (copy-paste helpers / parallel adapters),
-# frozen as known tech debt — advisory only, they never block a commit.
+# Current contents: 0 blocking transforms; the near-duplicate pairs below are
+# 3-line helpers duplicated across still-stabilizing WIP modules — frozen under
+# the rule of three (fold into a shared home if a third copy appears), advisory
+# only, they never block a commit.
+zotero_summarizer/services/library/app_library_reader.py:AppLibraryReader._connect::zotero_summarizer/storage/corpus_bm25.py:CorpusBM25._conn  # identical 3-line row-factory conn openers; sharing would couple the app reader to the BM25 store for 3 lines
+zotero_summarizer/services/model/classifier_backup.py:_read_meta::zotero_summarizer/services/setup/calibration.py:read_calibration  # identical absent→{} JSON readers in two new WIP domains; fold into services/_common on a third copy
