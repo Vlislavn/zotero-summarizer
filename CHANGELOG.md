@@ -10,9 +10,46 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+### Removed
+
+- Tier-1 orphans: `measure_latency` moved out of `services/setup/calibration.py` to its only consumer domain (`tools/eval_small_models.py`, + regression test); test-only `feed_key_alias_validation_report` deleted (its test queries the ambiguity table directly). `dump-orphans` is now empty.
+
+### Changed
+
+- Tier-6 redundancy → zero: the duplicated JSON state readers (`read_calibration`, `classifier_backup._read_meta`) folded into `services/_common.read_json_or_empty` (missing file → `{}`; an existing-but-corrupt file raises). Redundancy allowlist now EMPTY.
+- Sqlite openers unified: `storage.feeds.open_triage_conn` (api routes / app_rss / review / feeds `_common`) + `storage.corpus.open_corpus_conn` — `CorpusBM25` now runs the same WAL journal mode as `EmbeddingCache` on the shared corpus DB (latent inconsistency fixed).
+- Tier-7 slop → zero via param bundles: `_BrowserLib` (browser_fetch), `RunInputs` (faithbench `run_benchmark`/`judge_run`), `ChunkBudget` (`digest_for_strategy`), `_OofDiag` (`_training_metadata`); `_run_rubric` prompt lifted to its caller; tick adapter resolution split into `_tick_setup.py`. Slop allowlist now EMPTY.
+- Overlap-scan dedups: `daily_actions.record_row_outcome` made public (routes/daily's copy deleted), `pick_stored_summary` shared by both review-apply paths, `is_app_rss_source` in `_common`, `_zotero_write_tags` delegates to `repositories.table_columns`, `_bootstrap_feeds_cli` shared by 3 subcommands, `integrations.llm._log_call` extracted.
+- Guardrail allowlists after the sweep: `dead_code`/`slop`/`redundancy` allowlists now EMPTY (header-only); `vulture_allowlist` regenerated to 3 justified residue entries; `check_allowlists.py reconcile` exits 0 (CLEAN).
+
 ### Fixed
 
+- `make scan` outside the venv crashed reconcile (`No module named vulture`): a reconciler whose tool isn't importable now SKIPS with a note (the real gate still enforces it in `make lint`). Also a `# type:`-prefixed comment wrap in `quality_eval.py` broke vulture's parse → 6 phantom findings; reworded.
+- `check_overlaps.py` paired a function with its OWN nested closure (`get_collections`/`get_item_detail`) — same-path prefix-qualname pairs are now suppressed, with a regression test pinning that same-file siblings still pair.
+
+### Changed
+
+- Docs truth pass: architecture.md, README.md, docs/usage.md, and feeds CLI help now reflect the app-owned RSS pool as the triage source; Zotero is an optional adapter (Inbox picks, label writes, read-sync), not the feed reader.
+
+### Fixed
+
+- Firewalled eval loader (`tools/_eval_labels.py`) silently measured on kept=5: it joined only 2 of 3 live verdict key shapes (missing `stable_feed_key`/`feed:g:<sha>`) plus an over-strict abstract filter. Fix adds the 3rd join path, drops the filter (title-only goal_sim is a valid floor), dedups one-row-per-verdict → kept 5→42. Ported `eval_triage_score_calibration.py` off leaked `decision`; re-anchored relevance_score AUC 0.852→0.634 (0.852 was a 15-kept artifact).
+- Quality eval mis-flagged technical ML papers as clinical: the "clinical data with cross-validation but no patient-level split" red flag fired type-agnostically on any empirical paper (a technical paper mentioning `cross-validation` + incidental `cell`/`protein`/`cohort` was graded D/`flag`). Each structural red-flag is now family-gated — the clinical flag fires on CLIN types only, the leakage flag on EMP only — and `_CLINICAL` narrowed to genuine patient/clinical context. Regression tests pin both the suppression (empirical) and the retained true-positive (clinical_prediction).
+- Zotero feed cards stayed unread since the app-RSS source migration (`mark_feed_items_read` structurally unreachable — every item is `source_type=app_rss`). New per-tick read-sync reconciler (`feeds/_zotero_readsync.py`) marks Zotero's unread `feedItems` read by guid once the app read them (`feeds.zotero_read_sync`, default on).
+- RSS refresh starved 31/41 enabled feeds forever (alphabetical top-`max_feeds` slice). `AppRssReader.refresh_feeds` now rotates least-recently-fetched-first, covering every enabled feed across ticks.
+- Outcome resolution and library dedup were silently dead post-migration (`AppRssReader` lacks `get_item_membership`; its dedup hook always returned None → removed). The tick wires a separate optional `ZoteroReader` for both; outcome checks no longer run in `dry_run` (they write).
+- `apply_changes` (force-apply write executor) had no lock-retry, unlike other Zotero writes; now `_retry_on_lock`-wrapped. `remove_items_from_collection` likewise; its failure now surfaces as `inbox_removed_error` in the apply response, not just a log.
+
+### Added
+
+- Quality-first Today ordering (`ZS_RANK_QUALITY_FIRST`, default OFF): new `rank_blend_quality.py` — quality LEADS, topicality soft-gates, so a grade-A off-topic paper beats a grade-D on-topic one. Model floor swaps composite→`relevance_score>2`; `rank_blend` stays the control arm, eval-gated.
+- Track-C frontier eval for the quality-first re-rank: `eval_slate_blend.py --replay` measures label-free contamination@k + q-lift@k over daily cohorts (`_eval_replay.py`); `quality_first_key` gains a swept `gate_floor`. Frontier ran + verified (ADR-A9): the +0.10 q-lift bar exceeds the oracle ceiling (+0.088, A2 captures 100%); offline exhausted → decision moves online (P3 interleave), default stays OFF.
+- P3 online interleave (`ZS_RANK_INTERLEAVE`, default OFF): Today team-draft-merges the A0 control and A2 quality-first slates blind; `tools/eval_interleave.py` scores user verdicts per competitive pair via Wald SPRT — the flip trigger for `ZS_RANK_QUALITY_FIRST`.
+- P3 evidence-integrity guards (adversarial review, ADR-A9): interleave_log is day-level write-once; daemon slate assemblies bypass the interleave; scorer firewalls machine-authored selected/black_swan via decision_reason and counts an item only in its last logged pair (i.i.d.).
+- `feeds.*` is now a validated `FeedsConfig` section (`models/feeds_config.py`) instead of raw-dict passthrough goals.yaml silently dropped — 19 auto-derived `ZS_FEEDS_*` env overrides (docs/overrides.md regenerated).
 - `pre-commit run --all-files` is green again: `services/config_overrides.py` (cross-domain env/calibration override engine, consumed by shared `config.py` + `_common.py`) added to the import-policy shared set — it predates tracking, so the gate had never seen it.
+- `user_approved` review rows could age past `apply_all_approved`'s 720h window and become permanently unreachable (nothing else consumes them). `select_by_decisions` now accepts `since_hours=None` (no window); `apply_all_approved` defaults to it.
+- Today's Add/Trash toasts and the paper-verdict submit no longer report plain success when the API returns pending_sync/marked_read_error/failed_count or label_error/note_error; those now show a warning-tone note instead.
 
 ### Changed
 

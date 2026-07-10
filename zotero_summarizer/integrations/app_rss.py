@@ -3,9 +3,8 @@ from __future__ import annotations
 
 import ipaddress
 import socket
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 from urllib.parse import urljoin, urlsplit
 
 import httpx
@@ -138,18 +137,8 @@ class AppRssReader:
     def __init__(self, triage_db_path: Path):
         self.triage_db_path = Path(triage_db_path)
 
-    @contextmanager
-    def _conn(self) -> Iterator[Any]:
-        import sqlite3
-
-        self.triage_db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(self.triage_db_path), timeout=10)
-        conn.row_factory = sqlite3.Row
-        try:
-            feeds_storage.init_feeds_schema(conn)
-            yield conn
-        finally:
-            conn.close()
+    def _conn(self):
+        return feeds_storage.open_triage_conn(self.triage_db_path)
 
     def refresh_feeds(
         self,
@@ -160,6 +149,13 @@ class AppRssReader:
     ) -> dict[str, Any]:
         """Fetch a bounded pass of enabled feeds and store parsed items.
 
+        Feeds are taken least-recently-fetched-first (never-fetched first), so a
+        bounded pass ROTATES through every enabled feed across successive calls.
+        The old alphabetical slice permanently starved feeds beyond the first
+        ``max_feeds`` (31 of 41 enabled feeds had never been fetched).
+        ``record_rss_fetch_result`` stamps ``last_fetched_at`` on failures too,
+        so a broken feed cannot hog the rotation.
+
         This does not score anything and does not call an LLM.
         """
         import feedparser
@@ -169,7 +165,11 @@ class AppRssReader:
         updated = 0
         errors: list[dict[str, str]] = []
         with self._conn() as conn:
-            feeds = rss_storage.list_rss_feeds(conn)[: max(0, int(max_feeds))]
+            feeds = rss_storage.list_rss_feeds(conn)
+            # ponytail: LRU rotation via Python sort ('' < any timestamp puts
+            # never-fetched first); move into SQL ORDER BY if feed counts grow.
+            feeds.sort(key=lambda f: str(f.get("last_fetched_at") or ""))
+            feeds = feeds[: max(0, int(max_feeds))]
             for feed in feeds:
                 fetched += 1
                 try:
@@ -268,14 +268,6 @@ class AppRssReader:
                 }
             )
         return out
-
-    def find_by_external_id(self, *, doi: str | None = None, arxiv_id: str | None = None) -> dict[str, Any] | None:
-        """Optional Zotero-library duplicate hook.
-
-        The app-owned reader can run with no Zotero DB. Returning ``None`` keeps
-        Zotero as an optional adapter; DOI/arXiv processed-row dedup still runs.
-        """
-        return None
 
 
 __all__ = ["AppRssReader", "RssUrlRejected", "validate_rss_url"]

@@ -16,7 +16,6 @@ from zotero_summarizer.domain import (  # noqa: F401
 from zotero_summarizer.storage.repositories import (  # noqa: F401
     _VALID_LABEL_PRIORITIES,
     _connect_to,
-    _get_columns,
     _get_conn,
     _json_to_list,
     _normalize_order,

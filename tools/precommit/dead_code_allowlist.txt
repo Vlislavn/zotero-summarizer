@@ -11,5 +11,6 @@
 #
 # Format: <path>:<symbol>   # reason
 #
-zotero_summarizer/services/setup/calibration.py:measure_latency  # consumed by tools/eval_small_models.py + unit-tested (tests/test_calibration.py) — tools/ is outside the runtime grep
-zotero_summarizer/storage/feeds.py:feed_key_alias_validation_report  # test-only migration diagnostic (tests/test_app_rss_identity.py)
+# (empty — the 2026-07-09 sweep moved measure_latency to its consumer in tools/,
+# deleted the test-only feed_key_alias_validation_report, and dropped the stale
+# DraftPick entry after its finding aged out.)

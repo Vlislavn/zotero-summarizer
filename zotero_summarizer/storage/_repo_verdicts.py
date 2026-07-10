@@ -18,7 +18,6 @@ from zotero_summarizer.storage.repositories import (  # noqa: F401
     _VALID_AB_WINNERS,
     _VALID_VERDICTS,
     _connect_to,
-    _get_columns,
     _get_conn,
     _json_to_list,
     _normalize_order,

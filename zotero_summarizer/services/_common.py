@@ -51,6 +51,30 @@ def band_primary_enabled() -> bool:
     return _quality_toggle_enabled("ZS_QUALITY_BAND_PRIMARY", "quality_band_primary")
 
 
+def rank_quality_first_enabled() -> bool:
+    """Quality-FIRST Today slate ordering (``services/model/rank_blend_quality``):
+    quality LEADS the key, topicality soft-gates — replacing the default
+    relevance×goal×prestige blend so a high-quality off-topic paper out-ranks a
+    low-quality on-topic one (the user's directive). Config
+    ``quality_review.rank_quality_first``, overridden by ``ZS_RANK_QUALITY_FIRST``.
+    OFF by default (pending the Track-C frontier eval). Optional-feature boundary:
+    no config / no state → OFF."""
+    return _quality_toggle_enabled("ZS_RANK_QUALITY_FIRST", "rank_quality_first")
+
+
+def rank_interleave_enabled() -> bool:
+    """P3 ONLINE interleave (ADR-A9 / GAP-G11): the Today slate builds BOTH
+    ranking arms (A0 control blend + A2 quality-first), team-draft-merges them
+    into the one slate the user sees (``services/model/team_draft``) and logs
+    per-item arm attribution (``storage/interleave``) so the user's normal
+    verdicts decide the flip via SPRT (``tools/eval_interleave.py``). Blind: the
+    UI never shows the arm. Takes PRECEDENCE over ``rank_quality_first`` (the
+    interleave already contains both arms). Config
+    ``quality_review.rank_interleave``, overridden by ``ZS_RANK_INTERLEAVE``.
+    OFF by default. Optional-feature boundary: no config / no state → OFF."""
+    return _quality_toggle_enabled("ZS_RANK_INTERLEAVE", "rank_interleave")
+
+
 def quality_promote_enabled() -> bool:
     """Quality → must_read band promotion toggle (the inverse of the auto_quality
     hide gate). The gate's compressed regressor never reaches the must_read band on
@@ -352,6 +376,13 @@ def unique_non_empty_strings(values: Any) -> list[str]:
     return normalized
 
 
+def is_app_rss_source(row: dict[str, Any]) -> bool:
+    """True when a feed row/item originated from the app-owned RSS reader
+    (``source_type``/``source`` == ``app_rss``) rather than Zotero's feedItems."""
+    source = str(row.get("source_type") or row.get("source") or "").strip()
+    return source == "app_rss"
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -359,6 +390,15 @@ def now_iso() -> str:
 def now_iso_z() -> str:
     """UTC timestamp, second precision, ``Z`` suffix (e.g. ``2026-05-23T12:00:00Z``)."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def read_json_or_empty(path: Path) -> dict[str, Any]:
+    """Read a small JSON state file; a MISSING file → ``{}`` (legitimate absence —
+    first run, partially-migrated cache). A file that EXISTS but is unreadable or
+    unparseable RAISES — corrupt state is a real signal, never papered over."""
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:

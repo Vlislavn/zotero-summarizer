@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from zotero_summarizer.models import GoalsConfig
-from zotero_summarizer.services._common import LOGGER, now_iso_z, to_text, write_json_atomic
+from zotero_summarizer.services._common import LOGGER, now_iso_z, read_json_or_empty, to_text, write_json_atomic
 
 # Throughput (approx tokens/sec) below which the endpoint is "lean" — a slow local
 # model uses the cheaper text/consistency caps so a deep review stays usable. A fast
@@ -53,36 +53,9 @@ def measure_throughput(llm: Any, *, prompt: str = _PROBE_PROMPT) -> float:
     return approx_tokens / elapsed
 
 
-def measure_latency(llm: Any, *, prompt: str = _PROBE_PROMPT, warmups: int = 1, samples: int = 3) -> dict[str, Any]:
-    """Separate COLD latency (the FIRST call — includes the model LOAD for ollama, or the
-    on-demand SCHEDULING for a remote endpoint) from WARM STEADY-STATE (median of ``samples``
-    subsequent calls). A wallclock DECISION must use ``warm_median_secs``, NOT a cold number;
-    ``cold_start_overhead_secs = cold - warm_median`` is the one-time warm-up cost (report it,
-    don't bury it). ``warmups`` (>=1) discarded calls precede sampling — the 1st IS the cold one.
-    This is the fix for load-contaminated timings (a cold ollama 8B 'feed call' is mostly load)."""
-    if warmups < 1 or samples < 1:
-        raise ValueError("warmups>=1 and samples>=1")
-    cold_start = perf_counter()
-    to_text(llm.prompt(prompt))
-    cold = perf_counter() - cold_start
-    for _ in range(warmups - 1):
-        to_text(llm.prompt(prompt))
-    warm: list[float] = []
-    for _ in range(samples):
-        start = perf_counter()
-        to_text(llm.prompt(prompt))
-        warm.append(perf_counter() - start)
-    median = sorted(warm)[len(warm) // 2]
-    return {"cold_secs": round(cold, 2), "warm_median_secs": round(median, 2),
-            "warm_mean_secs": round(mean(warm), 2),
-            "cold_start_overhead_secs": round(cold - median, 2), "samples": samples}
-
-
 def read_calibration(calibration_path: Path) -> dict[str, Any]:
     """The current calibration envelope, or ``{}`` when absent (Tier-0 floor)."""
-    if not calibration_path.exists():
-        return {}
-    return json.loads(calibration_path.read_text(encoding="utf-8"))
+    return read_json_or_empty(calibration_path)
 
 
 def upsert_calibration_entries(

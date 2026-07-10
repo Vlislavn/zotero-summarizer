@@ -13,6 +13,7 @@ from typing import Any
 
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
+from zotero_summarizer.services._common import is_app_rss_source
 from zotero_summarizer.storage import feeds as feeds_storage
 from zotero_summarizer.storage import rss as rss_storage
 from zotero_summarizer.services.triage.feeds._common import (
@@ -477,14 +478,11 @@ def mark_processed_read(
         )
     ] + list(results.library_skipped) + list(results.processed_dup_skipped)
 
-    def _is_app(item: dict[str, Any]) -> bool:
-        return str(item.get("source_type") or item.get("source") or "") == "app_rss"
-
     if app_rss_ids:
         with _triage_conn() as conn:
             marked += rss_storage.mark_rss_items_read(conn, app_rss_ids)
             for item in touched_items:
-                if not _is_app(item):
+                if not is_app_rss_source(item):
                     continue
                 feeds_storage.record_read_marked(
                     conn,
@@ -512,7 +510,7 @@ def mark_processed_read(
     marked += zotero_marked
     with _triage_conn() as conn:
         for item in touched_items:
-            if _is_app(item):
+            if is_app_rss_source(item):
                 continue
             feeds_storage.record_read_marked(
                 conn,

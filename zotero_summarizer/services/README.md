@@ -27,7 +27,10 @@ small set of shared/infra files at the top level.
 
 Shared files: `_common` (helpers: settings/logging/sqlite-ro/now_iso_z/html_to_text/
 `load_golden_rows` (fail-fast golden-CSV reader), `atomic_write` (callback) + `write_json_atomic`
-(dict→JSON) for tmp+replace artifact/cache writes, NaN-rejecting `clamp`; `emoji_signals`
+(dict→JSON) for tmp+replace artifact/cache writes, `read_json_or_empty` (their read
+counterpart: missing state file → `{}`, an EXISTING-but-corrupt file raises),
+`is_app_rss_source` (the one definition of "row came from the app-RSS reader"),
+NaN-rejecting `clamp`; `emoji_signals`
 bins via `domain` so label derivation == prediction; the LLM-concurrency gates
 `effective_llm_concurrency` (triage per-item fan-out, remote→`TRIAGE_JOB_CONCURRENCY`),
 `deep_review_fleet_concurrency` (the N-paper deep-review batch, remote→`max_sub_concurrency`

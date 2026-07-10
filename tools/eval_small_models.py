@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from statistics import mean
 from time import perf_counter
 from typing import Any
 
@@ -61,6 +62,34 @@ _CHAT_MAX_TOKENS = 2048       # non-reasoning instruct: 7-field digest fits comf
 _REASONING_MAX_TOKENS = 8192  # reasoning: thinking phase + the same digest
 _DEFAULT_WARMUPS = 1
 _DEFAULT_SAMPLES = 1  # digest calls are real-cost; one quality sample + latency profile
+_LATENCY_PROBE_PROMPT = "Write one concise 80-word paragraph about reproducibility in machine learning."
+
+
+def measure_latency(llm: Any, *, prompt: str = _LATENCY_PROBE_PROMPT, warmups: int = 1, samples: int = 3) -> dict[str, Any]:
+    """Separate COLD latency (the FIRST call — includes the model LOAD for ollama, or the
+    on-demand SCHEDULING for a remote endpoint) from WARM STEADY-STATE (median of ``samples``
+    subsequent calls). A wallclock DECISION must use ``warm_median_secs``, NOT a cold number;
+    ``cold_start_overhead_secs = cold - warm_median`` is the one-time warm-up cost (report it,
+    don't bury it). ``warmups`` (>=1) discarded calls precede sampling — the 1st IS the cold one.
+    This is the fix for load-contaminated timings (a cold ollama 8B 'feed call' is mostly load)."""
+    from zotero_summarizer.services._common import to_text
+
+    if warmups < 1 or samples < 1:
+        raise ValueError("warmups>=1 and samples>=1")
+    cold_start = perf_counter()
+    to_text(llm.prompt(prompt))
+    cold = perf_counter() - cold_start
+    for _ in range(warmups - 1):
+        to_text(llm.prompt(prompt))
+    warm: list[float] = []
+    for _ in range(samples):
+        start = perf_counter()
+        to_text(llm.prompt(prompt))
+        warm.append(perf_counter() - start)
+    median = sorted(warm)[len(warm) // 2]
+    return {"cold_secs": round(cold, 2), "warm_median_secs": round(median, 2),
+            "warm_mean_secs": round(mean(warm), 2),
+            "cold_start_overhead_secs": round(cold - median, 2), "samples": samples}
 
 
 def _make_provider(name: str, model: str, base_url: str, api_key_env: str, *,
@@ -94,7 +123,7 @@ def run_one(model: str, title: str, full_text: str, config: Any, *, base_url: st
     import openai
     from zotero_summarizer.services.llm.factory import build_client_for_provider
     from zotero_summarizer.services.library.quality_review import assess_digest
-    from zotero_summarizer.services.setup.calibration import digest_completeness, measure_latency
+    from zotero_summarizer.services.setup.calibration import digest_completeness
 
     is_reasoning = model.startswith(("GPT-OSS", "qwen3", "Qwen3"))
     max_tokens = _REASONING_MAX_TOKENS if is_reasoning else _CHAT_MAX_TOKENS

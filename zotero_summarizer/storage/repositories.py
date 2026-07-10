@@ -225,25 +225,10 @@ _ALLOWED_SORT = {
 
 
 def _get_conn() -> sqlite3.Connection:
-    db_path = _resolve_db_path()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    if not db_path.exists():
-        db_path.touch(mode=0o600)
-    else:
-        os.chmod(db_path, 0o600)
-    # timeout=10 sets sqlite's busy_timeout to 10000 ms (Python maps the two),
-    # matching _connect_to so every writer waits the same for a held WAL lock
-    # under API + daemon contention before raising "database is locked".
-    conn = sqlite3.connect(str(db_path), timeout=10)
-    conn.row_factory = sqlite3.Row
-    try:
-        conn.execute("PRAGMA journal_mode=WAL")
-    except sqlite3.Error as _:
-        pass
-    return conn
+    return _connect_to(_resolve_db_path())
 
 
-def _get_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+def table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
     rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
     return {row[1] for row in rows}
 
@@ -278,7 +263,7 @@ def apply_schema(conn: sqlite3.Connection) -> None:
     # below (daily_actions wrote that literal before `source` existed); the
     # comment is UPSERT-overwritten on any later deliberate relabel, so rows
     # still matching it are exactly the never-revisited machine adds.
-    verdict_columns = _get_columns(conn, "label_verdicts")
+    verdict_columns = table_columns(conn, "label_verdicts")
     if "source" not in verdict_columns:
         conn.execute(
             "ALTER TABLE label_verdicts ADD COLUMN source TEXT NOT NULL DEFAULT 'user'"
@@ -289,7 +274,7 @@ def apply_schema(conn: sqlite3.Connection) -> None:
         )
         feeds_storage.init_feeds_schema(conn)
 
-    columns = _get_columns(conn, "triage_results")
+    columns = table_columns(conn, "triage_results")
     if "batch_id" not in columns:
         conn.execute("ALTER TABLE triage_results ADD COLUMN batch_id TEXT")
     if "pdf_path" not in columns:
@@ -297,7 +282,7 @@ def apply_schema(conn: sqlite3.Connection) -> None:
     if "prestige_score" not in columns:
         conn.execute("ALTER TABLE triage_results ADD COLUMN prestige_score REAL DEFAULT NULL")
 
-    triage_job_columns = _get_columns(conn, "triage_jobs")
+    triage_job_columns = table_columns(conn, "triage_jobs")
     if "queue_changes" not in triage_job_columns:
         conn.execute("ALTER TABLE triage_jobs ADD COLUMN queue_changes INTEGER NOT NULL DEFAULT 1")
     if "item_keys_json" not in triage_job_columns:
@@ -307,7 +292,7 @@ def apply_schema(conn: sqlite3.Connection) -> None:
     if "errors_json" not in triage_job_columns:
         conn.execute("ALTER TABLE triage_jobs ADD COLUMN errors_json TEXT NOT NULL DEFAULT '[]'")
 
-    triage_override_columns = _get_columns(conn, "triage_dimension_overrides")
+    triage_override_columns = table_columns(conn, "triage_dimension_overrides")
     override_column_defs = {
         "item_id": "TEXT NOT NULL DEFAULT ''",
         "result_row_id": "INTEGER",
@@ -393,7 +378,11 @@ _AB_WINNING_MARGIN = 6         # >=6/8 locks the decision
 
 
 def _connect_to(db_path: Path) -> sqlite3.Connection:
-    """Open a connection to *db_path* with the same hardening as ``_get_conn``."""
+    """Open a hardened connection to *db_path* (perms + busy_timeout + WAL).
+
+    The single opener for every triage-history DB connection; ``_get_conn``
+    delegates here for the no-arg (context-var-resolved) path.
+    """
     db_path.parent.mkdir(parents=True, exist_ok=True)
     if not db_path.exists():
         db_path.touch(mode=0o600)

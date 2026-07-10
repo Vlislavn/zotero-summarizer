@@ -418,7 +418,9 @@ async def submit_daily_verdict(body: DailyVerdictRequest) -> dict[str, Any]:
         user_priority=body.user_priority,
         comment=body.comment,
     )
-    await asyncio.to_thread(_record_user_labeled_outcome, row)
+    await asyncio.to_thread(
+        daily_actions.record_row_outcome, row, feeds_storage.OUTCOME_USER_LABELED,
+    )
     interaction_log.log_feed_decision(
         row=row, item_key=golden_key, surface="today_priority",
         model_priority=derived, comment=body.comment,
@@ -458,23 +460,6 @@ def _load_processed_row(pk: int) -> dict[str, Any] | None:
     conn.row_factory = sqlite3.Row
     try:
         return feeds_storage.get_processed_feed_item_by_pk(conn, pk)
-    finally:
-        conn.close()
-
-
-def _record_user_labeled_outcome(row: dict[str, Any]) -> None:
-    import sqlite3
-
-    conn = sqlite3.connect(str(_db_path()))
-    try:
-        feeds_storage.record_app_outcome(
-            conn,
-            feed_library_id=int(row.get("feed_library_id") or 0),
-            feed_item_id=int(row.get("feed_item_id") or 0),
-            final_outcome=feeds_storage.OUTCOME_USER_LABELED,
-            signal_weight=feeds_storage.OUTCOME_WEIGHT[feeds_storage.OUTCOME_USER_LABELED],
-        )
-        conn.commit()
     finally:
         conn.close()
 

@@ -21,7 +21,6 @@ from zotero_summarizer.services.setup.calibration import (
     decide_profile,
     digest_completeness,
     lean_tps_threshold,
-    measure_latency,
     measure_throughput,
     read_calibration,
     tier1_env_calibrate,
@@ -113,28 +112,6 @@ def test_tier1_full_writes_no_overrides(tmp_path: Path) -> None:
     res = tier1_env_calibrate(_default_goals_config(), cal, throughput=200.0)
     assert res["profile"] == "full"
     assert read_calibration(cal)["entries"] == {}  # defaults stand
-
-
-def test_measure_latency_separates_cold_from_warm() -> None:
-    import time
-
-    class _SlowFirst:
-        def __init__(self):
-            self.calls = 0
-
-        def prompt(self, _prompt):
-            self.calls += 1
-            if self.calls == 1:
-                time.sleep(0.05)  # simulate the cold model load on the first call
-            return "ok"
-
-    llm = _SlowFirst()
-    res = measure_latency(llm, warmups=1, samples=2)
-    assert llm.calls == 3  # 1 cold + 2 warm samples
-    assert res["cold_secs"] >= 0.05
-    assert res["cold_start_overhead_secs"] > 0.02  # cold clearly slower than warm steady-state
-    with pytest.raises(ValueError):
-        measure_latency(llm, warmups=0)
 
 
 def test_measure_throughput_smoke() -> None:

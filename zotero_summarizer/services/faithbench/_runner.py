@@ -80,6 +80,16 @@ class RunPaths:
         return self.run_dir / "claims_cache"
 
 
+@dataclass(frozen=True)
+class RunInputs:
+    """The frozen run artifacts ``run_benchmark`` and ``judge_run`` both take."""
+
+    meta: BenchmarkMeta
+    items: list[BenchmarkItem]
+    papers_dir: Path
+    paths: RunPaths
+
+
 # ---------------------------------------------------------------------------
 # JSONL helpers — last row per trial key wins (a --retry-errors resume appends
 # a fresh attempt for a previously failed key).
@@ -271,10 +281,7 @@ def _claims_trial(ctx: _TrialContext, paper_key: str, run_number: int) -> dict[s
 def run_benchmark(
     *,
     run_id: str,
-    meta: BenchmarkMeta,
-    items: list[BenchmarkItem],
-    papers_dir: Path,
-    paths: RunPaths,
+    inputs: RunInputs,
     llm: Any,
     config: Any,
     decompose_llm: Any | None,
@@ -282,6 +289,7 @@ def run_benchmark(
     progress_cb: Callable[[str], None] | None = None,
 ) -> dict[str, int]:
     """Execute all pending trials; returns ``{executed, skipped, failed}``."""
+    meta, items, papers_dir, paths = inputs.meta, inputs.items, inputs.papers_dir, inputs.paths
     if "claims" in options.tracks and decompose_llm is None:
         raise ValueError("claims track requested but no decompose_llm provided")
 

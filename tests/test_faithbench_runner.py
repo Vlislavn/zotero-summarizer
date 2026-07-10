@@ -16,6 +16,7 @@ from zotero_summarizer.services.faithbench._dataset import (
     TrapItem,
 )
 from zotero_summarizer.services.faithbench._runner import (
+    RunInputs,
     RunOptions,
     RunPaths,
     answer_with_retry,
@@ -86,7 +87,7 @@ def test_run_writes_rows_for_both_conditions_and_records_latency(tmp_path):
     paths = RunPaths(run_dir=tmp_path / "runs" / "r1")
     paths.run_dir.mkdir(parents=True)
     counts = run_benchmark(
-        run_id="r1", meta=meta, items=items, papers_dir=papers_dir, paths=paths,
+        run_id="r1", inputs=RunInputs(meta=meta, items=items, papers_dir=papers_dir, paths=paths),
         llm=FakeAnswerer(), config=_fake_config(), decompose_llm=None,
         options=RunOptions(conditions=("full_text", "retrieval"), tracks=("qa",), runs=1),
     )
@@ -108,7 +109,7 @@ def test_resume_skips_done_keys_and_manifest_guard_refuses_mismatch(tmp_path):
     meta, items, papers_dir = _benchmark(tmp_path)
     paths = RunPaths(run_dir=tmp_path / "runs" / "r1")
     paths.run_dir.mkdir(parents=True)
-    base = dict(meta=meta, items=items, papers_dir=papers_dir, paths=paths,
+    base = dict(inputs=RunInputs(meta=meta, items=items, papers_dir=papers_dir, paths=paths),
                 llm=FakeAnswerer(), config=_fake_config(), decompose_llm=None,
                 options=RunOptions(conditions=("full_text",), tracks=("qa",), runs=1))
     first = run_benchmark(run_id="r1", **base)
@@ -128,7 +129,7 @@ def test_exception_rows_recorded_and_retry_errors_reattempts(tmp_path):
     meta, items, papers_dir = _benchmark(tmp_path)
     paths = RunPaths(run_dir=tmp_path / "runs" / "r1")
     paths.run_dir.mkdir(parents=True)
-    base = dict(run_id="r1", meta=meta, items=items, papers_dir=papers_dir, paths=paths,
+    base = dict(run_id="r1", inputs=RunInputs(meta=meta, items=items, papers_dir=papers_dir, paths=paths),
                 config=_fake_config(), decompose_llm=None)
     options = RunOptions(conditions=("full_text",), tracks=("qa",), runs=1)
 
@@ -156,8 +157,9 @@ def test_run_refuses_frozen_text_drift(tmp_path):
     paths = RunPaths(run_dir=tmp_path / "runs" / "r1")
     paths.run_dir.mkdir(parents=True)
     with pytest.raises(ValueError, match="frozen text drift"):
-        run_benchmark(run_id="r1", meta=drifted, items=items, papers_dir=papers_dir,
-                      paths=paths, llm=FakeAnswerer(), config=_fake_config(),
+        run_benchmark(run_id="r1",
+                      inputs=RunInputs(meta=drifted, items=items, papers_dir=papers_dir, paths=paths),
+                      llm=FakeAnswerer(), config=_fake_config(),
                       decompose_llm=None,
                       options=RunOptions(conditions=("full_text",), tracks=("qa",)))
 
@@ -224,7 +226,7 @@ def test_claims_trial_writes_claims_and_caches_decomposition(tmp_path):
     paths.run_dir.mkdir(parents=True)
     decomposer = FakeDecomposer()
     counts = run_benchmark(
-        run_id="r1", meta=meta, items=items, papers_dir=papers_dir, paths=paths,
+        run_id="r1", inputs=RunInputs(meta=meta, items=items, papers_dir=papers_dir, paths=paths),
         llm=FakeDigestModel(), config=_fake_config(), decompose_llm=decomposer,
         options=RunOptions(conditions=("full_text",), tracks=("claims",), runs=2),
     )
@@ -239,6 +241,7 @@ def test_claims_track_requires_decompose_llm(tmp_path):
     meta, items, papers_dir = _benchmark(tmp_path)
     paths = RunPaths(run_dir=tmp_path / "runs" / "r1")
     with pytest.raises(ValueError, match="decompose_llm"):
-        run_benchmark(run_id="r1", meta=meta, items=items, papers_dir=papers_dir,
-                      paths=paths, llm=FakeDigestModel(), config=_fake_config(),
+        run_benchmark(run_id="r1",
+                      inputs=RunInputs(meta=meta, items=items, papers_dir=papers_dir, paths=paths),
+                      llm=FakeDigestModel(), config=_fake_config(),
                       decompose_llm=None, options=RunOptions(tracks=("claims",)))

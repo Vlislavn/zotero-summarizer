@@ -11,10 +11,8 @@ from __future__ import annotations
 import json as _json
 import logging
 import sqlite3
-from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any
 
-from zotero_summarizer.models import SummarizeResponse
 from zotero_summarizer.services import interaction_log
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.golden.goldenset import _PRIORITY_TO_RELEVANCE
@@ -30,17 +28,8 @@ LOGGER = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-@contextmanager
-def _conn() -> Iterator[sqlite3.Connection]:
-    path = get_settings().triage_db_path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), timeout=10)
-    conn.row_factory = sqlite3.Row
-    try:
-        feeds_storage.init_feeds_schema(conn)
-        yield conn
-    finally:
-        conn.close()
+def _conn():
+    return feeds_storage.open_triage_conn(get_settings().triage_db_path)
 
 
 # ---------------------------------------------------------------------------
@@ -351,7 +340,7 @@ def materialize_row(
 
     row_id = int(row["id"])
     new_key = _generate_zotero_key(used_keys)
-    stored = _pick_summary_for_apply(row)
+    stored = pick_stored_summary(row)
     summary = stored if stored is not None else _summary_from_row(row)
     feed_payload = _feed_payload_from_row(row)
     tags = _tags_from_row(is_black_swan=False, black_swan_tag="")
@@ -392,8 +381,8 @@ def materialize_row(
     return new_key
 
 
-def apply_all_approved(since_hours: int = 720) -> dict[str, Any]:
-    """Materialize every ``user_approved`` row into Zotero.
+def apply_all_approved(since_hours: int | None = None) -> dict[str, Any]:
+    """Materialize every ``user_approved`` row into Zotero (unbounded by default — never expires).
 
     Bypasses the pending_changes pipeline (which is designed for existing
     library items) and calls :meth:`ZoteroWriter.apply_feed_materialization`
@@ -482,22 +471,6 @@ def apply_all_approved(since_hours: int = 720) -> dict[str, Any]:
     }
 
 
-def _pick_summary_for_apply(row: dict[str, Any]):
-    """Return the stored SummarizeResponse (or None) from shap_contribs_json.
-
-    Used by apply_all_approved to prefer the LLM/relabel-synthesised summary
-    over the sparse fallback rebuilt from the row's scalar fields.
-    """
-    blob = (row.get("shap_contribs_json") or "").strip()
-    if not blob:
-        return None
-    payload = _json.loads(blob)
-    summary_dict = payload.get("summary")
-    if summary_dict is None:
-        return None
-    return SummarizeResponse.model_validate(summary_dict)
-
-
 def _label_and_terminate(
     processed_id: int,
     *,
@@ -566,4 +539,5 @@ from zotero_summarizer.services.library.review_summary import (  # noqa: E402,F4
     _write_golden_sample,
     append_to_golden,
     append_verdict_to_golden,
+    pick_stored_summary,
 )

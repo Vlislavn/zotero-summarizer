@@ -62,6 +62,27 @@ class ZoteroCollectionMixin:
     def _generate_unique_collection_key(self, conn: sqlite3.Connection) -> str:
         return generate_unique_key(conn, "collections", self._KEY_ALPHABET, "collection")
 
+    def _resolve_collection_target(
+        self,
+        conn: sqlite3.Connection,
+        item_key: str,
+        payload: dict[str, Any],
+        collection_columns: set[str],
+    ) -> tuple[int, int | None, str]:
+        """Resolve ``(item_id, collection_id, missing_ref)`` for a collection
+        add/remove. ``collection_id`` is ``None`` when no collection matches
+        ``collection_key``/``collection_path`` in ``payload``; ``missing_ref``
+        names the collection so the caller can apply its own not-found policy
+        (add raises, remove treats it as a no-op)."""
+        item_id = resolve_user_library_item_id(conn, item_key)
+        collection_key = str(payload.get("collection_key") or "").strip()
+        collection_path = str(payload.get("collection_path") or payload.get("collection_name") or "").strip()
+        if not collection_key and not collection_path:
+            raise ZoteroWriteError("Collection payload is empty")
+
+        collection_id = self._find_collection_id(conn, collection_key, collection_path, collection_columns)
+        return item_id, collection_id, collection_key or collection_path
+
     def _apply_collection_change(
         self,
         conn: sqlite3.Connection,
@@ -71,18 +92,13 @@ class ZoteroCollectionMixin:
         collection_columns: set[str],
         collection_item_columns: set[str],
     ) -> None:
-        item_id = resolve_user_library_item_id(conn, item_key)
         if not {"itemID", "collectionID"}.issubset(collection_item_columns):
             raise ZoteroWriteError("Unsupported Zotero schema: required collectionItems columns missing")
 
-        collection_key = str(payload.get("collection_key") or "").strip()
-        collection_path = str(payload.get("collection_path") or payload.get("collection_name") or "").strip()
-        if not collection_key and not collection_path:
-            raise ZoteroWriteError("Collection payload is empty")
-
-        collection_id = self._find_collection_id(conn, collection_key, collection_path, collection_columns)
+        item_id, collection_id, missing_ref = self._resolve_collection_target(
+            conn, item_key, payload, collection_columns
+        )
         if collection_id is None:
-            missing_ref = collection_key or collection_path
             raise ZoteroWriteError(f"Collection not found: {missing_ref}")
 
         conn.execute(
@@ -99,13 +115,9 @@ class ZoteroCollectionMixin:
         item_columns: set[str],
         collection_columns: set[str],
     ) -> None:
-        item_id = resolve_user_library_item_id(conn, item_key)
-        collection_key = str(payload.get("collection_key") or "").strip()
-        collection_path = str(payload.get("collection_path") or payload.get("collection_name") or "").strip()
-        if not collection_key and not collection_path:
-            raise ZoteroWriteError("Collection payload is empty")
-
-        collection_id = self._find_collection_id(conn, collection_key, collection_path, collection_columns)
+        item_id, collection_id, _missing_ref = self._resolve_collection_target(
+            conn, item_key, payload, collection_columns
+        )
         if collection_id is None:
             return  # Already not in collection
 
@@ -121,61 +133,78 @@ class ZoteroCollectionMixin:
         collection_name: str,
         root_only: bool = True,
     ) -> int:
-        """Remove items from a collection by name. Returns count of items removed."""
+        """Remove items from a collection by name. Returns count of items removed.
+
+        Wrapped in ``_retry_on_lock`` like the other Zotero writes (see
+        ``zotero_write.apply_changes`` / ``_zotero_write_items.mark_feed_items_read``)
+        so a transient 'database is locked' from a still-open Zotero connector is
+        retried instead of failing this best-effort batch outright.
+        """
         if not item_keys or not collection_name.strip():
             return 0
 
-        conn = sqlite3.connect(str(self.db_path), timeout=15)
-        conn.row_factory = sqlite3.Row
-        try:
-            conn.execute("PRAGMA foreign_keys=ON")
+        def _do() -> int:
+            conn = sqlite3.connect(str(self.db_path), timeout=15)
+            conn.row_factory = sqlite3.Row
             try:
-                conn.execute("PRAGMA journal_mode=WAL")
-            except sqlite3.Error as _:
-                pass
+                conn.execute("PRAGMA foreign_keys=ON")
+                try:
+                    conn.execute("PRAGMA journal_mode=WAL")
+                except sqlite3.Error as _:
+                    pass
 
-            if root_only:
-                coll_row = conn.execute(
-                    """
-                    SELECT collectionID FROM collections
-                    WHERE lower(collectionName) = lower(?)
-                      AND parentCollectionID IS NULL
-                    LIMIT 1
-                    """,
-                    (collection_name.strip(),),
-                ).fetchone()
-            else:
-                coll_row = conn.execute(
-                    """
-                    SELECT collectionID FROM collections
-                    WHERE lower(collectionName) = lower(?)
-                    LIMIT 1
-                    """,
-                    (collection_name.strip(),),
-                ).fetchone()
+                if root_only:
+                    coll_row = conn.execute(
+                        """
+                        SELECT collectionID FROM collections
+                        WHERE lower(collectionName) = lower(?)
+                          AND parentCollectionID IS NULL
+                        LIMIT 1
+                        """,
+                        (collection_name.strip(),),
+                    ).fetchone()
+                else:
+                    coll_row = conn.execute(
+                        """
+                        SELECT collectionID FROM collections
+                        WHERE lower(collectionName) = lower(?)
+                        LIMIT 1
+                        """,
+                        (collection_name.strip(),),
+                    ).fetchone()
 
-            if not coll_row:
-                return 0
+                if not coll_row:
+                    return 0
 
-            collection_id = int(coll_row["collectionID"])
-            item_columns = self._table_columns(conn, "items")
-            removed = 0
-            for item_key in item_keys:
-                safe_key = str(item_key).strip()
-                if not safe_key:
-                    continue
-                item_id = resolve_user_library_item_id(conn, safe_key, required=False)
-                if item_id is None:
-                    continue
-                cursor = conn.execute(
-                    "DELETE FROM collectionItems WHERE itemID = ? AND collectionID = ?",
-                    (item_id, collection_id),
-                )
-                if int(cursor.rowcount or 0) > 0:
-                    removed += 1
-                    self._touch_item(conn, item_id, item_columns)
+                collection_id = int(coll_row["collectionID"])
+                item_columns = self._table_columns(conn, "items")
+                removed = 0
+                for item_key in item_keys:
+                    safe_key = str(item_key).strip()
+                    if not safe_key:
+                        continue
+                    item_id = resolve_user_library_item_id(conn, safe_key, required=False)
+                    if item_id is None:
+                        continue
+                    cursor = conn.execute(
+                        "DELETE FROM collectionItems WHERE itemID = ? AND collectionID = ?",
+                        (item_id, collection_id),
+                    )
+                    if int(cursor.rowcount or 0) > 0:
+                        removed += 1
+                        self._touch_item(conn, item_id, item_columns)
 
-            conn.commit()
-            return removed
-        finally:
-            conn.close()
+                conn.commit()
+                return removed
+            except sqlite3.Error:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        try:
+            return self._retry_on_lock(_do, ctx="remove_items_from_collection")
+        except sqlite3.OperationalError as exc:
+            raise ZoteroWriteError(
+                f"Failed to remove items from collection {collection_name!r}: DB still locked after retries: {exc}"
+            ) from exc

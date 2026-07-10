@@ -208,7 +208,7 @@ def test_strategy3_navigates_when_api_request_is_blocked(tmp_path):
     req = _Req({landing: _Resp(b"<html>landing</html>"), pdf_url: _Resp(b"<html>cf challenge</html>")})
     pw = _PW(_Ctx(req, _Page(meta_url=pdf_url, nav_pdf_url=pdf_url, nav_pdf_bytes=_PDF)))
     body = browser_fetch._drive_browser(
-        lambda: pw, RuntimeError, landing, tmp_path / "prof",
+        browser_fetch._BrowserLib(lambda: pw, RuntimeError), landing, tmp_path / "prof",
         timeout=5.0, max_bytes=10_000_000, headless=True,
     )
     assert body == _PDF  # navigated to the PDF and captured it, not b""
@@ -228,7 +228,7 @@ def test_download_pdf_link_used_when_citation_meta_redirects(tmp_path):
     })
     page = _Page(meta_url=trap, nav_pdf_url=None, dl_hrefs=[real])  # nav streams nothing
     body = browser_fetch._drive_browser(
-        lambda: _PW(_Ctx(req, page)), RuntimeError, landing, tmp_path / "prof",
+        browser_fetch._BrowserLib(lambda: _PW(_Ctx(req, page)), RuntimeError), landing, tmp_path / "prof",
         timeout=5.0, max_bytes=20_000_000, headless=True,
     )
     assert body == _PDF  # followed the Download-PDF link after the meta trap failed
@@ -243,13 +243,13 @@ def test_channel_and_no_viewport_threaded_to_launch(tmp_path):
     req = _Req({landing: _Resp(b"<html>landing</html>"), pdf_url: _Resp(b"<html>cf</html>")})
     pw = _PW(_Ctx(req, _Page(meta_url=pdf_url, nav_pdf_url=pdf_url, nav_pdf_bytes=_PDF)))
     browser_fetch._drive_browser(
-        lambda: pw, RuntimeError, landing, tmp_path / "prof",
+        browser_fetch._BrowserLib(lambda: pw, RuntimeError), landing, tmp_path / "prof",
         timeout=5.0, max_bytes=10_000_000, headless=True, channel="chrome",
     )
     assert pw.launch_kwargs.get("channel") == "chrome"
     assert pw.launch_kwargs.get("no_viewport") is True
     # empty channel → bundled chromium (channel=None), not the literal ""
     pw2 = _PW(_Ctx(req, _Page(meta_url=pdf_url, nav_pdf_url=pdf_url, nav_pdf_bytes=_PDF)))
-    browser_fetch._drive_browser(lambda: pw2, RuntimeError, landing, tmp_path / "p2",
+    browser_fetch._drive_browser(browser_fetch._BrowserLib(lambda: pw2, RuntimeError), landing, tmp_path / "p2",
                                  timeout=5.0, max_bytes=10_000_000, headless=True, channel="")
     assert pw2.launch_kwargs.get("channel") is None

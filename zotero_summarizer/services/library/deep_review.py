@@ -248,9 +248,10 @@ def _review_one(
             reporter.phase("digest", is_call=True)
             # chunk_strategy dispatch (rank/prefix/map_reduce) in _map_reduce.digest_for_strategy.
             digest = _map_reduce.digest_for_strategy(
-                qr.chunk_strategy, title, text, config, map_llm=llm_map or llm,
-                reduce_llm=llm_digest or llm, max_chars=max_chars,
-                chunk_chars=qr.map_chunk_chars, sub_concurrency=sub_concurrency,
+                title, text, config, map_llm=llm_map or llm, reduce_llm=llm_digest or llm,
+                budget=_map_reduce.ChunkBudget(
+                    max_chars=max_chars, chunk_chars=qr.map_chunk_chars, sub_concurrency=sub_concurrency,
+                ),
                 focus_prompt=focus_prompt, response_format=response_format)
             digest_dump = digest.model_dump()
             quality_dump, goal_dump, paper_type_dump, section_overlay, code_link_dump = _deep_review_layers.extra_layers(_deep_review_layers.ExtraLayersCtx(

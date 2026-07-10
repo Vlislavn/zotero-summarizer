@@ -22,8 +22,8 @@ make scan-diff    # the same, scoped to the .py you changed vs the base branch (
 | `check_dead_code.py` | dead-code identification (two tiers, below); existing findings grandfathered |
 | `check_redundancy.py` | redundant-transform + near-duplicate identification (Tier 6, below); existing findings grandfathered |
 | `check_slop.py` | AI-slop / dead-code patterns (Tier 7, below); existing findings grandfathered |
-| `check_overlaps.py` | all-pairs semantic overlap audit (run via `make scan`/`make scan-diff`, advisory — **not** a hook) |
-| `check_allowlists.py` | `reconcile`: flags STALE grandfathers (committed key with no live finding) — run in `make scan` + the test suite |
+| `check_overlaps.py` | all-pairs semantic overlap audit (run via `make scan`/`make scan-diff`, advisory — **not** a hook). A function paired with its OWN nested closure (same path, prefix-qualname) is suppressed — self-overlap, not duplication |
+| `check_allowlists.py` | `reconcile`: flags STALE grandfathers (committed key with no live finding) — run in `make scan` + the test suite. A reconciler whose tool isn't importable in the current env (e.g. vulture outside the venv) SKIPS with a note instead of crashing — mirrors the Makefile's Tier-2 skip contract |
 | `loc_allowlist.txt` | grandfathered oversized files (path + frozen ceiling) — shrink to empty |
 | `dead_code_allowlist.txt` | grandfathered orphan public symbols (`<path>:<symbol>`) — shrink to empty |
 | `vulture_allowlist.txt` | grandfathered Vulture findings, **path-anchored** (`<path>:<name>`) — shrink to empty |

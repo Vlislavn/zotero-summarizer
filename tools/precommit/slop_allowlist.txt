@@ -8,17 +8,7 @@
 #   python3 tools/precommit/check_slop.py dump > tools/precommit/slop_allowlist.txt
 #   # then re-add this header
 #
-# Current contents: 0 blocking findings (debug-leftover path is clean). The
-# advisory entries below are all too-many-params on keyword-only entry points
-# whose param count IS the public/test interface, or single-call-site private
-# helpers whose params are pure pass-throughs — bundling would add an
-# abstraction layer for an advisory nit. Sanctioned, not refactored (the
-# 2026-07 sweep DID refactor the ones with a real win: judge_run's row helpers
-# via _JudgeContext, run_benchmark 16→10 via RunOptions, run_daemon_tick's
-# block extraction).
-zotero_summarizer/integrations/browser_fetch.py:277:slop/too-many-params        # _drive_browser — leaf driver, params mirror fetch_pdf_via_browser's public knobs; 5 direct test call sites pin the loose-kwargs shape
-zotero_summarizer/services/faithbench/_judge.py:382:slop/too-many-params        # judge_run — kw-only public judge entry (CLI + 6 tests); param count is the contract
-zotero_summarizer/services/faithbench/_runner.py:271:slop/too-many-params       # run_benchmark — kw-only public entry, already 16→10 via RunOptions; the rest are genuine per-run inputs
-zotero_summarizer/services/library/_map_reduce.py:44:slop/too-many-params       # new WIP module (map_reduce chunk strategy); revisit when it stabilizes
-zotero_summarizer/services/library/quality_eval.py:84:slop/too-many-params      # _run_rubric — single-call-site private helper; every param is a pass-through or just-computed local
-zotero_summarizer/services/model/classifier_training.py:214:slop/too-many-params # _training_metadata — single-call-site JSON formatter; 8 independently-sourced diagnostics, file at 470/500 LOC
+# Current contents: EMPTY — the 2026-07-09 sweep refactored every remaining
+# advisory finding (browser_fetch via _BrowserLib, judge_run/run_benchmark via
+# the shared RunInputs bundle, digest_for_strategy via ChunkBudget, _run_rubric
+# via prompt-lift, _training_metadata via _OofDiag, run-tick block extraction).

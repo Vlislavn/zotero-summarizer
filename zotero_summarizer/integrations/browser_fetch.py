@@ -30,7 +30,7 @@ import hashlib
 import logging
 import threading
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 from zotero_summarizer.integrations.pdf_fetch import (
     _DEFAULT_CACHE_DIR,
@@ -50,6 +50,15 @@ _LOGIN_TIMEOUT_SECS = 600.0
 # mere presence of a Cookies file, which Chromium writes on ANY page visit) as the
 # "has a session been established?" signal for the Settings readiness panel.
 _LOGIN_MARKER = ".zs_login_complete"
+
+
+class _BrowserLib(NamedTuple):
+    """The injected playwright library pair — the ``sync_playwright`` factory and the
+    browser lib's own error class always travel together, so ``_drive_browser`` takes
+    them bundled instead of as two separate required params."""
+
+    sync_playwright: Callable[[], Any]
+    error_class: type[BaseException] | None
 
 
 def _load_playwright() -> tuple[Callable[[], Any] | None, type[BaseException] | None]:
@@ -173,8 +182,9 @@ def fetch_pdf_via_browser(
         LOGGER.info("browser fetch skipped: another browser session is in flight")
         return None
     try:
-        body = _drive_browser(sync_playwright, error_class, url, profile_dir, timeout, max_bytes, headless,
-                              cookie_browser=cookie_browser, channel=channel, render_fallback=render_fallback)
+        body = _drive_browser(_BrowserLib(sync_playwright, error_class), url, profile_dir, timeout, max_bytes,
+                               headless, cookie_browser=cookie_browser, channel=channel,
+                               render_fallback=render_fallback)
     finally:
         _BROWSER_LOCK.release()
 
@@ -275,8 +285,7 @@ def _pdf_candidates(page: Any, landing_url: str, catch: tuple[type[BaseException
 
 
 def _drive_browser(
-    sync_playwright: Callable[[], Any],
-    error_class: type[BaseException] | None,
+    lib: _BrowserLib,
     url: str,
     profile_dir: Path,
     timeout: float,
@@ -296,6 +305,7 @@ def _drive_browser(
     itself to a PDF. A page that DOES declare a PDF we just couldn't fetch (gated behind
     a login for THAT publisher) returns ``b''`` so the caller reports it honestly rather
     than reviewing a paywall stub."""
+    sync_playwright, error_class = lib
     profile_dir.mkdir(parents=True, exist_ok=True)
     timeout_ms = int(timeout * 1000)
     catch: tuple[type[BaseException], ...] = (OSError,) if error_class is None else (error_class, OSError)

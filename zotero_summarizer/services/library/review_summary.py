@@ -49,6 +49,33 @@ def _drop_trashed_rearrivals(
     return [r for r in rows if str(r.get("guid") or "").strip() not in trashed_guids]
 
 
+def _parse_stored_summary(
+    row: dict[str, Any], *, required: bool
+) -> SummarizeResponse | None:
+    """Parse the LLM ``SummarizeResponse`` stored in ``shap_contribs_json``.
+
+    ``required=True`` raises when the row has no stored summary (the
+    :func:`_unpack_summary` sanity-check policy); ``required=False`` returns
+    ``None`` instead (the :func:`pick_stored_summary` fallback policy).
+    """
+    blob = (row.get("shap_contribs_json") or "").strip()
+    if not blob:
+        if required:
+            raise ValueError(
+                f"row id={row.get('id')} has no summary payload; cannot approve"
+            )
+        return None
+    payload = _json.loads(blob)
+    summary_dict = payload.get("summary")
+    if summary_dict is None:
+        if required:
+            raise ValueError(
+                f"row id={row.get('id')} has shap/aux but no LLM summary"
+            )
+        return None
+    return SummarizeResponse.model_validate(summary_dict)
+
+
 def _unpack_summary(row: dict[str, Any]) -> SummarizeResponse:
     """Parse the LLM ``SummarizeResponse`` saved alongside the awaiting row.
 
@@ -56,18 +83,16 @@ def _unpack_summary(row: dict[str, Any]) -> SummarizeResponse:
     (those always have a stored summary). For gate_rejected items use
     :func:`_build_summary_for_queue` instead — it synthesises on the fly.
     """
-    blob = (row.get("shap_contribs_json") or "").strip()
-    if not blob:
-        raise ValueError(
-            f"row id={row.get('id')} has no summary payload; cannot approve"
-        )
-    payload = _json.loads(blob)
-    summary_dict = payload.get("summary")
-    if summary_dict is None:
-        raise ValueError(
-            f"row id={row.get('id')} has shap/aux but no LLM summary"
-        )
-    return SummarizeResponse.model_validate(summary_dict)
+    return _parse_stored_summary(row, required=True)
+
+
+def pick_stored_summary(row: dict[str, Any]) -> SummarizeResponse | None:
+    """Return the stored ``SummarizeResponse`` (or ``None``) from ``shap_contribs_json``.
+
+    Used by ``apply_all_approved`` to prefer the LLM/relabel-synthesised
+    summary over the sparse fallback rebuilt from the row's scalar fields.
+    """
+    return _parse_stored_summary(row, required=False)
 
 
 def _build_summary_for_queue(row: dict[str, Any], new_priority: str) -> SummarizeResponse:

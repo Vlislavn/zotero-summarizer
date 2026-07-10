@@ -4,7 +4,12 @@ from __future__ import annotations
 import pytest
 
 from zotero_summarizer.models import PaperDigest
-from zotero_summarizer.services.library._map_reduce import digest_for_strategy, map_reduce_digest, split_chunks
+from zotero_summarizer.services.library._map_reduce import (
+    ChunkBudget,
+    digest_for_strategy,
+    map_reduce_digest,
+    split_chunks,
+)
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
 
 
@@ -84,23 +89,23 @@ def test_digest_for_strategy_dispatches_by_chunk_strategy():
     called once per chunk). Proves the knob is wired, not a no-op."""
     cfg = _default_goals_config()
     text = "Sample paper body. " * 1200  # ~22k chars → multiple chunks at 8000
-    max_chars = cfg.quality_review.max_text_chars
+    budget = ChunkBudget(max_chars=cfg.quality_review.max_text_chars, chunk_chars=8000, sub_concurrency=1)
 
     # rank (default) → single assess_digest call, basis full_text
+    cfg.quality_review.chunk_strategy = "rank"
     llm = _DigestLLM()
-    d = digest_for_strategy("rank", "T", text, cfg, map_llm=_MapLLM(), reduce_llm=llm,
-                            max_chars=max_chars, chunk_chars=8000, sub_concurrency=1)
+    d = digest_for_strategy("T", text, cfg, map_llm=_MapLLM(), reduce_llm=llm, budget=budget)
     assert d.basis == "full_text" and llm.pydantic_calls == 1
 
     # prefix → still single assess_digest call (naive truncate path), basis full_text
+    cfg.quality_review.chunk_strategy = "prefix"
     llm_p = _DigestLLM()
-    d_p = digest_for_strategy("prefix", "T", text, cfg, map_llm=_MapLLM(), reduce_llm=llm_p,
-                              max_chars=max_chars, chunk_chars=8000, sub_concurrency=1)
+    d_p = digest_for_strategy("T", text, cfg, map_llm=_MapLLM(), reduce_llm=llm_p, budget=budget)
     assert d_p.basis == "full_text" and llm_p.pydantic_calls == 1
 
     # map_reduce → map_llm.prompt called once per chunk, basis map_reduce
+    cfg.quality_review.chunk_strategy = "map_reduce"
     map_llm = _MapLLM()
-    d_m = digest_for_strategy("map_reduce", "T", text, cfg, map_llm=map_llm, reduce_llm=_DigestLLM(),
-                              max_chars=max_chars, chunk_chars=8000, sub_concurrency=1)
+    d_m = digest_for_strategy("T", text, cfg, map_llm=map_llm, reduce_llm=_DigestLLM(), budget=budget)
     assert d_m.basis == "map_reduce"
     assert map_llm.calls == len(split_chunks(text, 8000))  # one map call per chunk — NOT a no-op

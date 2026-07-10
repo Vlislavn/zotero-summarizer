@@ -36,8 +36,10 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from pathlib import Path
+from typing import Any, Iterator
 
 # Re-export the decision/outcome taxonomy and table DDL so existing
 # `from zotero_summarizer.storage import feeds as fs; fs.DECISION_*` callers
@@ -129,6 +131,25 @@ def init_feeds_schema(conn: sqlite3.Connection) -> None:
     _backfill_stable_feed_keys(conn)
     _backfill_feed_key_aliases(conn)
     _copy_legacy_label_verdicts_to_stable_keys(conn)
+
+
+@contextmanager
+def open_triage_conn(db_path: Path) -> Iterator[sqlite3.Connection]:
+    """Open a schema-initialized, ``sqlite3.Row``-backed connection to a triage DB.
+
+    Shared by the app RSS reader, review-mode service, feed daemon, and RSS API
+    routes — every one of them opened the triage DB with this exact
+    ``connect(timeout=10) + row_factory=Row + init_feeds_schema`` idiom.
+    """
+    db_path = Path(db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path), timeout=10)
+    conn.row_factory = sqlite3.Row
+    try:
+        init_feeds_schema(conn)
+        yield conn
+    finally:
+        conn.close()
 
 
 def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
@@ -274,29 +295,6 @@ def _copy_legacy_label_verdicts_to_stable_keys(conn: sqlite3.Connection) -> int:
         """
     )
     return int(cursor.rowcount or 0)
-
-
-def feed_key_alias_validation_report(conn: sqlite3.Connection) -> dict[str, Any]:
-    """Return unresolved legacy alias collisions for migration diagnostics."""
-    rows = conn.execute(
-        """
-        SELECT old_key, stable_feed_keys_json, row_count, created_at
-        FROM feed_key_alias_ambiguities
-        ORDER BY old_key
-        """
-    ).fetchall()
-    return {
-        "ambiguous_count": len(rows),
-        "ambiguous": [
-            {
-                "old_key": _col(row, 0, "old_key"),
-                "stable_feed_keys_json": _col(row, 1, "stable_feed_keys_json"),
-                "row_count": _col(row, 2, "row_count"),
-                "created_at": _col(row, 3, "created_at"),
-            }
-            for row in rows
-        ],
-    }
 
 
 def new_run_id(prefix: str = "feeds") -> str:

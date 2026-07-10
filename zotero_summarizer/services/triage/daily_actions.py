@@ -21,7 +21,7 @@ from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.services import interaction_log
 from zotero_summarizer.services.library import deep_review, fulltext, review
-from zotero_summarizer.services._common import LOGGER
+from zotero_summarizer.services._common import LOGGER, is_app_rss_source
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.storage import feeds as feeds_storage
 from zotero_summarizer.storage.feed_identity import row_feed_keys
@@ -127,7 +127,7 @@ def _mark_zotero_sync(row: dict[str, Any], status: str) -> None:
         conn.close()
 
 
-def _record_app_outcome(row: dict[str, Any], outcome: str) -> None:
+def record_row_outcome(row: dict[str, Any], outcome: str) -> None:
     conn = sqlite3.connect(str(_db_path()))
     try:
         feeds_storage.record_app_outcome(
@@ -148,11 +148,6 @@ def _open_optional_writer() -> tuple[Any | None, Exception | None]:
     except Exception as exc:  # noqa: BLE001 - Zotero is an optional sync target.
         LOGGER.warning("Zotero writer unavailable; local RSS action will continue: %s", exc)
         return None, exc
-
-
-def _is_app_rss_row(row: dict[str, Any]) -> bool:
-    source = str(row.get("source_type") or row.get("source") or "").strip()
-    return source == "app_rss"
 
 
 def _mark_app_rss_rows_read(rows: list[dict[str, Any]]) -> int:
@@ -209,7 +204,7 @@ def add_to_library(item_ids: list[int]) -> dict[str, Any]:
             if writer is None:
                 _set_decision(row, feeds_storage.DECISION_USER_APPROVED, "today_add_zotero_pending")
                 _mark_zotero_sync(row, "pending")
-                _record_app_outcome(row, feeds_storage.OUTCOME_KEPT_UNREAD_APP)
+                record_row_outcome(row, feeds_storage.OUTCOME_KEPT_UNREAD_APP)
                 pending_sync += 1
             else:
                 try:
@@ -223,7 +218,7 @@ def add_to_library(item_ids: list[int]) -> dict[str, Any]:
                 except Exception as exc:
                     _set_decision(row, feeds_storage.DECISION_USER_APPROVED, "today_add_zotero_pending")
                     _mark_zotero_sync(row, "pending")
-                    _record_app_outcome(row, feeds_storage.OUTCOME_KEPT_UNREAD_APP)
+                    record_row_outcome(row, feeds_storage.OUTCOME_KEPT_UNREAD_APP)
                     pending_sync += 1
                     LOGGER.warning(
                         "add_to_library: Zotero export pending for row id=%s: %s",
@@ -309,9 +304,9 @@ def trash(item_ids: list[int]) -> dict[str, Any]:
         try:
             _record_label(row, "dont_read", "trashed from Today", surface="today_trash")
             _set_decision(row, feeds_storage.DECISION_USER_REJECTED, "trashed_from_today")
-            _record_app_outcome(row, feeds_storage.OUTCOME_TRASHED)
+            record_row_outcome(row, feeds_storage.OUTCOME_TRASHED)
             fid = int(row.get("feed_item_id") or 0)
-            if fid and _is_app_rss_row(row):
+            if fid and is_app_rss_source(row):
                 app_rss_rows.append(row)
             elif fid:
                 zotero_read_ids.append(fid)

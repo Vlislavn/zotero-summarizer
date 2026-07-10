@@ -11,7 +11,7 @@ for the A/B that decides which wins on coverage-per-cost.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Any, NamedTuple
 
 from zotero_summarizer.models import GoalsConfig, PaperDigest
 from zotero_summarizer.services._common import to_text
@@ -41,17 +41,23 @@ def _map_chunk(map_llm: Any, chunk: str) -> str:
     return to_text(map_llm.prompt(DEFAULT_MAP_PROMPT.format(chunk=chunk))).strip()
 
 
+class ChunkBudget(NamedTuple):
+    """The chunking budget trio for ``digest_for_strategy``: the rank/prefix output
+    cap, the map_reduce per-chunk size, and its map-step parallelism."""
+
+    max_chars: int
+    chunk_chars: int
+    sub_concurrency: int
+
+
 def digest_for_strategy(
-    strategy: str,
     title: str,
     full_text: str,
     config: GoalsConfig,
     *,
     map_llm: Any,
     reduce_llm: Any,
-    max_chars: int,
-    chunk_chars: int,
-    sub_concurrency: int,
+    budget: ChunkBudget,
     focus_prompt: str = "",
     response_format: dict[str, Any] | None = None,
 ) -> PaperDigest:
@@ -64,15 +70,16 @@ def digest_for_strategy(
     ``response_format`` (decoder-level JSON Schema) is forwarded to the rank/prefix
     assess_digest call; map_reduce's reduce reuses assess_digest and gets it too. Errors
     propagate to deep_review's per-item boundary (never a fabricated review)."""
+    strategy = config.quality_review.chunk_strategy
     if strategy == "map_reduce":
         return map_reduce_digest(
             title=title, full_text=full_text, config=config, map_llm=map_llm,
-            reduce_llm=reduce_llm, chunk_chars=chunk_chars, sub_concurrency=sub_concurrency,
-            response_format=response_format,
+            reduce_llm=reduce_llm, chunk_chars=budget.chunk_chars,
+            sub_concurrency=budget.sub_concurrency, response_format=response_format,
         )
     return assess_digest(
         title=title, full_text=full_text, config=config, llm=reduce_llm,
-        focus_prompt=focus_prompt, max_chars=max_chars, prefix=(strategy == "prefix"),
+        focus_prompt=focus_prompt, max_chars=budget.max_chars, prefix=(strategy == "prefix"),
         response_format=response_format,
     )
 

@@ -58,32 +58,43 @@ def _near_perfect_metric(text: str) -> bool:
     allowlist; broaden it if a genuine near-perfect metric is ever missed."""
     return any(_METRIC_WORD.search(text[max(0, m.start() - 40): m.end() + 40])
                for m in _PERFECT_NUM.finditer(text))
-_CLINICAL = re.compile(r"\b(patient|clinical|diagnos|EHR|medical|cohort|disease|hospital|genom|bioinform|cell|protein)", re.I)
+# Genuine patient/clinical context only. Bare bio/ML vocabulary (cell, protein, genom,
+# cohort, bioinform) was matching technical ML papers ("cell-line embeddings", "training
+# cohort") and mis-firing the clinical patient-split red flag. That flag now ALSO family-
+# gates to CLIN at the caller; this narrower regex is the second, defence-in-depth guard.
+# ponytail: keep tight — add a token back only if a real clinical paper is missed.
+_CLINICAL = re.compile(r"\b(patient|clinical|diagnos|EHR|medical|disease|hospital)", re.I)
 _AGENTIC = re.compile(r"\b(agent|autonom|multi[- ]agent|tool[- ]use|policy enforcement|orchestrat|llm[- ]agent)", re.I)
 
 
-def _structural(sections: list[dict[str, Any]], full_text: str) -> tuple[dict[str, bool], list[str]]:
-    """Cheap high-precision presence checks + leakage red-flags over the body."""
+def _structural(sections: list[dict[str, Any]], full_text: str
+                ) -> tuple[dict[str, bool], list[tuple[pc.Family, str]]]:
+    """Cheap high-precision presence checks + leakage red-flags, each TAGGED with the
+    criteria family it belongs to. The caller fires a flag only when that family is active
+    for the paper's type — so the clinical patient-split flag (CLIN) never fires on a
+    non-clinical empirical paper, and the leakage flag (EMP) never on a review. This
+    function stays a pure flag GENERATOR (family-agnostic); the gating lives at the caller."""
     section_titles = " ".join(str(s.get("title") or "") for s in (sections or []))
     haystack = f"{section_titles}\n{full_text}"
     signals = {name: bool(rx.search(haystack)) for name, rx in _PATTERNS.items()}
-    red_flags: list[str] = []
-    # Leakage: a near-perfect headline METRIC (not an optimizer hyperparameter) with no
-    # leakage discussion anywhere.
+    red_flags: list[tuple[pc.Family, str]] = []
+    # Leakage (EMPIRICAL): a near-perfect headline METRIC (not an optimizer hyperparameter)
+    # with no leakage discussion anywhere.
     if _near_perfect_metric(full_text) and not _LEAKAGE_WORD.search(full_text):
-        red_flags.append("near-perfect headline metric with no leakage/contamination discussion")
-    # Clinical paper using plain cross-validation without a patient-level split mention.
-    # Match patient/subject/group-level terminology ANYWHERE (papers write
+        red_flags.append((pc.Family.EMP,
+                          "near-perfect headline metric with no leakage/contamination discussion"))
+    # Clinical (CLIN): clinical data using plain cross-validation without a patient-level
+    # split mention. Match patient/subject/group-level terminology ANYWHERE (papers write
     # "patient-level 5-fold cross-validation" — digits/words sit between the terms).
     if _CLINICAL.search(full_text) and re.search(r"\b(k[- ]?fold|cross[- ]validation)\b", full_text, re.I) \
             and not re.search(r"\b(patient|subject|group)[- ]level\b|grouped (k[- ]?fold|cv)", full_text, re.I):
-        red_flags.append("clinical data with cross-validation but no patient-level split stated")
+        red_flags.append((pc.Family.CLIN,
+                          "clinical data with cross-validation but no patient-level split stated"))
     return signals, red_flags
 
 
 def _run_rubric(
-    llm: Any, *, title: str, body: str, structural: dict[str, bool], items_block: str,
-    exemplars: str, runs: int, reporter: Any = None, sub_concurrency: int = 1,
+    llm: Any, prompt: str, *, runs: int, reporter: Any = None, sub_concurrency: int = 1,
 ) -> list[qp.RubricLLMResponse]:
     """Self-consistency samples of the decomposed rubric (runs ≥ 1).
 
@@ -94,11 +105,6 @@ def _run_rubric(
     When ``sub_concurrency == 1`` (local provider) the serial path is kept to
     protect host RAM.
     """
-    prompt = qp.QUALITY_RUBRIC_PROMPT.format(
-        title=title or "(hidden)", full_text=body,
-        structural=", ".join(k for k, v in structural.items() if v) or "none detected",
-        items=items_block, exemplars=(exemplars + "\n\n") if exemplars else "",
-    )
     total = max(1, runs)
 
     if sub_concurrency <= 1 or total <= 1:
@@ -274,15 +280,21 @@ def evaluate_quality(
     # structural checks below still see the FULL text — only the LLM-fed body is curated.
     body = select_review_text(sections, full_text or "", budget=max_chars)
     signals, structural_flags = _structural(sections, full_text or "")
-    # The structural leakage red-flags are EMPIRICAL — never fire them on a
-    # review/policy/position paper (the exact bug being fixed).
-    red_flags = structural_flags if pc.Family.EMP in spec.families else []
+    # Fire each structural red flag ONLY when its criteria family is active for this
+    # paper type: the clinical patient-split flag (CLIN) must not fire on a non-clinical empirical
+    # paper, the leakage flag (EMP) not on a review. Replaces the coarse "any structural flag
+    # on any EMP-family type" gate that leaked the clinical flag onto technical ML papers.
+    red_flags = [msg for fam, msg in structural_flags if fam in spec.families]
     item_keys = [it.key for it in spec.items]
     items_block = "\n".join(f"- {it.key}: {it.question}" for it in spec.items)
     if reporter is not None:
         reporter.phase("quality_rubric", total=max(1, self_consistency_runs))
-    samples = _run_rubric(llm, title=title, body=body, structural=signals, items_block=items_block,
-                          exemplars=exemplars, runs=self_consistency_runs, reporter=reporter,
+    rubric_prompt = qp.QUALITY_RUBRIC_PROMPT.format(
+        title=title or "(hidden)", full_text=body,
+        structural=", ".join(k for k, v in signals.items() if v) or "none detected",
+        items=items_block, exemplars=(exemplars + "\n\n") if exemplars else "",
+    )
+    samples = _run_rubric(llm, rubric_prompt, runs=self_consistency_runs, reporter=reporter,
                           sub_concurrency=sub_concurrency)
     rubric, evidence, concerns, grounded_yes = _aggregate_rubric(samples, item_keys, body)
 

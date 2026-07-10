@@ -5,7 +5,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 import joblib
 import numpy as np
@@ -211,15 +211,22 @@ def _dated_oof_spearman(
     return float(spearmanr(y_train[dated], preds_oof[dated]).statistic), n_dated
 
 
+class _OofDiag(NamedTuple):
+    """The four out-of-fold diagnostics that travel together into ``training_metadata``:
+    aggregate Spearman ρ, the dated-subset ρ (+ its row count), and per-class metrics."""
+
+    rho: float
+    rho_verified: float | None
+    n_verified: int
+    metrics: dict[str, Any]
+
+
 def _training_metadata(
     library: Any,
     temporal: dict[str, Any] | None,
     *,
     n_train: int,
-    oof_rho: float,
-    oof_rho_verified: float | None,
-    n_verified: int,
-    oof_metrics: dict[str, Any],
+    oof: _OofDiag,
     cal_diag: Any,
 ) -> dict[str, Any]:
     """The JSON-able ``training_metadata`` block stored on the artefact."""
@@ -227,18 +234,18 @@ def _training_metadata(
         "n_train": n_train,
         "n_positive_library": library.n_rows,
         "objective": "regression",
-        "oof_spearman": round(oof_rho, 4),
+        "oof_spearman": round(oof.rho, 4),
         # Honest split: oof_spearman above is the aggregate (inflated by ~72%
         # undated feed:* rows the gate trivially rejects); this is the SAME OOF
         # restricted to dated reading-decisions — the gate's real ranking ability.
         # None = subset too small / constant label (tiny fixtures).
-        "oof_spearman_verified": None if oof_rho_verified is None else round(oof_rho_verified, 4),
-        "n_verified": n_verified,
+        "oof_spearman_verified": None if oof.rho_verified is None else round(oof.rho_verified, 4),
+        "n_verified": oof.n_verified,
         # None = holdout too small / constant labels (tiny fixtures) —
         # the ModelCard renders an em-dash then, never a fake number.
         "temporal_spearman": None if temporal is None else temporal["temporal_spearman"],
         "temporal_holdout_n": 0 if temporal is None else temporal["temporal_holdout_n"],
-        "oof_metrics_vs_gold": oof_metrics,
+        "oof_metrics_vs_gold": oof.metrics,
         "band_calibration": cal_diag,
         "trained_at": now_iso_z(),
         "git_commit": run_log.short_git_commit(),
@@ -394,9 +401,9 @@ def train_and_save(
         classifier_name=classifier_name, sha256=sha256, pca_dim=pca_dim,
         metadata=_training_metadata(
             library, temporal,
-            n_train=n_train, oof_rho=oof_rho,
-            oof_rho_verified=oof_rho_verified, n_verified=n_verified,
-            oof_metrics=oof_metrics, cal_diag=cal_diag,
+            n_train=n_train,
+            oof=_OofDiag(oof_rho, oof_rho_verified, n_verified, oof_metrics),
+            cal_diag=cal_diag,
         ),
     )
 

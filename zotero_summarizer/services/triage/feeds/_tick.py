@@ -11,7 +11,6 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from zotero_summarizer.integrations.app_rss import AppRssReader
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.storage import feeds as feeds_storage
@@ -20,7 +19,6 @@ from zotero_summarizer.services.triage.feeds._common import (
     DaemonTickReport,
     TriagedCandidate,
     _load_config,
-    get_settings,
 )
 from zotero_summarizer.services.triage.feeds._gate import (
     _apply_classifier_gate,
@@ -44,6 +42,8 @@ from zotero_summarizer.services.triage.feeds._tick_phases import (
 from zotero_summarizer.services.triage.feeds._rescue_l1 import (
     recover_abstractless_l1_candidates,
 )
+from zotero_summarizer.services.triage.feeds._tick_setup import resolve_tick_adapters
+from zotero_summarizer.services.triage.feeds._zotero_readsync import sync_zotero_read_state
 
 
 @dataclass(frozen=True)
@@ -51,6 +51,7 @@ class _TickFlags:
     dedup_enabled: bool
     processed_dedup_enabled: bool
     mark_processed_as_read: bool
+    zotero_read_sync: bool
     outcome_check_per_tick: int
     exclude_feed_names: set[str]
 
@@ -60,14 +61,17 @@ def _resolve_tick_flags(feeds_cfg: dict[str, Any]) -> _TickFlags:
 
     ``dedup_against_processed`` defaults to the library-dedup flag (so a config
     that turned off duplicate protection stays off) but is independently
-    switchable. Non-paper feeds (e.g. GitHub releases) the user marked not-scholarly
-    never enter triage (so never get materialised/scored)."""
+    switchable — ``None`` (the ``FeedsConfig`` default) means "follow". Non-paper
+    feeds (e.g. GitHub releases) the user marked not-scholarly never enter
+    triage (so never get materialised/scored)."""
     dedup_enabled = bool(feeds_cfg.get("dedup_against_library", True))
+    processed_dedup_raw = feeds_cfg.get("dedup_against_processed")
     return _TickFlags(
         dedup_enabled=dedup_enabled,
-        processed_dedup_enabled=bool(feeds_cfg.get("dedup_against_processed", dedup_enabled)),
+        processed_dedup_enabled=dedup_enabled if processed_dedup_raw is None else bool(processed_dedup_raw),
         mark_processed_as_read=bool(feeds_cfg.get("mark_processed_as_read", True)),
-        outcome_check_per_tick=int(feeds_cfg.get("outcome_check_per_tick") or 3),
+        zotero_read_sync=bool(feeds_cfg.get("zotero_read_sync", True)),
+        outcome_check_per_tick=int(feeds_cfg.get("outcome_check_per_tick", 3)),
         exclude_feed_names={
             str(name).strip().casefold()
             for name in (feeds_cfg.get("exclude_feeds") or [])
@@ -118,12 +122,16 @@ def _build_tick_report(
 
 
 def _maybe_refresh_app_rss(reader: ZoteroReader, feeds_cfg: dict[str, Any], tick_id: str) -> None:
-    """Refresh app-RSS feeds in place before picking, when the reader supports it."""
+    """Refresh app-RSS feeds in place before picking, when the reader supports it.
+
+    Keys are the flat ``FeedsConfig`` fields (the nested ``startup_refresh``/
+    ``refresh`` dicts were unset everywhere and are gone). The refresh itself
+    rotates least-recently-fetched-first, so a bounded pass covers every
+    enabled feed across successive ticks."""
     if hasattr(reader, "refresh_feeds"):
-        refresh_cfg = feeds_cfg.get("startup_refresh") or feeds_cfg.get("refresh") or {}
-        max_feeds = int(refresh_cfg.get("max_feeds_per_pass") or feeds_cfg.get("max_feeds_per_pass") or 10)
-        max_new = int(refresh_cfg.get("max_new_items_per_feed") or feeds_cfg.get("max_new_items_per_feed") or 25)
-        timeout = float(refresh_cfg.get("per_feed_timeout_secs") or feeds_cfg.get("per_feed_timeout_secs") or 10.0)
+        max_feeds = int(feeds_cfg.get("max_feeds_per_pass", 10))
+        max_new = int(feeds_cfg.get("max_new_items_per_feed", 25))
+        timeout = float(feeds_cfg.get("per_feed_timeout_secs", 10.0))
         try:
             refreshed = reader.refresh_feeds(
                 max_feeds=max_feeds,
@@ -206,13 +214,13 @@ def _auto_review_slate(tick_id: str) -> None:
     if k <= 0:
         return
     try:
-        from zotero_summarizer.services._common import settings
+        from zotero_summarizer.services._common import rank_quality_first_enabled, settings
         from zotero_summarizer.services.library import deep_review
         from zotero_summarizer.services.library.app_library_reader import AppLibraryReader
         from zotero_summarizer.services.triage.daily_select import assemble_daily_slate
 
         db_path = settings().triage_db_path
-        slate = assemble_daily_slate(db_path=db_path, K=k)
+        slate = assemble_daily_slate(db_path=db_path, K=k, quality_first=rank_quality_first_enabled())  # explicit arm: the P3 interleave is user-facing-GET only — a daemon merge must never claim the day's interleave_log nor widen auto-review beyond the shipped arm (README)
         done = deep_review.cached_review_keys()
         keys = [p.stable_feed_key for p in slate.papers
                 if p.stable_feed_key and p.stable_feed_key not in done][:k]
@@ -239,12 +247,12 @@ def _auto_render_slate(tick_id: str) -> None:
     if k <= 0:
         return
     try:
-        from zotero_summarizer.services._common import settings
+        from zotero_summarizer.services._common import rank_quality_first_enabled, settings
         from zotero_summarizer.services.library import deep_review, paper_render
         from zotero_summarizer.services.triage.daily_select import assemble_daily_slate
 
         db_path = settings().triage_db_path
-        slate = assemble_daily_slate(db_path=db_path, K=max(k, 5))
+        slate = assemble_daily_slate(db_path=db_path, K=max(k, 5), quality_first=rank_quality_first_enabled())  # explicit arm — bypasses the P3 interleave (see _auto_review_slate)
         reviewed = deep_review.cached_review_keys()
         # Top-K by composite rank, restricted to reviewed feed keys (so the brief has the
         # review folded in). slate.papers is role-grouped, so sort by composite_score.
@@ -297,7 +305,9 @@ def run_daemon_tick(
       2. Dedup against `processed_feed_items` (resumability) + library DOI.
       3. Triage each (corpus fast-reject -> LLM if not pre-rejected).
       4. Insert as `triaged_pending` (or `rejected_low_score` / etc).
-      5. Mark all processed items read in Zotero (feedItems.readTime).
+      5. Mark all processed items read: app_rss items in the app's own
+         `rss_items.read_at`; then reconcile app-read guids into Zotero's
+         `feedItems.readTime` so the unread badge clears (read-sync sweep).
       6. Resolve up to `outcome_check_per_tick` due outcomes -> user_feedback.
       7. If 24h has elapsed since last daily-selection, run it now.
 
@@ -328,13 +338,7 @@ def run_daemon_tick(
     config = _load_config()
     feeds_cfg = config["feeds"]
 
-    reader = reader or AppRssReader(get_settings().triage_db_path)
-    if writer is None:
-        try:
-            writer = ZoteroWriter(get_settings().zotero_data_dir)
-        except Exception as exc:  # noqa: BLE001 — Zotero is now an optional adapter
-            writer = None
-            LOGGER.info("[%s] Zotero writer unavailable; app RSS read-state only: %s", tick_id, exc)
+    reader, writer, zotero_reader = resolve_tick_adapters(reader, writer, tick_id=tick_id)
 
     # batch_size semantics: None = unlimited (feeds run full-exhaust); int = bounded.
     effective_batch: int | None = batch_size
@@ -357,7 +361,7 @@ def run_daemon_tick(
         unprocessed, tick_id=tick_id, enabled=flags.processed_dedup_enabled,
     )
     to_triage, library_skipped = dedup_against_library(
-        unprocessed, reader=reader, tick_id=tick_id, enabled=flags.dedup_enabled,
+        unprocessed, reader=zotero_reader, tick_id=tick_id, enabled=flags.dedup_enabled,
     )
 
     # 2.5 Classifier gate (Phase 1.13) — fast-reject before the LLM; also kicks
@@ -401,17 +405,26 @@ def run_daemon_tick(
     # 4. Record decisions.
     record_tick_decisions(results, tick_id=tick_id, review_mode=review_mode)
 
-    # 5. Mark all processed items read in Zotero (skipped in review_mode/dry_run
-    #    so they keep showing in the Zotero RSS view while the user decides).
+    # 5. Mark all processed items read — app_rss items in the app's own
+    #    rss_items.read_at, legacy Zotero-sourced items via writer (skipped in
+    #    review_mode/dry_run so they keep showing while the user decides).
     marked = 0
     if flags.mark_processed_as_read and not dry_run and not review_mode:
         marked = mark_processed_read(results, stale_to_mark, writer=writer, tick_id=tick_id)
 
-    # 6. Resolve up to N due outcomes.
+    # 5.5 Reconcile app-side read state into Zotero's unread badge (guid sweep):
+    #     step 5 only writes the app DB for app_rss items. Also picks up user
+    #     actions (Today Trash) from previous ticks.
+    if flags.zotero_read_sync and not dry_run and not review_mode:
+        sync_zotero_read_state(zotero_reader=zotero_reader, writer=writer, tick_id=tick_id)
+
+    # 6. Resolve up to N due outcomes — deferred (not lost) while Zotero is
+    #    unavailable. Skipped in dry_run: outcome resolution WRITES
+    #    final_outcome + user_feedback rows.
     outcomes = 0
-    if flags.outcome_check_per_tick > 0:
+    if flags.outcome_check_per_tick > 0 and not dry_run and zotero_reader is not None:
         try:
-            outcomes = _resolve_due_outcomes(reader=reader, limit=flags.outcome_check_per_tick)
+            outcomes = _resolve_due_outcomes(reader=zotero_reader, limit=flags.outcome_check_per_tick)
         except Exception:
             LOGGER.exception("[%s] outcome resolution failed", tick_id)
 

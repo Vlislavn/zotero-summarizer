@@ -32,6 +32,22 @@ except Exception:  # pragma: no cover - optional dependency fallback
 LOGGER = logging.getLogger("zotero_summarizer.embedding_cache")
 
 
+def open_corpus_conn(db_path: Path) -> sqlite3.Connection:
+    """Open a ``sqlite3.Row``-backed connection to the corpus DB, WAL enabled.
+
+    Shared by :class:`EmbeddingCache` and ``storage.corpus_bm25.CorpusBM25`` —
+    both read/write the same corpus DB, and WAL is DB-sticky, so either side
+    enabling it benefits both.
+    """
+    conn = sqlite3.connect(str(db_path), timeout=10)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.Error as _:
+        pass
+    return conn
+
+
 class EmbeddingCache(CorpusReadMixin):
     """Stores and queries library embeddings for corpus-aware triage.
 
@@ -59,13 +75,7 @@ class EmbeddingCache(CorpusReadMixin):
         self._init_db()
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path), timeout=10)
-        conn.row_factory = sqlite3.Row
-        try:
-            conn.execute("PRAGMA journal_mode=WAL")
-        except sqlite3.Error as _:
-            pass
-        return conn
+        return open_corpus_conn(self.db_path)
 
     def _init_db(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

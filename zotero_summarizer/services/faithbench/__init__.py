@@ -8,6 +8,7 @@ from zotero_summarizer.services.faithbench._judge import judge_run
 from zotero_summarizer.services.faithbench._report import build_report
 from zotero_summarizer.services.faithbench._runner import (
     ANSWER_PROMPT,
+    RunInputs,
     RunOptions,
     RunPaths,
     answer_with_retry,
@@ -17,6 +18,7 @@ from zotero_summarizer.services.faithbench._runner import (
 __all__ = [
     "ANSWER_PROMPT",
     "PaperChunkIndex",
+    "RunInputs",
     "RunOptions",
     "RunPaths",
     "answer_with_retry",

@@ -190,20 +190,12 @@ def _is_fatal_llm_error(exc: BaseException) -> bool:
 
 @contextmanager
 def _triage_conn() -> Iterator[sqlite3.Connection]:
-    settings = get_settings()
-    path = settings.triage_db_path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), timeout=10)
-    conn.row_factory = sqlite3.Row
-    try:
+    with feeds_storage.open_triage_conn(get_settings().triage_db_path) as conn:
         try:
             conn.execute("PRAGMA journal_mode=WAL")
         except sqlite3.Error as _:
             pass
-        feeds_storage.init_feeds_schema(conn)
         yield conn
-    finally:
-        conn.close()
 
 
 def _load_config() -> dict[str, Any]:

@@ -18,7 +18,6 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Callable
 
 from zotero_summarizer.services._common import extract_json_blob, now_iso_z, to_text
@@ -34,7 +33,6 @@ from zotero_summarizer.services.faithbench._corpus import (
 )
 from zotero_summarizer.services.faithbench._dataset import (
     BenchmarkItem,
-    BenchmarkMeta,
     QAItem,
     TrapItem,
     items_by_id,
@@ -45,7 +43,7 @@ from zotero_summarizer.services.faithbench._judgment import (
     Judgment,
 )
 from zotero_summarizer.services.faithbench._runner import (
-    RunPaths,
+    RunInputs,
     latest_by_key,
     load_jsonl,
 )
@@ -381,10 +379,7 @@ def _judge_claims_row(row: dict[str, Any], *, item_id: str, paper_key: str, ctx:
 
 def judge_run(
     *,
-    meta: BenchmarkMeta,
-    items: list[BenchmarkItem],
-    papers_dir: Path,
-    paths: RunPaths,
+    inputs: RunInputs,
     judge_llm: Any,
     judge_model: str,
     max_text_chars: int,
@@ -398,6 +393,7 @@ def judge_run(
 
     ``research_goals`` (the run's snapshot, "; "-joined) switches read_why
     claims to the goal-aware support standard; empty → paper-only for all."""
+    meta, items, papers_dir, paths = inputs.meta, inputs.items, inputs.papers_dir, inputs.paths
     by_id = items_by_id(items)
     responses = list(latest_by_key(load_jsonl(paths.responses)).values())
     if force and paths.judgments.exists():

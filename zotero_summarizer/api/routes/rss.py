@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 from typing import Any
 
 from fastapi import APIRouter
@@ -37,15 +36,6 @@ class RssRefreshRequest(BaseModel):
     per_feed_timeout_secs: float = Field(default=10.0, ge=1.0, le=60.0)
 
 
-def _conn() -> sqlite3.Connection:
-    db_path = get_settings().triage_db_path
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path), timeout=10)
-    conn.row_factory = sqlite3.Row
-    feeds_storage.init_feeds_schema(conn)
-    return conn
-
-
 def _clean_feed(row: dict[str, Any]) -> dict[str, Any]:
     out = dict(row)
     out["enabled"] = bool(out.get("enabled"))
@@ -54,11 +44,8 @@ def _clean_feed(row: dict[str, Any]) -> dict[str, Any]:
 
 async def list_feeds() -> dict[str, Any]:
     def _read() -> list[dict[str, Any]]:
-        conn = _conn()
-        try:
+        with feeds_storage.open_triage_conn(get_settings().triage_db_path) as conn:
             return [_clean_feed(row) for row in rss_storage.list_rss_feeds(conn, include_disabled=True)]
-        finally:
-            conn.close()
 
     feeds = await asyncio.to_thread(_read)
     return {"feeds": feeds, "total": len(feeds)}
@@ -71,16 +58,13 @@ async def add_feed(req: RssFeedRequest) -> dict[str, Any]:
         raise APIError("validation_error", str(exc), status_code=422) from exc
 
     def _write() -> dict[str, Any]:
-        conn = _conn()
-        try:
+        with feeds_storage.open_triage_conn(get_settings().triage_db_path) as conn:
             feed_id = rss_storage.upsert_rss_feed(
                 conn, name=req.name, url=safe_url, enabled=req.enabled, source="app",
             )
             conn.commit()
             row = conn.execute("SELECT * FROM rss_feeds WHERE id = ?", (feed_id,)).fetchone()
             return _clean_feed(dict(row))
-        finally:
-            conn.close()
 
     return await asyncio.to_thread(_write)
 
@@ -94,8 +78,7 @@ async def update_feed(feed_id: int, req: RssFeedUpdateRequest) -> dict[str, Any]
             raise APIError("validation_error", str(exc), status_code=422) from exc
 
     def _write() -> dict[str, Any]:
-        conn = _conn()
-        try:
+        with feeds_storage.open_triage_conn(get_settings().triage_db_path) as conn:
             ok = rss_storage.update_rss_feed(
                 conn,
                 int(feed_id),
@@ -108,21 +91,16 @@ async def update_feed(feed_id: int, req: RssFeedUpdateRequest) -> dict[str, Any]
             conn.commit()
             row = conn.execute("SELECT * FROM rss_feeds WHERE id = ?", (int(feed_id),)).fetchone()
             return _clean_feed(dict(row))
-        finally:
-            conn.close()
 
     return await asyncio.to_thread(_write)
 
 
 async def delete_feed(feed_id: int) -> dict[str, Any]:
     def _write() -> dict[str, Any]:
-        conn = _conn()
-        try:
+        with feeds_storage.open_triage_conn(get_settings().triage_db_path) as conn:
             deleted = rss_storage.delete_rss_feed(conn, int(feed_id))
             conn.commit()
             return {"deleted": deleted}
-        finally:
-            conn.close()
 
     return await asyncio.to_thread(_write)
 
@@ -131,13 +109,10 @@ async def import_from_zotero() -> dict[str, Any]:
     def _import() -> dict[str, Any]:
         reader = ZoteroReader(get_settings().zotero_data_dir)
         groups = reader.get_feed_groups()
-        conn = _conn()
-        try:
+        with feeds_storage.open_triage_conn(get_settings().triage_db_path) as conn:
             result = rss_storage.import_zotero_feeds(conn, groups)
             conn.commit()
             return result
-        finally:
-            conn.close()
 
     try:
         return await asyncio.to_thread(_import)

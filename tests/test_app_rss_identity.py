@@ -141,9 +141,11 @@ def test_ambiguous_legacy_alias_is_reported_not_resolved() -> None:
 
     fs.init_feeds_schema(conn)
 
-    report = fs.feed_key_alias_validation_report(conn)
-    assert report["ambiguous_count"] == 1
-    assert report["ambiguous"][0]["old_key"] == "feed:42"
+    ambiguous = conn.execute(
+        "SELECT old_key FROM feed_key_alias_ambiguities ORDER BY old_key"
+    ).fetchall()
+    assert len(ambiguous) == 1
+    assert ambiguous[0][0] == "feed:42"
     assert fs.get_processed_feed_item_by_id(conn, 42) is None
 
 

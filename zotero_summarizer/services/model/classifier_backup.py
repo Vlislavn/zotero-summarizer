@@ -30,7 +30,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from zotero_summarizer.services._common import atomic_write, now_iso_z
+from zotero_summarizer.services._common import atomic_write, now_iso_z, read_json_or_empty
 
 LOGGER = logging.getLogger(__name__)
 
@@ -53,16 +53,6 @@ def _snapshot_name(meta: dict[str, Any], ts: str) -> str:
     return f"{ts}{_SEP}{sha}{_SEP}{oof_tag}"
 
 
-def _read_meta(json_path: Path) -> dict[str, Any]:
-    """Read the model json mirror. Missing file → ``{}`` (legitimate absence — the
-    joblib may exist without a mirror on a partially-migrated cache). A file that
-    EXISTS but is unreadable/unparseable RAISES — a corrupt model mirror is a real
-    signal, not something to paper over with an empty label."""
-    if not json_path.exists():
-        return {}
-    return json.loads(json_path.read_text(encoding="utf-8"))
-
-
 def snapshot_current(
     model_dir: Path,
     classifier_name: str,
@@ -82,7 +72,7 @@ def snapshot_current(
     if not joblib_path.exists():
         return None
     ts = ts or now_iso_z().replace(":", "").replace("-", "")
-    meta = _read_meta(json_path)
+    meta = read_json_or_empty(json_path)
     snap_dir = _history_dir(model_dir, classifier_name) / _snapshot_name(meta, ts)
     snap_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(joblib_path, snap_dir / joblib_path.name)
@@ -115,7 +105,7 @@ def list_snapshots(model_dir: Path, classifier_name: str) -> list[dict[str, Any]
         return []
     out: list[dict[str, Any]] = []
     for snap in sorted(p.name for p in hdir.iterdir() if p.is_dir()):
-        meta = _read_meta(hdir / snap / f"{classifier_name}.json")
+        meta = read_json_or_empty(hdir / snap / f"{classifier_name}.json")
         out.append({
             "name": snap,
             "trained_at": meta.get("trained_at"),

@@ -35,20 +35,20 @@ class InstrumentedLLMClient:
     def _estimate_tokens(text: str) -> int:
         return len(text) // 4
 
-    def prompt(self, prompt: str, **kwargs: Any) -> Any:
-        result = self._inner.prompt(prompt, **kwargs)
+    def _log_call(self, label: str, prompt: str, result: Any) -> None:
         LOGGER.info(
-            "LLM prompt input_tokens≈%d output_tokens≈%d",
+            "LLM %s input_tokens≈%d output_tokens≈%d",
+            label,
             self._estimate_tokens(prompt),
             self._estimate_tokens(self._to_text(result)),
         )
+
+    def prompt(self, prompt: str, **kwargs: Any) -> Any:
+        result = self._inner.prompt(prompt, **kwargs)
+        self._log_call("prompt", prompt, result)
         return result
 
     def pydantic_prompt(self, prompt: str, pydantic_model: Any, **kwargs: Any) -> Any:
         result = self._inner.pydantic_prompt(prompt=prompt, pydantic_model=pydantic_model, **kwargs)
-        LOGGER.info(
-            "LLM pydantic_prompt input_tokens≈%d output_tokens≈%d",
-            self._estimate_tokens(prompt),
-            self._estimate_tokens(self._to_text(result)),
-        )
+        self._log_call("pydantic_prompt", prompt, result)
         return result

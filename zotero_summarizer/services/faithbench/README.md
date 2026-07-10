@@ -120,7 +120,7 @@ to be re-used:
 | `_corpus.py` | paper selection/extraction, frozen text, `normalize_text` (shared by gate AND judge), chunking, per-paper BM25 (word `tokenize` reused from `storage.corpus_bm25`); `PaperSubstrate` bundles a paper's text+norm+chunk-index (the trio `_judge`/`_runner` cache per paper) |
 | `_build_qa.py` | QA generation + deterministic span keep-gate + traps |
 | `_build_claims.py` | digest (reuses `library.quality_review`) + claim decomposition |
-| `_runner.py` | trial execution, append-only responses, resume + manifest guard; `run_benchmark`'s 7 execution knobs (conditions/tracks/runs/limit/retry_errors/serial/max_workers) are bundled in `RunOptions` |
+| `_runner.py` | trial execution, append-only responses, resume + manifest guard; `run_benchmark`'s 7 execution knobs (conditions/tracks/runs/limit/retry_errors/serial/max_workers) are bundled in `RunOptions`, and the frozen run artifacts (meta/items/papers_dir/paths) in `RunInputs` — the same bundle `judge_run` takes, so runner and judge can never disagree on what a "run" is |
 | `_judge.py` | hard ladder + LLM escalation, claim support judging |
 | `_stats.py` | `calculate_statistics` — single source of truth |
 | `_report.py` | report.json / report.md rendering + master log |

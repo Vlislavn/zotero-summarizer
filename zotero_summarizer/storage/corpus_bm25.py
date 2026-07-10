@@ -15,6 +15,8 @@ import sqlite3
 import threading
 from pathlib import Path
 
+from zotero_summarizer.storage.corpus import open_corpus_conn
+
 try:
     from rank_bm25 import BM25Okapi
 except Exception:  # pragma: no cover - optional dependency boundary
@@ -52,9 +54,7 @@ class CorpusBM25:
         self._bm25 = None  # BM25Okapi | None
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path), timeout=10)
-        conn.row_factory = sqlite3.Row
-        return conn
+        return open_corpus_conn(self.db_path)
 
     @staticmethod
     def _db_version(conn: sqlite3.Connection) -> tuple[int, str]:

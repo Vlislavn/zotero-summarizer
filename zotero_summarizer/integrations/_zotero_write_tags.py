@@ -12,6 +12,7 @@ from zotero_summarizer.integrations._zotero_write_common import (  # noqa: F401
     lookup_int_id,
     resolve_user_library_item_id,
 )
+from zotero_summarizer.storage.repositories import table_columns
 
 
 class ZoteroTagMixin:
@@ -364,8 +365,7 @@ class ZoteroTagMixin:
 
     @staticmethod
     def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
-        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-        return {str(row["name"]) for row in rows}
+        return table_columns(conn, table_name)
 
     @staticmethod
     def _get_item_type_id(conn: sqlite3.Connection, type_name: str) -> int | None:
