@@ -48,6 +48,31 @@ class ZoteroFeedsMixin:
 
         return self._execute_read(_read)
 
+    def get_unread_feed_guid_map(self, limit: int = 5000) -> dict[str, int]:
+        """Map ``guid -> feedItems.itemID`` for every UNREAD feed item.
+
+        The read-sync reconciler joins this against the app-side ``rss_items``
+        read state to clear Zotero's unread badge for items the app already
+        triaged (guid is the shared key — both sides store the RSS entry id
+        verbatim). Zotero purges unread feed items after ``cleanupUnreadAfter``
+        days, so the map is naturally bounded; ``limit`` is a safety cap.
+        """
+        safe_limit = max(1, min(int(limit), 20000))
+
+        def _read(conn: sqlite3.Connection) -> dict[str, int]:
+            rows = conn.execute(
+                """
+                SELECT fi.guid, fi.itemID
+                FROM feedItems fi
+                WHERE fi.readTime IS NULL AND fi.guid IS NOT NULL AND fi.guid != ''
+                LIMIT ?
+                """,
+                (safe_limit,),
+            ).fetchall()
+            return {str(row["guid"]): int(row["itemID"]) for row in rows}
+
+        return self._execute_read(_read)
+
     def get_feed_items(
         self,
         feed_library_id: int | None = None,

@@ -12,6 +12,6 @@
 #   python3 tools/precommit/check_redundancy.py dump > tools/precommit/redundancy_allowlist.txt
 #   # then re-add this header
 #
-# Current contents: 0 blocking transforms; the near-duplicate function pairs below
-# are pre-existing parallel implementations (copy-paste helpers / parallel adapters),
-# frozen as known tech debt — advisory only, they never block a commit.
+# Current contents: EMPTY — the 2026-07-09 sweep folded the duplicated JSON
+# readers into services/_common.read_json_or_empty and routed the sqlite conn
+# openers through shared storage-layer helpers.

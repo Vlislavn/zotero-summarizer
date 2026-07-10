@@ -3,7 +3,7 @@
 // finishing — the wizard is short by design, so the bar reads as nearly-full
 // almost immediately.
 
-const STEP_LABELS = ['Connect Zotero', 'Connect LLM', 'Describe research'];
+const STEP_LABELS = ['Zotero sync', 'Connect LLM', 'Describe research'];
 
 export default function StepProgress({ current, validity, maxReached = 0 }) {
   // current is the 0-based active step index. A step earns its green check only

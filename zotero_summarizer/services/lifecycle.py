@@ -19,6 +19,11 @@ from zotero_summarizer.storage import repositories as triage_db
 from zotero_summarizer.storage.corpus import EmbeddingCache
 
 
+_STARTUP_RSS_MAX_FEEDS = int(os.environ.get("ZS_STARTUP_RSS_MAX_FEEDS", "5"))
+_STARTUP_RSS_MAX_NEW_PER_FEED = int(os.environ.get("ZS_STARTUP_RSS_MAX_NEW_PER_FEED", "10"))
+_STARTUP_RSS_TIMEOUT_SECS = float(os.environ.get("ZS_STARTUP_RSS_TIMEOUT_SECS", "8"))
+
+
 def _load_config(current_settings: Settings, override_model: str | None) -> GoalsConfig:
     """Read + validate goals.yaml.
 
@@ -33,7 +38,7 @@ def _load_config(current_settings: Settings, override_model: str | None) -> Goal
     if not current_settings.config_path.exists():
         raise RuntimeError(f"Missing config file: {current_settings.config_path}")
 
-    config = read_config(current_settings.config_path)
+    config = read_config(current_settings.config_path, current_settings.calibration_path)
     if override_model:
         LOGGER.info(
             "LLM model override: default stage model %r -> %r",
@@ -265,6 +270,35 @@ def _resume_interrupted_jobs(app_state: RuntimeState, loop: asyncio.AbstractEven
     return resumed_jobs
 
 
+def _schedule_startup_rss_refresh(
+    loop: asyncio.AbstractEventLoop | None,
+    current_settings: Settings,
+) -> bool:
+    """Schedule a small fetch-only app RSS refresh on startup."""
+    if loop is None or _STARTUP_RSS_MAX_FEEDS <= 0 or _STARTUP_RSS_MAX_NEW_PER_FEED <= 0:
+        return False
+
+    def _run_refresh() -> None:
+        from zotero_summarizer.integrations.app_rss import AppRssReader
+
+        reader = AppRssReader(current_settings.triage_db_path)
+        result = reader.refresh_feeds(
+            max_feeds=_STARTUP_RSS_MAX_FEEDS,
+            max_new_items_per_feed=_STARTUP_RSS_MAX_NEW_PER_FEED,
+            per_feed_timeout=_STARTUP_RSS_TIMEOUT_SECS,
+        )
+        LOGGER.info("startup app RSS refresh complete: %s", result)
+
+    async def _worker() -> None:
+        try:
+            await asyncio.to_thread(_run_refresh)
+        except Exception as exc:  # noqa: BLE001 — background startup helper
+            LOGGER.warning("startup app RSS refresh failed: %s", exc)
+
+    loop.create_task(_worker())
+    return True
+
+
 def startup(override_model: str | None = None) -> None:
     current_settings = settings()
     setup_logging()
@@ -307,6 +341,7 @@ def startup(override_model: str | None = None) -> None:
         loop = None
 
     resumed_jobs = _resume_interrupted_jobs(app_state, loop)
+    rss_refresh_scheduled = _schedule_startup_rss_refresh(loop, current_settings)
 
     auto_corpus_import_started = False
     if config.corpus.enabled and app_state.zotero_reader is not None and loop is not None:
@@ -330,7 +365,7 @@ def startup(override_model: str | None = None) -> None:
         (
             "Startup complete config=%s timeout=%ss log_file=%s corpus_db=%s embedding_model=%s "
             "zotero_data_dir=%s interrupted_jobs=%s resumed_jobs=%s auto_corpus_import=%s "
-            "deep_review_prewarm=%s review_fleet_prewarm=%s triage_job_concurrency=%s"
+            "startup_rss_refresh=%s deep_review_prewarm=%s review_fleet_prewarm=%s triage_job_concurrency=%s"
         ),
         current_settings.config_path,
         current_settings.summary_timeout_seconds,
@@ -341,6 +376,7 @@ def startup(override_model: str | None = None) -> None:
         interrupted_jobs,
         resumed_jobs,
         auto_corpus_import_started,
+        rss_refresh_scheduled,
         prewarm_scheduled,
         review_fleet_scheduled,
         current_settings.triage_job_concurrency,

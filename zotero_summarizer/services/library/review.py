@@ -11,14 +11,14 @@ from __future__ import annotations
 import json as _json
 import logging
 import sqlite3
-from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any
 
-from zotero_summarizer.models import SummarizeResponse
 from zotero_summarizer.services import interaction_log
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.golden.goldenset import _PRIORITY_TO_RELEVANCE
 from zotero_summarizer.storage import feeds as feeds_storage
+from zotero_summarizer.storage.feed_identity import row_feed_keys
+from zotero_summarizer.storage import repositories
 
 LOGGER = logging.getLogger(__name__)
 
@@ -28,17 +28,8 @@ LOGGER = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-@contextmanager
-def _conn() -> Iterator[sqlite3.Connection]:
-    path = get_settings().triage_db_path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), timeout=10)
-    conn.row_factory = sqlite3.Row
-    try:
-        feeds_storage.init_feeds_schema(conn)
-        yield conn
-    finally:
-        conn.close()
+def _conn():
+    return feeds_storage.open_triage_conn(get_settings().triage_db_path)
 
 
 # ---------------------------------------------------------------------------
@@ -98,9 +89,30 @@ def _log_review(row: dict[str, Any], surface: str, value: str) -> None:
     column, not this dict), so the model block records what the human overrode.
     """
     interaction_log.log_feed_decision(
-        row=row, item_key=f"feed:{int(row.get('feed_item_id') or 0)}",
+        row=row, item_key=row_feed_keys(row)[0],
         surface=surface, human={"kind": "priority", "value": value},
     )
+
+
+def _priority_for_positive_review(row: dict[str, Any]) -> str:
+    priority = str(row.get("reading_priority") or "").strip()
+    if priority in _PRIORITY_TO_RELEVANCE and priority != "dont_read":
+        return priority
+    return "should_read"
+
+
+def _record_label_verdict(row: dict[str, Any], priority: str, comment: str) -> None:
+    """Persist a review decision into ``label_verdicts`` when the table exists."""
+    try:
+        repositories.insert_or_update_label_verdict(
+            get_settings().triage_db_path,
+            item_key=row_feed_keys(row)[0],
+            original_derived_priority=str(row.get("reading_priority") or "").strip() or "unknown",
+            user_priority=priority,
+            comment=comment,
+        )
+    except sqlite3.Error as exc:
+        LOGGER.warning("review label verdict could not be saved: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +144,8 @@ def approve(processed_id: int) -> dict[str, Any]:
             decision_reason="user_approved_in_review_ui",
         )
         conn.commit()
+    priority = _priority_for_positive_review(row)
+    _record_label_verdict(row, priority, "approved in review UI")
     return {"processed_id": processed_id, "state": feeds_storage.DECISION_USER_APPROVED}
 
 
@@ -191,6 +205,11 @@ def relabel(processed_id: int, new_priority: str) -> dict[str, Any]:
         label=new_priority,
         note=f"relabel via review UI ({new_priority}; from {row.get('decision')})",
     )
+    _record_label_verdict(
+        row,
+        new_priority,
+        f"relabel via review UI ({new_priority}; from {row.get('decision')})",
+    )
     _log_review(row, "review_relabel", new_priority)
     return {
         "processed_id": processed_id,
@@ -245,6 +264,7 @@ def _confirm_or_reject_to_dont_read(processed_id: int) -> dict[str, Any]:
         label="dont_read",
         note=f"relabel via review UI (dont_read; from {prior_state})",
     )
+    _record_label_verdict(row, "dont_read", f"relabel via review UI (dont_read; from {prior_state})")
     _log_review(row, "review_relabel", "dont_read")
     return {"processed_id": processed_id, "golden_csv_row_added": appended}
 
@@ -320,7 +340,7 @@ def materialize_row(
 
     row_id = int(row["id"])
     new_key = _generate_zotero_key(used_keys)
-    stored = _pick_summary_for_apply(row)
+    stored = pick_stored_summary(row)
     summary = stored if stored is not None else _summary_from_row(row)
     feed_payload = _feed_payload_from_row(row)
     tags = _tags_from_row(is_black_swan=False, black_swan_tag="")
@@ -361,8 +381,8 @@ def materialize_row(
     return new_key
 
 
-def apply_all_approved(since_hours: int = 720) -> dict[str, Any]:
-    """Materialize every ``user_approved`` row into Zotero.
+def apply_all_approved(since_hours: int | None = None) -> dict[str, Any]:
+    """Materialize every ``user_approved`` row into Zotero (unbounded by default — never expires).
 
     Bypasses the pending_changes pipeline (which is designed for existing
     library items) and calls :meth:`ZoteroWriter.apply_feed_materialization`
@@ -377,9 +397,6 @@ def apply_all_approved(since_hours: int = 720) -> dict[str, Any]:
     """
     from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 
-    settings_ = get_settings()
-    writer = ZoteroWriter(settings_.zotero_data_dir)
-
     with _conn() as conn:
         rows = feeds_storage.select_by_decisions(
             conn,
@@ -387,6 +404,44 @@ def apply_all_approved(since_hours: int = 720) -> dict[str, Any]:
             since_hours=since_hours,
             limit=5000,
         )
+
+    if not rows:
+        return {
+            "applied": 0,
+            "pending_sync": 0,
+            "zotero_sync_error": None,
+            "failed_count": 0,
+            "failed": [],
+        }
+
+    settings_ = get_settings()
+    try:
+        writer = ZoteroWriter(settings_.zotero_data_dir)
+    except Exception as exc:  # noqa: BLE001 - Zotero is optional for approved feed rows.
+        LOGGER.warning("apply_all_approved: Zotero writer unavailable; rows remain pending sync: %s", exc)
+        with _conn() as conn:
+            for row in rows:
+                feeds_storage.record_zotero_sync_status(
+                    conn,
+                    feed_library_id=int(row["feed_library_id"]),
+                    feed_item_id=int(row["feed_item_id"]),
+                    status="pending",
+                )
+                feeds_storage.record_app_outcome(
+                    conn,
+                    feed_library_id=int(row["feed_library_id"]),
+                    feed_item_id=int(row["feed_item_id"]),
+                    final_outcome=feeds_storage.OUTCOME_KEPT_UNREAD_APP,
+                    signal_weight=feeds_storage.OUTCOME_WEIGHT[feeds_storage.OUTCOME_KEPT_UNREAD_APP],
+                )
+            conn.commit()
+        return {
+            "applied": 0,
+            "pending_sync": len(rows),
+            "zotero_sync_error": str(exc),
+            "failed_count": 0,
+            "failed": [],
+        }
 
     applied = 0
     failed: list[dict[str, Any]] = []
@@ -409,25 +464,11 @@ def apply_all_approved(since_hours: int = 720) -> dict[str, Any]:
 
     return {
         "applied": applied,
+        "pending_sync": 0,
+        "zotero_sync_error": None,
         "failed_count": len(failed),
         "failed": failed[:20],
     }
-
-
-def _pick_summary_for_apply(row: dict[str, Any]):
-    """Return the stored SummarizeResponse (or None) from shap_contribs_json.
-
-    Used by apply_all_approved to prefer the LLM/relabel-synthesised summary
-    over the sparse fallback rebuilt from the row's scalar fields.
-    """
-    blob = (row.get("shap_contribs_json") or "").strip()
-    if not blob:
-        return None
-    payload = _json.loads(blob)
-    summary_dict = payload.get("summary")
-    if summary_dict is None:
-        return None
-    return SummarizeResponse.model_validate(summary_dict)
 
 
 def _label_and_terminate(
@@ -453,6 +494,7 @@ def _label_and_terminate(
     appended = False
     if write_to_golden:
         appended = append_to_golden(row, label=label, note=f"{reason} via review UI")
+    _record_label_verdict(row, label, f"{reason} via review UI")
     _log_review(row, "review_reject", label)
     return {"processed_id": processed_id, "golden_csv_row_added": appended}
 
@@ -497,4 +539,5 @@ from zotero_summarizer.services.library.review_summary import (  # noqa: E402,F4
     _write_golden_sample,
     append_to_golden,
     append_verdict_to_golden,
+    pick_stored_summary,
 )

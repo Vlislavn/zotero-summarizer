@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import {
   fetchJobs,
   fetchJob,
@@ -6,6 +7,7 @@ import {
   fetchCalibrationMetrics,
   submitResultFeedback,
 } from '../api/triageApi.js';
+import { triggerTriageBacklog } from '../api/dailyApi.js';
 import { humanizeError } from '../utils/humanizeError.js';
 import Async from '../components/ui/Async.jsx';
 import { ActionBadge } from '../components/ui/Badge.jsx';
@@ -112,6 +114,11 @@ export default function Triage() {
   // Last seen status of the active job, so we can auto-refresh calibration the
   // moment a job transitions out of `running` (EDGE 4).
   const prevStatusRef = useRef(null);
+  const runMutation = useMutation({
+    mutationFn: triggerTriageBacklog,
+    onSuccess: () => { setMessage('Triage started — check job list.'); setIsError(false); loadJobs(); },
+    onError: (err) => { setMessage(humanizeError(err)); setIsError(true); },
+  });
   const jobListRef = useRef(null);
 
   // Completed results, optionally narrowed to the ones still awaiting your
@@ -289,13 +296,23 @@ export default function Triage() {
             Library tab.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => { loadJobs(); if (activeJobId) loadJob(activeJobId); }}
-          className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs hover:bg-slate-50"
-        >
-          Refresh
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => runMutation.mutate()}
+            disabled={runMutation.isPending}
+            className="px-3 py-1.5 rounded-lg border border-teal-600 bg-teal-600 text-white text-xs font-medium hover:bg-teal-700 disabled:opacity-50"
+          >
+            {runMutation.isPending ? 'Starting…' : 'Run triage now'}
+          </button>
+          <button
+            type="button"
+            onClick={() => { loadJobs(); if (activeJobId) loadJob(activeJobId); }}
+            className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs hover:bg-slate-50"
+          >
+            Refresh
+          </button>
+        </div>
       </div>
 
       <StatusBanner message={message} isError={isError} />

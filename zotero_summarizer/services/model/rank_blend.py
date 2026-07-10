@@ -36,6 +36,8 @@ Blend contract (mirrors the measured Library behaviour exactly):
 """
 from __future__ import annotations
 
+from zotero_summarizer.domain import ReadingPriority
+
 GOAL_BLEND_WEIGHT = 0.4
 PRESTIGE_BLEND_WEIGHT = 0.15
 
@@ -123,6 +125,11 @@ def blend_scores(
 #     (never negative) — ``uncertain`` is a self-consistency / human-look state,
 #     not a quality demotion, so it must never bury a borderline (e.g. clinical)
 #     paper.
+# PROVISIONAL magnitudes: the GOAL/PRESTIGE blend weights above are blind-judge
+# measured (NDCG 0.38→0.72), but these bonus magnitudes are hand-set, capped, and
+# NOT yet isolated by an eval. `tools/eval_slate_blend.py` measures their effect on
+# the slate's own kept/trashed labels (grade-only vs band-primary vs normalized) — it
+# has not been run on the current slate (Phase 5 closes this).
 DEFAULT_QUALITY_BONUS: dict[str, float] = {"A": 0.06, "B": 0.03, "C": 0.0, "D": -0.02}
 DEFAULT_QUALITY_BAND_BONUS: dict[str, float] = {
     "highlight": 0.06, "flag": -0.06, "neutral": 0.0, "uncertain": 0.0,
@@ -155,11 +162,68 @@ def quality_bonus(
     return base + grade_nudge * grade_table.get(g, 0.0)
 
 
+# Default thresholds for promote_band. Set by tools/eval_quality_promote.py on 68
+# firewalled user-verdict rows: goal_sim 0.55 + relevance_floor 3.0 promote 3 must +
+# 9 should at 1.00 precision with ZERO flooding; the old 3.5 (should-band boundary)
+# promoted just 1 under gate compression, and below 3.0 precision decays. Runtime uses
+# the config values (quality_promote_*); these are the fallback when called bare.
+DEFAULT_PROMOTE_GOAL_SIM = 0.55
+DEFAULT_PROMOTE_RELEVANCE_FLOOR = 3.0
+_PROMOTE_GRADES = {"A", "B"}
+
+
+def promote_band(
+    raw_priority: str | None,
+    *,
+    grade: str | None,
+    relevance_score: float | None,
+    goal_sim: float | None,
+    goal_sim_floor: float = DEFAULT_PROMOTE_GOAL_SIM,
+    relevance_floor: float = DEFAULT_PROMOTE_RELEVANCE_FLOOR,
+) -> str:
+    """Quality → must_read band promotion (the inverse of the auto_quality hide gate).
+
+    The gate's regressor scores are compressed toward the mean → the must_read band
+    (≥4.5) is almost never reached on its own (0/69 must recall), so ``raw_priority``
+    for a genuinely great paper lands at ``should_read``/``could_read``. This lifts a
+    paper to ``must_read`` only when quality AND relevance AGREE — a strict multi-signal
+    AND (precision-first: "I can't read much trash"):
+
+      must_read  IF  grade ∈ {A,B}  AND  goal_sim ≥ floor  AND  relevance ≥ floor
+      should_read IF grade ∈ {A,B}  AND  relevance ≥ floor   (quality lifts could→should)
+      else the raw gate band unchanged.
+
+    A ``None`` signal (no review / unscored) means "not assessed" → no promotion
+    (mirrors the no-hide-on-absent-evidence contract, ADR-B2). ``relevance_score``
+    here is the GATE's raw 1-5 score (the same field the band derives from); the
+    floor is the should_read boundary, so promotion only crosses ONE band up — never
+    invents must_read from a dont_read. Pure; the consumer (``_ranking``) applies it
+    to the record's ``reading_priority``.
+    """
+    g = str(grade or "").upper()
+    if g not in _PROMOTE_GRADES:
+        return raw_priority or ""
+    if relevance_score is None or goal_sim is None:
+        return raw_priority or ""
+    rel = float(relevance_score)
+    gs = float(goal_sim)
+    if rel < relevance_floor:
+        return raw_priority or ""
+    # relevance ≥ should-band AND quality A/B → at least should_read; must_read
+    # additionally requires strong goal alignment.
+    if gs >= goal_sim_floor:
+        return ReadingPriority.MUST_READ.value
+    return ReadingPriority.SHOULD_READ.value
+
+
 __all__ = [
     "GOAL_BLEND_WEIGHT",
     "PRESTIGE_BLEND_WEIGHT",
     "DEFAULT_QUALITY_BONUS",
     "DEFAULT_QUALITY_BAND_BONUS",
+    "DEFAULT_PROMOTE_GOAL_SIM",
+    "DEFAULT_PROMOTE_RELEVANCE_FLOOR",
     "blend_scores",
     "quality_bonus",
+    "promote_band",
 ]

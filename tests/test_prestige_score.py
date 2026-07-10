@@ -206,3 +206,31 @@ def test_policy_from_config_reads_knobs():
 
 def test_policy_from_config_respects_lift_toggle():
     assert cold_start_policy_from_config(_Cfg(cold_start_author_lift=False)).enabled is False
+
+
+# ----------------------------------------- entry_prestige_evidence (filter signal)
+# Regression: the Prestige FILTER must act on author h-index too, else a preprint
+# library (no citation percentiles) blanks the list when filtering high/low. The
+# conservative banding FLOOR stays citation-only — the two signals are separate.
+
+from zotero_summarizer.services.library._score_distribution import (  # noqa: E402
+    _entry_prestige,
+    entry_prestige_evidence,
+)
+
+
+def test_evidence_true_for_author_h_index_only_but_floor_stays_unknown():
+    entry = {"scoring": {"prestige_inputs": {"max_author_h_index": 42}}}
+    h_index, evidence = entry_prestige_evidence(entry)
+    assert (h_index, evidence) == (42.0, True)          # filterable as prestige
+    assert _entry_prestige(entry) == (None, False)      # but not "known" for the floor
+
+
+def test_evidence_true_for_citation_percentile():
+    entry = {"scoring": {"prestige_inputs": {"citation_percentile": 0.8}}}
+    assert entry_prestige_evidence(entry)[1] is True
+
+
+def test_evidence_false_when_no_signal():
+    assert entry_prestige_evidence({"scoring": {"prestige_inputs": {}}}) == (None, False)
+    assert entry_prestige_evidence(None) == (None, False)

@@ -11,3 +11,6 @@
 #
 # Format: <path>:<symbol>   # reason
 #
+# (empty — the 2026-07-09 sweep moved measure_latency to its consumer in tools/,
+# deleted the test-only feed_key_alias_validation_report, and dropped the stale
+# DraftPick entry after its finding aged out.)

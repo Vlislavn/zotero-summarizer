@@ -147,3 +147,15 @@ def _insert(
         conn.commit()
     finally:
         conn.close()
+
+
+def seed_reviews(monkeypatch, mapping: dict[str, str]) -> None:
+    """Patch the deep-review cache so ``attach_quality_from_reviews`` sees grades.
+    ``mapping``: materialized_zotero_key -> grade letter (band left neutral)."""
+    from zotero_summarizer.services.library import deep_review
+
+    reviews = {
+        key: {"quality": {"grade": grade, "quality_band": "neutral"}}
+        for key, grade in mapping.items()
+    }
+    monkeypatch.setattr(deep_review, "_read_all", lambda: reviews)

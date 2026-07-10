@@ -1,4 +1,4 @@
-"""One-off validation of the SOTA prestige-signal upgrade (NOT a committed tool).
+"""One-off validation of the prestige-signal upgrade (NOT a committed tool).
 
 Faithfully rescores the unread library with the freshly-trained gate and reports
 the prestige distribution + the data-driven floor + the must/should banding

@@ -151,6 +151,7 @@ def add_library_item(
     doi: str | None = None,
     url: str | None = None,
     abstract: str | None = None,
+    venue: str | None = None,
     item_type: str = "journalArticle",
     library_id: int = 1,
 ) -> int:
@@ -174,6 +175,7 @@ def add_library_item(
             ("abstractNote", abstract),
             ("url", url),
             ("DOI", doi),
+            ("publicationTitle", venue),
         ):
             if value is None:
                 continue

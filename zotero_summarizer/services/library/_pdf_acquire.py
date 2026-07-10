@@ -40,6 +40,9 @@ class AcquireResult:
     # The publisher landing the user can open to sign in (surfaced as a click-to-open
     # link). Set only on a ``needs_login`` result; empty otherwise.
     login_url: str = ""
+    # True when ``path`` is a web page RENDERED to PDF (blog/news), not a paper PDF —
+    # the review then treats it as a NON_PAPER (relevance-only, no scientific grade).
+    web_article: bool = False
 
 
 def _proxied_url(ua: Any, url: str, doi: str) -> str:
@@ -54,13 +57,14 @@ def _proxied_url(ua: Any, url: str, doi: str) -> str:
     return f"{prefix}{target}" if prefix else target
 
 
-def acquire_for_item(item_key: str) -> AcquireResult:
-    """Read the item's Zotero detail and acquire a reviewable PDF — the single-key entry
+def acquire_for_item(item_key: str, reader: Any = None) -> AcquireResult:
+    """Read the item's detail and acquire a reviewable PDF — the single-key entry
     point for the per-paper deep-review path (the fleet inlines the equivalent over a
-    batch). ``AcquireResult(path=None)`` when it already has a local PDF (``deep_review``
-    will use that) or nothing is fetchable."""
-    from zotero_summarizer.services.zotero.zotero import get_zotero_reader_or_raise
-    detail = get_zotero_reader_or_raise().get_item_detail(item_key) or {}
+    batch). ``reader`` overrides the resolved library reader so the in-place Today path
+    can resolve a feed candidate by ``stable_feed_key``. ``AcquireResult(path=None)``
+    when it already has a local PDF (``deep_review`` will use that) or nothing fetchable."""
+    from zotero_summarizer.services.zotero.zotero import get_library_reader
+    detail = (reader or get_library_reader()).get_item_detail(item_key) or {}
     if detail.get("has_pdf"):
         return AcquireResult(path=None)
     # Interactive path: a visible (headed) browser may pass a Cloudflare/SSO challenge a
@@ -170,7 +174,7 @@ def acquire_pdf_for(item_key: str, detail: dict[str, Any], *, allow_headed_fallb
             url, cache_dir=None, timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes
         )
         if rendered is not None:
-            return AcquireResult(path=rendered)
+            return AcquireResult(path=rendered, web_article=True)
 
     return AcquireResult(path=None)
 

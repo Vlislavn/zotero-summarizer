@@ -4,10 +4,10 @@ import json
 import random
 import sqlite3
 import time
+from http.client import HTTPConnection
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence, TypeVar
-from urllib.request import urlopen
 
 from zotero_summarizer.integrations._zotero_write_common import (  # noqa: F401
     LOGGER,
@@ -45,11 +45,16 @@ class ZoteroWriter(
 
     def is_connector_running(self) -> bool:
         """Return True when Zotero connector HTTP server responds locally."""
+        conn: HTTPConnection | None = None
         try:
-            with urlopen("http://127.0.0.1:23119/connector/ping", timeout=0.8) as response:
-                return int(getattr(response, "status", 0)) == 200
+            conn = HTTPConnection("127.0.0.1", 23119, timeout=0.8)
+            conn.request("GET", "/connector/ping")
+            return int(getattr(conn.getresponse(), "status", 0)) == 200
         except Exception:
             return False
+        finally:
+            if conn is not None:
+                conn.close()
 
     @staticmethod
     def _is_db_locked(exc: Exception) -> bool:
@@ -126,48 +131,63 @@ class ZoteroWriter(
             stale.unlink(missing_ok=True)
 
     def apply_changes(self, changes: Sequence[dict[str, Any]], create_backup: bool = True) -> dict[str, Any]:
-        """Apply queued changes and return applied IDs and per-item failures."""
+        """Apply queued changes and return applied IDs and per-item failures.
+
+        Wrapped in ``_retry_on_lock`` like every other Zotero write (Zotero's own
+        connector holds the DB open while running): the per-change SAVEPOINT is a
+        deferred transaction, so a 'database is locked' error only surfaces at the
+        first actual write inside the loop — the retry must therefore cover the
+        whole connect→dispatch→commit body, not just the initial connect.
+        """
         if not changes:
             return {"applied_ids": [], "failed": [], "backup_path": None}
 
         backup_path = self.backup_database() if create_backup else None
 
-        conn = sqlite3.connect(str(self.db_path), timeout=15)
-        conn.row_factory = sqlite3.Row
-        try:
-            conn.execute("PRAGMA foreign_keys=ON")
+        def _do() -> dict[str, Any]:
+            conn = sqlite3.connect(str(self.db_path), timeout=15)
+            conn.row_factory = sqlite3.Row
             try:
-                conn.execute("PRAGMA journal_mode=WAL")
-            except sqlite3.Error as _:
-                pass
-
-            cols = read_write_columns(lambda t: self._table_columns(conn, t))
-
-            applied_ids: list[int] = []
-            failed: list[dict[str, Any]] = []
-
-            for change in changes:
-                change_id = int(change.get("id") or 0)
-                savepoint_name = f"change_{change_id or random.randint(1000, 9999)}"
-                conn.execute(f"SAVEPOINT {savepoint_name}")
+                conn.execute("PRAGMA foreign_keys=ON")
                 try:
-                    self._dispatch_change(conn, change, cols)
-                    conn.execute(f"RELEASE {savepoint_name}")
-                    applied_ids.append(change_id)
-                except Exception as exc:
-                    conn.execute(f"ROLLBACK TO {savepoint_name}")
-                    conn.execute(f"RELEASE {savepoint_name}")
-                    failed.append({"id": change_id, "error": str(exc)})
+                    conn.execute("PRAGMA journal_mode=WAL")
+                except sqlite3.Error as _:
+                    pass
 
-            conn.commit()
-            if backup_path is not None:
-                self._prune_backups()  # cap app-created backups (after a successful write)
-            return {"applied_ids": applied_ids, "failed": failed, "backup_path": backup_path}
+                cols = read_write_columns(lambda t: self._table_columns(conn, t))
+
+                applied_ids: list[int] = []
+                failed: list[dict[str, Any]] = []
+
+                for change in changes:
+                    change_id = int(change.get("id") or 0)
+                    savepoint_name = f"change_{change_id or random.randint(1000, 9999)}"
+                    conn.execute(f"SAVEPOINT {savepoint_name}")
+                    try:
+                        self._dispatch_change(conn, change, cols)
+                        conn.execute(f"RELEASE {savepoint_name}")
+                        applied_ids.append(change_id)
+                    except Exception as exc:
+                        conn.execute(f"ROLLBACK TO {savepoint_name}")
+                        conn.execute(f"RELEASE {savepoint_name}")
+                        failed.append({"id": change_id, "error": str(exc)})
+
+                conn.commit()
+                if backup_path is not None:
+                    self._prune_backups()  # cap app-created backups (after a successful write)
+                return {"applied_ids": applied_ids, "failed": failed, "backup_path": backup_path}
+            except sqlite3.Error:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        try:
+            return self._retry_on_lock(_do, ctx="apply_changes")
+        except sqlite3.OperationalError as exc:
+            raise ZoteroWriteError(f"Failed to apply queued changes: DB still locked after retries: {exc}") from exc
         except sqlite3.Error as exc:
-            conn.rollback()
             raise ZoteroWriteError(f"Failed to apply queued changes: {exc}") from exc
-        finally:
-            conn.close()
 
     def _dispatch_change(self, conn: sqlite3.Connection, change: dict[str, Any], cols: WriteColumns) -> None:
         """Validate one queued change and route it to the right ``_apply_*`` writer."""

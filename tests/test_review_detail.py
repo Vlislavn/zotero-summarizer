@@ -338,3 +338,35 @@ def test_load_csv_row_returns_none_when_missing(tmp_path):
 
 def test_load_csv_row_returns_none_when_csv_missing(tmp_path):
     assert rd.load_csv_row(tmp_path / "does-not-exist.csv", "ABC12345") is None
+
+
+def test_build_feed_detail_by_key_folds_in_cached_review(tmp_path, monkeypatch):
+    """The IN-PLACE Today review (cached under stable_feed_key) must surface on the feed
+    /paper detail — it used to hardcode deep_review:None (pre-Phase-3). Metadata for a
+    stable key comes from app-owned rss_items (NOT Zotero's feedItems), so the detail works
+    WITHOUT a live Zotero DB. An int feed-item-id key has no review entry → None."""
+    from zotero_summarizer.services.library import deep_review
+
+    monkeypatch.setattr(fs, "get_processed_feed_item_by_stable_key",
+                        lambda conn, key: {"title": "T", "feed_library_id": 1, "feed_item_id": 1, "doi": ""})
+    monkeypatch.setattr(fs, "get_processed_feed_item_by_id",
+                        lambda conn, key: {"title": "T", "feed_library_id": 1, "feed_item_id": 1, "doi": ""})
+    # Stable-key metadata source = rss_items (Zotero-independent). If this path called the
+    # Zotero feedItems reader instead, a no-Zotero run would raise FileNotFoundError.
+    monkeypatch.setattr(rd.rss_storage, "get_rss_item_by_stable_key",
+                        lambda conn, key: {"abstract": "abs", "authors": "Jane Doe", "url": "https://arxiv.org/abs/x"})
+    def _no_zotero(**kw):  # _fetch_feed_metadata must NOT be reached for a stable key
+        raise AssertionError("stable key must not hit the Zotero feedItems reader")
+    monkeypatch.setattr(rd, "_fetch_feed_metadata", _no_zotero)
+    monkeypatch.setattr(rd, "build_scoring", lambda row: None)
+    monkeypatch.setattr(rd._candidate, "parse_payload", lambda row: {})
+    monkeypatch.setattr(deep_review, "get_cached_review", lambda key: {"quality": {"grade": "A"}})
+
+    feed_key = "feed:d:" + ("a" * 64)
+    detail = rd.build_feed_detail_by_key(triage_db_path=tmp_path / "t.db", zotero_data_dir=tmp_path, feed_key=feed_key)
+    assert detail["deep_review"] == {"quality": {"grade": "A"}}  # folded in
+    assert detail["abstract"] == "abs" and detail["url"] == "https://arxiv.org/abs/x"  # from rss_items
+
+    monkeypatch.setattr(rd, "_fetch_feed_metadata", lambda **kw: {})  # int-key path still uses Zotero source
+    by_id = rd.build_feed_detail_by_key(triage_db_path=tmp_path / "t.db", zotero_data_dir=tmp_path, feed_key=42)
+    assert by_id["deep_review"] is None  # an int id key never has an in-place review

@@ -3,9 +3,9 @@
 ``DEFAULT_JUDGE_MODEL`` follows the ARE/Gaia2 "pinned judge model" discipline:
 one module-level, fully-qualified model id that every consumer (CLI flag
 default, judge engine, report metadata) imports — never a floating alias like
-``sota`` whose target can silently change and break score comparability. The
+a floating alias whose target can silently change and break score comparability. The
 id must be one the judge endpoint actually serves (checked against
-``GET /v1/models`` on api.kather.ai at pin time).
+``GET /v1/models`` on the remote endpoint at pin time).
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from __future__ import annotations
 DEFAULT_JUDGE_BASE_URL_ENV = "CUSTOM_BASE_URL"
 DEFAULT_JUDGE_API_KEY_ENV = "CUSTOM_API_KEY"
 # Deliberately NOT the qwen3.6-35b family (that's the model under test —
-# self-judging bias) and NOT the floating "sota" alias.
+# self-judging bias) and NOT a floating model alias.
 DEFAULT_JUDGE_MODEL = "Qwen3.5-397B-A17B-FP8"
 # Reasoning model: the thinking phase shares this budget, so it needs the same
 # roomy 16384 the provider registry documents (models/providers.py) — at 2048

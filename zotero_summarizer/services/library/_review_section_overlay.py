@@ -27,10 +27,10 @@ import re
 from typing import Any
 
 from zotero_summarizer.services.library._grounding import quote_is_grounded
+from zotero_summarizer.storage.corpus_bm25 import tokenize
 
 # Sentinel titles produced by the page fallback / preamble — not real headings.
 _SENTINEL_TITLE_RE = re.compile(r"^(?:Front matter|Page\s+\d+)$", re.IGNORECASE)
-_TOKEN_RE = re.compile(r"[a-z0-9]+")
 # Section-level fallback floors: the approximate section must share at least this
 # FRACTION of the finding's content tokens AND this many tokens absolutely — high
 # enough that a description with no real lexical tie to any section stays unplaced
@@ -46,10 +46,6 @@ def _norm_title(title: Any) -> str:
 def _label(section: dict[str, Any]) -> dict[str, Any]:
     """The light section reference carried on a located finding (no body text)."""
     return {"id": section.get("id"), "title": section.get("title"), "page": section.get("page")}
-
-
-def _tokens(text: str) -> list[str]:
-    return _TOKEN_RE.findall(str(text or "").lower())
 
 
 def _is_degraded(sections: list[dict[str, Any]]) -> bool:
@@ -85,13 +81,13 @@ def _best_section(quote: Any, sections: list[dict[str, Any]]) -> dict[str, Any] 
     SECTION-LEVEL fallback when no span grounds. Returns None (stays unplaced) when
     no section clears the conservative overlap floors, so a description with no real
     tie to the paper is never mislocated."""
-    q = set(_tokens(quote))
+    q = set(tokenize(str(quote or "")))
     if len(q) < _APPROX_MIN_TOKENS:
         return None
     best: dict[str, Any] | None = None
     best_shared = 0
     for section in sections:
-        shared = len(q & set(_tokens(section.get("text"))))
+        shared = len(q & set(tokenize(str(section.get("text") or ""))))
         if shared > best_shared:
             best_shared, best = shared, section
     if best is None or best_shared < _APPROX_MIN_TOKENS or best_shared / len(q) < _APPROX_MIN_OVERLAP:

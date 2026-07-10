@@ -47,12 +47,15 @@ _TEXT_CACHE: dict[tuple[str, int], tuple[str, PaperChunkIndex]] = {}
 
 def _paper_context_source(item_key: str) -> tuple[str, PaperChunkIndex]:
     """Extracted full text + chunk index for a library item's local PDF."""
+    from zotero_summarizer.services.zotero.zotero import get_library_reader
+
     app = state()
-    reader = getattr(app, "zotero_reader", None)
+    # Zotero-optional: app library reader over kept feed papers when Zotero absent.
+    reader = get_library_reader(app)
     extractor = getattr(app, "pdf_extractor", None)
-    if reader is None or extractor is None:
+    if extractor is None:
         raise APIError(
-            error="unavailable", message="Zotero reader / PDF extractor not initialized",
+            error="unavailable", message="PDF extractor not initialized",
             status_code=503,
         )
     detail = reader.get_item_detail(item_key)
@@ -195,5 +198,4 @@ def _metadata_payload(answer: str, quote: str) -> dict[str, Any]:
         "latency_seconds": 0.0,
         "model": "deterministic-metadata",
     }
-
 

@@ -15,6 +15,9 @@ class SlatePaper:
 
     item_key: str
     item_id: int
+    # Durable feed identity — the key the in-place Today deep review caches under and
+    # the pre-materialize join handle to the deep_review cache. Empty for legacy rows.
+    stable_feed_key: str
     title: str
     authors: str
     venue: str
@@ -55,6 +58,11 @@ class SlatePaper:
     # number (only meaningful pool-relative — the card uses anchored words, not
     # bare decimals). Carried on the ``/api/daily`` payload per card.
     goal_sim: float | None = None
+    # Direct link to the paper: derived from ``processed_feed_items.doi`` or
+    # ``arxiv_id`` at candidate-build time. Empty string when neither is available
+    # (the card title stays plain text). Preferred over exposing raw doi/arxiv_id
+    # to the frontend, which would need to reconstruct the same logic.
+    url: str = ""
 
 
 @dataclass(frozen=True)

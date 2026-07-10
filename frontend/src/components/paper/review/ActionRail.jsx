@@ -1,4 +1,5 @@
 import VerdictPanel from '../../VerdictPanel.jsx';
+import ReviewNotes from './ReviewNotes.jsx';
 import CollectionEditor from '../CollectionEditor.jsx';
 import TagOfInterestEditor from '../TagOfInterestEditor.jsx';
 import AskPaperBox from '../../library/AskPaperBox.jsx';
@@ -12,6 +13,7 @@ import { Disclosure } from './primitives.jsx';
 // (same grounded/abstaining logic, no re-generation).
 export default function ActionRail({
   itemKey, detail, collections, verdict, onTagsChanged, onCollectionsChanged, hasPdf, canAsk = hasPdf,
+  onNoteSaved = () => {}, onNotesDirtyChange = () => {},
 }) {
   return (
     <div className="space-y-5">
@@ -23,9 +25,18 @@ export default function ActionRail({
         onDelete={verdict.onDelete}
         submitting={verdict.submitting}
         submitError={verdict.submitError}
+        submitWarning={verdict.submitWarning}
         deleting={verdict.deleting}
         deleteError={verdict.deleteError}
       />
+      <div className="border-t border-slate-200/60 pt-4">
+        <ReviewNotes
+          itemKey={itemKey}
+          initialNote={detail.user_note || ''}
+          onSaved={onNoteSaved}
+          onDirtyChange={onNotesDirtyChange}
+        />
+      </div>
       <div className="border-t border-slate-200/60 pt-4">
         <CollectionEditor
           itemKey={itemKey}

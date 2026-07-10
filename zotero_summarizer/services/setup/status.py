@@ -3,8 +3,8 @@
 One call answers "is this install configured enough to use?" across four axes:
 config validity, the default LLM provider (reachable + key present), the
 filesystem paths, and the Zotero library. ``ready`` is the hard gate
-(config.valid AND research_goals AND llm.api_key_present AND zotero.db_found);
-reachability + the trained classifier are advisory.
+(config.valid AND research_goals AND llm.api_key_present); Zotero + reachability
++ the trained classifier are advisory.
 
 SECURITY: this NEVER returns an API-key value. It reads only the *presence* of
 the env var named by ``api_key_env`` (``bool(os.getenv(name))``) and reports a
@@ -99,8 +99,8 @@ def _path_status() -> PathStatus:
 
 
 def _zotero_status() -> ZoteroStatus:
-    """Zotero readiness from the live reader + status payload. ``db_found`` is the
-    gating signal; library/feed counts are best-effort from the live reader."""
+    """Zotero readiness from the live reader + status payload. ``db_found`` is an
+    advisory signal; library/feed counts are best-effort from the live reader."""
     payload = zotero_status_payload()
     db_found = bool(payload.available)
     stats = payload.stats or {}
@@ -139,9 +139,10 @@ async def get_setup_status() -> SetupStatusResponse:
     """Assemble the full setup-readiness snapshot.
 
     ``ready`` = config valid AND ≥1 research goal AND the default provider's key
-    is present AND the Zotero DB was found. Reachability + classifier are advisory
-    and deliberately excluded from the gate (an install is "ready" before the LLM
-    endpoint is up or the gate is trained)."""
+    is present. Zotero, reachability, and the classifier are advisory and
+    deliberately excluded from the gate: the app works (Today + feed ingest +
+    reading kept feed papers) without Zotero, and an install is "ready" before
+    the LLM endpoint is up or the gate is trained."""
     config_status, config = _config_status()
     llm = await _llm_status(config)
     paths = _path_status()
@@ -152,7 +153,8 @@ async def get_setup_status() -> SetupStatusResponse:
         config_status.valid
         and config_status.research_goals_count > 0
         and llm.api_key_present
-        and zotero.db_found
+        # Zotero is advisory: app works (Today + feed ingest) without it.
+        # zotero.db_found is surfaced in the response but does not gate ready.
     )
 
     return SetupStatusResponse(

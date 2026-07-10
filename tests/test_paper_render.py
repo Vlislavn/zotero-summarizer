@@ -249,7 +249,7 @@ def test_render_paper_flags_stale_when_renderer_changed(tmp_path, monkeypatch):
     fake_settings = types.SimpleNamespace(paper_render_dir=tmp_path / "render", pdf_root=tmp_path)
     monkeypatch.setattr(paper_render, "settings", lambda: fake_settings)
     monkeypatch.setattr(
-        "zotero_summarizer.services.zotero.zotero.get_zotero_reader_or_raise", lambda: _Reader()
+        "zotero_summarizer.services.zotero.zotero.get_library_reader", lambda: _Reader()
     )
     paper_render.build_paper_read("STALE1")
     assert paper_render.render_paper("STALE1").get("stale") is not True
@@ -308,7 +308,7 @@ def test_facade_status_presentation_and_figure_guards(tmp_path, monkeypatch):
     fake_settings = types.SimpleNamespace(paper_render_dir=tmp_path / "render", pdf_root=tmp_path)
     monkeypatch.setattr(paper_render, "settings", lambda: fake_settings)
     monkeypatch.setattr(
-        "zotero_summarizer.services.zotero.zotero.get_zotero_reader_or_raise",
+        "zotero_summarizer.services.zotero.zotero.get_library_reader",
         lambda: _Reader(),
     )
 
@@ -336,7 +336,7 @@ def test_missing_presentation_output_is_rebuildable(tmp_path, monkeypatch):
     fake_settings = types.SimpleNamespace(paper_render_dir=tmp_path / "render", pdf_root=tmp_path)
     monkeypatch.setattr(paper_render, "settings", lambda: fake_settings)
     monkeypatch.setattr(
-        "zotero_summarizer.services.zotero.zotero.get_zotero_reader_or_raise",
+        "zotero_summarizer.services.zotero.zotero.get_library_reader",
         lambda: _Reader(),
     )
 
@@ -381,7 +381,7 @@ def test_build_paper_read_acquires_missing_pdf_when_allowed(tmp_path, monkeypatc
     fake_settings = types.SimpleNamespace(paper_render_dir=tmp_path / "render", pdf_root=tmp_path)
     monkeypatch.setattr(paper_render, "settings", lambda: fake_settings)
     monkeypatch.setattr(
-        "zotero_summarizer.services.zotero.zotero.get_zotero_reader_or_raise",
+        "zotero_summarizer.services.zotero.zotero.get_library_reader",
         lambda: _Reader(),
     )
     monkeypatch.setattr(

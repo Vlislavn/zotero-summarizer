@@ -10,7 +10,12 @@ from zotero_summarizer.services.library import deep_review
 
 
 def _config():
-    qr = types.SimpleNamespace(lean_max_text_chars=12_000, max_text_chars=60_000)
+    qr = types.SimpleNamespace(
+        lean_max_text_chars=12_000,
+        max_text_chars=60_000,
+        chunk_strategy="rank",
+        map_chunk_chars=8_000,
+    )
     return types.SimpleNamespace(quality_review=qr, research_goals=[])
 
 
@@ -23,7 +28,7 @@ def _wire(monkeypatch, *, detail):
     digest = types.SimpleNamespace(model_dump=lambda: {"grade": "A", "read_decision": "read"})
     monkeypatch.setattr(deep_review.quality_review, "assess_digest", lambda **_k: digest)
     monkeypatch.setattr(deep_review._deep_review_layers, "extra_layers",
-                        lambda ctx: ({"quality_band": "ok"}, [], {"type": "x"}, None))
+                        lambda ctx: ({"quality_band": "ok"}, [], {"type": "x"}, None, None))
     # The note write is a local import inside _review_one — patch the source symbol.
     from zotero_summarizer.services.zotero import zotero as zsvc
     monkeypatch.setattr(zsvc, "zotero_upsert_digest_note", lambda *_a, **_k: None)

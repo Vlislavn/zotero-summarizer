@@ -21,7 +21,13 @@ from zotero_summarizer.services.triage.daily_select import (
     count_awaiting_unhandled,
 )
 from zotero_summarizer.storage import repositories as repo
-from tests._daily_select_helpers import _DEFAULT_NOW, _create_db, _insert, _make_shap_json
+from tests._daily_select_helpers import (
+    _DEFAULT_NOW,
+    _create_db,
+    _insert,
+    _make_shap_json,
+    seed_reviews as _seed_reviews,
+)
 
 
 @pytest.fixture
@@ -347,6 +353,78 @@ def test_assemble_daily_slate_K_larger_than_pool(triage_db: Path) -> None:
     assert "surprise" in slate.empty_role_events
     # Diversity also empty (no negative-affinity rows).
     assert "diversity" in slate.empty_role_events
+
+
+# ---------------------------------------------------------------------------
+# Quality-first mode (ZS_RANK_QUALITY_FIRST) — the directive at the slate level.
+# Grade/band ride in via the deep-review bridge (patched), keyed by
+# materialized_zotero_key.
+# ---------------------------------------------------------------------------
+
+
+def test_quality_first_grade_a_offtopic_outranks_grade_d_ontopic(
+    triage_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The directive at the slate level: under ZS_RANK_QUALITY_FIRST a grade-A
+    OFF-topic paper leads a grade-D ON-topic one (D's q=0 zeroes its key)."""
+    monkeypatch.setenv("ZS_RANK_QUALITY_FIRST", "1")
+    _seed_reviews(monkeypatch, {"ZK-A": "A", "ZK-D": "D"})
+    _insert(triage_db, item_key="A-OFF", decision="awaiting_review",
+            composite_score=3.0, corpus_affinity=0.2,
+            materialized_zotero_key="ZK-A", goal_sims={"g": 0.05})
+    _insert(triage_db, item_key="D-ON", decision="awaiting_review",
+            composite_score=3.0, corpus_affinity=0.2,
+            materialized_zotero_key="ZK-D", goal_sims={"g": 0.95})
+    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    model_keys = [p.item_key for p in slate.papers if p.role in {"model", "model_fallback"}]
+    assert model_keys[0] == "A-OFF"
+    assert model_keys.index("A-OFF") < model_keys.index("D-ON")
+
+
+def test_default_mode_topicality_swamps_grade(
+    triage_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Control arm (flag OFF): the same cohort orders topicality-first — the
+    grade-D ON-topic paper leads despite the ±0.06 quality_bonus (the very
+    additive-swamp the quality-first key is built to fix)."""
+    _seed_reviews(monkeypatch, {"ZK-A": "A", "ZK-D": "D"})
+    _insert(triage_db, item_key="A-OFF", decision="awaiting_review",
+            composite_score=3.0, corpus_affinity=0.2,
+            materialized_zotero_key="ZK-A", goal_sims={"g": 0.05})
+    _insert(triage_db, item_key="D-ON", decision="awaiting_review",
+            composite_score=3.0, corpus_affinity=0.2,
+            materialized_zotero_key="ZK-D", goal_sims={"g": 0.95})
+    slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    model_keys = [p.item_key for p in slate.papers if p.role in {"model", "model_fallback"}]
+    assert model_keys[0] == "D-ON"
+
+
+def test_quality_first_floor_swap_surfaces_grade_a_low_composite(
+    triage_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The floor swap: a grade-A paper with a dont-band composite (<2.0) is hidden
+    by the default composite floor but surfaced under quality-first (relevance_score
+    floor; None passes) — exactly the paper the directive wants promoted."""
+    _seed_reviews(monkeypatch, {"ZK-A": "A", "ZK-C": "C"})
+    _insert(triage_db, item_key="A-LOW", decision="awaiting_review",
+            composite_score=1.2, corpus_affinity=0.2,  # below the 2.0 model floor
+            materialized_zotero_key="ZK-A", goal_sims={"g": 0.4})
+    _insert(triage_db, item_key="C-OK", decision="awaiting_review",
+            composite_score=2.6, corpus_affinity=0.2,
+            materialized_zotero_key="ZK-C", goal_sims={"g": 0.4})
+
+    # Default mode: composite floor hides the grade-A low-composite paper.
+    default_slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    default_model = {p.item_key for p in default_slate.papers if p.role in {"model", "model_fallback"}}
+    assert "A-LOW" not in default_model
+
+    # Quality-first: relevance-score floor (None passes) surfaces it, and its
+    # grade-A quality leads the C paper.
+    monkeypatch.setenv("ZS_RANK_QUALITY_FIRST", "1")
+    qf_slate = assemble_daily_slate(db_path=triage_db, K=5, now=_DEFAULT_NOW)
+    qf_model = [p.item_key for p in qf_slate.papers if p.role in {"model", "model_fallback"}]
+    assert "A-LOW" in qf_model
+    assert qf_model[0] == "A-LOW"
 
 
 def test_assemble_daily_slate_rejects_invalid_K(triage_db: Path) -> None:

@@ -30,11 +30,20 @@ ROLE_ORDER: tuple[str, ...] = ("model", "surprise", "diversity")
 # off-library papers and own their own predicates.
 MODEL_RELEVANCE_FLOOR = PRIORITY_COULD_READ_THRESHOLD
 
+# Quality-first mode floors on the LLM ``relevance_score`` (1-5) instead of the
+# composite band: the composite floor would hide exactly the grade-A / low-affinity
+# papers the directive wants surfaced (composite is ~50% corpus_affinity — the
+# inverted 0.268 axis). ``> 2`` bars only the clearest topical misses (the same
+# boundary as the L1 auto-quality gate); a row with no persisted relevance_score
+# passes (absent ≠ below-bar).
+QF_RELEVANCE_FLOOR = 2.0
+
 
 def _to_slate_paper(cand: dict[str, Any], *, role: str) -> SlatePaper:
     return SlatePaper(
         item_key=cand["item_key"],
         item_id=cand["id"],
+        stable_feed_key=cand.get("stable_feed_key", ""),
         title=cand["title"],
         authors=cand["authors"],
         venue=cand["venue"],
@@ -53,20 +62,33 @@ def _to_slate_paper(cand: dict[str, Any], *, role: str) -> SlatePaper:
         pub_year=cand.get("pub_year"),
         why=cand.get("why", []),
         goal_sim=cand.get("goal_sim"),
+        url=cand.get("url", ""),
     )
 
 
-def _model_score(cand: dict[str, Any], *, use_band: bool) -> float:
-    """``rank_score`` + the capped deep-review QUALITY lift. Quality is applied
-    ONLY here, in the FLOORED model role (and its fallback) — never in the
-    un-floored surprise/diversity pickers, whose job is off-pattern / off-library
-    discovery, not quality. The cap bounds the within-role reorder; the floor
-    (on the raw composite, below) is untouched, so a below-bar paper can never be
-    lifted into the slate by quality."""
+def _model_score(cand: dict[str, Any], *, use_band: bool, quality_first: bool) -> float:
+    """The model-role sort key. In quality-first mode ``rank_score`` IS the
+    quality-led key (``rank_blend_quality``), so the additive quality_bonus is
+    dropped — grade already leads the key, and re-adding the ±0.06 bonus would
+    double-count it. In the default mode it's ``rank_score`` + the capped
+    deep-review quality lift, applied ONLY here in the FLOORED model role (never
+    the un-floored surprise/diversity discovery pickers)."""
+    if quality_first:
+        return cand["rank_score"]
     q = cand.get("quality") or {}
     return cand["rank_score"] + quality_bonus(
         q.get("quality_band"), q.get("grade"), use_band=use_band
     )
+
+
+def _passes_model_floor(cand: dict[str, Any], *, quality_first: bool, min_composite: float) -> bool:
+    """Model-role floor. Quality-first floors on ``relevance_score > 2`` (None
+    passes) so a grade-A / low-composite paper isn't hidden by the corpus-affinity-
+    heavy composite band; default floors on ``composite_score >= min_composite``."""
+    if quality_first:
+        rel = cand.get("relevance_score")
+        return rel is None or float(rel) > QF_RELEVANCE_FLOOR
+    return cand["composite_score"] >= min_composite
 
 
 def _pick_model(
@@ -74,19 +96,23 @@ def _pick_model(
     n: int,
     chosen_ids: set[int],
     *,
+    quality_first: bool = False,
     min_composite: float = MODEL_RELEVANCE_FLOOR,
 ) -> list[dict[str, Any]]:
-    """Top-N by ``rank_score`` + capped quality lift among unchosen items AT/ABOVE
-    the relevance floor — the system's current best recommendation: the gate
-    composite blended with goal-text similarity and known prestige
-    (``_candidate.attach_rank_scores``), then floated by deep-review quality, with
-    ``dont_read``-band papers (composite < ``min_composite``) excluded so a weak
-    feed week doesn't pad Today with below-the-bar picks. Falls back to pure
-    composite order automatically when the blend/quality signals are absent."""
+    """Top-N by the model-role key among unchosen items clearing the model floor —
+    the system's current best recommendation. Default: the relevance×goal×prestige
+    blend floated by deep-review quality, ``dont_read``-band papers excluded.
+    Quality-first: the quality-led ``rank_score`` with a ``relevance_score`` floor
+    (see ``_model_score`` / ``_passes_model_floor``). Falls back to pure composite
+    order automatically when the blend/quality signals are absent."""
     use_band = band_primary_enabled()
     ordered = sorted(
-        (c for c in pool if c["id"] not in chosen_ids and c["composite_score"] >= min_composite),
-        key=lambda c: _model_score(c, use_band=use_band),
+        (
+            c for c in pool
+            if c["id"] not in chosen_ids
+            and _passes_model_floor(c, quality_first=quality_first, min_composite=min_composite)
+        ),
+        key=lambda c: _model_score(c, use_band=use_band, quality_first=quality_first),
         reverse=True,
     )
     return ordered[:n]
@@ -129,21 +155,22 @@ def allocate(
     candidate_pool: list[dict[str, Any]],
     roles: dict[str, int],
     K: int,
+    quality_first: bool = False,
 ) -> tuple[list[SlatePaper], list[str]]:
     """Run the greedy role allocator.
 
     Returns (papers, empty_role_events). Each unfilled slot from a role's
     intended sub-pool contributes one ``model_fallback`` paper drawn from
     the highest-remaining ``rank_score`` (the shared relevance×goal×prestige
-    blend) AND one entry to ``empty_role_events``. The final list is
-    truncated to K.
+    blend, or the quality-led key when ``quality_first``) AND one entry to
+    ``empty_role_events``. The final list is truncated to K.
     """
     chosen_ids: set[int] = set()
     papers: list[SlatePaper] = []
     empty_roles: list[str] = []
 
     role_pickers = {
-        "model": lambda n: _pick_model(candidate_pool, n, chosen_ids),
+        "model": lambda n: _pick_model(candidate_pool, n, chosen_ids, quality_first=quality_first),
         "surprise": lambda n: _pick_surprise(
             candidate_pool, n, chosen_ids, min_score=DEFAULT_BLACK_SWAN_MIN_SCORE
         ),
@@ -160,7 +187,7 @@ def allocate(
             papers.append(_to_slate_paper(cand, role=role))
         missing = wanted - len(picked)
         for _ in range(missing):
-            fallback = _pick_model(candidate_pool, 1, chosen_ids)
+            fallback = _pick_model(candidate_pool, 1, chosen_ids, quality_first=quality_first)
             empty_roles.append(role)
             if not fallback:
                 # Genuinely nothing left — slate becomes shorter than K.

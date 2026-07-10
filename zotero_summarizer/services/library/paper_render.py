@@ -98,9 +98,12 @@ def _write_state(item_key: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _item_detail(item_key: str) -> dict[str, Any]:
-    from zotero_summarizer.services.zotero.zotero import get_zotero_reader_or_raise
+    # Key-aware: a stable_feed_key (un-materialized Today paper) resolves via the app
+    # library reader even when live Zotero is present; a Zotero key uses the live reader.
+    # _pdf_for_item_or_acquire then fetches the PDF into the local cache for a feed item.
+    from zotero_summarizer.services.zotero.zotero import resolve_reader_for_key
 
-    reader = get_zotero_reader_or_raise()
+    reader = resolve_reader_for_key(item_key)
     detail = reader.get_item_detail(item_key)
     if detail is None:
         raise APIError(error="not_found", message=f"Item {item_key} not found", status_code=404)
@@ -403,8 +406,10 @@ def build_paper_read_for_pdf(
     digest = cached["digest"] if cached and cached.get("digest") else None
     quality = cached.get("quality") if cached else None
     goal_summaries = cached.get("goal_summaries") if cached else None
+    code_link = cached.get("code_link") if cached else None
     outputs = _paper_read_html.write_outputs(
-        pdf_path, content, digest=digest, quality=quality, goal_summaries=goal_summaries
+        pdf_path, content, digest=digest, quality=quality,
+        goal_summaries=goal_summaries, code_link=code_link,
     )
     content.update(
         {

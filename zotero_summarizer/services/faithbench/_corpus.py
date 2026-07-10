@@ -243,3 +243,24 @@ class PaperChunkIndex:
             scores = [float(len(q_set.intersection(doc))) for doc in self._docs]
         order = sorted(range(len(self.chunks)), key=lambda i: scores[i], reverse=True)
         return [self.chunks[i] for i in order[: max(1, k)] if scores[i] > 0]
+
+
+# ---------------------------------------------------------------------------
+# Per-paper substrate — the trio (raw text, normalized text, chunk index) that
+# the judge and runner always load and cache together for a given paper.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PaperSubstrate:
+    """One paper's frozen text plus its derived normalized form and BM25 chunk
+    index — bundled because callers (``judge_claim``, ``judge_run``) always
+    need all three together."""
+
+    text: str
+    norm: str
+    index: PaperChunkIndex
+
+    @classmethod
+    def from_text(cls, text: str) -> "PaperSubstrate":
+        return cls(text=text, norm=normalize_text(text), index=PaperChunkIndex(text))

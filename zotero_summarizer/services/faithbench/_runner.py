@@ -80,6 +80,16 @@ class RunPaths:
         return self.run_dir / "claims_cache"
 
 
+@dataclass(frozen=True)
+class RunInputs:
+    """The frozen run artifacts ``run_benchmark`` and ``judge_run`` both take."""
+
+    meta: BenchmarkMeta
+    items: list[BenchmarkItem]
+    papers_dir: Path
+    paths: RunPaths
+
+
 # ---------------------------------------------------------------------------
 # JSONL helpers — last row per trial key wins (a --retry-errors resume appends
 # a fresh attempt for a previously failed key).
@@ -193,27 +203,94 @@ def _qa_context(item: BenchmarkItem, *, condition: str, text: str,
     return "\n\n[...]\n\n".join(chunks) if chunks else text[: max_chars // 10]
 
 
+@dataclass(frozen=True)
+class RunOptions:
+    """Execution knobs for ``run_benchmark``, bundled so call sites don't have
+    to spell out all of them; defaults match the previous individual kwargs."""
+
+    conditions: tuple[str, ...] = CONDITIONS
+    tracks: tuple[str, ...] = TRACKS
+    runs: int = 1
+    limit: int | None = None
+    retry_errors: bool = False
+    serial: bool = True
+    max_workers: int = 4
+
+
+@dataclass(frozen=True)
+class _TrialContext:
+    """Captured locals a trial closure needs — passed explicitly instead of
+    closing over ``run_benchmark``'s frame."""
+
+    run_id: str
+    meta: BenchmarkMeta
+    texts: dict[str, str]
+    indexes: dict[str, PaperChunkIndex]
+    config: Any
+    llm: Any
+    decompose_llm: Any | None
+    paths: RunPaths
+    max_chars: int
+
+
+def _qa_trial(ctx: _TrialContext, item: BenchmarkItem, condition: str, run_number: int) -> dict[str, Any]:
+    text = ctx.texts[item.paper_item_key]
+    if condition == "retrieval" and item.paper_item_key not in ctx.indexes:
+        ctx.indexes[item.paper_item_key] = PaperChunkIndex(text)
+    context = _qa_context(
+        item, condition=condition, text=text,
+        index=ctx.indexes.get(item.paper_item_key) or PaperChunkIndex(text),
+        max_chars=ctx.max_chars,
+    )
+    prompt = ANSWER_PROMPT.format(context=context, question=item.question)
+    started = now_iso_z()
+    t0 = perf_counter()
+    parsed, raw = answer_with_retry(ctx.llm, prompt)
+    return {
+        "run_id": ctx.run_id, "item_id": item.item_id, "kind": item.kind, "track": "qa",
+        "condition": condition, "run_number": run_number,
+        "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16],
+        "response_text": raw[:4000], "parsed": parsed,
+        "latency_seconds": round(perf_counter() - t0, 3),
+        "started_at": started, "status": "ok", "error": None,
+    }
+
+
+def _claims_trial(ctx: _TrialContext, paper_key: str, run_number: int) -> dict[str, Any]:
+    paper = ctx.meta.paper_by_key(paper_key)
+    started = now_iso_z()
+    t0 = perf_counter()
+    digest_dump, digest_sha = _build_claims.digest_for_paper(
+        title=paper.title, full_text=ctx.texts[paper_key], config=ctx.config, llm=ctx.llm
+    )
+    claims = _build_claims.decompose_digest(
+        digest_dump=digest_dump, digest_sha=digest_sha, title=paper.title,
+        decompose_llm=ctx.decompose_llm, cache_dir=ctx.paths.claims_cache_dir,
+    )
+    return {
+        "run_id": ctx.run_id, "item_id": f"claims:{paper_key}", "kind": "claims",
+        "track": "claims", "condition": CLAIMS_CONDITION, "run_number": run_number,
+        "prompt_sha256": None,
+        "response_text": json.dumps(digest_dump, ensure_ascii=False)[:4000],
+        "parsed": {"claims": claims, "digest_sha": digest_sha},
+        "latency_seconds": round(perf_counter() - t0, 3),
+        "started_at": started, "status": "ok", "error": None,
+    }
+
+
 def run_benchmark(
     *,
     run_id: str,
-    meta: BenchmarkMeta,
-    items: list[BenchmarkItem],
-    papers_dir: Path,
-    paths: RunPaths,
+    inputs: RunInputs,
     llm: Any,
     config: Any,
     decompose_llm: Any | None,
-    conditions: tuple[str, ...] = CONDITIONS,
-    tracks: tuple[str, ...] = TRACKS,
-    runs: int = 1,
-    limit: int | None = None,
-    retry_errors: bool = False,
-    serial: bool = True,
-    max_workers: int = 4,
+    options: RunOptions = RunOptions(),
     progress_cb: Callable[[str], None] | None = None,
 ) -> dict[str, int]:
     """Execute all pending trials; returns ``{executed, skipped, failed}``."""
-    if "claims" in tracks and decompose_llm is None:
+    meta, items, papers_dir, paths = inputs.meta, inputs.items, inputs.papers_dir, inputs.paths
+    if "claims" in options.tracks and decompose_llm is None:
         raise ValueError("claims track requested but no decompose_llm provided")
 
     max_chars = int(config.quality_review.max_text_chars)
@@ -226,8 +303,8 @@ def run_benchmark(
             papers_dir, paper.item_key, expected_sha256=paper.text_sha256
         )
 
-    bench_items = items[: limit] if limit else items
-    done = done_keys(load_jsonl(paths.responses), retry_errors=retry_errors)
+    bench_items = items[: options.limit] if options.limit else items
+    done = done_keys(load_jsonl(paths.responses), retry_errors=options.retry_errors)
     write_lock = threading.Lock()
 
     def emit(row: dict[str, Any]) -> None:
@@ -236,70 +313,34 @@ def run_benchmark(
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
                 f.flush()
 
-    def qa_trial(item: BenchmarkItem, condition: str, run_number: int) -> dict[str, Any]:
-        text = texts[item.paper_item_key]
-        if condition == "retrieval" and item.paper_item_key not in indexes:
-            indexes[item.paper_item_key] = PaperChunkIndex(text)
-        context = _qa_context(
-            item, condition=condition, text=text,
-            index=indexes.get(item.paper_item_key) or PaperChunkIndex(text),
-            max_chars=max_chars,
-        )
-        prompt = ANSWER_PROMPT.format(context=context, question=item.question)
-        started = now_iso_z()
-        t0 = perf_counter()
-        parsed, raw = answer_with_retry(llm, prompt)
-        return {
-            "run_id": run_id, "item_id": item.item_id, "kind": item.kind, "track": "qa",
-            "condition": condition, "run_number": run_number,
-            "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16],
-            "response_text": raw[:4000], "parsed": parsed,
-            "latency_seconds": round(perf_counter() - t0, 3),
-            "started_at": started, "status": "ok", "error": None,
-        }
-
-    def claims_trial(paper_key: str, run_number: int) -> dict[str, Any]:
-        paper = meta.paper_by_key(paper_key)
-        started = now_iso_z()
-        t0 = perf_counter()
-        digest_dump, digest_sha = _build_claims.digest_for_paper(
-            title=paper.title, full_text=texts[paper_key], config=config, llm=llm
-        )
-        claims = _build_claims.decompose_digest(
-            digest_dump=digest_dump, digest_sha=digest_sha, title=paper.title,
-            decompose_llm=decompose_llm, cache_dir=paths.claims_cache_dir,
-        )
-        return {
-            "run_id": run_id, "item_id": f"claims:{paper_key}", "kind": "claims",
-            "track": "claims", "condition": CLAIMS_CONDITION, "run_number": run_number,
-            "prompt_sha256": None,
-            "response_text": json.dumps(digest_dump, ensure_ascii=False)[:4000],
-            "parsed": {"claims": claims, "digest_sha": digest_sha},
-            "latency_seconds": round(perf_counter() - t0, 3),
-            "started_at": started, "status": "ok", "error": None,
-        }
+    ctx = _TrialContext(
+        run_id=run_id, meta=meta, texts=texts, indexes=indexes, config=config,
+        llm=llm, decompose_llm=decompose_llm, paths=paths, max_chars=max_chars,
+    )
 
     pending: list[tuple[Callable[[], dict[str, Any]], tuple[str, str, int]]] = []
-    if "qa" in tracks:
+    if "qa" in options.tracks:
         for item in bench_items:
-            for condition in conditions:
-                for run_number in range(1, runs + 1):
+            for condition in options.conditions:
+                for run_number in range(1, options.runs + 1):
                     key = (item.item_id, condition, run_number)
                     if key not in done:
                         pending.append(
-                            (lambda i=item, c=condition, r=run_number: qa_trial(i, c, r), key)
+                            (lambda i=item, c=condition, r=run_number: _qa_trial(ctx, i, c, r), key)
                         )
-    if "claims" in tracks:
+    if "claims" in options.tracks:
         for paper in meta.papers:
-            for run_number in range(1, runs + 1):
+            for run_number in range(1, options.runs + 1):
                 key = (f"claims:{paper.item_key}", CLAIMS_CONDITION, run_number)
                 if key not in done:
                     pending.append(
-                        (lambda p=paper.item_key, r=run_number: claims_trial(p, r), key)
+                        (lambda p=paper.item_key, r=run_number: _claims_trial(ctx, p, r), key)
                     )
 
-    skipped = (len(bench_items) * len(conditions) * runs if "qa" in tracks else 0) + (
-        len(meta.papers) * runs if "claims" in tracks else 0
+    skipped = (
+        len(bench_items) * len(options.conditions) * options.runs if "qa" in options.tracks else 0
+    ) + (
+        len(meta.papers) * options.runs if "claims" in options.tracks else 0
     ) - len(pending)
     counts = {"executed": 0, "skipped": skipped, "failed": 0}
 
@@ -322,11 +363,11 @@ def run_benchmark(
         if progress_cb:
             progress_cb(f"[{counts['executed']}/{len(pending)}] {key[0]} {key[1]} run{key[2]}")
 
-    if serial or len(pending) <= 1:
+    if options.serial or len(pending) <= 1:
         for thunk, key in pending:
             execute(thunk, key)
     else:
-        with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
+        with ThreadPoolExecutor(max_workers=max(1, options.max_workers)) as pool:
             futures = [pool.submit(execute, thunk, key) for thunk, key in pending]
             for future in as_completed(futures):
                 future.result()  # re-raise anything outside the per-trial boundary

@@ -12,7 +12,10 @@ import { formatShortDate } from './library/shared.jsx';
 //   existingVerdict: { id, item_key, user_priority, comment, created_at } | null
 //   onSubmit: ({ user_priority, comment }) => void
 //   onDelete: () => void
-//   submitting / submitError / deleting / deleteError
+//   submitting / submitError / submitWarning / deleting / deleteError
+//   submitWarning: soft-failure note (e.g. the Zotero label/note mirror didn't
+//                  write) — the verdict itself already saved, so this renders
+//                  amber, not the rose submitError/deleteError tone.
 
 // One human vocabulary for the verdict (Mental Model / Jakob's Law): the buttons
 // read in plain words, not the raw `must_read` enum. The loud SOLID-fill `cls` is
@@ -42,6 +45,7 @@ export default function VerdictPanel({
   onDelete = () => {},
   submitting = false,
   submitError = null,
+  submitWarning = null,
   deleting = false,
   deleteError = null,
 }) {
@@ -119,6 +123,11 @@ export default function VerdictPanel({
             {deleteError}
           </div>
         )}
+        {!deleteError && submitWarning && (
+          <div className="mt-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900">
+            {submitWarning}
+          </div>
+        )}
       </div>
     );
   }
@@ -159,6 +168,11 @@ export default function VerdictPanel({
       {(submitError || deleteError) && (
         <div className="mt-2 p-2 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800">
           {submitError || deleteError}
+        </div>
+      )}
+      {!(submitError || deleteError) && submitWarning && (
+        <div className="mt-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900">
+          {submitWarning}
         </div>
       )}
 

@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from zotero_summarizer.api.errors import install_error_handlers
+from zotero_summarizer.api.errors import APIError, install_error_handlers
 from zotero_summarizer.api.routes import include_routes
 from zotero_summarizer.runtime import AppContext, set_context
 from zotero_summarizer.services import lifecycle
@@ -57,7 +57,7 @@ def _install_spa(app: FastAPI) -> None:
         # fires for unknown paths. The check is a belt-and-suspenders
         # guard against future route shapes accidentally falling through.
         if full_path.startswith(("api/", "assets/")):
-            raise FileNotFoundError(f"unknown path: {full_path}")
+            raise APIError(error="not_found", message=f"/{full_path}", status_code=404)
         return FileResponse(str(index_html))
 
 

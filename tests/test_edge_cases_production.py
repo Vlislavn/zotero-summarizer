@@ -115,18 +115,18 @@ def test_review_detail_csv_stub_for_missing_source(tmp_path):
 def test_border_top_k_out_of_range_422(tmp_path, bad_top_k):
     _make_project(tmp_path, [{"item_key": "ABC12345", "title": "T", "abstract": "a",
                               "gold_priority_final": "could_read"}])
-    from zotero_summarizer.api.routes import golden
+    from zotero_summarizer.api.routes import _golden_border
     with pytest.raises(APIError) as ei:
-        _run(golden.border_suggestions(top_k=bad_top_k))
+        _run(_golden_border.border_suggestions(top_k=bad_top_k))
     assert ei.value.status_code == 422
 
 
 def test_border_missing_csv_404(tmp_path):
     settings = Settings.load(project_root=tmp_path)  # no CSV written
     set_context(AppContext(settings=settings))
-    from zotero_summarizer.api.routes import golden
+    from zotero_summarizer.api.routes import _golden_border
     with pytest.raises(APIError) as ei:
-        _run(golden.border_suggestions(top_k=50))
+        _run(_golden_border.border_suggestions(top_k=50))
     assert ei.value.status_code == 404
 
 

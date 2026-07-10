@@ -13,8 +13,10 @@ from typing import Any, Callable
 import yaml
 
 from zotero_summarizer.models import GoalsConfig, SummarizeRequest
+from zotero_summarizer.models.config import USER_OWNED_KEYS
 from zotero_summarizer.models.providers import ProviderConfig
 from zotero_summarizer.runtime import get_context
+from zotero_summarizer.services.config_overrides import apply_calibration, apply_env_overrides
 from zotero_summarizer.settings import Settings
 
 
@@ -29,6 +31,16 @@ def state() -> Any:
     return get_context().state
 
 
+def _quality_toggle_enabled(env_var: str, attr: str) -> bool:
+    env = os.environ.get(env_var)
+    if env is not None:
+        return env.strip().lower() in ("1", "true", "yes", "on")
+    app_state = getattr(state(), "app_state", None)
+    config = getattr(app_state, "config", None) if app_state is not None else None
+    qr = getattr(config, "quality_review", None) if config is not None else None
+    return bool(getattr(qr, attr, False))
+
+
 def band_primary_enabled() -> bool:
     """Order-time deep-review QUALITY mode, shared by BOTH rank consumers (the
     Library queue ``_ranking`` and the Today slate allocator): grade-only (default
@@ -36,13 +48,42 @@ def band_primary_enabled() -> bool:
     neutral & uncertain → exactly 0.0), a Phase-2-MEASURED arm. Config
     ``quality_review.quality_band_primary``, overridden by ``ZS_QUALITY_BAND_PRIMARY``.
     Optional-feature boundary: no config / no state → the grade-only default."""
-    env = os.environ.get("ZS_QUALITY_BAND_PRIMARY")
-    if env is not None:
-        return env.strip().lower() in ("1", "true", "yes", "on")
-    app_state = getattr(state(), "app_state", None)
-    config = getattr(app_state, "config", None) if app_state is not None else None
-    qr = getattr(config, "quality_review", None) if config is not None else None
-    return bool(getattr(qr, "quality_band_primary", False))
+    return _quality_toggle_enabled("ZS_QUALITY_BAND_PRIMARY", "quality_band_primary")
+
+
+def rank_quality_first_enabled() -> bool:
+    """Quality-FIRST Today slate ordering (``services/model/rank_blend_quality``):
+    quality LEADS the key, topicality soft-gates — replacing the default
+    relevance×goal×prestige blend so a high-quality off-topic paper out-ranks a
+    low-quality on-topic one (the user's directive). Config
+    ``quality_review.rank_quality_first``, overridden by ``ZS_RANK_QUALITY_FIRST``.
+    OFF by default (pending the Track-C frontier eval). Optional-feature boundary:
+    no config / no state → OFF."""
+    return _quality_toggle_enabled("ZS_RANK_QUALITY_FIRST", "rank_quality_first")
+
+
+def rank_interleave_enabled() -> bool:
+    """P3 ONLINE interleave (ADR-A9 / GAP-G11): the Today slate builds BOTH
+    ranking arms (A0 control blend + A2 quality-first), team-draft-merges them
+    into the one slate the user sees (``services/model/team_draft``) and logs
+    per-item arm attribution (``storage/interleave``) so the user's normal
+    verdicts decide the flip via SPRT (``tools/eval_interleave.py``). Blind: the
+    UI never shows the arm. Takes PRECEDENCE over ``rank_quality_first`` (the
+    interleave already contains both arms). Config
+    ``quality_review.rank_interleave``, overridden by ``ZS_RANK_INTERLEAVE``.
+    OFF by default. Optional-feature boundary: no config / no state → OFF."""
+    return _quality_toggle_enabled("ZS_RANK_INTERLEAVE", "rank_interleave")
+
+
+def quality_promote_enabled() -> bool:
+    """Quality → must_read band promotion toggle (the inverse of the auto_quality
+    hide gate). The gate's compressed regressor never reaches the must_read band on
+    its own; promotion lifts a high-quality + on-goal + gate-confirmed paper to
+    must_read. ON by default (``tools/eval_quality_promote.py`` measured 0 flooding +
+    1.00 must/should precision on firewalled user verdicts). Config
+    ``quality_review.quality_promote``, overridden by ``ZS_QUALITY_PROMOTE=0``.
+    Optional-feature boundary: no config / no state → OFF (safe when uninitialised)."""
+    return _quality_toggle_enabled("ZS_QUALITY_PROMOTE", "quality_promote")
 
 
 def effective_llm_concurrency(provider: ProviderConfig | None, item_count: int) -> int:
@@ -131,10 +172,81 @@ def _expand_env_placeholders(value: Any) -> Any:
     return value
 
 
-def read_config(config_path: Path) -> GoalsConfig:
+# chars-per-token for typical English+paper prose (the standard ~4 assumption; scientific
+# text runs slightly denser but 4 is the conservative planning factor).
+_CHARS_PER_TOKEN = 4
+# Slack on (prompt_tokens + max_tokens) so the KV cache has headroom for the response + any
+# thinking phase without a hard truncation at the edge. 1.25 = 25% headroom.
+_NUM_CTX_HEADROOM = 1.25
+
+
+def derive_num_ctx(*, max_text_chars: int, max_tokens: int, headroom: float = _NUM_CTX_HEADROOM) -> int:
+    """Context window (tokens) a LOCAL provider needs so a deep-review prompt FITS.
+
+    ``num_ctx = ceil((max_text_chars/chars_per_token + max_tokens) * headroom)`` — large
+    enough for the biggest prompt the stage sends (text budget + structured output + thinking
+    headroom), small enough not to over-allocate KV-cache RAM on a memory-constrained Mac
+    (ollama allocates KV for the FULL window). ollama's own default (~2–4k) silently truncates
+    a 60k-char prompt; this sizes it to fit. Pure (testable); re-exported for calibration."""
+    if max_text_chars <= 0 or max_tokens <= 0:
+        raise ValueError("max_text_chars and max_tokens must be positive")
+    prompt_tokens = max_text_chars / _CHARS_PER_TOKEN
+    return int((prompt_tokens + max_tokens) * headroom)
+
+
+def read_config(config_path: Path, calibration_path: Path | None = None) -> GoalsConfig:
+    """Load goals.yaml → validate → apply per-user calibration → apply ``ZS_*`` env.
+    Precedence: code default < goals.yaml < ``calibration.json`` < ZS_* env. Pass
+    ``calibration_path`` (``settings.calibration_path``) to enable the calibration layer;
+    omit it (eval/CLI tools that want the raw config) to skip it. See
+    ``services/config_overrides.py``."""
     with config_path.open("r", encoding="utf-8") as fh:
         raw = yaml.safe_load(fh) or {}
-    return GoalsConfig.model_validate(_expand_env_placeholders(raw))
+    config = GoalsConfig.model_validate(_expand_env_placeholders(raw))
+    if calibration_path is not None:
+        config = apply_calibration(config, calibration_path)
+    config = apply_env_overrides(config)
+    config = _disable_prestige_when_offline(config)
+    return _derive_local_num_ctx(config)
+
+
+def _disable_prestige_when_offline(config: GoalsConfig) -> GoalsConfig:
+    """Air-gap contract: ``ZS_OFFLINE`` forces OpenAlex prestige off so triage and
+    scoring never reach the network (prestige is now on by default). Applied AFTER
+    the env layer so ``ZS_OFFLINE`` beats an explicit ``ZS_PRESTIGE_ENABLED=1``.
+    No-op when prestige is already off or the app is online."""
+    if not config.prestige.enabled:
+        return config
+    if (os.getenv("ZS_OFFLINE") or "").strip().lower() not in ("1", "true", "yes", "on"):
+        return config
+    data = config.model_dump(mode="python")
+    data["prestige"]["enabled"] = False
+    return GoalsConfig.model_validate(data)
+
+
+def _derive_local_num_ctx(config: GoalsConfig) -> GoalsConfig:
+    """Auto-size the context window for LOCAL providers that didn't set one explicitly.
+
+    A local ollama provider's own ``num_ctx`` default (~2–4k) silently truncates a long
+    deep-review prompt; derive it to fit (``max_text_chars/4 + max_tokens``, +headroom —
+    see ``derive_num_ctx``). REMOTE providers keep ``num_ctx=None`` (they size
+    their own window; extra_body.num_ctx is a safe no-op there). A provider that set
+    ``num_ctx`` explicitly is left alone (user/calibration override). No-op when there's no
+    ``llm_routing`` (the legacy flat-llm path)."""
+    routing = config.llm_routing
+    if routing is None:
+        return config
+    qr = config.quality_review
+    changed = False
+    new_providers = []
+    for p in routing.providers:
+        if p.is_local and p.num_ctx is None:
+            p = p.model_copy(update={"num_ctx": derive_num_ctx(max_text_chars=qr.max_text_chars, max_tokens=p.max_tokens)})
+            changed = True
+        new_providers.append(p)
+    if not changed:
+        return config
+    return config.model_copy(update={"llm_routing": routing.model_copy(update={"providers": new_providers})})
 
 
 def write_config_atomic(config_path: Path, payload: dict[str, Any]) -> None:
@@ -142,6 +254,22 @@ def write_config_atomic(config_path: Path, payload: dict[str, Any]) -> None:
     with tmp_path.open("w", encoding="utf-8") as config_file:
         yaml.safe_dump(payload, config_file, sort_keys=False, allow_unicode=False)
     tmp_path.replace(config_path)
+
+
+def write_user_config(config_path: Path, config: GoalsConfig) -> None:
+    """Persist ONLY the user-owned keys (intent + LLM connection + university access)
+    to goals.yaml. System-owned sections (corpus, prestige, quality_review, gate, …)
+    are NEVER written — they stay validated code defaults, refined by calibration and
+    ``ZS_*`` env. ``university_access`` is written only when non-default (off → omitted)
+    so an unused section never clutters the file. See ``models.config.USER_OWNED_KEYS``."""
+    full = config.model_dump(mode="json")
+    lean = config.model_dump(mode="json", exclude_defaults=True)
+    payload = {
+        key: value
+        for key, value in full.items()
+        if key in USER_OWNED_KEYS and (key != "university_access" or key in lean)
+    }
+    write_config_atomic(config_path, payload)
 
 
 def to_text(value: Any) -> str:
@@ -248,6 +376,13 @@ def unique_non_empty_strings(values: Any) -> list[str]:
     return normalized
 
 
+def is_app_rss_source(row: dict[str, Any]) -> bool:
+    """True when a feed row/item originated from the app-owned RSS reader
+    (``source_type``/``source`` == ``app_rss``) rather than Zotero's feedItems."""
+    source = str(row.get("source_type") or row.get("source") or "").strip()
+    return source == "app_rss"
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -255,6 +390,15 @@ def now_iso() -> str:
 def now_iso_z() -> str:
     """UTC timestamp, second precision, ``Z`` suffix (e.g. ``2026-05-23T12:00:00Z``)."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def read_json_or_empty(path: Path) -> dict[str, Any]:
+    """Read a small JSON state file; a MISSING file → ``{}`` (legitimate absence —
+    first run, partially-migrated cache). A file that EXISTS but is unreadable or
+    unparseable RAISES — corrupt state is a real signal, never papered over."""
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:

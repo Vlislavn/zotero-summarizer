@@ -110,6 +110,23 @@ def test_changed_filter_restricts_to_diff_touching_pairs():
     assert touched == {frozenset(("f", "g")), frozenset(("g", "h"))}  # f<->h dropped (neither changed)
 
 
+def test_own_nested_closure_pair_suppressed():
+    # A function trivially "overlaps" its own nested closure (shared token stream) —
+    # that self-referential pair is noise; same-file SIBLINGS must still pair.
+    struct = ["Module", "FunctionDef", "Return", "FN"]
+    free = {"x"}
+
+    def _at(qualname: str, line: int) -> co.FunctionUnit:
+        return co.FunctionUnit(path="m.py", qualname=qualname, line=line,
+                               struct_tokens=tuple(struct), free_tokens=frozenset(free), source="")
+
+    outer, inner, sibling = _at("get_thing", 1), _at("get_thing._read", 3), _at("fetch_all", 9)
+    pairs = co.find_overlaps([outer, inner, sibling], threshold=0.0, min_nodes=0, embed_fn=None)
+    keys = {frozenset((p.a.qualname, p.b.qualname)) for p in pairs}
+    assert frozenset(("get_thing", "get_thing._read")) not in keys  # parent<->own closure suppressed
+    assert keys == {frozenset(("get_thing", "fetch_all")), frozenset(("get_thing._read", "fetch_all"))}
+
+
 def test_threshold_boundary_inclusive():
     units, embed = _three_units()
     at = co.find_overlaps(units, threshold=0.80, min_nodes=0, embed_fn=embed)

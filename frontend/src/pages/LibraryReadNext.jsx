@@ -15,7 +15,6 @@ import {
 import ReadNextView from '../components/library/ReadNextView.jsx';
 import LibraryFilterBar from '../components/library/LibraryFilterBar.jsx';
 import PredictionsBar from '../components/library/PredictionsBar.jsx';
-import NotConfiguredCard from '../components/setup/NotConfiguredCard.jsx';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import { useReviewCoolLoop } from '../hooks/useReviewCoolLoop.js';
 import ZoteroActionsMenu from '../components/library/ZoteroActionsMenu.jsx';
@@ -23,7 +22,7 @@ import { StatusBanner, formatShortDate } from '../components/library/shared.jsx'
 import { Section } from '../components/paper/review/primitives.jsx';
 import {
   EMPTY_FILTERS, buildPredicate, goalHighKeys, isFilterActive,
-  serializeFilters, hydrateFilters,
+  serializeFilters, hydrateFilters, prestigeBucketCounts,
 } from '../utils/relevanceBands.js';
 import { isMachineTag } from '../utils/tags.js';
 
@@ -50,12 +49,9 @@ function flattenCollections(nodes, depth = 0) {
 
 export default function LibraryReadNext() {
   const navigate = useNavigate();
-  // Only hit the Zotero-backed sidebar/queue endpoints once we KNOW the reader is
-  // up. When Zotero isn't connected those calls 500/503; gating on db_found keeps
-  // a first-run user on the clean "finish setup" card instead of a wall of errors.
   const { status } = useSetupStatus();
-  const zoteroReady = status?.zotero?.db_found === true;
-  const zoteroKnownMissing = Boolean(status) && !status?.zotero?.db_found;
+  const setupStatusKnown = Boolean(status);
+  const zoteroConnected = status?.zotero?.db_found === true;
   const [searchParams, setSearchParams] = useSearchParams();
   // Client-side smart filters (Phase 1) — hydrated from the URL on mount so a
   // filtered view is shareable / survives reload, then mirrored back on change.
@@ -72,8 +68,8 @@ export default function LibraryReadNext() {
   const [includeRead, setIncludeRead] = useState(false);
   const [collections, setCollections] = useState([]);
   const [tags, setTags] = useState([]);
-  const [selectedCollection, setSelectedCollection] = useState('');
-  const [selectedTag, setSelectedTag] = useState('');
+  const [selectedCollection, setSelectedCollection] = useState(() => searchParams.get('c') || '');
+  const [selectedTag, setSelectedTag] = useState(() => searchParams.get('t') || '');
   // "Browse & filter" drawer (collections + tags + smart filters). Default
   // COLLAPSED everywhere so the ranked queue — the task — owns the fold (Serial
   // Position); the collapsed summary still shows the active scope, so nothing is
@@ -121,7 +117,7 @@ export default function LibraryReadNext() {
   // setSearchParams every render can loop, since its identity changes with the
   // location it just updated). Non-filter params are preserved.
   useEffect(() => {
-    const FILTER_KEYS = ['b', 'pr', 'g', 'w', 'q'];
+    const FILTER_KEYS = ['b', 'pr', 'g', 'w', 'q', 'vn'];
     const target = serializeFilters(clientFilters);
     const current = new URLSearchParams();
     for (const [k, v] of searchParams.entries()) {
@@ -148,6 +144,14 @@ export default function LibraryReadNext() {
     () => [...new Set(queue.map((i) => i.why_reason).filter(Boolean))].sort(),
     [queue],
   );
+  const venueOptions = useMemo(
+    () => [...new Set(queue.map((i) => i.venue).filter(Boolean))].sort(),
+    [queue],
+  );
+  const prestigeCounts = useMemo(
+    () => prestigeBucketCounts(queue, filterCtx.prestigeFloor),
+    [queue, filterCtx.prestigeFloor],
+  );
   const goalEnabled = useMemo(() => queue.some((i) => typeof i.goal_sim === 'number'), [queue]);
   const qualityEnabled = useMemo(() => queue.some((i) => i.quality_grade), [queue]);
   // Proposals already on the rows (e.g. from the startup prewarm) — lets the
@@ -164,7 +168,7 @@ export default function LibraryReadNext() {
 
   // ------ Initial sidebar load ------
   useEffect(() => {
-    if (!zoteroReady) return undefined;
+    if (!zoteroConnected) return undefined;
     let cancelled = false;
     (async () => {
       try {
@@ -183,7 +187,7 @@ export default function LibraryReadNext() {
       }
     })();
     return () => { cancelled = true; };
-  }, [zoteroReady]);
+  }, [zoteroConnected]);
 
   // ------ Read-next queue load (Stage 2) ------
   // Shared query + state-mapping (used by loadQueue AND the auto-review loop's
@@ -248,21 +252,39 @@ export default function LibraryReadNext() {
   }, [queueArgs, applyQueueData]);
 
   useEffect(() => {
-    if (zoteroReady) loadQueue();
+    if (setupStatusKnown) loadQueue();
     return () => {
       if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null; }
       if (ftPollRef.current) { clearTimeout(ftPollRef.current); ftPollRef.current = null; }
     };
-  }, [loadQueue, zoteroReady]);
+  }, [loadQueue, setupStatusKnown]);
+
+  // Persist the CURRENTLY-DISPLAYED ranked order so the full-page review (opened
+  // in a new tab via window.open) can offer Prev/Next through the same list.
+  // localStorage, not sessionStorage — the review is a separate tab. ponytail:
+  // a snapshot; it can go stale if the queue is re-ranked while a review tab is
+  // open — acceptable ceiling, no live sync.
+  useEffect(() => {
+    const displayed = queueMeta.model_ready ? filteredQueue : queue;
+    // Only persist a REAL list — never the empty first-render default (queue starts
+    // []), which would otherwise clobber a prior session's order until the async
+    // fetch resolves, blanking Prev/Next in an already-open review tab.
+    if (!displayed.length) return;
+    try {
+      localStorage.setItem('zs.reviewOrder', JSON.stringify(displayed.map((i) => i.item_key)));
+    } catch { /* storage unavailable — the review page just hides its nav buttons */ }
+  }, [filteredQueue, queue, queueMeta.model_ready]);
 
   function selectCollection(key) {
     setSelectedCollection(key);
     setSelected(new Set());
+    setSearchParams((prev) => { const next = new URLSearchParams(prev); key ? next.set('c', key) : next.delete('c'); return next; }, { replace: true });
   }
 
   function selectTag(tag) {
     setSelectedTag(tag);
     setSelected(new Set());
+    setSearchParams((prev) => { const next = new URLSearchParams(prev); tag ? next.set('t', tag) : next.delete('t'); return next; }, { replace: true });
   }
 
   function applySearch() {
@@ -274,6 +296,7 @@ export default function LibraryReadNext() {
     setSelectedTag('');
     setSearchInput('');
     setSearch('');
+    setSearchParams((prev) => { const next = new URLSearchParams(prev); next.delete('c'); next.delete('t'); return next; }, { replace: true });
   }
 
   function toggleItem(key) {
@@ -370,7 +393,7 @@ export default function LibraryReadNext() {
   const {
     fleetStatus, autoReview, coolUndecided, handleReviewCool, stopReviewCool,
   } = useReviewCoolLoop({
-    queue, queueArgs, applyQueueData, loadQueue, zoteroReady, setMessage, setIsError,
+    queue, queueArgs, applyQueueData, loadQueue, zoteroConnected, setMessage, setIsError,
   });
 
   // One-click Zotero export chain (Tesler: the system owns the rescore→tags→
@@ -461,16 +484,6 @@ export default function LibraryReadNext() {
       setMessage(`Failed to start full-text fetch: ${err.message || err}`);
       setIsError(true);
     }
-  }
-
-  // Zotero not connected → show ONLY the friendly setup card. The data-backed
-  // sidebar/queue (and their errors) would just be noise behind it.
-  if (zoteroKnownMissing) {
-    return (
-      <div className="max-w-3xl mx-auto">
-        <NotConfiguredCard />
-      </div>
-    );
   }
 
   // Active scope shown in the collapsed drawer summary so folding it never hides
@@ -608,6 +621,8 @@ export default function LibraryReadNext() {
                   filters={clientFilters}
                   onChange={setClientFilters}
                   whyOptions={whyOptions}
+                  venueOptions={venueOptions}
+                  prestigeCounts={prestigeCounts}
                   goalEnabled={goalEnabled}
                   qualityEnabled={qualityEnabled}
                   onClear={clearClientFilters}
@@ -682,31 +697,33 @@ export default function LibraryReadNext() {
             under Predict (the conflation that made Predict look like it should
             change a sync timestamp). Hick's/Miller's Law: the four actions stay in
             one grouped disclosure. */}
-        <Section label="Export to Zotero">
-          <div className="flex flex-wrap gap-2 items-center">
-            <ZoteroActionsMenu
-              disabled={syncingAll}
-              actions={[
-                {
-                  label: 'Sync all → Zotero', busy: syncingAll, busyLabel: 'Syncing…',
-                  onClick: () => handleSyncAll(false),
-                  title: 'One click, whole chain: rescore the library if the model changed since, then write zs:rel/<band> relevance tags AND stamp the Call-Number ranks (zr0001…) into Zotero. Backup-first; needs Zotero closed (you\'ll be asked to force otherwise). Then just sort the Call Number column in Zotero.',
-                },
-                {
-                  label: 'Fetch full text', busy: fetchingFulltext, busyLabel: 'Fetching…',
-                  disabled: fetchingFulltext, onClick: () => handleFetchFulltext(false),
-                  title: 'Download the arXiv full-text PDF for every library paper that has an arXiv link but no PDF, and attach it natively to Zotero. Skips papers that already have a PDF. Backs up first; runs with Zotero closed; PDFs upload to zotero.org on the next sync.',
-                },
-              ]}
-            />
-          </div>
-          {(zoteroSyncedAt.tags || zoteroSyncedAt.ranks) && (
-            <p className="mt-2 text-[11px] text-slate-400">
-              Last synced — relevance tags: {formatShortDate(zoteroSyncedAt.tags) || 'never'} ·
-              Call-Number ranks: {formatShortDate(zoteroSyncedAt.ranks) || 'never'}
-            </p>
-          )}
-        </Section>
+        {zoteroConnected && (
+          <Section label="Export to Zotero">
+            <div className="flex flex-wrap gap-2 items-center">
+              <ZoteroActionsMenu
+                disabled={syncingAll}
+                actions={[
+                  {
+                    label: 'Sync all → Zotero', busy: syncingAll, busyLabel: 'Syncing…',
+                    onClick: () => handleSyncAll(false),
+                    title: 'One click, whole chain: rescore the library if the model changed since, then write zs:rel/<band> relevance tags AND stamp the Call-Number ranks (zr0001…) into Zotero. Backup-first; needs Zotero closed (you\'ll be asked to force otherwise). Then just sort the Call Number column in Zotero.',
+                  },
+                  {
+                    label: 'Fetch full text', busy: fetchingFulltext, busyLabel: 'Fetching…',
+                    disabled: fetchingFulltext, onClick: () => handleFetchFulltext(false),
+                    title: 'Download the arXiv full-text PDF for every library paper that has an arXiv link but no PDF, and attach it natively to Zotero. Skips papers that already have a PDF. Backs up first; runs with Zotero closed; PDFs upload to zotero.org on the next sync.',
+                  },
+                ]}
+              />
+            </div>
+            {(zoteroSyncedAt.tags || zoteroSyncedAt.ranks) && (
+              <p className="mt-2 text-[11px] text-slate-400">
+                Last synced — relevance tags: {formatShortDate(zoteroSyncedAt.tags) || 'never'} ·
+                Call-Number ranks: {formatShortDate(zoteroSyncedAt.ranks) || 'never'}
+              </p>
+            )}
+          </Section>
+        )}
 
         {/* One shared transient slot for action results (sync / add-to-collection /
             triage). Self-gates to null when empty, so no stray hairline. */}

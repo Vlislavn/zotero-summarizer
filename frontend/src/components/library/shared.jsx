@@ -9,6 +9,22 @@ export function formatShortDate(value) {
   return s;
 }
 
+// Relative "time ago" — a deep review from 3 months back is a different signal
+// than one from today, so the review recency reads as "reviewed 3d ago" (exact
+// date on hover). Falls back to the short date for unparseable input.
+export function timeAgo(value) {
+  if (!value) return '';
+  const then = new Date(value).getTime();
+  if (Number.isNaN(then)) return formatShortDate(value);
+  const secs = Math.max(0, (Date.now() - then) / 1000);
+  const DAY = 86400;
+  if (secs < 3600) return 'just now';
+  if (secs < DAY) return `${Math.floor(secs / 3600)}h ago`;
+  if (secs < DAY * 30) return `${Math.floor(secs / DAY)}d ago`;
+  if (secs < DAY * 365) return `${Math.floor(secs / (DAY * 30))}mo ago`;
+  return `${Math.floor(secs / (DAY * 365))}y ago`;
+}
+
 export function truncateAuthors(authors) {
   if (!authors) return '';
   if (typeof authors === 'string') return authors.length > 60 ? `${authors.slice(0, 60)}…` : authors;

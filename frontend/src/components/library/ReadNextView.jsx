@@ -376,6 +376,14 @@ export default function ReadNextView({
                           not scored yet
                         </span>
                       )}
+                      {/* Why it surfaced — the top signal behind its rank (topic
+                          match / library affinity / prestige). Answers "why did I
+                          get this paper?" at a glance without opening the row. */}
+                      {it.why_reason && (
+                        <span className="text-slate-400" title="Why this surfaced — the strongest signal behind its rank">
+                          · {it.why_reason}
+                        </span>
+                      )}
                       {/* Author/venue prestige is NOT a row chip — it's already
                           baked into the best-first order (position encodes it), so
                           a per-row violet "◆ top author/venue" pill was the 4th

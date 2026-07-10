@@ -1,4 +1,4 @@
-// Wizard step 1 — Connect Zotero. Auto-detects the Zotero data dir; clicking a
+// Wizard step 1 — optional Zotero sync. Auto-detects the Zotero data dir; clicking a
 // detected location SAVES it immediately (no second button, nothing to remember).
 // Manual entry lives behind an "Enter path manually" disclosure for the rare
 // no-candidates case. The live status row shows "DB found ✓ / N feeds" from the
@@ -50,10 +50,10 @@ export default function StepConnectZotero({ status, draftPaths, onPatchPaths, on
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-base font-semibold text-slate-900">Connect Zotero</h3>
+        <h3 className="text-base font-semibold text-slate-900">Zotero sync</h3>
         <p className="text-sm text-slate-500 mt-1">
           We look for your Zotero data directory automatically. Click the right one
-          to connect it, or enter the path manually.
+          to connect it, enter the path manually, or continue without Zotero.
         </p>
       </div>
 

@@ -1,10 +1,10 @@
 // Settings → Triage region. Research goals, triage criteria, output language,
-// and the Zotero paths with a live status row + a [Save paths] action
+// and the optional Zotero paths with a live status row + a [Save paths] action
 // (restart-required). The LLM-provider editor moved to the AI Models region
 // (AiModelsSection) — config is edited in exactly one place now.
 //
-// Anchors (essentials-goals / essentials-zotero-paths) are the scroll targets
-// the ReadinessStrip's failing pills jump to.
+// Anchors (essentials-goals / essentials-zotero-paths) are scroll targets for
+// settings links.
 
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -72,8 +72,7 @@ function ZoteroPaths({ form, onUpdate }) {
         />
       </div>
 
-      {/* PDF-root status only — the Zotero DB / dir readiness is already the
-          ReadinessStrip's Zotero pill (one readiness answer, not two). */}
+      {/* PDF-root status only — Zotero itself is an optional sync target. */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
         <PathStatus label="PDF root" info={paths.pdf_root} />
       </div>
@@ -141,7 +140,7 @@ export default function EssentialsSection({ form, onUpdate, pathForm, onUpdatePa
 
       <SectionCard
         title="Zotero"
-        description="Where the app reads your library and writes generated artifacts. Changing these needs a restart."
+        description="Optional sync target. The app can read kept RSS papers without Zotero; connect Zotero to mirror tags, collections, and attachments."
       >
         <ZoteroPaths form={pathForm} onUpdate={onUpdatePath} />
       </SectionCard>

@@ -1,23 +1,26 @@
 // Settings — thin orchestrator. Owns the runtime-config query, the local form
 // state seeded from it, the JSON dirty-check, and the sticky save bar; delegates
-// the actual fields to settings/ subcomponents:
+// the actual fields to settings/ subcomponents. The surface is now just INTENT +
+// the LLM/Zotero CONNECTION (Tesler's Law: the human owns intent + environment;
+// every technical knob — classifier gate, corpus thresholds, quality_review,
+// prestige, tokens — is a validated code default, overridable via ZS_* env or
+// per-user calibration, NOT a UI control). Components:
 //
 //   ReadinessStrip     — Zotero·LLM·Goals·Model pills (from useSetupStatus)
-//   EssentialsSection  — goals, triage criteria, output language, default
-//                        provider, Zotero paths (+ live status / Save paths)
-//   AdvancedSection    — <details> with the full LlmRoutingSection (verbatim),
-//                        the classifier gate, and the corpus-similarity slider
+//   AiModelsSection    — the LLM connection + per-stage routing (one editor)
+//   EssentialsSection  — goals, triage criteria, output language, Zotero paths
+//   UniversityAccessPanel — institutional-login toggle (authorization)
 //   ModelCard / AdminSection — unchanged
 //
-// The legacy `llm.*` text inputs (draft_model/refine_model/api_base/api_key_env)
-// are GONE — they duplicated llm_routing. The transforms live in
-// utils/configForm.js (shared with the wizard) and no longer read/write that
-// nested block. Backend round-trips the untouched `llm` key from baseConfig.
+// The old AdvancedSection (classifier-gate knobs + corpus-similarity slider) is
+// GONE. The transforms live in utils/configForm.js (shared with the wizard);
+// system-owned keys round-trip from baseConfig untouched and the backend persists
+// only the user-owned keys (services/_common.write_user_config).
 
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchConfig, updateConfig } from '../api/settingsApi.js';
-import { ALL_PRIORITIES, configToFormState, formStateToConfig } from '../utils/configForm.js';
+import { configToFormState, formStateToConfig } from '../utils/configForm.js';
 import { humanizeError } from '../utils/humanizeError.js';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import AdminSection from '../components/AdminSection.jsx';
@@ -27,8 +30,10 @@ import Button from '../components/ui/Button.jsx';
 import ReadinessStrip from '../components/settings/ReadinessStrip.jsx';
 import AiModelsSection from '../components/settings/AiModelsSection.jsx';
 import EssentialsSection from '../components/settings/EssentialsSection.jsx';
-import AdvancedSection from '../components/settings/AdvancedSection.jsx';
 import UniversityAccessPanel from '../components/settings/UniversityAccessPanel.jsx';
+import CalibrationCard from '../components/settings/CalibrationCard.jsx';
+import DeploymentCard from '../components/settings/DeploymentCard.jsx';
+import RssFeedsSection from '../components/settings/RssFeedsSection.jsx';
 
 export default function Settings() {
   const queryClient = useQueryClient();
@@ -97,22 +102,12 @@ export default function Settings() {
   });
 
   function updateField(key, value) {
+    if (saveMutation.isError) saveMutation.reset();
     setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
   }
 
   function updatePathField(key, value) {
     setPathForm((prev) => ({ ...prev, [key]: value }));
-  }
-
-  function toggleDropPriority(priority) {
-    setForm((prev) => {
-      if (!prev) return prev;
-      const set = new Set(prev.gate_drop_priorities || []);
-      if (set.has(priority)) set.delete(priority);
-      else set.add(priority);
-      const next = ALL_PRIORITIES.filter((p) => set.has(p));
-      return { ...prev, gate_drop_priorities: next };
-    });
   }
 
   function handleSave(e) {
@@ -193,12 +188,7 @@ export default function Settings() {
             Save commits it (the panel keeps only its login action). */}
         <UniversityAccessPanel form={form} onUpdate={updateField} />
 
-        {/* Classifier — the optional fast-reject gate (collapsed by default). */}
-        <AdvancedSection
-          form={form}
-          onUpdate={updateField}
-          onToggleDropPriority={toggleDropPriority}
-        />
+        <RssFeedsSection />
 
         {/* Save bar — sticky-bottom so the action target stays within reach (Fitts's
             Law). ONE status slot: error wins, then unsaved, then saved/idle. */}
@@ -235,6 +225,11 @@ export default function Settings() {
           )}
         </div>
       </form>
+
+      {/* Deployment profile (local vs hybrid) + "Calibrate to my setup" — actions, not
+          config edits, so they sit outside the form. Both apply/measure immediately. */}
+      <DeploymentCard />
+      <CalibrationCard />
 
       {/* Read-only model card + admin actions sit OUTSIDE the config form so their
           action buttons can't be conflated with the config submit. */}

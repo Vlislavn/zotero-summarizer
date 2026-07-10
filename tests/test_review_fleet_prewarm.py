@@ -65,9 +65,12 @@ def test_schedule_skips_when_deep_review_disabled(monkeypatch):
     assert prewarm.schedule_on_startup(_config(enabled=False), _app_state()) is False
 
 
-def test_schedule_skips_without_zotero_reader(monkeypatch):
-    monkeypatch.setattr(prewarm._flight, "run_in_background", _never_spawn)
-    assert prewarm.schedule_on_startup(_config(), _app_state(reader=None)) is False
+def test_schedule_runs_without_zotero_reader(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(prewarm, "_prewarm_worker", lambda k: seen.update(k=k))
+    monkeypatch.setattr(prewarm._flight, "run_in_background", lambda target: target())
+    assert prewarm.schedule_on_startup(_config(prewarm_k=3), _app_state(reader=None)) is True
+    assert seen["k"] == 3
 
 
 def test_worker_starts_fleet_with_k(monkeypatch):

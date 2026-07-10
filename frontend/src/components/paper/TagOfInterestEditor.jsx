@@ -35,11 +35,20 @@ export default function TagOfInterestEditor({ itemKey, tags = [], onChanged }) {
   const shownTags = tags.filter((t) => t && !isMachineTag(t));
   const listId = `tagvocab-${itemKey}`;
 
-  async function applyTags({ addTags = [], removeTags = [] }, busy = '') {
+  async function applyTags({ addTags = [], removeTags = [] }, busy = '', force = false) {
     setError(null);
     setBusyTag(busy);
     try {
-      await updateItemTags(itemKey, { addTags, removeTags });
+      // Same force handshake as CollectionEditor: with Zotero open the first write
+      // returns requires_force (no-op) — without this the tag was silently dropped.
+      const data = await updateItemTags(itemKey, { addTags, removeTags, force });
+      if (data?.requires_force) {
+        setBusyTag('');
+        if (window.confirm('Zotero appears to be running. Change tags anyway? (a backup is taken first)')) {
+          return applyTags({ addTags, removeTags }, busy, true);
+        }
+        return;
+      }
       onChanged?.();
     } catch (e) {
       setError(`Tagging failed: ${e.message || e}`);

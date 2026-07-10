@@ -1,5 +1,5 @@
-// Readiness strip for the top of Settings. Four pills — Zotero · LLM · Goals ·
-// Classifier — derived from useSetupStatus. A failing pill is actionable: it
+// Readiness strip for the top of Settings. LLM · Goals · Classifier pills are
+// derived from useSetupStatus. A failing pill is actionable: it
 // either scrolls to the relevant region (via an anchor id) or routes to the
 // wizard / model lifecycle, so "what's broken?" answers itself. ("Classifier"
 // names the trained drop-classifier — distinct from the LLM, which is the "LLM"
@@ -49,7 +49,7 @@ export default function ReadinessStrip() {
   // An all-green strip tells the user nothing actionable (it just restates that
   // setup is done, and the LLM dot already lives in Active models below). Surface
   // it ONLY when something needs fixing — success is silent (Tesler / Occam).
-  const allReady = pillars.zotero && pillars.llm && pillars.goals && pillars.model
+  const allReady = pillars.llm && pillars.goals && pillars.model
     && subsystemIssues.length === 0;
   if (allReady) return null;
 
@@ -58,12 +58,6 @@ export default function ReadinessStrip() {
       <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mr-1">
         Needs attention
       </span>
-      <Pill
-        label="Zotero"
-        ok={pillars.zotero}
-        onClick={() => scrollToAnchor('essentials-zotero-paths')}
-        title={pillars.zotero ? 'Zotero DB found' : 'Zotero DB not found — set the data directory below'}
-      />
       <Pill
         label="LLM"
         ok={pillars.llm}

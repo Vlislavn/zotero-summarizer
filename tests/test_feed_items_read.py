@@ -15,11 +15,6 @@ def zotero_dir(tmp_path: Path) -> Path:
     return db_path.parent
 
 
-def test_get_user_library_id_returns_1(zotero_dir: Path):
-    r = ZoteroReader(zotero_dir)
-    assert r.get_user_library_id() == 1
-
-
 def test_get_feed_groups_returns_both_feeds_sorted(zotero_dir: Path):
     r = ZoteroReader(zotero_dir)
     groups = r.get_feed_groups()

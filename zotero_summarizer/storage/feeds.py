@@ -36,8 +36,10 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from pathlib import Path
+from typing import Any, Iterator
 
 # Re-export the decision/outcome taxonomy and table DDL so existing
 # `from zotero_summarizer.storage import feeds as fs; fs.DECISION_*` callers
@@ -58,26 +60,40 @@ from zotero_summarizer.storage.feeds_constants import (  # noqa: F401  (re-expor
     DECISION_USER_REJECTED,
     BEHAVIORAL_OUTCOMES,
     OUTCOME_DELETED_ALL,
+    OUTCOME_DEEP_REVIEW_RUN,
     OUTCOME_ENGAGED,
     OUTCOME_KEPT_INBOX,
+    OUTCOME_KEPT_UNREAD_APP,
     OUTCOME_MOVED_COLLECTION,
+    OUTCOME_OPENED_DETAIL,
     OUTCOME_PENDING,
     OUTCOME_TRASHED,
     OUTCOME_UNKNOWN,
+    OUTCOME_USER_LABELED,
     OUTCOME_WEIGHT,
     relevance_from_signal_weight,
 )
 from zotero_summarizer.storage.feeds_schema import (
     CREATE_TABLE as _CREATE_TABLE,
+    CREATE_FEED_KEY_ALIAS_AMBIGUITIES_TABLE as _CREATE_FEED_KEY_ALIAS_AMBIGUITIES_TABLE,
+    CREATE_FEED_KEY_ALIASES_TABLE as _CREATE_FEED_KEY_ALIASES_TABLE,
+    CREATE_RSS_FEEDS_TABLE as _CREATE_RSS_FEEDS_TABLE,
+    CREATE_RSS_ITEMS_TABLE as _CREATE_RSS_ITEMS_TABLE,
     INDEX_STATEMENTS as _INDEX_STATEMENTS,
     MIGRATION_COLUMNS as _MIGRATION_COLUMNS,
 )
+from zotero_summarizer.storage.feed_identity import (
+    legacy_feed_key,
+    stable_feed_key_from_item,
+)
 from zotero_summarizer.storage.feeds_lookup import (  # noqa: F401  (re-exported)
+    _col,
     fetch_processed_content_pairs,
-    fetch_resolved_outcomes,
+    fetch_resolved_outcomes_by_key,
     fetch_trashed_guids,
     get_processed_feed_item_by_id,
     get_processed_feed_item_by_pk,
+    get_processed_feed_item_by_stable_key,
 )
 
 LOGGER = logging.getLogger("zotero_summarizer.storage.feeds")
@@ -99,6 +115,10 @@ def init_feeds_schema(conn: sqlite3.Connection) -> None:
     warning log preserves visibility.
     """
     conn.execute(_CREATE_TABLE)
+    conn.execute(_CREATE_RSS_FEEDS_TABLE)
+    conn.execute(_CREATE_RSS_ITEMS_TABLE)
+    conn.execute(_CREATE_FEED_KEY_ALIASES_TABLE)
+    conn.execute(_CREATE_FEED_KEY_ALIAS_AMBIGUITIES_TABLE)
     existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(processed_feed_items)").fetchall()}
     for col_name, col_def in _MIGRATION_COLUMNS:
         if col_name not in existing_cols:
@@ -108,6 +128,173 @@ def init_feeds_schema(conn: sqlite3.Connection) -> None:
                 LOGGER.warning("Failed to add column %s: %s", col_name, exc)
     for stmt in _INDEX_STATEMENTS:
         conn.execute(stmt)
+    _backfill_stable_feed_keys(conn)
+    _backfill_feed_key_aliases(conn)
+    _copy_legacy_label_verdicts_to_stable_keys(conn)
+
+
+@contextmanager
+def open_triage_conn(db_path: Path) -> Iterator[sqlite3.Connection]:
+    """Open a schema-initialized, ``sqlite3.Row``-backed connection to a triage DB.
+
+    Shared by the app RSS reader, review-mode service, feed daemon, and RSS API
+    routes — every one of them opened the triage DB with this exact
+    ``connect(timeout=10) + row_factory=Row + init_feeds_schema`` idiom.
+    """
+    db_path = Path(db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path), timeout=10)
+    conn.row_factory = sqlite3.Row
+    try:
+        init_feeds_schema(conn)
+        yield conn
+    finally:
+        conn.close()
+
+
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
+def _backfill_stable_feed_keys(conn: sqlite3.Connection) -> int:
+    """Populate ``processed_feed_items.stable_feed_key`` for existing rows."""
+    rows = conn.execute(
+        """
+        SELECT id, guid, doi, arxiv_id
+        FROM processed_feed_items
+        WHERE stable_feed_key IS NULL OR stable_feed_key = ''
+        """
+    ).fetchall()
+    updated = 0
+    for row in rows:
+        row_id = int(_col(row, 0, "id"))
+        item = {
+            "guid": _col(row, 1, "guid"),
+            "doi": _col(row, 2, "doi"),
+            "arxiv_id": _col(row, 3, "arxiv_id"),
+        }
+        stable = stable_feed_key_from_item(item)
+        if not stable:
+            continue
+        conn.execute(
+            "UPDATE processed_feed_items SET stable_feed_key = ? WHERE id = ?",
+            (stable, row_id),
+        )
+        updated += 1
+    return updated
+
+
+def _backfill_feed_key_aliases(conn: sqlite3.Connection) -> dict[str, int]:
+    """Map unambiguous legacy ``feed:<feed_item_id>`` keys to stable keys.
+
+    Ambiguous legacy ids are written to ``feed_key_alias_ambiguities`` so callers
+    can report them instead of silently picking the newest row.
+    """
+    import json as _json
+
+    rows = conn.execute(
+        """
+        SELECT feed_item_id, stable_feed_key
+        FROM processed_feed_items
+        WHERE feed_item_id > 0
+          AND stable_feed_key IS NOT NULL
+          AND stable_feed_key != ''
+        """
+    ).fetchall()
+    grouped: dict[str, set[str]] = {}
+    row_counts: dict[str, int] = {}
+    for row in rows:
+        old_key = legacy_feed_key(_col(row, 0, "feed_item_id"))
+        if not old_key:
+            continue
+        grouped.setdefault(old_key, set()).add(str(_col(row, 1, "stable_feed_key")))
+        row_counts[old_key] = row_counts.get(old_key, 0) + 1
+
+    inserted = 0
+    ambiguous = 0
+    for old_key, stable_keys in grouped.items():
+        if len(stable_keys) == 1:
+            stable = next(iter(stable_keys))
+            conn.execute(
+                """
+                INSERT INTO feed_key_aliases (old_key, stable_feed_key)
+                VALUES (?, ?)
+                ON CONFLICT(old_key) DO UPDATE SET stable_feed_key = excluded.stable_feed_key
+                """,
+                (old_key, stable),
+            )
+            conn.execute("DELETE FROM feed_key_alias_ambiguities WHERE old_key = ?", (old_key,))
+            inserted += 1
+            continue
+        ambiguous += 1
+        conn.execute("DELETE FROM feed_key_aliases WHERE old_key = ?", (old_key,))
+        conn.execute(
+            """
+            INSERT INTO feed_key_alias_ambiguities (old_key, stable_feed_keys_json, row_count)
+            VALUES (?, ?, ?)
+            ON CONFLICT(old_key) DO UPDATE SET
+                stable_feed_keys_json = excluded.stable_feed_keys_json,
+                row_count = excluded.row_count,
+                created_at = datetime('now')
+            """,
+            (old_key, _json.dumps(sorted(stable_keys)), row_counts[old_key]),
+        )
+    return {"aliases": inserted, "ambiguous": ambiguous}
+
+
+def _copy_legacy_label_verdicts_to_stable_keys(conn: sqlite3.Connection) -> int:
+    """Duplicate old ``feed:<id>`` verdict rows onto their stable keys.
+
+    Legacy rows remain in place for compatibility. Stable rows win for new
+    readers; existing stable rows are never overwritten.
+    """
+    if not _table_exists(conn, "label_verdicts"):
+        return 0
+    verdict_cols = {row[1] for row in conn.execute("PRAGMA table_info(label_verdicts)").fetchall()}
+    if "source" not in verdict_cols:
+        return 0
+    cursor = conn.execute(
+        """
+        WITH candidates AS (
+            SELECT
+                a.stable_feed_key,
+                lv.original_derived_priority,
+                lv.user_priority,
+                lv.comment,
+                lv.created_at,
+                lv.source
+            FROM label_verdicts lv
+            JOIN feed_key_aliases a ON a.old_key = lv.item_key
+        ),
+        copyable AS (
+            SELECT stable_feed_key
+            FROM candidates
+            GROUP BY stable_feed_key
+            HAVING COUNT(*) = 1
+        )
+        INSERT INTO label_verdicts (
+            item_key, original_derived_priority, user_priority, comment, created_at, source
+        )
+        SELECT
+            c.stable_feed_key,
+            c.original_derived_priority,
+            c.user_priority,
+            c.comment,
+            c.created_at,
+            c.source
+        FROM candidates c
+        JOIN copyable cp ON cp.stable_feed_key = c.stable_feed_key
+        WHERE NOT EXISTS (
+            SELECT 1 FROM label_verdicts existing
+            WHERE existing.item_key = c.stable_feed_key
+        )
+        """
+    )
+    return int(cursor.rowcount or 0)
 
 
 def new_run_id(prefix: str = "feeds") -> str:
@@ -130,10 +317,7 @@ def filter_unprocessed(
     if not feed_items:
         return [], 0
     keys = [(int(it.get("feed_library_id") or 0), int(it.get("item_id") or 0)) for it in feed_items]
-    placeholders = ",".join("(?,?)" for _ in keys)
-    flat: list[Any] = []
-    for fl, fi in keys:
-        flat.extend([fl, fi])
+    stable_keys = [stable_feed_key_from_item(it) for it in feed_items]
 
     # `skipped_error` rows are transient LLM/endpoint failures the daemon
     # explicitly keeps for retry (the item was never scored). Treat them as
@@ -141,21 +325,43 @@ def filter_unprocessed(
     # stays unread forever AND blocks the round-robin picker from advancing to
     # newer unprocessed items. `clear_error_rows` removes the stale row before
     # the retry records a fresh decision.
-    seen_rows = conn.execute(
-        f"""
-        SELECT feed_library_id, feed_item_id
-        FROM processed_feed_items
-        WHERE (feed_library_id, feed_item_id) IN (VALUES {placeholders})
-          AND decision != ?
-        """,
-        [*flat, DECISION_SKIPPED_ERROR],
-    ).fetchall()
-    seen: set[tuple[int, int]] = {(int(r[0]), int(r[1])) for r in seen_rows}
+    seen_numeric: set[tuple[int, int]] = set()
+    if keys:
+        placeholders = ",".join("(?,?)" for _ in keys)
+        flat: list[Any] = []
+        for fl, fi in keys:
+            flat.extend([fl, fi])
+        seen_rows = conn.execute(
+            f"""
+            SELECT feed_library_id, feed_item_id
+            FROM processed_feed_items
+            WHERE (feed_library_id, feed_item_id) IN (VALUES {placeholders})
+              AND decision != ?
+            """,
+            [*flat, DECISION_SKIPPED_ERROR],
+        ).fetchall()
+        seen_numeric = {(int(r[0]), int(r[1])) for r in seen_rows}
+
+    seen_stable: set[str] = set()
+    non_empty_stable = [k for k in stable_keys if k]
+    if non_empty_stable:
+        placeholders = ",".join("?" for _ in non_empty_stable)
+        rows = conn.execute(
+            f"""
+            SELECT DISTINCT stable_feed_key
+            FROM processed_feed_items
+            WHERE stable_feed_key IN ({placeholders})
+              AND decision != ?
+            """,
+            [*non_empty_stable, DECISION_SKIPPED_ERROR],
+        ).fetchall()
+        seen_stable = {str(r[0]) for r in rows}
 
     unprocessed: list[dict[str, Any]] = []
-    for item in feed_items:
+    for idx, item in enumerate(feed_items):
         key = (int(item.get("feed_library_id") or 0), int(item.get("item_id") or 0))
-        if key not in seen:
+        stable = stable_keys[idx]
+        if (stable and stable not in seen_stable) or (not stable and key not in seen_numeric):
             unprocessed.append(item)
     return unprocessed, len(feed_items) - len(unprocessed)
 
@@ -178,22 +384,34 @@ def select_stale_unread_to_mark(
     """
     if not feed_items:
         return []
-    keys = [(int(it.get("feed_library_id") or 0), int(it.get("item_id") or 0)) for it in feed_items]
-    placeholders = ",".join("(?,?)" for _ in keys)
-    flat: list[Any] = []
-    for fl, fi in keys:
-        flat.extend([fl, fi])
-
-    rows = conn.execute(
-        f"""
-        SELECT DISTINCT feed_library_id, feed_item_id
-        FROM processed_feed_items
-        WHERE (feed_library_id, feed_item_id) IN (VALUES {placeholders})
-          AND decision NOT IN (?, ?)
-        """,
-        [*flat, DECISION_SKIPPED_ERROR, DECISION_AWAITING_REVIEW],
-    ).fetchall()
-    return [(int(r[0]), int(r[1])) for r in rows]
+    out: list[tuple[int, int]] = []
+    for item in feed_items:
+        fl = int(item.get("feed_library_id") or 0)
+        fi = int(item.get("item_id") or 0)
+        stable = stable_feed_key_from_item(item)
+        if stable:
+            row = conn.execute(
+                """
+                SELECT 1 FROM processed_feed_items
+                WHERE stable_feed_key = ?
+                  AND decision NOT IN (?, ?)
+                LIMIT 1
+                """,
+                (stable, DECISION_SKIPPED_ERROR, DECISION_AWAITING_REVIEW),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT 1 FROM processed_feed_items
+                WHERE feed_library_id = ? AND feed_item_id = ?
+                  AND decision NOT IN (?, ?)
+                LIMIT 1
+                """,
+                (fl, fi, DECISION_SKIPPED_ERROR, DECISION_AWAITING_REVIEW),
+            ).fetchone()
+        if row is not None:
+            out.append((fl, fi))
+    return out
 
 
 def clear_error_rows(
@@ -208,20 +426,30 @@ def clear_error_rows(
     """
     if not feed_items:
         return 0
-    keys = [(int(it.get("feed_library_id") or 0), int(it.get("item_id") or 0)) for it in feed_items]
-    placeholders = ",".join("(?,?)" for _ in keys)
-    flat: list[Any] = []
-    for fl, fi in keys:
-        flat.extend([fl, fi])
-    cursor = conn.execute(
-        f"""
-        DELETE FROM processed_feed_items
-        WHERE decision = ?
-          AND (feed_library_id, feed_item_id) IN (VALUES {placeholders})
-        """,
-        [DECISION_SKIPPED_ERROR, *flat],
-    )
-    return cursor.rowcount
+    deleted = 0
+    for item in feed_items:
+        fl = int(item.get("feed_library_id") or 0)
+        fi = int(item.get("item_id") or 0)
+        stable = stable_feed_key_from_item(item)
+        if stable:
+            cursor = conn.execute(
+                """
+                DELETE FROM processed_feed_items
+                WHERE decision = ? AND stable_feed_key = ?
+                """,
+                (DECISION_SKIPPED_ERROR, stable),
+            )
+        else:
+            cursor = conn.execute(
+                """
+                DELETE FROM processed_feed_items
+                WHERE decision = ?
+                  AND feed_library_id = ? AND feed_item_id = ?
+                """,
+                (DECISION_SKIPPED_ERROR, fl, fi),
+            )
+        deleted += int(cursor.rowcount or 0)
+    return deleted
 
 
 def record_decision(
@@ -254,17 +482,20 @@ def record_decision(
     cursor = conn.execute(
         """
         INSERT OR IGNORE INTO processed_feed_items (
-            feed_library_id, feed_item_id, guid, title, doi, arxiv_id, feed_name,
+            feed_library_id, feed_item_id, source_type, stable_feed_key,
+            guid, title, doi, arxiv_id, feed_name,
             decision, decision_reason,
             composite_score, surprise_score, corpus_affinity, reading_priority,
             is_black_swan, model_version, run_id, planned_zotero_key,
             matched_collections_json, error, shap_contribs_json,
             abstract, pub_year
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             int(feed_item.get("feed_library_id") or 0),
             int(feed_item.get("item_id") or 0),
+            str(feed_item.get("source_type") or feed_item.get("source") or "zotero"),
+            str(feed_item.get("stable_feed_key") or stable_feed_key_from_item(feed_item) or "") or None,
             str(feed_item.get("guid") or ""),
             str(feed_item.get("title") or ""),
             str(feed_item.get("doi") or "") or None,
@@ -355,7 +586,7 @@ def count_all_by_decision(conn: sqlite3.Connection) -> dict[str, int]:
     """Full per-decision histogram across every processed feed item.
 
     Backs the Today pipeline-funnel overview (came in / filtered / awaiting /
-    added / trashed). Mirrors :func:`get_run_summary` but spans all runs.
+    added / trashed). Spans all runs, grouped by decision.
     """
     rows = conn.execute(
         "SELECT decision, COUNT(*) AS n FROM processed_feed_items GROUP BY decision"
@@ -385,12 +616,60 @@ def record_materialization(
         """
         UPDATE processed_feed_items
         SET materialized_zotero_key = ?,
+            zotero_sync_status = 'synced',
             outcome_eligible_at = ?,
             final_outcome = ?,
             updated_at = datetime('now')
         WHERE feed_library_id = ? AND feed_item_id = ?
         """,
         (materialized_zotero_key, eligible_at, OUTCOME_PENDING, feed_library_id, feed_item_id),
+    )
+    return int(cursor.rowcount or 0) > 0
+
+
+def record_zotero_sync_status(
+    conn: sqlite3.Connection,
+    *,
+    feed_library_id: int,
+    feed_item_id: int,
+    status: str,
+) -> bool:
+    cursor = conn.execute(
+        """
+        UPDATE processed_feed_items
+        SET zotero_sync_status = ?,
+            updated_at = datetime('now')
+        WHERE feed_library_id = ? AND feed_item_id = ?
+        """,
+        (str(status or "").strip(), int(feed_library_id), int(feed_item_id)),
+    )
+    return int(cursor.rowcount or 0) > 0
+
+
+def record_app_outcome(
+    conn: sqlite3.Connection,
+    *,
+    feed_library_id: int,
+    feed_item_id: int,
+    final_outcome: str,
+    signal_weight: float,
+) -> bool:
+    cursor = conn.execute(
+        """
+        UPDATE processed_feed_items
+        SET final_outcome = ?,
+            outcome_signal_weight = ?,
+            outcome_detected_at = datetime('now'),
+            updated_at = datetime('now')
+        WHERE feed_library_id = ? AND feed_item_id = ?
+          AND materialized_zotero_key IS NULL
+        """,
+        (
+            str(final_outcome or "").strip(),
+            float(signal_weight),
+            int(feed_library_id),
+            int(feed_item_id),
+        ),
     )
     return int(cursor.rowcount or 0) > 0
 
@@ -417,8 +696,6 @@ def record_read_marked(
 # Selection + outcome/history queries live in feeds_history (re-exported).
 from zotero_summarizer.storage.feeds_history import (  # noqa: F401,E402
     due_outcome_checks,
-    get_run_summary,
-    list_recent_decisions,
     record_outcome,
     select_by_decisions,
     select_pending_triaged,

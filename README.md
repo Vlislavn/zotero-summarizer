@@ -6,10 +6,10 @@ gate first, an LLM for the survivors), and gives you a small daily slate to cull
 keep/trash decisions train the model, so tomorrow's slate is sharper.
 
 ```
-  RSS feeds (in Zotero) → [ML gate → LLM] → ranked daily slate → you cull / read / label
+  app RSS pool (self-fetched) → [ML gate → LLM] → ranked daily slate → you cull / read / label
         ▲                                                                      │
         └──────────────── retrain on your labels ◄─────────────────────────────┘
-                 approved tag/collection changes → Zotero (backup first)
+        daily picks → Zotero Inbox · approved tag/note changes → Zotero (backup first)
 ```
 
 **Local-first · no telemetry · trained on _your_ labels** (nothing ships with the repo —
@@ -19,8 +19,9 @@ writes back changes you approve.
 ## Requirements
 
 - **Python 3.10+** and **[uv](https://docs.astral.sh/uv/getting-started/installation/)**
-- **Zotero desktop** with at least one **RSS feed** subscribed (arXiv, bioRxiv,
-  or a **PubMed** saved search — see [docs/usage.md](docs/usage.md) "Adding sources")
+- **Zotero desktop**, plus at least one **RSS feed** added in the app (arXiv,
+  bioRxiv, or a **PubMed** saved search — see [docs/usage.md](docs/usage.md)
+  "Adding sources"); existing Zotero feed subscriptions can be imported in one click
 - An **OpenAI-compatible LLM endpoint** — **local** (Ollama, vLLM, LM Studio,
   `mlx_lm.server`) or **hosted** (any API). You provide the base URL + key.
 - *(developers only: Node 18+ to rebuild the UI — the built UI is already shipped)*

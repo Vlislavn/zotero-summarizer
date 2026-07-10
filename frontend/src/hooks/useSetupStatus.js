@@ -4,20 +4,19 @@
 //
 // Derived (per the frozen contract):
 //   isConfigured = config.valid && config.research_goals_count>0
-//                  && llm.api_key_present && zotero.db_found
-//   pillars = { zotero, llm, goals, model } booleans for the readiness strip.
+//                  && llm.api_key_present
+//   pillars = { zotero, llm, goals, model } advisory status booleans.
 
 import { useQuery } from '@tanstack/react-query';
 import { fetchSetupStatus } from '../api/setupApi.js';
 
 export function deriveConfigured(status) {
   if (!status) return false;
-  const { config, llm, zotero } = status;
+  const { config, llm } = status;
   return Boolean(
     config?.valid &&
       (config?.research_goals_count || 0) > 0 &&
-      llm?.api_key_present &&
-      zotero?.db_found,
+      llm?.api_key_present,
   );
 }
 

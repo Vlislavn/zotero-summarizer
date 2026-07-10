@@ -58,6 +58,16 @@ def test_thinking_effort_defaults_none_and_accepts_levels():
         ProviderConfig(name="p", base_url="u", api_key_env="K", thinking_effort="extreme")
 
 
+def test_thinking_on_is_true_unless_explicitly_off():
+    """The digest reads ``thinking_on`` to decide reasoning: ON by default (unset or a
+    graded level), OFF only when the provider sets ``thinking_effort: off``."""
+    base = dict(name="p", base_url="u", api_key_env="K")
+    assert ProviderConfig(**base).thinking_on is True                       # unset → on (measured NEEDED)
+    assert ProviderConfig(**base, thinking_effort="off").thinking_on is False
+    for level in ("low", "medium", "high"):
+        assert ProviderConfig(**base, thinking_effort=level).thinking_on is True
+
+
 def test_routing_rejects_duplicate_provider_names():
     with pytest.raises(ValueError, match="unique"):
         LLMRoutingConfig(
@@ -93,7 +103,7 @@ def test_provider_is_local_detects_loopback():
     assert mk("http://0.0.0.0:1234").is_local
     assert mk("http://[::1]:8000/v1").is_local
     assert mk("localhost:11434/v1").is_local  # scheme-less still resolves
-    assert not mk("https://api.kather.ai/v1").is_local
+    assert not mk("https://remote.example/v1").is_local
     assert not mk("https://openrouter.ai/api/v1").is_local
     assert not mk("https://api.openai.com/v1").is_local
     # anthropic is always cloud, even with no base_url
@@ -122,7 +132,7 @@ def test_effective_llm_concurrency_local_vs_remote(monkeypatch):
     import zotero_summarizer.services._common as common
     monkeypatch.setattr(common, "settings", lambda: types.SimpleNamespace(triage_job_concurrency=4))
     local = ProviderConfig(name="mlx", base_url="http://127.0.0.1:8080/v1", api_key_env="K")
-    remote = ProviderConfig(name="k", base_url="https://api.kather.ai/v1", api_key_env="K")
+    remote = ProviderConfig(name="k", base_url="https://remote.example/v1", api_key_env="K")
     assert common.effective_llm_concurrency(local, 10) == 1     # local → serial
     assert common.effective_llm_concurrency(remote, 10) == 4    # remote → configured cap
     assert common.effective_llm_concurrency(remote, 2) == 2     # never more than the work
@@ -352,6 +362,30 @@ def test_factory_enable_thinking_noop_without_chat_template_kwargs(monkeypatch):
                               api_key_env="LOCAL_KEY", extra_body=None)
     factory.build_client_for_provider(provider, "m", enable_thinking=True)
     assert captured["extra_body"] is None  # nothing injected
+
+
+def test_factory_keep_alive_forwarded_only_when_set(monkeypatch):
+    # keep_alive mirrors num_ctx: forwarded into extra_body when the provider set it,
+    # NOT injected when None (OFF by default — a latency knob that pins RAM, unsafe to
+    # auto-enable on a memory-constrained Mac). See ADR-D7 / GAP §G6.
+    from zotero_summarizer.services.llm import factory
+
+    monkeypatch.setenv("LOCAL_KEY", "secret")
+    captured = {}
+    monkeypatch.setattr(
+        factory, "build_llm",
+        lambda url, model, key, max_tokens, temperature, extra_body: captured.update(extra_body=extra_body) or "C",
+    )
+    # Set → forwarded.
+    provider = ProviderConfig(name="ollama", base_url="http://localhost:11434/v1",
+                              api_key_env="LOCAL_KEY", keep_alive=3600)
+    factory.build_client_for_provider(provider, "m")
+    assert captured["extra_body"]["keep_alive"] == 3600
+    # Unset (default) → NOT injected (no RAM pin by default).
+    provider_off = ProviderConfig(name="ollama", base_url="http://localhost:11434/v1",
+                                  api_key_env="LOCAL_KEY")
+    factory.build_client_for_provider(provider_off, "m")
+    assert "keep_alive" not in (captured["extra_body"] or {})
 
 
 def test_factory_anthropic_builds_native_adapter(monkeypatch):

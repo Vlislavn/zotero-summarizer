@@ -29,7 +29,6 @@ hint) and never affects another paper's review.
 """
 from __future__ import annotations
 
-import json
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -40,21 +39,31 @@ from zotero_summarizer.services._common import (
     deep_review_sub_concurrency,
     now_iso_z,
     settings,
-    write_json_atomic,
 )
 
+from zotero_summarizer.models import PaperDigest
 from zotero_summarizer.services.library import (
     _deep_review_errors,
     _deep_review_layers,
     _deep_review_progress,
+    _map_reduce,
     quality_review,
     reading_queue,
+)
+# Cache I/O primitives live in _review_cache (split out for the LOC cap); re-exported
+# here so deep_review._read_all / get_cached_review / copy_review stay the public seam.
+from zotero_summarizer.services.library._review_cache import (  # noqa: F401
+    _cache_path,
+    _read_all,
+    _write_one,
+    cached_review_keys,
+    copy_review,
+    get_cached_review,
 )
 from zotero_summarizer.services._common import state as get_state
 
 LOGGER = logging.getLogger(__name__)
 
-_CACHE_FILENAME = "deep_reviews.json"
 _DEFAULT_TOP_K = 5
 
 # ---------------------------------------------------------------------------
@@ -69,7 +78,6 @@ _MAX_CONCURRENT = 8
 _MAX_FINISHED_JOBS = 12
 
 _LOCK = threading.Lock()          # guards _JOBS
-_CACHE_LOCK = threading.Lock()    # guards the read-merge-write of deep_reviews.json
 _POOL_LOCK = threading.Lock()     # guards (re)building the shared pool
 _JOBS: dict[str, dict[str, Any]] = {}
 _POOL: ThreadPoolExecutor | None = None
@@ -182,51 +190,6 @@ def _try_rebuild_render(item_key: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# JSON cache (item_key -> review entry). Quality is gate-independent, so unlike
-# reading_queue this is NOT keyed by the gate sha; re-run to refresh.
-# ---------------------------------------------------------------------------
-
-
-def _cache_path():
-    from zotero_summarizer.services.model.classifier_persistence import DEFAULT_MODEL_DIR
-    return DEFAULT_MODEL_DIR / _CACHE_FILENAME
-
-
-def _read_all() -> dict[str, Any]:
-    path = _cache_path()
-    if not path.exists():
-        return {}
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    return payload.get("reviews") or {}
-
-
-def _write_all(reviews: dict[str, Any]) -> None:
-    write_json_atomic(_cache_path(), {"updated_at": now_iso_z(), "reviews": reviews})
-
-
-def _write_one(item_key: str, entry: dict[str, Any]) -> None:
-    """Persist ONE review entry via a locked read-merge-write, so concurrent per-item
-    workers never clobber each other's keys in the shared ``deep_reviews.json``."""
-    with _CACHE_LOCK:
-        reviews = _read_all()
-        reviews[item_key] = entry
-        _write_all(reviews)
-
-
-def get_cached_review(item_key: str) -> dict[str, Any] | None:
-    """The stored deep-review entry for an item (for ``review_detail``), or None."""
-    if not item_key:
-        return None
-    return _read_all().get(item_key)
-
-
-def cached_review_keys() -> set[str]:
-    """All item_keys with a stored deep review — one cache read (prewarm reuses this
-    instead of calling ``get_cached_review`` per row, which re-reads the whole file)."""
-    return set(_read_all())
-
-
-# ---------------------------------------------------------------------------
 # Per-item work + the background job
 # ---------------------------------------------------------------------------
 
@@ -240,6 +203,8 @@ def _review_one(
     llm: Any,
     quality_enabled: bool,
     llm_digest: Any = None,
+    llm_map: Any = None,
+    response_format: dict[str, Any] | None = None,
     focus_prompt: str = "",
     prestige_scores: dict[str, Any] | None = None,
     prestige_floor_value: float | None = None,
@@ -250,14 +215,11 @@ def _review_one(
     """Condensed paper DIGEST (what it's about + how to use it + quality) for one
     library item. ``None`` when the item vanished from Zotero (caller skips it).
 
-    The PDF normally comes from Zotero's local attachment (``detail['pdf_path']``);
-    Zotero's "Find Available PDF" handles Cloudflare/SSO sources a headless client
-    can't. The review-fleet may instead inject an already-acquired PDF path on the
-    ``item`` dict (``item['pdf_path']`` — a local cache download via the university
-    browser/OA chain), which takes precedence so a verdict works without a Zotero
-    attachment. With neither path we mark ``needs_pdf`` and do nothing else —
-    honest, and cheap (no doomed fetch). The digest is also written to Zotero as one
-    short note (best-effort; the in-app digest is unaffected by a note-write failure).
+    PDF source (precedence): an injected ``item['pdf_path']`` (review-fleet cache via
+    the university browser/OA chain) > Zotero's local attachment (``detail['pdf_path']``).
+    With neither we mark ``needs_pdf`` and do nothing else (cheap, no doomed fetch). The
+    digest is also written to Zotero as one short note (best-effort; in-app digest
+    unaffected by a note-write failure).
     """
     item_key = str(item["item_key"])
     detail = reader.get_item_detail(item_key)
@@ -269,11 +231,7 @@ def _review_one(
     # Zotero attachment — the decouple that lets a verdict happen while Zotero is open.
     pdf_path = str(item.get("pdf_path") or detail.get("pdf_path") or "")
 
-    digest_dump: dict[str, Any] | None = None
-    quality_dump: dict[str, Any] | None = None
-    goal_dump: list[dict[str, Any]] | None = None
-    paper_type_dump: dict[str, Any] | None = None
-    section_overlay: dict[str, Any] | None = None
+    digest_dump = quality_dump = goal_dump = paper_type_dump = section_overlay = code_link_dump = None
     note_written = False
     note_error: str | None = None
 
@@ -288,18 +246,22 @@ def _review_one(
             qr = config.quality_review
             max_chars = int(qr.lean_max_text_chars if lean_tier else qr.max_text_chars)
             reporter.phase("digest", is_call=True)
-            digest = quality_review.assess_digest(
-                title=title, full_text=text, config=config, llm=llm_digest or llm,
-                focus_prompt=focus_prompt, max_chars=max_chars,
-            )
+            # chunk_strategy dispatch (rank/prefix/map_reduce) in _map_reduce.digest_for_strategy.
+            digest = _map_reduce.digest_for_strategy(
+                title, text, config, map_llm=llm_map or llm, reduce_llm=llm_digest or llm,
+                budget=_map_reduce.ChunkBudget(
+                    max_chars=max_chars, chunk_chars=qr.map_chunk_chars, sub_concurrency=sub_concurrency,
+                ),
+                focus_prompt=focus_prompt, response_format=response_format)
             digest_dump = digest.model_dump()
-            quality_dump, goal_dump, paper_type_dump, section_overlay = _deep_review_layers.extra_layers(_deep_review_layers.ExtraLayersCtx(
+            quality_dump, goal_dump, paper_type_dump, section_overlay, code_link_dump = _deep_review_layers.extra_layers(_deep_review_layers.ExtraLayersCtx(
                 item_key=item_key, title=title, pdf_path=pdf_path, text=text,
-                digest_dump=digest_dump, llm=llm, config=config,
+                digest_dump=digest_dump, llm=llm, llm_light=llm_map, config=config,
                 prestige=(prestige_scores or {}).get(item_key),
-                prestige_floor_value=prestige_floor_value, reporter=reporter,
-                lean_tier=lean_tier, sub_concurrency=sub_concurrency, item_type=detail.get("item_type"),
-            ))
+                prestige_floor_value=prestige_floor_value, reporter=reporter, lean_tier=lean_tier,
+                sub_concurrency=sub_concurrency, item_type=detail.get("item_type"),
+                web_article=bool(item.get("web_article")),
+            ))  # noqa: E501
             reporter.phase("note")
             try:
                 from zotero_summarizer.services.zotero.zotero import zotero_upsert_digest_note
@@ -316,6 +278,7 @@ def _review_one(
         "goal_summaries": goal_dump,
         "paper_type": paper_type_dump,
         "section_overlay": section_overlay,
+        "code_link": code_link_dump,
         "needs_pdf": not bool(pdf_path),
         # Set by _review_worker from the acquire result when a fetch was DECLARED-but-
         # gated (paywall/no session) — the per-paper pane shows login_url as a
@@ -346,18 +309,22 @@ def _load_prestige_context() -> tuple[dict[str, Any], float | None]:
     return scores, floor
 
 
-def _build_ctx() -> dict[str, Any]:
+def _build_ctx(reader: Any = None) -> dict[str, Any]:
     """Resolve the shared per-run review context (LLM clients, config, reader, the
     library prestige floor, provider-derived tiers) ONCE per ``start`` call. The
     ``_provider`` key (private) is used for pool sizing + error hinting and is filtered
-    out before the kwargs reach ``_review_one``. Raises if the Zotero reader is absent."""
+    out before the kwargs reach ``_review_one``. ``reader`` overrides the resolved
+    library reader — the in-place Today review passes an ``AppLibraryReader`` so feed
+    candidates resolve by ``stable_feed_key`` even when a live Zotero reader is present."""
     app = get_state()
     config = app.app_state.config
     cfg = config.quality_review
     extractor = getattr(app, "pdf_extractor", None)
-    reader = getattr(app, "zotero_reader", None)
-    if reader is None:
-        raise RuntimeError("Zotero reader unavailable; cannot deep-review")
+    # Zotero-optional: live Zotero reader when present, else the app library over
+    # kept feed papers (PDF acquired into the local cache by _pdf_acquire).
+    from zotero_summarizer.services.zotero.zotero import get_library_reader
+
+    reader = reader or get_library_reader(app)
     provider = app.resolve_stage_provider("deep_review")
     prestige_scores, prestige_floor_value = _load_prestige_context()
     return {
@@ -366,17 +333,16 @@ def _build_ctx() -> dict[str, Any]:
         "extractor": extractor,
         "quality_enabled": bool(cfg.enabled and extractor is not None),
         "llm": app.resolve_stage_client("deep_review"),
-        # DIGEST reasons (quality); trivial calls keep the fast thinking-off default
-        # (a thinking-off digest goes empty/hallucinates — see README). No-op sans flag.
-        "llm_digest": app.resolve_stage_client("deep_review", enable_thinking=True),
+        "llm_digest": app.resolve_stage_client("deep_review", enable_thinking=provider.thinking_on),  # DIGEST reasons unless provider thinking_effort=off
+        "llm_map": app.resolve_stage_client("feed"),  # map_reduce MAP-step (cheap feed stage); lazy, unused by default rank
         "prestige_scores": prestige_scores,
         "prestige_floor_value": prestige_floor_value,
-        # `lean_deep_review` providers (ollama, prefill-bound) use the cheaper tier;
-        # keyed on the flag, NOT is_local (MLX is loopback but fast).
-        "lean_tier": bool(getattr(provider, "lean_deep_review", False)),
-        # Sub-call concurrency WITHIN one paper (local→serial, remote→capped); shared
-        # with verify-deep-review so the CLI receipt matches production.
+        "lean_tier": bool(getattr(provider, "lean_deep_review", False)),  # ollama=prefill-bound→lean; keyed on flag, not is_local
+        # Sub-call concurrency within one paper (local→serial, remote→capped); shared with verify-deep-review.
         "sub_concurrency": deep_review_sub_concurrency(provider),
+        # Decoder-level structured output: JSON Schema for PaperDigest when the provider supports it
+        # (vLLM-style: logit constraint + reasoning survives, measured 2026-06-27); None → prompt-level fallback.
+        "response_format": quality_review.build_response_format(PaperDigest) if getattr(provider, "structured_output", False) else None,
         "_provider": provider,
     }
 
@@ -416,22 +382,22 @@ def _review_worker(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str)
         if ctx.get("_acquire_missing") and not item.get("pdf_path"):
             from zotero_summarizer.services.library import _pdf_acquire
             _set_job_progress(item_key, {"phase": "acquire", "phase_label": "Fetching full text…"})
-            acquired = _pdf_acquire.acquire_for_item(item_key)
+            acquired = _pdf_acquire.acquire_for_item(item_key, reader=ctx.get("reader"))
             if acquired.path is not None:
-                item["pdf_path"] = str(acquired.path)
+                item.update({"pdf_path": str(acquired.path), "web_article": acquired.web_article})
         entry = _review_one(
             item, focus_prompt=focus_prompt,
             progress_sink=lambda prog: _set_job_progress(item_key, prog), **kwargs,
         )
         if entry is not None:
-            # The fetch was DECLARED-but-gated (paywall/no session): carry the actionable
-            # needs_login + landing URL so the pane shows a click-to-open sign-in link
-            # (not the misleading generic "no full text"). Only when no PDF landed.
+            # DECLARED-but-gated fetch (paywall/no session): carry needs_login + landing URL for a sign-in link.
             if acquired is not None and acquired.needs_login and not item.get("pdf_path"):
                 entry["needs_login"] = True
                 entry["login_url"] = acquired.login_url
             _write_one(item_key, entry)
             _try_rebuild_render(item_key)
+            from zotero_summarizer.services.library import quality_gate  # grade landed → L2 hide D/flag
+            quality_gate.fire_for_keys({item_key})
         _set_job(item_key, status="ready", completed=1, progress={}, error=None)
     except Exception as exc:  # noqa: BLE001 — per-item background boundary
         LOGGER.warning("deep_review failed item=%s: %s", item_key, exc)
@@ -458,6 +424,7 @@ def start(
     focus_prompt: str = "",
     pdf_overrides: dict[str, str] | None = None,
     acquire_missing: bool = False,
+    reader: Any = None,
 ) -> dict[str, Any]:
     """Kick off deep review(s). With ``item_keys`` set, reviews exactly those papers
     (the per-paper button / the review-fleet); otherwise the top-``top_k`` unread picks.
@@ -480,7 +447,7 @@ def start(
     panels surface the cause."""
     overrides = pdf_overrides or {}
     try:
-        ctx = _build_ctx()
+        ctx = _build_ctx(reader=reader)
         ctx["_acquire_missing"] = bool(acquire_missing)
         items = _resolve_items(top_k, item_keys, overrides)
     except Exception as exc:  # noqa: BLE001 — surface setup failure on the targeted jobs
@@ -495,4 +462,4 @@ def start(
     return {**status(), "accepted": True}
 
 
-__all__ = ["start", "status", "get_cached_review"]
+__all__ = ["start", "status", "get_cached_review", "copy_review"]

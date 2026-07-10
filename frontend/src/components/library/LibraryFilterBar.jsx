@@ -36,7 +36,8 @@ function Cluster({ label, children }) {
 }
 
 export default function LibraryFilterBar({
-  filters, onChange, whyOptions = [], goalEnabled = false, qualityEnabled = false, onClear,
+  filters, onChange, whyOptions = [], venueOptions = [], prestigeCounts = null,
+  goalEnabled = false, qualityEnabled = false, onClear,
 }) {
   const set = (patch) => onChange({ ...filters, ...patch });
   // Single-select cluster: clicking the active value clears it back to 'any'.
@@ -46,9 +47,15 @@ export default function LibraryFilterBar({
       ? filters[field].filter((x) => x !== value)
       : [...filters[field], value],
   });
+  // Prestige chip label carries its bucket count so an empty bucket is visible
+  // before the click (the old bug: high/low silently blanked a preprint library).
+  const prestigeLabel = (o) => (
+    prestigeCounts && typeof prestigeCounts[o.value] === 'number'
+      ? `${o.label} (${prestigeCounts[o.value]})` : o.label
+  );
 
   const active = isFilterActive(filters);
-  const advancedActive = filters.prestige !== 'any' || filters.why.length > 0;
+  const advancedActive = filters.prestige !== 'any' || filters.why.length > 0 || !!filters.venue;
 
   return (
     <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50/60 p-2.5">
@@ -103,7 +110,9 @@ export default function LibraryFilterBar({
           Advanced filters
         </summary>
         <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2">
-          {/* Prestige — single-select; lowest-frequency facet, so it lives here. */}
+          {/* Prestige — single-select; lowest-frequency facet, so it lives here.
+              Chips carry a live bucket count (author h-index OR citations count as
+              evidence, so a preprint by a known author is filterable, not blanked). */}
           <Cluster label="Prestige">
             {PRESTIGE_OPTS.map((o) => (
               <FilterChip
@@ -111,10 +120,27 @@ export default function LibraryFilterBar({
                 active={filters.prestige === o.value}
                 onClick={() => single('prestige', o.value)}
               >
-                {o.label}
+                {prestigeLabel(o)}
               </FilterChip>
             ))}
           </Cluster>
+
+          {/* Journal / venue — single-select from the live data (Hick's Law: a
+              select, not a chip-per-venue row). Empty = preprints / no journal. */}
+          {venueOptions.length > 0 && (
+            <Cluster label="Journal">
+              <select
+                value={filters.venue}
+                onChange={(e) => set({ venue: e.target.value })}
+                className="text-xs rounded-md border border-slate-300 bg-white px-1.5 py-0.5 max-w-[16rem] text-slate-700"
+              >
+                <option value="">any</option>
+                {venueOptions.map((v) => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+            </Cluster>
+          )}
 
           {/* Why (top reason) — multi-select, built from the live data. */}
           {whyOptions.length > 0 && (

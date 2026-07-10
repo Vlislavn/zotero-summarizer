@@ -185,6 +185,10 @@ def find_overlaps(
             a, b = units[i], units[j]
             if changed is not None and a.path not in changed and b.path not in changed:
                 continue
+            if a.path == b.path and (
+                b.qualname.startswith(a.qualname + ".") or a.qualname.startswith(b.qualname + ".")
+            ):
+                continue  # a function vs its OWN nested closure — self-overlap, not duplication
             embed = _cosine(vectors, i, j)
             api = clones.jaccard(a.free_tokens, b.free_tokens)
             matcher = difflib.SequenceMatcher(None, a.struct_tokens, b.struct_tokens, autojunk=False)

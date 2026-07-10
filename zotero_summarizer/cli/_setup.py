@@ -4,7 +4,8 @@ A guided flow that REUSES the ``services/setup`` primitives the HTTP layer uses
 (no duplicated logic): bootstrap absent files, pick the Zotero data dir
 (detect → confirm → ``write_env_paths``), configure the LLM provider (prompt the
 provider profile → reachability test via ``operational_check.probe_provider``),
-and set the research goals (persist via the shared ``write_config_atomic``).
+and set the research goals (persist via the shared ``write_user_config`` — only the
+user-owned keys; technical knobs stay code defaults).
 
 Everything writes through the same allowlisted/validated paths as the API, so the
 CLI and the Settings UI can never drift.
@@ -114,8 +115,9 @@ def _step_provider(settings: Settings) -> None:
 
 def _step_goals(settings: Settings) -> None:
     """Prompt research goals and persist them into goals.yaml via the shared
-    ``write_config_atomic`` primitive (the same one the config service uses)."""
-    from zotero_summarizer.services._common import read_config, write_config_atomic
+    ``write_user_config`` primitive (the same one the config service uses) — only
+    the user-owned keys are written; technical sections stay code defaults."""
+    from zotero_summarizer.services._common import read_config, write_user_config
 
     print("\n== Research goals ==")
     config = read_config(settings.config_path)
@@ -139,7 +141,7 @@ def _step_goals(settings: Settings) -> None:
         return
 
     config.research_goals = goals
-    write_config_atomic(settings.config_path, config.model_dump(mode="json"))
+    write_user_config(settings.config_path, config)
     print(f"  wrote {len(goals)} research goal(s) to {settings.config_path}")
 
 
@@ -169,6 +171,71 @@ def _setup(args: argparse.Namespace) -> int:
     return 0
 
 
+def _calibrate(args: argparse.Namespace) -> int:
+    """`calibrate` — Tier-1 (env probe) + Tier-2 (text-budget sweep) on the resolved
+    deep-review endpoint, persisting to data/calibration.json. FOREGROUND + watched (the
+    memory-safe path): run it yourself in a terminal. Remote endpoints load
+    no local model, so they're memory-safe regardless of swap."""
+    import json
+
+    from zotero_summarizer.services.setup.calibration import run_full_calibration, tier3_recalibrate
+
+    settings = Settings.load(project_root=args.project_root)
+    item_keys = [k.strip() for k in (args.item_keys or "").split(",") if k.strip()] or None
+    print("Calibrating to your setup (Tier-1 env probe + Tier-2 budget sweep)…", flush=True)
+    result = run_full_calibration(settings, item_keys=item_keys, papers_limit=args.papers)
+
+    if args.tier3:
+        # Tier-3: data-driven classifier recal on YOUR labels (heavy — eval_baseline CV;
+        # run it foreground in a memory-safe window). Label-gated inside tier3_recalibrate.
+        from zotero_summarizer.services._common import load_golden_rows, read_config
+        from zotero_summarizer.services.model.eval_baseline import run_baseline
+
+        classifiers = [c.strip() for c in args.tier3_classifiers.split(",") if c.strip()]
+        print(f"Tier-3: evaluating {classifiers} on your golden labels…", flush=True)
+
+        def _classifier_eval(s: Settings) -> dict[str, dict[str, float]]:
+            cfg = read_config(s.config_path, s.calibration_path)
+            rows = load_golden_rows(s.golden_csv_path)
+            scores: dict[str, dict[str, float]] = {}
+            for clf in classifiers:
+                report = run_baseline(rows, corpus_db_path=s.corpus_db_path, goals_config=cfg,
+                                      classifier_name=clf, n_repeats=2, n_folds=5)
+                scores[clf] = {"oof_spearman": report.spearman_rho.point, "auc": report.auc.point}
+            return scores
+
+        result["tier3"] = tier3_recalibrate(settings, run_eval=_classifier_eval, min_labels=args.tier3_min_labels)
+
+    print(json.dumps(result, indent=2))
+    print(f"\nWrote {settings.calibration_path} — applied automatically on next config load.")
+    return 0
+
+
+def _profile(args: argparse.Namespace) -> int:
+    """`profile` — pick a deployment profile (fully-local vs hybrid local+API), or measure
+    which stages are token/compute-heavy across your providers to inform the choice."""
+    import json
+
+    from zotero_summarizer.services.setup.profiles import PROFILES, run_full_profile_measure, set_profile
+
+    settings = Settings.load(project_root=args.project_root)
+    if args.list:
+        for name, profile in PROFILES.items():
+            print(f"  {name:7} {profile['label']}\n           {profile['description']}\n")
+        return 0
+    if args.measure:
+        print("Measuring stage costs across providers (remote always; local only with --include-local)…", flush=True)
+        print(json.dumps(run_full_profile_measure(settings, include_local=args.include_local), indent=2))
+        return 0
+    if args.set:
+        result = set_profile(settings, args.set, local_depth=args.local_depth)
+        print(json.dumps(result, indent=2))
+        print(f"\nApplied '{args.set}' to {settings.config_path}. Restart the daemon to pick up routing changes.")
+        return 0
+    print("nothing to do — pass --list, --measure, or --set {local|hybrid}")
+    return 1
+
+
 def register_setup(subparsers) -> None:
     parser = subparsers.add_parser(
         "setup",
@@ -176,3 +243,34 @@ def register_setup(subparsers) -> None:
     )
     parser.add_argument("--project-root", default=None)
     parser.set_defaults(func=_setup)
+
+    calib = subparsers.add_parser(
+        "calibrate",
+        help="Calibrate technical defaults to your setup (Tier-1 env probe + Tier-2 budget sweep)",
+    )
+    calib.add_argument("--project-root", default=None)
+    calib.add_argument("--item-keys", default=None,
+                       help="Comma-separated paper item keys to sweep (default: auto-pick built briefs)")
+    calib.add_argument("--papers", type=int, default=3, help="How many papers to sweep (default 3)")
+    calib.add_argument("--tier3", action="store_true",
+                       help="Also run Tier-3 data-driven classifier recal on your golden labels (HEAVY — eval_baseline CV; run foreground)")
+    calib.add_argument("--tier3-classifiers", default="lightgbm,logreg",
+                       help="Classifiers to compare in Tier-3 (default lightgbm,logreg; add tabpfn if RAM allows)")
+    calib.add_argument("--tier3-min-labels", type=int, default=200,
+                       help="Skip Tier-3 below this many golden labels (Tier-0 default stands)")
+    calib.set_defaults(func=_calibrate)
+
+    prof = subparsers.add_parser(
+        "profile",
+        help="Deployment profile: fully-local vs hybrid (local+API) routing, or measure stage costs",
+    )
+    prof.add_argument("--project-root", default=None)
+    prof.add_argument("--list", action="store_true", help="List the presets + their trade-offs")
+    prof.add_argument("--measure", action="store_true",
+                      help="Measure token/compute cost per stage×provider + recommend a profile")
+    prof.add_argument("--include-local", action="store_true",
+                      help="Also measure LOCAL gens (loads a multi-GB model — run in a memory-safe window)")
+    prof.add_argument("--set", choices=sorted(("local", "hybrid")), help="Apply a preset")
+    prof.add_argument("--local-depth", choices=("superficial", "deep"), default=None,
+                      help="Override the local deep-review depth (deep = slow but thorough on local)")
+    prof.set_defaults(func=_profile)

@@ -246,7 +246,8 @@ def test_web_article_rendered_when_enabled(monkeypatch):
 
 
 def test_web_article_skipped_when_flag_off(monkeypatch):
-    """review_web_articles OFF (default) → a blog is NOT rendered; honest no-source."""
+    """review_web_articles OFF → a blog is NOT rendered; honest no-source. (The model
+    default is now ON; this asserts the OFF path still holds when explicitly disabled.)"""
     app = _app(review_web_articles=False)
     render_calls: list = []
     _patch(

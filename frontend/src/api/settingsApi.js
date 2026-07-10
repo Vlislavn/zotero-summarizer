@@ -149,6 +149,61 @@ export async function listModels(provider) {
 }
 
 /**
+ * POST /api/setup/calibrate
+ * "Calibrate to my setup" — kicks off the Tier-1 env probe + Tier-2 text-budget sweep on
+ * the resolved deep-review endpoint (persists data/calibration.json, applied on the next
+ * config load) on a background thread and returns the INITIAL job status immediately. The
+ * caller polls fetchCalibrateStatus for live { completed, total, phase } progress.
+ */
+export async function calibrateSetup({ papers = 3 } = {}) {
+  return request('/api/setup/calibrate', {
+    method: 'POST',
+    body: JSON.stringify({ papers }),
+  });
+}
+
+/**
+ * GET /api/setup/calibrate/status
+ * Live calibration progress: { status: 'idle'|'running'|'ready'|'error', completed, total,
+ * phase, result, error }. `result` (on ready) = { tier1, tier2, provider, model, papers }.
+ */
+export async function fetchCalibrateStatus() {
+  return request('/api/setup/calibrate/status');
+}
+
+/**
+ * GET /api/setup/profiles → { profiles: {local, hybrid}, current: 'local'|'hybrid'|'custom' }
+ * The deployment presets (fully-local vs hybrid local+API) + which one is active now.
+ */
+export async function fetchProfiles() {
+  return request('/api/setup/profiles');
+}
+
+/**
+ * POST /api/setup/profile  body { profile, local_depth? }
+ * Applies a preset — rewrites llm_routing (which stage runs local vs API + review depth).
+ */
+export async function setProfile(profile, localDepth = null) {
+  return request('/api/setup/profile', {
+    method: 'POST',
+    body: JSON.stringify({ profile, local_depth: localDepth }),
+  });
+}
+
+/**
+ * POST /api/setup/profile/measure  body { include_local }
+ * Measures which stages are token/compute-heavy per provider → recommendation. Remote-only
+ * by default (a local gen loads a multi-GB model); slow (real LLM calls). Resolves to
+ *   { summary: { heaviest_by_tokens, heaviest_by_secs, rows[] }, recommendation, providers }.
+ */
+export async function measureProfile({ includeLocal = false } = {}) {
+  return request('/api/setup/profile/measure', {
+    method: 'POST',
+    body: JSON.stringify({ include_local: includeLocal }),
+  });
+}
+
+/**
  * GET /api/admin/model
  * Returns the freshest-on-disk trained classifier's metadata for the
  * Settings model card. Resolves to ``{model: null}`` when no model has
@@ -160,4 +215,39 @@ export async function listModels(provider) {
  */
 export async function fetchModelCard() {
   return request(`${ADMIN_BASE}/model`);
+}
+
+export async function fetchRssFeeds() {
+  return request('/api/rss/feeds');
+}
+
+export async function addRssFeed(payload) {
+  return request('/api/rss/feeds', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateRssFeed(feedId, payload) {
+  return request(`/api/rss/feeds/${encodeURIComponent(feedId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteRssFeed(feedId) {
+  return request(`/api/rss/feeds/${encodeURIComponent(feedId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function importRssFeedsFromZotero() {
+  return request('/api/rss/import-zotero', { method: 'POST' });
+}
+
+export async function refreshRssFeeds(payload = {}) {
+  return request('/api/rss/refresh', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }

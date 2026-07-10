@@ -126,6 +126,23 @@ def build_verdict_note_html(user_priority: str, comment: str) -> str:
     )
 
 
+# Marker for the single free-text "my notes" note the user jots during a review
+# (upsert, no duplicates). Distinct from the verdict note (a decision) — this is
+# the user's own thinking, mirrored from the app's review_notes table.
+USER_NOTE_MARKER = f"{NOTE_PROVENANCE_NAMESPACE}:note_type=user_note"
+
+
+def build_user_note_html(note: str) -> str:
+    """Render the user's free-text review note as one Zotero-safe note.
+
+    Blank lines split paragraphs (each an escaped ``<p>``); a note with no body
+    still renders the header so the marker survives an upsert that clears it.
+    """
+    paras = [html.escape(p.strip()) for p in (note or "").split("\n\n") if p.strip()]
+    body = "".join(f"<p>{p}</p>" for p in paras) or "<p></p>"
+    return f"<!-- {USER_NOTE_MARKER};version=1 --><h2>📝 My notes</h2>{body}"
+
+
 # Marker for the single "deep digest" note on an item (upsert, no duplicates).
 DIGEST_NOTE_MARKER = f"{NOTE_PROVENANCE_NAMESPACE}:note_type=digest"
 

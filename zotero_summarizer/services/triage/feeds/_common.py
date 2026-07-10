@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
 
+from zotero_summarizer.integrations.app_rss import AppRssReader
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.models import SummarizeResponse
 from zotero_summarizer.services._common import settings as get_settings
@@ -189,20 +190,12 @@ def _is_fatal_llm_error(exc: BaseException) -> bool:
 
 @contextmanager
 def _triage_conn() -> Iterator[sqlite3.Connection]:
-    settings = get_settings()
-    path = settings.triage_db_path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), timeout=10)
-    conn.row_factory = sqlite3.Row
-    try:
+    with feeds_storage.open_triage_conn(get_settings().triage_db_path) as conn:
         try:
             conn.execute("PRAGMA journal_mode=WAL")
         except sqlite3.Error as _:
             pass
-        feeds_storage.init_feeds_schema(conn)
         yield conn
-    finally:
-        conn.close()
 
 
 def _load_config() -> dict[str, Any]:
@@ -211,23 +204,18 @@ def _load_config() -> dict[str, Any]:
     feeds_cfg = _safe_dict(getattr(config, "feeds", None)) or _safe_dict(raw.get("feeds"))
     selection_cfg = _safe_dict(getattr(config, "selection", None)) or _safe_dict(raw.get("selection"))
     surprise_cfg = _safe_dict(getattr(config, "surprise", None)) or _safe_dict(raw.get("surprise"))
+    qr = getattr(config, "quality_review", None)
+    quality_review_cfg = qr.model_dump() if qr is not None else {}
     return {
         "feeds": feeds_cfg,
         "selection": selection_cfg,
         "surprise": surprise_cfg,
+        "quality_review": quality_review_cfg,
     }
 
 
 def _parse_year(date_str: Any) -> int | None:
-    if not date_str:
-        return None
-    s = str(date_str).strip()
-    if len(s) >= 4 and s[:4].isdigit():
-        try:
-            return int(s[:4])
-        except ValueError:
-            return None
-    return None
+    return feeds_storage._parse_pub_year(date_str)
 
 
 def _triage_result_from_summary(summary: SummarizeResponse):
@@ -246,7 +234,7 @@ def _triage_result_from_summary(summary: SummarizeResponse):
 
 def list_feed_groups(reader: ZoteroReader | None = None) -> list[dict[str, Any]]:
     """Convenience pass-through for the CLI `feeds list` subcommand."""
-    reader = reader or ZoteroReader(get_settings().zotero_data_dir)
+    reader = reader or AppRssReader(get_settings().triage_db_path)
     return reader.get_feed_groups()
 
 
@@ -259,7 +247,7 @@ def preview_feed(
     unread_only: bool = False,
 ) -> list[dict[str, Any]]:
     """Peek at recent feed items for one feed (CLI `feeds preview`)."""
-    reader = reader or ZoteroReader(get_settings().zotero_data_dir)
+    reader = reader or AppRssReader(get_settings().triage_db_path)
     since = _since_iso(since_days, None)
     return reader.get_feed_items(
         feed_library_id=feed_library_id,

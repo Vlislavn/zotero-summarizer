@@ -13,8 +13,6 @@
 // the nested `llm` key is preserved untouched; we simply never read from it
 // into the form nor write it back from the form.
 
-const ALL_PRIORITIES = ['must_read', 'should_read', 'could_read', 'dont_read'];
-
 // Resolve a stage's effective provider+model on the client, mirroring the
 // backend resolve_stage (zotero_summarizer/models/providers.py): an unset stage
 // field inherits the global `default`. Lets ActiveModelsSummary answer "what's
@@ -46,21 +44,11 @@ export function joinLines(items) {
 // owns a single string/number/bool.
 export function configToFormState(cfg) {
   if (!cfg) return null;
-  const corpus = cfg.corpus || {};
-  const gate = cfg.classifier_gate || {};
   const ua = cfg.university_access || {};
   return {
     research_goals_text: joinLines(cfg.research_goals),
     triage_criteria_text: joinLines(cfg.triage_criteria),
     output_language: cfg.output_language || 'English',
-    corpus_similarity_threshold: Number(corpus.similarity_threshold ?? -0.3),
-    gate_enabled: Boolean(gate.enabled),
-    gate_model_name: gate.model_name || 'tabpfn',
-    gate_drop_priorities: Array.isArray(gate.drop_priorities)
-      ? [...gate.drop_priorities]
-      : ['dont_read'],
-    gate_raw_score_dont_read_below: Number(gate.raw_score_dont_read_below ?? 0),
-    gate_audit_sample_per_tick: Number(gate.audit_sample_per_tick ?? 0),
     // University access (browser PDF fetch) — folded into the one config form so
     // the single sticky Save commits it; the panel keeps only its login action.
     ua_enabled: Boolean(ua.enabled),
@@ -91,22 +79,11 @@ export function formStateToConfig(form, baseConfig) {
   next.research_goals = splitLines(form.research_goals_text);
   next.triage_criteria = splitLines(form.triage_criteria_text);
   next.output_language = form.output_language || 'English';
-  // NOTE: deliberately NO `next.llm = {...}` write — the legacy block is
-  // round-tripped from baseConfig untouched and is no longer UI-editable.
-  next.corpus = {
-    ...(next.corpus || {}),
-    similarity_threshold: Number(form.corpus_similarity_threshold ?? -0.3),
-  };
-  next.classifier_gate = {
-    ...(next.classifier_gate || {}),
-    enabled: Boolean(form.gate_enabled),
-    model_name: form.gate_model_name,
-    drop_priorities: Array.isArray(form.gate_drop_priorities)
-      ? [...form.gate_drop_priorities]
-      : [],
-    raw_score_dont_read_below: Number(form.gate_raw_score_dont_read_below ?? 0),
-    audit_sample_per_tick: Number(form.gate_audit_sample_per_tick ?? 0),
-  };
+  // NOTE: deliberately NO `next.llm`, `next.corpus`, or `next.classifier_gate`
+  // write — those are system-owned knobs (validated code defaults, ZS_* env, and
+  // per-user calibration). Like `prestige`, they round-trip from baseConfig
+  // untouched and are no longer UI-editable. The backend persists only the
+  // user-owned keys (services/_common.write_user_config).
   next.university_access = {
     ...(next.university_access || {}),
     enabled: Boolean(form.ua_enabled),
@@ -124,5 +101,3 @@ export function formStateToConfig(form, baseConfig) {
   }
   return next;
 }
-
-export { ALL_PRIORITIES };

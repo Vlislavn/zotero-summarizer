@@ -22,7 +22,6 @@ run; the same top-K never recompute).
 """
 from __future__ import annotations
 
-import threading
 import time
 from typing import Any
 
@@ -87,18 +86,15 @@ def _prewarm_worker(k: int, config: Any, app_state: Any) -> None:
         LOGGER.warning("deep-review prewarm failed: %s", exc)
 
 
-def run_in_background(target) -> None:
-    threading.Thread(target=target, name="deep-review-prewarm", daemon=True).start()
-
-
 def schedule_on_startup(config: Any, app_state: Any) -> bool:
     """Spawn the prewarm worker when enabled; return whether it was scheduled (for
-    the startup log). Skipped when ``prewarm_on_startup_k`` is 0, deep review is
-    disabled, or Zotero is unavailable (no local PDFs to review)."""
+    the startup log). Skipped when ``prewarm_on_startup_k`` is 0 or deep review is
+    disabled. Zotero is optional: kept feed papers can acquire PDFs into the app
+    cache before review."""
     k = resolve_prewarm_k(config)
-    if k <= 0 or not config.quality_review.enabled or getattr(app_state, "zotero_reader", None) is None:
+    if k <= 0 or not config.quality_review.enabled:
         return False
-    run_in_background(lambda: _prewarm_worker(k, config, app_state))
+    _flight.run_in_background(lambda: _prewarm_worker(k, config, app_state), name="deep-review-prewarm")
     return True
 
 

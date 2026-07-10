@@ -1457,6 +1457,18 @@ wheels = [
 ]
 
 [[package]]
+name = "feedparser"
+version = "6.0.12"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "sgmllib3k" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/dc/79/db7edb5e77d6dfbc54d7d9df72828be4318275b2e580549ff45a962f6461/feedparser-6.0.12.tar.gz", hash = "sha256:64f76ce90ae3e8ef5d1ede0f8d3b50ce26bcce71dd8ae5e82b1cd2d4a5f94228", size = 286579, upload-time = "2025-09-10T13:33:59.486Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4e/eb/c96d64137e29ae17d83ad2552470bafe3a7a915e85434d9942077d7fd011/feedparser-6.0.12-py3-none-any.whl", hash = "sha256:6bbff10f5a52662c00a2e3f86a38928c37c48f77b3c511aedcd51de933549324", size = 81480, upload-time = "2025-09-10T13:33:58.022Z" },
+]
+
+[[package]]
 name = "filelock"
 version = "3.29.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1696,6 +1708,28 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/33/f6/354ae6491228b5eb40e10d89c4d13c651fe1cf7556e35ebdded50cff57ce/gitpython-3.1.50.tar.gz", hash = "sha256:80da2d12504d52e1f998772dc5baf6e553f8d2fcfe1fcc226c9d9a2ee3372dcc", size = 219798, upload-time = "2026-05-06T04:01:26.571Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/20/7a/1c6e3562dfd8950adbb11ffbc65d21e7c89d01a6e4f137fa981056de25c5/gitpython-3.1.50-py3-none-any.whl", hash = "sha256:d352abe2908d07355014abdd21ddf798c2a961469239afec4962e9da884858f9", size = 212507, upload-time = "2026-05-06T04:01:23.799Z" },
+]
+
+[[package]]
+name = "gliner2"
+version = "1.3.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "peft" },
+    { name = "pydantic" },
+    { name = "requests" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/06/ea/d6091c70ba05d5611e49520198f40c11e5df3b0f5cedc629e4ec01c496ea/gliner2-1.3.2.tar.gz", hash = "sha256:0c07befb66c031d288c7fe0398880885a6a4016f14ff3f6e17568439fe6019d8", size = 133808, upload-time = "2026-06-30T15:04:44.889Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5e/e5/ce58a45306747714072179d24f9a6c59d642a588cededf35132bdbfd74f8/gliner2-1.3.2-py3-none-any.whl", hash = "sha256:d4e5e2f76a2eec1da5e4d6c205b6fc99dfc6c3c82ff29ea07a27565040730802", size = 96814, upload-time = "2026-06-30T15:04:41.967Z" },
+]
+
+[package.optional-dependencies]
+local = [
+    { name = "peft" },
+    { name = "torch" },
+    { name = "transformers" },
 ]
 
 [[package]]
@@ -4473,6 +4507,28 @@ wheels = [
 ]
 
 [[package]]
+name = "peft"
+version = "0.19.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "accelerate" },
+    { name = "huggingface-hub" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "packaging" },
+    { name = "psutil" },
+    { name = "pyyaml" },
+    { name = "safetensors" },
+    { name = "torch" },
+    { name = "tqdm" },
+    { name = "transformers" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/86/cf/037f1e3d5186496c05513a6754639e2dab3038a05f384284d49a9bd06a2d/peft-0.19.1.tar.gz", hash = "sha256:0d97542fe96dcdaa20d3b81c06f26f988618f416a73544ab23c3618ccb674a40", size = 763738, upload-time = "2026-04-16T15:46:45.105Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e8/b6/f54d676ed93cc2dd2234c3b172ea9c8c3d7d29361e66b1b23dec57a67465/peft-0.19.1-py3-none-any.whl", hash = "sha256:2113f72a81621b5913ef28f9022204c742df111890c5f49d812716a4a301e356", size = 680692, upload-time = "2026-04-16T15:46:42.886Z" },
+]
+
+[[package]]
 name = "pi-heif"
 version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -6530,6 +6586,12 @@ wheels = [
 ]
 
 [[package]]
+name = "sgmllib3k"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9e/bd/3704a8c3e0942d711c1299ebf7b9091930adae6675d7c8f476a7ce48653c/sgmllib3k-1.0.0.tar.gz", hash = "sha256:7868fb1c8bfa764c1ac563d3cf369c381d1325d36124933a726f29fcdaa812e9", size = 5750, upload-time = "2010-08-24T14:33:52.445Z" }
+
+[[package]]
 name = "shadowcopy"
 version = "0.0.4"
 source = { registry = "https://pypi.org/simple" }
@@ -8432,6 +8494,7 @@ dependencies = [
     { name = "adapters" },
     { name = "anthropic" },
     { name = "fastapi" },
+    { name = "feedparser" },
     { name = "httpx" },
     { name = "kneed" },
     { name = "lightgbm" },
@@ -8462,6 +8525,9 @@ dev = [
 docling = [
     { name = "docling" },
 ]
+entities = [
+    { name = "gliner2", extra = ["local"] },
+]
 
 [package.metadata]
 requires-dist = [
@@ -8470,6 +8536,8 @@ requires-dist = [
     { name = "browser-cookie3", marker = "extra == 'browser'", specifier = ">=0.19" },
     { name = "docling", marker = "extra == 'docling'", specifier = ">=2.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "feedparser", specifier = ">=6.0.12" },
+    { name = "gliner2", extras = ["local"], marker = "extra == 'entities'", specifier = ">=1.3" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "kneed", specifier = ">=0.8.5" },
     { name = "lightgbm", specifier = ">=4.0.0" },
@@ -8489,7 +8557,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
     { name = "vulture", marker = "extra == 'dev'", specifier = "==2.16" },
 ]
-provides-extras = ["dev", "docling", "browser"]
+provides-extras = ["dev", "docling", "browser", "entities"]
 
 [[package]]
 name = "zstandard"

@@ -39,6 +39,34 @@ def test_attach_quality_bridges_only_via_materialized_key(monkeypatch) -> None:
     assert cands[2]["quality"] == {}
 
 
+def test_attach_quality_bridges_via_stable_feed_key(monkeypatch) -> None:
+    """The IN-PLACE Today review caches under stable_feed_key — the bridge must join on
+    it too, so an un-materialized (no-Zotero-write) card still shows quality."""
+    monkeypatch.setattr(deep_review, "_read_all", lambda: {
+        "feed:d:abc": {"quality": {"quality_band": "highlight", "grade": "A"}},
+    })
+    cands = [
+        {"stable_feed_key": "feed:d:abc", "materialized_zotero_key": None, "quality": {}},
+        {"stable_feed_key": "feed:d:none", "materialized_zotero_key": None, "quality": {}},
+    ]
+    matched = _candidate.attach_quality_from_reviews(cands)
+    assert matched == 1
+    assert cands[0]["quality"] == {"quality_band": "highlight", "grade": "A"}
+    assert cands[1]["quality"] == {}
+
+
+def test_attach_quality_prefers_materialized_over_feed_key(monkeypatch) -> None:
+    """Post-materialize the Zotero-key entry wins over the feed-key one (the copy made
+    at materialization is the canonical library record)."""
+    monkeypatch.setattr(deep_review, "_read_all", lambda: {
+        "ZK1": {"quality": {"grade": "A"}},
+        "feed:d:abc": {"quality": {"grade": "C"}},
+    })
+    cands = [{"stable_feed_key": "feed:d:abc", "materialized_zotero_key": "ZK1", "quality": {}}]
+    _candidate.attach_quality_from_reviews(cands)
+    assert cands[0]["quality"] == {"grade": "A"}
+
+
 def test_pick_model_floats_highlight_within_floored_role(monkeypatch) -> None:
     monkeypatch.setenv("ZS_QUALITY_BAND_PRIMARY", "1")
     # Equal base rank_score, both above the could_read floor → the highlight floats.

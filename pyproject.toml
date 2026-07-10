@@ -25,6 +25,7 @@ dependencies = [
     "pandas>=2.0.0",
     "rank-bm25>=0.2.2",
     "lightgbm>=4.0.0",
+    "feedparser>=6.0.12",
 ]
 
 [project.optional-dependencies]
@@ -56,6 +57,14 @@ browser = [
     # Read the user's existing Safari/Chrome session cookies to reuse an institutional
     # login without a second in-app sign-in (gated by `university_access.reuse_safari_cookies`).
     "browser-cookie3>=0.19",
+]
+# Optional zero-shot entity/schema extractor (Fastino GLiNER2, Apache-2.0, ~205M
+# DeBERTa-v2 encoder, CPU). BENCHMARK-ONLY for now: tools/bench_gliner2.py is the
+# Phase-0 go/no-go before any product wiring (README ships no accuracy numbers).
+# `[local]` pulls torch + the local inference/training stack. Install with
+# `uv sync --extra entities`; no product code imports it yet.
+entities = [
+    "gliner2[local]>=1.3",
 ]
 
 [project.scripts]

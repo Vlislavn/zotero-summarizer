@@ -5,7 +5,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 import joblib
 import numpy as np
@@ -211,15 +211,22 @@ def _dated_oof_spearman(
     return float(spearmanr(y_train[dated], preds_oof[dated]).statistic), n_dated
 
 
+class _OofDiag(NamedTuple):
+    """The four out-of-fold diagnostics that travel together into ``training_metadata``:
+    aggregate Spearman ρ, the dated-subset ρ (+ its row count), and per-class metrics."""
+
+    rho: float
+    rho_verified: float | None
+    n_verified: int
+    metrics: dict[str, Any]
+
+
 def _training_metadata(
     library: Any,
     temporal: dict[str, Any] | None,
     *,
     n_train: int,
-    oof_rho: float,
-    oof_rho_verified: float | None,
-    n_verified: int,
-    oof_metrics: dict[str, Any],
+    oof: _OofDiag,
     cal_diag: Any,
 ) -> dict[str, Any]:
     """The JSON-able ``training_metadata`` block stored on the artefact."""
@@ -227,18 +234,18 @@ def _training_metadata(
         "n_train": n_train,
         "n_positive_library": library.n_rows,
         "objective": "regression",
-        "oof_spearman": round(oof_rho, 4),
+        "oof_spearman": round(oof.rho, 4),
         # Honest split: oof_spearman above is the aggregate (inflated by ~72%
         # undated feed:* rows the gate trivially rejects); this is the SAME OOF
         # restricted to dated reading-decisions — the gate's real ranking ability.
         # None = subset too small / constant label (tiny fixtures).
-        "oof_spearman_verified": None if oof_rho_verified is None else round(oof_rho_verified, 4),
-        "n_verified": n_verified,
+        "oof_spearman_verified": None if oof.rho_verified is None else round(oof.rho_verified, 4),
+        "n_verified": oof.n_verified,
         # None = holdout too small / constant labels (tiny fixtures) —
         # the ModelCard renders an em-dash then, never a fake number.
         "temporal_spearman": None if temporal is None else temporal["temporal_spearman"],
         "temporal_holdout_n": 0 if temporal is None else temporal["temporal_holdout_n"],
-        "oof_metrics_vs_gold": oof_metrics,
+        "oof_metrics_vs_gold": oof.metrics,
         "band_calibration": cal_diag,
         "trained_at": now_iso_z(),
         "git_commit": run_log.short_git_commit(),
@@ -364,6 +371,16 @@ def train_and_save(
     # Out-of-fold per-class quality (honest — predictions never saw their own
     # fold), on the EFFECTIVE (post-calibration) bins the shipped gate will assign.
     oof_metrics = _oof_quality_metrics(train_rows, eff_oof)
+    # Label-drift visibility: the golden CSV is re-exported from live Zotero each
+    # train, so labels shift silently. Surface the distribution + n_train delta vs
+    # the prior run (read-only; logged + carried into the run-log entry).
+    from zotero_summarizer.services.model.classifier_drift import log_label_drift
+
+    gold_labels = [r.get("gold_priority_final") or "" for r in train_rows]
+    label_drift = log_label_drift(
+        gold_labels, n_train, classifier_name=classifier_name,
+        runs_log_path=runs_log_path,
+    )
 
     # 3c. Forward-looking Spearman: train on the oldest 80%, score the newest
     # 20% — the number production actually delivers (the shuffled OOF above
@@ -384,9 +401,9 @@ def train_and_save(
         classifier_name=classifier_name, sha256=sha256, pca_dim=pca_dim,
         metadata=_training_metadata(
             library, temporal,
-            n_train=n_train, oof_rho=oof_rho,
-            oof_rho_verified=oof_rho_verified, n_verified=n_verified,
-            oof_metrics=oof_metrics, cal_diag=cal_diag,
+            n_train=n_train,
+            oof=_OofDiag(oof_rho, oof_rho_verified, n_verified, oof_metrics),
+            cal_diag=cal_diag,
         ),
     )
 
@@ -405,6 +422,7 @@ def train_and_save(
             "classifier": classifier_name,
             "type": "train_artifact",
             "cv": {"n_rows": n_train, "auc": None, "metrics_vs_gold": oof_metrics},
+            "label_drift": label_drift,
             "input_csv_sha256_prefix": sha256[:12],
         })
     LOGGER.info(
@@ -416,10 +434,19 @@ def train_and_save(
 
 
 def save_trained(trained: TrainedClassifier, output_dir: Path) -> tuple[Path, Path]:
-    """Write the joblib payload + JSON metadata mirror (atomically)."""
+    """Write the joblib payload + JSON metadata mirror (atomically).
+
+    Before overwriting, the prior model is snapshotted to a versioned history dir
+    (``classifier_backup.snapshot_current``) so a retrain that later looks wrong has
+    a rollback target. A failed snapshot RAISES — the invariant is *never overwrite
+    the live model without a successful backup* (``--force`` is reversible).
+    """
+    from zotero_summarizer.services.model.classifier_backup import snapshot_current
+
     output_dir.mkdir(parents=True, exist_ok=True)
     joblib_path = output_dir / f"{trained.classifier_name}.joblib"
     json_path = output_dir / f"{trained.classifier_name}.json"
+    snapshot_current(output_dir, trained.classifier_name)
     # tmp + os.replace: a crash mid-dump must not leave a truncated .joblib that
     # then fails to unpickle and bricks the gate on the next startup.
     atomic_write(joblib_path, lambda target: joblib.dump(trained, target))

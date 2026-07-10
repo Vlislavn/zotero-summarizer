@@ -2,7 +2,7 @@
 
 - ``GET  /api/daily``                — assemble the daily slate
 - ``GET  /api/daily/pipeline``       — funnel overview (in/filtered/awaiting/added/trashed)
-- ``POST /api/daily/triage-backlog`` — drain the un-triaged backlog (sota model)
+- ``POST /api/daily/triage-backlog`` — drain the un-triaged backlog (remote model)
 - ``GET  /api/daily/triage-status``  — poll the backlog drain
 - ``POST /api/daily/rescore-slate``  — re-score the current slate in place (gate upgrade)
 - ``POST /api/daily/add-to-library`` — materialize cards into Zotero Inbox (positive label)
@@ -25,6 +25,7 @@ from zotero_summarizer.services import interaction_log
 from zotero_summarizer.services.triage import daily_actions, daily_select
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.storage import feeds as feeds_storage
+from zotero_summarizer.storage.feed_identity import row_feed_keys
 from zotero_summarizer.storage import repositories
 
 
@@ -308,7 +309,7 @@ async def _record_role_verdict(item_key: str, body: RoleVerdictRequest) -> dict[
 
 
 # ---------------------------------------------------------------------------
-# Backlog triage (drain the un-triaged feed backlog via the custom SOTA provider)
+# Backlog triage (drain the un-triaged feed backlog via the custom remote provider)
 # ---------------------------------------------------------------------------
 
 
@@ -398,8 +399,7 @@ async def submit_daily_verdict(body: DailyVerdictRequest) -> dict[str, Any]:
             status_code=404,
         )
 
-    feed_item_id = int(row.get("feed_item_id") or 0)
-    golden_key = f"feed:{feed_item_id}" if feed_item_id else f"processed:{row.get('id')}"
+    golden_key = row_feed_keys(row)[0]
 
     # Append to golden CSV (idempotent) so the row enters the training set.
     from zotero_summarizer.services.library import review
@@ -417,6 +417,9 @@ async def submit_daily_verdict(body: DailyVerdictRequest) -> dict[str, Any]:
         original_derived_priority=derived,
         user_priority=body.user_priority,
         comment=body.comment,
+    )
+    await asyncio.to_thread(
+        daily_actions.record_row_outcome, row, feeds_storage.OUTCOME_USER_LABELED,
     )
     interaction_log.log_feed_decision(
         row=row, item_key=golden_key, surface="today_priority",

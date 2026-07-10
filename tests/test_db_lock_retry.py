@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from tests._zotero_fixtures import add_feed_item, build_zotero_db
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter, ZoteroWriteError
 
 
@@ -98,3 +99,42 @@ def test_mark_feed_items_read_retries_on_lock(tmp_path):
 
     assert result == 1
     assert lock_attempts[0] == 2
+
+
+def test_apply_changes_retries_on_lock(tmp_path):
+    """apply_changes wraps its write in _retry_on_lock: a transient 'database is
+    locked' on the first connect attempt is retried and the second attempt
+    succeeds, applying the queued change (regression for the bare-connect bug —
+    previously the OperationalError was converted straight to ZoteroWriteError
+    with no retry)."""
+    db_path = build_zotero_db(tmp_path / "zotero")
+    zotero_dir = db_path.parent
+    feed_item_id = add_feed_item(db_path, feed_library_id=2, guid="g1", title="A")
+
+    writer = ZoteroWriter(zotero_dir)
+
+    real_connect = sqlite3.connect
+    attempts = [0]
+
+    def flaky_connect(path, *args, **kwargs):
+        attempts[0] += 1
+        if attempts[0] == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real_connect(path, *args, **kwargs)
+
+    changes = [
+        {
+            "id": 1,
+            "item_key": "__feed_marker__",
+            "change_type": "mark_feed_item_read",
+            "payload_json": {"feed_library_id": 2, "feed_item_id": feed_item_id},
+        }
+    ]
+
+    with patch("zotero_summarizer.integrations.zotero_write.sqlite3.connect", side_effect=flaky_connect):
+        with patch("zotero_summarizer.integrations.zotero_write.time"):
+            result = writer.apply_changes(changes, create_backup=False)
+
+    assert attempts[0] == 2
+    assert result["applied_ids"] == [1]
+    assert result["failed"] == []

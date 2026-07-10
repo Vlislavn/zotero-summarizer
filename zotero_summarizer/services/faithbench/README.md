@@ -10,8 +10,8 @@ browser + paper Q&A feature.
 Zotero PDFs ──► [_corpus]──► papers/<key>.txt   │                         │                    │
                    │         (frozen + sha256)  │                         │                    │
 builder LLM ──► [_build_qa] ─► benchmark_vN.jsonl ─► [_runner] ──► responses.jsonl ─► [_judge] ─► judgments.jsonl ─► [_stats/_report]
-(remote,           │  QA span-verified + traps     │  model under test       │  hard ladder        │   report.{json,md}
- api.kather.ai)    └─► benchmark_vN.review.csv     │  (deep_review stage,    │  then pinned        └─► faithbench-runs.jsonl
+(remote API)       │  QA span-verified + traps     │  model under test       │  hard ladder        │   report.{json,md}
+                   └─► benchmark_vN.review.csv     │  (deep_review stage,    │  then pinned        └─► faithbench-runs.jsonl
                                                    │   full_text|retrieval)  │  LLM judge
                                           [_build_claims] digest→claims      │  (residual only)
 ```
@@ -117,14 +117,13 @@ to be re-used:
 | `_constants.py` | pinned `DEFAULT_JUDGE_MODEL` + env-var names + thresholds |
 | `_judgment.py` | tri-state `Judgment`, closed `FailureReason`/`JudgeMethod` enums |
 | `_dataset.py` | benchmark schemas, versioned JSONL persistence, review CSV |
-| `_corpus.py` | paper selection/extraction, frozen text, `normalize_text` (shared by gate AND judge), chunking, per-paper BM25 (word `tokenize` reused from `storage.corpus_bm25`) |
+| `_corpus.py` | paper selection/extraction, frozen text, `normalize_text` (shared by gate AND judge), chunking, per-paper BM25 (word `tokenize` reused from `storage.corpus_bm25`); `PaperSubstrate` bundles a paper's text+norm+chunk-index (the trio `_judge`/`_runner` cache per paper) |
 | `_build_qa.py` | QA generation + deterministic span keep-gate + traps |
 | `_build_claims.py` | digest (reuses `library.quality_review`) + claim decomposition |
-| `_runner.py` | trial execution, append-only responses, resume + manifest guard |
+| `_runner.py` | trial execution, append-only responses, resume + manifest guard; `run_benchmark`'s 7 execution knobs (conditions/tracks/runs/limit/retry_errors/serial/max_workers) are bundled in `RunOptions`, and the frozen run artifacts (meta/items/papers_dir/paths) in `RunInputs` — the same bundle `judge_run` takes, so runner and judge can never disagree on what a "run" is |
 | `_judge.py` | hard ladder + LLM escalation, claim support judging |
 | `_stats.py` | `calculate_statistics` — single source of truth |
 | `_report.py` | report.json / report.md rendering + master log |
 
-SOTA provenance: ARE/Gaia2 patterns (hard-before-soft judge, pinned judge
-model, typed failure taxonomy, run-level variance) — cards under
-`~/.claude/skills/sota-pattern-index/knowledge/are/`.
+Design provenance: ARE/Gaia2 agent-benchmark patterns (hard-before-soft judge,
+pinned judge model, typed failure taxonomy, run-level variance).

@@ -24,10 +24,12 @@ from zotero_summarizer.services.zotero._notes import (  # noqa: F401
     NOTE_PROVENANCE_NAMESPACE,
     NOTE_PROVENANCE_SOURCE,
     NOTE_VERSION,
+    USER_NOTE_MARKER,
     VERDICT_NOTE_MARKER,
     build_digest_note_html,
     build_provenance_comment,
     build_triage_note_html,
+    build_user_note_html,
     build_verdict_note_html,
 )
 from zotero_summarizer.storage import repositories as triage_db
@@ -329,6 +331,7 @@ async def apply_pending_changes(req: PendingChangeMutationRequest) -> dict[str, 
     ]
 
     inbox_removed = 0
+    inbox_removed_error: str | None = None
     if refreshed_item_keys:
         try:
             inbox_removed = await asyncio.to_thread(
@@ -337,7 +340,8 @@ async def apply_pending_changes(req: PendingChangeMutationRequest) -> dict[str, 
                 "Inbox",
                 True,
             )
-        except Exception:
+        except Exception as exc:
+            inbox_removed_error = str(exc)
             LOGGER.warning("Failed removing applied items from Inbox collection", exc_info=True)
         await refresh_corpus_items_by_keys(refreshed_item_keys)
 
@@ -354,4 +358,5 @@ async def apply_pending_changes(req: PendingChangeMutationRequest) -> dict[str, 
         "backup_path": result.get("backup_path"),
         "failed_items": failed_items,
         "inbox_removed": inbox_removed,
+        "inbox_removed_error": inbox_removed_error,
     }

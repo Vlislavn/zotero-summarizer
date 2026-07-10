@@ -24,13 +24,14 @@ def write_outputs(
     digest: dict[str, Any] | None = None,
     quality: dict[str, Any] | None = None,
     goal_summaries: list[dict[str, Any]] | None = None,
+    code_link: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write paper-render-compatible notes, presentation and audit files."""
     short = _paper_short_name(str(content.get("title") or ""), pdf_path.stem)
     notes_path = pdf_path.parent / f"{short}_notes.md"
     html_path = pdf_path.parent / f"{short}_presentation.html"
     notes_path.write_text(_render_notes(content, digest, quality, goal_summaries), encoding="utf-8")
-    html_path.write_text(_render_presentation(content, short, digest, quality, goal_summaries), encoding="utf-8")
+    html_path.write_text(_render_presentation(content, short, digest, quality, goal_summaries, code_link), encoding="utf-8")
     audit = _audit_presentation(html_path, notes_path, content.get("figures") or [])
     audit_path = pdf_path.parent / f"{short}_audit.json"
     audit_path.write_text(json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -150,6 +151,7 @@ def _render_presentation(
     digest: dict[str, Any] | None = None,
     quality: dict[str, Any] | None = None,
     goal_summaries: list[dict[str, Any]] | None = None,
+    code_link: dict[str, Any] | None = None,
 ) -> str:
     from zotero_summarizer.services.library import _paper_read_brief as brief
 
@@ -157,6 +159,7 @@ def _render_presentation(
     authors = str(content.get("authors") or "")
     figures = [fig for fig in (content.get("figures") or []) if fig.get("name")]
     image_map = {f"ph-fig{i}": f"figures/{fig['name']}" for i, fig in enumerate(figures, 1)}
+    code_link_block = brief.code_link_html(code_link)
     brief_block = brief.brief_html(content, quality=quality, goal_summaries=goal_summaries)
     quality_block = brief.quality_panel_html(quality)
     empty_state = (
@@ -190,6 +193,7 @@ def _render_presentation(
     <div class="subtitle">{_h(authors)}</div>
     {tldr_html}
   </header>
+  {code_link_block}
   {brief_block}
   {quality_block}
   {empty_state}

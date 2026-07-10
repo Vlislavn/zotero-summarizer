@@ -19,11 +19,15 @@ def select_by_decisions(
     conn: sqlite3.Connection,
     *,
     decisions: list[str],
-    since_hours: int = 24,
+    since_hours: int | None = 24,
     limit: int = 1000,
     feed_library_ids: list[int] | None = None,
 ) -> list[dict[str, Any]]:
     """Return rows whose decision is in ``decisions`` from the last N hours.
+
+    ``since_hours=None`` disables the time window entirely (returns every
+    matching row regardless of age) — used for ``user_approved`` rows, which
+    are an explicit user instruction and must never silently expire.
 
     Used by:
       * Daily-selection (decisions=[DECISION_TRIAGED_PENDING]) to gather the
@@ -38,31 +42,36 @@ def select_by_decisions(
     if not decisions:
         raise ValueError("decisions must be non-empty")
     safe_limit = max(1, min(int(limit), 5000))
-    safe_hours = max(1, int(since_hours))
     decision_placeholders = ",".join("?" * len(decisions))
+    time_clause = ""
+    time_params: tuple[Any, ...] = ()
+    if since_hours is not None:
+        safe_hours = max(1, int(since_hours))
+        time_clause = "AND created_at >= datetime('now', ?)"
+        time_params = (f"-{safe_hours} hours",)
     if feed_library_ids:
         feed_placeholders = ",".join("?" * len(feed_library_ids))
         rows = conn.execute(
             f"""
             SELECT * FROM processed_feed_items
             WHERE decision IN ({decision_placeholders})
-              AND created_at >= datetime('now', ?)
+              {time_clause}
               AND feed_library_id IN ({feed_placeholders})
             ORDER BY COALESCE(composite_score, 0) DESC
             LIMIT ?
             """,
-            (*decisions, f"-{safe_hours} hours", *feed_library_ids, safe_limit),
+            (*decisions, *time_params, *feed_library_ids, safe_limit),
         ).fetchall()
     else:
         rows = conn.execute(
             f"""
             SELECT * FROM processed_feed_items
             WHERE decision IN ({decision_placeholders})
-              AND created_at >= datetime('now', ?)
+              {time_clause}
             ORDER BY COALESCE(composite_score, 0) DESC
             LIMIT ?
             """,
-            (*decisions, f"-{safe_hours} hours", safe_limit),
+            (*decisions, *time_params, safe_limit),
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -131,48 +140,3 @@ def record_outcome(
         (final_outcome, float(signal_weight), feed_library_id, feed_item_id),
     )
     return int(cursor.rowcount or 0) > 0
-
-
-def get_run_summary(conn: sqlite3.Connection, run_id: str) -> dict[str, Any]:
-    """Return a per-decision count summary for a run."""
-    rows = conn.execute(
-        """
-        SELECT decision, COUNT(*) AS n
-        FROM processed_feed_items
-        WHERE run_id = ?
-        GROUP BY decision
-        """,
-        (run_id,),
-    ).fetchall()
-    counts = {str(r["decision"]): int(r["n"]) for r in rows}
-    total = sum(counts.values())
-    return {"run_id": run_id, "total": total, "by_decision": counts}
-
-
-def list_recent_decisions(
-    conn: sqlite3.Connection,
-    limit: int = 100,
-    decision: str | None = None,
-) -> list[dict[str, Any]]:
-    """Return recent decision rows (for the CLI audit view)."""
-    safe_limit = max(1, min(int(limit), 1000))
-    if decision:
-        rows = conn.execute(
-            """
-            SELECT * FROM processed_feed_items
-            WHERE decision = ?
-            ORDER BY created_at DESC
-            LIMIT ?
-            """,
-            (decision, safe_limit),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            """
-            SELECT * FROM processed_feed_items
-            ORDER BY created_at DESC
-            LIMIT ?
-            """,
-            (safe_limit,),
-        ).fetchall()
-    return [dict(r) for r in rows]

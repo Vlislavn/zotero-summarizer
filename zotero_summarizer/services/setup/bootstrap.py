@@ -20,7 +20,7 @@ from zotero_summarizer.models.config import (
     GoalsConfig,
     LLMConfig,
 )
-from zotero_summarizer.services._common import LOGGER, write_config_atomic
+from zotero_summarizer.services._common import LOGGER, write_user_config
 from zotero_summarizer.settings import Settings
 
 
@@ -111,8 +111,8 @@ def _bootstrap_goals(settings: Settings) -> bool:
     if config_path.exists():
         return False
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = _default_goals_config().model_dump(mode="json")
-    write_config_atomic(config_path, payload)
+    # Writes only intent + the LLM connection; technical sections stay code defaults.
+    write_user_config(config_path, _default_goals_config())
     LOGGER.info("Bootstrap: created default config at %s (edit research goals in Settings)", config_path)
     return True
 

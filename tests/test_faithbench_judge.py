@@ -8,9 +8,8 @@ import json
 import pytest
 
 from zotero_summarizer.services.faithbench._corpus import (
-    PaperChunkIndex,
+    PaperSubstrate,
     freeze_paper_text,
-    normalize_text,
 )
 from zotero_summarizer.services.faithbench._dataset import (
     BenchmarkMeta,
@@ -30,7 +29,7 @@ from zotero_summarizer.services.faithbench._judgment import (
     JudgeMethod,
     Judgment,
 )
-from zotero_summarizer.services.faithbench._runner import RunPaths
+from zotero_summarizer.services.faithbench._runner import RunInputs, RunPaths
 
 PAPER_TEXT = (
     "We trained on the ImageNet dataset using 1,281,167 images. "
@@ -171,12 +170,11 @@ def test_judge_equivalence_verdicts_and_error_tri_state():
 
 
 def test_judge_claim_verbatim_skips_judge_and_nei_gets_full_text_pass():
-    index = PaperChunkIndex(PAPER_TEXT)
+    substrate = PaperSubstrate.from_text(PAPER_TEXT)
     judge = FakeJudge([])
     verbatim = judge_claim(
         judge, claim="The top-1 accuracy was 85.3 percent",
-        paper_text=PAPER_TEXT, norm_paper=normalize_text(PAPER_TEXT),
-        index=index, max_chars=60_000, judge_model="J",
+        substrate=substrate, max_chars=60_000, judge_model="J",
     )
     assert verbatim.success is True and verbatim.method == JudgeMethod.VERBATIM
     assert judge.calls == 0
@@ -187,16 +185,14 @@ def test_judge_claim_verbatim_skips_judge_and_nei_gets_full_text_pass():
     ])
     supported = judge_claim(
         nei_then_yes, claim="GlassNet uses residual connections",
-        paper_text=PAPER_TEXT, norm_paper=normalize_text(PAPER_TEXT),
-        index=index, max_chars=60_000, judge_model="J",
+        substrate=substrate, max_chars=60_000, judge_model="J",
     )
     assert supported.success is True and nei_then_yes.calls == 2
 
     unsupported = judge_claim(
         FakeJudge([{"verdict": "unsupported", "evidence": ""}]),
         claim="GlassNet was trained on 12 GPUs",
-        paper_text=PAPER_TEXT, norm_paper=normalize_text(PAPER_TEXT),
-        index=index, max_chars=60_000, judge_model="J",
+        substrate=substrate, max_chars=60_000, judge_model="J",
     )
     assert unsupported.failure_reason == FailureReason.UNSUPPORTED_CLAIM
 
@@ -206,8 +202,7 @@ def test_read_why_claim_is_judged_against_paper_plus_goals():
     judge = FakeJudge([{"verdict": "supported", "evidence": "builds on residual connections"}])
     verdict = judge_claim(
         judge, claim="GlassNet addresses agent autonomy in vision pipelines",
-        paper_text=PAPER_TEXT, norm_paper=normalize_text(PAPER_TEXT),
-        index=PaperChunkIndex(PAPER_TEXT), max_chars=60_000, judge_model="J",
+        substrate=PaperSubstrate.from_text(PAPER_TEXT), max_chars=60_000, judge_model="J",
         field="read_why", research_goals=goals,
     )
     assert verdict.success is True
@@ -223,8 +218,7 @@ def test_other_claims_keep_the_paper_only_standard(field, goals):
     judge = FakeJudge([{"verdict": "unsupported", "evidence": ""}])
     verdict = judge_claim(
         judge, claim="GlassNet was trained on 12 GPUs",
-        paper_text=PAPER_TEXT, norm_paper=normalize_text(PAPER_TEXT),
-        index=PaperChunkIndex(PAPER_TEXT), max_chars=60_000, judge_model="J",
+        substrate=PaperSubstrate.from_text(PAPER_TEXT), max_chars=60_000, judge_model="J",
         field=field, research_goals=goals,
     )
     assert verdict.failure_reason == FailureReason.UNSUPPORTED_CLAIM
@@ -261,8 +255,8 @@ def _setup_run(tmp_path, *, sha_override=None):
 def test_judge_run_writes_verdicts_and_traps_never_reach_judge(tmp_path):
     meta, items, papers_dir, paths = _setup_run(tmp_path)
     judge = FakeJudge([])
-    counts = judge_run(meta=meta, items=items, papers_dir=papers_dir, paths=paths,
-                       judge_llm=judge, judge_model="J", max_text_chars=60_000)
+    inputs = RunInputs(meta=meta, items=items, papers_dir=papers_dir, paths=paths)
+    counts = judge_run(inputs=inputs, judge_llm=judge, judge_model="J", max_text_chars=60_000)
     assert counts["judged"] == 2 and counts["escalated"] == 0 and judge.calls == 0
     rows = [json.loads(line) for line in paths.judgments.read_text().splitlines()]
     by_id = {r["item_id"]: r for r in rows}
@@ -270,15 +264,14 @@ def test_judge_run_writes_verdicts_and_traps_never_reach_judge(tmp_path):
     assert by_id["trap:P1:0"]["failure_reason"] == FailureReason.HALLUCINATED_ON_TRAP.value
 
     # idempotent: a second pass judges nothing new
-    counts2 = judge_run(meta=meta, items=items, papers_dir=papers_dir, paths=paths,
-                        judge_llm=judge, judge_model="J", max_text_chars=60_000)
+    counts2 = judge_run(inputs=inputs, judge_llm=judge, judge_model="J", max_text_chars=60_000)
     assert counts2["judged"] == 0 and counts2["skipped"] == 2
 
 
 def test_judge_run_frozen_text_drift_is_harness_fault_not_model_failure(tmp_path):
     meta, items, papers_dir, paths = _setup_run(tmp_path, sha_override="0" * 64)
-    counts = judge_run(meta=meta, items=items, papers_dir=papers_dir, paths=paths,
-                       judge_llm=FakeJudge([]), judge_model="J", max_text_chars=60_000)
+    inputs = RunInputs(meta=meta, items=items, papers_dir=papers_dir, paths=paths)
+    counts = judge_run(inputs=inputs, judge_llm=FakeJudge([]), judge_model="J", max_text_chars=60_000)
     rows = [json.loads(line) for line in paths.judgments.read_text().splitlines()]
     assert counts["judged"] == 2
     assert all(r["success"] is None for r in rows)
@@ -308,7 +301,7 @@ def test_judge_run_routes_read_why_claims_through_goal_aware_prompt(tmp_path):
     judge = FakeJudge([{"verdict": "supported", "evidence": ""},
                        {"verdict": "unsupported", "evidence": ""}])
     counts = judge_run(
-        meta=meta, items=[], papers_dir=papers_dir, paths=paths,
+        inputs=RunInputs(meta=meta, items=[], papers_dir=papers_dir, paths=paths),
         judge_llm=judge, judge_model="J", max_text_chars=60_000,
         research_goals="Agent autonomy, determinism, and glassboxing",
     )
@@ -342,7 +335,7 @@ def test_judge_run_claims_unknown_paper_is_harness_fault_not_crash(tmp_path):
     paths.responses.write_text(json.dumps(row) + "\n", encoding="utf-8")
 
     judge = FakeJudge([])  # must never be called
-    counts = judge_run(meta=meta, items=[], papers_dir=papers_dir, paths=paths,
+    counts = judge_run(inputs=RunInputs(meta=meta, items=[], papers_dir=papers_dir, paths=paths),
                        judge_llm=judge, judge_model="J", max_text_chars=60_000)
     assert counts["judged"] == 1  # emitted, not crashed
     rows = [json.loads(line) for line in paths.judgments.read_text().splitlines()]

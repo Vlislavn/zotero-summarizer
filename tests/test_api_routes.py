@@ -162,9 +162,6 @@ def test_get_reading_queue_accepts_whole_library_limit(monkeypatch):
         seen.update(kw)
         return {"items": [], "total_unread": 0, "status": "ready"}
 
-    # A configured reader is a precondition of the happy path (the route now
-    # fails fast with 503 when it's missing — see the regression test below).
-    monkeypatch.setattr(library_routes, "get_zotero_reader_or_raise", lambda: object())
     monkeypatch.setattr(library_routes.reading_queue, "build_reading_queue", _stub)
     for limit in (1, 5000, 10000):
         out = asyncio.run(library_routes.get_reading_queue(limit=limit))
@@ -172,28 +169,24 @@ def test_get_reading_queue_accepts_whole_library_limit(monkeypatch):
     assert seen["limit"] == 10000
 
 
-def test_get_reading_queue_returns_503_when_zotero_unavailable(monkeypatch):
-    # First run (no Zotero) must surface as a clean 503 at the boundary, never a
-    # 500 from build_reading_queue's reader-unavailable RuntimeError. Regression
-    # for the "Failed to load queue: Unexpected server error" the user would have
-    # seen behind the first-run setup card.
-    def _raise_unavailable():
-        raise APIError(
-            error="zotero_unavailable",
-            message="Zotero database not found",
-            status_code=503,
-        )
+def test_get_reading_queue_does_not_require_strict_zotero_reader(monkeypatch):
+    # The queue can be built from the app library fallback when Zotero is absent.
+    # Keep this boundary free of the strict Zotero reader gate.
+    seen: dict = {}
 
-    def _must_not_run(**_kw):
-        raise AssertionError("build_reading_queue must not run when the reader is unavailable")
+    def _strict_reader_must_not_run():
+        raise AssertionError("strict Zotero reader must not gate reading queue")
 
-    monkeypatch.setattr(library_routes, "get_zotero_reader_or_raise", _raise_unavailable)
-    monkeypatch.setattr(library_routes.reading_queue, "build_reading_queue", _must_not_run)
+    def _stub(**kw):
+        seen.update(kw)
+        return {"items": [], "total_unread": 0, "status": "ready"}
 
-    with pytest.raises(APIError) as excinfo:
-        asyncio.run(library_routes.get_reading_queue(limit=10))
-    assert excinfo.value.status_code == 503
-    assert excinfo.value.error == "zotero_unavailable"
+    monkeypatch.setattr(library_routes, "get_zotero_reader_or_raise", _strict_reader_must_not_run)
+    monkeypatch.setattr(library_routes.reading_queue, "build_reading_queue", _stub)
+
+    out = asyncio.run(library_routes.get_reading_queue(limit=10))
+    assert out["status"] == "ready"
+    assert seen["limit"] == 10
 
 
 def test_app_uses_canonical_routes_only(tmp_path, monkeypatch):

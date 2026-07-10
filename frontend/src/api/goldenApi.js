@@ -78,6 +78,21 @@ export async function submitVerdict({ item_key, user_priority, comment }) {
 }
 
 /**
+ * POST /api/golden/review-note
+ * Body: { item_key, note }
+ * Returns: { saved: true, note_written: boolean, note_error: string|null }.
+ * Local save always succeeds; note_written reflects the best-effort Zotero mirror
+ * (false + note_error when Zotero is open), exactly like the verdict-note path.
+ */
+export async function saveReviewNote({ item_key, note }) {
+  if (!item_key) throw new Error('saveReviewNote: item_key is required');
+  return request('/review-note', {
+    method: 'POST',
+    body: JSON.stringify({ item_key, note: note ?? '' }),
+  });
+}
+
+/**
  * DELETE /api/golden/verdict?item_key=...
  * Returns: { deleted: boolean }.
  */

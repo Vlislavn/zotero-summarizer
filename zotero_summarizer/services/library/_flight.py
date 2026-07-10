@@ -46,9 +46,9 @@ class FlightLatch:
             self._last_error = error
 
 
-def run_in_background(target: Callable[[], None]) -> None:
+def run_in_background(target: Callable[[], None], *, name: str | None = None) -> None:
     """Start ``target`` (a zero-arg callable) on a daemon thread."""
-    threading.Thread(target=target, daemon=True).start()
+    threading.Thread(target=target, name=name, daemon=True).start()
 
 
 def resolve_prewarm_k(config: Any, *, env_var: str) -> int:

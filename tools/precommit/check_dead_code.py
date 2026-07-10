@@ -41,10 +41,15 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
 from _model_fields import (  # noqa: E402 — same-dir import, script context
     REPO_ROOT,
     RUNTIME_ROOT,
     _all_runtime_python_files,
+    _is_model_class,
     model_field_keys,
 )
 CONSUMER_ALLOWLIST = Path(__file__).with_name("dead_code_allowlist.txt")

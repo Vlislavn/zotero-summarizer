@@ -382,14 +382,20 @@ def test_predict_named_silences_feature_name_warning_with_parity():
     must suppress that warning while keeping predictions identical."""
     import warnings
 
-    import lightgbm as lgb
+    class _NamedModel:
+        feature_names_in_ = np.array([f"Column_{i}" for i in range(6)])
+
+        def predict(self, X, **kwargs):
+            if not hasattr(X, "columns"):
+                warnings.warn(
+                    "X does not have valid feature names, but model was fitted with feature names",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            return np.asarray(X).sum(axis=1)
 
     rng = np.random.default_rng(0)
-    X = rng.random((50, 6)).astype(np.float32)
-    y = rng.random(50)
-    model = lgb.LGBMRegressor(n_estimators=5, verbose=-1).fit(X, y)
-    assert hasattr(model, "feature_names_in_"), "precondition: numpy fit sets names"
-
+    model = _NamedModel()
     X_new = rng.random((4, 6)).astype(np.float32)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")

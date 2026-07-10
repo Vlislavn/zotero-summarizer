@@ -59,6 +59,7 @@ export const EMPTY_FILTERS = {
   goal: 'any',      // any | high | low
   why: [],          // multi-select of why_reason strings; [] = all
   quality: 'any',   // any | high (deep-review grade A/B) | low (C/D); the "quality papers" filter
+  venue: '',        // exact journal/venue name; '' = any
 };
 
 export function isFilterActive(f) {
@@ -69,19 +70,36 @@ export function isFilterActive(f) {
     || f.goal !== 'any'
     || (f.why && f.why.length > 0)
     || f.quality !== 'any'
+    || (f.venue && f.venue.length > 0)
   );
 }
 
-// "High prestige" = a KNOWN author/venue reputation at/above the library's
-// quality floor (median of known prestige; falls back to the neutral 3.0 on the
-// 1–5 scale when no floor is supplied). Single source of the "high prestige"
-// rule — used by both the Prestige filter and the card's quality badge so they
-// agree. A cold-start / uncited / no-OpenAlex row (prestige_known false) is
-// NOT high (no evidence) — never penalised, just unlabelled.
+// "High prestige" = a row with prestige EVIDENCE (an OpenAlex citation percentile
+// OR a known author h-index) scoring at/above the library's quality floor (median
+// of known prestige; falls back to the neutral 3.0 on the 1–5 scale when no floor
+// is supplied). Single source of the "high prestige" rule — used by both the
+// Prestige filter and the card's quality badge so they agree. Keying on
+// `prestige_evidence` (not the citation-only `prestige_known`) is what lets an
+// uncited preprint by a high-h-index author count as high prestige; a row with NO
+// signal at all (prestige_evidence false) is never high — unlabelled, not penalised.
 export function isHighPrestige(it, floor = null) {
-  const known = it?.prestige_known === true && typeof it.prestige_score === 'number';
-  if (!known) return false;
+  const ev = it?.prestige_evidence === true && typeof it.prestige_score === 'number';
+  if (!ev) return false;
   return floor == null ? it.prestige_score >= 3 : it.prestige_score >= floor;
+}
+
+// Count rows per Prestige bucket so the filter chips can show "high (N)" — a row
+// with no prestige signal lands in `new`. Makes an empty bucket visible BEFORE the
+// click (the prior bug: filtering high/low silently blanked a preprint library).
+export function prestigeBucketCounts(items, floor = null) {
+  const c = { high: 0, low: 0, new: 0 };
+  for (const it of items || []) {
+    const ev = it?.prestige_evidence === true && typeof it.prestige_score === 'number';
+    if (!ev) { c.new += 1; continue; }
+    if (isHighPrestige(it, floor)) c.high += 1;
+    else c.low += 1;
+  }
+  return c;
 }
 
 // Keys of the top (1 - pct) fraction by goal_sim, among rows that HAVE a numeric
@@ -110,12 +128,15 @@ export function buildPredicate(filters, ctx) {
     if (bandSet.size && (band === null || !bandSet.has(band))) return false;
 
     if (f.prestige !== 'any') {
-      const known = it.prestige_known === true && typeof it.prestige_score === 'number';
+      const ev = it.prestige_evidence === true && typeof it.prestige_score === 'number';
       const high = isHighPrestige(it, floor);   // single source — matches the card badge
-      if (f.prestige === 'new' && known) return false;
+      if (f.prestige === 'new' && ev) return false;       // 'new' = no prestige signal yet
       if (f.prestige === 'high' && !high) return false;
-      if (f.prestige === 'low' && !(known && !high)) return false;
+      if (f.prestige === 'low' && !(ev && !high)) return false;
     }
+
+    // Journal/venue — exact match against the row's publicationTitle ('' = any).
+    if (f.venue && it.venue !== f.venue) return false;
 
     // goal_sim only exists on scored unread rows; rows without it match neither
     // high nor low (they carry no goal signal).
@@ -146,6 +167,7 @@ export function serializeFilters(f) {
   if (f.goal && f.goal !== 'any') out.g = f.goal;
   if (f.why && f.why.length) out.w = f.why.join('~');   // '~' never appears in a why label
   if (f.quality && f.quality !== 'any') out.q = f.quality;
+  if (f.venue) out.vn = f.venue;
   return out;
 }
 
@@ -156,5 +178,6 @@ export function hydrateFilters(searchParams) {
   const goal = ['high', 'low'].includes(get('g')) ? get('g') : 'any';
   const why = (get('w') || '').split('~').filter(Boolean);
   const quality = ['high', 'low'].includes(get('q')) ? get('q') : 'any';
-  return { bands, prestige, goal, why, quality };
+  const venue = get('vn') || '';
+  return { bands, prestige, goal, why, quality, venue };
 }

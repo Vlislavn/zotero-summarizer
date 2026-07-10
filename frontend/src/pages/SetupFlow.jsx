@@ -88,7 +88,7 @@ export default function SetupFlow() {
   }, [status?.paths]);
 
   const validity = useMemo(() => {
-    const zoteroOk = Boolean(status?.zotero?.db_found);
+    const zoteroOk = true;
     // LLM step: structurally well-formed config, NOT a passing live test. The
     // provider needs a name for the key env var, a base URL (openai only), and a
     // default model. The endpoint being reachable / the secret being exported are
@@ -106,7 +106,7 @@ export default function SetupFlow() {
       draft && draft.research_goals_text && draft.research_goals_text.trim().length > 0,
     );
     return [zoteroOk, llmOk, goalsOk];
-  }, [status?.zotero?.db_found, draft]);
+  }, [draft]);
 
   const allValid = validity.every(Boolean);
 
@@ -240,7 +240,7 @@ export default function SetupFlow() {
               <Button
                 onClick={handleFinish}
                 disabled={!allValid || finishMutation.isPending || validateMutation.isPending}
-                title={!allValid ? 'Complete all three steps to finish.' : undefined}
+                title={!allValid ? 'Complete the LLM and research steps to finish.' : undefined}
               >
                 {finishMutation.isPending || validateMutation.isPending ? 'Saving…' : 'Finish'}
               </Button>

@@ -63,7 +63,7 @@ frontend/
       settingsApi.js            /api/config + /api/admin/* (exports request())
       setupApi.js               /api/setup/* (status, detect-zotero, paths, validate)
     hooks/
-      useSetupStatus.js         single seam → setup-status + isConfigured + pillars
+      useSetupStatus.js         single seam → setup-status + isConfigured + pillars (Zotero is advisory)
     utils/
       configForm.js             shared config<->form transforms (Settings + wizard)
     pages/

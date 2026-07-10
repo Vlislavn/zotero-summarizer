@@ -18,6 +18,7 @@ only shrink toward empty, never accrete dead grandfathers.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -29,14 +30,17 @@ _CHECK_DEAD = "tools/precommit/check_dead_code.py"
 _CHECK_REDUNDANCY = "tools/precommit/check_redundancy.py"
 _CHECK_SLOP = "tools/precommit/check_slop.py"
 
-# (label, committed allowlist file, argv that dumps the LIVE keys). The
-# loc_allowlist is excluded by design: its keys are ``<path> <ceiling>`` with
-# grow-not-shrink semantics, not a finding dump.
+# (label, committed allowlist file, argv that dumps the LIVE keys, required
+# third-party module or None). The loc_allowlist is excluded by design: its
+# keys are ``<path> <ceiling>`` with grow-not-shrink semantics, not a finding
+# dump. ``make scan`` already skips the Tier-2 vulture scan when vulture is
+# absent from the env (it runs in the gate: 'make lint'); the vulture-backed
+# reconciler mirrors that same contract instead of crashing the advisory scan.
 RECONCILERS = [
-    ("dead_code_allowlist.txt", HERE / "dead_code_allowlist.txt", [_CHECK_DEAD, "dump-orphans"]),
-    ("vulture_allowlist.txt", HERE / "vulture_allowlist.txt", [_CHECK_DEAD, "make-allowlist"]),
-    ("redundancy_allowlist.txt", HERE / "redundancy_allowlist.txt", [_CHECK_REDUNDANCY, "dump"]),
-    ("slop_allowlist.txt", HERE / "slop_allowlist.txt", [_CHECK_SLOP, "dump"]),
+    ("dead_code_allowlist.txt", HERE / "dead_code_allowlist.txt", [_CHECK_DEAD, "dump-orphans"], None),
+    ("vulture_allowlist.txt", HERE / "vulture_allowlist.txt", [_CHECK_DEAD, "make-allowlist"], "vulture"),
+    ("redundancy_allowlist.txt", HERE / "redundancy_allowlist.txt", [_CHECK_REDUNDANCY, "dump"], None),
+    ("slop_allowlist.txt", HERE / "slop_allowlist.txt", [_CHECK_SLOP, "dump"], None),
 ]
 
 
@@ -80,9 +84,15 @@ def _dump(argv: list[str]) -> str:
 def _reconcile() -> int:
     """Report stale grandfathers across every key-based allowlist."""
     stale_total = 0
-    for label, allowlist_path, dump_argv in RECONCILERS:
+    for label, allowlist_path, dump_argv, requires in RECONCILERS:
         committed = parse_keys(allowlist_path.read_text()) if allowlist_path.exists() else set()
         if not committed:
+            continue
+        if requires is not None and importlib.util.find_spec(requires) is None:
+            sys.stderr.write(
+                f"⚠ {label} reconcile SKIPPED — {requires} not installed in this env "
+                "(it runs in the gate: 'make lint')\n"
+            )
             continue
         stale = sorted(find_stale(committed, live_keys(_dump(dump_argv))))
         if not stale:

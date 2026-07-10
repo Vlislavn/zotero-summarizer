@@ -33,7 +33,9 @@ from zotero_summarizer.domain import (
     normalize_arxiv_id,
     normalize_doi,
 )
-from zotero_summarizer.services.triage.daily_select._allocation import allocate
+from zotero_summarizer.services._common import rank_interleave_enabled, rank_quality_first_enabled
+from zotero_summarizer.services.model.team_draft import team_draft_merge
+from zotero_summarizer.services.triage.daily_select._allocation import allocate, _passes_model_floor
 from zotero_summarizer.services.triage.daily_select._candidate import (
     attach_quality_from_reviews,
     attach_rank_scores,
@@ -49,6 +51,8 @@ from zotero_summarizer.services.triage.daily_select._querying import (
     fetch_trashed_guids,
     open_ro,
 )
+from zotero_summarizer.storage.feed_identity import row_feed_keys
+from zotero_summarizer.storage.interleave import record_interleave_slate
 
 LOGGER = logging.getLogger(__name__)
 
@@ -108,8 +112,7 @@ def _drop_handled(
         guid = str(row.get("guid") or "").strip()
         if guid and guid in handled_guids:
             continue
-        fid = row.get("feed_item_id")
-        if fid is not None and f"feed:{int(fid)}" in handled_label_keys:
+        if any(key in handled_label_keys for key in row_feed_keys(row)):
             continue
         out.append(row)
     return out
@@ -241,6 +244,74 @@ def count_awaiting_unhandled(
     return len(dedup_keep_newest(rows))
 
 
+def _assemble_interleaved(
+    *,
+    db_path: Path,
+    K: int,
+    roles: dict[str, int] | None,
+    backlog_cap: int,
+    lookback_hours: int,
+    now: datetime | None,
+) -> DailySlate:
+    """P3 online interleave (ADR-A9/GAP-G11): build BOTH arms' full slates over the
+    same pool — A0 (the shipped control blend, incl. its composite floor and quality
+    bonus) and A2 (quality-first, incl. its relevance floor) — and team-draft-merge
+    their top-K into the ONE slate the user sees. The merge is seeded by the slate
+    date, so repeated GETs within a day reproduce it; per-item arm attribution is
+    logged to ``interleave_log`` (day-level write-once: the FIRST slate of a day is
+    the only one recorded — later same-day assemblies over a drifted pool display
+    fine but never write, so two merges' pair_ids can't mix) for the SPRT scorer
+    ``tools/eval_interleave.py``. Blind: the returned papers carry no team marker.
+    Slate metadata (pool_size, hidden/weak banners) comes from the A0 control arm —
+    it describes the status quo the experiment is judged against.
+    ponytail: the two arm builds read sequentially (no shared DB snapshot); a write
+    landing between them can desync the pools for one assembly — rare, symmetric
+    noise, and ties are discarded by the scorer. Shared-snapshot plumbing only if
+    the interleave_log ever shows same-day one-sided pair inflation."""
+    now_ = now or datetime.now(timezone.utc)
+    a0 = assemble_daily_slate(
+        db_path=db_path, K=K, roles=roles, backlog_cap=backlog_cap,
+        lookback_hours=lookback_hours, now=now_, quality_first=False,
+    )
+    a2 = assemble_daily_slate(
+        db_path=db_path, K=K, roles=roles, backlog_cap=backlog_cap,
+        lookback_hours=lookback_hours, now=now_, quality_first=True,
+    )
+    # LOCAL date: this is a local-first app — the user's day boundary is local
+    # midnight, not 02:00 (UTC midnight at UTC+2 would split one evening session).
+    day = now_.astimezone().date().isoformat()
+    picks = team_draft_merge(
+        [p.item_id for p in a0.papers], [p.item_id for p in a2.papers], K, seed=day,
+    )
+    by_a0 = {p.item_id: p for p in a0.papers}
+    by_a2 = {p.item_id: p for p in a2.papers}
+    papers = []
+    entries = []
+    for position, pick in enumerate(picks):
+        # The drafting arm's SlatePaper carries the role label; 'both' takes A0's
+        # ('a'/'both' picks are by construction in the A0 slate — KeyError = bug).
+        paper = by_a2[pick.item] if pick.team == "b" else by_a0[pick.item]
+        papers.append(paper)
+        entries.append({
+            "item_id": pick.item,
+            "item_key": paper.item_key,
+            "stable_feed_key": paper.stable_feed_key,
+            "team": {"a": "a0", "b": "a2", "both": "both"}[pick.team],
+            "pair_id": pick.pair_id,
+            "position": position,
+        })
+    record_interleave_slate(db_path, day=day, entries=entries)
+    return DailySlate(
+        papers=papers,
+        pool_size=a0.pool_size,
+        lookback_hours=lookback_hours,
+        empty_role_events=a0.empty_role_events,
+        fellback_to_recent=a0.fellback_to_recent or a2.fellback_to_recent,
+        low_relevance_hidden=a0.low_relevance_hidden,
+        weak_slate=a0.weak_slate,
+    )
+
+
 def assemble_daily_slate(
     *,
     db_path: Path,
@@ -249,6 +320,7 @@ def assemble_daily_slate(
     backlog_cap: int = 25,
     lookback_hours: int = 168,
     now: datetime | None = None,
+    quality_first: bool | None = None,
 ) -> DailySlate:
     """Build today's role-allocated slate.
 
@@ -278,6 +350,14 @@ def assemble_daily_slate(
         raise ValueError(f"backlog_cap must be positive; got {backlog_cap}")
     if lookback_hours <= 0:
         raise ValueError(f"lookback_hours must be positive; got {lookback_hours}")
+    if quality_first is None and rank_interleave_enabled():
+        # P3 online interleave (ADR-A9/GAP-G11): both arms compete inside one slate.
+        # Only the top-level call dispatches — the two arm builds below pass an
+        # explicit quality_first, so there is no recursion.
+        return _assemble_interleaved(
+            db_path=db_path, K=K, roles=roles, backlog_cap=backlog_cap,
+            lookback_hours=lookback_hours, now=now,
+        )
     if roles is not None:
         effective_roles = dict(roles)
     else:
@@ -309,7 +389,13 @@ def assemble_daily_slate(
     # the Library queue uses; degrades to composite-only when those signals
     # are absent. The full pool goes to the allocator: a cap here would starve
     # the surprise/diversity pickers of exactly the papers they exist to find.
-    attach_rank_scores(deduped)
+    # Quality-first mode (default OFF, eval-gated) swaps in the quality-led key
+    # (``rank_blend_quality``): grade leads, topicality soft-gates. An explicit
+    # ``quality_first`` argument pins the arm (the interleave builds both);
+    # ``None`` resolves from config/env as before.
+    if quality_first is None:
+        quality_first = rank_quality_first_enabled()
+    attach_rank_scores(deduped, quality_first=quality_first)
     deduped.sort(key=lambda c: c["rank_score"], reverse=True)
     attach_why(deduped)
 
@@ -317,16 +403,21 @@ def assemble_daily_slate(
         candidate_pool=deduped,
         roles=effective_roles,
         K=K,
+        quality_first=quality_first,
     )
 
     # Honest "weak feed week" signals for the Today banner. The model role hides
-    # dont_read-band papers (``_allocation.MODEL_RELEVANCE_FLOOR``); count those
-    # no role surfaced so the UI can say "N below your bar were hidden", and flag
-    # a slate with NO should_read-or-better candidate as weak (nudge a re-triage).
+    # papers below its floor (composite band by default, ``relevance_score`` in
+    # quality-first mode — ``_passes_model_floor``); count those no role surfaced
+    # so the UI can say "N below your bar were hidden", and flag a slate with NO
+    # should_read-or-better candidate as weak (nudge a re-triage).
     shown_ids = {p.item_id for p in papers}
     low_relevance_hidden = sum(
         1 for c in deduped
-        if c["composite_score"] < PRIORITY_COULD_READ_THRESHOLD and c["id"] not in shown_ids
+        if not _passes_model_floor(
+            c, quality_first=quality_first, min_composite=PRIORITY_COULD_READ_THRESHOLD
+        )
+        and c["id"] not in shown_ids
     )
     weak_slate = bool(deduped) and not any(
         c["composite_score"] >= PRIORITY_SHOULD_READ_THRESHOLD for c in deduped

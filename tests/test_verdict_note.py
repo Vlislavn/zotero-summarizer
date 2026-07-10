@@ -8,10 +8,16 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from tests._zotero_fixtures import add_library_item, build_zotero_db
+from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.api.routes import golden as golden_routes
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.services.golden import hybrid_gt
-from zotero_summarizer.services.zotero.pending import VERDICT_NOTE_MARKER, build_verdict_note_html
+from zotero_summarizer.services.zotero.pending import (
+    USER_NOTE_MARKER,
+    VERDICT_NOTE_MARKER,
+    build_user_note_html,
+    build_verdict_note_html,
+)
 from zotero_summarizer.storage import repositories
 
 
@@ -116,6 +122,128 @@ def test_submit_verdict_note_failure_does_not_block_verdict(monkeypatch):
     assert out["id"] == 1  # verdict still durably saved
     assert out["note_written"] is False
     assert "Zotero is open" in out["note_error"]
+
+
+def test_submit_verdict_swallows_optional_zotero_unavailable(monkeypatch):
+    def unavailable(*_a):
+        raise APIError(
+            error="zotero_unavailable",
+            message="Zotero library is not configured",
+            status_code=503,
+        )
+
+    _patch_verdict_basics(monkeypatch, note_fn=unavailable)
+    monkeypatch.setattr(golden_routes, "zotero_set_label_tag", unavailable)
+
+    out = asyncio.run(golden_routes.submit_verdict(
+        golden_routes.VerdictRequest(item_key="K1", user_priority="must_read", comment="x")))
+
+    assert out["id"] == 1
+    assert out["label_written"] is False
+    assert out["label_error"] is None
+    assert out["note_written"] is False
+    assert out["note_error"] is None
+
+
+# --------------------------------------------------------------------------- #
+# Review notes: builder, storage round-trip, save_review_note wiring
+# --------------------------------------------------------------------------- #
+def test_build_user_note_html_marked_and_escaped():
+    h = build_user_note_html("para one\n\n<b>x</b> & y")
+    assert USER_NOTE_MARKER in h
+    assert "My notes" in h
+    assert "<p>para one</p>" in h                              # blank line → separate paragraph
+    assert "<p>&lt;b&gt;x&lt;/b&gt; &amp; y</p>" in h          # 2nd para its OWN wrapped, escaped <p>
+    assert "<script>" not in h and "<b>" not in h             # no raw markup leaks into the note
+
+
+def _init_triage_db(path: Path) -> Path:
+    conn = sqlite3.connect(str(path))
+    try:
+        repositories.apply_schema(conn)
+        conn.commit()
+    finally:
+        conn.close()
+    return path
+
+
+def test_review_note_upsert_get_and_replace_in_place(tmp_path: Path):
+    db = _init_triage_db(tmp_path / "triage.db")
+    assert repositories.get_review_note(db, "K1") is None       # absent → None
+    repositories.upsert_review_note(db, "K1", "first thoughts")
+    assert repositories.get_review_note(db, "K1") == "first thoughts"
+    repositories.upsert_review_note(db, "K1", "revised")        # UPSERT, one row
+    assert repositories.get_review_note(db, "K1") == "revised"
+    rows = sqlite3.connect(str(db)).execute("SELECT COUNT(*) FROM review_notes").fetchone()
+    assert rows[0] == 1
+
+
+def _patch_note_basics(monkeypatch, *, mirror_fn):
+    """Returns the list that records every local upsert_review_note call, so a test
+    proves the durable save actually happened with the right (item_key, note) —
+    not just that the Zotero mirror spy fired."""
+    saves: list[tuple] = []
+    monkeypatch.setattr(golden_routes, "_db_path", lambda: Path("/unused"))
+    monkeypatch.setattr(repositories, "upsert_review_note",
+                        lambda _db, ik, note: saves.append((ik, note)))
+    monkeypatch.setattr(golden_routes, "zotero_upsert_user_note", mirror_fn)
+    return saves
+
+
+def test_save_review_note_mirrors_to_zotero(monkeypatch):
+    calls = []
+    saves = _patch_note_basics(monkeypatch, mirror_fn=lambda ik, note: calls.append((ik, note)))
+    out = asyncio.run(golden_routes.save_review_note(
+        golden_routes.ReviewNoteRequest(item_key="K1", note="jot")))
+    assert out == {"saved": True, "note_written": True, "note_error": None}
+    assert saves == [("K1", "jot")]   # the DURABLE local save ran with the right args
+    assert calls == [("K1", "jot")]   # and the Zotero mirror got the same
+
+
+def test_save_review_note_mirror_failure_still_saves(monkeypatch):
+    def boom(*_a):
+        raise RuntimeError("Zotero is open")
+
+    saves = _patch_note_basics(monkeypatch, mirror_fn=boom)
+    out = asyncio.run(golden_routes.save_review_note(
+        golden_routes.ReviewNoteRequest(item_key="K1", note="jot")))
+    assert out["saved"] is True and out["note_written"] is False
+    assert "Zotero is open" in out["note_error"]
+    assert saves == [("K1", "jot")]   # local save happened DESPITE the mirror failing
+
+
+def test_save_review_note_swallows_optional_zotero_unavailable(monkeypatch):
+    def unavailable(*_a):
+        raise APIError(error="zotero_unavailable", message="Zotero library is not configured", status_code=503)
+
+    saves = _patch_note_basics(monkeypatch, mirror_fn=unavailable)
+    out = asyncio.run(golden_routes.save_review_note(
+        golden_routes.ReviewNoteRequest(item_key="K1", note="jot")))
+    # A missing Zotero DB is an optional-mirror miss, not an error surfaced to the user.
+    assert out == {"saved": True, "note_written": False, "note_error": None}
+    assert saves == [("K1", "jot")]
+
+
+def test_save_review_note_feed_key_skips_zotero_mirror(monkeypatch):
+    def _boom(*_a):
+        raise AssertionError("feed key has no Zotero item — must not mirror")
+
+    saves = _patch_note_basics(monkeypatch, mirror_fn=_boom)
+    out = asyncio.run(golden_routes.save_review_note(
+        golden_routes.ReviewNoteRequest(item_key="feed:123", note="jot")))
+    assert out == {"saved": True, "note_written": False, "note_error": None}
+    assert saves == [("feed:123", "jot")]   # still saved locally, mirror correctly skipped
+
+
+def test_save_review_note_blank_item_key_is_422(monkeypatch):
+    saves = _patch_note_basics(monkeypatch, mirror_fn=lambda *_a: None)
+    try:
+        asyncio.run(golden_routes.save_review_note(
+            golden_routes.ReviewNoteRequest(item_key="   ", note="jot")))
+        raise AssertionError("expected APIError for whitespace item_key")
+    except APIError as exc:
+        assert exc.status_code == 422
+    assert saves == []   # never reached the storage layer
 
 
 # --------------------------------------------------------------------------- #

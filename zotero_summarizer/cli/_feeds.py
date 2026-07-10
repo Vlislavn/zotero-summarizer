@@ -8,6 +8,25 @@ from zotero_summarizer.settings import Settings
 from zotero_summarizer.cli._helpers import _feeds_lock, _resolve_feed_ids
 
 
+def _bootstrap_feeds_cli(args: argparse.Namespace) -> tuple[Settings, list[int] | None]:
+    """Shared bootstrap for the feeds subcommands: load settings, resolve an
+    optional ``--feeds`` filter, set the runtime context, and run app startup
+    with an optional ``--model`` override. Divergent per-subcommand logic (PID
+    lock vs no-lock, daemon loop vs single tick vs daily selection) stays in
+    each caller."""
+    from zotero_summarizer.runtime import AppContext, set_context
+    from zotero_summarizer.services import lifecycle
+
+    settings = Settings.load(project_root=args.project_root)
+    feed_filter: list[int] | None = None
+    if getattr(args, "feeds", None):
+        feed_filter = _resolve_feed_ids(args.feeds, settings)
+
+    set_context(AppContext(settings=settings))
+    lifecycle.startup(override_model=getattr(args, "model", None) or None)
+    return settings, feed_filter
+
+
 def _feeds_run(args: argparse.Namespace) -> int:
     """Process one or more feeds to completion in a single pass.
 
@@ -60,19 +79,19 @@ def _feeds_run(args: argparse.Namespace) -> int:
 
 
 def _feeds_list(args: argparse.Namespace) -> int:
-    """Show every Zotero RSS feed (one feed library per row)."""
+    """Show every app-owned RSS feed."""
     settings = Settings.load(project_root=args.project_root)
-    from zotero_summarizer.integrations.zotero_read import ZoteroReader
+    from zotero_summarizer.integrations.app_rss import AppRssReader
     from zotero_summarizer.services.triage.feeds import list_feed_groups
 
-    feeds = list_feed_groups(ZoteroReader(settings.zotero_data_dir))
+    feeds = list_feed_groups(AppRssReader(settings.triage_db_path))
     if args.json:
         print(json.dumps(feeds, indent=2))
         return 0
 
     # Human-friendly table
     if not feeds:
-        print("(no Zotero RSS feeds configured)")
+        print("(no app RSS feeds configured; import from Zotero or add one in Settings)")
         return 0
     name_w = min(60, max(len(f["name"]) for f in feeds))
     print(f"{'ID':>6}  {'NAME':<{name_w}}  LAST UPDATE")
@@ -96,19 +115,10 @@ def _feeds_serve(args: argparse.Namespace) -> int:
     """
     import asyncio
 
-    settings = Settings.load(project_root=args.project_root)
-    feed_filter: list[int] | None = None
-    if args.feeds:
-        feed_filter = _resolve_feed_ids(args.feeds, settings)
-
     async def _run() -> int:
-        from zotero_summarizer.runtime import AppContext, set_context
-        from zotero_summarizer.services import lifecycle
         from zotero_summarizer.services.triage.feeds import run_daemon_loop
 
-        set_context(AppContext(settings=settings))
-        lifecycle.startup(override_model=args.model or None)
-
+        settings, feed_filter = _bootstrap_feeds_cli(args)
         with _feeds_lock(settings.project_root):
             await run_daemon_loop(
                 feed_library_ids=feed_filter,
@@ -129,13 +139,9 @@ def _feeds_select_daily(args: argparse.Namespace) -> int:
     import asyncio
 
     async def _run() -> int:
-        settings = Settings.load(project_root=args.project_root)
-        from zotero_summarizer.runtime import AppContext, set_context
-        from zotero_summarizer.services import lifecycle
         from zotero_summarizer.services.triage.feeds import run_daily_selection
 
-        set_context(AppContext(settings=settings))
-        lifecycle.startup()
+        _bootstrap_feeds_cli(args)
         result = await asyncio.to_thread(run_daily_selection, dry_run=args.dry_run)
         print(json.dumps(result, indent=2))
         return 0 if not result.get("errors") else 1
@@ -152,18 +158,10 @@ def _feeds_tick(args: argparse.Namespace) -> int:
     """
     import asyncio
 
-    settings = Settings.load(project_root=args.project_root)
-    feed_filter: list[int] | None = None
-    if args.feeds:
-        feed_filter = _resolve_feed_ids(args.feeds, settings)
-
     async def _run() -> int:
-        from zotero_summarizer.runtime import AppContext, set_context
-        from zotero_summarizer.services import lifecycle
         from zotero_summarizer.services.triage.feeds import run_daemon_tick
 
-        set_context(AppContext(settings=settings))
-        lifecycle.startup(override_model=args.model or None)
+        _settings, feed_filter = _bootstrap_feeds_cli(args)
         report = await asyncio.to_thread(
             run_daemon_tick,
             feed_library_ids=feed_filter,
@@ -179,14 +177,14 @@ def _feeds_tick(args: argparse.Namespace) -> int:
 def _feeds_preview(args: argparse.Namespace) -> int:
     """Peek at the most recent feed items for one feed (read-only)."""
     settings = Settings.load(project_root=args.project_root)
-    from zotero_summarizer.integrations.zotero_read import ZoteroReader
+    from zotero_summarizer.integrations.app_rss import AppRssReader
     from zotero_summarizer.services.triage.feeds import preview_feed
 
     items = preview_feed(
         feed_library_id=args.feed_id,
         since_days=args.since,
         limit=args.limit,
-        reader=ZoteroReader(settings.zotero_data_dir),
+        reader=AppRssReader(settings.triage_db_path),
         unread_only=args.unread_only,
     )
     if args.json:
@@ -208,7 +206,7 @@ def register_feeds(subparsers) -> None:
     # --- feeds <run|list|preview> ------------------------------------------
     feeds = subparsers.add_parser(
         "feeds",
-        help="Process Zotero RSS feeds (Phase 1: read → triage → plateau-select → queue)",
+        help="Process app-owned RSS feeds (Phase 1: read → triage → plateau-select → queue)",
     )
     feeds_subparsers = feeds.add_subparsers(dest="feeds_command", required=True)
 
@@ -252,7 +250,7 @@ def register_feeds(subparsers) -> None:
     feeds_run.add_argument("--project-root", default=None)
     feeds_run.set_defaults(func=_feeds_run)
 
-    feeds_list = feeds_subparsers.add_parser("list", help="List configured Zotero RSS feeds")
+    feeds_list = feeds_subparsers.add_parser("list", help="List configured app-owned RSS feeds")
     feeds_list.add_argument("--json", action="store_true", help="Emit JSON instead of a table")
     feeds_list.add_argument("--project-root", default=None)
     feeds_list.set_defaults(func=_feeds_list)
@@ -342,4 +340,3 @@ def register_feeds(subparsers) -> None:
     )
     feeds_daily.add_argument("--project-root", default=None)
     feeds_daily.set_defaults(func=_feeds_select_daily)
-

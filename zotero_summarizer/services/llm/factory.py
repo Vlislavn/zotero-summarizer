@@ -43,7 +43,7 @@ def _override_thinking(extra_body: dict | None, enable: bool) -> dict | None:
     """Return ``extra_body`` with ``chat_template_kwargs.enable_thinking`` set to
     ``enable`` — but ONLY when the provider already advertises
     ``chat_template_kwargs`` (i.e. the endpoint is a reasoning model that honors
-    the flag: ollama qwen3, kather sota, vLLM). A provider with no
+    the flag: ollama qwen3, a remote vLLM endpoint). A provider with no
     ``chat_template_kwargs`` (e.g. real OpenAI) is left untouched so it never
     receives an unknown ``extra_body`` key it would reject. This is what lets
     deep_review run the DIGEST with thinking ON (quality) and the trivial
@@ -75,6 +75,19 @@ def build_client_for_provider(
         # per-call override on top so deep_review's digest can still force
         # thinking on for chat_template providers.
         extra_body = apply_effort_openai(provider.thinking_effort, provider.extra_body)
+        # Fold num_ctx into extra_body so a LOCAL ollama provider sizes its KV cache to
+        # fit a long deep-review prompt (ollama's own default is ~2–4k → silent truncation).
+        # Remote endpoints ignore extra_body.num_ctx (they size their own window), so this
+        # is a safe no-op for vLLM-style remote endpoints. Only injected when the provider sets num_ctx.
+        if provider.num_ctx is not None:
+            extra_body = {**(extra_body or {}), "num_ctx": provider.num_ctx}
+        # keep_alive: ollama warm-hold (seconds). OFF by default (None) — a latency knob, not a
+        # correctness one, and pinning a model resident grows steady-state RAM (unsafe on a
+        # memory-constrained Mac). Only forwarded when the provider set it explicitly. Same
+        # extra_body path as num_ctx; remote endpoints ignore it (safe no-op). PROVISIONAL —
+        # whether ollama/LiteLLM honors extra_body.keep_alive is unmeasured (GAP §G6).
+        if provider.keep_alive is not None:
+            extra_body = {**(extra_body or {}), "keep_alive": provider.keep_alive}
         if enable_thinking is not None:
             extra_body = _override_thinking(extra_body, enable_thinking)
         return build_llm(

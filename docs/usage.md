@@ -48,17 +48,22 @@ The daemon is convenience, not a requirement.
 
 ## Adding sources (arXiv, bioRxiv, PubMed, HackerNoon)
 
-A "source" is just an **RSS feed subscribed in Zotero** — the app reads Zotero's
-feed items, it never fetches RSS itself. So any feed Zotero can subscribe to is a
-first-class source, and the same pipeline (gate → goal_sim → LLM → daily slate)
-scores all of them. To add one: in Zotero, **Add Library → Add Feed → From URL…**,
-paste the feed URL, Save. The daemon discovers it on the next tick; `feeds list`
-shows it.
+A "source" is just an **RSS feed the app subscribes to itself** — the app fetches
+and stores RSS/Atom in its own pool, it never reads Zotero's feed items. So any
+public RSS/Atom URL is a first-class source, and the same pipeline (gate →
+goal_sim → LLM → daily slate) scores all of them. To add one: **Settings → RSS
+feeds** in the app, or `POST /api/rss/feeds`; `feeds list` shows it. Already have
+feeds subscribed in Zotero? Import them once with the **"Import feeds from
+Zotero"** button (`POST /api/rss/import-zotero`) instead of re-adding each URL.
+
+Either way, Zotero's own feed cards still get marked read automatically once the
+app has triaged the matching item (the read-sync reconciler) — so the unread
+badge in Zotero stays clear even though Zotero isn't the source of truth anymore.
 
 **PubMed** is the recommended source for *published, clinical* work (e.g.
 medical agentic-AI papers) that the CS/bio preprint feeds miss. PubMed turns any
 search into a feed: run a search → **Create RSS** → copy the URL → add it in
-Zotero as above.
+the app as above.
 
 The query is your volume + quality filter; the daily slate only surfaces 1–2
 papers regardless of intake. Two pitfalls found by validating these live against
@@ -137,9 +142,9 @@ abstract is too thin, that's the signal to add the deferred efetch backfill.
 ### HackerNoon (practitioner / engineering angle)
 
 HackerNoon adds the *building-agents* engineering view that arXiv (research) and
-PubMed (clinical) miss. It's a tag-filtered RSS feed — same **Add Feed → From
-URL…** flow. Tags are the only filter (no boolean queries), so pick a narrow one
-and let the gate + goal_sim do the rest:
+PubMed (clinical) miss. It's a tag-filtered RSS feed — same **Settings → RSS
+feeds** flow as any other source. Tags are the only filter (no boolean queries),
+so pick a narrow one and let the gate + goal_sim do the rest:
 
 ```
 https://hackernoon.com/tagged/llm/feed                     # best fit (~50/feed; LLM/agent eng.)

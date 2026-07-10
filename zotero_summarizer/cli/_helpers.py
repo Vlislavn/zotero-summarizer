@@ -31,6 +31,7 @@ def _resolve_feed_ids(raw: str, settings: Settings) -> list[int]:
 
     Raises ``SystemExit`` with a descriptive message on ambiguity or no match.
     """
+    from zotero_summarizer.integrations.app_rss import AppRssReader
     from zotero_summarizer.integrations.zotero_read import ZoteroReader
     from zotero_summarizer.services.triage.feeds import list_feed_groups
 
@@ -41,11 +42,20 @@ def _resolve_feed_ids(raw: str, settings: Settings) -> list[int]:
     needs_name_lookup = any(not t.lstrip("-").isdigit() for t in tokens)
     feed_groups: list[dict] = []
     if needs_name_lookup:
+        app_error: Exception | None = None
         try:
-            feed_groups = list_feed_groups(ZoteroReader(settings.zotero_data_dir))
+            feed_groups = list_feed_groups(AppRssReader(settings.triage_db_path))
         except Exception as exc:
-            print(f"ERROR: could not read feed list from Zotero: {exc}", file=sys.stderr)
-            raise SystemExit(2)
+            app_error = exc
+        if not feed_groups:
+            try:
+                feed_groups = list_feed_groups(ZoteroReader(settings.zotero_data_dir))
+            except Exception as exc:
+                detail = f"{exc}"
+                if app_error is not None:
+                    detail = f"app RSS: {app_error}; Zotero: {exc}"
+                print(f"ERROR: could not read RSS feed list: {detail}", file=sys.stderr)
+                raise SystemExit(2)
 
     ids: list[int] = []
     for token in tokens:

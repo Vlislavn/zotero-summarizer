@@ -414,7 +414,7 @@ def test_needs_pdf_pick_is_acquired_then_re_reviewed_from_that_path(monkeypatch)
     starts = _stub_deep_review(monkeypatch, cache, review=_review)
     monkeypatch.setattr(fleet.time, "sleep", lambda _s: None)
     monkeypatch.setattr(
-        "zotero_summarizer.services.zotero.zotero.get_zotero_reader_or_raise",
+        "zotero_summarizer.services.zotero.zotero.get_library_reader",
         lambda: types.SimpleNamespace(get_item_detail=lambda _k: {"has_pdf": False}),
     )
     monkeypatch.setattr(
@@ -436,7 +436,7 @@ def test_needs_library_login_pick_is_tallied_not_proposed(monkeypatch):
     _stub_deep_review(monkeypatch, cache, review=lambda _k, _ov: {"digest": None, "needs_pdf": True})
     monkeypatch.setattr(fleet.time, "sleep", lambda _s: None)
     monkeypatch.setattr(
-        "zotero_summarizer.services.zotero.zotero.get_zotero_reader_or_raise",
+        "zotero_summarizer.services.zotero.zotero.get_library_reader",
         lambda: types.SimpleNamespace(get_item_detail=lambda _k: {"has_pdf": False}),
     )
     monkeypatch.setattr(

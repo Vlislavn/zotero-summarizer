@@ -98,13 +98,11 @@ run_in_background = _flight.run_in_background
 
 
 def _reader():
-    reader = getattr(get_state(), "zotero_reader", None)
-    if reader is None:
-        raise RuntimeError(
-            "Zotero reader unavailable; cannot build the reading queue "
-            "(check ZOTERO_DATA_DIR)"
-        )
-    return reader
+    # Zotero-optional per user req: with Zotero the live reader, else the app-owned
+    # library over kept feed papers (AppLibraryReader). Both expose get_all_items.
+    from zotero_summarizer.services.zotero.zotero import get_library_reader
+
+    return get_library_reader(get_state())
 
 
 def _gate():

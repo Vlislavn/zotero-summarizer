@@ -7,7 +7,10 @@ from zotero_summarizer.services import interaction_log
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.golden import label_provenance
 from zotero_summarizer.services.library import review_detail as review_detail_svc
-from zotero_summarizer.services.zotero.zotero import get_zotero_reader_or_raise
+from zotero_summarizer.services.zotero.zotero import (
+    get_library_reader,
+    get_zotero_reader_or_raise,
+)
 
 
 def _golden_csv_path():
@@ -27,13 +30,21 @@ def _zotero_candidate_keys(*, collection: str, tag: str, search: str) -> set[str
     """Item keys matching the Zotero collection/tag/search filters — the SAME
     reader filtering the Library queue uses, so annotate filters consistently.
     One query, capped at the reader's 500-item scan window."""
-    reader = get_zotero_reader_or_raise()
-    page = reader.get_items(
-        collection_key=collection or None,
-        tag=tag or None,
-        search=search or None,
-        limit=500,
-    )
+    reader = get_library_reader()
+    if hasattr(reader, "get_items"):
+        page = reader.get_items(
+            collection_key=collection or None,
+            tag=tag or None,
+            search=search or None,
+            limit=500,
+        )
+    else:
+        page = reader.get_all_items(
+            collection_key=collection or None,
+            tag=tag or None,
+            search=search or None,
+            include_abstract=False,
+        )
     return {str(it["item_key"]) for it in (page.get("items") or []) if it.get("item_key")}
 
 
@@ -48,11 +59,11 @@ def _build_source_payload(item_key: str) -> dict[str, Any] | None:
     source = review_detail_svc.classify_item_key(item_key)
 
     if source == review_detail_svc.SOURCE_FEED:
-        feed_item_id = review_detail_svc.parse_feed_key(item_key)
-        return review_detail_svc.build_feed_detail(
+        feed_key = review_detail_svc.parse_feed_item_key(item_key)
+        return review_detail_svc.build_feed_detail_by_key(
             triage_db_path=settings_.triage_db_path,
             zotero_data_dir=settings_.zotero_data_dir,
-            feed_item_id=feed_item_id,
+            feed_key=feed_key,
         )
 
     if source == review_detail_svc.SOURCE_NOTE:
@@ -60,7 +71,7 @@ def _build_source_payload(item_key: str) -> dict[str, Any] | None:
         reader = get_zotero_reader_or_raise()
         return review_detail_svc.build_note_detail(reader, parent_key, note_id)
 
-    reader = get_zotero_reader_or_raise()
+    reader = get_library_reader()
     return review_detail_svc.build_library_detail(reader, item_key)
 
 
@@ -170,4 +181,3 @@ def _compute_border_into_cache(golden_sha: str, top_k: int) -> None:
         border_cache.finish(error=f"{type(exc).__name__}: {exc}")
         return
     border_cache.finish(error=None)
-

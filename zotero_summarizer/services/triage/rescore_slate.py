@@ -1,6 +1,6 @@
 """Re-score the current Today slate IN PLACE with the loaded classifier gate.
 
-After a gate upgrade (e.g. the SOTA prestige-signal change), already-triaged
+After a gate upgrade (e.g. the prestige-signal change), already-triaged
 slate rows keep the scores they were given at triage time — the triage state
 machine treats decisions as terminal and never re-scores them. This module
 re-runs the *current* in-memory gate over the slate's candidate pool (the
@@ -39,6 +39,7 @@ from zotero_summarizer.services.triage.daily_select._querying import (
     fetch_rows_by_decisions,
 )
 from zotero_summarizer.storage import feeds as feeds_storage
+from zotero_summarizer.storage.feed_identity import row_feed_keys
 
 LOGGER = logging.getLogger(__name__)
 
@@ -95,8 +96,7 @@ def _unhandled(rows: list[dict[str, Any]], conn: sqlite3.Connection) -> list[dic
         guid = str(row.get("guid") or "").strip()
         if guid and guid in handled_guids:
             continue
-        fid = row.get("feed_item_id")
-        if fid is not None and f"feed:{int(fid)}" in handled_label_keys:
+        if any(key in handled_label_keys for key in row_feed_keys(row)):
             continue
         out.append(row)
     return out

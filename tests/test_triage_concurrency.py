@@ -113,5 +113,5 @@ def test_local_provider_forces_serial():
 
 def test_remote_provider_uses_configured_cap():
     items = [_item(f"K{i}") for i in range(1, 11)]
-    remote = ProviderConfig(name="kather", base_url="https://api.kather.ai/v1", api_key_env="K")
+    remote = ProviderConfig(name="remote", base_url="https://remote.example/v1", api_key_env="K")
     assert _observed_workers(items, provider=remote, concurrency=4) == 4

@@ -33,6 +33,20 @@ def _entry_prestige(entry: dict[str, Any] | None) -> tuple[float | None, bool]:
     return sc.get("prestige_score"), bool(known)
 
 
+def entry_prestige_evidence(entry: dict[str, Any] | None) -> tuple[float | None, bool]:
+    """``(max_author_h_index, evidence)`` from a score-cache entry. ``evidence`` =
+    we have ANY prestige signal — an OpenAlex field-normalized ``citation_percentile``
+    OR a known author ``max_author_h_index``. The FILTER keys on this so a uncited
+    preprint with a high-h-index author is still filterable as "high prestige"; the
+    conservative quality FLOOR (banding) keeps keying on citation-known only via
+    :func:`_entry_prestige`, so a young paper is never demoted for lacking citations."""
+    sc = (entry or {}).get("scoring") or {}
+    inp = sc.get("prestige_inputs") or {}
+    h_index = inp.get("max_author_h_index")
+    evidence = inp.get("citation_percentile") is not None or h_index is not None
+    return (float(h_index) if h_index is not None else None), bool(evidence)
+
+
 def prestige_floor(pairs: list[tuple[float | None, bool]]) -> float | None:
     """Data-driven quality floor = the MEDIAN of the library's KNOWN prestige
     scores — a parameter-free "at least typical quality" bar (no tuned quantile).
@@ -78,4 +92,7 @@ def score_distribution(records: list[dict[str, Any]], floor: float | None = None
     }
 
 
-__all__ = ["_HIST_EDGES", "_entry_prestige", "prestige_floor", "score_distribution"]
+__all__ = [
+    "_HIST_EDGES", "_entry_prestige", "entry_prestige_evidence",
+    "prestige_floor", "score_distribution",
+]

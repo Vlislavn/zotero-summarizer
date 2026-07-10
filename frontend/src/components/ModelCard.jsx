@@ -3,7 +3,7 @@
 // Reads `GET /api/admin/model` and renders a compact AUDIT TRAIL of the freshest
 // trained classifier — enough to answer "is my gate fresh and trained on my
 // data": classifier, training size, when it was trained, the honest reading-
-// decision ρ, and the prediction thresholds. Not a model-engineering dashboard;
+// decision ρ. Not a model-engineering dashboard;
 // the raw run-log, per-class CV table and inflated all-rows metrics were removed
 // (Miller's Law / Pareto — a clinician's config page, not a debug surface).
 //
@@ -21,14 +21,6 @@ function Field({ label, value, mono = false, title = null }) {
       </div>
     </div>
   );
-}
-
-function formatThresholds(t) {
-  if (!t) return '—';
-  const parts = ['keep', 'must', 'could']
-    .map((k) => (t[k] != null ? `${k}=${Number(t[k]).toFixed(3)}` : null))
-    .filter(Boolean);
-  return parts.length ? parts.join(' · ') : '—';
 }
 
 export default function ModelCard() {
@@ -93,11 +85,6 @@ function ModelDetails({ model }) {
               ? Number(model.oof_spearman_verified).toFixed(3)
               : '—'
           }
-        />
-        <Field
-          label="Thresholds"
-          value={formatThresholds(model.thresholds)}
-          mono
         />
       </div>
       <p className="mt-3 text-[11px] text-slate-400 leading-relaxed">

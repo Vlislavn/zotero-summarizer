@@ -33,6 +33,30 @@ def detect_arxiv_id(pdf_path: Path) -> str | None:
     return None
 
 
+def extract_link_uris(doc: fitz.Document) -> list[str]:
+    """Distinct external URIs from every page's hyperlink ANNOTATIONS, in order.
+
+    A clickable link over text like "our code" (a ``LINK_URI`` annotation) is not
+    in the extracted visible text, so a github URL that only exists as an annotation
+    is invisible to the code-link regex. Harvest them so that layer can still see it.
+
+    A ``/URI`` annotation value is an untrusted opaque string: PyMuPDF round-trips
+    embedded raw whitespace/newlines verbatim, so a crafted PDF could pack a fake
+    "code available at github.com/attacker/x" *phrase* into one link value and, once
+    the harvested URIs are newline-joined into the code-link text, smuggle an
+    availability phrase that outranks the paper's real repo. A real URL has no raw
+    whitespace — reject any that does (I/O-boundary validation, injection defense).
+    """
+    seen: dict[str, None] = {}
+    for page in doc:
+        for link in page.get_links():
+            if link.get("kind") == fitz.LINK_URI:
+                uri = str(link.get("uri") or "").strip()
+                if uri and uri not in seen and not any(ch.isspace() for ch in uri):
+                    seen[uri] = None
+    return list(seen)
+
+
 def _block_texts(page: fitz.Page) -> list[tuple[float, str]]:
     blocks: list[tuple[float, str]] = []
     for block in page.get_text("blocks"):
@@ -107,6 +131,10 @@ def extract_pdf_content(pdf_path: Path, *, use_docling: bool = False) -> dict[st
             "n_pages": doc.page_count,
             "sections": sections or _sections_by_page(pages),
             "full_text": full_text,
+            # Hyperlink-annotation URIs, kept OUT of full_text so quality/goal layers
+            # stay pure; the code-link layer appends them so a github link that's only
+            # a clickable annotation (over "our code") is still caught.
+            "link_uris": extract_link_uris(doc),
             "references_count": refs,
         }
 

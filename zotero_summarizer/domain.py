@@ -122,6 +122,13 @@ LABEL_TAG_CASEFOLDED = frozenset(
 # and the read path (``services.golden``, ``storage``) can never diverge.
 VERDICT_SOURCE_USER = "user"
 VERDICT_SOURCE_MACHINE_ADD = "machine_add"
+# The auto quality-gate's verdict provenance: a ``dont_read`` written by the
+# quality gate (L1 LLM-score floor / L2 deep-review grade D | band flag), NOT by
+# the user. Distinct from ``machine_add`` (a provisional library-add). A later
+# explicit user relabel flips the row back to ``user`` (the UPSERT in
+# ``storage._repo_labels.insert_or_update_label_verdict`` overwrites ``source``),
+# so every auto-hide is one-tap reversible and never clobbers a human verdict.
+VERDICT_SOURCE_AUTO_QUALITY = "auto_quality"
 
 
 # Training-row filter — Sprint 3+ (May 2026). Drop only `meta` (library

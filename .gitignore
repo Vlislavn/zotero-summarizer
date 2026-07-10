@@ -27,6 +27,10 @@ goals.yaml
 # dataset, logs, and ML eval/run artifacts. Never commit. See settings.data_dir.
 data/
 
+# Internal "why we built it this way" rationale notes (ADR log, provenance
+# ledgers, run logs, design treatise). Kept on disk, out of the shared repo.
+docs/internal/
+
 # Generic safety nets (data/ already covers the in-app paths).
 *.sqlite
 *.sqlite3
@@ -41,3 +45,4 @@ tests/e2e/screenshots/
 tests/e2e/screenshots-pre/
 tests/e2e/audit-shots/
 tests/e2e/*-report*.json
+docs/benchmarking.md

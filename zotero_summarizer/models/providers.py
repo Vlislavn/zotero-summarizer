@@ -50,14 +50,14 @@ class ProviderType(str, Enum):
 
 
 class ProviderConfig(BaseModel):
-    name: str = Field(..., min_length=1)          # registry key, e.g. "local", "sota", "claude"
+    name: str = Field(..., min_length=1)          # registry key, e.g. "local", "remote", "claude"
     type: ProviderType = ProviderType.openai
     base_url: Optional[str] = None                # required for openai; optional for anthropic
     api_key_env: str = Field(..., min_length=1)   # env var NAME (never the secret itself)
     # Provider-specific kwargs forwarded to OpenAI-compatible endpoints as `extra_body`
     # (e.g. vLLM's `chat_template_kwargs`). Ignored by the native Anthropic adapter.
     extra_body: Optional[Dict[str, Any]] = None
-    # Per-provider generation budget. Reasoning models (the old `sota`) need a roomy
+    # Per-provider generation budget. Reasoning models (a remote reasoning model) need a roomy
     # budget — 16384 — or the thinking phase eats the whole allowance; chat models are
     # fine at 4096.
     max_tokens: int = Field(default=4096, ge=1)
@@ -80,15 +80,54 @@ class ProviderConfig(BaseModel):
     # Max concurrent LLM sub-calls within a single deep review (rubric samples, goal
     # summaries). None → inherit the global triage_job_concurrency cap. Local providers
     # always get 1 regardless of this value (RAM protection). For remote reasoning
-    # models (e.g. kather/sota) set to 3–4 so the 3 rubric runs and 6 goal calls fan
+    # models (e.g. a remote vLLM endpoint) set to 3–4 so the 3 rubric runs and 6 goal calls fan
     # out concurrently without hammering the endpoint.
     max_sub_concurrency: Optional[int] = Field(default=None, ge=1)
+    # Context window (tokens) for the model's KV cache. None = use the endpoint's own
+    # default (SAFE for remote endpoints — vLLM-style endpoints size their own window). For a
+    # LOCAL ollama provider, set this so a long deep-review prompt FITS: ollama's own
+    # default is tiny (~2–4k) and silently truncates a 60k-char prompt. Auto-derived for
+    # local providers in ``_common._derive_local_num_ctx`` (``derive_num_ctx``); forwarded
+    # to ollama as extra_body.num_ctx via LiteLLM. CAUTION:
+    # a larger num_ctx grows the KV-cache RAM allocation — on a memory-constrained Mac
+    # keep it just-large-enough, not the model's max. Override: ZS_PROVIDER_NUM_CTX.
+    num_ctx: Optional[int] = Field(default=None, ge=512)
+    # ollama ``keep_alive`` (seconds): how long a LOCAL model stays loaded after a call
+    # (warm → no cold-start on the next call). None = ollama default (~5m). This is a LATENCY
+    # knob, NOT a correctness one (unlike num_ctx), so it is left OFF by default and is NOT
+    # auto-derived: pinning a model resident grows steady-state RAM, which on a memory-
+    # constrained Mac is the OPPOSITE of safe (see the 2026-06-12 watchdog panic). Set it
+    # explicitly only on a provider where the warm-start win outweighs the RAM hold, then
+    # measure. Forwarded as ``extra_body.keep_alive`` (same path as num_ctx). -1 = forever.
+    # PROVISIONAL (wired, not measured): see docs/decisions.md ADR-D7 / GAP §G6.
+    keep_alive: Optional[int] = Field(default=None)
+    # Decoder-level structured output: send ``response_format: {type: json_schema, strict: true}`` so the
+    # ENDPOINT constrains decoding to the schema (a real decoder-level guarantee, NOT a prompt
+    # hint). MEASURED trade-off on a vLLM endpoint (2026-06-27, GPT-OSS-120B, 1 paper): strict forces
+    # enum/range compliance AND reasoning survives (unlike Ollama native format+think, #10929), BUT
+    # field completeness DROPS (0.62 vs 1.00 prompt-level — the model satisfices with empty-string
+    # defaults under strict guidance) AND needs a roomy max_tokens (8192 truncated→16384 worked;
+    # thinking + full JSON must fit). So: enable for models PRONE to invalid JSON (small/Qwen3-on-
+    # ollama, where the guarantee outweighs the completeness cost); leave OFF for well-behaved
+    # reasoning models (GPT-OSS produces valid JSON already → prompt-level wins on completeness).
+    # Prompt-level PydanticOutputParser + retry stays the backstop when False. Per-provider config
+    # (like lean_deep_review / max_sub_concurrency), not a ZS_ env knob.
+    structured_output: bool = Field(default=False)
 
     @model_validator(mode="after")
     def _require_base_url_for_openai(self) -> "ProviderConfig":
         if self.type == ProviderType.openai and not (self.base_url or "").strip():
             raise ValueError(f"provider {self.name!r} is type=openai and requires base_url")
         return self
+
+    @property
+    def thinking_on(self) -> bool:
+        """Whether this provider's reasoning is on. ``thinking_effort`` of ``None``
+        (unset) or a graded level means ON; only an explicit ``"off"`` disables it.
+        The deep-review DIGEST reads this to decide ``enable_thinking`` — so the
+        digest reasons by default (measured NEEDED) and a provider set to
+        ``thinking_effort: off`` opts it out, without a separate toggle."""
+        return self.thinking_effort != "off"
 
     @property
     def is_local(self) -> bool:

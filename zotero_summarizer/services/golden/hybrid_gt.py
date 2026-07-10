@@ -80,7 +80,25 @@ def load_user_verdicts(db_path: Path) -> dict[str, dict[str, Any]]:
     outgrew it (found June 2026 with 946 rows vs the 500 cap).
     """
     rows = repositories.list_all_label_verdicts(db_path)
-    return {row["item_key"]: row for row in rows}
+    out = {row["item_key"]: row for row in rows}
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        alias_rows = conn.execute(
+            "SELECT old_key, stable_feed_key FROM feed_key_aliases"
+        ).fetchall()
+    except sqlite3.Error:
+        alias_rows = []
+    finally:
+        conn.close()
+    for alias in alias_rows:
+        old_key = str(alias["old_key"])
+        stable_key = str(alias["stable_feed_key"])
+        if old_key not in out and stable_key in out:
+            copied = dict(out[stable_key])
+            copied["item_key"] = old_key
+            out[old_key] = copied
+    return out
 
 
 def load_resolved_outcomes(db_path: Path) -> dict[str, str]:
@@ -92,12 +110,12 @@ def load_resolved_outcomes(db_path: Path) -> dict[str, str]:
     """
     conn = sqlite3.connect(str(db_path))
     try:
-        by_id = feeds_storage.fetch_resolved_outcomes(
+        by_key = feeds_storage.fetch_resolved_outcomes_by_key(
             conn, outcomes=tuple(sorted(feeds_storage.BEHAVIORAL_OUTCOMES))
         )
     finally:
         conn.close()
-    return {f"feed:{fid}": outcome for fid, outcome in by_id.items()}
+    return by_key
 
 
 def outcome_correction(

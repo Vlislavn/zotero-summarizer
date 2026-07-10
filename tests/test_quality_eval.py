@@ -267,12 +267,37 @@ def test_self_verification_only_overturns_explicit_rejects():
 
 
 def test_clinical_patient_level_phrasing_not_flagged():
+    # _structural returns (Family, message) pairs — a pure family-agnostic generator; the
+    # caller gates by family. Here we assert the GENERATION logic (regex), unpacking the tag.
     body = "We study patient outcomes with patient-level 5-fold cross-validation on the cohort."
     _, flags = quality_eval._structural([], body)
-    assert not any("patient-level split" in f for f in flags)
+    assert not any("patient-level split" in msg for _fam, msg in flags)
     plain = "We study patient outcomes with 5-fold cross-validation on the cohort."
     _, flags2 = quality_eval._structural([], plain)
-    assert any("patient-level split" in f for f in flags2)
+    assert any("patient-level split" in msg for _fam, msg in flags2)
+
+
+def test_clinical_flag_suppressed_on_non_clinical_empirical_paper():
+    """The user's bug: a technical ML paper (empirical_ml) whose text mentions cross-
+    validation and incidentally bio/ML vocabulary must NOT get the clinical patient-level-
+    split red flag — that flag belongs to CLINICAL types only, not every empirical paper."""
+    body = RIGOROUS_BODY + " We evaluate with 5-fold cross-validation over cell-line embeddings."
+    out = _eval(_FakeLLM([ALL_YES, ALL_YES, ALL_YES]), body=body, paper_type="empirical_ml")
+    assert not any("patient-level split" in f for f in out.red_flags)
+
+
+def test_clinical_flag_still_fires_on_true_clinical_paper():
+    """... but a genuine clinical_prediction paper with plain CV and no patient-level split
+    still DOES get the flag — the CLIN family is active for its type, so gating preserves the
+    true positive (this is a precision fix, not a removal)."""
+    body = "We predict patient survival using 5-fold cross-validation on a disease cohort."
+    out = quality_eval.evaluate_quality(
+        title="X", full_text=body, sections=[{"title": "Methods", "text": body}],
+        digest={"tldr": "a model", "key_findings": [], "grade": "A"},
+        llm=_FakeLLM([CLIN_YES, CLIN_YES, CLIN_YES], evidence=CLIN_EV),
+        max_chars=60_000, self_consistency_runs=3, paper_type="clinical_prediction",
+    )
+    assert any("patient-level split" in f for f in out.red_flags)
 
 
 def test_adam_beta_is_not_a_near_perfect_metric():
@@ -282,11 +307,11 @@ def test_adam_beta_is_not_a_near_perfect_metric():
     hyperparam = "We used the Adam optimizer with β1 = 0.9, β2 = 0.98 and ϵ = 10−9 over 100,000 steps."
     assert not quality_eval._near_perfect_metric(hyperparam)
     _, flags = quality_eval._structural([], hyperparam)
-    assert not any("near-perfect" in f for f in flags)
+    assert not any("near-perfect" in msg for _fam, msg in flags)
     metric = "Our model reached 0.99 AUC on the held-out test set, a new state of the art."
     assert quality_eval._near_perfect_metric(metric)
     _, flags2 = quality_eval._structural([], metric)
-    assert any("near-perfect" in f for f in flags2)
+    assert any("near-perfect" in msg for _fam, msg in flags2)
 
 
 def test_transformer_like_methods_paper_not_capped_to_flag():
@@ -299,3 +324,22 @@ def test_transformer_like_methods_paper_not_capped_to_flag():
     assert not any("near-perfect" in f for f in out.red_flags)
     assert out.quality_band == "neutral"
     assert out.grade == "A"
+
+
+class _ExplodingLLM:
+    """Fails if called — proves the non-paper short-circuit makes no LLM call."""
+
+    def pydantic_prompt(self, *args, **kwargs):  # noqa: D401
+        raise AssertionError("LLM must not be called for a NON_PAPER")
+
+
+def test_non_paper_short_circuits_to_relevance_only():
+    """A NON_PAPER (web article) gets NO scientific grade/band and makes ZERO LLM
+    calls — scientific quality criteria don't apply; relevance is judged elsewhere."""
+    q = quality_eval.evaluate_quality(
+        title="A blog post", full_text="some web prose", sections=[], digest={"grade": "A"},
+        llm=_ExplodingLLM(), max_chars=2000, paper_type="non_paper",
+    )
+    assert q.grade == "" and q.quality_band == ""
+    assert q.basis == "non_paper" and q.paper_type == "non_paper"
+    assert q.red_flags == [] and q.coverage_standard.startswith("Not a research paper")

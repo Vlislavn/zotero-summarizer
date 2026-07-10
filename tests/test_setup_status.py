@@ -124,12 +124,13 @@ def test_ready_false_when_api_key_absent(tmp_path, monkeypatch):
     assert resp.ready is False  # key presence gates ready
 
 
-def test_ready_false_when_zotero_db_missing(tmp_path, monkeypatch):
+def test_ready_true_without_zotero_db(tmp_path, monkeypatch):
+    """Zotero is advisory: app is ready (Today + feed ingest) without a Zotero DB."""
     _seed(tmp_path, key_value=_SECRET, db_found=False, feeds=0)
     _patch_externals(monkeypatch, key_value=_SECRET, db_found=False, feeds=0)
     resp = _run(get_setup_status())
-    assert resp.zotero.db_found is False
-    assert resp.ready is False  # db_found gates ready
+    assert resp.zotero.db_found is False  # still surfaced as advisory
+    assert resp.ready is True             # but does not block ready
 
 
 def test_ready_false_when_config_invalid(tmp_path, monkeypatch):

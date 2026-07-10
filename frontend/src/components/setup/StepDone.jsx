@@ -1,6 +1,6 @@
 // Wizard step 4 — Done. Confirms the config was saved and routes to /today,
 // where the first daily slate lands. The per-pillar checklist was removed —
-// StepProgress already credited Zotero/LLM/Goals green throughout the wizard, so
+// StepProgress already credited the wizard steps throughout the flow, so
 // re-rendering the same state in a third idiom only diluted the one next action.
 
 import { useNavigate } from 'react-router-dom';

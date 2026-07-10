@@ -27,7 +27,10 @@ small set of shared/infra files at the top level.
 
 Shared files: `_common` (helpers: settings/logging/sqlite-ro/now_iso_z/html_to_text/
 `load_golden_rows` (fail-fast golden-CSV reader), `atomic_write` (callback) + `write_json_atomic`
-(dict→JSON) for tmp+replace artifact/cache writes, NaN-rejecting `clamp`; `emoji_signals`
+(dict→JSON) for tmp+replace artifact/cache writes, `read_json_or_empty` (their read
+counterpart: missing state file → `{}`, an EXISTING-but-corrupt file raises),
+`is_app_rss_source` (the one definition of "row came from the app-RSS reader"),
+NaN-rejecting `clamp`; `emoji_signals`
 bins via `domain` so label derivation == prediction; the LLM-concurrency gates
 `effective_llm_concurrency` (triage per-item fan-out, remote→`TRIAGE_JOB_CONCURRENCY`),
 `deep_review_fleet_concurrency` (the N-paper deep-review batch, remote→`max_sub_concurrency`
@@ -67,10 +70,18 @@ model version. The live verdict tables UPSERT/DELETE and lose the trajectory; th
 for offline improvement. Best-effort: a log failure warns, never blocks the durable write.
 Emitted by the verdict routes, Today keep/trash, the review queue, triage feedback, and the
 outcome daemon — `results` also calls it),
-`config` (GET/PUT `/api/config`; PUT persists + invalidates stage clients,
-does not validate provider availability; an edit to `research_goals` schedules a
+`config` (GET/PUT `/api/config`; PUT persists via `_common.write_user_config` — only
+the `USER_OWNED_KEYS` (intent + LLM connection + university access), so `goals.yaml`
+stays intent-only; re-applies `ZS_*` env before the hot-swap; invalidates stage
+clients; does not validate provider availability; an edit to `research_goals` schedules a
 background Today-slate rescore so persisted per-item `goal_sims` — the slate's
-rank-blend input — don't go stale against the new goals), `health`, `results`,
+rank-blend input — don't go stale against the new goals),
+`config_overrides` (the auto-derived `ZS_*` env override registry for every
+system-owned knob — `apply_env_overrides` re-validates, `render_overrides_doc`
+generates `docs/overrides.md`; precedence: code default < `goals.yaml` < `ZS_*` env;
+`read_config` additionally forces `prestige.enabled` off under `ZS_OFFLINE` so the
+now-default-on OpenAlex prestige never hits the network air-gapped),
+`health`, `results`,
 `corpus` (embeddings/affinity), `emoji_signals`
 (emoji→engagement taxonomy; `READ_EMOJIS` = non-meta engagement emojis only, used by the library read/hide partition).
 
