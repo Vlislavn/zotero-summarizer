@@ -26,6 +26,18 @@ export default function usePaperReview(itemKey, { onSaved, onQueueRefresh, deriv
   const deleteMutation = useMutation({ mutationFn: () => deleteVerdict(itemKey) });
   const detail = detailQuery.data;
 
+  // POST /api/golden/verdict resolves HTTP 200 even when the best-effort Zotero
+  // mirror (label tag / note) failed — it reports label_error/note_error instead
+  // of raising (api/routes/golden.py submit_verdict). The verdict itself is
+  // already durable at that point; same soft-warning idiom as AnnotationVerdict's
+  // flashStatus (data?.label_error || data?.note_error).
+  const [verdictResult] = submitMutation.data || [];
+  const submitWarning = verdictResult?.label_error
+    ? `Zotero label not written: ${verdictResult.label_error}`
+    : verdictResult?.note_error
+      ? `Zotero note not written: ${verdictResult.note_error}`
+      : null;
+
   function refreshDetail() {
     queryClient.invalidateQueries({ queryKey: ['review-detail', itemKey] });
   }
@@ -43,6 +55,7 @@ export default function usePaperReview(itemKey, { onSaved, onQueueRefresh, deriv
     onDelete: () => deleteMutation.mutate(undefined, { onSuccess: afterVerdictChange }),
     submitting: submitMutation.isPending,
     submitError: submitMutation.error?.message || null,
+    submitWarning,
     deleting: deleteMutation.isPending,
     deleteError: deleteMutation.error?.message || null,
   };

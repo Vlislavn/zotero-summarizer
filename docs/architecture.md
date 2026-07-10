@@ -6,26 +6,31 @@ Read this before editing; every package also has its own `README.md`.
 ## The loop
 
 ```
-  RSS feeds (in Zotero) ─┐
-                         ▼
+  app RSS pool (self-fetched, own DB) ─┐
+                                       ▼
    [triage]  cheap ML gate ──reject──> dropped
-                         │
-                         │ survivors → LLM summary + relevance score
-                         ▼
+                                       │
+                                       │ survivors → LLM summary + relevance score
+                                       ▼
    SQLite (data/) ──> [api] ──> React UI  (Today / Library / Annotate / Settings)
         ▲                                   │
         │                                   │ you cull / read / label
    retrain [model] <── [golden] dataset <───┘
                                             │ approve changes
-                                 [zotero] ──> writes back to Zotero (backup first)
+                                 [zotero] ──> Zotero: daily picks → Inbox,
+                                              label tags/notes, read-state sync
 ```
 
-1. **triage** scores RSS papers (gate first, LLM for survivors) into SQLite.
+1. **triage** fetches RSS itself into an app-owned pool and scores it (gate
+   first, LLM for survivors) into SQLite.
 2. **model** is the relevance gate — trained on your labels, it ranks everything.
 3. **api** serves the React UI and the JSON API; routes are thin.
 4. **you** cull on *Today*, read on *Library*, fine-label on *Annotate*.
 5. **golden** is your label dataset; **model** retrains on it — the loop closes.
-6. **zotero** is the only write path: changes are queued, reviewed, then applied.
+6. **zotero** writes back three things: the daily best-picks materialized into
+   the *Inbox*, approved label tags/notes (queued + reviewed, backup first),
+   and an automatic read-state sync that marks Zotero's own feed cards read
+   once the app has triaged them.
 
 ## Why it's built this way (decisions + evidence)
 

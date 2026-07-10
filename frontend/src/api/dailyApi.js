@@ -82,7 +82,10 @@ export async function fetchPipeline({ lookback_hours = 168 } = {}) {
  * POST /api/daily/add-to-library
  * Materialize the selected Today cards into the Zotero "Inbox" collection and
  * record a positive training label. `itemIds` are processed_feed_items PKs
- * (SlatePaper.item_id). Returns { added, failed_count, failed }.
+ * (SlatePaper.item_id). Returns { added, pending_sync, zotero_sync_error,
+ * failed_count, failed, fulltext }. `pending_sync` counts rows whose label
+ * saved but the Zotero write itself didn't (writer unavailable / materialize
+ * threw) — those items are NOT actually in Zotero yet.
  */
 export async function addToLibrary(itemIds) {
   if (!Array.isArray(itemIds) || itemIds.length === 0) {
@@ -97,7 +100,9 @@ export async function addToLibrary(itemIds) {
 /**
  * POST /api/daily/trash
  * Record dont_read (strong negative) for the selected cards and mark them
- * read. Returns { trashed, marked_read, failed_count, failed }.
+ * read. Returns { trashed, marked_read, marked_read_error, failed_count,
+ * failed }. `marked_read_error` is set when the label/decision committed but
+ * the best-effort Zotero mark-read failed (e.g. Zotero holds the DB lock).
  */
 export async function trashPapers(itemIds) {
   if (!Array.isArray(itemIds) || itemIds.length === 0) {

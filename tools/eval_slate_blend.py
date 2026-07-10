@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import json
 import random
-import sqlite3
 import sys
 
 # User-driven labels ONLY — the firewall (never the allocator's own selections).
@@ -76,6 +75,46 @@ def _ndcg_at(keys: list[float], gains: list[int], k: int) -> float:
     ideal = sorted(range(len(gains)), key=lambda i: -gains[i])
     idcg = _dcg(ideal)
     return _dcg(ranked) / idcg if idcg > 0 else 0.0
+
+
+def _topk_indices(keys: list[float], k: int) -> list[int]:
+    """Indices of the top-``k`` rows by descending ``keys`` (``min(k, n)`` of them)."""
+    return sorted(range(len(keys)), key=lambda i: -keys[i])[:k]
+
+
+def _contamination_at(keys: list[float], is_bad: list[bool], k: int) -> float:
+    """Fraction of the top-``k`` (by ``keys``) that are quality-contaminated —
+    the caller sets ``is_bad[i]`` (grade-D ∨ flag ∨ rigor≤2). The directive's
+    label-free acceptance metric: a quality-first order should surface FEWER of these."""
+    top = _topk_indices(keys, k)
+    return sum(1 for i in top if is_bad[i]) / len(top)
+
+
+def _mean(xs: list[float]) -> float:
+    return sum(xs) / len(xs)
+
+
+def _median(xs: list[float]) -> float:
+    s = sorted(xs)
+    return s[len(s) // 2]
+
+
+def _q_at(keys: list[float], q: list[float], k: int, *, agg) -> float:
+    """``agg`` (``_mean``/``_median``) of the unified-quality ``q`` over the top-``k``
+    by ``keys`` — the "how good is what we surfaced" side of q-lift@k."""
+    return agg([q[i] for i in _topk_indices(keys, k)])
+
+
+def _is_contaminated(grade: str | None, band: str | None, rigor: float | None) -> bool:
+    """The directive's contamination predicate — a poor-quality paper we do NOT want
+    in the top-K: a deep-review grade D, a flagged band, or a low methodological-rigor
+    dim (≤2). Unreviewed rows with no rigor dim are UNKNOWN, not contaminated (the honest
+    absence — contamination@k only counts papers we have negative evidence on)."""
+    if str(grade or "").upper() == "D":
+        return True
+    if str(band or "").lower() == "flag":
+        return True
+    return rigor is not None and float(rigor) <= 2.0
 
 
 def _bootstrap_ci(
@@ -204,13 +243,20 @@ def main(argv: list[str] | None = None) -> None:
     from zotero_summarizer.services._common import settings as get_settings
     from zotero_summarizer.models import GoalsConfig
     from zotero_summarizer.services.model.rank_blend import blend_scores, quality_bonus
+    from zotero_summarizer.services.model.rank_blend_quality import quality_first_key, unified_quality
     from zotero_summarizer.services.library import deep_review
+    from zotero_summarizer.services.triage.daily_select._candidate import (
+        parse_payload, row_relevance_score, row_triage_dim,
+    )
     from zotero_summarizer.storage.corpus import EmbeddingCache
     # tools/ is not a package (scripts run directly); put its dir on sys.path to import a sibling.
     import os as _os
     sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
     from _eval_labels import load_firewalled_labels, legacy_decision_labels  # type: ignore[import-not-found]
     import yaml
+
+    # The quality-first topic-floor sweep (shared by --replay and the labeled A2 arm).
+    QF_FLOORS = (0.3, 0.5, 0.7)
 
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
@@ -222,10 +268,21 @@ def main(argv: list[str] | None = None) -> None:
         "--prestige-sweep", action="store_true",
         help="after the embed pass, sweep prestige_w over {0,.05,.1,.15,.2,.3} (goal_w=0.4) "
              "and print AUC + bootstrap 95%% CI + P@10 per arm. Closes the prestige-weight GAP.")
+    parser.add_argument(
+        "--replay", action="store_true",
+        help="P2 label-free replay: group historical scored rows by day, compare the shipped "
+             "blend (A0) vs the quality-first key (A2, floors 0.3/0.5/0.7) on contamination@10 "
+             "+ q-lift@10. Reads stored goal_sim (NO embed pass) — light + memory-safe. This is "
+             "the directive's acceptance metric; runs standalone (no labels, no embed) and exits.")
     args = parser.parse_args(argv)
 
     settings_ = get_settings()
     config = GoalsConfig.model_validate(yaml.safe_load(settings_.config_path.read_text()))
+
+    if args.replay:
+        from _eval_replay import run_replay  # type: ignore[import-not-found]  # sibling on sys.path
+        run_replay(settings_, config, floors=QF_FLOORS)
+        return
 
     # ---- load labeled rows (firewalled, DE-LEAKED) ----
     # Default: label_verdicts (Zotero-native GT, source='user' only). --legacy-decision-labels
@@ -287,6 +344,30 @@ def main(argv: list[str] | None = None) -> None:
     report("blend+band", blend_band)
     goal_only = [g if g is not None else min(x for x in goal if x is not None) for g in goal]
     report("goal_sim alone", goal_only)
+
+    # ---- P1 frontier arms: A1 relevance-swap + A2 quality-first (floor sweep) ----
+    # Reuse the already-loaded goal (embedded) + quals (grade/band). The QF dims come from
+    # each row's stored payload — no extra embed. A2's absolute grade anchor means a grade-D
+    # row's key is 0 regardless of topicality (the directive), so its whole-cohort AUC is
+    # dominated by the ~71% unreviewed rows (q=prior) — read it alongside the P2 replay.
+    payloads = [parse_payload(r) for r in rows]
+    rel_raw = [row_relevance_score(p) for p in payloads]
+    rel_known = sorted(v for v in rel_raw if v is not None)
+    rel_med = rel_known[len(rel_known) // 2] if rel_known else 0.0
+    rel_filled = [v if v is not None else rel_med for v in rel_raw]  # None → cohort median (blend contract)
+    goal_align = [row_triage_dim(p, "goal_alignment") for p in payloads]
+    qf_qual = [
+        unified_quality(quals[i].get("grade"), quals[i].get("quality_band"),
+                        rigor=row_triage_dim(payloads[i], "methodological_rigor"),
+                        evidence=row_triage_dim(payloads[i], "evidence_strength"))
+        for i in range(len(rows))
+    ]
+    n_rel = sum(1 for v in rel_raw if v is not None)
+    print(f"  (A1/A2 inputs: relevance_score present={n_rel}/{len(rows)})")
+    report("A1 relevance-swap", blend_scores(rel_filled, goal, prestige))
+    for floor in QF_FLOORS:
+        report(f"A2 quality-first f={floor:.1f}",
+               quality_first_key(qf_qual, goal, goal_align, gate_floor=floor))
 
     # ---- prestige-weight ablation (closes the prestige-weight GAP) ----
     # goal_weight fixed at 0.4 (the measured lever); sweep prestige_weight. The embed pass

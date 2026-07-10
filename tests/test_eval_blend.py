@@ -8,16 +8,21 @@ model: ``main()`` defers every heavy import, so importing the module is cheap.
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
 
-_SPEC = importlib.util.spec_from_file_location(
-    "eval_slate_blend",
-    Path(__file__).resolve().parents[1] / "tools" / "eval_slate_blend.py",
-)
+_TOOLS = Path(__file__).resolve().parents[1] / "tools"
+_SPEC = importlib.util.spec_from_file_location("eval_slate_blend", _TOOLS / "eval_slate_blend.py")
 ev = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(ev)
+
+# _eval_replay imports the pure kernel from its sibling; put tools/ on sys.path so that resolves.
+sys.path.insert(0, str(_TOOLS))
+_RSPEC = importlib.util.spec_from_file_location("_eval_replay", _TOOLS / "_eval_replay.py")
+rp = importlib.util.module_from_spec(_RSPEC)
+_RSPEC.loader.exec_module(rp)
 
 
 def test_auc_perfect_and_inverse_separation() -> None:
@@ -96,3 +101,43 @@ def test_row_quality_joins_only_via_materialized_key() -> None:
     # GUID-keyed row with no materialized key → empty (the v1 trap: never a false join).
     assert ev._row_quality({"materialized_zotero_key": None, "guid": "ZKEY1"}, reviews) == {}
     assert ev._row_quality({"materialized_zotero_key": "MISSING"}, reviews) == {}
+
+
+# --- P2 replay metrics (contamination@k / q-lift@k) ---------------------------
+
+def test_topk_indices_takes_highest_min_k_n() -> None:
+    assert ev._topk_indices([0.1, 0.9, 0.5], 2) == [1, 2]   # descending, top-2
+    assert ev._topk_indices([0.1, 0.9], 5) == [1, 0]        # k > n → all, still ordered
+
+
+def test_contamination_at_counts_bad_in_topk() -> None:
+    # top-2 by keys = indices 0,1; only index 0 is bad → 1/2.
+    assert ev._contamination_at([0.9, 0.8, 0.1], [True, False, False], 2) == 0.5
+    # a bad row ranked BELOW the cutoff doesn't count (that's the whole point of quality-first).
+    assert ev._contamination_at([0.9, 0.8, 0.1], [False, False, True], 2) == 0.0
+    assert ev._contamination_at([0.9, 0.8], [True, True], 2) == 1.0
+
+
+def test_q_at_mean_and_median_over_topk() -> None:
+    keys, q = [0.9, 0.1, 0.5], [1.0, 0.0, 0.4]     # top-2 = indices 0,2 → q {1.0, 0.4}
+    assert ev._q_at(keys, q, 2, agg=ev._mean) == pytest.approx(0.7)
+    assert ev._q_at(keys, q, 2, agg=ev._median) == 1.0   # upper-median of [0.4, 1.0]
+
+
+def test_is_contaminated_predicate() -> None:
+    assert ev._is_contaminated("D", None, None) is True        # grade D
+    assert ev._is_contaminated("A", "flag", None) is True      # flagged band, any letter
+    assert ev._is_contaminated(None, None, 2) is True          # low rigor dim
+    assert ev._is_contaminated(None, None, 1) is True
+    assert ev._is_contaminated(None, None, 3) is False         # rigor above the bar
+    assert ev._is_contaminated(None, None, None) is False      # unknown ≠ contaminated
+    assert ev._is_contaminated("A", "neutral", 5) is False
+
+
+def test_replay_join_quality_two_key_bridge() -> None:
+    reviews = {"ZK": {"quality": {"grade": "A"}}}
+    # materialized key wins; stable_feed_key is the fallback; miss on both → {}.
+    assert rp._join_quality({"materialized_zotero_key": "ZK"}, reviews) == {"grade": "A"}
+    assert rp._join_quality({"stable_feed_key": "ZK"}, reviews) == {"grade": "A"}
+    assert rp._join_quality({"materialized_zotero_key": "MISS", "stable_feed_key": "ZK"}, reviews) == {"grade": "A"}
+    assert rp._join_quality({"materialized_zotero_key": None, "stable_feed_key": None}, reviews) == {}

@@ -34,6 +34,8 @@ _SKIP_SECTIONS: frozenset[str] = frozenset({"prompts"})
 # services/library/deep_review_prewarm) keep working — env wins either way.
 _ENV_ALIASES: dict[str, str] = {
     "quality_review.quality_band_primary": "ZS_QUALITY_BAND_PRIMARY",
+    "quality_review.rank_quality_first": "ZS_RANK_QUALITY_FIRST",
+    "quality_review.rank_interleave": "ZS_RANK_INTERLEAVE",
     "quality_review.prewarm_on_startup_k": "ZS_DEEP_REVIEW_PREWARM_K",
     "quality_review.auto_quality_gate": "ZS_AUTO_QUALITY_GATE",
     "quality_review.auto_quality_llm_floor": "ZS_AUTO_QUALITY_LLM_FLOOR",

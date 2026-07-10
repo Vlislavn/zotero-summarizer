@@ -11,8 +11,9 @@ ARE the LLM's pre-extracted structured judgment, and this measures whether they
 track user quality.
 
 WHAT IT MEASURES (2026-06-28 DB):
-* LLM ``relevance_score`` (1-5) vs labels — AUC, firewalled (user_approved vs
-  user_rejected), bootstrap 95% CI. Compared head-to-head with:
+* LLM ``relevance_score`` (1-5) vs labels — AUC, firewalled (de-leaked
+  ``label_verdicts`` user verdicts, via ``_eval_labels.load_firewalled_labels``),
+  bootstrap 95% CI. Compared head-to-head with:
     - ``composite_score`` (the ML gate, the 0.268 finding)
     - goal_sim alone (0.755 title-only floor from eval_relevancy_titleonly)
 * ``relevance_score`` vs ``composite_score`` — Spearman ρ (does the LLM agree
@@ -44,7 +45,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -70,9 +70,9 @@ _GP.loader.exec_module(_gp)
 _spearman = _gp._spearman
 _bootstrap_rho_ci = _gp._bootstrap_rho_ci
 
-# User-driven labels ONLY — the firewall (never the allocator's own selections).
-KEPT = ("user_approved",)
-TRASHED = ("user_rejected",)
+# User-driven labels ONLY — the firewall lives in _eval_labels.load_firewalled_labels
+# (de-leaked label_verdicts, source='user'); this tool no longer reads the leaked
+# processed_feed_items.decision column.
 MIN_PER_SIDE = 15
 
 # The 5 LLM-extracted dimensions (abstract-based judgment at triage time).
@@ -130,24 +130,11 @@ def main() -> None:
     settings_ = get_settings()
     config = GoalsConfig.model_validate(yaml.safe_load(settings_.config_path.read_text()))
 
-    # ---- load firewalled labeled rows ----
-    all_labels = (*KEPT, *TRASHED)
-    conn = sqlite3.connect(f"file:{settings_.triage_db_path}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    try:
-        placeholders = ",".join("?" * len(all_labels))
-        rows = [dict(r) for r in conn.execute(
-            f"""SELECT id, title, abstract, decision, composite_score,
-                       shap_contribs_json
-                FROM processed_feed_items
-                WHERE decision IN ({placeholders})""",
-            all_labels,
-        )]
-    finally:
-        conn.close()
-    labels = [0 if r["decision"] in TRASHED else 1 for r in rows]
+    # ---- load firewalled labeled rows (de-leaked label_verdicts, source='user') ----
+    from _eval_labels import load_firewalled_labels  # tools/ dir is sys.path[0] when run as a script
+    rows, labels = load_firewalled_labels(settings_.triage_db_path)
     n_kept, n_trashed = sum(labels), len(labels) - sum(labels)
-    print(f"firewalled labels: kept(user_approved)={n_kept} trashed(user_rejected)={n_trashed}")
+    print(f"firewalled labels (label_verdicts user verdicts): kept={n_kept} trashed={n_trashed}")
 
     summaries = [_summary(r) for r in rows]
     rel_scores = [s.get("relevance_score") for s in summaries]

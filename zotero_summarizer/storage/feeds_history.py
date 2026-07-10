@@ -19,11 +19,15 @@ def select_by_decisions(
     conn: sqlite3.Connection,
     *,
     decisions: list[str],
-    since_hours: int = 24,
+    since_hours: int | None = 24,
     limit: int = 1000,
     feed_library_ids: list[int] | None = None,
 ) -> list[dict[str, Any]]:
     """Return rows whose decision is in ``decisions`` from the last N hours.
+
+    ``since_hours=None`` disables the time window entirely (returns every
+    matching row regardless of age) — used for ``user_approved`` rows, which
+    are an explicit user instruction and must never silently expire.
 
     Used by:
       * Daily-selection (decisions=[DECISION_TRIAGED_PENDING]) to gather the
@@ -38,31 +42,36 @@ def select_by_decisions(
     if not decisions:
         raise ValueError("decisions must be non-empty")
     safe_limit = max(1, min(int(limit), 5000))
-    safe_hours = max(1, int(since_hours))
     decision_placeholders = ",".join("?" * len(decisions))
+    time_clause = ""
+    time_params: tuple[Any, ...] = ()
+    if since_hours is not None:
+        safe_hours = max(1, int(since_hours))
+        time_clause = "AND created_at >= datetime('now', ?)"
+        time_params = (f"-{safe_hours} hours",)
     if feed_library_ids:
         feed_placeholders = ",".join("?" * len(feed_library_ids))
         rows = conn.execute(
             f"""
             SELECT * FROM processed_feed_items
             WHERE decision IN ({decision_placeholders})
-              AND created_at >= datetime('now', ?)
+              {time_clause}
               AND feed_library_id IN ({feed_placeholders})
             ORDER BY COALESCE(composite_score, 0) DESC
             LIMIT ?
             """,
-            (*decisions, f"-{safe_hours} hours", *feed_library_ids, safe_limit),
+            (*decisions, *time_params, *feed_library_ids, safe_limit),
         ).fetchall()
     else:
         rows = conn.execute(
             f"""
             SELECT * FROM processed_feed_items
             WHERE decision IN ({decision_placeholders})
-              AND created_at >= datetime('now', ?)
+              {time_clause}
             ORDER BY COALESCE(composite_score, 0) DESC
             LIMIT ?
             """,
-            (*decisions, f"-{safe_hours} hours", safe_limit),
+            (*decisions, *time_params, safe_limit),
         ).fetchall()
     return [dict(r) for r in rows]
 

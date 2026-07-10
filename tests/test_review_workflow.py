@@ -326,6 +326,48 @@ def test_apply_all_approved_without_zotero_marks_pending_sync(patched_settings, 
     assert row["final_outcome"] == fs.OUTCOME_KEPT_UNREAD_APP
 
 
+def test_apply_all_approved_ignores_created_at_window(patched_settings, monkeypatch):
+    """Regression: a user_approved row must never expire out of reach.
+
+    Before the fix, apply_all_approved's default since_hours=720 (30 days)
+    filtered select_by_decisions's query on created_at, so any user_approved
+    row older than 30 days was permanently unreachable — nothing else
+    consumes user_approved rows. approve()/relabel() are explicit user
+    instructions and must not silently time out.
+    """
+    db = sqlite3.connect(str(patched_settings / "triage.db"))
+    db.row_factory = sqlite3.Row
+    row_id = _insert_awaiting(db, feed_item_id=444)
+    fs.update_to_decision(
+        db,
+        feed_library_id=2,
+        feed_item_id=444,
+        decision=fs.DECISION_USER_APPROVED,
+        decision_reason="approved",
+    )
+    # Backdate created_at well past the old 720-hour (30-day) window.
+    db.execute(
+        "UPDATE processed_feed_items SET created_at = datetime('now', '-1000 hours') WHERE id = ?",
+        (row_id,),
+    )
+    db.commit()
+    db.close()
+
+    from zotero_summarizer.integrations import zotero_write
+
+    class _UnavailableWriter:
+        def __init__(self, *a, **k):
+            raise RuntimeError("zotero unavailable")
+
+    monkeypatch.setattr(zotero_write, "ZoteroWriter", _UnavailableWriter)
+    res = review.apply_all_approved()
+
+    # pending_sync counts rows selected for materialization (the Zotero-
+    # unavailable branch); 1 means the 1000-hour-old row was picked up rather
+    # than dropped by the time-window filter.
+    assert res["pending_sync"] == 1
+
+
 def test_action_on_missing_row_raises_keyerror(patched_settings):
     with pytest.raises(KeyError):
         review.approve(99999)

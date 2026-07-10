@@ -331,6 +331,7 @@ async def apply_pending_changes(req: PendingChangeMutationRequest) -> dict[str, 
     ]
 
     inbox_removed = 0
+    inbox_removed_error: str | None = None
     if refreshed_item_keys:
         try:
             inbox_removed = await asyncio.to_thread(
@@ -339,7 +340,8 @@ async def apply_pending_changes(req: PendingChangeMutationRequest) -> dict[str, 
                 "Inbox",
                 True,
             )
-        except Exception:
+        except Exception as exc:
+            inbox_removed_error = str(exc)
             LOGGER.warning("Failed removing applied items from Inbox collection", exc_info=True)
         await refresh_corpus_items_by_keys(refreshed_item_keys)
 
@@ -356,4 +358,5 @@ async def apply_pending_changes(req: PendingChangeMutationRequest) -> dict[str, 
         "backup_path": result.get("backup_path"),
         "failed_items": failed_items,
         "inbox_removed": inbox_removed,
+        "inbox_removed_error": inbox_removed_error,
     }

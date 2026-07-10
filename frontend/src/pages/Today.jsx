@@ -16,7 +16,7 @@ import { useNavigate } from 'react-router-dom';
 import PaperCard from '../components/today/PaperCard.jsx';
 import NotConfiguredCard from '../components/setup/NotConfiguredCard.jsx';
 import Spinner from '../components/ui/Spinner.jsx';
-import { ErrorBanner } from '../components/library/shared.jsx';
+import { ErrorBanner, StatusBanner } from '../components/library/shared.jsx';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import {
   fetchDailySlate,
@@ -156,7 +156,9 @@ export default function Today() {
   const { status } = useSetupStatus();
   const setupStatusKnown = Boolean(status);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
-  const [actionMsg, setActionMsg] = useState('');
+  // { text, tone } | null — tone flips to 'warn' when the API reports a
+  // partial failure (Zotero side-effect didn't land even though the label did).
+  const [actionMsg, setActionMsg] = useState(null);
   const triageKicked = useRef(false);
 
   // K=15 (API ceiling 20): show MORE cards so the queue isn't drip-fed 5 at a
@@ -242,13 +244,37 @@ export default function Today() {
   const busy = addMutation.isPending || trashMutation.isPending;
 
   const commit = useCallback(
-    (mutation, verb, note = '') => {
+    (mutation, verb) => {
       const ids = [...selectedIds];
       if (ids.length === 0) return;
       mutation.mutate(ids, {
         onSuccess: (res) => {
           const n = res?.added ?? res?.trashed ?? ids.length;
-          setActionMsg(`${verb} ${n} paper${n === 1 ? '' : 's'}${note}.`);
+          // Both endpoints commit the label/decision unconditionally and only
+          // best-effort the Zotero side-effect: add-to-library sets pending_sync
+          // when the writer is unavailable/materialize threw (daily_actions.
+          // add_to_library), trash sets marked_read_error when the best-effort
+          // mark-read fails (daily_actions.trash_papers). Either means the label
+          // is safely saved but Zotero itself did NOT get the write — the toast
+          // must not claim a plain success in that case.
+          const bits = [];
+          let warn = false;
+          if (typeof res?.pending_sync === 'number' && res.pending_sync > 0) {
+            bits.push(`Zotero sync pending (${res.pending_sync})`);
+            warn = true;
+          } else if (res && 'added' in res) {
+            bits.push('saved to Zotero');
+          }
+          if (res?.marked_read_error) {
+            bits.push('Zotero mark-read failed');
+            warn = true;
+          }
+          if (res?.failed_count > 0) {
+            bits.push(`${res.failed_count} failed`);
+            warn = true;
+          }
+          const text = `${verb} ${n} paper${n === 1 ? '' : 's'}${bits.length ? ` — ${bits.join(', ')}` : ''}.`;
+          setActionMsg({ text, tone: warn ? 'warn' : 'success' });
           setSelectedIds(new Set());
           queryClient.invalidateQueries({ queryKey: ['daily-slate'] });
         },
@@ -331,11 +357,7 @@ export default function Today() {
           title="Last triage run failed"
         />
       )}
-      {actionMsg && (
-        <div className="my-2 p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800">
-          {actionMsg}
-        </div>
-      )}
+      <StatusBanner message={actionMsg?.text} tone={actionMsg?.tone} />
 
       {slateQuery.isLoading && (
         <div role="status" aria-live="polite" className="flex items-center gap-2 p-4 text-sm text-slate-600">
@@ -435,7 +457,7 @@ export default function Today() {
             <div className="flex-1" />
             <button
               type="button"
-              onClick={() => commit(addMutation, 'Added', ' — saved to Zotero')}
+              onClick={() => commit(addMutation, 'Added')}
               disabled={selectedCount === 0 || busy}
               className="px-3 py-1.5 rounded-lg border text-xs font-semibold bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
             >

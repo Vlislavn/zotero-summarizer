@@ -25,6 +25,7 @@ from typing import Any
 
 from zotero_summarizer.services._common import LOGGER
 from zotero_summarizer.services.model.rank_blend import blend_scores
+from zotero_summarizer.services.model.rank_blend_quality import quality_first_key, unified_quality
 
 
 def parse_payload(row: dict[str, Any]) -> dict[str, Any]:
@@ -242,6 +243,33 @@ def row_citation_percentile(payload: dict[str, Any]) -> float | None:
     return float(pct) if pct is not None else None
 
 
+def _num_or_none(value: Any) -> float | None:
+    """Coerce a JSON scalar to ``float`` (``None``/missing → ``None``)."""
+    return float(value) if value is not None else None
+
+
+def row_relevance_score(payload: dict[str, Any]) -> float | None:
+    """The feed-stage LLM's 1-5 ``relevance_score`` (``summary.relevance_score``).
+
+    ``None`` = not persisted (older / gate-only rows). Used ONLY by the
+    quality-first allocation floor (relevance_score > 2), never the lead — its
+    de-leaked label-AUC is the weakest of the ranking signals (0.634)."""
+    return _num_or_none(_summary_dict(payload).get("relevance_score"))
+
+
+def row_triage_dim(payload: dict[str, Any], name: str) -> float | None:
+    """One LLM ``summary.triage_dimensions.<name>`` value (1-5), else ``None``.
+
+    Sparse (~20% coverage) — the quality-first blend treats an absent dim as
+    "signal unavailable" (per-row renormalize), never a fabricated 0."""
+    dims = _summary_dict(payload).get("triage_dimensions")
+    if dims is None:
+        return None
+    if not isinstance(dims, dict):
+        raise ValueError("payload.summary.triage_dimensions must be a JSON object or null")
+    return _num_or_none(dims.get(name))
+
+
 def _paper_url(row: dict[str, Any]) -> str:
     """Best available direct link: doi.org from DOI, else arxiv.org from arxiv_id."""
     doi = str(row.get("doi") or "").strip()
@@ -302,6 +330,14 @@ def make_candidate(row: dict[str, Any]) -> dict[str, Any]:
         # composite/5 fallback would be circular as a ranking input).
         "goal_sim": row_goal_sim(payload),
         "citation_percentile": row_citation_percentile(payload),
+        # Quality-first blend inputs (services/model/rank_blend_quality): the LLM
+        # 1-5 goal_alignment dim (topicality), rigor+evidence dims (abstract-only
+        # quality prior for un-reviewed rows), and relevance_score (the QF
+        # allocation floor only — never the lead). All None when not persisted.
+        "goal_alignment": row_triage_dim(payload, "goal_alignment"),
+        "rigor": row_triage_dim(payload, "methodological_rigor"),
+        "evidence": row_triage_dim(payload, "evidence_strength"),
+        "relevance_score": row_relevance_score(payload),
         "url": _paper_url(row),
         # Order key for the slate + model/diversity pickers. Assembly overwrites
         # this with the shared relevance×goal×prestige blend (rank_blend) once
@@ -367,22 +403,45 @@ def attach_quality_from_reviews(candidates: list[dict[str, Any]]) -> int:
     return matched
 
 
-def attach_rank_scores(candidates: list[dict[str, Any]]) -> None:
-    """Overwrite each candidate's ``rank_score`` IN PLACE with the shared
-    relevance × goal × prestige blend (``services/model/rank_blend``) — the
-    same primitive the Library queue orders by, adapted to slate candidates:
-    relevance = ``composite_score``, goal = ``goal_sim`` (None folds the goal
-    weight back into relevance), prestige = the KNOWN ``citation_percentile``
-    only (cohort min-max makes its [0,1] scale equivalent to the library's
-    [1,5] mapping order-wise; the display ladder's circular composite fallback
-    is deliberately excluded)."""
+def attach_rank_scores(candidates: list[dict[str, Any]], *, quality_first: bool = False) -> None:
+    """Overwrite each candidate's ``rank_score`` IN PLACE.
+
+    Default (control): the shared relevance × goal × prestige blend
+    (``services/model/rank_blend``) — the same primitive the Library queue orders
+    by, adapted to slate candidates: relevance = ``composite_score``, goal =
+    ``goal_sim`` (None folds the goal weight back into relevance), prestige = the
+    KNOWN ``citation_percentile`` only (cohort min-max makes its [0,1] scale
+    equivalent to the library's [1,5] mapping order-wise; the display ladder's
+    circular composite fallback is deliberately excluded).
+
+    ``quality_first=True``: the quality-LEADS blend
+    (``services/model/rank_blend_quality``) — ``key = q·(0.5+0.5·t)`` with quality
+    (grade / dims prior) leading and topicality (goal_sim + goal_alignment) as a
+    floored soft gate. A high-quality off-topic paper then out-ranks a low-quality
+    on-topic one (the user's directive). Default OFF pending the Track-C eval."""
     if not candidates:
         return
-    keys = blend_scores(
-        [c["composite_score"] for c in candidates],
-        [c["goal_sim"] for c in candidates],
-        [c["citation_percentile"] for c in candidates],
-    )
+    if quality_first:
+        qualities = [
+            unified_quality(
+                (c.get("quality") or {}).get("grade"),
+                (c.get("quality") or {}).get("quality_band"),
+                rigor=c["rigor"],
+                evidence=c["evidence"],
+            )
+            for c in candidates
+        ]
+        keys = quality_first_key(
+            qualities,
+            [c["goal_sim"] for c in candidates],
+            [c["goal_alignment"] for c in candidates],
+        )
+    else:
+        keys = blend_scores(
+            [c["composite_score"] for c in candidates],
+            [c["goal_sim"] for c in candidates],
+            [c["citation_percentile"] for c in candidates],
+        )
     for cand, key in zip(candidates, keys):
         cand["rank_score"] = key
 

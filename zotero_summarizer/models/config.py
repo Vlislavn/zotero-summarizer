@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from zotero_summarizer.models.feeds_config import FeedsConfig
 from zotero_summarizer.models.providers import (
     DefaultModelConfig,
     LLMRoutingConfig,
@@ -17,6 +18,7 @@ __all__ = [
     "LLMConfig",
     "PromptOverrides",
     "CorpusConfig",
+    "FeedsConfig",
     "PrestigeConfig",
     "FullTextRefineConfig",
     "QualityReviewConfig",
@@ -174,6 +176,20 @@ class QualityReviewConfig(BaseModel):
     # ahead of its gate. Env override (consumer-side): ZS_QUALITY_BAND_PRIMARY.
     # See services/library/_ranking._band_primary_enabled + model/rank_blend.quality_bonus.
     quality_band_primary: bool = Field(default=False)
+    # Quality-FIRST Today slate ordering (services/model/rank_blend_quality): quality
+    # LEADS the order key (key = q·(0.5+0.5·t)), topicality soft-gates — so a
+    # high-quality off-topic paper out-ranks a low-quality on-topic one (the user's
+    # directive). Replaces the default relevance×goal×prestige blend for the Today
+    # slate only (Library queue unchanged). OFF by default until the Track-C frontier
+    # eval (contamination@10 / q-lift@10) clears the ship gate. Env: ZS_RANK_QUALITY_FIRST.
+    rank_quality_first: bool = Field(default=False)
+    # P3 ONLINE interleave (ADR-A9/GAP-G11): build BOTH ranking arms (A0 control
+    # blend + A2 quality-first) and team-draft-merge them into the one Today slate,
+    # logging per-item arm attribution (storage/interleave) so the user's normal
+    # verdicts decide the flip via SPRT (tools/eval_interleave.py). Blind — the UI
+    # never shows the arm. Takes precedence over rank_quality_first (the interleave
+    # already contains both arms). OFF by default. Env: ZS_RANK_INTERLEAVE.
+    rank_interleave: bool = Field(default=False)
     # Quality → must_read PROMOTION (the inverse of the auto_quality hide gate).
     # The gate's regressor scores are compressed toward the mean → never reach the
     # must_read band (≥4.5) on their own (0/69 must recall), so must_read is empty
@@ -402,6 +418,7 @@ class GoalsConfig(BaseModel):
     llm_routing: Optional[LLMRoutingConfig] = None
     prompts: PromptOverrides = Field(default_factory=PromptOverrides)
     corpus: CorpusConfig = Field(default_factory=CorpusConfig)
+    feeds: FeedsConfig = Field(default_factory=FeedsConfig)
     prestige: PrestigeConfig = Field(default_factory=PrestigeConfig)
     full_text_refine: FullTextRefineConfig = Field(default_factory=FullTextRefineConfig)
     recover_abstract: RecoverAbstractConfig = Field(default_factory=RecoverAbstractConfig)

@@ -125,15 +125,21 @@ def dedup_against_processed(
 
 
 def dedup_against_library(
-    unprocessed: list[dict[str, Any]], *, reader: ZoteroReader, tick_id: str, enabled: bool
+    unprocessed: list[dict[str, Any]], *, reader: ZoteroReader | None, tick_id: str, enabled: bool
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Split unprocessed items into (to_triage, already_in_library).
+
+    ``reader`` must be a ZOTERO reader (the library being deduped against), not
+    the triage source reader — routing the app-RSS source reader here made the
+    guard a silent no-op (its ``find_by_external_id`` always returns ``None``).
+    ``reader=None`` means Zotero is absent: there is no library to dedup
+    against, so everything passes through (same as ``enabled=False``).
 
     A failed dedup LOOKUP must NOT be read as "not in library" — that would
     re-materialize an existing paper — so the item is skipped this tick and
     retried next tick once the read succeeds.
     """
-    if not enabled:
+    if not enabled or reader is None:
         return list(unprocessed), []
     library_skipped: list[dict[str, Any]] = []
     to_triage: list[dict[str, Any]] = []

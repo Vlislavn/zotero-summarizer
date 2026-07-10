@@ -44,8 +44,8 @@ import { Section, Disclosure } from '../review/primitives.jsx';
 //   collections: flat [{key,name,depth}] list for the CollectionEditor
 //   onDeepReviewDone, onTagsChanged, onCollectionsChanged: refetch callbacks
 //   verdict:     { derivedPriority, existing, onSubmit, onDelete, submitting,
-//                  submitError, deleting, deleteError } for the editable
-//                VerdictPanel (editable mode only)
+//                  submitError, submitWarning, deleting, deleteError } for the
+//                editable VerdictPanel (editable mode only)
 //   extras:      extra nodes appended after the body (readonly tails)
 
 export default function PaperDetailView({
@@ -137,6 +137,9 @@ export default function PaperDetailView({
                   {verdict.submitError && (
                     <div className="mt-1 text-[11px] text-rose-700">{verdict.submitError}</div>
                   )}
+                  {!verdict.submitError && verdict.submitWarning && (
+                    <div className="mt-1 text-[11px] text-amber-700">{verdict.submitWarning}</div>
+                  )}
                 </div>
               ) : (
                 <VerdictPanel
@@ -147,6 +150,7 @@ export default function PaperDetailView({
                   onDelete={verdict.onDelete}
                   submitting={verdict.submitting}
                   submitError={verdict.submitError}
+                  submitWarning={verdict.submitWarning}
                   deleting={verdict.deleting}
                   deleteError={verdict.deleteError}
                 />
