@@ -1,0 +1,96 @@
+"""Parse a raw topic into a structured intent + a PER-SOURCE query plan.
+
+The expert review's first architectural fix (spec §13.1): one universal
+reformulated query is wrong — different engines want different inputs. A cheap
+``feed``-stage LLM produces a ``SearchIntent`` (canonical English question,
+concepts, synonyms, must/must-not), and ``build_query_plan`` deterministically
+derives a query string per source. The plan is shown to the user (transparency).
+
+If the LLM output is empty or unparseable, ``parse_intent`` falls back to the raw
+query for every field — the degradation the use-case spec's error table (§7)
+explicitly requires ("reformulation empty/garbled → fall back to raw query").
+"""
+from __future__ import annotations
+
+from typing import Any
+
+from zotero_summarizer.services._common import safe_parse_response_json, to_text
+from zotero_summarizer.services.search._models import SearchIntent, QueryPlan
+
+_PROMPT = """You are a scientific literature search planner. A researcher typed \
+this topic (may be terse, RU/EN mixed, or a typo):
+
+TOPIC: {topic}
+{questions_block}
+Return ONE JSON object, no prose, with these keys:
+- "canonical_question": one clear English sentence stating the information need \
+(a paragraph-length restatement good for semantic search).
+- "concepts": 3-8 core concept phrases (lowercase noun phrases).
+- "synonyms": alternative terms / acronyms for the concepts.
+- "must_include": terms that MUST appear (empty list if none obvious).
+- "must_not_include": terms to exclude (empty list if none).
+- "study_types": relevant study/paper types if the topic implies them (e.g. \
+"randomized controlled trial", "benchmark", "systematic review"); else empty.
+
+JSON only."""
+
+
+def _as_str_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [s.strip() for s in value if isinstance(s, str) and s.strip()]
+
+
+def parse_intent(raw_query: str, questions: list[str], *, llm: Any) -> SearchIntent:
+    """LLM feed-stage parse → SearchIntent. Raw-query fallback on empty/garbled
+    output (spec §7 error contract)."""
+    raw = (raw_query or "").strip()
+    questions = [q.strip() for q in (questions or []) if q and q.strip()]
+    fallback = SearchIntent(
+        raw_query=raw, canonical_question=raw, concepts=[raw] if raw else [], questions=questions
+    )
+    if not raw:
+        return fallback
+
+    q_block = ""
+    if questions:
+        q_block = "The researcher also wants these questions answered:\n" + "\n".join(
+            f"- {q}" for q in questions
+        ) + "\n"
+    prompt = _PROMPT.format(topic=raw, questions_block=q_block)
+    parsed = safe_parse_response_json(to_text(llm.prompt(prompt)), context="targeted_search.intent")
+    canonical = (parsed.get("canonical_question") or "").strip()
+    if not canonical:
+        return fallback
+    return SearchIntent(
+        raw_query=raw,
+        canonical_question=canonical,
+        concepts=_as_str_list(parsed.get("concepts")) or [raw],
+        synonyms=_as_str_list(parsed.get("synonyms")),
+        must_include=_as_str_list(parsed.get("must_include")),
+        must_not_include=_as_str_list(parsed.get("must_not_include")),
+        study_types=_as_str_list(parsed.get("study_types")),
+        questions=questions,
+    )
+
+
+def build_query_plan(intent: SearchIntent) -> QueryPlan:
+    """Derive a source-specific query per channel (spec §13.1). Deterministic —
+    no LLM. Lexical channels get concise concept terms; the semantic + library-
+    expanded channels get the canonical paragraph."""
+    concepts = intent.concepts or ([intent.raw_query] if intent.raw_query else [])
+    lexical = " ".join(concepts[:6]).strip() or intent.raw_query
+    expanded = intent.canonical_question or intent.raw_query
+    if concepts:
+        expanded = (expanded + " " + " ".join(concepts[:6])).strip()
+    return QueryPlan(
+        library_raw=intent.raw_query,
+        library_expanded=expanded,
+        openalex_lexical=lexical,
+        openalex_semantic=intent.canonical_question or intent.raw_query,
+        europepmc=lexical,
+        arxiv=" ".join(concepts[:5]).strip() or intent.raw_query,
+    )
+
+
+__all__ = ["parse_intent", "build_query_plan"]

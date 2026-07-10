@@ -10,6 +10,10 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+### Added
+
+- Targeted Search (`services/search/`, `/api/search*`, `/search`): query→per-source plan→concurrent arXiv/Europe PMC/OpenAlex federation (keyless `arxiv.py`+`europepmc.py`)→version-family dedup→cross-encoder relevance under a constrained re-rank→light-review tier→grounded deep read. No Zotero writes.
+
 ### Removed
 
 - Tier-1 orphans: `measure_latency` moved out of `services/setup/calibration.py` to its only consumer domain (`tools/eval_small_models.py`, + regression test); test-only `feed_key_alias_validation_report` deleted (its test queries the ambiguity table directly). `dump-orphans` is now empty.
