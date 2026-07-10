@@ -28,6 +28,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ### Fixed
 
+- Targeted Search produced no plan and no deep reads on a live run. Intent parse now salvages a small model's fenced/nested/trailing-junk JSON (`extract_json_blob` + one strict retry + dict-of-lists synonym flatten) instead of bare `json.loads` silently falling back to the raw query; a genuine fallback sets `SearchIntent.parse_ok=False` so a degraded plan is visible.
+- Targeted Search PMC candidates yielded zero full text (the `?pdf=render` OA link 404s, NCBI's `/pdf/` mirror bot-blocks). `_fulltext` now recovers a PMCID hit's body via Europe PMC's `fullTextXML` endpoint (`fetch_fulltext_xml`, `<body>`-only JATS strip).
 - `make scan` outside the venv crashed reconcile (`No module named vulture`): a reconciler whose tool isn't importable now SKIPS with a note (the real gate still enforces it in `make lint`). Also a `# type:`-prefixed comment wrap in `quality_eval.py` broke vulture's parse → 6 phantom findings; reworded.
 - `check_overlaps.py` paired a function with its OWN nested closure (`get_collections`/`get_item_detail`) — same-path prefix-qualname pairs are now suppressed, with a regression test pinning that same-file siblings still pair.
 

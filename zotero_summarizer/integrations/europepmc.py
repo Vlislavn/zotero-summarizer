@@ -12,6 +12,8 @@ host is the SSRF / indirect-injection guard.
 """
 from __future__ import annotations
 
+import html
+import re
 from dataclasses import dataclass, field
 
 import httpx
@@ -19,9 +21,14 @@ import httpx
 from zotero_summarizer.integrations._rate_limiter import RateLimiter
 
 _BASE = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+_REST = "https://www.ebi.ac.uk/europepmc/webservices/rest"
 _TIMEOUT_SECS = 12.0
 # Europe PMC allows generous keyless use; a modest 5 req/s is polite. Shared.
 _RATE_LIMITER = RateLimiter(5)
+
+_BODY_RE = re.compile(r"<body\b[^>]*>(.*?)</body>", re.DOTALL | re.IGNORECASE)
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,4 +105,45 @@ def search_europepmc(
     return [h for h in hits if h is not None]
 
 
-__all__ = ["EuropePmcHit", "search_europepmc"]
+def _xml_to_text(xml: str) -> str:
+    """Plain body text from a JATS full-text document. Prefers the ``<body>``
+    span (drops journal metadata / reference lists); falls back to the whole
+    document when a paper has no ``<body>`` tag."""
+    match = _BODY_RE.search(xml)
+    inner = match.group(1) if match else xml
+    text = html.unescape(_TAG_RE.sub(" ", inner))
+    return _WS_RE.sub(" ", text).strip()
+
+
+def fetch_fulltext_xml(pmcid: str, *, http_client: httpx.Client | None = None) -> str:
+    """Fetch + plain-text the JATS full text of a PMC open-access article via the
+    Europe PMC REST full-text endpoint (keyless, machine-readable — the reliable
+    OA path where the ``?pdf=render`` link 404s and NCBI's mirror bot-blocks).
+
+    Returns ``""`` when no OA full text exists (many hits are abstract-only — an
+    expected state, spec §9) or on any transport/parse error — the same
+    never-raises leaf contract as ``search_europepmc`` (see module docstring)."""
+    pmcid = (pmcid or "").strip().upper()
+    if not pmcid:
+        return ""
+    if not pmcid.startswith("PMC"):
+        pmcid = "PMC" + pmcid
+    _RATE_LIMITER.acquire()
+    client = http_client or httpx.Client(timeout=_TIMEOUT_SECS)
+    try:
+        resp = client.get(
+            f"{_REST}/{pmcid}/fullTextXML",
+            headers={"User-Agent": "zotero-summarizer/1.0"},
+        )
+        if resp.status_code != 200:
+            return ""
+        xml = resp.text
+    except (httpx.HTTPError, OSError):
+        return ""
+    finally:
+        if http_client is None:
+            client.close()
+    return _xml_to_text(xml)
+
+
+__all__ = ["EuropePmcHit", "search_europepmc", "fetch_fulltext_xml"]

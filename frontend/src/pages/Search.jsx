@@ -188,6 +188,11 @@ export default function Search() {
 
       {session && (
         <div>
+          {session.intent && session.intent.parse_ok === false && (
+            <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+              Couldn’t structure this topic — searched your raw query as-is. Try rephrasing for a sharper plan.
+            </div>
+          )}
           <QueryPlan plan={session.plan || {}} />
           <div className="flex items-center justify-between mb-2">
             <div className="text-[12px] text-slate-500">{(session.candidates || []).length} candidates</div>

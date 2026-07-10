@@ -16,16 +16,24 @@ from __future__ import annotations
 
 from typing import Any
 
-from zotero_summarizer.integrations import pdf_fetch
+from zotero_summarizer.integrations import europepmc, pdf_fetch
 from zotero_summarizer.services.search._models import Candidate
 
 
 def acquire_full_text(cand: Candidate, *, extractor: Any, unpaywall: Any = None) -> str:
     """Resolve + fetch + extract this candidate's OA full text. Returns the text,
-    or ``""`` when no OA PDF is resolvable / extractable (the spec §9 boundary the
+    or ``""`` when no OA copy is resolvable / extractable (the spec §9 boundary the
     review tiers handle). ``extractor is None`` (quality disabled) → ``""``."""
     if extractor is None:
         return ""
+    # PMC open access: the reliable keyless full text is Europe PMC's fullTextXML
+    # REST endpoint — the fullTextUrlList ``?pdf=render`` link 404s and NCBI's
+    # ``/pdf/`` mirror serves a bot-block HTML page, so recover the machine-readable
+    # XML before falling back to a PDF fetch (derive-over-cull).
+    if cand.pmcid:
+        text = europepmc.fetch_fulltext_xml(cand.pmcid)
+        if text:
+            return text
     url = pdf_fetch.resolve_pdf_url(
         doi=cand.doi or None, arxiv_id=cand.arxiv_id or None,
         url=cand.url or None, unpaywall=unpaywall,

@@ -137,12 +137,27 @@ def test_parse_intent_uses_llm_json():
     assert intent.canonical_question == "How do X?"
     assert intent.concepts == ["x", "y"]
     assert intent.questions == ["what N?"]
+    assert intent.parse_ok is True
+
+
+def test_parse_intent_handles_fenced_and_nested_json():
+    # A small model's real failure mode (observed live): ```json fence, trailing
+    # junk, and synonyms nested as a dict-of-lists. Must salvage, not fall back.
+    text = (
+        '```json\n{"canonical_question": "How X?", "concepts": ["a", "b"], '
+        '"synonyms": {"a": ["a1", "a2"], "b": ["b1"]}, "study_types": []}\n```\nthanks!'
+    )
+    intent = parse_intent("x", [], llm=_FakeLLM(text))
+    assert intent.canonical_question == "How X?"
+    assert intent.parse_ok is True
+    assert set(intent.synonyms) == {"a1", "a2", "b1"}  # dict-of-lists flattened
 
 
 def test_parse_intent_falls_back_on_garbled(monkeypatch):
     intent = parse_intent("raw topic", [], llm=_FakeLLM("not json at all"))
     assert intent.canonical_question == "raw topic"  # spec §7 fallback
     assert intent.concepts == ["raw topic"]
+    assert intent.parse_ok is False  # degraded plan is visible, never silent
 
 
 # --- review adapters (heavy library calls stubbed) --------------------------
@@ -214,3 +229,17 @@ def test_targeted_review_happy_path(monkeypatch):
     assert cand.review["query_lens"]["text"] == "lens"
     assert cand.review["question_answers"][0]["question"] == "what dataset?"
     assert cand.review["question_answers"][0]["supporting_quotes"] == ["quoteA"]
+
+
+# --- PMC full-text XML → plain text (the OA full-text path) ------------------
+
+def test_europepmc_xml_to_text_extracts_body_only():
+    from zotero_summarizer.integrations.europepmc import _xml_to_text
+
+    xml = (
+        "<article><front><article-title>FRONTMATTER_ONLY</article-title></front>"
+        "<body><sec><p>Body text here &amp; more.</p><p>Second para.</p></sec></body></article>"
+    )
+    text = _xml_to_text(xml)
+    assert text == "Body text here & more. Second para."   # body-only, entities unescaped
+    assert "FRONTMATTER_ONLY" not in text                   # journal metadata dropped

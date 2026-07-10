@@ -50,9 +50,11 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
   source is kept for a missed-paper analysis. Never title-merged (`dedup_doi_arxiv_only`).
 - **Targeted review reuses read-only layers, not `deep_review.start`**: no Zotero
   note write to suppress, no corpus-membership requirement, and the query is the lens.
-- **Zotero-optional**: candidates come from the open web; `_fulltext` resolves OA
-  PDFs by identifier (arXiv → Unpaywall(DOI) → direct url). A push to your Inbox
-  (materialize) stays an explicit user action — this domain never writes to Zotero.
+- **Zotero-optional**: candidates come from the open web; `_fulltext` recovers a
+  PMC hit's machine-readable full text from Europe PMC's `fullTextXML` endpoint,
+  else resolves an OA PDF by identifier (arXiv → Unpaywall(DOI) → direct url). A
+  push to your Inbox (materialize) stays an explicit user action — this domain
+  never writes to Zotero.
 
 ## Files
 
@@ -65,7 +67,7 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
 | `rank.py` | cross-encoder `query_score` + the constrained re-rank contract |
 | `review.py` | `light_review` (quality tier) + `select_deep_set` |
 | `_targeted_review.py` | query-lensed deep read (composes library read-only layers) |
-| `_fulltext.py` | OA full-text acquisition for a federated (non-Zotero) candidate |
+| `_fulltext.py` | OA full-text acquisition for a federated (non-Zotero) candidate: PMC → Europe PMC `fullTextXML` (a PMCID hit), else identifier → OA PDF |
 | `pipeline.py` | `run_screen` (fast) + `run_review` (slow) + `SearchDeps`/`default_deps` |
 | `session.py` | one-JSON-per-session persistence under `settings().search_dir` |
 

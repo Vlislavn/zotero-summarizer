@@ -12,42 +12,66 @@ explicitly requires ("reformulation empty/garbled → fall back to raw query").
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
-from zotero_summarizer.services._common import safe_parse_response_json, to_text
+from zotero_summarizer.services._common import extract_json_blob, to_text
 from zotero_summarizer.services.search._models import SearchIntent, QueryPlan
+
+LOGGER = logging.getLogger(__name__)
 
 _PROMPT = """You are a scientific literature search planner. A researcher typed \
 this topic (may be terse, RU/EN mixed, or a typo):
 
 TOPIC: {topic}
 {questions_block}
-Return ONE JSON object, no prose, with these keys:
+Return ONE JSON object with these keys:
 - "canonical_question": one clear English sentence stating the information need \
 (a paragraph-length restatement good for semantic search).
 - "concepts": 3-8 core concept phrases (lowercase noun phrases).
-- "synonyms": alternative terms / acronyms for the concepts.
-- "must_include": terms that MUST appear (empty list if none obvious).
-- "must_not_include": terms to exclude (empty list if none).
+- "synonyms": a FLAT array of alternative terms / acronyms (max 8 strings; do \
+NOT nest objects).
+- "must_include": terms that MUST appear (empty array if none obvious).
+- "must_not_include": terms to exclude (empty array if none).
 - "study_types": relevant study/paper types if the topic implies them (e.g. \
 "randomized controlled trial", "benchmark", "systematic review"); else empty.
 
-JSON only."""
+Respond with MINIFIED JSON on a single line — no code fence, no prose, no \
+nested objects, only flat string arrays."""
+
+_STRICT_RETRY = (
+    "\n\nYour previous answer was not valid JSON (fenced, truncated, or nested). "
+    "Respond again with ONLY a single-line minified JSON object, flat string "
+    "arrays, no code fence, no commentary."
+)
 
 
 def _as_str_list(value: Any) -> list[str]:
+    """Coerce to a flat list of trimmed strings. Tolerates a dict-of-lists (a
+    small model sometimes nests ``synonyms`` per concept despite the prompt)."""
+    if isinstance(value, dict):
+        value = [item for sub in value.values() for item in (sub if isinstance(sub, list) else [sub])]
     if not isinstance(value, list):
         return []
     return [s.strip() for s in value if isinstance(s, str) and s.strip()]
 
 
+def _parse_once(prompt: str, *, llm: Any) -> dict[str, Any]:
+    """One LLM call → parsed dict. Salvages a fenced / trailing-prose JSON blob
+    (``extract_json_blob``); raises ``ValueError`` if nothing parseable came back."""
+    return extract_json_blob(to_text(llm.prompt(prompt)))
+
+
 def parse_intent(raw_query: str, questions: list[str], *, llm: Any) -> SearchIntent:
-    """LLM feed-stage parse → SearchIntent. Raw-query fallback on empty/garbled
-    output (spec §7 error contract)."""
+    """LLM feed-stage parse → SearchIntent. One strict retry when the model returns
+    unparseable JSON (fenced/truncated/nested — small models do all three), THEN a
+    raw-query fallback with ``parse_ok=False`` so a degraded plan is visible, never
+    silent (spec §7 error contract)."""
     raw = (raw_query or "").strip()
     questions = [q.strip() for q in (questions or []) if q and q.strip()]
     fallback = SearchIntent(
-        raw_query=raw, canonical_question=raw, concepts=[raw] if raw else [], questions=questions
+        raw_query=raw, canonical_question=raw, concepts=[raw] if raw else [],
+        questions=questions, parse_ok=False,
     )
     if not raw:
         return fallback
@@ -58,7 +82,14 @@ def parse_intent(raw_query: str, questions: list[str], *, llm: Any) -> SearchInt
             f"- {q}" for q in questions
         ) + "\n"
     prompt = _PROMPT.format(topic=raw, questions_block=q_block)
-    parsed = safe_parse_response_json(to_text(llm.prompt(prompt)), context="targeted_search.intent")
+    try:
+        parsed = _parse_once(prompt, llm=llm)
+    except ValueError:
+        try:
+            parsed = _parse_once(prompt + _STRICT_RETRY, llm=llm)
+        except ValueError:
+            LOGGER.warning("targeted_search.intent: unparseable after retry; raw-query fallback")
+            return fallback
     canonical = (parsed.get("canonical_question") or "").strip()
     if not canonical:
         return fallback

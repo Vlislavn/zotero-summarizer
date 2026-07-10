@@ -132,6 +132,9 @@ class SearchIntent:
     must_not_include: list[str] = field(default_factory=list)
     study_types: list[str] = field(default_factory=list)
     questions: list[str] = field(default_factory=list)
+    # False when the LLM parse failed and we fell back to the raw query — so a
+    # degraded plan is visible in the UI, never silently passed off as planned.
+    parse_ok: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
