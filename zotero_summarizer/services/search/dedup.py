@@ -66,6 +66,26 @@ def _merge_family(members: list[Candidate]) -> Candidate:
         preferred.year = preferred.year or m.year
         preferred.is_open_access = preferred.is_open_access or m.is_open_access
         preferred.is_retracted = preferred.is_retracted or m.is_retracted
+        # Correction #12: carry DERIVED state (expensive light/deep review, the user's
+        # reading intent, and the materialized library key) from whichever member holds
+        # it. Without this, an agentic round that re-fetches a bibliographically richer
+        # version (so it wins `_richness`) would silently discard a completed review or
+        # a materialized key that lived on the round-1 candidate.
+        preferred.query_score = preferred.query_score if preferred.query_score is not None else m.query_score
+        preferred.goal_sim = preferred.goal_sim if preferred.goal_sim is not None else m.goal_sim
+        preferred.cited_by_count = (
+            preferred.cited_by_count if preferred.cited_by_count is not None else m.cited_by_count
+        )
+        preferred.quality = preferred.quality or m.quality
+        preferred.coverage = preferred.coverage or m.coverage
+        preferred.review = preferred.review or m.review
+        preferred.verdict = preferred.verdict or m.verdict
+        preferred.relevance_band = preferred.relevance_band or m.relevance_band
+        preferred.why = preferred.why or m.why
+        preferred.materialized_zotero_key = preferred.materialized_zotero_key or m.materialized_zotero_key
+        if preferred.in_library is None:
+            preferred.in_library = m.in_library
+        preferred.existing_zotero_key = preferred.existing_zotero_key or m.existing_zotero_key
         if m is not preferred:
             preferred.provenance.extend(m.provenance)
     preferred.version_type = _version_type(preferred)

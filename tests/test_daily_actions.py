@@ -111,7 +111,7 @@ def test_add_to_library_materializes_and_labels_should_read(env, monkeypatch):
     materialized: list[int] = []
     monkeypatch.setattr(
         review, "materialize_row",
-        lambda row, *, writer, used_keys, reason="x": materialized.append(int(row["feed_item_id"])) or "KEY1",
+        lambda row, *, writer, used_keys, reason="x", collection_name="Inbox": materialized.append(int(row["feed_item_id"])) or "KEY1",
     )
     res = daily_actions.add_to_library([pk])
     assert res["added"] == 1

@@ -61,11 +61,24 @@ def test_quality_cannot_cross_a_relevance_bucket():
 
 
 def test_quality_reorders_within_a_bucket():
-    # Same relevance bucket (within EPSILON): quality breaks the tie.
-    a = _c("a", query_score=3.00, quality={"quality_band": "", "grade": "C"})
-    b = _c("b", query_score=3.10, quality={"quality_band": "highlight", "grade": "A"})
+    # Same relevance bucket (within EPSILON=0.05): quality breaks the tie EVEN
+    # against a slightly higher raw score. a has the higher query_score but no
+    # quality; b is a hair lower but top quality → b wins the tie.
+    a = _c("a", query_score=0.83, quality={"quality_band": "", "grade": "C"})
+    b = _c("b", query_score=0.81, quality={"quality_band": "highlight", "grade": "A"})
     ordered = rank_candidates([a, b])
     assert ordered[0] is b
+
+
+def test_quality_cannot_cross_bucket_in_unit_domain():
+    # Regression: query_score is sigmoid [0,1]. A high-relevance/low-quality paper
+    # must stay above a mid-relevance/top-quality one. With the OLD epsilon=0.5 both
+    # fall in bucket floor(x/0.5) — 0.95→1, 0.50→1 — so quality would wrongly cross;
+    # the retuned default (0.05) keeps them in distinct buckets (19 vs 10).
+    hi = _c("hi", query_score=0.95, quality={"quality_band": "", "grade": "C"})
+    lo = _c("lo", query_score=0.50, quality={"quality_band": "highlight", "grade": "A"})
+    ordered = rank_candidates([lo, hi])
+    assert ordered[0] is hi
 
 
 def test_retracted_sinks_to_the_bottom():
@@ -229,6 +242,171 @@ def test_targeted_review_happy_path(monkeypatch):
     assert cand.review["query_lens"]["text"] == "lens"
     assert cand.review["question_answers"][0]["question"] == "what dataset?"
     assert cand.review["question_answers"][0]["supporting_quotes"] == ["quoteA"]
+
+
+# --- session store: single-flight claim + race-safe save_merge --------------
+
+def _tmp_store(monkeypatch, tmp_path):
+    from zotero_summarizer.services.search import session as session_mod
+
+    class _S:
+        search_dir = tmp_path
+
+    monkeypatch.setattr(session_mod, "settings", lambda: _S())
+    return session_mod
+
+
+def test_claim_single_flights_the_worker(monkeypatch, tmp_path):
+    store = _tmp_store(monkeypatch, tmp_path)
+    sess = ResearchSession(
+        id="s1", created_at="t", raw_query="q", intent=SearchIntent(raw_query="q"),
+        plan=QueryPlan(), candidates=[], status="screened",
+    )
+    store.save(sess)
+    assert store.claim("s1", expect="screened", to="reviewing") is True
+    assert store.claim("s1", expect="screened", to="reviewing") is False  # already claimed
+    assert store.load("s1").status == "reviewing"
+
+
+def test_save_merge_preserves_concurrent_materialized_key(monkeypatch, tmp_path):
+    # The review worker holds a stale copy (no key); a concurrent Add stamps the key;
+    # the worker's whole-session save must NOT drop it (add-only/monotonic key).
+    store = _tmp_store(monkeypatch, tmp_path)
+    sess = ResearchSession(
+        id="s2", created_at="t", raw_query="q", intent=SearchIntent(raw_query="q"),
+        plan=QueryPlan(), candidates=[_c("P", doi="10.1/x")], status="reviewing",
+    )
+    store.save(sess)
+    stale = store.load("s2")  # worker's in-memory copy, before the Add
+    store.update("s2", lambda s: setattr(s.candidates[0], "materialized_zotero_key", "ZKEY1"))
+    store.save_merge(stale)  # worker persists its stale copy
+    assert store.load("s2").candidates[0].materialized_zotero_key == "ZKEY1"
+
+
+# --- materialize a candidate into the library (Add to library) --------------
+
+def test_feed_payload_adapter_shape():
+    # Correction #8: the writer wants authors as a LIST and publication_date (not year).
+    from zotero_summarizer.services.search.materialize import _feed_payload
+
+    c = _c("T", abstract="A", doi="10.1/x", authors=["Alice", "Bob"], year=2025, venue="Nature")
+    p = _feed_payload(c)
+    assert p["authors"] == ["Alice", "Bob"]      # list, not a comma string
+    assert p["publication_date"] == "2025"        # year → publication_date
+    assert p["publication_title"] == "Nature"
+    assert "year" not in p
+    assert p["item_type"] == "journalArticle"
+
+
+def test_materialize_rejects_unknown_candidate(monkeypatch, tmp_path):
+    from zotero_summarizer.api.errors import APIError
+    from zotero_summarizer.services.search import materialize as mat
+
+    _tmp_store(monkeypatch, tmp_path)
+    sess = ResearchSession(
+        id="m1", created_at="t", raw_query="q", intent=SearchIntent(raw_query="q"),
+        plan=QueryPlan(), candidates=[_c("P", doi="10.1/x")], status="screened",
+    )
+    from zotero_summarizer.services.search import session as session_mod
+    session_mod.save(sess)
+    try:
+        mat.materialize_candidate("m1", "does-not-exist", None)
+        assert False, "expected APIError for unknown candidate"
+    except APIError as exc:
+        assert exc.status_code == 404
+
+
+def test_materialize_is_idempotent(monkeypatch, tmp_path):
+    # An already-added candidate returns its key without touching Zotero.
+    from zotero_summarizer.services.search import materialize as mat
+
+    _tmp_store(monkeypatch, tmp_path)
+    cand = _c("P", doi="10.1/x", materialized_zotero_key="ZEXIST")
+    sess = ResearchSession(
+        id="m2", created_at="t", raw_query="q", intent=SearchIntent(raw_query="q"),
+        plan=QueryPlan(), candidates=[cand], status="screened",
+    )
+    from zotero_summarizer.services.search import session as session_mod
+    session_mod.save(sess)
+    out = mat.materialize_candidate("m2", cand.candidate_id, None)
+    assert out == {"status": "already_added", "zotero_key": "ZEXIST"}
+
+
+def test_materialize_rejects_unknown_collection_key(monkeypatch, tmp_path):
+    # Correction #3: a picker key the reader can't resolve is a 400, never a junk
+    # auto-create — and it must fire BEFORE any Zotero write is attempted.
+    from zotero_summarizer.api.errors import APIError
+    from zotero_summarizer.services.search import materialize as mat
+
+    _tmp_store(monkeypatch, tmp_path)
+
+    class _Reader:
+        def __init__(self, *a, **k):
+            pass
+
+        def collection_name_for_key(self, key):
+            return None  # unknown key
+
+    monkeypatch.setattr(mat, "ZoteroReader", _Reader)
+    # A writer construction would blow up the test if we ever reached it — we shouldn't.
+    monkeypatch.setattr(mat, "ZoteroWriter", lambda *a, **k: (_ for _ in ()).throw(AssertionError("wrote despite bad key")))
+
+    sess = ResearchSession(
+        id="m3", created_at="t", raw_query="q", intent=SearchIntent(raw_query="q"),
+        plan=QueryPlan(), candidates=[_c("P", doi="10.1/x")], status="screened",
+    )
+    from zotero_summarizer.services.search import session as session_mod
+    session_mod.save(sess)
+    cand_id = sess.candidates[0].candidate_id
+    try:
+        mat.materialize_candidate("m3", cand_id, "BOGUSKEY")
+        assert False, "expected APIError for unknown collection key"
+    except APIError as exc:
+        assert exc.status_code == 400
+
+
+# --- relevance band + why chips (Phase C) -----------------------------------
+
+def test_relevance_bands_tercile_split():
+    from zotero_summarizer.services.search._relevance import band_for, relevance_bands
+
+    cands = [_c(f"P{i}", query_score=s) for i, s in enumerate([0.9, 0.8, 0.6, 0.4, 0.2, 0.05])]
+    strong, mild = relevance_bands(cands)
+    assert strong is not None and mild is not None and strong > mild
+    assert band_for(0.9, strong, mild) == "strong"
+    assert band_for(0.01, strong, mild) == "weak"
+
+
+def test_relevance_bands_absolute_floor_kills_all_bad_pool():
+    # A pool of all-tiny scores must NOT crown its least-bad third "strong".
+    from zotero_summarizer.services.search._relevance import band_for, relevance_bands
+
+    cands = [_c(f"P{i}", query_score=s) for i, s in enumerate([0.04, 0.03, 0.02, 0.01])]
+    strong, mild = relevance_bands(cands)
+    assert all(band_for(c.query_score, strong, mild) != "strong" for c in cands)
+
+
+def test_relevance_bands_suppressed_below_three():
+    from zotero_summarizer.services.search._relevance import relevance_bands
+
+    assert relevance_bands([_c("A", query_score=0.9), _c("B", query_score=0.5)]) == (None, None)
+
+
+def test_build_why_chips_ordered_and_capped():
+    from zotero_summarizer.services.search._models import Provenance
+    from zotero_summarizer.services.search._relevance import build_why
+
+    c = _c(
+        "P", version_type="version_of_record",
+        provenance=[Provenance(source="arxiv", query_variant="q"),
+                    Provenance(source="openalex", query_variant="q")],
+    )
+    c.quality = {"grade": "A", "quality_band": "highlight"}
+    why = build_why(c, "strong")
+    assert why[0] == "Strong match"        # relevance leads
+    assert "In 2 sources" in why           # cross-source agreement
+    assert "Grade A" in why                # graded quality
+    assert len(why) <= 3                    # capped (Peer-reviewed drops off)
 
 
 # --- PMC full-text XML → plain text (the OA full-text path) ------------------

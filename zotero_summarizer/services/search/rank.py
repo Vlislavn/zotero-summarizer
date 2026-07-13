@@ -27,9 +27,13 @@ from zotero_summarizer.services.search._models import Candidate
 
 # Bucket width for the constrained contract: query scores within EPSILON are
 # "tied on relevance", so quality may reorder them. Named constant + env override
-# (no magic number); the eval seed (spec §14) tunes it. bge cross-encoder logits
-# are unbounded (~[-11, 11]); 0.5 groups near-ties without collapsing the scale.
-DEFAULT_EPSILON = 0.5
+# (no magic number); the eval seed (spec §14) tunes it. The reranker is a 1-label
+# CrossEncoder, so sentence-transformers applies a Sigmoid → query_score is in
+# [0, 1] (NOT the raw logit range). 0.05 gives ~20 relevance buckets so quality
+# reorders only genuine near-ties. (0.5 collapsed [0,1] to 2 buckets — it let a
+# 0.51 paper be reordered above a 0.99 one, the exact inversion this contract exists
+# to prevent. See services/model/reranker.py: no activation override → ST default.)
+DEFAULT_EPSILON = 0.05
 # Weak standing-goal tiebreak weight for a targeted session — the query already
 # IS the goal (spec §8: ~0-0.05, NOT the shipped 0.4).
 GOAL_TIEBREAK_WEIGHT = 0.05

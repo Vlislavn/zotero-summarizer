@@ -13,6 +13,7 @@ explicitly requires ("reformulation empty/garbled → fall back to raw query").
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from zotero_summarizer.services._common import extract_json_blob, to_text
@@ -105,12 +106,47 @@ def parse_intent(raw_query: str, questions: list[str], *, llm: Any) -> SearchInt
     )
 
 
+def _tight_query(raw_query: str, concepts: list[str]) -> str:
+    """A precision pass: ONE exact-match quoted phrase, not a conjunction of terms.
+
+    The user's own leading clause (before any ``:``/``?``/em-dash qualifier) is the
+    phrase, because it preserves their literal terminology — which tends to match paper
+    *titles*, where a bag of LLM-paraphrased concepts does not (the parser turns
+    "LLM-based agents" into "autonomous agents", so the literal title span never survives
+    to be quoted; and a new low-citation paper then sinks under OpenAlex's citation-
+    weighted bag ranking). A single contiguous phrase is specific enough that few works
+    match, so citation weight can't bury the target — measured: bag + a 6-way quoted
+    conjunction both miss "A Survey on Evaluation of LLM-based Agents", the phrase
+    ``"evaluation of llm-based agents"`` lands it #2 (``+ survey`` → #1). Bare (no field
+    prefix) → valid unchanged across OpenAlex ``search=``, Europe PMC, and arXiv ``all:``.
+
+    Falls back to the longest multi-word concept when the topic is a lone token or a
+    sentence too long to be a title phrase; "" (→ a single bag pass) when neither yields
+    a multi-word phrase — quoting a lone token matches the same works as the bag."""
+    head = re.split(r"[:?\n—–]", raw_query or "", maxsplit=1)[0]
+    phrase = " ".join(head.replace('"', "").split())
+    if 2 <= len(phrase.split()) <= 8:
+        return f'"{phrase}"'
+    multiword = [" ".join(c.replace('"', "").split()) for c in concepts if len(c.split()) >= 2]
+    return f'"{max(multiword, key=lambda c: len(c.split()))}"' if multiword else ""
+
+
+def _variants(tight: str, bag: str) -> list[str]:
+    """Tight-first variant list for one lexical source, dropping an empty tight or a
+    tight identical to the bag (e.g. a single-concept raw-query fallback → one pass)."""
+    return [tight, bag] if tight and tight != bag else [bag]
+
+
 def build_query_plan(intent: SearchIntent) -> QueryPlan:
     """Derive a source-specific query per channel (spec §13.1). Deterministic —
     no LLM. Lexical channels get concise concept terms; the semantic + library-
-    expanded channels get the canonical paragraph."""
+    expanded channels get the canonical paragraph. Each lexical source also carries
+    a tight quoted-phrase variant (``*_variants``, tight-first) so federation issues
+    a precision pass alongside the broad bag — the reranker re-sorts the union."""
     concepts = intent.concepts or ([intent.raw_query] if intent.raw_query else [])
     lexical = " ".join(concepts[:6]).strip() or intent.raw_query
+    arxiv_bag = " ".join(concepts[:5]).strip() or intent.raw_query
+    tight = _tight_query(intent.raw_query, concepts)
     expanded = intent.canonical_question or intent.raw_query
     if concepts:
         expanded = (expanded + " " + " ".join(concepts[:6])).strip()
@@ -120,7 +156,12 @@ def build_query_plan(intent: SearchIntent) -> QueryPlan:
         openalex_lexical=lexical,
         openalex_semantic=intent.canonical_question or intent.raw_query,
         europepmc=lexical,
-        arxiv=" ".join(concepts[:5]).strip() or intent.raw_query,
+        arxiv=arxiv_bag,
+        crossref=lexical,  # broad scholarly metadata — keyword bag
+        semantic_scholar=intent.canonical_question or intent.raw_query,  # relevance-ranked NL
+        openalex_lexical_variants=_variants(tight, lexical),
+        europepmc_variants=_variants(tight, lexical),
+        arxiv_variants=_variants(tight, arxiv_bag),
     )
 
 

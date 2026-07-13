@@ -16,6 +16,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.domain import VERDICT_SOURCE_MACHINE_ADD, VERDICT_SOURCE_USER
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
@@ -150,6 +151,22 @@ def _open_optional_writer() -> tuple[Any | None, Exception | None]:
         return None, exc
 
 
+def _resolve_collection_name(collection_key: str | None) -> str:
+    """Picker key → user-library collection name (default "Inbox" when unset). An
+    unknown/foreign key is a 400 — a raw key must never reach the name-based writer,
+    which would auto-create a junk collection named after it."""
+    if not collection_key:
+        return "Inbox"
+    name = ZoteroReader(get_settings().zotero_data_dir).collection_name_for_key(collection_key)
+    if not name:
+        raise APIError(
+            error="invalid_collection",
+            message=f"no such collection: {collection_key}",
+            status_code=400,
+        )
+    return name
+
+
 def _mark_app_rss_rows_read(rows: list[dict[str, Any]]) -> int:
     item_ids = [int(row.get("feed_item_id") or 0) for row in rows]
     conn = sqlite3.connect(str(_db_path()))
@@ -168,10 +185,15 @@ def _mark_app_rss_rows_read(rows: list[dict[str, Any]]) -> int:
         conn.close()
 
 
-def add_to_library(item_ids: list[int]) -> dict[str, Any]:
-    """Materialize each selected card into the Zotero Inbox + record a positive
-    training label. Returns ``{added, failed_count, failed}``."""
+def add_to_library(item_ids: list[int], target_collection_key: str | None = None) -> dict[str, Any]:
+    """Materialize each selected card into a Zotero collection (default "Inbox") +
+    record a positive training label. Returns ``{added, failed_count, failed}``.
+
+    ``target_collection_key`` is the picker's user-library collection key; it is
+    resolved (and validated) to a collection name — an unknown key is a 400, never a
+    silent junk-collection auto-create."""
     rows = _load_rows(item_ids)
+    collection_name = _resolve_collection_name(target_collection_key)
     writer, writer_error = _open_optional_writer()
     used_keys: set[str] = set()
     added = 0
@@ -208,7 +230,10 @@ def add_to_library(item_ids: list[int]) -> dict[str, Any]:
                 pending_sync += 1
             else:
                 try:
-                    new_key = review.materialize_row(row, writer=writer, used_keys=used_keys, reason="today_add")
+                    new_key = review.materialize_row(
+                        row, writer=writer, used_keys=used_keys, reason="today_add",
+                        collection_name=collection_name,
+                    )
                     new_keys.append(new_key)
                     # Carry the in-place Today review (cached under stable_feed_key) onto
                     # the new library key so the deep review persists into the library.

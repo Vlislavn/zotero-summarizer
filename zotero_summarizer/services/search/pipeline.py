@@ -17,14 +17,16 @@ with fakes (no hidden global reach inside the stages).
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any
 
 from zotero_summarizer.models import GoalsConfig
-from zotero_summarizer.services._common import state
+from zotero_summarizer.services._common import settings, state
 from zotero_summarizer.services.search import session as session_store
 from zotero_summarizer.services.search._fulltext import acquire_full_text
 from zotero_summarizer.services.search._models import Candidate, ResearchSession
+from zotero_summarizer.services.search._relevance import attach_relevance
 from zotero_summarizer.services.search._targeted_review import targeted_review
 from zotero_summarizer.services.search.federate import LibraryFinder, federate
 from zotero_summarizer.services.search.intent import build_query_plan, parse_intent
@@ -36,6 +38,8 @@ from zotero_summarizer.services.search.review import light_review, select_deep_s
 # targeted session is a handful of papers, not a feed.
 LIGHT_REVIEW_N = 10
 DEEP_SET_K = 4
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -50,8 +54,31 @@ class SearchDeps:
     unpaywall_client: Any = None
     extractor: Any = None
     library_finder: LibraryFinder | None = None
+    reader: Any = None             # ZoteroReader for library-coverage annotation; None → skip
     max_chars: int = 0             # quality-review text cap; 0 → config default
     quota: int = 15
+    crossref_mailto: str | None = None  # Crossref polite-pool mailto (optional)
+
+
+# Process-lazy keyless OpenAlex for Search federation — built once, reused (an
+# OpenAlexClient owns an httpx pool; per-screen construction would leak one).
+_SEARCH_OPENALEX: Any = None
+
+
+def _search_openalex_client(app: Any, config: GoalsConfig) -> Any:
+    """OpenAlex for Search, wired INDEPENDENTLY of prestige (correction #11): reuse
+    the app's prestige client if present, else lazily build a keyless polite-pool
+    client so the broadest source contributes even when prestige is disabled."""
+    if app.openalex_client is not None:
+        return app.openalex_client
+    global _SEARCH_OPENALEX
+    if _SEARCH_OPENALEX is None:
+        from zotero_summarizer.integrations.openalex import OpenAlexClient
+        from zotero_summarizer.integrations.openalex_cache import OpenAlexCache
+
+        cache = app.app_state.openalex_cache or OpenAlexCache(settings().corpus_db_path)
+        _SEARCH_OPENALEX = OpenAlexClient(cache, mailto=config.prestige.user_agent_email or None)
+    return _SEARCH_OPENALEX
 
 
 def default_deps() -> SearchDeps:
@@ -67,11 +94,13 @@ def default_deps() -> SearchDeps:
         llm_light=app.resolve_stage_client("feed"),
         config=config,
         reranker_model=config.corpus.reranker_model,
-        openalex_client=app.openalex_client,
+        openalex_client=_search_openalex_client(app, config),
         unpaywall_client=app.unpaywall_client,
         extractor=app.pdf_extractor,
         library_finder=None,
+        reader=app.zotero_reader,
         max_chars=int(config.quality_review.max_text_chars),
+        crossref_mailto=config.prestige.user_agent_email or None,
     )
 
 
@@ -83,15 +112,48 @@ def run_screen(raw_query: str, questions: list[str], *, deps: SearchDeps) -> Res
     candidates = federate(
         plan, openalex_client=deps.openalex_client,
         library_finder=deps.library_finder, quota=deps.quota,
+        crossref_mailto=deps.crossref_mailto,
     )
     score_query_relevance(raw_query or intent.canonical_question, candidates, reranker_model=deps.reranker_model)
     rank_candidates(candidates)
+    attach_relevance(candidates)  # pool-relative band + why chips (no quality yet)
+    _annotate_library_coverage(candidates, deps.reader)
 
     sess = session_store.new_session(raw_query=raw_query, intent=intent, plan=plan, questions=questions)
     sess.candidates = candidates
     sess.status = "screened"
     session_store.save(sess)
     return sess
+
+
+def _annotate_library_coverage(candidates: list[Candidate], reader: Any) -> None:
+    """Set each candidate's Zotero-library coverage in place (tri-state, fail-open).
+
+    Mirrors triage ``_tick_dedup.dedup_against_library``: one reader across the
+    batch, a per-candidate boundary guard. ``in_library`` becomes ``True`` (+ the
+    found key) on a hit; ``False`` ONLY when the candidate carries a supported id
+    (doi/arxiv) and the lookup returned None; otherwise it stays ``None``
+    (unknown — a PMID/PMCID-only row or a failed lookup is never a false
+    "missing"). ``reader is None`` (Zotero absent) leaves every candidate ``None``.
+    """
+    if reader is None:
+        return
+    for cand in candidates:
+        doi = cand.doi or None
+        arxiv = cand.arxiv_id or None
+        if not doi and not arxiv:
+            continue  # no supported id → coverage unknown (stays None)
+        try:
+            existing = reader.find_by_external_id(doi=doi, arxiv_id=arxiv)
+        except Exception as exc:  # noqa: BLE001 — external Zotero-read boundary (see _tick_dedup)
+            # fail-open: leave None (unknown), never a false "not in library".
+            LOGGER.warning("library coverage lookup failed for %r; leaving unknown: %s", cand.title[:60], exc)
+            continue
+        if existing:
+            cand.in_library = True
+            cand.existing_zotero_key = existing
+        else:
+            cand.in_library = False
 
 
 def _max_chars(deps: SearchDeps) -> int:
@@ -110,16 +172,22 @@ def run_review(session_id: str, *, deps: SearchDeps, top_n: int = LIGHT_REVIEW_N
         light_review(cand, full_text=text, sections=[], llm=deps.llm_light, max_chars=_max_chars(deps))
 
     rank_candidates(sess.candidates)  # quality now populated → re-rank the band
+    attach_relevance(sess.candidates)  # re-derive bands/why now that quality chips exist
+    # Persist the re-ranked, quality-scored band before the slow deep reads so the UI
+    # shows bands immediately (save_merge keeps a concurrent Add's materialized key).
+    session_store.save_merge(sess)
+
     deep_set = select_deep_set(sess.candidates, k=k)
     for cand in deep_set:
         targeted_review(
             cand, full_text=fulltext.get(cand.candidate_id, ""), sections=[],
             query=sess.raw_query, questions=sess.questions, config=deps.config, llm=deps.llm,
         )
+        session_store.save_merge(sess)  # incremental: each deep review appears as it lands
 
     sess.status = "reviewed"
     sess.screened_count = len(sess.candidates[:top_n])
-    session_store.save(sess)
+    session_store.save_merge(sess)
     return sess
 
 

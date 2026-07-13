@@ -321,16 +321,19 @@ def materialize_row(
     writer: Any,
     used_keys: set[str],
     reason: str = "review_apply",
+    collection_name: str = "Inbox",
 ) -> str:
     """Materialize ONE feed row into Zotero and return the new item key.
 
-    Creates the item in the "Inbox" collection (+ any matched collections),
-    flips the row to ``DECISION_SELECTED``, stamps ``materialized_zotero_key``
-    and schedules the 7-day outcome window. Raises on failure — callers
-    running a batch wrap each call (one locked row must not strand the rest).
+    Creates the item in ``collection_name`` (default "Inbox") plus any matched
+    collections, flips the row to ``DECISION_SELECTED``, stamps
+    ``materialized_zotero_key`` and schedules the 7-day outcome window. Raises on
+    failure — callers running a batch wrap each call (one locked row must not
+    strand the rest).
 
-    Shared by :func:`apply_all_approved` (review UI) and
-    ``services.daily_actions.add_to_library`` (Today's add-to-library).
+    Shared by :func:`apply_all_approved` (review UI, keeps the "Inbox" default) and
+    ``services.daily_actions.add_to_library`` (Today's add-to-library, which passes a
+    user-chosen collection).
     """
     from zotero_summarizer.services.zotero import pending as pending_service
     from zotero_summarizer.services.triage.feeds import (
@@ -354,7 +357,7 @@ def materialize_row(
     writer.apply_feed_materialization(
         new_item_key=new_key,
         feed_payload=feed_payload,
-        inbox_collection_name="Inbox",   # matches daemon default
+        inbox_collection_name=collection_name,   # default "Inbox" (daemon parity)
         matched_collections=_matched_collections_from_row(row),
         tags=tags,
         note_title=f"Triage: {str(row.get('title') or '')[:80]}",

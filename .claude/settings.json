@@ -11,6 +11,18 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/weekly_review_gate.sh",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }

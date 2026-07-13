@@ -24,6 +24,15 @@ export async function getSession(sessionId) {
   return request(`/api/search/${encodeURIComponent(sessionId)}`);
 }
 
+/** POST /api/search/{id}/materialize — file one candidate into a chosen Zotero
+ * collection (collectionKey falsy → Inbox). Returns { status, zotero_key, collection }. */
+export async function materialize(sessionId, candidateId, collectionKey) {
+  return request(`/api/search/${encodeURIComponent(sessionId)}/materialize`, {
+    method: 'POST',
+    body: JSON.stringify({ candidate_id: candidateId, collection_key: collectionKey || null }),
+  });
+}
+
 /** GET /api/search — newest-first saved-session summaries for the sidebar. */
 export async function listSessions() {
   return request('/api/search');

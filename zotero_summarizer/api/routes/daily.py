@@ -439,12 +439,19 @@ class BatchItemsRequest(BaseModel):
         ..., min_length=1,
         description="processed_feed_items PKs (SlatePaper.item_id) to act on.",
     )
+    target_collection_key: str | None = Field(
+        default=None,
+        description="Zotero collection key to file into (from the picker); None → Inbox.",
+    )
 
 
 async def add_to_library(body: BatchItemsRequest) -> dict[str, Any]:
-    """Materialize the selected Today cards into the Zotero Inbox + record a
-    positive training label. Acted cards drop out of the slate on next fetch."""
-    return await asyncio.to_thread(daily_actions.add_to_library, body.item_ids)
+    """Materialize the selected Today cards into a chosen Zotero collection (default
+    Inbox) + record a positive training label. Acted cards drop out of the slate on
+    next fetch."""
+    return await asyncio.to_thread(
+        daily_actions.add_to_library, body.item_ids, body.target_collection_key,
+    )
 
 
 async def trash_papers(body: BatchItemsRequest) -> dict[str, Any]:

@@ -62,11 +62,18 @@ class Candidate:
     # Derived downstream:
     query_score: float | None = None   # master key — OUR cross-encoder vs the query
     goal_sim: float | None = None      # weak tiebreak (standing goals); often absent
+    relevance_band: str = ""           # strong/on_topic/weak — pool-relative (_relevance)
+    why: list[str] = field(default_factory=list)  # ≤3 plain chips for the card
     quality: dict[str, Any] = field(default_factory=dict)   # query-independent QualityEval
     coverage: dict[str, Any] = field(default_factory=dict)  # sections used/missing (§9)
     verdict: str = ""                  # reading intent (reversible)
     review: dict[str, Any] = field(default_factory=dict)    # brief + query_lens + Q answers
     materialized_zotero_key: str = ""  # set only on explicit Inbox push
+    cited_by_count: int | None = None  # OpenAlex citation count (importance signal); None off-channel
+    # Library coverage (tri-state, fail-open): True=in Zotero, False=has an id but
+    # absent, None=unknown (no supported id, or the lookup couldn't run).
+    in_library: bool | None = None
+    existing_zotero_key: str | None = None  # the found item's key when in_library is True
 
     def __post_init__(self) -> None:
         self.doi = normalize_doi(self.doi) if self.doi else ""
@@ -156,6 +163,14 @@ class QueryPlan:
     openalex_semantic: str = ""
     europepmc: str = ""
     arxiv: str = ""
+    crossref: str = ""          # broad scholarly metadata (keyword bag)
+    semantic_scholar: str = ""  # relevance-ranked (natural-language question)
+    # Per-lexical-source query variants (tight-first: quoted-phrase, then keyword bag).
+    # Empty = the pre-fusion behavior (federate falls back to the scalar field above),
+    # so sessions persisted before the recall fix still load and run unchanged.
+    openalex_lexical_variants: list[str] = field(default_factory=list)
+    europepmc_variants: list[str] = field(default_factory=list)
+    arxiv_variants: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -166,14 +181,18 @@ class QueryPlan:
         return cls(**known)
 
     def display(self) -> list[dict[str, str]]:
-        """Flat [{source, query}] rows for the transparency panel."""
-        rows = [
-            ("library", self.library_expanded or self.library_raw),
-            ("openalex (lexical)", self.openalex_lexical),
-            ("openalex (semantic)", self.openalex_semantic),
-            ("europepmc", self.europepmc),
-            ("arxiv", self.arxiv),
-        ]
+        """Flat [{source, query}] rows for the transparency panel. A lexical source
+        with query variants (tight + bag) shows one row per variant; else the scalar."""
+        rows: list[tuple[str, str]] = [("library", self.library_expanded or self.library_raw)]
+        for q in (self.openalex_lexical_variants or [self.openalex_lexical]):
+            rows.append(("openalex (lexical)", q))
+        rows.append(("openalex (semantic)", self.openalex_semantic))
+        for q in (self.europepmc_variants or [self.europepmc]):
+            rows.append(("europepmc", q))
+        for q in (self.arxiv_variants or [self.arxiv]):
+            rows.append(("arxiv", q))
+        rows.append(("crossref", self.crossref))
+        rows.append(("semantic scholar", self.semantic_scholar))
         return [{"source": s, "query": q} for s, q in rows if q]
 
 
@@ -190,6 +209,7 @@ class ResearchSession:
     candidates: list[Candidate] = field(default_factory=list)
     status: str = "created"
     screened_count: int = 0
+    refinements: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -202,6 +222,7 @@ class ResearchSession:
             "candidates": [c.to_dict() for c in self.candidates],
             "status": self.status,
             "screened_count": self.screened_count,
+            "refinements": [dict(r) for r in self.refinements],
         }
 
     @classmethod
@@ -216,4 +237,5 @@ class ResearchSession:
             candidates=[Candidate.from_dict(c) for c in data.get("candidates") or []],
             status=data.get("status", "created"),
             screened_count=int(data.get("screened_count") or 0),
+            refinements=[dict(r) for r in data.get("refinements") or []],
         )

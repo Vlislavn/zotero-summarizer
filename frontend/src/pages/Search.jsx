@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   screen as screenApi,
-  startReview,
   getSession,
+  materialize as materializeApi,
 } from '../api/searchApi.js';
+import CollectionPicker from '../components/CollectionPicker.jsx';
 import { ErrorBanner, StatusBanner } from '../components/library/shared.jsx';
 import { humanizeError } from '../utils/humanizeError.js';
 
@@ -13,10 +14,21 @@ import { humanizeError } from '../utils/humanizeError.js';
 // background-polled). Quality is measured on the top band BEFORE the deep set is
 // chosen, so a rigorous paper ranked 6th can still be deep-read.
 
+// Full-text quality band chip. Von Restorff: relevance is the master signal (it owns
+// the saturated pill), so a quality *win* stays neutral — only a quality *problem*
+// (flag) earns a warning color. Keeps the card from emphasizing everything at once.
 const BAND_CLASS = {
-  highlight: 'bg-emerald-100 text-emerald-800',
+  highlight: 'bg-slate-100 text-slate-600',
   flag: 'bg-rose-100 text-rose-800',
   uncertain: 'bg-slate-100 text-slate-600',
+};
+
+// Relevance band (pool-relative, from query_score) — server field cand.relevance_band.
+// Distinct from the full-text quality band above; drives the card accent + a pill.
+const REL_BAND = {
+  strong: { label: 'strong match', pill: 'bg-emerald-600 text-white', card: 'border-emerald-300 bg-emerald-50/40' },
+  on_topic: { label: 'on-topic', pill: 'bg-sky-600 text-white', card: 'border-sky-200 bg-white' },
+  weak: { label: 'weak match', pill: 'bg-slate-200 text-slate-600', card: 'border-slate-200 bg-slate-50/60' },
 };
 
 function QueryPlan({ plan }) {
@@ -26,6 +38,8 @@ function QueryPlan({ plan }) {
     ['openalex (semantic)', plan.openalex_semantic],
     ['europepmc', plan.europepmc],
     ['arxiv', plan.arxiv],
+    ['crossref', plan.crossref],
+    ['semantic scholar', plan.semantic_scholar],
   ].filter(([, q]) => q);
   if (!rows.length) return null;
   return (
@@ -40,6 +54,25 @@ function QueryPlan({ plan }) {
         ))}
       </div>
     </details>
+  );
+}
+
+// Agentic-search rounds (Phase E) — one line per PRF round: what the LLM added to
+// broaden the pool, what it dropped as off-topic, and how many new papers it pulled.
+function Refinements({ rounds }) {
+  if (!rounds || !rounds.length) return null;
+  return (
+    <div className="mb-4 rounded-lg border border-violet-200 bg-violet-50/60 px-3 py-2 text-[12px]">
+      <div className="font-semibold text-violet-800 mb-1">Agentic refinement</div>
+      {rounds.map((r) => (
+        <div key={r.round} className="text-slate-700">
+          <span className="text-slate-500">Round {r.round}:</span>{' '}
+          {(r.add_concepts || []).length > 0 && <>added <span className="font-medium">{(r.add_concepts || []).join(', ')}</span></>}
+          {(r.drop_terms || []).length > 0 && <> · dropped <span className="font-medium">{(r.drop_terms || []).join(', ')}</span></>}
+          {typeof r.new_candidates === 'number' && <span className="text-slate-500"> (+{r.new_candidates} new)</span>}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -79,12 +112,29 @@ function ReviewPanel({ review }) {
   );
 }
 
-function CandidateCard({ cand }) {
+function CandidateCard({ cand, onAdd }) {
   const sources = [...new Set((cand.provenance || []).map((p) => p.source))];
   const band = (cand.quality?.quality_band || '').toLowerCase();
   const meta = [cand.venue, cand.year].filter(Boolean).join(' · ');
+  const added = Boolean(cand.materialized_zotero_key);
+  const rel = REL_BAND[cand.relevance_band];
+  const why = Array.isArray(cand.why) ? cand.why : [];
+  const [adding, setAdding] = useState(false);
+  const [addErr, setAddErr] = useState(null);
+  const add = useCallback(async () => {
+    setAdding(true);
+    setAddErr(null);
+    try {
+      await onAdd(cand.candidate_id);
+    } catch (err) {
+      setAddErr(err);
+    } finally {
+      setAdding(false);
+    }
+  }, [onAdd, cand.candidate_id]);
+  const cardCls = cand.is_retracted ? 'bg-rose-50 border-rose-300' : (rel?.card || 'bg-white border-slate-200');
   return (
-    <div className={`border rounded-xl p-3 ${cand.is_retracted ? 'bg-rose-50 border-rose-300' : 'bg-white border-slate-200'}`}>
+    <div className={`border rounded-xl p-3 ${cardCls}`}>
       <div className="flex items-baseline justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-slate-900">
@@ -93,23 +143,46 @@ function CandidateCard({ cand }) {
           {meta && <div className="text-[12px] text-slate-500">{meta}</div>}
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {rel && <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${rel.pill}`}>{rel.label}</span>}
           {typeof cand.query_score === 'number' && (
-            <span className="mono text-[11px] text-slate-500" title="query relevance (our cross-encoder)">
-              rel {cand.query_score.toFixed(2)}
+            <span className="mono text-[11px] text-slate-500" title="query relevance (our cross-encoder), 0–1">
+              {cand.query_score.toFixed(2)}
             </span>
           )}
-          {band && <span className={`text-[11px] px-2 py-0.5 rounded-full ${BAND_CLASS[band] || BAND_CLASS.uncertain}`}>{band}</span>}
+          {band && <span className={`text-[11px] px-2 py-0.5 rounded-full ${BAND_CLASS[band] || BAND_CLASS.uncertain}`} title="full-text quality band">{band}</span>}
         </div>
       </div>
+      {/* why chips: secondary context → neutral, so they don't compete with the band
+          pill or the Add CTA for attention (Von Restorff — emphasize sparingly). */}
+      {why.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {why.map((r) => (
+            <span key={r} className="inline-flex items-center px-2 py-0.5 rounded-full border border-slate-200 bg-slate-50 text-slate-600 text-[11px] font-medium">{r}</span>
+          ))}
+        </div>
+      )}
       <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-slate-500">
         {sources.map((s) => <span key={s} className="px-1.5 py-0.5 bg-slate-100 rounded">{s}</span>)}
         {cand.version_type && cand.version_type !== 'unknown' && (
-          <span className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded">{cand.version_type}</span>
+          <span className="px-1.5 py-0.5 bg-slate-100 rounded">{cand.version_type}</span>
         )}
         {cand.is_retracted && <span className="px-1.5 py-0.5 bg-rose-200 text-rose-900 rounded font-semibold">RETRACTED</span>}
       </div>
       {cand.abstract && <p className="mt-2 text-[12px] text-slate-600 line-clamp-3">{cand.abstract}</p>}
       <ReviewPanel review={cand.review} />
+      <div className="mt-2 flex items-center gap-2">
+        {added ? (
+          <span className="text-[12px] text-emerald-700 font-semibold">✓ In library</span>
+        ) : (
+          <button
+            type="button" onClick={add} disabled={adding}
+            className="px-2.5 py-1 rounded-lg text-[12px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40"
+          >
+            {adding ? 'Adding…' : 'Add to library'}
+          </button>
+        )}
+        {addErr && <span className="text-[11px] text-rose-700">{humanizeError(addErr)}</span>}
+      </div>
     </div>
   );
 }
@@ -120,9 +193,33 @@ export default function Search() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  // Target Zotero collection for per-result "Add to library" ('' = server "Inbox").
+  const [targetCollection, setTargetCollection] = useState('');
   const pollRef = useRef(null);
 
   useEffect(() => () => clearInterval(pollRef.current), []);
+
+  // File one candidate into the chosen collection, then stamp its returned key on
+  // the local session so the card flips to "✓ In library" without waiting for a poll.
+  const materializeCard = useCallback(async (candidateId) => {
+    if (!session) return;
+    const res = await materializeApi(session.id, candidateId, targetCollection);
+    setSession((prev) => (prev ? {
+      ...prev,
+      candidates: (prev.candidates || []).map((c) =>
+        c.candidate_id === candidateId ? { ...c, materialized_zotero_key: res.zotero_key } : c),
+    } : prev));
+  }, [session, targetCollection]);
+
+  // Poll a reviewing session until the deep reviews finish (screen auto-starts them).
+  const pollUntilDone = useCallback((id) => {
+    clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      const fresh = await getSession(id);
+      setSession(fresh);
+      if (fresh.status === 'reviewed' || fresh.status === 'error') clearInterval(pollRef.current);
+    }, 3000);
+  }, []);
 
   const runScreen = useCallback(async (e) => {
     e?.preventDefault();
@@ -132,32 +229,21 @@ export default function Search() {
     setSession(null);
     try {
       const qs = questions.split('\n').map((q) => q.trim()).filter(Boolean);
-      setSession(await screenApi({ query: query.trim(), questions: qs }));
+      const sess = await screenApi({ query: query.trim(), questions: qs });
+      setSession(sess);
+      if (sess.status === 'reviewing') pollUntilDone(sess.id);  // auto deep-review started server-side
     } catch (err) {
       setError(err);
     } finally {
       setLoading(false);
     }
-  }, [query, questions]);
-
-  const runReview = useCallback(async () => {
-    if (!session) return;
-    setError(null);
-    try {
-      await startReview(session.id);
-      setSession((s) => ({ ...s, status: 'reviewing' }));
-      clearInterval(pollRef.current);
-      pollRef.current = setInterval(async () => {
-        const fresh = await getSession(session.id);
-        setSession(fresh);
-        if (fresh.status === 'reviewed' || fresh.status === 'error') clearInterval(pollRef.current);
-      }, 3000);
-    } catch (err) {
-      setError(err);
-    }
-  }, [session]);
+  }, [query, questions, pollUntilDone]);
 
   const reviewing = session?.status === 'reviewing';
+  // Doherty: name the honest stage. During agentic rounds refinements grow but no
+  // review has landed yet — showing "Deep-reviewing…" then would mislabel the wait.
+  const anyReviewed = (session?.candidates || []).some((c) => c.review && c.review.state);
+  const refining = reviewing && (session?.refinements || []).length > 0 && !anyReviewed;
   return (
     <div className="max-w-3xl mx-auto">
       <h1 className="text-lg font-semibold text-slate-900 mb-1">Targeted Search</h1>
@@ -194,19 +280,43 @@ export default function Search() {
             </div>
           )}
           <QueryPlan plan={session.plan || {}} />
-          <div className="flex items-center justify-between mb-2">
+          <Refinements rounds={session.refinements} />
+          <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
             <div className="text-[12px] text-slate-500">{(session.candidates || []).length} candidates</div>
-            <button
-              onClick={runReview} disabled={reviewing || !(session.candidates || []).length}
-              className="px-3 py-1 rounded-lg border border-slate-300 text-[12px] disabled:opacity-40"
-            >
-              {reviewing ? 'Reviewing…' : 'Deep-review top papers'}
-            </button>
+            <div className="flex items-center gap-2">
+              {reviewing && (
+                <div className="text-[12px] text-slate-500 flex items-center gap-1.5">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  {refining ? 'Refining the search…' : 'Deep-reviewing the top papers…'}
+                </div>
+              )}
+              <span className="text-[11px] text-slate-500">Add to:</span>
+              <CollectionPicker value={targetCollection} onChange={setTargetCollection} />
+            </div>
           </div>
           {session.status === 'error' && <StatusBanner isError message="Review failed — see server log." />}
-          <div className="grid gap-3">
-            {(session.candidates || []).map((c) => <CandidateCard key={c.candidate_id || c.title} cand={c} />)}
-          </div>
+          {(() => {
+            const cands = session.candidates || [];
+            const strong = cands.filter((c) => c.relevance_band !== 'weak');
+            const weak = cands.filter((c) => c.relevance_band === 'weak');
+            return (
+              <>
+                <div className="grid gap-3">
+                  {strong.map((c) => <CandidateCard key={c.candidate_id || c.title} cand={c} onAdd={materializeCard} />)}
+                </div>
+                {weak.length > 0 && (
+                  <details className="mt-3">
+                    <summary className="cursor-pointer text-[12px] text-slate-500 font-semibold py-1">
+                      {weak.length} weaker match{weak.length === 1 ? '' : 'es'} ▾
+                    </summary>
+                    <div className="grid gap-3 mt-2">
+                      {weak.map((c) => <CandidateCard key={c.candidate_id || c.title} cand={c} onAdd={materializeCard} />)}
+                    </div>
+                  </details>
+                )}
+              </>
+            );
+          })()}
         </div>
       )}
     </div>

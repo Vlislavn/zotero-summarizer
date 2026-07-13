@@ -10,7 +10,9 @@ JSON dir; move to SQLite only if sessions ever number in the thousands.
 from __future__ import annotations
 
 import json
+import threading
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 from zotero_summarizer.services._common import now_iso_z, settings
@@ -19,6 +21,21 @@ from zotero_summarizer.services.search._models import (
     ResearchSession,
     SearchIntent,
 )
+
+# Per-session-id locks so the background review worker (whole-session saves) and a
+# concurrent "Add to library" (stamps one candidate's materialized key) never
+# lost-update each other. In-process only — sessions are served by one app process.
+_locks: dict[str, threading.Lock] = {}
+_locks_guard = threading.Lock()
+
+
+def _lock_for(session_id: str) -> threading.Lock:
+    with _locks_guard:
+        lk = _locks.get(session_id)
+        if lk is None:
+            lk = threading.Lock()
+            _locks[session_id] = lk
+        return lk
 
 
 def _dir() -> Path:
@@ -55,6 +72,50 @@ def save(session: ResearchSession) -> None:
     tmp.replace(path)
 
 
+def save_merge(session: ResearchSession) -> ResearchSession:
+    """Persist under the session lock, preserving any ``materialized_zotero_key`` that
+    a concurrent "Add to library" stamped since this in-memory copy was loaded. The
+    key is add-only/monotonic, so the review worker's whole-session saves must never
+    drop it. Everything else (order, quality, reviews) is owned by the worker."""
+    with _lock_for(session.id):
+        persisted = load(session.id)
+        keyed = {
+            c.candidate_id: c.materialized_zotero_key
+            for c in persisted.candidates
+            if c.materialized_zotero_key
+        }
+        for cand in session.candidates:
+            if not cand.materialized_zotero_key and keyed.get(cand.candidate_id):
+                cand.materialized_zotero_key = keyed[cand.candidate_id]
+        save(session)
+    return session
+
+
+def update(session_id: str, mutate: Callable[[ResearchSession], None]) -> ResearchSession:
+    """Load → ``mutate`` in place → save, all under the session lock (read-modify-write
+    safe against the concurrent review worker). Used by the "Add to library" path to
+    stamp one candidate's materialized key without clobbering in-flight reviews."""
+    with _lock_for(session_id):
+        sess = load(session_id)
+        mutate(sess)
+        save(sess)
+        return sess
+
+
+def claim(session_id: str, *, expect: str, to: str) -> bool:
+    """Atomic status compare-and-set under the session lock: flip ``expect`` → ``to``
+    and return True, or return False if the current status differs (already claimed /
+    terminal). Single-flights the review worker so auto-start + a manual click, or two
+    screens, can't stack workers."""
+    with _lock_for(session_id):
+        sess = load(session_id)
+        if sess.status != expect:
+            return False
+        sess.status = to
+        save(sess)
+    return True
+
+
 def load(session_id: str) -> ResearchSession:
     """Load one session. Raises ``FileNotFoundError`` when it does not exist (the
     route maps that to a 404 — an unknown id is a client error, not a silent None)."""
@@ -81,4 +142,4 @@ def delete(session_id: str) -> None:
     _path(session_id).unlink(missing_ok=True)
 
 
-__all__ = ["new_session", "save", "load", "list_sessions", "delete"]
+__all__ = ["new_session", "save", "save_merge", "update", "claim", "load", "list_sessions", "delete"]
