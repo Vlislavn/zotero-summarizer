@@ -79,15 +79,19 @@ def select_deep_set(candidates: list[Candidate], *, k: int = 4) -> list[Candidat
         return []
     pool = candidates[: max(k * 2, 8)]  # the top ~8-10 light-reviewed band
     picked: list[Candidate] = list(pool[:2])  # 2 highest-relevance
+    # Membership by candidate_id, not dataclass value-equality: two distinct candidates
+    # with equal fields (e.g. a near-dup that dedup kept) must not collapse to one slot.
+    picked_ids: set[str] = {c.candidate_id for c in picked}
 
     def take(cand: Candidate | None) -> None:
-        if cand is not None and cand not in picked and len(picked) < k:
+        if cand is not None and cand.candidate_id not in picked_ids and len(picked) < k:
             picked.append(cand)
+            picked_ids.add(cand.candidate_id)
 
-    rest = [c for c in pool if c not in picked]
+    rest = [c for c in pool if c.candidate_id not in picked_ids]
     if rest:
         take(max(rest, key=_quality_rank))  # highest quality-adjusted
-    rest = [c for c in pool if c not in picked]
+    rest = [c for c in pool if c.candidate_id not in picked_ids]
     uncertain = [c for c in rest if _uncertain(c)]
     take(uncertain[0] if uncertain else (rest[0] if rest else None))  # exploration / next-best
     for cand in pool:  # top up to k in relevance order

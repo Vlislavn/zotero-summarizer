@@ -283,6 +283,45 @@ def test_save_merge_preserves_concurrent_materialized_key(monkeypatch, tmp_path)
     assert store.load("s2").candidates[0].materialized_zotero_key == "ZKEY1"
 
 
+def test_materialize_once_serializes_concurrent_adds(monkeypatch, tmp_path):
+    # Two simultaneous "Add to library" clicks on the SAME candidate must write to
+    # Zotero exactly once — the session lock serializes check→write→stamp. Without it
+    # both threads would load "no key" before either wrote, and double-add.
+    import threading
+    import time
+
+    store = _tmp_store(monkeypatch, tmp_path)
+    cand = _c("P", doi="10.1/x")
+    sess = ResearchSession(
+        id="m4", created_at="t", raw_query="q", intent=SearchIntent(raw_query="q"),
+        plan=QueryPlan(), candidates=[cand], status="screened",
+    )
+    store.save(sess)
+
+    writes: list[str] = []
+
+    def _do_write(c, s):
+        time.sleep(0.05)  # widen the window so a missing lock reliably double-writes
+        key = f"ZK{len(writes)}"
+        writes.append(key)
+        return key
+
+    results: list[object] = []
+
+    def _run():
+        results.append(store.materialize_once("m4", cand.candidate_id, _do_write))
+
+    threads = [threading.Thread(target=_run) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(writes) == 1                                 # wrote exactly once
+    assert sorted(r[0] for r in results) == [False, True]   # one added, one saw it done
+    assert store.load("m4").candidates[0].materialized_zotero_key == "ZK0"
+
+
 # --- materialize a candidate into the library (Add to library) --------------
 
 def test_feed_payload_adapter_shape():

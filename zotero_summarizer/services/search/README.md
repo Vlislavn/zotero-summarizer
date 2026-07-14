@@ -90,8 +90,10 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
   never a junk auto-create), builds a create-item payload FROM the Candidate (a LIST
   of authors + `publication_date`, NOT the ranker's `to_scoring_dict` shape), writes
   atomically via `apply_feed_materialization` (a locked DB after retries → 503, no
-  fake success), then stamps `materialized_zotero_key` back under the session lock so
-  a concurrent auto-review can't lose it. Idempotent (re-add returns the existing key).
+  fake success), then stamps `materialized_zotero_key` back. The whole
+  check-write-stamp runs under the session lock (`session.materialize_once`), so a
+  concurrent auto-review can't lose the key AND two simultaneous Add clicks on one
+  candidate write exactly once. Idempotent (re-add returns the existing key).
 
 ## Files
 
@@ -107,9 +109,9 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
 | `_targeted_review.py` | query-lensed deep read (composes library read-only layers) |
 | `_fulltext.py` | OA full-text acquisition for a federated (non-Zotero) candidate: PMC → Europe PMC `fullTextXML` (a PMCID hit), else identifier → OA PDF |
 | `pipeline.py` | `run_screen` (fast) + `run_review` (slow) + `SearchDeps`/`default_deps` |
-| `materialize.py` | the one Search→Zotero write: `materialize_candidate(session_id, candidate_id, collection_key)` — resolve+validate collection, Candidate→feed_payload adapter, atomic write, stamp key under the lock |
+| `materialize.py` | the one Search→Zotero write: `materialize_candidate(session_id, candidate_id, collection_key)` — resolve+validate collection (pre-lock 400), Candidate→feed_payload adapter, then check-write-stamp under the session lock via `session.materialize_once` (concurrent Adds write once) |
 | `refine.py` | agentic PRF rounds (Phase E, off by default `ZS_SEARCH_AGENTIC`): one LLM call reads the top results → a concept delta (add under-covered facets, drop off-topic drift) → federate ONLY the delta → union into the existing families → re-score/rank/band → record a per-round summary. Bounded rounds; stops when the LLM proposes no additions or the strong band stabilizes. Runs BEFORE auto-review so the deep set comes from the refined pool |
-| `session.py` | one-JSON-per-session persistence under `settings().search_dir` + per-session lock: `claim` (status CAS, single-flights the worker), `save_merge` (whole-session save that preserves a concurrent Add's `materialized_zotero_key`), `update` (Add's read-modify-write) |
+| `session.py` | one-JSON-per-session persistence under `settings().search_dir` + per-session lock: `claim` (status CAS, single-flights the worker), `save_merge` (whole-session save that preserves a concurrent Add's `materialized_zotero_key`), `update` (read-modify-write), `materialize_once` (Add's check-write-stamp under the lock, single-write). Malformed id → `APIError(400)` |
 
 ## Deferred (ponytail seams, known ceilings)
 

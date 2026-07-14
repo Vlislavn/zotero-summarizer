@@ -15,8 +15,10 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
+from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services._common import now_iso_z, settings
 from zotero_summarizer.services.search._models import (
+    Candidate,
     QueryPlan,
     ResearchSession,
     SearchIntent,
@@ -48,7 +50,7 @@ def _path(session_id: str) -> Path:
     # Guard the id → a single path segment (no traversal from a client-supplied id).
     safe = "".join(ch for ch in session_id if ch.isalnum() or ch in "-_")
     if not safe or safe != session_id:
-        raise ValueError(f"invalid session id: {session_id!r}")
+        raise APIError(error="invalid_session", message=f"invalid session id: {session_id!r}", status_code=400)
     return _dir() / f"{safe}.json"
 
 
@@ -102,6 +104,35 @@ def update(session_id: str, mutate: Callable[[ResearchSession], None]) -> Resear
         return sess
 
 
+def materialize_once(
+    session_id: str,
+    candidate_id: str,
+    do_write: Callable[[Candidate, ResearchSession], str],
+) -> tuple[bool, str] | None:
+    """File one candidate into Zotero exactly once, under the session lock.
+
+    Closes the check-then-write race: two concurrent "Add to library" clicks on the
+    same candidate must not both write to Zotero. Returns ``None`` if the candidate id
+    is unknown, ``(False, key)`` if it was already materialized (no write), or
+    ``(True, key)`` after calling ``do_write(cand, session)`` to create the Zotero item
+    and stamping the returned key. The lock is held across ``do_write`` — materialize is
+    a rare explicit action, so serializing it per session is simpler than a reservation
+    marker. ponytail: whole-session lock; only split if Add ever gets hot.
+    Do NOT call the locked helpers (``update``/``save_merge``/``claim``) from
+    ``do_write`` — the lock is a plain (non-reentrant) ``threading.Lock``."""
+    with _lock_for(session_id):
+        sess = load(session_id)
+        cand = next((c for c in sess.candidates if c.candidate_id == candidate_id), None)
+        if cand is None:
+            return None
+        if cand.materialized_zotero_key:
+            return (False, cand.materialized_zotero_key)
+        key = do_write(cand, sess)
+        cand.materialized_zotero_key = key
+        save(sess)
+        return (True, key)
+
+
 def claim(session_id: str, *, expect: str, to: str) -> bool:
     """Atomic status compare-and-set under the session lock: flip ``expect`` → ``to``
     and return True, or return False if the current status differs (already claimed /
@@ -142,4 +173,4 @@ def delete(session_id: str) -> None:
     _path(session_id).unlink(missing_ok=True)
 
 
-__all__ = ["new_session", "save", "save_merge", "update", "claim", "load", "list_sessions", "delete"]
+__all__ = ["new_session", "save", "save_merge", "update", "materialize_once", "claim", "load", "list_sessions", "delete"]

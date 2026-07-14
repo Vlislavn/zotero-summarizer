@@ -72,61 +72,56 @@ def _resolve_collection_name(collection_key: str | None) -> str:
     return name
 
 
-def _stamp(sess: ResearchSession, candidate_id: str, zotero_key: str) -> None:
-    for c in sess.candidates:
-        if c.candidate_id == candidate_id:
-            c.materialized_zotero_key = zotero_key
-            return
-
-
 def materialize_candidate(
     session_id: str, candidate_id: str, collection_key: str | None
 ) -> dict[str, Any]:
     """File one candidate into the chosen Zotero collection (default Inbox). Explicit
-    user action — returns ``{status, zotero_key, collection}``. Idempotent: an
-    already-added candidate returns its existing key."""
+    user action — returns ``{status, zotero_key, collection}``. Idempotent AND
+    concurrency-safe: the check-write-stamp runs under the session lock via
+    ``session_store.materialize_once``, so two simultaneous "Add to library" clicks on
+    the same candidate write to Zotero exactly once."""
     from zotero_summarizer.services.triage.feeds import _generate_zotero_key
 
-    sess = session_store.load(session_id)
-    cand = next((c for c in sess.candidates if c.candidate_id == candidate_id), None)
-    if cand is None:
+    collection_name = _resolve_collection_name(collection_key)  # validate → fast 400, before the lock
+
+    def _do_write(cand: Candidate, sess: ResearchSession) -> str:
+        try:
+            writer = ZoteroWriter(settings().zotero_data_dir)
+        except Exception as exc:  # noqa: BLE001 — Zotero-write is optional; surface as 503, don't 500.
+            raise APIError(
+                error="zotero_unavailable",
+                message="Zotero is not available to write to",
+                status_code=503,
+            ) from exc
+        new_key = _generate_zotero_key(set())
+        try:
+            writer.apply_feed_materialization(
+                new_item_key=new_key,
+                feed_payload=_feed_payload(cand),
+                inbox_collection_name=collection_name,
+                tags=[_TAG],
+                note_title=f"Targeted Search: {sess.raw_query[:80]}",
+                note_html=_note_html(cand, sess.raw_query),
+            )
+        except ZoteroWriteError as exc:
+            # Locked DB after retries (Zotero open) — nothing written, no separate label
+            # to keep. Surface, don't fake success (plan correction #4).
+            raise APIError(
+                error="zotero_locked",
+                message="Zotero DB is locked (is Zotero open?) — try again in a moment",
+                status_code=503,
+            ) from exc
+        return new_key
+
+    result = session_store.materialize_once(session_id, candidate_id, _do_write)
+    if result is None:
         raise APIError(
             error="not_found", message=f"no such candidate: {candidate_id}", status_code=404
         )
-    if cand.materialized_zotero_key:
-        return {"status": "already_added", "zotero_key": cand.materialized_zotero_key}
-
-    collection_name = _resolve_collection_name(collection_key)
-    try:
-        writer = ZoteroWriter(settings().zotero_data_dir)
-    except Exception as exc:  # noqa: BLE001 — Zotero-write is optional; surface as 503, don't 500.
-        raise APIError(
-            error="zotero_unavailable",
-            message="Zotero is not available to write to",
-            status_code=503,
-        ) from exc
-
-    new_key = _generate_zotero_key(set())
-    try:
-        writer.apply_feed_materialization(
-            new_item_key=new_key,
-            feed_payload=_feed_payload(cand),
-            inbox_collection_name=collection_name,
-            tags=[_TAG],
-            note_title=f"Targeted Search: {sess.raw_query[:80]}",
-            note_html=_note_html(cand, sess.raw_query),
-        )
-    except ZoteroWriteError as exc:
-        # Locked DB after retries (Zotero open) — nothing was written and there's no
-        # separate label to keep (unlike Today's add path), so report it and stamp no
-        # key. Boundary contract per plan correction #4: surface, don't fake success.
-        raise APIError(
-            error="zotero_locked",
-            message="Zotero DB is locked (is Zotero open?) — try again in a moment",
-            status_code=503,
-        ) from exc
-    session_store.update(session_id, lambda s: _stamp(s, candidate_id, new_key))
-    return {"status": "added", "zotero_key": new_key, "collection": collection_name}
+    added, key = result
+    if not added:
+        return {"status": "already_added", "zotero_key": key}
+    return {"status": "added", "zotero_key": key, "collection": collection_name}
 
 
 __all__ = ["materialize_candidate"]
