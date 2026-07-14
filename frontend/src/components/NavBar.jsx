@@ -8,8 +8,12 @@ import { NavLink } from 'react-router-dom';
 // former Annotate page). Today (feed cull) sits next, then Settings. Ops is the
 // rarely-used operator surface (Feed review + Triage jobs + Pending changes) on
 // its own tab — Hick's Law: the bar stays at four flat choices, no disclosure.
+// Search (Targeted Search) sits next to Library: both are research entry points —
+// Library is the *push* surface (cull what feeds brought), Search is the *pull*
+// surface (go find papers on a topic). Kept a flat choice, no disclosure.
 const PRIMARY = [
   { to: '/library', label: 'Library' },
+  { to: '/search', label: 'Search' },
   { to: '/today', label: 'Today' },
   { to: '/settings', label: 'Settings' },
   { to: '/ops', label: 'Ops' },

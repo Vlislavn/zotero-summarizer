@@ -53,6 +53,8 @@ class Settings:
     interaction_log_path: Path
     faithbench_dir: Path
     paper_render_dir: Path
+    # Persisted Targeted Search research sessions (one JSON per session).
+    search_dir: Path
     # App-owned browser profile for university institutional access (persistent
     # login session). Default under data/; overridable via UniversityAccessConfig.
     browser_profile_dir: Path
@@ -96,5 +98,6 @@ class Settings:
             interaction_log_path=data_dir / "interaction-events.jsonl",
             faithbench_dir=data_dir / "faithbench",
             paper_render_dir=data_dir / "paper_render",
+            search_dir=data_dir / "search",
             browser_profile_dir=data_dir / "browser_profile",
         )

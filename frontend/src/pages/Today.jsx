@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import PaperCard from '../components/today/PaperCard.jsx';
+import CollectionPicker from '../components/CollectionPicker.jsx';
 import NotConfiguredCard from '../components/setup/NotConfiguredCard.jsx';
 import Spinner from '../components/ui/Spinner.jsx';
 import { ErrorBanner, StatusBanner } from '../components/library/shared.jsx';
@@ -156,6 +157,8 @@ export default function Today() {
   const { status } = useSetupStatus();
   const setupStatusKnown = Boolean(status);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
+  // Target Zotero collection for "Add to library" ('' = server default "Inbox").
+  const [addCollectionKey, setAddCollectionKey] = useState('');
   // { text, tone } | null — tone flips to 'warn' when the API reports a
   // partial failure (Zotero side-effect didn't land even though the label did).
   const [actionMsg, setActionMsg] = useState(null);
@@ -170,7 +173,7 @@ export default function Today() {
     enabled: setupStatusKnown,
   });
 
-  const addMutation = useMutation({ mutationFn: addToLibrary });
+  const addMutation = useMutation({ mutationFn: (ids) => addToLibrary(ids, addCollectionKey) });
   const trashMutation = useMutation({ mutationFn: trashPapers });
 
   // Always poll once on mount so the button reflects a drain already running
@@ -455,6 +458,7 @@ export default function Today() {
               </select>
             )}
             <div className="flex-1" />
+            <CollectionPicker value={addCollectionKey} onChange={setAddCollectionKey} disabled={busy} />
             <button
               type="button"
               onClick={() => commit(addMutation, 'Added')}

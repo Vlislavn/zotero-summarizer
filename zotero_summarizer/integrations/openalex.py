@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -61,6 +61,29 @@ class OpenAlexWork:
     # title but no abstract so the classifier gate can score them. None when the
     # work has no abstract index (some records omit it).
     abstract: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OpenAlexSearchHit:
+    """One ``/works?search=`` result, shaped as a Targeted Search candidate.
+
+    Distinct from :class:`OpenAlexWork` (a prestige-enrichment record): this is a
+    lightweight topic-search row (title/abstract/ids/year) plus the ``is_retracted``
+    integrity flag OpenAlex carries. ``source_rank`` is the position in OpenAlex's
+    own result list — citation-weighted, so it is a candidate-generation signal
+    ONLY, never a query-relevance signal (see the guides linked in the spec)."""
+
+    openalex_id: str
+    title: str
+    abstract: str = ""
+    doi: str = ""
+    year: int | None = None
+    authors: list[str] = field(default_factory=list)
+    venue: str = ""
+    cited_by_count: int = 0
+    is_oa: bool = False
+    is_retracted: bool = False
+    source_rank: int = 0
 
 
 _RATE_LIMITER = RateLimiter(_RATE_LIMIT_PER_SEC)
@@ -124,6 +147,36 @@ class OpenAlexClient:
         if not enriched.pop("__author_pct_incomplete", False):
             self.cache.set(key, enriched)
         return self._work_from_payload(enriched)
+
+    def search_works(
+        self, query: str, *, per_page: int = 20, semantic: bool = False
+    ) -> list[OpenAlexSearchHit]:
+        """Topic search ``/works`` — lexical (``search=``) or, when
+        ``semantic=True``, semantic (``search.semantic=``, a paragraph query up
+        to 2000 chars embedded by OpenAlex's own model). Returns hits in OpenAlex
+        order; caller re-ranks with its own cross-encoder (OpenAlex lexical rank is
+        citation-weighted → candidate-generation only). ``[]`` on a network error
+        or exhausted keyless budget (``_get`` returns None) — the leaf best-effort
+        contract, so federation survives one dead source (spec §7)."""
+        query = (query or "").strip()
+        if not query:
+            return []
+        param_key = "search.semantic" if semantic else "search"
+        params: dict[str, Any] = {
+            param_key: query[:2000] if semantic else query,
+            "per_page": max(1, min(per_page, 50)),
+            "select": "id,doi,title,display_name,publication_year,authorships,"
+            "primary_location,abstract_inverted_index,cited_by_count,is_retracted,open_access",
+        }
+        payload = self._get("/works", params=params)
+        if not payload:
+            return []
+        results = payload.get("results") or []
+        return [
+            hit
+            for i, raw in enumerate(results)
+            if (hit := _search_hit_from_payload(raw, source_rank=i)) is not None
+        ]
 
     # ----------------------------------------------------------------- private
 
@@ -301,6 +354,37 @@ def _abstract_from_inverted_index(inv: dict[str, list[int]] | None) -> str | Non
         return None
     positions.sort(key=lambda p: p[0])
     return " ".join(word for _, word in positions)
+
+
+def _search_hit_from_payload(raw: dict[str, Any], *, source_rank: int) -> OpenAlexSearchHit | None:
+    """Shape one ``/works`` result into an :class:`OpenAlexSearchHit`. None when
+    it has no id or title (unusable as a candidate)."""
+    if not isinstance(raw, dict):
+        return None
+    openalex_id = (raw.get("id") or "").rsplit("/", 1)[-1]
+    title = (raw.get("title") or raw.get("display_name") or "").strip()
+    if not openalex_id or not title:
+        return None
+    authors = [
+        name
+        for a in (raw.get("authorships") or [])
+        if (name := ((a.get("author") or {}).get("display_name") or "").strip())
+    ]
+    source = (raw.get("primary_location") or {}).get("source") or {}
+    doi = raw.get("doi") or ""
+    return OpenAlexSearchHit(
+        openalex_id=openalex_id,
+        title=title,
+        abstract=_abstract_from_inverted_index(raw.get("abstract_inverted_index")) or "",
+        doi=normalize_doi(doi) if doi else "",
+        year=raw.get("publication_year"),
+        authors=authors[:10],
+        venue=(source.get("display_name") or "").strip(),
+        cited_by_count=int(raw.get("cited_by_count") or 0),
+        is_oa=bool((raw.get("open_access") or {}).get("is_oa")),
+        is_retracted=bool(raw.get("is_retracted")),
+        source_rank=source_rank,
+    )
 
 
 def _median(values: list[float]) -> float | None:

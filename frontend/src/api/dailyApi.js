@@ -87,13 +87,13 @@ export async function fetchPipeline({ lookback_hours = 168 } = {}) {
  * saved but the Zotero write itself didn't (writer unavailable / materialize
  * threw) — those items are NOT actually in Zotero yet.
  */
-export async function addToLibrary(itemIds) {
+export async function addToLibrary(itemIds, collectionKey = null) {
   if (!Array.isArray(itemIds) || itemIds.length === 0) {
     throw new Error('addToLibrary: itemIds must be a non-empty array');
   }
   return request('/daily/add-to-library', {
     method: 'POST',
-    body: JSON.stringify({ item_ids: itemIds }),
+    body: JSON.stringify({ item_ids: itemIds, target_collection_key: collectionKey || null }),
   });
 }
 

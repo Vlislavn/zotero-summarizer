@@ -94,10 +94,14 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
         """Return the collection tree with per-collection item counts."""
 
         def _read(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+            # Scope to the user library on BOTH queries — Zotero keeps ~dozens of
+            # feed/group libraries in the same `collections`/`items` tables, and the
+            # picker must not list (or count) their collections.
             collection_rows = conn.execute(
-                """
+                f"""
                 SELECT collectionID, key, collectionName, parentCollectionID
                 FROM collections
+                WHERE libraryID = ({_USER_LIBRARY_ID_SELECT})
                 """
             ).fetchall()
             count_rows = conn.execute(
@@ -108,6 +112,7 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
                 JOIN itemTypes it ON it.itemTypeID = i.itemTypeID
                 LEFT JOIN deletedItems di ON di.itemID = i.itemID
                 WHERE di.itemID IS NULL
+                  AND i.libraryID = ({_USER_LIBRARY_ID_SELECT})
                   AND it.typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL})
                 GROUP BY ci.collectionID
                 """
@@ -144,6 +149,25 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
 
             self._sort_collection_nodes(roots)
             return roots
+
+        return self._execute_read(_read)
+
+    def collection_name_for_key(self, key: str) -> str | None:
+        """Resolve a user-library collection key → its name (``None`` if the key is
+        not a user-library collection). Resolves AND validates a picker's key before a
+        write: an unknown/foreign key must never reach the name-based writer (which
+        would auto-create a junk top-level collection named after the raw key).
+        ponytail: same-name sibling collections resolve to the first match by name
+        downstream — unique names are the norm; upgrade to key-based write if it bites.
+        """
+
+        def _read(conn: sqlite3.Connection) -> str | None:
+            row = conn.execute(
+                f"SELECT collectionName FROM collections "
+                f"WHERE key = ? AND libraryID = ({_USER_LIBRARY_ID_SELECT}) LIMIT 1",
+                (key,),
+            ).fetchone()
+            return str(row["collectionName"]) if row and row["collectionName"] else None
 
         return self._execute_read(_read)
 
