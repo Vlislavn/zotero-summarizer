@@ -3,7 +3,7 @@ split from ``config.py`` to stay under the LOC ceiling.
 
 Both sections are network-dependent SEARCH/triage enrichment sources gated
 identically by ``ZS_OFFLINE`` (``services/_common.read_config``'s
-``_disable_prestige_when_offline`` / ``_disable_openreview_when_offline``).
+``_disable_section_when_offline``, called once per section).
 """
 from __future__ import annotations
 
@@ -62,4 +62,3 @@ class OpenReviewConfig(BaseModel):
         default_factory=lambda: ["ICLR.cc", "NeurIPS.cc", "ICML.cc", "COLM.cc", "TMLR", "MIDL.io"]
     )
     year_min: int = Field(default=2024, ge=2000, le=2100)
-    limit: int = Field(default=25, ge=1, le=100)

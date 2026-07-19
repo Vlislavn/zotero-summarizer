@@ -33,9 +33,9 @@ counterpart: missing state file → `{}`, an EXISTING-but-corrupt file raises),
 `is_app_rss_source` (the one definition of "row came from the app-RSS reader"),
 NaN-rejecting `clamp`; `emoji_signals`
 bins via `domain` so label derivation == prediction; `read_config` applies the
-air-gap trio AFTER env overrides — `_disable_prestige_when_offline` (OpenAlex
-prestige) and `_disable_openreview_when_offline` (the OpenReview Search source —
-both are network channels, on by default; `ZS_OFFLINE` forces them off so triage
+air-gap pair AFTER env overrides — `_disable_section_when_offline` (called once
+for OpenAlex prestige, once for the OpenReview Search source — both are network
+channels, on by default; `ZS_OFFLINE` forces them off so triage
 and scoring never reach the network air-gapped; no-op when already off / online),
 shared `_is_offline()` so the toggle has one definition; the LLM-concurrency gates
 `effective_llm_concurrency` (triage per-item fan-out, remote→`TRIAGE_JOB_CONCURRENCY`),

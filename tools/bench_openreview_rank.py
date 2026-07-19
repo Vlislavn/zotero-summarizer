@@ -237,7 +237,7 @@ def fetch(out: Path) -> int:
     for i, item in enumerate(QUERIES, 1):
         q = item["q"]
         pool = federate(_plan_for(q), openalex_client=openalex, quota=12)
-        or_hits = search_openreview(or_client, item.get("or_q", q), limit=60)
+        or_hits = search_openreview(or_client, item.get("or_q", q), limit=60, with_ratings=True)
         pool, pr_by_id = _attach_openreview(pool, or_hits, openalex)
         score_query_relevance(q, pool, reranker_model=config.corpus.reranker_model)
         frozen.append({

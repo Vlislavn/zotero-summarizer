@@ -206,8 +206,8 @@ def read_config(config_path: Path, calibration_path: Path | None = None) -> Goal
     if calibration_path is not None:
         config = apply_calibration(config, calibration_path)
     config = apply_env_overrides(config)
-    config = _disable_prestige_when_offline(config)
-    config = _disable_openreview_when_offline(config)
+    config = _disable_section_when_offline(config, "prestige")
+    config = _disable_section_when_offline(config, "openreview")
     return _derive_local_num_ctx(config)
 
 
@@ -215,30 +215,16 @@ def _is_offline() -> bool:
     return (os.getenv("ZS_OFFLINE") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def _disable_prestige_when_offline(config: GoalsConfig) -> GoalsConfig:
-    """Air-gap contract: ``ZS_OFFLINE`` forces OpenAlex prestige off so triage and
-    scoring never reach the network (prestige is now on by default). Applied AFTER
-    the env layer so ``ZS_OFFLINE`` beats an explicit ``ZS_PRESTIGE_ENABLED=1``.
-    No-op when prestige is already off or the app is online."""
-    if not config.prestige.enabled:
-        return config
-    if not _is_offline():
-        return config
-    data = config.model_dump(mode="python")
-    data["prestige"]["enabled"] = False
-    return GoalsConfig.model_validate(data)
-
-
-def _disable_openreview_when_offline(config: GoalsConfig) -> GoalsConfig:
-    """Air-gap contract: ``ZS_OFFLINE`` forces the OpenReview Search source off
-    (it is a network channel, on by default). Mirrors ``_disable_prestige_when_offline``.
-    No-op when already off or the app is online."""
-    if not config.openreview.enabled:
-        return config
-    if not _is_offline():
+def _disable_section_when_offline(config: GoalsConfig, section: str) -> GoalsConfig:
+    """Air-gap contract: ``ZS_OFFLINE`` forces a network-dependent enrichment section
+    (``prestige`` / ``openreview``) off so triage and scoring never reach the network.
+    Applied AFTER the env layer so ``ZS_OFFLINE`` beats an explicit ``ZS_*_ENABLED=1``.
+    No-op when the section is already off or the app is online."""
+    sec = getattr(config, section)
+    if not sec.enabled or not _is_offline():
         return config
     data = config.model_dump(mode="python")
-    data["openreview"]["enabled"] = False
+    data[section]["enabled"] = False
     return GoalsConfig.model_validate(data)
 
 

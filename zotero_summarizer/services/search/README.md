@@ -87,6 +87,9 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
   family and attaches `Candidate.peer_review` (tier/venue/rating) for one `why`
   chip (e.g. `ICLR'25 Oral`) in `_relevance.py`. Never touches `query_score` or
   `rank.py`. Off (`openreview_client=None`) when creds are unset or `ZS_OFFLINE=1`.
+  The channel calls `search_openreview(...)` WITHOUT `with_ratings`, so production
+  skips the per-paper rating fan-out (only the venue+tier chip is read); the rating
+  field stays at its `None`/`0` default.
 - **Zotero-optional**: candidates come from the open web; `_fulltext` recovers a
   PMC hit's machine-readable full text from Europe PMC's `fullTextXML` endpoint,
   else resolves an OA PDF by identifier (arXiv → Unpaywall(DOI) → direct url). The
