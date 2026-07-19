@@ -200,7 +200,9 @@ def _in_venue_window(client: OpenReviewClient, venueid: str) -> bool:
     return bool(years) and max(years) >= client.year_min
 
 
-def _hit_from_content(client: OpenReviewClient, content: dict, forum_id: str) -> OpenReviewHit | None:
+def _hit_from_content(
+    client: OpenReviewClient, content: dict, forum_id: str, *, with_ratings: bool
+) -> OpenReviewHit | None:
     title = str(_val(content.get("title")) or "").strip()
     venue = str(_val(content.get("venue")) or "").strip()
     venueid = str(_val(content.get("venueid")) or "").strip()
@@ -208,7 +210,13 @@ def _hit_from_content(client: OpenReviewClient, content: dict, forum_id: str) ->
         return None
     authors = _val(content.get("authors")) or []
     year_m = _YEAR.search(venueid) or _YEAR.search(venue)
-    mean_rating, n_reviews = client.forum_reviews(forum_id)
+    # The per-paper forum_reviews GET is the channel's cost. Production reads only
+    # the venue+tier chip (services/search/_relevance._peer_review_chip) — never the
+    # rating — so skip it unless a bench explicitly opts in (with_ratings=True).
+    if with_ratings:
+        mean_rating, n_reviews = client.forum_reviews(forum_id)
+    else:
+        mean_rating, n_reviews = None, 0
     return OpenReviewHit(
         title=title,
         abstract=str(_val(content.get("abstract")) or "").strip(),
@@ -225,11 +233,14 @@ def _hit_from_content(client: OpenReviewClient, content: dict, forum_id: str) ->
 
 
 def search_openreview(
-    client: OpenReviewClient, query: str, *, limit: int = 25
+    client: OpenReviewClient, query: str, *, limit: int = 25, with_ratings: bool = False
 ) -> list[OpenReviewHit]:
     """Topic-search OpenReview → accepted papers at configured venues in the year
-    window, each with its reviewer-rating aggregate. Returns ``[]`` when the client
-    is disabled or on any transport/parse error — never raises (leaf contract)."""
+    window. ``with_ratings=False`` (the default) skips the per-paper ``forum_reviews``
+    fan-out — production consumes only the venue+tier chip, never the rating; the two
+    OpenReview benches pass ``with_ratings=True`` to exercise the rating arms. Returns
+    ``[]`` when the client is disabled or on any transport/parse error — never raises
+    (leaf contract)."""
     query = (query or "").strip()
     if not client.enabled or not query:
         return []
@@ -241,7 +252,10 @@ def search_openreview(
             forum_id = note.get("id") if "title" in content else note.get("forum")
             if forum_id and "title" in content:
                 by_forum.setdefault(forum_id, content)
-        hits = [_hit_from_content(client, content, fid) for fid, content in by_forum.items()]
+        hits = [
+            _hit_from_content(client, content, fid, with_ratings=with_ratings)
+            for fid, content in by_forum.items()
+        ]
     except (httpx.HTTPError, OSError, ValueError, KeyError, TypeError) as exc:
         LOGGER.debug("openreview search failed: %s", exc)
         return []

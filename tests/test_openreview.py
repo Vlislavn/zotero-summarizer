@@ -110,7 +110,7 @@ def test_accepted_oral_hit_with_rating():
             "F1", "Deep RAG", "ICLR 2025 Oral", "ICLR.cc/2025/Conference")]}),
         _resp(200, {"notes": [_review(8), _review(6), _review(8)]}),
     ]
-    hits = search_openreview(_client(http), "retrieval augmented generation")
+    hits = search_openreview(_client(http), "retrieval augmented generation", with_ratings=True)
     assert len(hits) == 1
     h = hits[0]
     assert h.title == "Deep RAG" and h.tier == "oral" and h.decision == "accepted"
@@ -127,9 +127,25 @@ def test_accepted_paper_no_public_reviews():
             "F2", "No Reviews", "MIDL 2025 Poster", "MIDL.io/2025/Conference")]}),
         _resp(200, {"notes": []}),  # reviews hidden
     ]
-    hits = search_openreview(_client(http), "segmentation")
+    hits = search_openreview(_client(http), "segmentation", with_ratings=True)
     assert len(hits) == 1
     assert hits[0].mean_rating is None and hits[0].n_reviews == 0
+
+
+def test_ratings_gated_off_by_default_no_forum_fanout():
+    # Production (with_ratings omitted) reads only the venue+tier chip — it must NOT
+    # issue the per-paper forum_reviews GET. The single GET here is /notes/search.
+    http = MagicMock()
+    http.post.return_value = _resp(200, {"token": "T"})
+    http.get.side_effect = [
+        _resp(200, {"notes": [_paper_note(
+            "F3", "Gated Ratings", "ICLR 2025 Oral", "ICLR.cc/2025/Conference")]}),
+    ]
+    hits = search_openreview(_client(http), "retrieval")
+    assert len(hits) == 1
+    h = hits[0]
+    assert h.tier == "oral" and h.mean_rating is None and h.n_reviews == 0
+    assert http.get.call_count == 1  # search only, no per-paper forum fan-out
 
 
 # ------------------------------------------------------------------- filters
