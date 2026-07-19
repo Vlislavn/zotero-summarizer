@@ -12,9 +12,9 @@ topic + questions
 SearchIntent ─ intent.build_query_plan ─> QueryPlan (per-source strings, NOT one universal query;
    │                                        each lexical source = tight "quoted phrase" + broad bag)
    ▼  federate.federate  (ThreadPoolExecutor — all channels at once; one pass per variant, unioned)
- ┌─────────┬───────────┬──────────────────┬──────────┬───────────────────┬──────────────┐
- │ arxiv   │ europepmc │ openalex lex+sem │ crossref │ semantic scholar  │ library(TODO)│  → Candidate + Provenance
- └─────────┴───────────┴──────────────────┴──────────┴───────────────────┴──────────────┘
+ ┌─────────┬───────────┬──────────────────┬──────────┬───────────────────┬────────────┬──────────────┐
+ │ arxiv   │ europepmc │ openalex lex+sem │ crossref │ semantic scholar  │ openreview │ library(TODO)│  → Candidate + Provenance
+ └─────────┴───────────┴──────────────────┴──────────┴───────────────────┴────────────┴──────────────┘
    │  dedup.to_version_families  (union-find on shared ids; never title-merge; OR integrity flags)
    ▼
 [Candidate]  ── rank.score_query_relevance ──> query_score  (OUR bge cross-encoder over the union;
@@ -81,6 +81,12 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
   to flag which top results are *missing*. Fail-open: a failed/absent lookup stays
   `None` (unknown), never a false "not in library" that would re-surface a paper
   you already have.
+- **OpenReview is SIGNAL-ONLY, never ranking** (`federate._openreview_channel`): a
+  dual-judge eval refuted prestige-boost ranking, so a hit only resolves its
+  OpenAlex id (title+year lookup, best-effort) to merge into the right version
+  family and attaches `Candidate.peer_review` (tier/venue/rating) for one `why`
+  chip (e.g. `ICLR'25 Oral`) in `_relevance.py`. Never touches `query_score` or
+  `rank.py`. Off (`openreview_client=None`) when creds are unset or `ZS_OFFLINE=1`.
 - **Zotero-optional**: candidates come from the open web; `_fulltext` recovers a
   PMC hit's machine-readable full text from Europe PMC's `fullTextXML` endpoint,
   else resolves an OA PDF by identifier (arXiv → Unpaywall(DOI) → direct url). The
@@ -101,7 +107,7 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
 |------|------|
 | `_models.py` | `Candidate` / `Provenance` / `SearchIntent` / `QueryPlan` / `ResearchSession` (JSON round-trip) |
 | `intent.py` | topic → `SearchIntent` → per-source `QueryPlan` |
-| `federate.py` | concurrent channel fan-out + quotas + provenance → `to_version_families`. Channels: arXiv, Europe PMC, OpenAlex (lex+sem), Crossref (broad metadata, `mailto` polite pool), Semantic Scholar (relevance-ranked, throttled). Lexical sources issue a tight+bag variant pair; the new leaves issue one scalar pass each |
+| `federate.py` | concurrent channel fan-out + quotas + provenance → `to_version_families`. Channels: arXiv, Europe PMC, OpenAlex (lex+sem), Crossref (broad metadata, `mailto` polite pool), Semantic Scholar (relevance-ranked, throttled), OpenReview (peer-review signal, SIGNAL-ONLY — see below). Lexical sources issue a tight+bag variant pair; the new leaves issue one scalar pass each |
 | `dedup.py` | union-find version-family resolution |
 | `rank.py` | cross-encoder `query_score` + the constrained re-rank contract |
 | `_relevance.py` | pool-relative `relevance_band` (strong/on_topic/weak — cohort terciles of `query_score` + an absolute floor so an all-bad pool gets no "strong") + ≤3 `why` chips (relevance, cross-source agreement, quality grade/band, version standing). Mirrors `daily_select/_relevance`; attached in `run_screen` and re-derived after the review re-rank |

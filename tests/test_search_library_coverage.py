@@ -99,7 +99,9 @@ def test_coverage_and_citations_survive_round_trip() -> None:
     cand = Candidate(title="T", doi="10.1/x", cited_by_count=42)
     cand.in_library = True
     cand.existing_zotero_key = "ABCD1234"
+    cand.peer_review = {"tier": "oral", "venue": "ICLR 2025 Oral", "mean_rating": 7.5}
     restored = Candidate.from_dict(cand.to_dict())
     assert restored.cited_by_count == 42
     assert restored.in_library is True
     assert restored.existing_zotero_key == "ABCD1234"
+    assert restored.peer_review == {"tier": "oral", "venue": "ICLR 2025 Oral", "mean_rating": 7.5}

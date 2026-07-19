@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 
     from zotero_summarizer.integrations.openalex import OpenAlexClient
     from zotero_summarizer.integrations.openalex_cache import OpenAlexCache
+    from zotero_summarizer.integrations.openreview import OpenReviewClient
     from zotero_summarizer.integrations.pdf import OnPremPdfExtractor
     from zotero_summarizer.integrations.unpaywall import UnpaywallClient
     from zotero_summarizer.integrations.zotero_read import ZoteroReader
@@ -44,6 +45,7 @@ class RuntimeState:
     openalex_client: "OpenAlexClient | None" = None
     openalex_cache: "OpenAlexCache | None" = None
     unpaywall_client: "UnpaywallClient | None" = None
+    openreview_client: "OpenReviewClient | None" = None
 
     # Hybrid daemon classifier gate. Typed loosely (Any) to keep this module
     # independent of the services/model layer.

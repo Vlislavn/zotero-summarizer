@@ -140,6 +140,9 @@ export default function PaperDetailView({
                   {!verdict.submitError && verdict.submitWarning && (
                     <div className="mt-1 text-[11px] text-amber-700">{verdict.submitWarning}</div>
                   )}
+                  {!verdict.submitError && !verdict.submitWarning && verdict.submitNotice && (
+                    <div className="mt-1 text-[11px] text-emerald-700">{verdict.submitNotice}</div>
+                  )}
                 </div>
               ) : (
                 <VerdictPanel
@@ -151,6 +154,7 @@ export default function PaperDetailView({
                   submitting={verdict.submitting}
                   submitError={verdict.submitError}
                   submitWarning={verdict.submitWarning}
+                  submitNotice={verdict.submitNotice}
                   deleting={verdict.deleting}
                   deleteError={verdict.deleteError}
                 />

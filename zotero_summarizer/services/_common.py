@@ -207,7 +207,12 @@ def read_config(config_path: Path, calibration_path: Path | None = None) -> Goal
         config = apply_calibration(config, calibration_path)
     config = apply_env_overrides(config)
     config = _disable_prestige_when_offline(config)
+    config = _disable_openreview_when_offline(config)
     return _derive_local_num_ctx(config)
+
+
+def _is_offline() -> bool:
+    return (os.getenv("ZS_OFFLINE") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _disable_prestige_when_offline(config: GoalsConfig) -> GoalsConfig:
@@ -217,10 +222,23 @@ def _disable_prestige_when_offline(config: GoalsConfig) -> GoalsConfig:
     No-op when prestige is already off or the app is online."""
     if not config.prestige.enabled:
         return config
-    if (os.getenv("ZS_OFFLINE") or "").strip().lower() not in ("1", "true", "yes", "on"):
+    if not _is_offline():
         return config
     data = config.model_dump(mode="python")
     data["prestige"]["enabled"] = False
+    return GoalsConfig.model_validate(data)
+
+
+def _disable_openreview_when_offline(config: GoalsConfig) -> GoalsConfig:
+    """Air-gap contract: ``ZS_OFFLINE`` forces the OpenReview Search source off
+    (it is a network channel, on by default). Mirrors ``_disable_prestige_when_offline``.
+    No-op when already off or the app is online."""
+    if not config.openreview.enabled:
+        return config
+    if not _is_offline():
+        return config
+    data = config.model_dump(mode="python")
+    data["openreview"]["enabled"] = False
     return GoalsConfig.model_validate(data)
 
 

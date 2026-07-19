@@ -26,6 +26,7 @@ export default function ActionRail({
         submitting={verdict.submitting}
         submitError={verdict.submitError}
         submitWarning={verdict.submitWarning}
+        submitNotice={verdict.submitNotice}
         deleting={verdict.deleting}
         deleteError={verdict.deleteError}
       />

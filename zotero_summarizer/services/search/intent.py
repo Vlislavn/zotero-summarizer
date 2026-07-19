@@ -159,6 +159,7 @@ def build_query_plan(intent: SearchIntent) -> QueryPlan:
         arxiv=arxiv_bag,
         crossref=lexical,  # broad scholarly metadata — keyword bag
         semantic_scholar=intent.canonical_question or intent.raw_query,  # relevance-ranked NL
+        openreview=intent.canonical_question or intent.raw_query,  # relevance search over text (peer-review signal)
         openalex_lexical_variants=_variants(tight, lexical),
         europepmc_variants=_variants(tight, lexical),
         arxiv_variants=_variants(tight, arxiv_bag),

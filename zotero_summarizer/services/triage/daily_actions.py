@@ -25,7 +25,7 @@ from zotero_summarizer.services.library import deep_review, fulltext, review
 from zotero_summarizer.services._common import LOGGER, is_app_rss_source
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.storage import feeds as feeds_storage
-from zotero_summarizer.storage.feed_identity import row_feed_keys
+from zotero_summarizer.storage.feed_identity import LEGACY_FEED_PREFIX, row_feed_keys
 from zotero_summarizer.storage import repositories
 from zotero_summarizer.storage import rss as rss_storage
 
@@ -185,6 +185,39 @@ def _mark_app_rss_rows_read(rows: list[dict[str, Any]]) -> int:
         conn.close()
 
 
+def _mark_pending(row: dict[str, Any], reason: str) -> None:
+    """Park a row as user-approved-but-not-yet-in-Zotero so the user's next
+    'Apply all approved' flushes it (the writer was absent, or the DB stayed
+    locked through retries)."""
+    _set_decision(row, feeds_storage.DECISION_USER_APPROVED, reason)
+    _mark_zotero_sync(row, "pending")
+    record_row_outcome(row, feeds_storage.OUTCOME_KEPT_UNREAD_APP)
+
+
+def _materialize_one(
+    row: dict[str, Any], *, writer: Any, used_keys: set[str], collection_name: str,
+    new_keys: list[str], materialized: list[tuple[str, str]], reason: str,
+    label_priority: str | None = None,
+) -> str:
+    """Create ONE Zotero item from a feed row + carry its in-place deep review
+    onto the new library key. Appends to ``new_keys``/``materialized`` for the
+    caller's batch post-processing (fulltext + render carry). Raises on Zotero
+    failure — the caller decides whether to park the row pending. Records NO
+    training label: the caller owns labelling.
+
+    ``label_priority`` stamps the user's ground-truth ``label:<priority>`` tag on
+    the new item (verdict-add path only); ``None`` for the machine Add button."""
+    new_key = review.materialize_row(
+        row, writer=writer, used_keys=used_keys, reason=reason,
+        collection_name=collection_name, label_priority=label_priority,
+    )
+    new_keys.append(new_key)
+    sfk = str(row.get("stable_feed_key") or "")
+    deep_review.copy_review(sfk, new_key)
+    materialized.append((sfk, new_key))
+    return new_key
+
+
 def add_to_library(item_ids: list[int], target_collection_key: str | None = None) -> dict[str, Any]:
     """Materialize each selected card into a Zotero collection (default "Inbox") +
     record a positive training label. Returns ``{added, failed_count, failed}``.
@@ -224,26 +257,18 @@ def add_to_library(item_ids: list[int], target_collection_key: str | None = None
                 source=VERDICT_SOURCE_MACHINE_ADD, surface="today_keep",
             )
             if writer is None:
-                _set_decision(row, feeds_storage.DECISION_USER_APPROVED, "today_add_zotero_pending")
-                _mark_zotero_sync(row, "pending")
-                record_row_outcome(row, feeds_storage.OUTCOME_KEPT_UNREAD_APP)
+                _mark_pending(row, "today_add_zotero_pending")
                 pending_sync += 1
             else:
                 try:
-                    new_key = review.materialize_row(
-                        row, writer=writer, used_keys=used_keys, reason="today_add",
-                        collection_name=collection_name,
+                    # Carries the in-place Today review onto the new library key.
+                    _materialize_one(
+                        row, writer=writer, used_keys=used_keys,
+                        collection_name=collection_name, new_keys=new_keys,
+                        materialized=materialized, reason="today_add",
                     )
-                    new_keys.append(new_key)
-                    # Carry the in-place Today review (cached under stable_feed_key) onto
-                    # the new library key so the deep review persists into the library.
-                    sfk = str(row.get("stable_feed_key") or "")
-                    deep_review.copy_review(sfk, new_key)
-                    materialized.append((sfk, new_key))
                 except Exception as exc:
-                    _set_decision(row, feeds_storage.DECISION_USER_APPROVED, "today_add_zotero_pending")
-                    _mark_zotero_sync(row, "pending")
-                    record_row_outcome(row, feeds_storage.OUTCOME_KEPT_UNREAD_APP)
+                    _mark_pending(row, "today_add_zotero_pending")
                     pending_sync += 1
                     LOGGER.warning(
                         "add_to_library: Zotero export pending for row id=%s: %s",
@@ -272,6 +297,103 @@ def add_to_library(item_ids: list[int], target_collection_key: str | None = None
         "failed_count": len(failed), "failed": failed[:20],
         "fulltext": fulltext,
     }
+
+
+def _load_feed_row(item_key: str) -> dict[str, Any] | None:
+    """Resolve a feed verdict ``item_key`` (a stable feed key, or a legacy
+    ``feed:<feed_item_id>``) to its processed_feed_items row. ``None`` when no
+    such row exists."""
+    key = str(item_key or "").strip()
+    if not key:
+        return None
+    conn = sqlite3.connect(str(_db_path()))
+    conn.row_factory = sqlite3.Row
+    try:
+        row = feeds_storage.get_processed_feed_item_by_stable_key(conn, key)
+        if row is None and key.startswith(LEGACY_FEED_PREFIX):
+            rest = key[len(LEGACY_FEED_PREFIX):]
+            if rest.isdigit():
+                row = feeds_storage.get_processed_feed_item_by_id(conn, int(rest))
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _materialized_key_for(row: dict[str, Any]) -> str | None:
+    """The Zotero key this feed paper is already materialized under, or ``None``.
+
+    Checks the row itself AND any sibling ``processed_feed_items`` row with the
+    same ``stable_feed_key`` — a feed paper can re-arrive as several rows (one
+    materialized on an earlier pass, a later one not), so a per-row check would
+    miss the existing item and re-add a duplicate."""
+    direct = str(row.get("materialized_zotero_key") or "").strip()
+    if direct:
+        return direct
+    sfk = str(row.get("stable_feed_key") or "").strip()
+    if not sfk:
+        return None
+    conn = sqlite3.connect(str(_db_path()))
+    conn.row_factory = sqlite3.Row
+    try:
+        sibling = conn.execute(
+            "SELECT materialized_zotero_key FROM processed_feed_items "
+            "WHERE stable_feed_key = ? AND materialized_zotero_key IS NOT NULL "
+            "AND materialized_zotero_key <> '' LIMIT 1",
+            (sfk,),
+        ).fetchone()
+        return str(sibling["materialized_zotero_key"]) if sibling else None
+    finally:
+        conn.close()
+
+
+def materialize_feed_verdict(item_key: str, user_priority: str) -> dict[str, Any]:
+    """Materialize ONE feed paper (identified by its verdict ``item_key`` /
+    stable feed key) into the Zotero "Inbox", as a side-effect of a positive
+    verdict set in the Today deep-review. Reuses the add-to-library machinery but
+    records NO training label — ``submit_verdict`` already saved the user's fine
+    verdict, and re-labelling here would duplicate the golden row and clobber a
+    must/could verdict with the generic "add" label.
+
+    ``user_priority`` (the verdict) is stamped on the new Zotero item as its
+    ground-truth ``label:<priority>`` tag, in the same lock-tolerant write that
+    creates the item — so the user's label lands even though Zotero is open (the
+    separate ``zotero_set_label_tag`` refuses then). The user asked: a label set
+    during Today review MUST reach Zotero.
+
+    Returns ``{"added": bool, "zotero_key": str | None, "status": str}``.
+    Idempotent: an already-materialized paper is a no-op (status
+    ``already_in_library``). Zotero failures are the documented add-to-library
+    boundary — the row is parked pending and the failure returned as a status
+    (``zotero_unavailable`` / ``zotero_pending``), never raised, so the caller
+    can report it without blocking the already-durable verdict."""
+    row = _load_feed_row(item_key)
+    if row is None:
+        return {"added": False, "zotero_key": None, "status": "no_feed_row"}
+    existing = _materialized_key_for(row)
+    if existing:
+        return {"added": False, "zotero_key": existing, "status": "already_in_library"}
+
+    writer, _writer_error = _open_optional_writer()
+    if writer is None:
+        _mark_pending(row, "verdict_add_zotero_pending")
+        return {"added": False, "zotero_key": None, "status": "zotero_unavailable"}
+
+    new_keys: list[str] = []
+    materialized: list[tuple[str, str]] = []
+    try:
+        new_key = _materialize_one(
+            row, writer=writer, used_keys=set(), collection_name="Inbox",
+            new_keys=new_keys, materialized=materialized, reason="verdict_add",
+            label_priority=user_priority,
+        )
+    except Exception as exc:  # noqa: BLE001 — add-to-library boundary: park pending, report to caller
+        _mark_pending(row, "verdict_add_zotero_pending")
+        LOGGER.warning("materialize_feed_verdict: Zotero export pending for %s: %s", item_key, exc)
+        return {"added": False, "zotero_key": None, "status": "zotero_pending"}
+
+    _attach_fulltext_best_effort(new_keys)
+    _carry_renders_best_effort(materialized)
+    return {"added": True, "zotero_key": new_key, "status": "added"}
 
 
 def _carry_renders_best_effort(pairs: list[tuple[str, str]]) -> None:

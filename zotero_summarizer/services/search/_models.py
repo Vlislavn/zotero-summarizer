@@ -66,6 +66,9 @@ class Candidate:
     why: list[str] = field(default_factory=list)  # ≤3 plain chips for the card
     quality: dict[str, Any] = field(default_factory=dict)   # query-independent QualityEval
     coverage: dict[str, Any] = field(default_factory=dict)  # sections used/missing (§9)
+    # OpenReview peer-review signal bag (tier/venue/rating) — SEARCH-display only
+    # (a compact chip, see `_relevance.py`); never consumed by `rank.py`.
+    peer_review: dict[str, Any] = field(default_factory=dict)
     verdict: str = ""                  # reading intent (reversible)
     review: dict[str, Any] = field(default_factory=dict)    # brief + query_lens + Q answers
     materialized_zotero_key: str = ""  # set only on explicit Inbox push
@@ -165,6 +168,7 @@ class QueryPlan:
     arxiv: str = ""
     crossref: str = ""          # broad scholarly metadata (keyword bag)
     semantic_scholar: str = ""  # relevance-ranked (natural-language question)
+    openreview: str = ""        # peer-review signal source (natural-language question)
     # Per-lexical-source query variants (tight-first: quoted-phrase, then keyword bag).
     # Empty = the pre-fusion behavior (federate falls back to the scalar field above),
     # so sessions persisted before the recall fix still load and run unchanged.
@@ -193,6 +197,7 @@ class QueryPlan:
             rows.append(("arxiv", q))
         rows.append(("crossref", self.crossref))
         rows.append(("semantic scholar", self.semantic_scholar))
+        rows.append(("openreview", self.openreview))
         return [{"source": s, "query": q} for s, q in rows if q]
 
 

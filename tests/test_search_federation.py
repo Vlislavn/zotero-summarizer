@@ -118,6 +118,64 @@ def test_build_query_plan_wires_crossref_and_semantic_scholar():
     plan = build_query_plan(intent)
     assert plan.crossref                       # keyword bag present
     assert plan.semantic_scholar == "How X?"   # natural-language question
+    assert plan.openreview == "How X?"         # same dead-channel guard for the signal-only leaf
+
+
+# --- OpenReview (signal-only peer-review channel) ---------------------------
+
+def test_openreview_channel_wires_peer_review_signal(monkeypatch):
+    # federate() must skip the channel when no client is wired (SIGNAL-ONLY is
+    # opt-in, never required), and populate `peer_review` + resolve an OpenAlex id
+    # (for cross-source dedup) when a client IS wired — but never touch query_score.
+    from types import SimpleNamespace
+
+    from zotero_summarizer.integrations.openreview import OpenReviewHit
+    from zotero_summarizer.services.search import federate as fed
+
+    monkeypatch.setattr(fed, "search_arxiv", lambda *a, **k: [])
+    monkeypatch.setattr(fed, "search_europepmc", lambda *a, **k: [])
+    hit = OpenReviewHit(
+        title="Great Paper", abstract="abs", year=2025, venue="ICLR 2025 Oral",
+        venueid="ICLR.cc/2025/Conference", tier="oral", mean_rating=7.5, n_reviews=3,
+    )
+    monkeypatch.setattr(fed, "search_openreview", lambda *a, **k: [hit])
+    openalex_client = SimpleNamespace(
+        fetch_work_by_title=lambda title, *, year=None: SimpleNamespace(
+            openalex_id="https://openalex.org/W123"
+        )
+    )
+
+    plan = QueryPlan(openreview="q")
+    no_client = fed.federate(plan, openalex_client=openalex_client, openreview_client=None, quota=5)
+    assert no_client == []  # channel not registered without an openreview_client
+
+    cands = fed.federate(plan, openalex_client=openalex_client, openreview_client=object(), quota=5)
+    assert len(cands) == 1
+    c = cands[0]
+    assert c.openalex_id == "W123"                       # bare id, not the full URL
+    assert c.peer_review == {
+        "tier": "oral", "venue": "ICLR 2025 Oral", "venueid": "ICLR.cc/2025/Conference",
+        "mean_rating": 7.5, "n_reviews": 3,
+    }
+    assert c.query_score is None                          # SIGNAL-ONLY: no ranking effect
+    assert {p.source for p in c.provenance} == {"openreview"}
+
+
+def test_merge_family_carries_peer_review_from_member():
+    # A version family where only the OpenReview member carries the peer-review
+    # signal must not lose it when a bibliographically richer non-OpenReview
+    # member becomes the preferred version (mirrors correction #12's carry rules).
+    or_hit = _c(
+        "P", doi="10.1/x", peer_review={"tier": "oral", "venue": "ICLR 2025 Oral"},
+    )
+    richer = _c(
+        "P (journal)", doi="10.1/x", venue="Nature",
+        abstract="a much longer abstract that clearly wins the richness sort",
+    )
+    fams = to_version_families([or_hit, richer])
+    assert len(fams) == 1
+    assert fams[0].venue == "Nature"                                 # richer version preferred
+    assert fams[0].peer_review == {"tier": "oral", "venue": "ICLR 2025 Oral"}  # signal survives
 
 
 # --- agentic iterative search (Phase E) -------------------------------------

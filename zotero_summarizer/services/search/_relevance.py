@@ -13,6 +13,7 @@ can't manufacture a "strong" group out of the least-bad third.
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 from zotero_summarizer.services.search._models import Candidate
@@ -24,6 +25,9 @@ from zotero_summarizer.services.search._models import Candidate
 _STRONG_FLOOR = float(os.environ.get("ZS_SEARCH_STRONG_FLOOR", "0.30"))
 _MILD_FLOOR = float(os.environ.get("ZS_SEARCH_MILD_FLOOR", "0.05"))
 _MAX_WHY = 3  # keep the card scannable (Miller's Law)
+
+# "ICLR 2025 Oral" -> "ICLR'25 Oral" (compact year, keep the tier word).
+_VENUE_YEAR = re.compile(r"^(\S+)\s+(\d{4})\b\s*(.*)$")
 
 
 def relevance_bands(candidates: list[Candidate]) -> tuple[float | None, float | None]:
@@ -61,6 +65,24 @@ def _quality_chip(quality: dict[str, Any]) -> str:
     return ""
 
 
+def _peer_review_chip(peer_review: dict[str, Any]) -> str:
+    """Compact chip from the OpenReview signal bag (SIGNAL-ONLY, no ranking
+    effect), e.g. ``"ICLR 2025 Oral"`` -> ``"ICLR'25 Oral"``. Falls back to the
+    venue string verbatim, then the tier capitalized, when the venue doesn't
+    parse into name+year+tier."""
+    if not peer_review:
+        return ""
+    venue = str(peer_review.get("venue") or "").strip()
+    m = _VENUE_YEAR.match(venue)
+    if m:
+        name, year, rest = m.groups()
+        return f"{name}'{year[-2:]} {rest}".strip()
+    if venue:
+        return venue
+    tier = str(peer_review.get("tier") or "").strip()
+    return tier.capitalize() if tier else ""
+
+
 def build_why(cand: Candidate, band: str) -> list[str]:
     """Ordered, capped reason chips for one card — strongest signal first. Missing
     signals are simply omitted (an empty list is a valid "nothing cleared a bar",
@@ -83,6 +105,11 @@ def build_why(cand: Candidate, band: str) -> list[str]:
     chip = _quality_chip(cand.quality)
     if chip:
         why.append(chip)
+
+    # 3.5. Peer-review tier (OpenReview signal — SIGNAL-ONLY, no ranking effect).
+    pr_chip = _peer_review_chip(cand.peer_review)
+    if pr_chip:
+        why.append(pr_chip)
 
     # 4. Version standing.
     if cand.version_type == "version_of_record":

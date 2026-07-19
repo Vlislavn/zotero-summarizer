@@ -45,6 +45,10 @@ Precedence: **code default < `goals.yaml` < `data/calibration.json` < `ZS_*` env
 | `ZS_PRESTIGE_COLD_START_AUTHOR_LIFT` | `prestige.cold_start_author_lift` | bool | true |
 | `ZS_PRESTIGE_COLD_START_MAX_LIFT` | `prestige.cold_start_max_lift` | float | 1.0 |
 | `ZS_PRESTIGE_COLD_START_GAMMA` | `prestige.cold_start_gamma` | float | 1.5 |
+| `ZS_OPENREVIEW_ENABLED` | `openreview.enabled` | bool | true |
+| `ZS_OPENREVIEW_VENUES` | `openreview.venues` | list[str] | ICLR.cc, NeurIPS.cc, ICML.cc, COLM.cc, TMLR, MIDL.io |
+| `ZS_OPENREVIEW_YEAR_MIN` | `openreview.year_min` | int | 2024 |
+| `ZS_OPENREVIEW_LIMIT` | `openreview.limit` | int | 25 |
 | `ZS_FULL_TEXT_REFINE_ENABLED` | `full_text_refine.enabled` | bool | false |
 | `ZS_FULL_TEXT_REFINE_TOP_K` | `full_text_refine.top_k` | int | 2 |
 | `ZS_FULL_TEXT_REFINE_MAX_PDF_BYTES` | `full_text_refine.max_pdf_bytes` | int | 50000000 |
