@@ -46,6 +46,7 @@ export default function VerdictPanel({
   submitting = false,
   submitError = null,
   submitWarning = null,
+  submitNotice = null,
   deleting = false,
   deleteError = null,
 }) {
@@ -128,6 +129,11 @@ export default function VerdictPanel({
             {submitWarning}
           </div>
         )}
+        {!deleteError && !submitWarning && submitNotice && (
+          <div className="mt-2 p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800">
+            {submitNotice}
+          </div>
+        )}
       </div>
     );
   }
@@ -173,6 +179,11 @@ export default function VerdictPanel({
       {!(submitError || deleteError) && submitWarning && (
         <div className="mt-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900">
           {submitWarning}
+        </div>
+      )}
+      {!(submitError || deleteError) && !submitWarning && submitNotice && (
+        <div className="mt-2 p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800">
+          {submitNotice}
         </div>
       )}
 

@@ -5,6 +5,7 @@ import os
 
 from zotero_summarizer.integrations.openalex import OpenAlexClient
 from zotero_summarizer.integrations.openalex_cache import OpenAlexCache
+from zotero_summarizer.integrations.openreview import OpenReviewClient
 from zotero_summarizer.integrations.unpaywall import UnpaywallClient
 from zotero_summarizer.integrations.zotero_read import ZoteroReadError, ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriteError, ZoteroWriter
@@ -76,11 +77,12 @@ def _init_database(current_settings: Settings, app_state: RuntimeState) -> None:
 
 
 def _init_metadata_clients(app_state: RuntimeState, config: GoalsConfig, current_settings: Settings) -> None:
-    """OpenAlex prestige + Unpaywall full-text clients (both optional)."""
+    """OpenAlex prestige + Unpaywall full-text + OpenReview peer-review clients (all optional)."""
     app_state.openalex_client = None
     app_state.unpaywall_client = None
     app_state.openalex_cache = None
-    if config.prestige.enabled or config.full_text_refine.enabled:
+    app_state.openreview_client = None
+    if config.prestige.enabled or config.full_text_refine.enabled or config.openreview.enabled:
         ttl_days = max(config.prestige.cache_ttl_days, 1)
         app_state.openalex_cache = OpenAlexCache(
             current_settings.corpus_db_path,
@@ -110,6 +112,20 @@ def _init_metadata_clients(app_state: RuntimeState, config: GoalsConfig, current
             "Full-text refine enabled (top_k=%d, max_bytes=%d)",
             config.full_text_refine.top_k,
             config.full_text_refine.max_pdf_bytes,
+        )
+    if config.openreview.enabled:
+        # Credentials are read from the env INSIDE the client (never passed here,
+        # never logged) — only whether they resolved to an enabled client is logged.
+        app_state.openreview_client = OpenReviewClient(
+            venue_hosts=tuple(config.openreview.venues),
+            year_min=config.openreview.year_min,
+            cache=app_state.openalex_cache,
+        )
+        LOGGER.info(
+            "OpenReview search source enabled (venues=%s, year_min=%d, creds=%s)",
+            config.openreview.venues,
+            config.openreview.year_min,
+            "set" if app_state.openreview_client.enabled else "unset",
         )
 
 

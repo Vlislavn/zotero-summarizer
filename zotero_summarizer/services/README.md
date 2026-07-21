@@ -32,7 +32,12 @@ Shared files: `_common` (helpers: settings/logging/sqlite-ro/now_iso_z/html_to_t
 counterpart: missing state file → `{}`, an EXISTING-but-corrupt file raises),
 `is_app_rss_source` (the one definition of "row came from the app-RSS reader"),
 NaN-rejecting `clamp`; `emoji_signals`
-bins via `domain` so label derivation == prediction; the LLM-concurrency gates
+bins via `domain` so label derivation == prediction; `read_config` applies the
+air-gap pair AFTER env overrides — `_disable_section_when_offline` (called once
+for OpenAlex prestige, once for the OpenReview Search source — both are network
+channels, on by default; `ZS_OFFLINE` forces them off so triage
+and scoring never reach the network air-gapped; no-op when already off / online),
+shared `_is_offline()` so the toggle has one definition; the LLM-concurrency gates
 `effective_llm_concurrency` (triage per-item fan-out, remote→`TRIAGE_JOB_CONCURRENCY`),
 `deep_review_fleet_concurrency` (the N-paper deep-review batch, remote→`max_sub_concurrency`
 else all N — NOT the triage knob, so a remote batch isn't throttled by the local-RAM cap)
@@ -44,6 +49,10 @@ All LLM clients are constructed through `services/llm/factory`, which calls
 `build_llm` for `openai`-type providers), `lifecycle` (startup composition root — small `_init_*`
 builders wire each singleton onto `RuntimeState`; LLM clients are NOT built here,
 they resolve lazily per stage so startup never depends on a provider being reachable;
+`_init_metadata_clients` builds the THREE optional network clients — OpenAlex prestige,
+Unpaywall full-text, and the authenticated OpenReview peer-review Search source
+(`OpenReviewClient`, host-locked, creds read from env INSIDE the client so only
+whether-they-resolved is logged) — all sharing the one `OpenAlexCache` TTL store;
 `_init_classifier_gate` schedules a background Today-slate rescore when it loads a
 cached gate with an unchanged golden sha, so an offline-trained model reflects on the
 next start without a manual `rescore-slate`; `startup` then runs a loud **readiness

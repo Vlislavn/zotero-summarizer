@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from zotero_summarizer.models.enrichment_config import OpenReviewConfig, PrestigeConfig
 from zotero_summarizer.models.feeds_config import FeedsConfig
 from zotero_summarizer.models.providers import (
     DefaultModelConfig,
@@ -20,6 +21,7 @@ __all__ = [
     "CorpusConfig",
     "FeedsConfig",
     "PrestigeConfig",
+    "OpenReviewConfig",
     "FullTextRefineConfig",
     "QualityReviewConfig",
     "ClassifierGateConfig",
@@ -72,41 +74,6 @@ class CorpusConfig(BaseModel):
     bm25_enabled: bool = Field(default=True)
     reranker_enabled: bool = Field(default=True)
     reranker_model: str = Field(default="BAAI/bge-reranker-v2-m3", min_length=1)
-
-
-class PrestigeConfig(BaseModel):
-    """OpenAlex-backed author/venue prestige enrichment.
-
-    Enabled by default: OpenAlex is keyless, cached (``cache_ttl_days``) and fails
-    soft to ``fallback_neutral``, so the field-normalized citation percentile is
-    worth having out of the box — leaving it off left the whole prestige subsystem
-    (blend weight, cold-start author prior, the Library "Prestige" facet) dark, so
-    every item read as "new". Air-gapped runs disable it: ``ZS_OFFLINE`` forces it
-    off (see ``services/_common.read_config``) and ``ZS_PRESTIGE_ENABLED=0`` opts
-    out explicitly. Blends h-index + venue impact + citations into the composite
-    score (weight ``weight``; rest of the LLM component is rebalanced).
-    """
-
-    enabled: bool = Field(default=True)  # ZS_OFFLINE forces off (read_config); ZS_PRESTIGE_ENABLED=0 opts out
-    weight: float = Field(default=0.15, ge=0.0, le=1.0)
-    cache_ttl_days: int = Field(default=30, ge=1, le=365)
-    fallback_neutral: float = Field(default=3.0, ge=1.0, le=5.0)
-    user_agent_email: str = Field(default="")
-    require_doi: bool = Field(default=False)
-    # --- Cold-start author-reputation prior --------------------------------
-    # A brand-new preprint has no field-normalized citation percentile yet, so
-    # citation prestige is structurally unavailable. When enabled, fall back to
-    # the authors' FIELD-NORMALIZED standing (median of their works' OpenAlex
-    # citation_normalized_percentile — the SAME signal the work-level prestige
-    # trusts, NOT raw h-index, which is field/career-biased per the Leiden
-    # Manifesto). The lift is asymmetric (can only raise above neutral, never
-    # demote) and capped (Matthew-effect dosage control). It applies ONLY at
-    # cold-start; once the paper accrues its own percentile, that takes over.
-    cold_start_author_lift: bool = Field(default=True)
-    cold_start_max_lift: float = Field(default=1.0, ge=0.0, le=2.0)
-    # Convexity of the percentile→lift map (p**gamma, gamma>=1): higher gamma
-    # means only genuinely top-standing authors approach the cap.
-    cold_start_gamma: float = Field(default=1.5, ge=1.0, le=4.0)
 
 
 class FullTextRefineConfig(BaseModel):
@@ -420,6 +387,7 @@ class GoalsConfig(BaseModel):
     corpus: CorpusConfig = Field(default_factory=CorpusConfig)
     feeds: FeedsConfig = Field(default_factory=FeedsConfig)
     prestige: PrestigeConfig = Field(default_factory=PrestigeConfig)
+    openreview: OpenReviewConfig = Field(default_factory=OpenReviewConfig)
     full_text_refine: FullTextRefineConfig = Field(default_factory=FullTextRefineConfig)
     recover_abstract: RecoverAbstractConfig = Field(default_factory=RecoverAbstractConfig)
     quality_review: QualityReviewConfig = Field(default_factory=QualityReviewConfig)

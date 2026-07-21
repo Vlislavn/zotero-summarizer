@@ -109,13 +109,16 @@ def test_add_to_library_materializes_and_labels_should_read(env, monkeypatch):
     db, appended = env
     pk = _record(db, 200)
     materialized: list[int] = []
+    labels: list[str | None] = []
     monkeypatch.setattr(
         review, "materialize_row",
-        lambda row, *, writer, used_keys, reason="x", collection_name="Inbox": materialized.append(int(row["feed_item_id"])) or "KEY1",
+        lambda row, *, writer, used_keys, reason="x", collection_name="Inbox", label_priority=None:
+            (materialized.append(int(row["feed_item_id"])), labels.append(label_priority))[0] or "KEY1",
     )
     res = daily_actions.add_to_library([pk])
     assert res["added"] == 1
     assert materialized == [200]
+    assert labels == [None]  # the machine Add button never writes the human label:* tag
     assert repo.get_label_verdict(db, "feed:200")["user_priority"] == "should_read"
     # Add is a soft pre-read interest signal → feed_interest tier (weight 0.3).
     assert (200, "should_read", "feed_interest") in appended
@@ -325,3 +328,115 @@ def test_carry_renders_best_effort_rebuilds_only_completed_feed_renders(monkeypa
         ("", "ZK4"),              # no feed key → skip
     ])
     assert built == ["ZK1"]
+
+
+def _stable_key(db: Path, pk: int) -> str:
+    conn = sqlite3.connect(str(db))
+    conn.row_factory = sqlite3.Row
+    try:
+        return str(conn.execute(
+            "SELECT stable_feed_key FROM processed_feed_items WHERE id=?", (pk,),
+        ).fetchone()["stable_feed_key"])
+    finally:
+        conn.close()
+
+
+def test_materialize_feed_verdict_adds_without_relabelling(env, monkeypatch):
+    """A positive verdict materializes the feed paper but records NO training
+    label — submit_verdict already saved the verdict; re-labelling here would
+    duplicate the golden row and clobber must/could with should_read."""
+    db, appended = env
+    pk = _record(db, 300, reading_priority="must_read")
+    key = _stable_key(db, pk)
+    materialized: list[tuple[int, str | None]] = []
+    monkeypatch.setattr(
+        review, "materialize_row",
+        lambda row, *, writer, used_keys, reason="x", collection_name="Inbox", label_priority=None:
+            materialized.append((int(row["feed_item_id"]), label_priority)) or "ZKNEW",
+    )
+    monkeypatch.setattr(daily_actions.deep_review, "copy_review", lambda *a, **k: None)
+    monkeypatch.setattr(daily_actions, "_attach_fulltext_best_effort", lambda keys: {"attached": 0})
+    monkeypatch.setattr(daily_actions, "_carry_renders_best_effort", lambda pairs: None)
+
+    res = daily_actions.materialize_feed_verdict(key, "must_read")
+    assert res == {"added": True, "zotero_key": "ZKNEW", "status": "added"}
+    # The verdict rides through to the label:<priority> tag write (feed_item_id, priority).
+    assert materialized == [(300, "must_read")]
+    assert appended == []  # anti-duplication: the add path records NO golden label
+
+
+def test_materialize_feed_verdict_idempotent_when_already_in_library(env, monkeypatch):
+    db, _appended = env
+    pk = _record(db, 310)
+    key = _stable_key(db, pk)
+    conn = sqlite3.connect(str(db))
+    try:
+        conn.execute(
+            "UPDATE processed_feed_items SET materialized_zotero_key='EXIST' WHERE id=?", (pk,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    called: list[str] = []
+    monkeypatch.setattr(review, "materialize_row", lambda *a, **k: called.append("x") or "NO")
+    res = daily_actions.materialize_feed_verdict(key, "must_read")
+    assert res == {"added": False, "zotero_key": "EXIST", "status": "already_in_library"}
+    assert called == []  # no second Zotero write for an already-materialized paper
+
+
+def test_materialize_feed_verdict_no_feed_row(env):
+    db, _ = env
+    res = daily_actions.materialize_feed_verdict("feed:g:doesnotexist", "must_read")
+    assert res == {"added": False, "zotero_key": None, "status": "no_feed_row"}
+
+
+def test_verdict_materialize_writes_label_tag(tmp_path, monkeypatch):
+    """The REAL materialize_row path stamps the verdict's label:<priority> tag on
+    the new Zotero item (the user's ground truth must reach Zotero even though it
+    was set on a feed paper). Runs the real body with a capturing writer."""
+    db = _build_db(tmp_path)
+    pk = _record(db, 500, reading_priority="dont_read")  # gate said dont; user says must
+    key = _stable_key(db, pk)
+    fake = _FakeSettings(db, tmp_path / "zot")
+    captured: dict = {}
+
+    class _CapWriter:
+        def __init__(self, *a, **k):
+            pass
+
+        def apply_feed_materialization(self, **kw):
+            captured.update(kw)
+            return {"item_key": kw["new_item_key"]}
+
+    monkeypatch.setattr(daily_actions, "get_settings", lambda: fake)
+    monkeypatch.setattr(daily_actions, "ZoteroWriter", _CapWriter)
+    monkeypatch.setattr(review, "get_settings", lambda: fake)  # materialize_row._conn
+    monkeypatch.setattr(daily_actions.deep_review, "copy_review", lambda *a, **k: None)
+    monkeypatch.setattr(daily_actions, "_attach_fulltext_best_effort", lambda keys: {"attached": 0})
+    monkeypatch.setattr(daily_actions, "_carry_renders_best_effort", lambda pairs: None)
+
+    res = daily_actions.materialize_feed_verdict(key, "must_read")
+    assert res["status"] == "added"
+    # The user's verdict — not the gate's dont_read — lands as the ground-truth tag.
+    assert "label:must_read" in captured["tags"]
+
+
+def test_add_feed_verdict_to_library_routing(monkeypatch):
+    """Router helper: only a positive verdict on a feed key delegates to the
+    materialize path; dont_read and non-feed (library) keys are no-ops."""
+    from zotero_summarizer.api.routes import _golden_helpers as h
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "zotero_summarizer.services.triage.daily_actions.materialize_feed_verdict",
+        lambda item_key, user_priority: calls.append((item_key, user_priority))
+        or {"added": True, "status": "added"},
+    )
+    # non-feed (library) key → no-op
+    assert h.add_feed_verdict_to_library("ABCD1234", "must_read")["add_status"] == "not_applicable"
+    # feed + dont_read → no-op
+    assert h.add_feed_verdict_to_library("feed:g:xyz", "dont_read")["add_status"] == "not_applicable"
+    # feed + positive → delegates once, carrying the verdict for the label tag
+    out = h.add_feed_verdict_to_library("feed:g:xyz", "must_read")
+    assert out["added_to_library"] is True and out["add_status"] == "added"
+    assert calls == [("feed:g:xyz", "must_read")]

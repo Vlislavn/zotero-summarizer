@@ -78,6 +78,7 @@ def _merge_family(members: list[Candidate]) -> Candidate:
         )
         preferred.quality = preferred.quality or m.quality
         preferred.coverage = preferred.coverage or m.coverage
+        preferred.peer_review = preferred.peer_review or m.peer_review
         preferred.review = preferred.review or m.review
         preferred.verdict = preferred.verdict or m.verdict
         preferred.relevance_band = preferred.relevance_band or m.relevance_band

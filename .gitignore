@@ -2,6 +2,9 @@
 venv/
 env/
 .claude/skills
+# Tool-local agent/CLI config (codex hooks, agent skills) — per-machine, not shared.
+.agents/
+.codex/
 __pycache__/
 *.pyc
 *.pyo

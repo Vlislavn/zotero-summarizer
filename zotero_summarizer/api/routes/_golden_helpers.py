@@ -1,6 +1,7 @@
 """Pure helpers for the golden routes (no HTTP). Re-imported by golden.py."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from zotero_summarizer.services import interaction_log
@@ -11,6 +12,43 @@ from zotero_summarizer.services.zotero.zotero import (
     get_library_reader,
     get_zotero_reader_or_raise,
 )
+
+LOGGER = logging.getLogger(__name__)
+
+# A fine positive verdict is a confident "I want to read this" — it now
+# materializes a Today feed paper into the library. dont_read is a rejection and
+# never adds.
+_POSITIVE_PRIORITIES = ("must_read", "should_read", "could_read")
+
+
+def add_feed_verdict_to_library(item_key: str, user_priority: str) -> dict[str, Any]:
+    """A positive verdict on a Today-feed paper materializes it into the Zotero
+    "Inbox". Users expect setting a verdict in the Today deep-review to add the
+    paper (the separate "Add to library" click used to be required, and papers
+    silently never reached Zotero). No-op for non-feed sources and for dont_read.
+
+    Returns the response-ready keys ``added_to_library`` / ``add_status`` /
+    ``add_error``. Never raises: the verdict is ALREADY durable at the call site,
+    so a Zotero failure is reported (surfaced in the API response + logged), not
+    propagated — the user authorized "the verdict should add it to the library"."""
+    from zotero_summarizer.services.triage import daily_actions
+
+    source = review_detail_svc.classify_item_key(item_key)
+    if source != review_detail_svc.SOURCE_FEED or user_priority not in _POSITIVE_PRIORITIES:
+        return {"added_to_library": False, "add_status": "not_applicable", "add_error": None}
+    try:
+        result = daily_actions.materialize_feed_verdict(item_key, user_priority)
+    except Exception as exc:  # noqa: BLE001 — verdict already durable; auto-add reported, not raised
+        LOGGER.warning("verdict auto-add to library for %s failed: %s", item_key, exc)
+        return {
+            "added_to_library": False, "add_status": "error",
+            "add_error": f"{type(exc).__name__}: {exc}",
+        }
+    return {
+        "added_to_library": bool(result.get("added")),
+        "add_status": str(result.get("status") or ""),
+        "add_error": None,
+    }
 
 
 def _golden_csv_path():

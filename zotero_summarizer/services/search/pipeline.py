@@ -51,6 +51,7 @@ class SearchDeps:
     config: GoalsConfig
     reranker_model: str
     openalex_client: Any = None
+    openreview_client: Any = None  # SIGNAL-ONLY peer-review channel; None → channel skipped
     unpaywall_client: Any = None
     extractor: Any = None
     library_finder: LibraryFinder | None = None
@@ -95,6 +96,7 @@ def default_deps() -> SearchDeps:
         config=config,
         reranker_model=config.corpus.reranker_model,
         openalex_client=_search_openalex_client(app, config),
+        openreview_client=app.openreview_client,
         unpaywall_client=app.unpaywall_client,
         extractor=app.pdf_extractor,
         library_finder=None,
@@ -111,6 +113,7 @@ def run_screen(raw_query: str, questions: list[str], *, deps: SearchDeps) -> Res
     plan = build_query_plan(intent)
     candidates = federate(
         plan, openalex_client=deps.openalex_client,
+        openreview_client=deps.openreview_client,
         library_finder=deps.library_finder, quota=deps.quota,
         crossref_mailto=deps.crossref_mailto,
     )

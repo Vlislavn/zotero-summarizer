@@ -13,6 +13,7 @@ import logging
 import sqlite3
 from typing import Any
 
+from zotero_summarizer.domain import label_tag_for_priority
 from zotero_summarizer.services import interaction_log
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.golden.goldenset import _PRIORITY_TO_RELEVANCE
@@ -322,6 +323,7 @@ def materialize_row(
     used_keys: set[str],
     reason: str = "review_apply",
     collection_name: str = "Inbox",
+    label_priority: str | None = None,
 ) -> str:
     """Materialize ONE feed row into Zotero and return the new item key.
 
@@ -330,6 +332,12 @@ def materialize_row(
     ``materialized_zotero_key`` and schedules the 7-day outcome window. Raises on
     failure — callers running a batch wrap each call (one locked row must not
     strand the rest).
+
+    ``label_priority`` (a reading priority like ``"must_read"``) stamps the user's
+    ground-truth ``label:<priority>`` tag on the new item IN THE SAME lock-tolerant
+    write — used when a deliberate verdict is what triggered the materialization
+    (Today deep-review). The daemon/Add paths leave it ``None`` (a machine decision
+    must never write the human label — see ``_tags_from_row``).
 
     Shared by :func:`apply_all_approved` (review UI, keeps the "Inbox" default) and
     ``services.daily_actions.add_to_library`` (Today's add-to-library, which passes a
@@ -347,6 +355,11 @@ def materialize_row(
     summary = stored if stored is not None else _summary_from_row(row)
     feed_payload = _feed_payload_from_row(row)
     tags = _tags_from_row(is_black_swan=False, black_swan_tag="")
+    if label_priority:
+        # The user's deliberate verdict → its ground-truth label:<priority> tag,
+        # written atomically with the item (the lock-tolerant materialization path,
+        # unlike zotero_set_label_tag which refuses while Zotero is open).
+        tags = [*tags, label_tag_for_priority(label_priority)]
     note_html = pending_service.build_triage_note_html(
         title=str(row.get("title") or ""),
         summary=summary,

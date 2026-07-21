@@ -32,11 +32,23 @@ export default function usePaperReview(itemKey, { onSaved, onQueueRefresh, deriv
   // already durable at that point; same soft-warning idiom as AnnotationVerdict's
   // flashStatus (data?.label_error || data?.note_error).
   const [verdictResult] = submitMutation.data || [];
+  // A positive verdict on a Today-feed paper now materializes it into Zotero
+  // (api/routes/golden.py submit_verdict → add_feed_verdict_to_library). Surface
+  // the outcome so the user KNOWS it was added — the paper appears in Zotero
+  // after the next Zotero restart (direct-DB write, same as "Add to library").
+  const addWarning = verdictResult?.add_error
+    ? `Not added to Zotero: ${verdictResult.add_error}`
+    : (verdictResult?.add_status === 'zotero_unavailable' || verdictResult?.add_status === 'zotero_pending')
+      ? 'Queued for Zotero — run "Apply all approved" / restart Zotero to finish adding'
+      : null;
   const submitWarning = verdictResult?.label_error
     ? `Zotero label not written: ${verdictResult.label_error}`
     : verdictResult?.note_error
       ? `Zotero note not written: ${verdictResult.note_error}`
-      : null;
+      : addWarning;
+  const submitNotice = verdictResult?.added_to_library
+    ? '✓ Added to your Zotero Inbox — appears after a Zotero restart'
+    : null;
 
   function refreshDetail() {
     queryClient.invalidateQueries({ queryKey: ['review-detail', itemKey] });
@@ -56,6 +68,7 @@ export default function usePaperReview(itemKey, { onSaved, onQueueRefresh, deriv
     submitting: submitMutation.isPending,
     submitError: submitMutation.error?.message || null,
     submitWarning,
+    submitNotice,
     deleting: deleteMutation.isPending,
     deleteError: deleteMutation.error?.message || null,
   };

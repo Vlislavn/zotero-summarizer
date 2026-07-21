@@ -19,6 +19,7 @@ from typing import Any
 from zotero_summarizer.integrations.arxiv import search_arxiv
 from zotero_summarizer.integrations.crossref import search_crossref
 from zotero_summarizer.integrations.europepmc import search_europepmc
+from zotero_summarizer.integrations.openreview import search_openreview
 from zotero_summarizer.integrations.semantic_scholar import search_semantic_scholar
 from zotero_summarizer.services._common import now_iso_z
 from zotero_summarizer.services.search._models import Candidate, Provenance
@@ -101,6 +102,37 @@ def _semantic_scholar_channel(query: str, quota: int, at: str) -> list[Candidate
     return _stamp(cands, source="semantic_scholar", variant=query, at=at)
 
 
+def _openreview_openalex_id(openalex_client: Any, title: str, year: int | None) -> str:
+    """Resolve a bare OpenAlex id for an OpenReview hit by title, so it can join
+    the same version family as an arXiv/OpenAlex/Crossref hit of the same paper.
+    No client, no match, or too-short/ambiguous title → "" (the candidate then
+    falls back to its title-hash self-id; no cross-source merge, no re-rank
+    effect either way — SIGNAL-ONLY)."""
+    if openalex_client is None:
+        return ""
+    work = openalex_client.fetch_work_by_title(title, year=year)
+    if work is None or not work.openalex_id:
+        return ""
+    return work.openalex_id.rsplit("/", 1)[-1]
+
+
+def _openreview_channel(query: str, *, or_client: Any, openalex_client: Any, quota: int, at: str) -> list[Candidate]:
+    hits = search_openreview(or_client, query, limit=quota)
+    cands = [
+        Candidate(
+            title=h.title, abstract=h.abstract, authors=h.authors, year=h.year, venue=h.venue,
+            url=h.url, doi=h.doi,
+            openalex_id=_openreview_openalex_id(openalex_client, h.title, h.year),
+            peer_review={
+                "tier": h.tier, "venue": h.venue, "venueid": h.venueid,
+                "mean_rating": h.mean_rating, "n_reviews": h.n_reviews,
+            },
+        )
+        for h in hits
+    ]
+    return _stamp(cands, source="openreview", variant="topic", at=at)
+
+
 def _variant_queries(variants: list[str], scalar: str, *, cap: int | None = None) -> list[str]:
     """Queries to issue for one lexical source: the plan's tight+bag ``*_variants``
     (order-preserving dedup, optionally capped), else the single ``scalar`` query — so
@@ -114,6 +146,7 @@ def federate(
     plan: Any,
     *,
     openalex_client: Any = None,
+    openreview_client: Any = None,
     library_finder: LibraryFinder | None = None,
     quota: int = 15,
     crossref_mailto: str | None = None,
@@ -138,6 +171,10 @@ def federate(
         tasks.append(lambda: _crossref_channel(plan.crossref, quota, at, crossref_mailto))
     if plan.semantic_scholar:
         tasks.append(lambda: _semantic_scholar_channel(plan.semantic_scholar, quota, at))
+    if plan.openreview and openreview_client is not None:
+        tasks.append(lambda: _openreview_channel(
+            plan.openreview, or_client=openreview_client, openalex_client=openalex_client, quota=quota, at=at
+        ))
     if library_finder is not None:
         lib_query = plan.library_expanded or plan.library_raw
         tasks.append(lambda: _stamp(

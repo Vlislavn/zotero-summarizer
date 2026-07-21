@@ -40,6 +40,7 @@ from zotero_summarizer.api.routes._golden_helpers import (
     _golden_csv_path,
     _load_all,
     _zotero_candidate_keys,
+    add_feed_verdict_to_library,
     log_retract_event,
     log_verdict_event,
 )
@@ -360,6 +361,12 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
                 note_error = f"{type(exc).__name__}: {exc}"
                 LOGGER.warning("verdict note write for %s failed: %s", req.item_key, exc)
 
+    # Positive verdict on a Today-feed paper → materialize into the Inbox (the
+    # helper no-ops for non-feed / dont_read and never blocks the durable verdict).
+    add_result = await asyncio.to_thread(
+        add_feed_verdict_to_library, req.item_key, req.user_priority,
+    )
+
     stored = repositories.get_label_verdict(_db_path(), req.item_key)
     if stored is None:
         raise RuntimeError(
@@ -372,6 +379,7 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
         "note_error": note_error,
         "label_written": label_written,
         "label_error": label_error,
+        **add_result,
     }
 
 
