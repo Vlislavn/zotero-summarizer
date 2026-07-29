@@ -23,6 +23,7 @@ import { Section } from '../components/paper/review/primitives.jsx';
 import {
   EMPTY_FILTERS, buildPredicate, goalHighKeys, isFilterActive,
   serializeFilters, hydrateFilters, prestigeBucketCounts,
+  DEFAULT_SORT, sortQueue, serializeSort, hydrateSort,
 } from '../utils/relevanceBands.js';
 import { isMachineTag } from '../utils/tags.js';
 
@@ -56,6 +57,9 @@ export default function LibraryReadNext() {
   // Client-side smart filters (Phase 1) — hydrated from the URL on mount so a
   // filtered view is shareable / survives reload, then mirrored back on change.
   const [clientFilters, setClientFilters] = useState(() => hydrateFilters(searchParams));
+  // Explicit Zotero-column sort (Title/Creator/Publication/Year/Date Added);
+  // 'best' = the server's blended order untouched. URL-persisted like filters.
+  const [sort, setSort] = useState(() => hydrateSort(searchParams));
   const [queue, setQueue] = useState([]);
   const [queueMeta, setQueueMeta] = useState({
     read_hidden: 0, total_unread: 0, status: 'ready', model_ready: true,
@@ -117,8 +121,8 @@ export default function LibraryReadNext() {
   // setSearchParams every render can loop, since its identity changes with the
   // location it just updated). Non-filter params are preserved.
   useEffect(() => {
-    const FILTER_KEYS = ['b', 'pr', 'g', 'w', 'q', 'vn'];
-    const target = serializeFilters(clientFilters);
+    const FILTER_KEYS = ['b', 'pr', 'g', 'w', 'q', 'vn', 's', 'sd'];
+    const target = { ...serializeFilters(clientFilters), ...serializeSort(sort) };
     const current = new URLSearchParams();
     for (const [k, v] of searchParams.entries()) {
       if (FILTER_KEYS.includes(k)) current.append(k, v);
@@ -130,7 +134,7 @@ export default function LibraryReadNext() {
       setSearchParams(merged, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientFilters]);
+  }, [clientFilters, sort]);
 
   const filterCtx = useMemo(() => ({
     goalHigh: goalHighKeys(queue),
@@ -139,6 +143,13 @@ export default function LibraryReadNext() {
   const filteredQueue = useMemo(
     () => queue.filter(buildPredicate(clientFilters, filterCtx)),
     [queue, clientFilters, filterCtx],
+  );
+  // What the list actually shows: client filters apply only when the model is
+  // ready (the bar is hidden otherwise), the explicit sort applies always —
+  // sorting by Title/Year needs no model.
+  const displayedQueue = useMemo(
+    () => sortQueue(queueMeta.model_ready ? filteredQueue : queue, sort),
+    [queueMeta.model_ready, filteredQueue, queue, sort],
   );
   const whyOptions = useMemo(
     () => [...new Set(queue.map((i) => i.why_reason).filter(Boolean))].sort(),
@@ -158,7 +169,10 @@ export default function LibraryReadNext() {
   // predictions bar say "N ready below" instead of implying nothing happened.
   const proposedCount = useMemo(() => queue.filter((i) => i.proposed_verdict).length, [queue]);
   const filtersActive = isFilterActive(clientFilters);
-  const filterSig = useMemo(() => JSON.stringify(serializeFilters(clientFilters)), [clientFilters]);
+  const filterSig = useMemo(
+    () => JSON.stringify({ ...serializeFilters(clientFilters), ...serializeSort(sort) }),
+    [clientFilters, sort],
+  );
 
   const clearClientFilters = useCallback(() => setClientFilters(EMPTY_FILTERS), []);
   const toggleBand = useCallback((band) => setClientFilters((f) => ({
@@ -265,15 +279,15 @@ export default function LibraryReadNext() {
   // a snapshot; it can go stale if the queue is re-ranked while a review tab is
   // open — acceptable ceiling, no live sync.
   useEffect(() => {
-    const displayed = queueMeta.model_ready ? filteredQueue : queue;
     // Only persist a REAL list — never the empty first-render default (queue starts
     // []), which would otherwise clobber a prior session's order until the async
-    // fetch resolves, blanking Prev/Next in an already-open review tab.
-    if (!displayed.length) return;
+    // fetch resolves, blanking Prev/Next in an already-open review tab. Follows the
+    // explicit sort too, so Prev/Next walks the list in the order the user sees.
+    if (!displayedQueue.length) return;
     try {
-      localStorage.setItem('zs.reviewOrder', JSON.stringify(displayed.map((i) => i.item_key)));
+      localStorage.setItem('zs.reviewOrder', JSON.stringify(displayedQueue.map((i) => i.item_key)));
     } catch { /* storage unavailable — the review page just hides its nav buttons */ }
-  }, [filteredQueue, queue, queueMeta.model_ready]);
+  }, [displayedQueue]);
 
   function selectCollection(key) {
     setSelectedCollection(key);
@@ -652,7 +666,10 @@ export default function LibraryReadNext() {
           key={`${selectedCollection}|${selectedTag}|${search}|${includeRead}`}
           // Client filters only apply while the bar is shown (model ready); when
           // the model isn't ready the bar is hidden, so don't silently filter.
-          items={queueMeta.model_ready ? filteredQueue : queue}
+          // The explicit Zotero-column sort applies in both cases (displayedQueue).
+          items={displayedQueue}
+          sort={sort}
+          onSortChange={setSort}
           loading={queueLoading}
           err={queueErr}
           includeRead={includeRead}

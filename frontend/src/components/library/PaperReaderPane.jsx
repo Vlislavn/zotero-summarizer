@@ -138,8 +138,9 @@ export default function PaperReaderPane({ itemKey, open, onOpenChange, hasPdf = 
               target="_blank"
               rel="noreferrer"
               className="font-semibold text-teal-700 hover:text-teal-800"
+              title="The standalone HTML artifact (no verdict/tag controls) — 'full review' elsewhere means the interactive page."
             >
-              Open full brief ↗
+              Open static brief ↗
             </a>
           </div>
         )}

@@ -13,8 +13,8 @@ import { Chip } from '../paper/review/primitives.jsx';
 //   Confirm  → one-tap submitVerdict(proposed); dont_read also queues the ❌ tag
 //              (same reject path as InlineAnnotate). Then onSaved() collapses +
 //              refetches, so the ratified paper drops out of the queue.
-//   Override → expand the row so the EXISTING InlineAnnotate → VerdictPanel shows,
-//              with the proposal pre-selected as derivedPriority. No new editor.
+//   Override → expand the row so the EXISTING InlineAnnotate → VerdictPanel shows
+//              (the human picks independently — FORK-A: no pre-selection). No new editor.
 //
 // AMBIGUITY GOES TO THE HUMAN (Tesler's Law): when the proposal is low-confidence
 // OR carries any quality flag, the one-tap Confirm is WITHHELD — only Override is

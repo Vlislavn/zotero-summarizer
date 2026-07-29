@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import InlineAnnotate from './InlineAnnotate.jsx';
 import OpenBriefButton from './OpenBriefButton.jsx';
+import ProposedVerdictCard from './ProposedVerdictCard.jsx';
 import ScoreHistogram from './ScoreHistogram.jsx';
 import { StatusBanner, formatShortDate, truncateAuthors } from './shared.jsx';
 import { pretty } from '../../utils/priorityLabels.js';
 import { CHIP_TONE, bandTone, gradeTone, BAND_LABEL } from '../paper/review/tones.js';
 import { Disclosure } from '../paper/review/primitives.jsx';
 import { humanizeError } from '../../utils/humanizeError.js';
+import { SORT_FIELDS, SORT_DEFAULT_DIR, DEFAULT_SORT } from '../../utils/relevanceBands.js';
 import Spinner from '../ui/Spinner.jsx';
 
 // Stage-2 "Read next": the single Library surface. Ranked queue over the WHOLE
@@ -79,7 +81,6 @@ function ExpandedPaperPanel({
         <InlineAnnotate
           itemKey={item.item_key}
           collections={collections}
-          derivedPriorityOverride={item.proposed_verdict?.proposed || null}
           onSaved={onSaved}
           onQueueRefresh={onQueueRefresh}
         />
@@ -104,9 +105,18 @@ export default function ReadNextView({
   // `searchQuery`; `rerankerLoading` = the cross-encoder is still downloading (we
   // show fusion order meanwhile); `semanticUnavailable` = corpus off (text match).
   semantic = false, searchQuery = '', rerankerLoading = false, semanticUnavailable = false,
+  // Explicit Zotero-column sort (Library owns the state; `items` arrive already
+  // sorted). 'best' = the blended server order.
+  sort = DEFAULT_SORT, onSortChange,
 }) {
   const computing = status === 'computing';
+  // Rescore is only actionable when scores are missing, stale, or in flight —
+  // when everything is scored and current, the button is noise (Hick's Law);
+  // retrain/hot-swap rescoring is automatic, so the quiet state needs no control.
   const errored = status === 'error';
+  const rescoreActionable =
+    computing || errored || scoresStale || !computedAt
+    || items.some((it) => typeof it.relevance_score !== 'number');
   const [expandedKey, setExpandedKey] = useState(null);
   const expandedPanelRef = useRef(null);
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
@@ -152,27 +162,62 @@ export default function ReadNextView({
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <div className="text-xs text-slate-600">
-          <strong>{totalUnread}</strong> papers,{' '}
-          {semantic
-            ? <>ranked by similarity to “{searchQuery}”.</>
-            : (modelReady
-              ? (
-                <span title="Best first: ranked by a blend of model relevance to you, goal match, and author/venue prestige — high-quality papers from strong authors/venues float to the top. Bands stay from the relevance score.">
-                  ranked best-first — relevance &amp; quality.
-                </span>
-              )
-              : 'ranked by recency (model not ready yet).')}
+        <div className="text-xs text-slate-600 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span><strong>{totalUnread}</strong> papers</span>
+          {/* Zotero-column sort (Jakob's Law: same field names as Zotero's item
+              table). One select + one direction toggle; 'Best match' restores the
+              blended server order and hides the toggle. */}
+          {onSortChange && (
+            <span className="inline-flex items-center gap-1">
+              <select
+                value={sort.field}
+                onChange={(e) => {
+                  const field = e.target.value;
+                  onSortChange(field === 'best' ? DEFAULT_SORT : { field, dir: SORT_DEFAULT_DIR[field] });
+                }}
+                className="px-1.5 py-0.5 rounded-md border border-slate-300 text-[11px] text-slate-700 bg-white"
+                title="Sort the list — same columns as Zotero (Title, Creator, Publication, Year, Date Added). Best match = ranked by relevance to you."
+                aria-label="Sort by"
+              >
+                {SORT_FIELDS.map((f) => (
+                  <option key={f.key} value={f.key}>{f.label}</option>
+                ))}
+              </select>
+              {sort.field !== 'best' && (
+                <button
+                  type="button"
+                  onClick={() => onSortChange({ ...sort, dir: sort.dir === 'asc' ? 'desc' : 'asc' })}
+                  className="px-1.5 py-0.5 rounded-md border border-slate-300 text-[11px] text-slate-700 bg-white hover:bg-slate-50"
+                  title={sort.dir === 'asc' ? 'Ascending — click for descending' : 'Descending — click for ascending'}
+                  aria-label="Toggle sort direction"
+                >
+                  {sort.dir === 'asc' ? '↑' : '↓'}
+                </button>
+              )}
+            </span>
+          )}
+          {sort.field === 'best' && (
+            semantic
+              ? <span>· ranked by similarity to “{searchQuery}”</span>
+              : (modelReady
+                ? (
+                  <span title="Best first: ranked by a blend of model relevance to you, goal match, and author/venue prestige — high-quality papers from strong authors/venues float to the top. Bands stay from the relevance score.">
+                    · relevance &amp; quality
+                  </span>
+                )
+                : <span>· ranked by recency (model not ready yet)</span>)
+          )}
           {readHidden > 0 && !includeRead && (
-            <span className="text-slate-400"> · {readHidden} read hidden</span>
+            <span className="text-slate-400">· {readHidden} read hidden</span>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {modelReady && (
-            // One control, not three. The score date is reference (→ title); the
-            // only thing worth saying out loud is "the model changed, rescore" —
-            // so the stale state IS the button (amber + named), the single accent
-            // (Von Restorff). Quiet when current.
+          {modelReady && rescoreActionable && (
+            // One control, not three, and only when actionable. The score date is
+            // reference (→ title); the only thing worth saying out loud is "the
+            // model changed, rescore" — the stale state IS the button (amber +
+            // named), the single accent (Von Restorff). Current + fully scored →
+            // no button at all.
             <button
               type="button"
               onClick={onRescore}
@@ -356,13 +401,13 @@ export default function ReadNextView({
                           🏷 {USER_PRIORITY_LABEL[it.user_priority]}
                         </span>
                       )}
-                      {/* The fleet's pre-decided verdict — quiet, info-only (one
-                          chip, not a card). Open the row to confirm/change it (it's
-                          pre-selected there). Hidden once you've set your own label. */}
+                      {/* The fleet's pre-decided verdict — quiet in-row marker;
+                          the actions live on the Confirm/Override card right
+                          below the row. Hidden once you've set your own label. */}
                       {!it.user_priority && it.proposed_verdict?.proposed && (
                         <span
                           className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200"
-                          title="The review fleet's suggested reading verdict (from cached deep-review signals). Open the paper to confirm or change it — it's pre-selected."
+                          title="The review fleet's suggested reading verdict (from cached deep-review signals) — Confirm or Override on the card below."
                         >
                           ◇ {pretty(it.proposed_verdict.proposed)}
                         </span>
@@ -432,6 +477,19 @@ export default function ReadNextView({
                   brief hasn't been generated yet, then opens it in a new tab. */}
               <OpenBriefButton itemKey={it.item_key} hasPdf={Boolean(it.has_pdf)} />
             </div>
+            {/* One-tap Confirm/Override for the fleet's proposal — the card
+                PredictionsBar's state line promises ("Confirm or Override on the
+                rows below"). Hidden while the row is expanded (Override opens the
+                full editor) and in select mode (bulk actions own the row then). */}
+            {!it.user_priority && it.proposed_verdict?.proposed
+              && expandedKey !== it.item_key && !selectMode && (
+              <ProposedVerdictCard
+                itemKey={it.item_key}
+                proposal={it.proposed_verdict}
+                onSaved={saveExpanded}
+                onOverride={() => setExpandedKey(it.item_key)}
+              />
+            )}
             {expandedKey === it.item_key && !isDesktop && (
               <ExpandedPaperPanel
                 item={it}

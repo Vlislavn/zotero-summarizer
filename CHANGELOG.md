@@ -22,14 +22,23 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Targeted Search recall: each lexical source adds a tight exact-match quoted-phrase pass (the user's leading clause) beside the concept bag, unioned pre-rerank (`intent._tight_query`, `QueryPlan.*_variants`, `federate`). The citation-weighted OpenAlex bag buried specific/new papers; `tools/bench_search_recall.py` lands the CAPA-target survey #2 that the bag missed.
 - Targeted Search candidates gain library-coverage annotation (`pipeline._annotate_library_coverage`): `in_library` (tri-state, fail-open) + `existing_zotero_key` + OpenAlex `cited_by_count`. Advisory — a paper already in Zotero still ranks; it flags which top results are missing.
 - Weekly paper-gap review: `/weekly-review` screens each goal via Targeted Search, curates ~12 papers with in-library flags, confirms with the user, then flags gaps; a SessionStart hook (`.claude/hooks/weekly_review_gate.sh`) nudges once/week when overdue.
+- Zotero-column sort in Library Read next: Best match / Title / Creator / Publication / Year / Date Added with Zotero's first-click directions and empty-cells-sink-last, URL-persisted (`s`/`sd`); queue recs now carry `publication_date`/`date_modified` (`_ranking._build_recs`).
+- The fleet's Confirm/Override card (`ProposedVerdictCard`) is now actually mounted on Read-next rows — one-tap Confirm of a confident proposal (low-confidence/flagged still forces Override), as PredictionsBar's state line always promised. Was built but never rendered; 3 regression tests.
 
 ### Removed
+
+- Re-label Audit page (`pages/Audit.jsx` + `api/auditApi.js` + the de-linked `/audit-page` route) — unreachable from the nav since Increment 3; old bookmarks land on Library via the catch-all.
+- Today card's per-card Quality expander (`QualityBlock`) — a second ordinal scale the card's own header forbids (one scale: the relevance band); full quality lives in the paper's review page.
+- The dead `derivedPriority` prop chain (VerdictPanel ignored it by design, FORK-A) — removed from VerdictPanel, ActionRail, PaperDetailView, AnnotationVerdict, InlineAnnotate, usePaperReview, ReadNextView.
 
 - OpenReview simplification (no behavior change): the duplicated `_disable_prestige_when_offline`/`_disable_openreview_when_offline` helpers collapsed to one parametrized `_disable_section_when_offline`; the unused per-paper `forum_reviews` rating fan-out is now opt-in (`search_openreview(..., with_ratings=True)`) — production reads only the venue+tier chip, so it stops the wasted GET (the two benches opt in to preserve their rating arms); the dead `openreview.limit` config field (`ZS_OPENREVIEW_LIMIT`) dropped (`docs/overrides.md` regenerated); two one-shot backfill scripts deleted (already run, `backfill_verdict_add.py` was also bit-rotted).
 - Tier-1 orphans: `measure_latency` moved out of `services/setup/calibration.py` to its only consumer domain (`tools/eval_small_models.py`, + regression test); test-only `feed_key_alias_validation_report` deleted (its test queries the ambiguity table directly). `dump-orphans` is now empty.
 
 ### Changed
 
+- Targeted Search page state survives tab switches: session id + typed drafts + target collection persist in `sessionStorage`; on remount the server-backed session is refetched and a still-running review resumes polling. A dead pointer clears itself.
+- Library Rescore button renders only when actionable (computing/error/stale/never-scored/unscored rows) — quiet-state noise removed; retrain hot-swap already rescores automatically.
+- One name per target: the interactive `/paper/:key` page is "Open full review ↗" everywhere (Today card renamed); the standalone HTML artifact link in the reader pane is now "Open static brief ↗".
 - Tier-6 redundancy → zero: the duplicated JSON state readers (`read_calibration`, `classifier_backup._read_meta`) folded into `services/_common.read_json_or_empty` (missing file → `{}`; an existing-but-corrupt file raises). Redundancy allowlist now EMPTY.
 - Sqlite openers unified: `storage.feeds.open_triage_conn` (api routes / app_rss / review / feeds `_common`) + `storage.corpus.open_corpus_conn` — `CorpusBM25` now runs the same WAL journal mode as `EmbeddingCache` on the shared corpus DB (latent inconsistency fixed).
 - Tier-7 slop → zero via param bundles: `_BrowserLib` (browser_fetch), `RunInputs` (faithbench `run_benchmark`/`judge_run`), `ChunkBudget` (`digest_for_strategy`), `_OofDiag` (`_training_metadata`); `_run_rubric` prompt lifted to its caller; tick adapter resolution split into `_tick_setup.py`. Slop allowlist now EMPTY.

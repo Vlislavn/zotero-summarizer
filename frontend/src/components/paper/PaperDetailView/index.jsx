@@ -43,7 +43,7 @@ import { Section, Disclosure } from '../review/primitives.jsx';
 //                the parent so it survives re-renders)
 //   collections: flat [{key,name,depth}] list for the CollectionEditor
 //   onDeepReviewDone, onTagsChanged, onCollectionsChanged: refetch callbacks
-//   verdict:     { derivedPriority, existing, onSubmit, onDelete, submitting,
+//   verdict:     { existing, onSubmit, onDelete, submitting,
 //                  submitError, submitWarning, deleting, deleteError } for the
 //                editable VerdictPanel (editable mode only)
 //   extras:      extra nodes appended after the body (readonly tails)
@@ -147,7 +147,6 @@ export default function PaperDetailView({
               ) : (
                 <VerdictPanel
                   itemKey={itemKey}
-                  derivedPriority={verdict.derivedPriority}
                   existingVerdict={verdict.existing}
                   onSubmit={verdict.onSubmit}
                   onDelete={verdict.onDelete}

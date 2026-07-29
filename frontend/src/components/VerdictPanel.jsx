@@ -5,10 +5,6 @@ import { formatShortDate } from './library/shared.jsx';
 // Verdict editor for a single paper.
 // Props:
 //   itemKey: string
-//   derivedPriority: string   — the model's guess. FORK-A: NOT used to preselect
-//                               (the verdict is the model's own training ground
-//                               truth, so the human picks independently); kept in
-//                               the signature for caller compatibility.
 //   existingVerdict: { id, item_key, user_priority, comment, created_at } | null
 //   onSubmit: ({ user_priority, comment }) => void
 //   onDelete: () => void
@@ -39,7 +35,6 @@ const PRIORITY_TEXT = {
 
 export default function VerdictPanel({
   itemKey,
-  derivedPriority = null, // eslint-disable-line no-unused-vars -- see FORK-A note above
   existingVerdict = null,
   onSubmit = () => {},
   onDelete = () => {},

@@ -250,6 +250,9 @@ def _build_recs(
             "user_priority": user_priority,
             "has_pdf": bool(it.get("has_pdf")),
             "date_added": it.get("date_added") or "",
+            # Zotero-column sort fields (client-side sort in the Library UI).
+            "publication_date": it.get("publication_date") or "",
+            "date_modified": it.get("date_modified") or "",
             "read": is_read,
             "relevance_score": relevance_score,
             "why_reason": entry["why_reason"] if entry else None,

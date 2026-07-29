@@ -187,17 +187,36 @@ function CandidateCard({ cand, onAdd }) {
   );
 }
 
+// The search session lives on the SERVER; the page only needs to survive a tab
+// switch with the POINTER (session id) + the typed drafts (Working Memory: the
+// system remembers, not the user). sessionStorage, not URL — a session id is not
+// a shareable address, and it dies with the browser tab, matching its lifetime.
+const SS_KEY = 'zs.searchSession';
+function loadSaved() {
+  try { return JSON.parse(sessionStorage.getItem(SS_KEY)) || {}; } catch { return {}; }
+}
+
 export default function Search() {
-  const [query, setQuery] = useState('');
-  const [questions, setQuestions] = useState('');
+  const [saved] = useState(loadSaved);   // snapshot once, at mount
+  const [query, setQuery] = useState(saved.q || '');
+  const [questions, setQuestions] = useState(saved.qs || '');
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   // Target Zotero collection for per-result "Add to library" ('' = server "Inbox").
-  const [targetCollection, setTargetCollection] = useState('');
+  const [targetCollection, setTargetCollection] = useState(saved.tc || '');
   const pollRef = useRef(null);
+  // The id to persist while no live session exists yet (cleared if it turns out dead).
+  const savedIdRef = useRef(saved.id || null);
 
   useEffect(() => () => clearInterval(pollRef.current), []);
+
+  // Mirror pointer + drafts to sessionStorage on every change.
+  useEffect(() => {
+    sessionStorage.setItem(SS_KEY, JSON.stringify(
+      { id: session?.id || savedIdRef.current, q: query, qs: questions, tc: targetCollection },
+    ));
+  }, [session?.id, query, questions, targetCollection]);
 
   // File one candidate into the chosen collection, then stamp its returned key on
   // the local session so the card flips to "✓ In library" without waiting for a poll.
@@ -221,6 +240,26 @@ export default function Search() {
     }, 3000);
   }, []);
 
+  // Rehydrate the last session on remount (tab switch / reload): refetch from the
+  // server (source of truth) and resume polling if the review is still running.
+  // A dead pointer (server restarted, session GC'd) clears itself silently.
+  useEffect(() => {
+    if (!saved.id) return undefined;
+    let cancelled = false;
+    getSession(saved.id)
+      .then((sess) => {
+        if (cancelled) return;
+        setSession(sess);
+        if (sess.status === 'reviewing') pollUntilDone(sess.id);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        savedIdRef.current = null;          // dead pointer — stop persisting it
+        sessionStorage.removeItem(SS_KEY);
+      });
+    return () => { cancelled = true; };
+  }, [saved.id, pollUntilDone]);
+
   const runScreen = useCallback(async (e) => {
     e?.preventDefault();
     if (!query.trim()) return;
@@ -230,6 +269,7 @@ export default function Search() {
     try {
       const qs = questions.split('\n').map((q) => q.trim()).filter(Boolean);
       const sess = await screenApi({ query: query.trim(), questions: qs });
+      savedIdRef.current = sess.id;
       setSession(sess);
       if (sess.status === 'reviewing') pollUntilDone(sess.id);  // auto deep-review started server-side
     } catch (err) {

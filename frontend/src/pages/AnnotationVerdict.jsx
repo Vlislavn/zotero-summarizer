@@ -448,7 +448,6 @@ export default function AnnotationVerdict() {
             )}
             <VerdictPanel
               itemKey={detail.item_key}
-              derivedPriority={detail.provenance?.derived_priority}
               existingVerdict={detail.verdict}
               onSubmit={handleVerdictSubmit}
               onDelete={handleVerdictDelete}

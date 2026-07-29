@@ -1,9 +1,10 @@
-// Pure, client-side filter model for the Library reading queue.
+// Pure, client-side filter + sort model for the Library reading queue.
 //
 // Mirrors zotero_summarizer/domain.py:57-59 (score_to_priority thresholds) so the
-// client bands match the server's banding exactly. Everything here is display /
-// filter only — callers use `buildPredicate` with `Array.prototype.filter`, which
-// preserves the API's order, so the goal-blended ranking is never reshuffled.
+// client bands match the server's banding exactly. Filtering uses `buildPredicate`
+// with `Array.prototype.filter`, which preserves the API's order — the goal-blended
+// ranking is only reshuffled when the user picks an EXPLICIT sort (`sortQueue`,
+// Zotero-column semantics); the default 'best' sort is the identity.
 
 export const BAND_MUST = 4.5;
 export const BAND_SHOULD = 3.5;
@@ -180,4 +181,78 @@ export function hydrateFilters(searchParams) {
   const quality = ['high', 'low'].includes(get('q')) ? get('q') : 'any';
   const venue = get('vn') || '';
   return { bands, prestige, goal, why, quality, venue };
+}
+
+// ---------- Zotero-column sort (explicit user sort over the loaded queue) ------
+// Field names deliberately mirror Zotero's item-table columns (Jakob's Law:
+// Title / Creator / Publication / Year / Date Added), so the mental model
+// transfers 1:1. 'best' = the server's blended ranking, untouched (identity).
+export const SORT_FIELDS = [
+  { key: 'best', label: 'Best match' },
+  { key: 'title', label: 'Title' },
+  { key: 'creator', label: 'Creator' },
+  { key: 'publication', label: 'Publication' },
+  { key: 'year', label: 'Year' },
+  { key: 'dateAdded', label: 'Date Added' },
+];
+
+// First-click direction per field, matching Zotero: text columns ascend,
+// date-ish columns show newest first.
+export const SORT_DEFAULT_DIR = {
+  title: 'asc', creator: 'asc', publication: 'asc', year: 'desc', dateAdded: 'desc',
+};
+
+export const DEFAULT_SORT = { field: 'best', dir: 'desc' };
+
+// publication_date is Zotero's free-form `date` string — the year is the first
+// 4-digit run, wherever it sits ("2024-05-01", "May 2024", "2024").
+function pubYear(it) {
+  const m = /\b(\d{4})\b/.exec(it.publication_date || '');
+  return m ? Number(m[1]) : null;
+}
+
+const SORT_VALUE = {
+  title: (it) => (it.title || '').toLowerCase() || null,
+  creator: (it) => (it.authors || '').toLowerCase() || null,
+  publication: (it) => (it.venue || '').toLowerCase() || null,
+  year: pubYear,
+  // Zotero dateAdded is "YYYY-MM-DD HH:MM:SS" — lexicographic order IS
+  // chronological order, no parsing needed.
+  dateAdded: (it) => it.date_added || null,
+};
+
+// Stable explicit sort; rows missing the field sink to the END in BOTH
+// directions (Zotero-like: an empty cell never leads the column).
+export function sortQueue(items, sort) {
+  const field = sort?.field || 'best';
+  if (field === 'best') return items;
+  const value = SORT_VALUE[field];
+  const sign = sort.dir === 'asc' ? 1 : -1;
+  return [...(items || [])].sort((a, b) => {
+    const va = value(a);
+    const vb = value(b);
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1;
+    if (vb == null) return -1;
+    const cmp = typeof va === 'number' ? va - vb : va.localeCompare(vb);
+    return cmp * sign;
+  });
+}
+
+// URL (de)serialize for the sort — same compact-keys convention as the filters.
+export function serializeSort(sort) {
+  const out = {};
+  if (sort && sort.field !== 'best' && SORT_VALUE[sort.field]) {
+    out.s = sort.field;
+    if (sort.dir !== SORT_DEFAULT_DIR[sort.field]) out.sd = sort.dir;
+  }
+  return out;
+}
+
+export function hydrateSort(searchParams) {
+  const field = searchParams.get('s');
+  if (!field || !SORT_VALUE[field]) return DEFAULT_SORT;
+  const sd = searchParams.get('sd');
+  const dir = sd === 'asc' || sd === 'desc' ? sd : SORT_DEFAULT_DIR[field];
+  return { field, dir };
 }

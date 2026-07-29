@@ -8,15 +8,15 @@
 //                      relevance band. Prestige and full-text Quality A–D are
 //                      Stage-2 reading signals that live in the Library, not here.
 //
-// The relevance band is DISTINCT from the full-text Quality A–D grade
-// (QualityBlock): different vocabulary (top pick / strong / fair / weak), and a
-// full-card accent vs. a small inline letter chip.
+// The relevance band uses cull-card vocabulary (top pick / strong / fair / weak),
+// deliberately NOT the Stage-2 must/should/could action labels. The full-text
+// Quality A–D assessment lives in the full brief ("Open full brief ↗"), not here —
+// the old per-card QualityBlock expander was a second ordinal scale this header
+// forbids, so it was subtracted (Occam's Razor / Cognitive Load).
 
 import AuthorByline from '../AuthorByline.jsx';
 import { scoreToBand, BAND_ACTIVE_CLS } from '../../utils/relevanceBands.js';
 import { Link } from 'react-router-dom';
-import { Chip } from '../paper/review/primitives.jsx';
-import { gradeTone, bandTone, BAND_LABEL } from '../paper/review/tones.js';
 
 // Relevance-band → card accent + tint (Von Restorff): treasures full-weight,
 // trash desaturated. Keyed by the same band names as relevanceBands.scoreToBand.
@@ -42,82 +42,6 @@ function parseAuthorsString(s) {
     .map((name) => name.trim())
     .filter(Boolean)
     .map((name) => ({ name, h_index: null }));
-}
-
-// ---------------------------------------------------------------------------
-// Quality — full-text peer-review assessment (services.quality_review), shown
-// SEPARATELY from relevance. Grade + rigor band inline; the coverage-based
-// checklist signal on expand — mirrors the brief's QualityHeadline. NOT the
-// digest's unvalidated 1-5 self-scores (coverage_fraction is their honest
-// replacement — see models/triage.py QualityEval).
-// ---------------------------------------------------------------------------
-
-function QualityBlock({ quality }) {
-  const q = quality || {};
-  const grade = q.grade || '';
-  if (q.basis === 'non_paper') {
-    // Not a research paper (blog/news/web page) — scientific quality criteria don't
-    // apply; it was read for relevance only, so don't imply a missing assessment.
-    return (
-      <div className="mt-1.5 text-[11px] text-slate-500">
-        <span className="uppercase tracking-wider font-semibold text-slate-500">Quality</span>{' '}
-        relevance read <span className="text-slate-400">(not a research paper)</span>
-      </div>
-    );
-  }
-  if (!grade) {
-    const why = q.basis === 'not_assessed' ? 'no open-access PDF' : 'not in the top-K reviewed set';
-    return (
-      <div className="mt-1.5 text-[11px] text-slate-400">
-        <span className="uppercase tracking-wider font-semibold text-slate-500">Quality</span>{' '}
-        not assessed <span className="text-slate-300">({why})</span>
-      </div>
-    );
-  }
-  const band = String(q.quality_band || '');
-  const redFlags = (q.red_flags || []).map((x) => String(x || '').trim()).filter(Boolean);
-  const met = Number(q.coverage_met) || 0;
-  const applicable = Number(q.coverage_applicable) || 0;
-  const standard = String(q.coverage_standard || '');
-  return (
-    <div className="mt-1.5">
-      <div className="flex items-center gap-2 text-xs flex-wrap">
-        <span className="uppercase tracking-wider font-semibold text-slate-500">Quality</span>
-        <Chip
-          tone={gradeTone(grade)}
-          title="Full-text peer-review grade (A best – D weak), independent of relevance to you"
-        >
-          {grade}
-        </Chip>
-        {BAND_LABEL[band] && (
-          <Chip tone={bandTone(band)} title="Reference-free rigor band from the full-text checklist">
-            {BAND_LABEL[band]}
-          </Chip>
-        )}
-      </div>
-      <details className="group mt-1">
-        <summary className="cursor-pointer text-[11px] uppercase tracking-wider font-semibold text-slate-500 hover:text-slate-700 select-none">
-          Quality review <span className="text-slate-400 normal-case font-normal">· from full text</span>
-        </summary>
-        <div className="mt-1.5 space-y-1 text-[11px] text-slate-600">
-          {applicable > 0 ? (
-            <p>
-              {standard && <span className="font-semibold text-slate-700">{standard} · </span>}
-              {met}/{applicable} applicable checklist items met
-            </p>
-          ) : (
-            <p className="text-slate-400">no checklist coverage recorded</p>
-          )}
-          {redFlags.length > 0 && (
-            <ul className="list-disc pl-4 text-rose-800">
-              {redFlags.slice(0, 3).map((f) => <li key={f}>{f}</li>)}
-            </ul>
-          )}
-          <p className="text-[10px] text-slate-400 mt-1.5">A = exceptional · B = solid · C = mixed · D = weak</p>
-        </div>
-      </details>
-    </div>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -222,17 +146,16 @@ export default function PaperCard({ paper, selected, onToggleSelect }) {
             </p>
           )}
 
-          <QualityBlock quality={paper.quality} />
-
-          {/* Open the full brief — the SAME library review page (/paper/:key), keyed by
+          {/* Open the full review — the SAME library review page (/paper/:key), keyed by
               the durable stable_feed_key (the top feed papers carry a rendered brief +
-              the in-place review; others show the review). Reuse, not a new view. */}
+              the in-place review; others show the review). Reuse, not a new view; one
+              name per target (Jakob): "full review" = the interactive page, everywhere. */}
           {paper.stable_feed_key && (
             <Link
               to={`/paper/${encodeURIComponent(paper.stable_feed_key)}`}
               className="mt-2 inline-block text-[11px] font-medium text-teal-700 hover:text-teal-900 hover:underline underline-offset-2"
             >
-              Open full brief ↗
+              Open full review ↗
             </Link>
           )}
         </div>

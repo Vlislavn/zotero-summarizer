@@ -19,7 +19,6 @@ export default function ActionRail({
     <div className="space-y-5">
       <VerdictPanel
         itemKey={itemKey}
-        derivedPriority={verdict.derivedPriority}
         existingVerdict={verdict.existing}
         onSubmit={verdict.onSubmit}
         onDelete={verdict.onDelete}

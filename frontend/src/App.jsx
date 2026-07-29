@@ -6,7 +6,6 @@ import Library from './pages/Library.jsx';
 import Search from './pages/Search.jsx';
 import PaperReviewPage from './pages/PaperReviewPage.jsx';
 import Ops from './pages/Ops.jsx';
-import Audit from './pages/Audit.jsx';
 import SetupFlow from './pages/SetupFlow.jsx';
 import SetupGate from './components/setup/SetupGate.jsx';
 
@@ -59,12 +58,8 @@ export default function App() {
             <Route path="/triage" element={<RedirectTo to="/ops" extra={{ tab: 'triage' }} />} />
             <Route path="/pending" element={<RedirectTo to="/ops" extra={{ tab: 'pending' }} />} />
 
-            {/* Re-label Audit de-linked from the nav (Increment 3). The page is
-                kept and still routable; /audit redirects to Library so an old
-                bookmark never 404s. */}
-            <Route path="/audit-page" element={<Audit />} />
-            <Route path="/audit" element={<Navigate to="/library" replace />} />
-
+            {/* Re-label Audit page removed (unused, no nav entry since Increment 3);
+                old /audit and /audit-page bookmarks land on Library via the catch-all. */}
             <Route path="*" element={<Navigate to="/library" replace />} />
           </Routes>
         </SetupGate>

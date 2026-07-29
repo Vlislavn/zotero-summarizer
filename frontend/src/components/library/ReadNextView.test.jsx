@@ -101,3 +101,37 @@ describe('ReadNextView mobile expansion', () => {
     expect(screen.getByTestId('brief-K2').dataset.hasPdf).toBe('false');
   });
 });
+
+describe('ProposedVerdictCard wiring', () => {
+  const proposal = { proposed: 'should_read', confidence: 0.85, flags: [] };
+
+  it('shows one-tap Confirm for a confident proposal, hides it once the row is expanded', () => {
+    renderView({ items: [{ ...items[0], proposed_verdict: proposal }, items[1]] });
+
+    // Card renders under the K1 row with both actions.
+    expect(screen.getByRole('button', { name: /Confirm — Should read/i })).toBeTruthy();
+    const override = screen.getByRole('button', { name: 'Override' });
+
+    // Override expands the row (full editor) and the card gives way to it.
+    fireEvent.click(override);
+    expect(screen.getByTestId('inline-annotate').textContent).toContain('K1');
+    expect(screen.queryByRole('button', { name: /Confirm — /i })).toBeNull();
+  });
+
+  it('withholds Confirm on a low-confidence or flagged proposal', () => {
+    renderView({
+      items: [{ ...items[0], proposed_verdict: { proposed: 'could_read', confidence: 0.4, flags: [] } }],
+    });
+
+    expect(screen.queryByRole('button', { name: /Confirm — /i })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Override' })).toBeTruthy();
+  });
+
+  it('never renders the card for a row the user already labelled', () => {
+    renderView({
+      items: [{ ...items[0], user_priority: 'must_read', proposed_verdict: proposal }],
+    });
+
+    expect(screen.queryByRole('button', { name: 'Override' })).toBeNull();
+  });
+});

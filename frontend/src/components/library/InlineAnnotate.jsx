@@ -11,15 +11,9 @@ import usePaperReview from '../../hooks/usePaperReview.js';
 // is ONE reject path (Occam's Razor). onSaved collapses + refetches (a
 // verdicted/engagement-tagged paper drops out); onQueueRefresh refetches without
 // collapsing.
-export default function InlineAnnotate({
-  itemKey, collections = [], onSaved, onQueueRefresh,
-  // Override path from the Confirm/Override card: when set, pre-select the fleet's
-  // PROPOSED verdict in the picker instead of the server's derived priority — so
-  // "Override" lands on the proposal, one click from the same decision.
-  derivedPriorityOverride = null,
-}) {
+export default function InlineAnnotate({ itemKey, collections = [], onSaved, onQueueRefresh }) {
   const { detail, isLoading, error, refreshDetail, onTagsChanged, onCollectionsChanged, verdict } =
-    usePaperReview(itemKey, { onSaved, onQueueRefresh, derivedPriorityOverride });
+    usePaperReview(itemKey, { onSaved, onQueueRefresh });
 
   return (
     // A single connecting accent rule ties the expanded review to its row (Law
