@@ -9,12 +9,14 @@ item — Inbox + matched collections + tags + v3 note — flipping its DB decisi
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.models import SummarizeResponse
+from zotero_summarizer.services.library.review_summary import pick_stored_summary
 from zotero_summarizer.services.zotero import pending as pending_service
 from zotero_summarizer.storage import feeds as feeds_storage
 from zotero_summarizer.services.triage.feeds._common import (
@@ -82,6 +84,18 @@ def _summary_from_row(row: dict[str, Any]) -> SummarizeResponse:
         corpus_affinity_score=float(row.get("corpus_affinity") or 0.0),
         matched_goal="",
     )
+
+
+def _materialize_summary(pick: _PendingScoredRow) -> tuple[SummarizeResponse, str]:
+    """Prefer live refinement, then the already-persisted exact model artifact."""
+    if pick.refined_summary is not None:
+        return pick.refined_summary, "refined_summary"
+    try:
+        stored = pick_stored_summary(pick.row)
+    except (ValueError, TypeError, json.JSONDecodeError) as exc:
+        LOGGER.warning("invalid persisted summary for %s; using legacy fallback: %s", pick.key, exc)
+        stored = None
+    return (stored, "persisted_summary") if stored is not None else (_summary_from_row(pick.row), "legacy_sparse")
 
 
 def _feed_payload_from_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -192,7 +206,7 @@ def materialize_pick(
     try:
         new_key = _generate_zotero_key(used_keys)
         pick.row["planned_zotero_key"] = new_key
-        summary = pick.refined_summary or _summary_from_row(pick.row)
+        summary, summary_source = _materialize_summary(pick)
         feed_payload = _feed_payload_from_row(pick.row)
         matched = _matched_collections_from_row(pick.row)
         tags = _tags_from_row(is_black_swan=pick.is_black_swan, black_swan_tag=ctx.black_swan_tag)
@@ -203,6 +217,10 @@ def materialize_pick(
             surprise_score=pick.surprise_score if pick.is_black_swan else None,
             run_id=run_id,
         )
+        words = len(re.findall(r"\b[\w'-]+\b", re.sub(r"<[^>]+>", " ", note_html)))
+        LOGGER.info("[%s] note source=%s words=%d sections=%d generic_fallback=%s",
+                    run_id, summary_source, words, note_html.count("<h2>"),
+                    summary_source == "legacy_sparse")
         writer.apply_feed_materialization(
             new_item_key=new_key,
             feed_payload=feed_payload,

@@ -1,8 +1,7 @@
-"""Phase-0 bootstrap: absent goals.yaml/.env are created with SAFE defaults;
-present files are left untouched; the DB migration runs when the triage DB is
-absent. Idempotent + non-destructive."""
+"""Phase-0 bootstrap is idempotent, non-destructive, and migration-safe."""
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 from zotero_summarizer.services._common import read_config
@@ -74,6 +73,25 @@ def test_idempotent_second_run_is_noop(tmp_path):
     assert second.created_goals is False
     assert second.created_env is False
     assert second.migrated_db is False
+
+
+def test_existing_triage_still_migrates_missing_corpus(tmp_path):
+    settings = _settings(tmp_path)
+    settings.data_dir.mkdir(parents=True)
+    sqlite3.connect(settings.triage_db_path).close()
+
+    result = bootstrap_phase0(settings)
+
+    assert result.migrated_db is False
+    for db_path, namespace in (
+        (settings.triage_db_path, "triage"),
+        (settings.corpus_db_path, "corpus"),
+    ):
+        with sqlite3.connect(db_path) as conn:
+            version = conn.execute(
+                "SELECT version FROM schema_migrations WHERE namespace = ?", (namespace,),
+            ).fetchone()
+        assert version == (2,)
 
 
 def test_default_goals_validate_as_goalsconfig(tmp_path):

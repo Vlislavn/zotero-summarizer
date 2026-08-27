@@ -21,12 +21,12 @@ from zotero_summarizer.domain import VERDICT_SOURCE_MACHINE_ADD, VERDICT_SOURCE_
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.services import interaction_log
+from zotero_summarizer.services.golden import label_verdicts
 from zotero_summarizer.services.library import deep_review, fulltext, review
 from zotero_summarizer.services._common import LOGGER, is_app_rss_source
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.storage import feeds as feeds_storage
 from zotero_summarizer.storage.feed_identity import LEGACY_FEED_PREFIX, row_feed_keys
-from zotero_summarizer.storage import repositories
 from zotero_summarizer.storage import rss as rss_storage
 
 # Provisional positive label for "add to library": the user signalled the
@@ -84,11 +84,12 @@ def _record_label(
         original_priority = (row.get("reading_priority") or "").strip() or "unknown"
     review.append_to_golden(row, label=priority, note=note, signal_tier=signal_tier)
     item_key = _golden_key(row)
-    repositories.insert_or_update_label_verdict(
+    label_verdicts.set_label_verdict(
         _db_path(),
         item_key=item_key,
         original_derived_priority=original_priority,
         user_priority=priority,
+        surface=surface,
         comment=note,
         source=source,
     )
@@ -196,12 +197,12 @@ def _mark_pending(row: dict[str, Any], reason: str) -> None:
 
 def _materialize_one(
     row: dict[str, Any], *, writer: Any, used_keys: set[str], collection_name: str,
-    new_keys: list[str], materialized: list[tuple[str, str]], reason: str,
+    materialized: list[tuple[str, str]], reason: str,
     label_priority: str | None = None,
 ) -> str:
     """Create ONE Zotero item from a feed row + carry its in-place deep review
-    onto the new library key. Appends to ``new_keys``/``materialized`` for the
-    caller's batch post-processing (fulltext + render carry). Raises on Zotero
+    onto the new library key. Appends to ``materialized`` for the caller's batch
+    post-processing (fulltext + render carry). Raises on Zotero
     failure — the caller decides whether to park the row pending. Records NO
     training label: the caller owns labelling.
 
@@ -211,7 +212,6 @@ def _materialize_one(
         row, writer=writer, used_keys=used_keys, reason=reason,
         collection_name=collection_name, label_priority=label_priority,
     )
-    new_keys.append(new_key)
     sfk = str(row.get("stable_feed_key") or "")
     deep_review.copy_review(sfk, new_key)
     materialized.append((sfk, new_key))
@@ -231,7 +231,6 @@ def add_to_library(item_ids: list[int], target_collection_key: str | None = None
     used_keys: set[str] = set()
     added = 0
     pending_sync = 0
-    new_keys: list[str] = []
     materialized: list[tuple[str, str]] = []  # (stable_feed_key, new_zotero_key) for render carry
     failed: list[dict[str, Any]] = []
     for row in rows:
@@ -264,7 +263,7 @@ def add_to_library(item_ids: list[int], target_collection_key: str | None = None
                     # Carries the in-place Today review onto the new library key.
                     _materialize_one(
                         row, writer=writer, used_keys=used_keys,
-                        collection_name=collection_name, new_keys=new_keys,
+                        collection_name=collection_name,
                         materialized=materialized, reason="today_add",
                     )
                 except Exception as exc:
@@ -284,10 +283,10 @@ def add_to_library(item_ids: list[int], target_collection_key: str | None = None
                 "title": str(row.get("title") or ""),
                 "error": str(exc),
             })
-    # Auto-fetch arXiv full text for the just-added papers (user-requested, 2026-06).
+    # Auto-fetch OA full text for the just-added papers.
     # Best-effort: the items are already in Zotero, so a fetch failure must NOT fail the
     # add — the bulk "Fetch full text" button can complete it later.
-    fulltext = _attach_fulltext_best_effort(new_keys)
+    fulltext = _attach_fulltext_best_effort(materialized)
     # Carry the heavy brief onto the library: a feed paper that already had a render
     # rebuilds under its new Zotero key (after fulltext attach, so the real PDF is present).
     _carry_renders_best_effort(materialized)
@@ -378,12 +377,11 @@ def materialize_feed_verdict(item_key: str, user_priority: str) -> dict[str, Any
         _mark_pending(row, "verdict_add_zotero_pending")
         return {"added": False, "zotero_key": None, "status": "zotero_unavailable"}
 
-    new_keys: list[str] = []
     materialized: list[tuple[str, str]] = []
     try:
         new_key = _materialize_one(
             row, writer=writer, used_keys=set(), collection_name="Inbox",
-            new_keys=new_keys, materialized=materialized, reason="verdict_add",
+            materialized=materialized, reason="verdict_add",
             label_priority=user_priority,
         )
     except Exception as exc:  # noqa: BLE001 — add-to-library boundary: park pending, report to caller
@@ -391,7 +389,7 @@ def materialize_feed_verdict(item_key: str, user_priority: str) -> dict[str, Any
         LOGGER.warning("materialize_feed_verdict: Zotero export pending for %s: %s", item_key, exc)
         return {"added": False, "zotero_key": None, "status": "zotero_pending"}
 
-    _attach_fulltext_best_effort(new_keys)
+    _attach_fulltext_best_effort(materialized)
     _carry_renders_best_effort(materialized)
     return {"added": True, "zotero_key": new_key, "status": "added"}
 
@@ -416,24 +414,25 @@ def _carry_renders_best_effort(pairs: list[tuple[str, str]]) -> None:
             LOGGER.warning("add_to_library: render carry failed for %s", new_key, exc_info=True)
 
 
-def _attach_fulltext_best_effort(new_keys: list[str]) -> dict[str, Any]:
-    """Fetch + attach arXiv PDFs for freshly-materialized items. Never raises —
-    a failure here is non-fatal to the add (documented best-effort boundary)."""
-    if not new_keys:
+def _attach_fulltext_best_effort(materialized: list[tuple[str, str]]) -> dict[str, Any]:
+    """Attach cached-review or newly acquired OA PDFs. Never fails the Add."""
+    if not materialized:
         return {"attached": 0}
     try:
         reader = ZoteroReader(get_settings().zotero_data_dir)
         urls = reader.get_field_values("url")
         dois = reader.get_field_values("DOI")
         items = [
-            {"item_key": k, "has_pdf": False, "url": urls.get(k, ""), "doi": dois.get(k, "")}
-            for k in new_keys
+            {
+                "item_key": key, "has_pdf": False, "url": urls.get(key, ""),
+                "doi": dois.get(key, ""),
+                "cached_acquisition": (deep_review.get_cached_review(key) or {}).get("acquired_pdf"),
+            }
+            for _stable_key, key in materialized
         ]
-        res = fulltext.fetch_fulltext_for_items(items)
-        return {"attached": res.get("attached", 0), "no_arxiv": res.get("no_arxiv", 0),
-                "failed": res.get("failed_count", 0)}
+        return fulltext.fetch_fulltext_for_items(items)
     except Exception as exc:  # noqa: BLE001 — best-effort; the add already succeeded
-        LOGGER.exception("add_to_library: arXiv full-text fetch failed (non-fatal)")
+        LOGGER.exception("add_to_library: full-text fetch failed (non-fatal)")
         return {"attached": 0, "error": f"{type(exc).__name__}: {exc}"}
 
 

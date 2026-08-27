@@ -171,7 +171,7 @@ def _has_digest(item_key: str) -> bool:
     return cached is not None and cached.get("digest") is not None
 
 
-def _run_batched_review(item_keys: list[str], *, overrides: dict[str, str] | None = None, force: bool = False) -> None:
+def _run_batched_review(item_keys: list[str], *, overrides: dict[str, Any] | None = None, force: bool = False) -> None:
     """Review a BATCH of items in ONE ``deep_review.start`` call, polled until OUR
     accepted job settles. ``deep_review`` fans the batch out provider-aware — parallel
     for a remote provider, serial (one model load at a time) for a local one — so this
@@ -225,7 +225,7 @@ def _run_batched_review(item_keys: list[str], *, overrides: dict[str, str] | Non
         foreign_waited += _POLL_INTERVAL_SECS
 
 
-def _acquire_missing_pdfs(keys: list[str], outcomes: dict[str, str]) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+def _acquire_missing_pdfs(keys: list[str], outcomes: dict[str, str]) -> tuple[dict[str, Any], dict[str, dict[str, str]]]:
     """SEQUENTIALLY acquire a PDF for each pick still without usable full text (no
     local Zotero attachment), returning ``({key: local_path}, {key: {title, url}})``.
     The second map is the GATED picks — a real PDF exists but the session for that
@@ -237,7 +237,7 @@ def _acquire_missing_pdfs(keys: list[str], outcomes: dict[str, str]) -> tuple[di
     from zotero_summarizer.services.library import _pdf_acquire
     from zotero_summarizer.services.zotero.zotero import get_library_reader
 
-    overrides: dict[str, str] = {}
+    overrides: dict[str, Any] = {}
     login: dict[str, dict[str, str]] = {}
     for item_key in keys:
         if item_key in outcomes:
@@ -251,7 +251,10 @@ def _acquire_missing_pdfs(keys: list[str], outcomes: dict[str, str]) -> tuple[di
                 continue  # has a local PDF but no digest → extraction failure, not a missing source
             result = _pdf_acquire.acquire_pdf_for(item_key, detail)
             if result.path is not None:
-                overrides[item_key] = str(result.path)
+                overrides[item_key] = {
+                    "path": str(result.path), "source": getattr(result, "source", ""),
+                    "source_url": getattr(result, "source_url", ""),
+                }
             elif result.needs_login:
                 doi = str(detail.get("doi") or "")
                 login[item_key] = {

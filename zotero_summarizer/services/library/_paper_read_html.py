@@ -1,4 +1,4 @@
-"""Markdown, HTML and audit output for paper-read artifacts."""
+"""Pure Markdown rendering plus persisted HTML/audit paper-read outputs."""
 from __future__ import annotations
 
 import html
@@ -26,18 +26,15 @@ def write_outputs(
     goal_summaries: list[dict[str, Any]] | None = None,
     code_link: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Write paper-render-compatible notes, presentation and audit files."""
+    """Write the presentation and audit files next to the source PDF."""
     short = _paper_short_name(str(content.get("title") or ""), pdf_path.stem)
-    notes_path = pdf_path.parent / f"{short}_notes.md"
     html_path = pdf_path.parent / f"{short}_presentation.html"
-    notes_path.write_text(_render_notes(content, digest, quality, goal_summaries), encoding="utf-8")
     html_path.write_text(_render_presentation(content, short, digest, quality, goal_summaries, code_link), encoding="utf-8")
-    audit = _audit_presentation(html_path, notes_path, content.get("figures") or [])
+    audit = _audit_presentation(html_path, content, content.get("figures") or [])
     audit_path = pdf_path.parent / f"{short}_audit.json"
     audit_path.write_text(json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")
     return {
         "paper_name": short,
-        "notes_path": str(notes_path),
         "presentation_path": str(html_path),
         "audit_path": str(audit_path),
         "figures_dir": str(pdf_path.parent / "figures"),
@@ -70,18 +67,20 @@ def _render_notes(
         decision = str(digest.get("read_decision") or "")
         why = str(digest.get("read_why") or "")
         if decision:
-            lines += [f"## Read decision: {decision.upper()}{f' — {why}' if why else ''}", ""]
+            minutes = digest.get("estimated_read_minutes")
+            timing = f" · {int(minutes)} min" if minutes is not None else ""
+            lines += [f"## Read decision: {decision.upper()}{timing}{f' — {why}' if why else ''}", ""]
         for label, key in [
             ("Relevance", "relevance"), ("Controversies", "controversies"),
             ("Industry impact", "industry_impact"), ("Academy impact", "academy_impact"),
             ("Impact", "impact"), ("Methods", "methods"), ("Limitations", "limitations"),
-            ("Unknown unknowns", "unknown_unknowns"),
+            ("Unknown unknowns", "unknown_unknowns"), ("What the original adds", "original_value"),
         ]:
             val = str(digest.get(key) or "")
             if val:
                 lines += [f"## {label}", "", val, ""]
         for label, key in [
-            ("Key findings", "key_findings"), ("Read parts", "read_parts"),
+            ("Key findings", "key_findings"), ("Read parts", "read_parts"), ("Skip parts", "skip_parts"),
             ("Implementation", "implementation"),
         ]:
             items = [str(x) for x in (digest.get(key) or []) if x]
@@ -160,7 +159,7 @@ def _render_presentation(
     figures = [fig for fig in (content.get("figures") or []) if fig.get("name")]
     image_map = {f"ph-fig{i}": f"figures/{fig['name']}" for i, fig in enumerate(figures, 1)}
     code_link_block = brief.code_link_html(code_link)
-    brief_block = brief.brief_html(content, quality=quality, goal_summaries=goal_summaries)
+    brief_block = brief.brief_html(content, digest=digest, quality=quality, goal_summaries=goal_summaries)
     quality_block = brief.quality_panel_html(quality)
     empty_state = (
         '<section class="fade-in"><div class="empty-state">No readable content could be '
@@ -237,15 +236,24 @@ def _digest_section_html(digest: dict[str, Any]) -> str:
     strength = str(digest.get("key_strength") or "")
     weakness = str(digest.get("key_weakness") or "")
     assess = [_row("Why read", "read_why"), _row("Controversies", "controversies")]
+    assess += [_row("Writing friction", "writing_friction"), _bullets("Writing reasons", "writing_reasons")]
     if strength:
         assess.append(f'<div class="drow"><span class="dlbl">Strength</span><span class="dpos">{_h(strength)}</span></div>')
     if weakness:
         assess.append(f'<div class="drow"><span class="dlbl">Weakness</span><span class="dneg">{_h(weakness)}</span></div>')
-    methods_body = "".join(filter(None, [_row("Methods", "methods"), _row("Limitations", "limitations")]))
+    parameters = digest.get("parameters") or {}
+    param_values = [str(parameters.get(key) or "") for key in ("dataset", "sample_size", "architecture")]
+    param_values += [str(x) for key in ("baselines", "metrics") for x in (parameters.get(key) or [])]
+    params = "; ".join(value for value in param_values if value)
+    methods_body = "".join(filter(None, [
+        _row("Methods", "methods"), _row("Limitations", "limitations"),
+        f'<div class="drow"><span class="dlbl">Parameters</span><span>{_h(params)}</span></div>' if params else "",
+    ]))
     impact_body = "".join(filter(None, [
         _row("Industry", "industry_impact"), _row("Academia", "academy_impact"),
-        _row("Unknown unknowns", "unknown_unknowns"),
-        _bullets("Read parts", "read_parts"), _bullets("Implementation", "implementation"),
+        _row("Unknown unknowns", "unknown_unknowns"), _row("Original adds", "original_value"),
+        _bullets("Read parts", "read_parts"), _bullets("Skip parts", "skip_parts"),
+        _bullets("Implementation", "implementation"),
     ]))
     blocks = "".join(filter(None, [
         _group("Summary", summary_body, open_=True),
@@ -288,8 +296,7 @@ def _figures_section_html(figures: list[dict[str, Any]]) -> str:
 def _reflow_prose(text: str) -> str:
     """Turn PDF hard-wrapped lines into flowing prose: de-hyphenate words split
     across a line break and collapse intra-paragraph newlines, while keeping
-    blank-line paragraph breaks. Used by the notes.md artifact (the brief no
-    longer embeds the paper body)."""
+    blank-line paragraph breaks. Used by the pure Markdown renderer."""
     text = (text or "").replace("\r\n", "\n")
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)  # de-hyphenate "in-\nformation"
     paragraphs = re.split(r"\n\s*\n", text)
@@ -298,16 +305,21 @@ def _reflow_prose(text: str) -> str:
 
 def _audit_presentation(
     html_path: Path,
-    notes_path: Path,
+    content: dict[str, Any],
     figures: list[dict[str, Any]],
 ) -> dict[str, Any]:
     html_text = html_path.read_text(encoding="utf-8") if html_path.exists() else ""
-    notes_text = notes_path.read_text(encoding="utf-8") if notes_path.exists() else ""
+    source_text = str(content.get("qa_text") or content.get("full_text") or "")
+    if not source_text:
+        source_text = "\n".join(
+            str(section.get("text") or "")
+            for section in (content.get("render_sections") or content.get("sections") or [])
+        )
     blocking: list[str] = []
     minor: list[str] = []
 
-    if not notes_text.strip():
-        blocking.append("notes file is empty")
+    if not source_text.strip():
+        blocking.append("extracted paper content is empty")
     if "const imageMap" not in html_text:
         blocking.append("HTML missing imageMap")
     if "<section" not in html_text:
@@ -321,15 +333,15 @@ def _audit_presentation(
         if f'id="ph-fig{idx}"' not in html_text:
             blocking.append(f"missing placeholder ph-fig{idx} for {fig['name']}")
 
-    if notes_text and re.search(r"\bAuthor\s+\d+", notes_text):
-        minor.append("notes contain placeholder authors (Author N) — Zotero fallback may not have run")
+    if re.search(r"\bAuthor\s+\d+", str(content.get("authors") or "")):
+        minor.append("metadata contains placeholder authors (Author N) — Zotero fallback may not have run")
     # Residual LaTeX (\cmd or $…$) means extraction degraded. A handful is minor;
     # egregious leakage is a blocking signal to rebuild after fixing extraction.
-    latex_hits = len(re.findall(r"\\[a-zA-Z]{2,}|\$[^$\n]{1,80}\$", notes_text or ""))
+    latex_hits = len(re.findall(r"\\[a-zA-Z]{2,}|\$[^$\n]{1,80}\$", source_text))
     if latex_hits > 8:
-        blocking.append(f"notes contain {latex_hits} residual LaTeX fragments — extraction degraded, rebuild")
+        blocking.append(f"content contains {latex_hits} residual LaTeX fragments — extraction degraded, rebuild")
     elif latex_hits:
-        minor.append("notes contain residual LaTeX commands")
+        minor.append("content contains residual LaTeX commands")
 
     return {
         "status": "passed" if not blocking else "blocking",
@@ -345,7 +357,6 @@ def _h(value: str) -> str:
 
 def _css() -> str:
     return """
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=Inter:wght@300;400;500;600&display=swap');
 :root{--bg:#fffefc;--card:#f3f8f3;--text:#171614;--muted:#585650;--accent:#0f3e17;--accent-soft:rgba(15,62,23,.09);--border:#e5e7eb;--hair:rgba(23,22,20,.12);--shadow:none;--hema:#0f3e17;--eosin:#6aa97b;--eosin-deep:#225f38;--eosin-wash:rgba(177,219,184,.42);--caution:#8a6a2a;--caution-wash:rgba(212,178,116,.22);--alert:#8c4330;--alert-wash:rgba(212,147,127,.2);--glass:#fffefc;--frost:#f1f7f2;--readout:#0f3e17;--font-serif:"Fraunces",Georgia,serif;--font-display:"Inter",system-ui,-apple-system,Segoe UI,sans-serif;--font-read:"Inter",system-ui,-apple-system,Segoe UI,sans-serif;--font-mono:"Inter",ui-monospace,SFMono-Regular,Menlo,monospace}
 body{margin:0;background:var(--bg);color:var(--text);font:16px/1.65 var(--font-read);letter-spacing:-.011em;-webkit-font-smoothing:antialiased}
 body.dark{--bg:#0e140f;--card:#16201a;--text:#eef3ee;--muted:#9baf9f;--accent:#7fc08e;--accent-soft:rgba(127,192,142,.14);--border:#26342a;--hair:rgba(238,243,238,.13);--shadow:none;--hema:#7fc08e;--eosin:#7fc08e;--eosin-deep:#a7d6b0;--eosin-wash:rgba(127,192,142,.16);--caution:#d9b46e;--caution-wash:rgba(217,180,110,.16);--alert:#d59079;--alert-wash:rgba(213,144,127,.16);--glass:#0e140f;--frost:#16201a;--readout:#7fc08e}

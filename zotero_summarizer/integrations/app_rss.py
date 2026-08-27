@@ -16,6 +16,7 @@ from zotero_summarizer.storage.feed_identity import (
     doi_from_text,
     stable_feed_key_from_item,
 )
+from zotero_summarizer.settings import offline_requested
 
 
 class RssUrlRejected(ValueError):
@@ -158,6 +159,8 @@ class AppRssReader:
 
         This does not score anything and does not call an LLM.
         """
+        if offline_requested():
+            return {"feeds": 0, "inserted": 0, "updated": 0, "errors": [], "offline": True}
         import feedparser
 
         fetched = 0

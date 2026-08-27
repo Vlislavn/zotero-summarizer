@@ -1,13 +1,4 @@
-// First-run wizard orchestrator. Owns:
-//   - the active step index (0..3)
-//   - the shared `draft` form state, seeded from GET /api/config (so a returning
-//     user resumes their real config, never a blank slate) + a sensible default
-//     triage-criteria prefill
-//   - per-step validity (which gates Next + the final Finish)
-//
-// Finish writes formStateToConfig(draft, baseConfig) via PUT /api/config, then
-// invalidates ['setup-status'] and advances to the Done step. Skippable and
-// resumable: "Skip for now" persists zs:setupDismissed=1 and routes home.
+// Skippable, resumable Zotero → AI → research wizard over the shared config APIs.
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -26,12 +17,16 @@ import { Banner } from '../components/form/Fields.jsx';
 import Button from '../components/ui/Button.jsx';
 import { validateSetup } from '../api/setupApi.js';
 
-// A sensible, editable default so the Describe step is never blank.
 const DEFAULT_TRIAGE_CRITERIA = [
   'Directly advances one of my research goals',
   'Introduces a method, dataset, or result I could build on',
   'Strong venue or credible authors',
 ].join('\n');
+const PROGRESS_KEY = 'zs_setup_progress_v1';
+
+function savedProgress() {
+  try { return JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}'); } catch { return {}; }
+}
 
 export default function SetupFlow() {
   const navigate = useNavigate();
@@ -40,33 +35,21 @@ export default function SetupFlow() {
 
   const configQuery = useQuery({ queryKey: ['runtime-config'], queryFn: fetchConfig });
 
-  const [step, setStep] = useState(0);
-  // Furthest step the user has actually reached. A step only earns its green
-  // "done" check once it's been reached AND is valid — otherwise step 3, whose
-  // prefilled defaults are valid from the start, would show done before the user
-  // ever sees it (a false Goal-Gradient signal).
-  const [maxStepReached, setMaxStepReached] = useState(0);
-  const [draft, setDraft] = useState(null);
-  // Tracks whether the LLM "Test connection" passed for the current fields.
-  // Advisory only (populates the model datalist + the success pill) — it does
-  // NOT gate Next: the secret lives outside the app (.env), so a first-run user
-  // who hasn't set it yet must still be able to finish setup (Tesler's Law —
-  // never trap the user). Next gates on structural validity instead.
+  const saved = useMemo(savedProgress, []);
+  const [step, setStep] = useState(saved.step || 0);
+  const [maxStepReached, setMaxStepReached] = useState(saved.maxStepReached || 0);
+  const [draft, setDraft] = useState(saved.draft || null);
   const [llmTestedOk, setLlmTestedOk] = useState(false);
-  // Field errors from the last describe-step validate-config.
   const [fieldErrors, setFieldErrors] = useState([]);
   const [finishError, setFinishError] = useState('');
-  // Set when the Zotero paths were saved during setup → StepDone reminds to restart.
-  const [pathsChanged, setPathsChanged] = useState(false);
+  const [pathsChanged, setPathsChanged] = useState(Boolean(saved.pathsChanged));
 
-  // Path draft is separate from the GoalsConfig draft: paths are written via the
-  // dedicated /api/setup/paths route, not the config PUT.
-  const [draftPaths, setDraftPaths] = useState({ zotero_data_dir: '', pdf_root: '' });
+  const [draftPaths, setDraftPaths] = useState(saved.draftPaths || { zotero_data_dir: '', pdf_root: '' });
 
-  // Seed the GoalsConfig draft once the server config lands.
   useEffect(() => {
     if (configQuery.data && draft === null) {
       const seeded = configToFormState(configQuery.data);
+      if (seeded?.research_goals_text?.startsWith('Replace with your ')) seeded.research_goals_text = '';
       if (seeded && !seeded.triage_criteria_text) {
         seeded.triage_criteria_text = DEFAULT_TRIAGE_CRITERIA;
       }
@@ -74,7 +57,6 @@ export default function SetupFlow() {
     }
   }, [configQuery.data, draft]);
 
-  // Seed the path draft from the live status payload (the resolved values).
   useEffect(() => {
     if (status?.paths) {
       setDraftPaths((prev) => {
@@ -89,11 +71,6 @@ export default function SetupFlow() {
 
   const validity = useMemo(() => {
     const zoteroOk = true;
-    // LLM step: structurally well-formed config, NOT a passing live test. The
-    // provider needs a name for the key env var, a base URL (openai only), and a
-    // default model. The endpoint being reachable / the secret being exported are
-    // surfaced as advisory signals, never as a gate (the app degrades gracefully
-    // without a live LLM, and the secret is set outside the app).
     const provider = (draft?.llm_routing?.providers || [])[0];
     const llmOk = Boolean(
       provider
@@ -110,9 +87,13 @@ export default function SetupFlow() {
 
   const allValid = validity.every(Boolean);
 
-  // Remember the furthest step reached so StepProgress only credits steps the
-  // user has actually visited (monotonic — going Back keeps earlier checks).
   useEffect(() => { setMaxStepReached((m) => Math.max(m, step)); }, [step]);
+
+  useEffect(() => {
+    if (draft) localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      step, maxStepReached, draft, draftPaths, pathsChanged,
+    }));
+  }, [step, maxStepReached, draft, draftPaths, pathsChanged]);
 
   const finishMutation = useMutation({
     mutationFn: (payload) => updateConfig(payload),
@@ -128,7 +109,6 @@ export default function SetupFlow() {
     onError: (err) => setFinishError(humanizeError(err)),
   });
 
-  // Validate the GoalsConfig before saving so field errors surface inline.
   const validateMutation = useMutation({
     mutationFn: (cfg) => validateSetup({ config: cfg, test_connection: false }),
   });
@@ -146,16 +126,11 @@ export default function SetupFlow() {
     setFinishError('');
     const payload = formStateToConfig(draft, configQuery.data);
     // Field-level validation first; show inline errors and stop if invalid.
-    try {
-      const res = await validateMutation.mutateAsync(payload);
-      if (res && res.valid === false) {
-        setFieldErrors(res.field_errors || []);
-        setStep(2); // jump back to the describe step where the errors live
-        return;
-      }
-    } catch {
-      // Validation endpoint unreachable — fall through to the PUT, which
-      // re-validates strictly server-side and surfaces its own error banner.
+    const res = await validateMutation.mutateAsync(payload).catch(() => null);
+    if (res && res.valid === false) {
+      setFieldErrors(res.field_errors || []);
+      setStep(2);
+      return;
     }
     setFieldErrors([]);
     finishMutation.mutate(payload);

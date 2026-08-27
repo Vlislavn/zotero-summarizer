@@ -44,6 +44,7 @@ def _make_project(tmp_path: Path, rows: list[dict[str, str]]) -> Settings:
     conn = sqlite3.connect(str(settings.triage_db_path))
     try:
         conn.execute(repositories._CREATE_LABEL_VERDICTS_TABLE)
+        conn.execute(repositories._CREATE_REVIEW_NOTES_TABLE)
         conn.commit()
     finally:
         conn.close()

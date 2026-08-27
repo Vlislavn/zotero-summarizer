@@ -252,6 +252,8 @@ def _build_recs(
             "date_added": it.get("date_added") or "",
             # Zotero-column sort fields (client-side sort in the Library UI).
             "publication_date": it.get("publication_date") or "",
+            "year": str(it.get("publication_date") or "")[:4],
+            "abstract_preview": str(it.get("abstract") or "")[:500],
             "date_modified": it.get("date_modified") or "",
             "read": is_read,
             "relevance_score": relevance_score,

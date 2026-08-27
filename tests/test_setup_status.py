@@ -36,6 +36,7 @@ def _write_valid_goals(config_path: Path) -> None:
         raw = yaml.safe_load(fh)
     raw["llm"]["api_base"] = "http://localhost:11434/v1"
     raw["llm"]["api_key_env"] = "ZS_TEST_KEY"
+    raw["research_goals"] = ["Reliable multimodal evidence synthesis"]
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
 
@@ -44,6 +45,8 @@ def _seed(tmp_path: Path, *, key_value: str | None, db_found: bool, feeds: int) 
     Zotero reader + status payload, and a stubbed classifier card."""
     settings = Settings.load(project_root=tmp_path)
     _write_valid_goals(settings.config_path)
+    settings.data_dir.mkdir()
+    (settings.data_dir / "setup_doctor.json").write_text('{"ready": true}')
 
     state = RuntimeState()
     state.app_state = AppState(config=read_config(settings.config_path))
@@ -122,6 +125,24 @@ def test_ready_false_when_api_key_absent(tmp_path, monkeypatch):
     resp = _run(get_setup_status())
     assert resp.llm.api_key_present is False
     assert resp.ready is False  # key presence gates ready
+
+
+def test_ready_false_when_model_is_unreachable(tmp_path, monkeypatch):
+    _seed(tmp_path, key_value=_SECRET, db_found=True, feeds=1)
+    _patch_externals(monkeypatch, key_value=_SECRET, db_found=True, feeds=1)
+
+    async def _down():
+        return {"stages": [{"stage": "deep_review", "reachable": False}]}
+
+    monkeypatch.setattr(status_mod.operational_check, "check_reachability", _down)
+    assert _run(get_setup_status()).ready is False
+
+
+def test_ready_false_until_doctor_verifies_the_real_pipeline(tmp_path, monkeypatch):
+    settings = _seed(tmp_path, key_value=_SECRET, db_found=True, feeds=1)
+    (settings.data_dir / "setup_doctor.json").unlink()
+    _patch_externals(monkeypatch, key_value=_SECRET, db_found=True, feeds=1)
+    assert _run(get_setup_status()).ready is False
 
 
 def test_ready_true_without_zotero_db(tmp_path, monkeypatch):

@@ -11,8 +11,8 @@ queues suggested Zotero changes for you to approve.
   cli.py ──>│ api/      FastAPI app + thin routes (HTTP)      │<── frontend/ (React)
             ├────────────────────────────────────────────────┤
             │ services/ business logic, grouped by domain:    │
-            │   model · golden · triage · library · zotero    │
-            │   faithbench (grounding eval, validates library.qa) │
+            │   model · golden · triage · library · zotero · setup │
+            │   sync · faithbench (grounding eval for library.qa) │
             ├────────────────────────────────────────────────┤
             │ storage/        integrations/                   │
             │ (SQLite)        (Zotero, PDF, LLM, OpenAlex)     │

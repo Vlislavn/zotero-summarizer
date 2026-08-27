@@ -1,0 +1,9 @@
+{
+  "name": "Zotero Summarizer",
+  "short_name": "Papers",
+  "start_url": "/library",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#14532d",
+  "icons": [{ "src": "/app-icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

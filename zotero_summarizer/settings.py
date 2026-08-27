@@ -20,6 +20,11 @@ def default_project_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def offline_requested() -> bool:
+    explicit = (os.getenv("ZS_OFFLINE") or "").strip().lower()
+    return explicit in {"1", "true", "yes", "on"} or os.getenv("HF_HUB_OFFLINE") == "1"
+
+
 def _env_int(name: str, default: int) -> int:
     try:
         return int(os.getenv(name, str(default)))

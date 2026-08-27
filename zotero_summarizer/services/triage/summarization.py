@@ -73,10 +73,11 @@ def _build_triage_prompt(
     req: SummarizeRequest,
     refined: RefinedSummary,
     corpus_context: dict[str, Any],
+    template_override: str | None = None,
 ) -> str:
     # Default is the security-hardened prompt (feed fields wrapped, anti-inflation
     # directive) — see services/triage/prompts.py. A null override = use it.
-    template = config.prompts.triage or DEFAULT_TRIAGE_PROMPT
+    template = template_override or config.prompts.triage or DEFAULT_TRIAGE_PROMPT
     return template.format(
         research_goals="\n".join(f"- {g}" for g in config.research_goals),
         triage_criteria="\n".join(f"- {c}" for c in config.triage_criteria),
@@ -99,6 +100,7 @@ def run_abstract_pipeline(
     log_prefix: str | None = None,
     *,
     llm_override: LLMClient | None = None,
+    triage_prompt_override: str | None = None,
 ) -> SummarizeResponse:
     """Triage a paper using only title + abstract (no PDF).
 
@@ -114,6 +116,8 @@ def run_abstract_pipeline(
     ``llm_override`` lets a caller (e.g. the backlog-triage job) score with the
     backlog stage's client instead — without affecting the feed stage client
     used by the daemon. ``None`` resolves the configured **feed** stage client.
+    ``triage_prompt_override`` selects a source-appropriate rubric without
+    changing the common response/scoring pipeline.
     """
     app_state = state()
     config: GoalsConfig = app_state.app_state.config
@@ -144,16 +148,43 @@ def run_abstract_pipeline(
         log_context(prefix, "fast-rejected by corpus threshold=%.3f", config.corpus.similarity_threshold)
         return _fast_reject_response(req, corpus_context, abstract_text)
 
-    # Use the abstract as paper_text directly — same refine/triage prompts.
+    return _score_abstract(config, req, llm, corpus_context, prefix, pipeline_started,
+                           triage_prompt_override)
+
+
+def run_abstract_dry(
+    config: GoalsConfig, req: SummarizeRequest, llm: LLMClient,
+) -> SummarizeResponse:
+    """Run the real abstract prompts without reading or writing app/Zotero state."""
+    return _score_abstract(
+        config, req, llm, corpus.empty_corpus_match_result(), "doctor", perf_counter(), None,
+    )
+
+
+def _score_abstract(
+    config: GoalsConfig,
+    req: SummarizeRequest,
+    llm: LLMClient,
+    corpus_context: dict[str, Any],
+    prefix: str,
+    started: float,
+    template_override: str | None = None,
+) -> SummarizeResponse:
+    abstract_text = (req.abstract or "").strip()
+    if not abstract_text:
+        return _abstract_only_empty_response("Feed item missing abstract")
     refined = _refine_with_retry(llm, config, req, abstract_text, prefix)
-    triage = _run_triage(llm, config, req, refined, corpus_context)
+    triage = _run_triage(
+        llm, config, req, refined, corpus_context,
+        template_override=template_override,
+    )
     composite_score = scoring.compute_composite_score(triage, float(corpus_context.get("affinity_score", 0.0)))
     mapped_priority = scoring.map_priority_from_score(composite_score)
 
     log_context(
         prefix,
         "abstract pipeline completed in %.2fs composite=%.2f priority=%s",
-        perf_counter() - pipeline_started,
+        perf_counter() - started,
         composite_score,
         mapped_priority,
     )
@@ -231,8 +262,12 @@ def _run_triage(
     req: SummarizeRequest,
     refined: RefinedSummary,
     corpus_context: dict[str, Any],
+    *,
+    template_override: str | None = None,
 ) -> TriageResult:
-    triage_prompt = _build_triage_prompt(config, req, refined, corpus_context)
+    triage_prompt = _build_triage_prompt(
+        config, req, refined, corpus_context, template_override,
+    )
     triage = llm.pydantic_prompt(prompt=triage_prompt, pydantic_model=TriageResult)
     if not isinstance(triage, TriageResult):
         triage = TriageResult.model_validate(extract_json_blob(to_text(triage)))

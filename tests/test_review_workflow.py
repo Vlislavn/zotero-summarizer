@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from zotero_summarizer.services.library import review, review_summary
+from zotero_summarizer.services.library import review, review_materialize, review_summary
 from zotero_summarizer.storage import feeds as fs
 
 
@@ -90,6 +90,7 @@ def patched_settings(tmp_path: Path, monkeypatch):
         zotero_data_dir=tmp_path / "zotero",   # _fetch_feed_metadata reads this
     )
     monkeypatch.setattr(review, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(review_materialize, "get_settings", lambda: fake_settings)
     # The golden-append + summary helpers now live in review_summary.
     monkeypatch.setattr(review_summary, "get_settings", lambda: fake_settings)
     # Stub _fetch_feed_metadata so tests don't need a real Zotero install.

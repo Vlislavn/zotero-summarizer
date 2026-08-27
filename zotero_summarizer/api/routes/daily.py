@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services import interaction_log
+from zotero_summarizer.services.golden import label_verdicts
 from zotero_summarizer.services.triage import daily_actions, daily_select
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.storage import feeds as feeds_storage
@@ -31,12 +32,9 @@ from zotero_summarizer.storage import repositories
 
 router = APIRouter()
 
-
 # ---------------------------------------------------------------------------
 # Request bodies
 # ---------------------------------------------------------------------------
-
-
 class RoleVerdictRequest(BaseModel):
     # Bug-fix Phase 1.18 Step 4: item_key for feed papers is the live
     # arxiv URL (``http://arxiv.org/abs/...``) which contains ``/``. Path
@@ -411,11 +409,12 @@ async def submit_daily_verdict(body: DailyVerdictRequest) -> dict[str, Any]:
     # UPSERT the manual verdict so it wins + stays visible/editable.
     derived = (row.get("reading_priority") or "").strip() or "unknown"
     row_id = await asyncio.to_thread(
-        repositories.insert_or_update_label_verdict,
+        label_verdicts.set_label_verdict,
         _db_path(),
         item_key=golden_key,
         original_derived_priority=derived,
         user_priority=body.user_priority,
+        surface="today_priority",
         comment=body.comment,
     )
     await asyncio.to_thread(

@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import process from 'node:process';
 
 // Vite config for the zotero-summarizer React frontend.
 // - In dev, Vite proxies /api/* to the FastAPI backend (default :8000).

@@ -6,8 +6,8 @@ prompt the faithfulness benchmark validated
 (``services.faithbench.ANSWER_PROMPT``) — the product runs what was measured.
 
 Default mode is ``comprehensive``: deterministic metadata answers first, then
-the generated paper-read notes plus full text. ``retrieval`` remains available
-as the fast mode.
+the structured cached review plus full text. ``retrieval`` remains available as
+the fast mode.
 """
 from __future__ import annotations
 
@@ -122,7 +122,7 @@ def ask_paper(item_key: str, question: str, *, mode: str = "comprehensive") -> d
     # Three genuinely distinct contexts:
     #   retrieval     — top-k chunks of the PDF body (fast, narrow)
     #   full_text     — the raw extracted PDF body only (no notes wrapper)
-    #   comprehensive — metadata + generated notes/digest + PDF body (default)
+    #   comprehensive — metadata + structured review + PDF body (default)
     chunks: list[str] = []
     if mode == "retrieval":
         text, index = _paper_context_source(item_key)
@@ -198,4 +198,3 @@ def _metadata_payload(answer: str, quote: str) -> dict[str, Any]:
         "latency_seconds": 0.0,
         "model": "deterministic-metadata",
     }
-

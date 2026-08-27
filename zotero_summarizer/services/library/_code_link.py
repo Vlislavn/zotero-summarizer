@@ -14,11 +14,11 @@ leaf ``integrations.github`` (layering: services → integrations).
 """
 from __future__ import annotations
 
-import os
 import re
 from typing import Any
 
 from zotero_summarizer.integrations import github
+from zotero_summarizer.settings import offline_requested
 
 # github.com/{owner}/{repo}. The repo segment stops before a path/anchor so
 # ".../repo/blob/main/x" → "repo"; a trailing "." / ")" from prose is dropped by
@@ -87,11 +87,6 @@ def extract_candidates(text: str) -> list[dict[str, Any]]:
     return cands
 
 
-def _is_offline() -> bool:
-    return ((os.getenv("ZS_OFFLINE") or "").strip().lower() in ("1", "true", "yes", "on")
-            or (os.getenv("HF_HUB_OFFLINE") or "").strip() == "1")
-
-
 # Live > unknown > dead, so a renamed/private 404 never wins over a working repo.
 _EXISTS_RANK = {True: 2, None: 1, False: 0}
 
@@ -113,7 +108,7 @@ def find_code_link(
     if not cands:
         return {"found": False}
     if offline is None:
-        offline = _is_offline()
+        offline = offline_requested()
     top = cands[0]
     if offline:
         return {"found": True, "url": top["url"], "exists": None, "checked": False,

@@ -80,12 +80,12 @@ def _short_goal(goal: str, words: int = 4) -> str:
 
 def _relevance_verdict(n_fired: int, max_score: float) -> str:
     if n_fired and max_score >= 2.3:
-        return "MUST READ"
+        return "HIGH RELEVANCE"
     if n_fired and max_score >= 1.5:
-        return "SHOULD READ"
+        return "RELEVANT"
     if n_fired:
-        return "COULD READ"
-    return "SKIP"
+        return "WEAK RELEVANCE"
+    return "OFF GOAL"
 
 
 def _read_verdict(n_fired: int, band: str) -> tuple[str, str, str]:
@@ -102,13 +102,14 @@ def _read_verdict(n_fired: int, band: str) -> tuple[str, str, str]:
 def brief_html(
     content: dict[str, Any],
     *,
+    digest: dict[str, Any] | None = None,
     quality: dict[str, Any] | None,
     goal_summaries: list[dict[str, Any]] | None,
 ) -> str:
     """Verdict (loudest) → ARR spine → goal board. '' when no decision data
     exists (the brief silently degrades to the plain digest)."""
     goals = goal_summaries or []
-    if not goals and not quality:
+    if not goals and not quality and not digest:
         return ""
     fired = [g for g in goals if g.get("retrieval_state") == "hit" and g.get("relevant")]
     n_fired = len(fired)
@@ -119,8 +120,26 @@ def brief_html(
 
     # The verdict is the loudest line — the "diagnosis". For a flagged-but-relevant
     # paper, inline the actual red flag so the warning is readable without scrolling.
-    vkey, vlabel, vreason = _read_verdict(n_fired, band)
-    if band == "flag" and n_fired:
+    decision = str((digest or {}).get("read_decision") or "").lower()
+    weak_evidence = band == "flag" or any((quality or {}).get("overstatements") or [])
+    high_friction = str((digest or {}).get("writing_friction") or "") == "high"
+    capped = decision == "read" and (weak_evidence or high_friction)
+    if capped:
+        decision = "skim"
+    if decision in {"read", "skim", "skip"}:
+        vkey = "deep" if decision == "read" else decision
+        vlabel = {"read": "READ", "skim": "SKIM", "skip": "DIGEST IS ENOUGH"}[decision]
+        minutes = (digest or {}).get("estimated_read_minutes")
+        if minutes is not None:
+            vlabel += f" · {int(minutes)} MIN"
+        vreason = str((digest or {}).get("read_why") or "")
+        if capped:
+            rf = [str(x).strip() for x in ((quality or {}).get("red_flags") or []) if str(x).strip()]
+            warning = f"Concept interesting; evidence weak{f' — {rf[0]}' if rf else ''}." if weak_evidence else "Idea preserved; writing friction is high."
+            vreason = f"{warning} {vreason}"
+    else:
+        vkey, vlabel, vreason = _read_verdict(n_fired, band)
+    if decision not in {"read", "skim", "skip"} and band == "flag" and n_fired:
         rf = [str(x).strip() for x in ((quality or {}).get("red_flags") or []) if str(x).strip()]
         if rf:
             vreason = f"relevant, but rigor is FLAGGED — {rf[0]}. Read critically."
@@ -129,12 +148,15 @@ def brief_html(
     rel_line = (
         f'<div class="v-rel">{_h(rel_verdict)} · {n_fired} goal{"s" if n_fired != 1 else ""} '
         f'matched · {max_score:.1f}/3</div>'
-    )
+    ) if goals else ""
+    idea_score = max(int((digest or {}).get("novelty") or 0), int((digest or {}).get("significance") or 0))
+    idea = "not assessed" if not idea_score else "high" if idea_score >= 4 else "low" if idea_score <= 2 else "moderate"
+    axes = f'<div class="v-rel">Idea: {idea} · Evidence: {_h(_BAND_LABEL.get(band, "not assessed"))} · Writing: {_h((digest or {}).get("writing_friction") or "not assessed")}</div>'
     verdict = (
         f'<div class="verdict v-{vkey}"><div class="v-eyebrow">Diagnosis</div>'
         f'<div class="v-word">{_h(vlabel)}</div>'
-        f'<div class="v-why">{_h(vreason)}</div>{rel_line}</div>'
-    ) if (goals or quality) else ""
+        f'<div class="v-why">{_h(vreason)}</div>{rel_line}{axes}</div>'
+    ) if (goals or quality or digest) else ""
 
     gauge = _gauge_html(band, agreed, total) if quality else ""
     board = _goal_board_html(goals) if goals else ""

@@ -25,8 +25,8 @@ from zotero_summarizer.services.library.review_fleet import propose
 # --- helpers: build the cached-signal dicts the way the fleet reads them -----------
 
 
-def _digest(read_decision=None, grade=None):
-    d: dict = {}
+def _digest(read_decision=None, grade=None, **extra):
+    d: dict = dict(extra)
     if read_decision is not None:
         d["read_decision"] = read_decision
     if grade is not None:
@@ -235,7 +235,8 @@ def test_overstatements_lower_confidence_and_flag():
         goal_summaries=_goals(matched=True),
     )
     assert "overstatements" in shaky.flags
-    assert shaky.confidence == pytest.approx(round(clean.confidence - 0.2, 2))
+    assert "weak_evidence" in shaky.flags and shaky.proposed == "should_read"
+    assert shaky.confidence < clean.confidence
 
 
 def test_blank_overstatements_are_ignored():
@@ -258,9 +259,7 @@ def test_shaky_rationale_carries_the_double_check_hint():
     assert "worth a check" in out.rationale
 
 
-def test_flag_band_and_red_flags_surface_without_cutting_confidence():
-    """``quality_band == 'flag'`` and ``red_flags`` raise flags for the UI but are
-    NOT part of the 'shaky' confidence cut (only uncertain/overstatements are)."""
+def test_flag_band_caps_read_to_skim_priority():
     flagged = propose.propose_verdict(
         _digest(read_decision="read", grade="A"),
         _quality(band="flag", red_flags=["n=3 underpowered"]),
@@ -272,7 +271,17 @@ def test_flag_band_and_red_flags_surface_without_cutting_confidence():
         goal_summaries=_goals(matched=True),
     )
     assert "quality_flag" in flagged.flags and "red_flags" in flagged.flags
-    assert flagged.confidence == clean.confidence  # not a shaky cut
+    assert "weak_evidence" in flagged.flags
+    assert flagged.proposed == "should_read" and flagged.confidence < clean.confidence
+
+
+def test_high_writing_friction_caps_read_but_preserves_it_as_provenance():
+    out = propose.propose_verdict(
+        _digest(read_decision="read", grade="A", writing_friction="high"),
+        _quality(band="neutral"), goal_summaries=_goals(matched=True),
+    )
+    assert out.proposed == "should_read" and out.digest_read_decision == "read"
+    assert "writing_friction" in out.flags
 
 
 def test_missing_grade_with_a_decision_takes_a_small_confidence_penalty():

@@ -1,9 +1,9 @@
-"""Explicit ``label:<priority>`` tag — the Zotero-native ground truth.
+"""Explicit ``label:<priority>`` tag — Zotero's synced current-label representation.
 
-The user's deliberate reading verdict lives as a Zotero tag ``label:<priority>``
-(see :data:`zotero_summarizer.domain.LABEL_TAG_PREFIX`). This module owns the
-read side of that tag: detecting it on an item, and reconciling it into the
-``label_verdicts`` store so the two never drift.
+The app commits a deliberate verdict to ``label_verdicts`` first and mirrors a
+``label:<priority>`` tag to Zotero when possible. This module owns the reverse
+path: detecting a direct Zotero/iPad edit and reconciling it into the app's
+current-state store while ``interaction-events.jsonl`` keeps the trajectory.
 
 The label is the **highest-precedence** signal: when present on a library item it
 overrides emoji/annotation/note engagement scoring in
@@ -20,8 +20,10 @@ from typing import Any, Iterable, NamedTuple
 from zotero_summarizer.domain import (
     LABEL_TAG_PREFIX,
     READING_PRIORITY_SORT_RANK,
+    VERDICT_SOURCE_USER,
     priority_from_label_tag,
 )
+from zotero_summarizer.services.golden import label_verdicts
 
 # SQLite default parameter cap is 999; chunk key lookups well under it.
 _KEY_BATCH = 400
@@ -71,10 +73,11 @@ def reconcile_label_verdicts(
 ) -> ReconcileCounts:
     """Two-way sync of Zotero ``label:<priority>`` tags into ``label_verdicts``.
 
-    The label tag is the source of truth (user-confirmed: label in Zotero OR the
-    app, Zotero reconciles). ``label_verdicts`` — read by the Annotate UI and the
-    ``hybrid_gt`` training overlay — is kept in step so a stale in-app verdict can
-    never override the Zotero label.
+    A direct Zotero edit wins when reconciliation observes it. ``label_verdicts``
+    is the operational current-state cache read by Annotate and ``hybrid_gt``;
+    the app-owned interaction log is the durable decision trajectory. This is a
+    bidirectional current-label bridge, not a claim that either mirror contains
+    the other's full history.
 
     1. **Upsert** from ``samples`` (the export's
        :class:`~services.golden.goldenset.GoldenSample` rows, duck-typed to avoid
@@ -95,18 +98,24 @@ def reconcile_label_verdicts(
         if sample.gold_signal_tier != "user_label":
             continue
         existing = repositories.get_label_verdict(triage_db_path, sample.item_key)
-        if existing is not None and existing["user_priority"] == sample.gold_priority_inferred:
+        if (
+            existing is not None
+            and existing["user_priority"] == sample.gold_priority_inferred
+            and existing.get("source") == VERDICT_SOURCE_USER
+        ):
             continue
-        if existing is not None:
+        if existing is not None and existing["user_priority"] != sample.gold_priority_inferred:
             changed += 1
-        repositories.insert_or_update_label_verdict(
+        label_verdicts.set_label_verdict(
             triage_db_path,
             item_key=sample.item_key,
-            original_derived_priority=(
-                existing["original_derived_priority"] if existing is not None else ZOTERO_LABEL_ORIGIN
-            ),
+            original_derived_priority=ZOTERO_LABEL_ORIGIN,
             user_priority=sample.gold_priority_inferred,
+            surface="zotero_reconcile",
+            event_source="zotero",
             comment=existing["comment"] if existing is not None else "",
+            transition_comment="",
+            history_known=existing is not None,
         )
         synced += 1
 
@@ -132,9 +141,9 @@ def _retract_removed_labels(zotero_db_path: Path, triage_db_path: Path) -> int:
     )
     from zotero_summarizer.storage import repositories
 
-    verdicts = repositories.list_label_verdicts(triage_db_path, limit=5000)
+    verdicts = repositories.list_all_label_verdicts(triage_db_path)
     tag_sourced = {
-        v["item_key"]
+        v["item_key"]: v
         for v in verdicts
         if v.get("original_derived_priority") == ZOTERO_LABEL_ORIGIN
         and classify_item_key(v["item_key"]) not in (SOURCE_FEED, SOURCE_NOTE)
@@ -144,12 +153,14 @@ def _retract_removed_labels(zotero_db_path: Path, triage_db_path: Path) -> int:
 
     live_has_label = _live_label_state(zotero_db_path, tag_sourced)
     removed = 0
-    for key in tag_sourced:
+    for key, _prior in tag_sourced.items():
         has_label = live_has_label.get(key)
         if has_label is None or has_label:
             # missing / unreadable / trashed (keep — safe), or tag still present.
             continue
-        if repositories.delete_label_verdict(triage_db_path, key):
+        if label_verdicts.retract_label_verdict(
+            triage_db_path, item_key=key, surface="zotero_reconcile", event_source="zotero",
+        ):
             removed += 1
     return removed
 

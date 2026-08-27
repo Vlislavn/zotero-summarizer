@@ -363,6 +363,7 @@ def build_reading_queue(
     tag: str = "",
     search: str = "",
     semantic: bool = False,
+    include_abstract: bool = False,
 ) -> dict[str, Any]:
     """Ranked queue over the WHOLE library. Read/handled status is applied live;
     scores come from the background cache. Scoring is NEVER auto-triggered on open
@@ -384,7 +385,7 @@ def build_reading_queue(
         collection_key=collection or None,
         tag=tag or None,
         search=None if semantic_requested else (search or None),
-        include_abstract=False,  # the queue never displays the abstract
+        include_abstract=include_abstract,
     ).get("items", [])
     gate_sha = _gate_sha()
     model_ready = gate_sha is not None

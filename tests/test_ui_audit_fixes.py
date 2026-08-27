@@ -100,6 +100,10 @@ def test_probe_stage_bounded_times_out(monkeypatch):
 def test_probe_stage_bounded_passes_through_fast_result(monkeypatch):
     monkeypatch.setattr(oc, "_PROBE_TIMEOUT_SECS", 1.0)
     monkeypatch.setattr(
+        oc, "_stage_skeleton",
+        lambda routing, stage: (None, {"stage": stage}),
+    )
+    monkeypatch.setattr(
         oc, "_probe_stage",
         lambda routing, stage: {"stage": stage, "status": "operational", "detail": ""},
     )

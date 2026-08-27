@@ -12,6 +12,7 @@ small set of shared/infra files at the top level.
    triage/ ──gate──> model/ ──trains on──> golden/ <──labels── library/
       │  (RSS daemon)        (relevance ML)   (dataset)  (Stage-2 reading)
       └────────────────────────────> zotero/ (queue + apply writes)
+   mobile PWA ←typed mutations/cursor→ sync/ ──> golden label history
 ```
 
 | domain | what it owns |
@@ -21,8 +22,9 @@ small set of shared/infra files at the top level.
 | `triage/` | the RSS daemon pipeline: feeds, summarization, selection, daily slate |
 | `library/` | Stage-2 reading: reading queue, deep/quality review, paper-read artifacts, feed review |
 | `search/` | Targeted Search — the query-driven *pull* surface (vs triage/library's *push*): topic → per-source query plan → concurrent federation (arXiv/EuropePMC/OpenAlex) → version-family dedup → cross-encoder query score under a constrained re-rank contract → light-review tier (quality before deep-set selection) → query-lensed deep read. Composes `library`'s read-only review layers; the only Zotero write is the explicit *Add to library* action (`materialize.py`). See `search/README.md`. |
+| `sync/` | local-first PWA boundary: compact paper snapshots + durable cursor pull; ordered UUID verdict/note mutations with per-field conflicts and explicit auditable resolution |
 | `zotero/` | write path: pending changes, note rendering, Zotero read helpers |
-| `llm/` | per-stage provider/model resolution: `factory` (build a client from a `ProviderConfig`, dispatch on `type`) + `operational_check` (manual probe of each stage). See `llm/README.md`. |
+| `llm/` | provider presets, OS-keyring/env credential resolution, per-stage clients, model discovery and operational checks. See `llm/README.md`. |
 | `faithbench/` | faithfulness mini-benchmark for the deep-review / paper-Q&A pipeline: span-verified QA + trap questions + review-claim grounding, hard-before-soft judging with a pinned remote judge. CLI-driven (`faithbench build/run/judge/report`); artifacts under `data/faithbench/`. See `faithbench/README.md`. |
 | `setup/` | first-run setup + onboarding: readiness `status`, read-only Zotero-dir `detect`, allowlisted `.env` path `env_writer` (byte-preserving; only `PDF_ROOT`/`ZOTERO_DATA_DIR`), dry-run config `validate`, and the Phase-0 `bootstrap` (creates absent `goals.yaml`/`.env`, runs the DB migration). Backs BOTH `/api/setup/*` and `zotero-summarizer setup`. Secrets never read as a value. See `setup/README.md`. |
 
@@ -33,11 +35,9 @@ counterpart: missing state file → `{}`, an EXISTING-but-corrupt file raises),
 `is_app_rss_source` (the one definition of "row came from the app-RSS reader"),
 NaN-rejecting `clamp`; `emoji_signals`
 bins via `domain` so label derivation == prediction; `read_config` applies the
-air-gap pair AFTER env overrides — `_disable_section_when_offline` (called once
-for OpenAlex prestige, once for the OpenReview Search source — both are network
-channels, on by default; `ZS_OFFLINE` forces them off so triage
-and scoring never reach the network air-gapped; no-op when already off / online),
-shared `_is_offline()` so the toggle has one definition; the LLM-concurrency gates
+strict-offline override after env config, disabling prestige, OpenReview, and
+full-text refinement. `settings.offline_requested` is the one toggle used by
+RSS, uncached PDF, library acquisition, and Search network boundaries; the LLM-concurrency gates
 `effective_llm_concurrency` (triage per-item fan-out, remote→`TRIAGE_JOB_CONCURRENCY`),
 `deep_review_fleet_concurrency` (the N-paper deep-review batch, remote→`max_sub_concurrency`
 else all N — NOT the triage knob, so a remote batch isn't throttled by the local-RAM cap)
@@ -73,13 +73,15 @@ log, the additive `subsystems[]` on `GET /api/setup/status`, and `require(name)`
 reason instead of degrading silently; new subsystem = one checker + one row),
 `run_log`,
 `interaction_log` (append-only **agentic interaction log** → `data/interaction-events.jsonl`:
-one immutable JSON line per human reading decision — the model prediction + the human's
-choice — plus the daemon's 7-day behavioural outcome; reuses `run_log`'s NDJSON appender,
+one immutable JSON line per human reading decision — including explicit `label_transition`
+assignment/change/retraction events with separate prior-user/current-user/model values — plus
+the daemon's 7-day behavioural outcome; reuses `run_log`'s NDJSON appender,
 stamps `git_commit` + the live gate's `golden_csv_sha256` so drift is attributable to a
 model version. The live verdict tables UPSERT/DELETE and lose the trajectory; this keeps it
 for offline improvement. Best-effort: a log failure warns, never blocks the durable write.
-Emitted by the verdict routes, Today keep/trash, the review queue, triage feedback, and the
-outcome daemon — `results` also calls it),
+Emitted by the shared `golden.label_verdicts` command used by every deliberate label writer,
+the legacy verdict feedback paths, and the outcome daemon — `results` also calls it. The JSONL
+append remains best-effort after the current-label commit, not a transactional outbox),
 `config` (GET/PUT `/api/config`; PUT persists via `_common.write_user_config` — only
 the `USER_OWNED_KEYS` (intent + LLM connection + university access), so `goals.yaml`
 stays intent-only; re-applies `ZS_*` env before the hot-swap; invalidates stage

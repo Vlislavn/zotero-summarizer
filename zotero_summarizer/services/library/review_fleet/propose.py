@@ -136,9 +136,9 @@ def _confidence(read_decision: str, grade: str, *, goal_evidence: str, shaky: bo
 def _rationale(read_decision: str, grade: str, verdict: str, *, goal_evidence: str, shaky: bool) -> str:
     """One short plain-language sentence explaining the proposal (for the UI)."""
     decision_txt = {
-        "read": "the digest says read it",
-        "skim": "the digest says skim it",
-        "skip": "the digest says skip it",
+        "read": "read the original",
+        "skim": "skim targeted parts",
+        "skip": "the digest is enough",
         "": "no full-text digest yet",
     }[read_decision]
     grade_txt = f"grade {grade}" if grade else "ungraded"
@@ -170,10 +170,17 @@ def propose_verdict(
     grade = _grade(digest, quality)
     goal_evidence = _goal_evidence(goal_summaries)
 
-    verdict = _base_verdict(read_decision, grade, goal_evidence=goal_evidence)
     flags, shaky = _quality_flags(quality)
-    confidence = _confidence(read_decision, grade, goal_evidence=goal_evidence, shaky=shaky)
-    rationale = _rationale(read_decision, grade, verdict, goal_evidence=goal_evidence, shaky=shaky)
+    effective_decision = read_decision
+    if read_decision == "read" and str((digest or {}).get("writing_friction") or "") == "high":
+        effective_decision = "skim"
+        flags.append("writing_friction")
+    if read_decision == "read" and ("quality_flag" in flags or "overstatements" in flags):
+        effective_decision = "skim"
+        flags.append("weak_evidence")
+    verdict = _base_verdict(effective_decision, grade, goal_evidence=goal_evidence)
+    confidence = _confidence(effective_decision, grade, goal_evidence=goal_evidence, shaky=shaky)
+    rationale = _rationale(effective_decision, grade, verdict, goal_evidence=goal_evidence, shaky=shaky)
 
     return ProposedVerdict(
         proposed=verdict,

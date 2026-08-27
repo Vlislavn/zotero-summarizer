@@ -2,13 +2,13 @@
 
 The public contract mirrors the upstream paper-render workflow behavior:
 source acquisition (local TeX -> optional arXiv source -> PDF fallback),
-Markdown notes, a single-file English HTML "paper brief" (hero, readable
-sections, figures, digest), figures next to the PDF, and an audit pass. The
+single-file English HTML "paper brief" (hero, readable sections, figures,
+digest), figures next to the PDF, and an audit pass. The
 implementation is local and structured for this app; it does not vendor
 upstream templates/code.
 
-Note (sanctioned CLAUDE.md rule-4 deviation): the notes/HTML/figures are
-written next to the Zotero PDF (`pdf_path.parent`) for upstream compatibility,
+Note (sanctioned CLAUDE.md rule-4 deviation): HTML/figures are written next to
+the Zotero PDF (`pdf_path.parent`) for the embedded reader,
 not under `data/`; only the `paper_read.json` state lives under
 `settings().paper_render_dir`. See `services/library/README.md`.
 """
@@ -33,10 +33,7 @@ from zotero_summarizer.services.library import (
     _paper_read_tex,
     deep_review,
 )
-from zotero_summarizer.services.library._paper_read_meta import (  # re-exported for qa.py + tests
-    artifact_text,
-    qa_body_text,
-)
+from zotero_summarizer.services.library._paper_read_meta import qa_body_text  # re-exported
 
 __all__ = ["artifact_text", "qa_body_text"]
 
@@ -53,6 +50,13 @@ _ITEM_LOCKS: dict[str, threading.Lock] = {}
 # Bounded pool for background builds (the in-repo faithbench pattern) — replaces
 # unbounded raw threads so N concurrent /build requests can't spawn N builds.
 _BUILD_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="paper-build")
+
+
+def artifact_text(artifact: dict[str, Any], *, max_chars: int) -> str:
+    """Build comprehensive Q&A context from structured review state + PDF text."""
+    item_key = str(artifact.get("item_key") or "")
+    review = deep_review.get_cached_review(item_key) if item_key else None
+    return _paper_read_meta.artifact_text(artifact, max_chars=max_chars, review=review)
 
 
 def _compute_renderer_rev() -> str:
@@ -415,7 +419,6 @@ def build_paper_read_for_pdf(
         {
             "paper_name": outputs["paper_name"],
             "outputs": {
-                "notes": outputs["notes_path"],
                 "presentation": outputs["presentation_path"],
                 "audit": outputs["audit_path"],
                 "figures_dir": outputs["figures_dir"],

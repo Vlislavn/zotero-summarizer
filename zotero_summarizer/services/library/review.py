@@ -13,13 +13,12 @@ import logging
 import sqlite3
 from typing import Any
 
-from zotero_summarizer.domain import label_tag_for_priority
 from zotero_summarizer.services import interaction_log
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.golden.goldenset import _PRIORITY_TO_RELEVANCE
+from zotero_summarizer.services.golden import label_verdicts
 from zotero_summarizer.storage import feeds as feeds_storage
 from zotero_summarizer.storage.feed_identity import row_feed_keys
-from zotero_summarizer.storage import repositories
 
 LOGGER = logging.getLogger(__name__)
 
@@ -105,11 +104,12 @@ def _priority_for_positive_review(row: dict[str, Any]) -> str:
 def _record_label_verdict(row: dict[str, Any], priority: str, comment: str) -> None:
     """Persist a review decision into ``label_verdicts`` when the table exists."""
     try:
-        repositories.insert_or_update_label_verdict(
+        label_verdicts.set_label_verdict(
             get_settings().triage_db_path,
             item_key=row_feed_keys(row)[0],
             original_derived_priority=str(row.get("reading_priority") or "").strip() or "unknown",
             user_priority=priority,
+            surface="review_label",
             comment=comment,
         )
     except sqlite3.Error as exc:
@@ -316,177 +316,6 @@ def confirm_remaining_gate_rejected(since_hours: int = 720) -> dict[str, Any]:
     }
 
 
-def materialize_row(
-    row: dict[str, Any],
-    *,
-    writer: Any,
-    used_keys: set[str],
-    reason: str = "review_apply",
-    collection_name: str = "Inbox",
-    label_priority: str | None = None,
-) -> str:
-    """Materialize ONE feed row into Zotero and return the new item key.
-
-    Creates the item in ``collection_name`` (default "Inbox") plus any matched
-    collections, flips the row to ``DECISION_SELECTED``, stamps
-    ``materialized_zotero_key`` and schedules the 7-day outcome window. Raises on
-    failure — callers running a batch wrap each call (one locked row must not
-    strand the rest).
-
-    ``label_priority`` (a reading priority like ``"must_read"``) stamps the user's
-    ground-truth ``label:<priority>`` tag on the new item IN THE SAME lock-tolerant
-    write — used when a deliberate verdict is what triggered the materialization
-    (Today deep-review). The daemon/Add paths leave it ``None`` (a machine decision
-    must never write the human label — see ``_tags_from_row``).
-
-    Shared by :func:`apply_all_approved` (review UI, keeps the "Inbox" default) and
-    ``services.daily_actions.add_to_library`` (Today's add-to-library, which passes a
-    user-chosen collection).
-    """
-    from zotero_summarizer.services.zotero import pending as pending_service
-    from zotero_summarizer.services.triage.feeds import (
-        _feed_payload_from_row, _generate_zotero_key, _matched_collections_from_row,
-        _summary_from_row, _tags_from_row,
-    )
-
-    row_id = int(row["id"])
-    new_key = _generate_zotero_key(used_keys)
-    stored = pick_stored_summary(row)
-    summary = stored if stored is not None else _summary_from_row(row)
-    feed_payload = _feed_payload_from_row(row)
-    tags = _tags_from_row(is_black_swan=False, black_swan_tag="")
-    if label_priority:
-        # The user's deliberate verdict → its ground-truth label:<priority> tag,
-        # written atomically with the item (the lock-tolerant materialization path,
-        # unlike zotero_set_label_tag which refuses while Zotero is open).
-        tags = [*tags, label_tag_for_priority(label_priority)]
-    note_html = pending_service.build_triage_note_html(
-        title=str(row.get("title") or ""),
-        summary=summary,
-        is_black_swan=False,
-        surprise_score=None,
-        run_id=f"{reason}:{row_id}",
-    )
-    writer.apply_feed_materialization(
-        new_item_key=new_key,
-        feed_payload=feed_payload,
-        inbox_collection_name=collection_name,   # default "Inbox" (daemon parity)
-        matched_collections=_matched_collections_from_row(row),
-        tags=tags,
-        note_title=f"Triage: {str(row.get('title') or '')[:80]}",
-        note_html=note_html,
-        provenance_tag=pending_service.SYSTEM_TAG_FEEDS_V3,
-    )
-    with _conn() as conn:
-        feeds_storage.update_to_decision(
-            conn,
-            feed_library_id=int(row["feed_library_id"]),
-            feed_item_id=int(row["feed_item_id"]),
-            decision=feeds_storage.DECISION_SELECTED,
-            decision_reason=f"materialized_via_{reason}",
-            planned_zotero_key=new_key,
-        )
-        feeds_storage.record_materialization(
-            conn,
-            feed_library_id=int(row["feed_library_id"]),
-            feed_item_id=int(row["feed_item_id"]),
-            materialized_zotero_key=new_key,
-            outcome_window_days=7,
-        )
-        conn.commit()
-    return new_key
-
-
-def apply_all_approved(since_hours: int | None = None) -> dict[str, Any]:
-    """Materialize every ``user_approved`` row into Zotero (unbounded by default — never expires).
-
-    Bypasses the pending_changes pipeline (which is designed for existing
-    library items) and calls :meth:`ZoteroWriter.apply_feed_materialization`
-    — the same daemon-direct path used by ``run_daily_selection``. Per-row
-    failures are caught + logged + reported in the response (batch contract:
-    one bad row must not block the rest of the user's queue).
-
-    On success: row → ``DECISION_SELECTED`` + ``materialized_zotero_key``
-    stamped + 7-day outcome window scheduled.
-
-    Returns ``{"applied", "failed_count", "failed": [{"id", "title", "error"}, ...]}``.
-    """
-    from zotero_summarizer.integrations.zotero_write import ZoteroWriter
-
-    with _conn() as conn:
-        rows = feeds_storage.select_by_decisions(
-            conn,
-            decisions=[feeds_storage.DECISION_USER_APPROVED],
-            since_hours=since_hours,
-            limit=5000,
-        )
-
-    if not rows:
-        return {
-            "applied": 0,
-            "pending_sync": 0,
-            "zotero_sync_error": None,
-            "failed_count": 0,
-            "failed": [],
-        }
-
-    settings_ = get_settings()
-    try:
-        writer = ZoteroWriter(settings_.zotero_data_dir)
-    except Exception as exc:  # noqa: BLE001 - Zotero is optional for approved feed rows.
-        LOGGER.warning("apply_all_approved: Zotero writer unavailable; rows remain pending sync: %s", exc)
-        with _conn() as conn:
-            for row in rows:
-                feeds_storage.record_zotero_sync_status(
-                    conn,
-                    feed_library_id=int(row["feed_library_id"]),
-                    feed_item_id=int(row["feed_item_id"]),
-                    status="pending",
-                )
-                feeds_storage.record_app_outcome(
-                    conn,
-                    feed_library_id=int(row["feed_library_id"]),
-                    feed_item_id=int(row["feed_item_id"]),
-                    final_outcome=feeds_storage.OUTCOME_KEPT_UNREAD_APP,
-                    signal_weight=feeds_storage.OUTCOME_WEIGHT[feeds_storage.OUTCOME_KEPT_UNREAD_APP],
-                )
-            conn.commit()
-        return {
-            "applied": 0,
-            "pending_sync": len(rows),
-            "zotero_sync_error": str(exc),
-            "failed_count": 0,
-            "failed": [],
-        }
-
-    applied = 0
-    failed: list[dict[str, Any]] = []
-    used_keys: set[str] = set()
-    for row in rows:
-        row_id = int(row["id"])
-        try:
-            materialize_row(row, writer=writer, used_keys=used_keys, reason="review_apply")
-            applied += 1
-        except Exception as exc:
-            # Batch-apply contract: log and continue so one Zotero-locked row
-            # doesn't strand the rest of the user's approvals. Per-row error
-            # is surfaced in the response.
-            LOGGER.exception("apply_all_approved failed for row id=%s", row_id)
-            failed.append({
-                "id": row_id,
-                "title": str(row.get("title") or ""),
-                "error": str(exc),
-            })
-
-    return {
-        "applied": applied,
-        "pending_sync": 0,
-        "zotero_sync_error": None,
-        "failed_count": len(failed),
-        "failed": failed[:20],
-    }
-
-
 def _label_and_terminate(
     processed_id: int,
     *,
@@ -556,4 +385,8 @@ from zotero_summarizer.services.library.review_summary import (  # noqa: E402,F4
     append_to_golden,
     append_verdict_to_golden,
     pick_stored_summary,
+)
+from zotero_summarizer.services.library.review_materialize import (  # noqa: E402,F401  (re-export)
+    apply_all_approved,
+    materialize_row,
 )

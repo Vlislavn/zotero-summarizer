@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
+from urllib.parse import urlsplit
 
 from zotero_summarizer.models import SummarizeRequest, SummarizeResponse
 from zotero_summarizer.services._common import effective_llm_concurrency
@@ -13,6 +14,7 @@ from zotero_summarizer.services.model import prestige as prestige_service
 from zotero_summarizer.services.model import scoring as scoring_service
 from zotero_summarizer.services.model import surprise as surprise_service
 from zotero_summarizer.services.triage.summarization import run_abstract_pipeline
+from zotero_summarizer.services.triage.prompts import DEFAULT_PRACTITIONER_TRIAGE_PROMPT
 from zotero_summarizer.services.triage.feeds._common import (
     LOGGER,
     TriagedCandidate,
@@ -20,7 +22,6 @@ from zotero_summarizer.services.triage.feeds._common import (
     _is_fatal_llm_error,
     _parse_year,
     _triage_result_from_summary,
-    get_settings,
     get_state,
 )
 
@@ -47,7 +48,12 @@ def _triage_one(
             abstract=item.get("abstract") or "",
             pdf_path="",
         )
-        summary = run_abstract_pipeline(req, log_prefix=log_prefix, llm_override=triage_llm)
+        host = (urlsplit(str(item.get("url") or "")).hostname or "").lower().removeprefix("www.")
+        prompt = DEFAULT_PRACTITIONER_TRIAGE_PROMPT if host == "hackernoon.com" else None
+        summary = run_abstract_pipeline(
+            req, log_prefix=log_prefix, llm_override=triage_llm,
+            triage_prompt_override=prompt,
+        )
         _apply_prestige(summary, item, log_prefix=log_prefix)
         surprise = surprise_service.compute_surprise_score(
             methodological_rigor=_dim_value(summary, "methodological_rigor"),

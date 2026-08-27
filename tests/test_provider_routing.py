@@ -432,7 +432,10 @@ def test_operational_check_reports_per_stage_status(monkeypatch):
         def prompt(self, _p):
             return "ok"
 
+    calls = []
+
     def _fake_build(provider, model):
+        calls.append((provider.name, model))
         # The deep_review stage routes to the anthropic ("claude") provider —
         # simulate that endpoint being unreachable (the shared probe_provider now
         # builds per provider+model, not per resolved-stage object).
@@ -449,6 +452,7 @@ def test_operational_check_reports_per_stage_status(monkeypatch):
     assert by_stage["backlog"]["status"] == "operational"
     assert by_stage["deep_review"]["status"] == "fail"
     assert "connection refused" in by_stage["deep_review"]["detail"]
+    assert calls.count(("local", "base-model")) == 1
 
 
 def test_reachability_check_reports_per_stage(monkeypatch):

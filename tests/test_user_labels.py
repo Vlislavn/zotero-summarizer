@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,6 +16,7 @@ from tests._zotero_fixtures import (
     mark_trashed,
 )
 from zotero_summarizer import domain
+from zotero_summarizer.services import interaction_log, run_log
 from zotero_summarizer.services.golden import goldenset, user_labels
 from zotero_summarizer.services.zotero.pending import build_label_tag_change
 from zotero_summarizer.storage.repositories import (
@@ -152,6 +154,70 @@ def test_reconcile_updates_stale_verdict_and_counts_drift(tmp_path):
     counts = user_labels.reconcile_label_verdicts([_sample("CCCC3333", "must_read")], zdb, db_path)
     assert counts.changed == 1
     assert get_label_verdict(db_path, "CCCC3333")["user_priority"] == "must_read"
+
+
+def test_reconcile_logs_assignment_change_replay_and_retraction(tmp_path, monkeypatch):
+    db_path = _verdict_db(tmp_path)
+    zdb = build_zotero_db(tmp_path / "zotero")
+    item_id = add_library_item(zdb, item_key="TRACK001", title="tracked")
+    add_tag_to_item(zdb, item_id=item_id, tag_name="label:should_read")
+    log_path = tmp_path / "interaction-events.jsonl"
+    monkeypatch.setattr(
+        interaction_log, "settings",
+        lambda: SimpleNamespace(interaction_log_path=log_path),
+    )
+
+    assert user_labels.reconcile_label_verdicts(
+        [_sample("TRACK001", "should_read")], zdb, db_path,
+    ).synced == 1
+    assert user_labels.reconcile_label_verdicts(
+        [_sample("TRACK001", "dont_read")], zdb, db_path,
+    ).changed == 1
+    assert user_labels.reconcile_label_verdicts(
+        [_sample("TRACK001", "dont_read")], zdb, db_path,
+    ).synced == 0
+    with sqlite3.connect(str(zdb)) as conn:
+        conn.execute("DELETE FROM itemTags WHERE itemID = ?", (item_id,))
+    assert user_labels.reconcile_label_verdicts([], zdb, db_path).removed == 1
+
+    events = [e for e in run_log.load_runs(log_path) if e["event"] == "label_transition"]
+    assert [e["transition"] for e in events] == ["assigned", "changed", "retracted"]
+    assert [
+        (e["previous_user_priority"], e["new_user_priority"])
+        for e in events
+    ] == [(None, "should_read"), ("should_read", "dont_read"), ("dont_read", None)]
+    assert events[0]["history_known"] is False
+    assert all(e["source"] == "zotero" for e in events)
+    assert all(e["model_priority"] is None for e in events)
+
+
+def test_reconcile_promotes_same_value_machine_row_to_zotero_user(tmp_path, monkeypatch):
+    db_path = _verdict_db(tmp_path)
+    zdb = build_zotero_db(tmp_path / "zotero")
+    log_path = tmp_path / "interaction-events.jsonl"
+    monkeypatch.setattr(
+        interaction_log, "settings",
+        lambda: SimpleNamespace(interaction_log_path=log_path),
+    )
+    insert_or_update_label_verdict(
+        db_path, item_key="PROMOTE1", original_derived_priority="should_read",
+        user_priority="dont_read", comment="old machine note", source="auto_quality",
+    )
+
+    counts = user_labels.reconcile_label_verdicts(
+        [_sample("PROMOTE1", "dont_read")], zdb, db_path,
+    )
+
+    assert counts == user_labels.ReconcileCounts(synced=1, changed=0, removed=0)
+    stored = get_label_verdict(db_path, "PROMOTE1")
+    assert stored["source"] == "user"
+    assert stored["original_derived_priority"] == user_labels.ZOTERO_LABEL_ORIGIN
+    event = run_log.load_runs(log_path)[0]
+    assert event["transition"] == "assigned"
+    assert event["previous_user_priority"] is None
+    assert event["previous_source"] == "auto_quality"
+    assert event["model_priority"] == "should_read"
+    assert event["comment"] == ""
 
 
 # --- retraction (#5): removing the label:* tag in Zotero retracts the verdict ----

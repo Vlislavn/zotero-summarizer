@@ -109,6 +109,8 @@ describe('ProposedVerdictCard wiring', () => {
     renderView({ items: [{ ...items[0], proposed_verdict: proposal }, items[1]] });
 
     // Card renders under the K1 row with both actions.
+    expect(screen.getByText(/Review suggests: Should read/i)).toBeTruthy();
+    expect(screen.getByText(/not used for rank/i)).toBeTruthy();
     expect(screen.getByRole('button', { name: /Confirm — Should read/i })).toBeTruthy();
     const override = screen.getByRole('button', { name: 'Override' });
 

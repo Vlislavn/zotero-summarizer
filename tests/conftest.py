@@ -4,6 +4,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -46,3 +48,9 @@ def _install_onprem_stubs() -> None:
 
 
 _install_onprem_stubs()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_os_keyring(monkeypatch):
+    import keyring
+    monkeypatch.setattr(keyring, "get_password", lambda _service, _name: None)

@@ -29,7 +29,7 @@ live LLM clients, and runs the manual "is it operational" probe.
   verification calls stay fast; `runtime.resolve_stage_client(stage, enable_thinking=...)`
   caches the two variants by `(stage, enable_thinking)`.
   Dispatches on `ProviderConfig.type`; `resolve_api_key(provider)` reads the API key from
-  the env var named by `api_key_env` (the single key-resolution point, reused by
+  the OS keyring, falling back to the env var named by `api_key_env` (reused by
   `model_list`) and raises `APIError(missing_api_key)` when unset. `openai` reuses
   `services._adapters.build_llm` — now threading `provider.temperature` (default 0) and the
   `provider.thinking_effort` translation (via `thinking.py`, applied BEFORE the per-call
@@ -46,8 +46,8 @@ live LLM clients, and runs the manual "is it operational" probe.
   there is one probe, never two divergent ones. `check_stages()` probes each stage's
   provider and returns per-stage `operational | fail`. Per-stage failures are reported,
   never raised: the app always starts, and the user runs this check manually to verify
-  each stage. Probes run in worker threads (`asyncio.to_thread`), each bounded by a
-  per-stage timeout (`_PROBE_TIMEOUT_SECS`) so a slow/loading/unreachable provider
+  each stage. `check_routing_stages(routing)` exposes that same bounded probe to the
+  setup doctor without depending on live global state. Identical provider/model routes share one serial probe; local cold starts get 60s while remote checks retain 8s. Worker calls are bounded so a slow/loading/unreachable provider
   reports `fail: timeout` instead of hanging the button — the check always answers
   within the timeout. Surfaced at `POST /api/admin/llm-check`. `check_reachability()`
   is the CHEAP proactive companion: a per-stage `GET /models` (via `model_list`, no
@@ -59,6 +59,9 @@ live LLM clients, and runs the manual "is it operational" probe.
   returning sorted, unique model ids for the Settings model-picker. Takes the provider
   profile from the request (not saved config), so the user can pick a model before
   saving. Surfaced at `POST /api/admin/llm-models`.
+- `presets.py` / `credentials.py` — eight human-facing service cards compile to
+  `ProviderConfig`; secrets use the OS keyring with legacy env fallback and only
+  redacted presence/source metadata crosses `/api/setup/ai-*`.
 
 ## Key invariants
 

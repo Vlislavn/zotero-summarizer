@@ -196,6 +196,20 @@ def test_app_rss_reader_refresh_stores_items_without_scoring(tmp_path, monkeypat
     assert is_stable_feed_key(items[0]["stable_feed_key"])
 
 
+def test_overlapping_tag_feeds_reuse_one_guid_row() -> None:
+    conn = _open()
+    a = rss_storage.upsert_rss_feed(conn, name="AI agents", url="https://example.com/a")
+    b = rss_storage.upsert_rss_feed(conn, name="Agentic AI", url="https://example.com/b")
+    first, inserted = rss_storage.upsert_rss_item(
+        conn, rss_feed_id=a, item={"guid": "shared-story", "title": "Concrete agent post"},
+    )
+    second, inserted_again = rss_storage.upsert_rss_item(
+        conn, rss_feed_id=b, item={"guid": "shared-story", "title": "Concrete agent post"},
+    )
+    assert first == second and inserted is True and inserted_again is False
+    assert conn.execute("SELECT COUNT(*) FROM rss_items").fetchone()[0] == 1
+
+
 def test_app_library_reader_lists_kept_rss_rows(tmp_path) -> None:
     db_path = tmp_path / "triage.db"
     conn = sqlite3.connect(str(db_path))

@@ -28,6 +28,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from zotero_summarizer.domain import READING_PRIORITY_SORT_RANK
 from zotero_summarizer.services import run_log
 from zotero_summarizer.services._common import LOGGER, settings, state
 
@@ -129,6 +130,56 @@ def log_human_feedback(
             "gate_sha": _current_gate_sha() if gate_sha is None else gate_sha,
             "model": model,
             "human": human,
+            "comment": comment,
+        },
+        item_key=item_key,
+        surface=surface,
+    )
+
+
+def _log_label_transition(
+    *,
+    item_key: str,
+    previous_user_priority: str | None,
+    new_user_priority: str | None,
+    model_priority: str | None,
+    surface: str,
+    previous_source: str | None = None,
+    source: str = "user",
+    comment: str = "",
+    history_known: bool = True,
+) -> None:
+    """Append an explicit user-label assignment, change, or retraction.
+
+    ``None`` means no prior label was recorded locally; ``history_known=False``
+    keeps a label first observed from another device from fabricating history.
+    Model/provenance sentinels are normalized to ``None`` rather than conflated
+    with either user label.
+    """
+    if previous_user_priority == new_user_priority:
+        return
+    if previous_user_priority is None:
+        transition = "assigned"
+    elif new_user_priority is None:
+        transition = "retracted"
+    else:
+        transition = "changed"
+    _emit(
+        "label_transition",
+        {
+            "item_key": item_key,
+            "item_key_kind": key_kind(item_key),
+            "surface": surface,
+            "source": source,
+            "previous_source": previous_source,
+            "gate_sha": _current_gate_sha(),
+            "transition": transition,
+            "previous_user_priority": previous_user_priority,
+            "new_user_priority": new_user_priority,
+            "model_priority": (
+                model_priority if model_priority in READING_PRIORITY_SORT_RANK else None
+            ),
+            "history_known": history_known,
             "comment": comment,
         },
         item_key=item_key,

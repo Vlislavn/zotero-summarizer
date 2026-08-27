@@ -69,15 +69,20 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
   // Lead verdict: the synthesized goals×rigor call when we have those layers;
   // otherwise fall back to the digest's own read decision.
   let verdict;
-  if (hasBrief) {
-    verdict = readVerdict({ nFired, band, redFlags });
-  } else if (digest?.read_decision) {
-    const d = String(digest.read_decision).toLowerCase();
+  const rawDigestDecision = String(digest?.read_decision || '').toLowerCase();
+  const weakEvidence = band === 'flag' || (quality?.overstatements || []).some(Boolean);
+  const capped = rawDigestDecision === 'read' && (weakEvidence || digest?.writing_friction === 'high');
+  const digestDecision = capped ? 'skim' : rawDigestDecision;
+  if (['read', 'skim', 'skip'].includes(digestDecision)) {
     verdict = {
-      key: d === 'read' ? 'deep' : d === 'skim' ? 'skim' : 'skip',
-      label: d.toUpperCase(),
-      reason: digest.verdict || '',
+      key: digestDecision === 'read' ? 'deep' : digestDecision,
+      label: { read: 'READ', skim: 'SKIM', skip: 'DIGEST IS ENOUGH' }[digestDecision],
+      reason: capped
+        ? `${weakEvidence ? `Concept interesting; evidence weak${redFlags[0] ? ` — ${redFlags[0]}` : ''}.` : 'Idea preserved; writing friction is high.'} ${digest.read_why || ''}`
+        : digest.read_why || '',
     };
+  } else if (hasBrief) {
+    verdict = readVerdict({ nFired, band, redFlags });
   } else {
     verdict = { key: 'skip', label: 'REVIEW', reason: digest?.verdict || '' };
   }
@@ -88,6 +93,8 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
   // caches. None for non-papers.
   const grade = isNonPaper ? '' : (quality?.grade || digest?.grade || '');
   const tldr = digest?.tldr || '';
+  const ideaScore = Math.max(Number(digest?.novelty) || 0, Number(digest?.significance) || 0);
+  const ideaLabel = ideaScore >= 4 ? 'high' : ideaScore >= 3 ? 'moderate' : ideaScore > 0 ? 'low' : 'not assessed';
 
   // Located findings (the story page passes the section overlay; the compact card
   // does not → unchanged). Keyed by VALUE (goal/flag text, critical item) so the
@@ -157,6 +164,7 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
       <div className={`rounded-lg border-l-[3px] px-3.5 py-3 ${VERDICT_ACCENT[verdict.key] || VERDICT_ACCENT.skip}`}>
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-display text-[22px] font-light tracking-tight text-slate-900">{verdict.label}</span>
+          {digest?.estimated_read_minutes != null && <Chip tone="slate">{digest.estimated_read_minutes} min</Chip>}
           {grade && (
             <Chip tone={gradeTone(grade)} title="Reference-free full-text quality grade">
               {compact ? grade : `Quality ${grade}`}
@@ -177,6 +185,11 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
         </div>
         {verdict.reason && (
           <p className="mt-1.5 text-[13px] leading-relaxed text-slate-700 max-w-[66ch]">{verdict.reason}</p>
+        )}
+        {digest && (
+          <p className="mt-1 text-[11px] text-slate-500">
+            Idea: {ideaLabel} · Evidence: {BAND_LABEL[band] || 'not assessed'} · Writing: {digest.writing_friction || 'not assessed'}
+          </p>
         )}
       </div>
 
@@ -544,6 +557,7 @@ function RubricMark({ value }) {
 // The structured digest, behind the "Full digest" disclosure. Rendered ONCE
 // (the old DigestBlock + iframe both showed it). Reading-scale KeyVal rows.
 function DigestRows({ digest: d }) {
+  const p = d.parameters || {};
   return (
     <dl className="space-y-2">
       <KeyVal label="Summary">{d.executive_summary}</KeyVal>
@@ -554,8 +568,20 @@ function DigestRows({ digest: d }) {
       {(d.read_parts || []).filter(Boolean).length > 0 && (
         <KeyVal label="Read parts"><Bullets items={d.read_parts} /></KeyVal>
       )}
+      {(d.skip_parts || []).filter(Boolean).length > 0 && (
+        <KeyVal label="Skip parts"><Bullets items={d.skip_parts} /></KeyVal>
+      )}
+      <KeyVal label="What the original adds">{d.original_value}</KeyVal>
+      {(d.writing_reasons || []).filter(Boolean).length > 0 && (
+        <KeyVal label={`Writing friction · ${d.writing_friction}`}><Bullets items={d.writing_reasons} /></KeyVal>
+      )}
       <KeyVal label="Relevance">{d.relevance}</KeyVal>
       <KeyVal label="Methods">{d.methods}</KeyVal>
+      <KeyVal label="Dataset / sample">{[p.dataset, p.sample_size].filter(Boolean).join(' · ')}</KeyVal>
+      <KeyVal label="Architecture">{p.architecture}</KeyVal>
+      {(p.baselines || []).filter(Boolean).length > 0 && <KeyVal label="Baselines"><Bullets items={p.baselines} /></KeyVal>}
+      {(p.metrics || []).filter(Boolean).length > 0 && <KeyVal label="Metrics"><Bullets items={p.metrics} /></KeyVal>}
+      {p.external_validation != null && <KeyVal label="External validation">{p.external_validation ? 'Yes' : 'No'}</KeyVal>}
       <KeyVal label="Limitations">{d.limitations}</KeyVal>
       <KeyVal label="Controversies">{d.controversies}</KeyVal>
       <KeyVal label="Impact">{d.impact}</KeyVal>

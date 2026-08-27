@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Iterator
@@ -28,6 +29,8 @@ DB_PATH = default_project_root() / "data" / "triage_history.db"
 # API worker threads, and triage tasks never clobber each other's override (the
 # old save/restore-on-a-global approach was racy).
 _DB_PATH_OVERRIDE: ContextVar[Path | None] = ContextVar("triage_db_path_override", default=None)
+_WAL_LOCK = threading.Lock()
+_WAL_PATHS: set[Path] = set()
 
 
 def _resolve_db_path() -> Path:
@@ -320,12 +323,11 @@ def apply_schema(conn: sqlite3.Connection) -> None:
 
 def init_db() -> None:
     """Ensure the triage schema exists on the active DB (idempotent startup path)."""
-    conn = _get_conn()
-    try:
-        apply_schema(conn)
-        conn.commit()
-    finally:
-        conn.close()
+    # Import lazily: migrations owns ordered schema evolution and imports this
+    # module for its v1 baseline.
+    from zotero_summarizer.storage.migrations import run_migrations, TRIAGE_MIGRATIONS
+
+    run_migrations(_resolve_db_path(), "triage", TRIAGE_MIGRATIONS)
     LOGGER.info("Database initialized at %s", _resolve_db_path())
 
 
@@ -390,13 +392,13 @@ def _connect_to(db_path: Path) -> sqlite3.Connection:
         os.chmod(db_path, 0o600)
     conn = sqlite3.connect(str(db_path), timeout=10)
     conn.row_factory = sqlite3.Row
-    # Set busy_timeout BEFORE switching journal mode: the WAL switch needs a
-    # brief exclusive lock, and under concurrent writers (API + feed daemon)
-    # it would otherwise raise "database is locked" before Python's connect
-    # timeout applies. busy_timeout makes every statement, including the WAL
-    # switch, wait for the lock at the SQLite C level.
     conn.execute("PRAGMA busy_timeout=10000")
-    conn.execute("PRAGMA journal_mode=WAL")
+    # ponytail: process-local first-open lock; add an interprocess lock if
+    # concurrent first startup is ever supported.
+    with _WAL_LOCK:
+        if db_path not in _WAL_PATHS:
+            conn.execute("PRAGMA journal_mode=WAL")
+            _WAL_PATHS.add(db_path)
     return conn
 
 
@@ -417,3 +419,4 @@ from zotero_summarizer.storage._repo_feedback import *  # noqa: F401,F403,E402
 from zotero_summarizer.storage._repo_pending import *  # noqa: F401,F403,E402
 from zotero_summarizer.storage._repo_verdicts import *  # noqa: F401,F403,E402
 from zotero_summarizer.storage._repo_labels import *  # noqa: F401,F403,E402
+from zotero_summarizer.storage._repo_sync import *  # noqa: F401,F403,E402

@@ -1,27 +1,12 @@
-// Single seam for first-run readiness. Everything that needs to know "is the
-// app configured?" / "which pillars are green?" reads through this hook so the
-// derivation lives in exactly one place (frozen-contract math, not scattered).
-//
-// Derived (per the frozen contract):
-//   isConfigured = config.valid && config.research_goals_count>0
-//                  && llm.api_key_present
-//   pillars = { zotero, llm, goals, model } advisory status booleans.
+// The backend owns the usable/not-usable gate; pillars explain it.
 
 import { useQuery } from '@tanstack/react-query';
 import { fetchSetupStatus } from '../api/setupApi.js';
 
 export function deriveConfigured(status) {
-  if (!status) return false;
-  const { config, llm } = status;
-  return Boolean(
-    config?.valid &&
-      (config?.research_goals_count || 0) > 0 &&
-      llm?.api_key_present,
-  );
+  return Boolean(status?.ready);
 }
 
-// Runtime subsystems (ML gate, critical deps) that are NOT ready right now.
-// Empty when everything is healthy (older backends omit the field → []).
 export function deriveSubsystemIssues(status) {
   return (status?.subsystems || []).filter((s) => s && s.ready === false);
 }

@@ -24,7 +24,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services.golden import hybrid_gt, label_provenance
+from zotero_summarizer.services.golden import hybrid_gt, label_provenance, label_verdicts
 from zotero_summarizer.services.library import review_detail as review_detail_svc
 from zotero_summarizer.services.zotero.zotero import (
     zotero_set_label_tag,
@@ -78,9 +78,6 @@ class ReviewNoteRequest(BaseModel):
         default="",
         description="Free-text review note; empty string clears the body.",
     )
-
-
-
 
 
 
@@ -302,11 +299,12 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
         existing = repositories.get_label_verdict(_db_path(), req.item_key)
         original = existing["original_derived_priority"] if existing is not None else "unknown"
 
-    row_id = repositories.insert_or_update_label_verdict(
+    row_id = label_verdicts.set_label_verdict(
         _db_path(),
         item_key=req.item_key,
         original_derived_priority=original,
         user_priority=req.user_priority,
+        surface="annotate_verdict",
         comment=req.comment,
     )
     log_verdict_event(req.item_key, original, req.user_priority, req.comment)
@@ -323,9 +321,9 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 — verdict save must not fail on enrichment
         LOGGER.warning("golden append for verdict %s failed: %s", req.item_key, exc)
 
-    # The verdict IS the user's explicit label — write it to Zotero as a
-    # `label:<priority>` tag so the ground truth lives in Zotero (source of truth,
-    # reconciled back on the next export). Library items only: feed:/note: keys
+    # The verdict IS the user's explicit label — mirror it to Zotero as a
+    # `label:<priority>` tag for cross-device reading and later reconciliation.
+    # The app already owns the committed current row + trajectory. Library items only: feed:/note: keys
     # have no Zotero item to tag yet and keep the label_verdicts path. Non-blocking
     # + reported-not-raised, exactly like the verdict note below — the verdict is
     # ALREADY durable above. The user authorized "keep my labels inside Zotero".
@@ -445,7 +443,9 @@ async def remove_verdict(item_key: str) -> dict[str, Any]:
     # Read the prior verdict BEFORE delete so the retraction event keeps the
     # model/human pair the DELETE is about to destroy.
     prior = repositories.get_label_verdict(_db_path(), safe_item_key)
-    deleted = repositories.delete_label_verdict(_db_path(), safe_item_key)
+    deleted = label_verdicts.retract_label_verdict(
+        _db_path(), item_key=safe_item_key, surface="annotate_retract",
+    )
     if deleted and prior is not None:
         log_retract_event(safe_item_key, prior)
     return {"deleted": deleted}

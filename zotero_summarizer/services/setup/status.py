@@ -1,15 +1,5 @@
-"""Aggregate the first-run readiness of the app (``GET /api/setup/status``).
+"""Aggregate first-run readiness without returning credential values."""
 
-One call answers "is this install configured enough to use?" across four axes:
-config validity, the default LLM provider (reachable + key present), the
-filesystem paths, and the Zotero library. ``ready`` is the hard gate
-(config.valid AND research_goals AND llm.api_key_present); Zotero + reachability
-+ the trained classifier are advisory.
-
-SECURITY: this NEVER returns an API-key value. It reads only the *presence* of
-the env var named by ``api_key_env`` (``bool(os.getenv(name))``) and reports a
-BOOL — the env-var NAME is surfaced, the value never is.
-"""
 from __future__ import annotations
 
 import os
@@ -30,46 +20,45 @@ from zotero_summarizer.models.setup import (
 )
 from zotero_summarizer.services import readiness
 from zotero_summarizer.services._common import read_config, settings, state
-from zotero_summarizer.services.llm import operational_check
+from zotero_summarizer.services.llm import credentials, operational_check
 from zotero_summarizer.services.model.model_card import model_card
 from zotero_summarizer.services.zotero.zotero import zotero_status_payload
 
 
 def _config_status() -> tuple[ConfigStatus, object | None]:
-    """Read goals.yaml → (status, parsed_config|None). The parsed config (when
-    valid) is reused for the LLM section so we don't read+validate twice."""
+    """Read goals.yaml once and return status plus the parsed config."""
     config_path = settings().config_path
     if not config_path.exists():
-        return ConfigStatus(present=False, valid=False, research_goals_count=0, error=None), None
+        return ConfigStatus(present=False, valid=False, research_goals_count=0), None
     try:
         config = read_config(config_path)
     except (pydantic.ValidationError, ValueError, yaml.YAMLError) as exc:
-        # I/O boundary: a present-but-broken config file (bad YAML or a schema
-        # violation) is a real, reportable state — not a crash. The setup UI shows
-        # the error so the user can fix it.
         return ConfigStatus(present=True, valid=False, research_goals_count=0, error=str(exc)), None
+    from zotero_summarizer.services.setup.validate import has_personal_goals
+
     goals = [g for g in (config.research_goals or []) if str(g).strip()]
-    return ConfigStatus(present=True, valid=True, research_goals_count=len(goals), error=None), config
+    count = len(goals) if has_personal_goals(config) else 0
+    return ConfigStatus(present=True, valid=True, research_goals_count=count), config
 
 
 async def _llm_status(config: object | None) -> LlmStatus:
-    """Default-stage provider snapshot: provider/model names, key presence (BOOL
-    only, never the value), and advisory reachability. When the config is invalid
-    there is no routing to inspect, so everything is null/false."""
+    """Return default-stage names, redacted key presence, and reachability."""
     if config is None:
-        return LlmStatus(
-            default_provider=None, default_model=None, api_key_env=None,
-            api_key_present=False, reachable=False, detail="config invalid or missing",
-        )
+        return LlmStatus(api_key_present=False, reachable=False, detail="config invalid or missing")
     resolved = resolve_stage(config.llm_routing, "deep_review")  # type: ignore[attr-defined]
     provider, model = resolved.provider, resolved.model
-    # Presence check ONLY — read the named env var and coerce to a bool. The value
-    # is never returned, logged, or stored.
-    api_key_present = bool(os.getenv(provider.api_key_env, "").strip())
+    preset_local = provider.is_local and provider.api_key_env == "OLLAMA_API_KEY"
+    api_key_present = (
+        preset_local or credentials.get_api_key(provider.api_key_env) is not None
+    )
 
     reachability = await operational_check.check_reachability()
     default_row = next(
-        (row for row in reachability.get("stages", []) if row.get("stage") == "deep_review"),
+        (
+            row
+            for row in reachability.get("stages", [])
+            if row.get("stage") == "deep_review"
+        ),
         {},
     )
     return LlmStatus(
@@ -136,26 +125,18 @@ async def _classifier_status() -> ClassifierStatus:
 
 
 async def get_setup_status() -> SetupStatusResponse:
-    """Assemble the full setup-readiness snapshot.
-
-    ``ready`` = config valid AND ≥1 research goal AND the default provider's key
-    is present. Zotero, reachability, and the classifier are advisory and
-    deliberately excluded from the gate: the app works (Today + feed ingest +
-    reading kept feed papers) without Zotero, and an install is "ready" before
-    the LLM endpoint is up or the gate is trained."""
+    """Assemble readiness; Zotero and the classifier stay advisory."""
     config_status, config = _config_status()
     llm = await _llm_status(config)
     paths = _path_status()
     zotero = _zotero_status()
     classifier = await _classifier_status()
 
-    ready = bool(
-        config_status.valid
-        and config_status.research_goals_count > 0
-        and llm.api_key_present
-        # Zotero is advisory: app works (Today + feed ingest) without it.
-        # zotero.db_found is surfaced in the response but does not gate ready.
-    )
+    from zotero_summarizer.services.setup.doctor import doctor_status
+
+    verified = bool(doctor_status(settings()).get("ready"))
+    ready = bool(config_status.valid and config_status.research_goals_count > 0
+                 and llm.api_key_present and llm.reachable and verified)
 
     return SetupStatusResponse(
         ready=ready,

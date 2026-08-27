@@ -1,14 +1,4 @@
-"""Manual operational check: probe each pipeline stage's configured provider.
-
-This is the user-triggered "initialize / is it operational" action — the app
-always starts regardless of provider availability, and this endpoint is how the
-user confirms each stage can actually reach its model. Each stage is probed
-independently; a failure is captured and reported as that stage's status, never
-raised — so one unreachable provider does NOT stop the app or the other stages.
-
-Returns one row per stage: ``{stage, provider, type, model, status, detail}``
-where ``status`` is ``operational`` or ``fail``.
-"""
+"""Bounded real-inference and cheap reachability probes for configured stages."""
 from __future__ import annotations
 
 import asyncio
@@ -21,22 +11,13 @@ from zotero_summarizer.services.llm.factory import build_client_for_provider
 
 LOGGER = logging.getLogger("zotero_summarizer")
 
-# Smallest useful probe: a one-word reply confirms auth + connectivity + that
-# the model id is served, without spending real tokens on a paper.
 _PROBE_PROMPT = "Reply with the single word: ok"
-
-# Hard ceiling on how long a SINGLE stage's probe may keep the user waiting. A
-# local model that's mid-load or an unreachable endpoint must not hang the
-# "Check operational" button (the bug: one slow provider made the whole check
-# take 15s+ with no feedback). On timeout the stage reports "fail: timeout" and
-# the others still return — the button always answers in ~this many seconds.
 _PROBE_TIMEOUT_SECS = 8.0
+_LOCAL_PROBE_TIMEOUT_SECS = 60.0
 
 
 def _stage_skeleton(routing: Any, stage: str) -> tuple[Any, dict[str, Any]]:
-    """``(resolved_stage, base_row)`` — the provider/model identity for a stage,
-    shared by the probe and its timeout path so a timed-out stage still names
-    which provider/model was slow."""
+    """Resolved identity shared by success and timeout rows."""
     resolved = resolve_stage(routing, stage)
     return resolved, {
         "stage": stage,
@@ -47,17 +28,7 @@ def _stage_skeleton(routing: Any, stage: str) -> tuple[Any, dict[str, Any]]:
 
 
 def probe_provider(provider: ProviderConfig, model: str) -> dict[str, Any]:
-    """Probe ONE provider+model with a tiny prompt — the single shared probe
-    mechanism behind both the per-stage operational check and the setup
-    config-draft validator.
-
-    Returns ``{status: "operational"|"fail", detail: str}``. The broad ``except``
-    is the documented status boundary: a probe reports a pass/fail row instead of
-    stopping the caller, so every failure mode (missing key, 401, connection
-    refused, bad model) becomes a ``fail`` row rather than propagating. Callers
-    that need an exception (none today) would call ``build_client_for_provider``
-    directly.
-    """
+    """Probe one provider/model; failures are data so sibling stages still run."""
     try:
         client = build_client_for_provider(provider, model)
         client.prompt(_PROBE_PROMPT)
@@ -74,55 +45,44 @@ def _probe_stage(routing: Any, stage: str) -> dict[str, Any]:
 
 
 async def _probe_stage_bounded(routing: Any, stage: str) -> dict[str, Any]:
-    """Run one probe in a worker thread, bounded by ``_PROBE_TIMEOUT_SECS``.
-
-    On timeout the user-visible call returns a ``fail: timeout`` row immediately;
-    the orphaned worker thread finishes on its own (the blocking ``client.prompt``
-    eventually returns/errors) — acceptable for this low-frequency manual check.
-    """
+    """Bound one blocking provider call; its orphaned worker exits independently."""
+    resolved, _row = _stage_skeleton(routing, stage)
+    timeout = _LOCAL_PROBE_TIMEOUT_SECS if getattr(resolved, "provider", None) and resolved.provider.is_local else _PROBE_TIMEOUT_SECS
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(_probe_stage, routing, stage),
-            timeout=_PROBE_TIMEOUT_SECS,
+            timeout=timeout,
         )
     except asyncio.TimeoutError:
         _resolved, row = _stage_skeleton(routing, stage)
         row["status"] = "fail"
-        row["detail"] = (
-            f"timeout after {_PROBE_TIMEOUT_SECS:.0f}s — provider slow or unreachable"
-        )
+        row["detail"] = f"timeout after {timeout:.0f}s — provider slow or unreachable"
         LOGGER.warning(
             "LLM operational check timed out for stage=%s (>%.0fs)",
-            stage, _PROBE_TIMEOUT_SECS,
+            stage, timeout,
         )
         return row
 
 
-async def check_stages() -> dict[str, Any]:
-    """Probe every stage's provider and return per-stage operational status.
-
-    Probes run concurrently in worker threads, each bounded by
-    ``_PROBE_TIMEOUT_SECS`` so one slow/unreachable provider can neither block the
-    event loop nor stall the button — every stage returns a status within the
-    timeout. Each probe captures its own failures, so no probe can fault the gather.
-    """
-    routing = state().app_state.config.llm_routing
-    stages = list(
-        await asyncio.gather(
-            *(_probe_stage_bounded(routing, stage) for stage in STAGES)
-        )
-    )
+async def check_routing_stages(routing: Any) -> dict[str, Any]:
+    """Run bounded real inference for every stage in an explicit routing config."""
+    stages, cached = [], {}
+    # ponytail: unique probes run serially to protect one local runtime; parallelize
+    # only if mixed-provider health-check latency becomes a measured problem.
+    for stage in STAGES:
+        resolved, _row = _stage_skeleton(routing, stage)
+        key = (resolved.provider.name, resolved.model)
+        if key not in cached:
+            cached[key] = await _probe_stage_bounded(routing, stage)
+        stages.append({**cached[key], "stage": stage})
     all_ok = all(row["status"] == "operational" for row in stages)
     return {"status": "ok" if all_ok else "degraded", "stages": stages}
 
 
-# ---------------------------------------------------------------------------
-# Cheap REACHABILITY probe (no tokens, no model load): a GET /models listing is
-# enough to tell "endpoint up + model served" from "unreachable". This is the
-# PROACTIVE companion to check_stages — safe to call on Settings load or before a
-# deep-review run to warn that a stage's endpoint is down, so a dead endpoint
-# surfaces as a banner instead of a silent empty result after a failed run.
-# ---------------------------------------------------------------------------
+async def check_stages() -> dict[str, Any]:
+    """Probe every live stage; the setup doctor reuses the explicit-routing seam."""
+    return await check_routing_stages(state().app_state.config.llm_routing)
+
 
 _REACH_TIMEOUT_SECS = 4.0
 
@@ -132,9 +92,6 @@ def _reach_stage(routing: Any, stage: str) -> dict[str, Any]:
 
     resolved, row = _stage_skeleton(routing, stage)
     row["base_url"] = resolved.provider.base_url or ""
-    # Broad except is the same per-stage status boundary as _probe_stage: every
-    # failure mode (unset key, connection refused, 404 model id) becomes an
-    # unreachable row the UI surfaces, never a propagating error.
     try:
         model_list.list_models_for_provider(resolved.provider)
         row["reachable"] = True
@@ -161,13 +118,7 @@ async def _reach_stage_bounded(routing: Any, stage: str) -> dict[str, Any]:
 
 
 async def check_reachability() -> dict[str, Any]:
-    """Cheap per-stage endpoint reachability (GET /models, no tokens spent).
-
-    Returns ``{status: ok|degraded, stages: [{stage, provider, type, model,
-    base_url, reachable, detail}]}``. The proactive companion to
-    :func:`check_stages`; the deep-review surface calls this on mount so an
-    unreachable endpoint is announced before the user runs a review.
-    """
+    """Cheap per-stage ``GET /models`` reachability, with no token spend."""
     routing = state().app_state.config.llm_routing
     stages = list(
         await asyncio.gather(

@@ -36,9 +36,9 @@ from zotero_summarizer.services.triage.feeds._tick_phases import (
     pick_and_log,
     prepare_unprocessed,
     record_tick_decisions,
-    recover_abstractless_rescues,
     run_triage_stage,
 )
+from zotero_summarizer.services.triage.feeds._rescue import recover_abstractless_rescues
 from zotero_summarizer.services.triage.feeds._rescue_l1 import (
     recover_abstractless_l1_candidates,
 )

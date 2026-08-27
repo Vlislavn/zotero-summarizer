@@ -48,6 +48,8 @@ export default function usePaperReview(itemKey, { onSaved, onQueueRefresh } = {}
       : addWarning;
   const submitNotice = verdictResult?.added_to_library
     ? '✓ Added to your Zotero Inbox — appears after a Zotero restart'
+    : verdictResult?.saved_offline
+      ? 'Saved on this device — it will sync when the server is reachable'
     : null;
 
   function refreshDetail() {

@@ -48,7 +48,7 @@ def test_arxiv_short_circuits_before_browser(monkeypatch):
         browser_fetch=lambda *_a, **_k: browser_calls.append(_a) or Path("/x"),
     )
     res = _pdf_acquire.acquire_pdf_for("A", {"url": "https://arxiv.org/abs/2401.00001", "doi": ""})
-    assert res.path == Path("/tmp/a.pdf") and res.needs_login is False
+    assert res.path == Path("/tmp/a.pdf") and res.source == "arxiv" and res.needs_login is False
     assert browser_calls == []  # headless win → browser never invoked
 
 
@@ -64,7 +64,7 @@ def test_openalex_oa_url_rung_used_when_no_direct(monkeypatch):
         headless_fetch=lambda url, **_k: (fetched.append(url), Path("/tmp/oa.pdf"))[1],
     )
     res = _pdf_acquire.acquire_pdf_for("A", {"url": "", "doi": "10.1/x"})
-    assert res.path == Path("/tmp/oa.pdf")
+    assert res.path == Path("/tmp/oa.pdf") and res.source == "openalex"
     assert fetched == ["https://oa.example/x.pdf"]
 
 
@@ -88,7 +88,7 @@ def test_pmc_rung_recovers_no_doi_pubmed_item(monkeypatch):
         headless_fetch=lambda url, **_k: (fetched.append(url), Path("/tmp/pmc.pdf"))[1],
     )
     res = _pdf_acquire.acquire_pdf_for("A", {"url": "https://pubmed.ncbi.nlm.nih.gov/42317861/", "doi": ""})
-    assert res.path == Path("/tmp/pmc.pdf")
+    assert res.path == Path("/tmp/pmc.pdf") and res.source == "pmc"
     assert fetched == ["https://pmc.ncbi.nlm.nih.gov/articles/PMC13274294/pdf/"]
     assert captured["pmid"] == "42317861"  # PMID parsed from the PubMed URL and threaded
 
@@ -228,6 +228,16 @@ def test_fleet_path_never_pops_headed_window(monkeypatch):
     res = _pdf_acquire.acquire_pdf_for("A", {"url": "https://www.nature.com/x", "doi": "10.1/x"})
     assert res.path is None and res.needs_login is True
     assert headed == []  # no visible window during a background run
+
+
+def test_automatic_attachment_never_opens_a_browser(monkeypatch):
+    app = _app(ua_enabled=True)
+    browser_calls = []
+    _patch(monkeypatch, app, browser_fetch=lambda *a, **k: browser_calls.append(a))
+    result = _pdf_acquire.acquire_pdf_for(
+        "A", {"url": "https://publisher.test/x", "doi": "10.1/x"}, allow_browser=False,
+    )
+    assert result.outcome == "needs_login" and browser_calls == []
 
 
 def test_web_article_rendered_when_enabled(monkeypatch):

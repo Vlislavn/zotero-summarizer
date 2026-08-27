@@ -222,7 +222,7 @@ class _FakeSummary:
 
 def test_targeted_review_no_fulltext():
     cand = _c("P")
-    targeted_review(cand, full_text="", sections=[], query="q", questions=[], config=None, llm=None)
+    targeted_review(cand, full_text="", query="q", questions=[], config=None, llm=None)
     assert cand.review == {"state": "needs_full_text"}
 
 
@@ -234,7 +234,7 @@ def test_targeted_review_happy_path(monkeypatch):
     )
     cand = _c("P")
     targeted_review(
-        cand, full_text="body", sections=[], query="my query", questions=["what dataset?"],
+        cand, full_text="body", query="my query", questions=["what dataset?"],
         config=object(), llm=object(),
     )
     assert cand.review["state"] == "reviewed"

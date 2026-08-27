@@ -114,6 +114,11 @@ class PaperDigest(QualityReview):
     read_decision: str = Field(default="")  # read | skim | skip
     read_why: str = Field(default="")
     read_parts: List[str] = Field(default_factory=list)
+    skip_parts: List[str] = Field(default_factory=list)
+    estimated_read_minutes: Optional[int] = Field(default=None, ge=0)
+    original_value: str = Field(default="")
+    writing_friction: Literal["low", "moderate", "high"] = Field(default="low")
+    writing_reasons: List[str] = Field(default_factory=list, max_length=3)
     relevance: str = Field(default="")
     controversies: str = Field(default="")
     impact: str = Field(default="")
@@ -135,6 +140,19 @@ class PaperDigest(QualityReview):
     def _norm_read_decision(cls, value: Any) -> str:
         v = str(value or "").strip().lower()
         return v if v in {"read", "skim", "skip"} else ""
+
+    @model_validator(mode="after")
+    def _reading_contract(self) -> "PaperDigest":
+        if self.writing_friction != "low" and not any(x.strip() for x in self.writing_reasons):
+            raise ValueError("moderate/high writing friction requires a concrete reason")
+        if self.writing_friction == "high" and self.read_decision == "read":
+            self.read_decision = "skim"
+        if self.read_decision == "skim" and not any(part.strip() for part in self.read_parts):
+            raise ValueError("skim requires at least one exact read target")
+        if self.read_decision == "skip":
+            self.read_parts = []
+            self.original_value = ""
+        return self
 
 
 class GoalSummary(BaseModel):

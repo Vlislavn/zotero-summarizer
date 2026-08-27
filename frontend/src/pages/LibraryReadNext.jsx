@@ -50,8 +50,8 @@ function flattenCollections(nodes, depth = 0) {
 
 export default function LibraryReadNext() {
   const navigate = useNavigate();
-  const { status } = useSetupStatus();
-  const setupStatusKnown = Boolean(status);
+  const { status, isError: setupStatusError } = useSetupStatus();
+  const setupStatusKnown = Boolean(status) || setupStatusError;
   const zoteroConnected = status?.zotero?.db_found === true;
   const [searchParams, setSearchParams] = useSearchParams();
   // Client-side smart filters (Phase 1) — hydrated from the URL on mount so a
@@ -377,22 +377,23 @@ export default function LibraryReadNext() {
     }
   }
 
-  // ------ Bulk: fetch arXiv full-text PDFs → Zotero (background job) ------
+  // ------ Bulk: acquire OA full-text PDFs → Zotero (background job) ------
   function pollFulltext() {
     if (ftPollRef.current) { clearTimeout(ftPollRef.current); ftPollRef.current = null; }
     fetchFulltextStatus().then((s) => {
       const p = s?.progress || {};
       if (s?.running) {
-        setMessage(`Fetching arXiv full text… ${p.done || 0}/${p.total || 0} downloaded (this can take several minutes).`);
+        setMessage(`Fetching full text… ${p.done || 0}/${p.total || 0} checked (this can take several minutes).`);
         ftPollRef.current = setTimeout(pollFulltext, 4000);
         return;
       }
       const r = s?.result || {};
       setFetchingFulltext(false);
       if (r.error) { setMessage(`Full-text fetch failed: ${r.error}`); setIsError(true); return; }
+      const unavailable = (r.no_oa_source || 0) + (r.needs_login || 0) + (r.failed_count || 0);
       setMessage(
-        `Attached ${r.attached || 0} arXiv PDF(s) to Zotero`
-        + ` (skipped ${r.skipped_has_pdf || 0} that already had a PDF, ${r.no_arxiv || 0} without an arXiv link, ${r.failed_count || 0} failed).`
+        `Attached ${r.attached || 0} full-text PDF(s) to Zotero`
+        + ` (skipped ${r.skipped_has_pdf || 0} already attached; ${unavailable} unavailable).`
         + (r.attached ? ' They upload to zotero.org on the next sync.' : '')
         + (r.backup_path ? ` Backup: ${r.backup_path}.` : ''),
       );
@@ -490,7 +491,7 @@ export default function LibraryReadNext() {
         return;
       }
       // 'started' or 'running' → poll the cheap status endpoint for progress.
-      setMessage('Fetching arXiv full text… scanning the library.');
+      setMessage('Fetching full text… scanning the library.');
       setIsError(false);
       pollFulltext();
     } catch (err) {

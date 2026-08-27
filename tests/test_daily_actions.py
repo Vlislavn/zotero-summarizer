@@ -197,7 +197,8 @@ def test_add_to_library_runs_real_materialize_row(tmp_path, monkeypatch):
 
     monkeypatch.setattr(daily_actions, "get_settings", lambda: fake)
     monkeypatch.setattr(daily_actions, "ZoteroWriter", _MatWriter)
-    monkeypatch.setattr(review, "get_settings", lambda: fake)            # materialize_row._conn
+    from zotero_summarizer.services.library import review_materialize
+    monkeypatch.setattr(review_materialize, "get_settings", lambda: fake)
     monkeypatch.setattr(review, "append_to_golden", lambda *a, **k: True)
     monkeypatch.setattr(daily_actions, "_attach_fulltext_best_effort", lambda keys: {"attached": 0})
 
@@ -410,7 +411,8 @@ def test_verdict_materialize_writes_label_tag(tmp_path, monkeypatch):
 
     monkeypatch.setattr(daily_actions, "get_settings", lambda: fake)
     monkeypatch.setattr(daily_actions, "ZoteroWriter", _CapWriter)
-    monkeypatch.setattr(review, "get_settings", lambda: fake)  # materialize_row._conn
+    from zotero_summarizer.services.library import review_materialize
+    monkeypatch.setattr(review_materialize, "get_settings", lambda: fake)
     monkeypatch.setattr(daily_actions.deep_review, "copy_review", lambda *a, **k: None)
     monkeypatch.setattr(daily_actions, "_attach_fulltext_best_effort", lambda keys: {"attached": 0})
     monkeypatch.setattr(daily_actions, "_carry_renders_best_effort", lambda pairs: None)

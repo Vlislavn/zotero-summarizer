@@ -1,9 +1,4 @@
-"""Config-draft validation: invalid GoalsConfig → field_errors, valid → none;
-test_connection=false → connection null; persists nothing.
-
-POST /api/setup/validate-config is a dry-run editor aid — it must never mutate
-app state.
-"""
+"""Setup draft validation remains read-only and reports field errors."""
 from __future__ import annotations
 
 import asyncio
@@ -20,12 +15,10 @@ def _run(coro):
 
 
 def _valid_config_dict() -> dict:
-    # The committed example is a known-valid GoalsConfig; load it as the draft.
     with open("goals.example.yaml", "r", encoding="utf-8") as fh:
         raw = yaml.safe_load(fh)
-    # The example uses ${OPENAI_API_BASE}; give llm.api_base a concrete value so it
-    # validates without env expansion (validate_config_draft does NOT expand env).
     raw["llm"]["api_base"] = "http://localhost:11434/v1"
+    raw["research_goals"] = ["Reliable multimodal evidence synthesis"]
     return raw
 
 
@@ -47,8 +40,14 @@ def test_valid_config_no_errors_connection_null_when_not_tested():
     resp = _run(validate_config_draft(req))
     assert resp.valid is True
     assert resp.field_errors == []
-    # connection is null when test_connection=false, even for a valid config.
     assert resp.connection is None
+
+
+def test_placeholder_goals_do_not_complete_setup():
+    draft = _valid_config_dict()
+    draft["research_goals"] = ["Replace with your first research focus area"]
+    resp = _run(validate_config_draft(ValidateConfigRequest(config=draft)))
+    assert not resp.valid and resp.field_errors[0].loc == ["research_goals"]
 
 
 def test_validate_persists_nothing(tmp_path, monkeypatch):

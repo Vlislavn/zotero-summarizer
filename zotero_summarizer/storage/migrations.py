@@ -31,18 +31,25 @@ def _migration_baseline_corpus(_conn: sqlite3.Connection) -> None:
     return None
 
 
+def _migration_offline_sync(conn: sqlite3.Connection) -> None:
+    from zotero_summarizer.storage._repo_sync import apply_sync_schema
+
+    apply_sync_schema(conn)
+
+
 # Append-only, version-ordered. To change the schema, add a new Migration with
 # the next version number — never edit a shipped one or add inline ALTERs.
 TRIAGE_MIGRATIONS: list[Migration] = [
     Migration(1, "baseline_schema", _migration_baseline_triage),
+    Migration(2, "offline_mutation_sync", _migration_offline_sync),
 ]
 CORPUS_MIGRATIONS: list[Migration] = [
     Migration(1, "baseline_embedding_cache", _migration_baseline_corpus),
+    Migration(2, "sync_version_alignment", _migration_baseline_corpus),
 ]
 
-# The current target version = the highest defined across namespaces. Both
-# namespaces share the v1 baseline today, so this is 1; it advances as steps
-# are appended.
+# Both namespaces advance in lockstep so one reported target stays meaningful;
+# a store unaffected by a schema step receives a named no-op version marker.
 SCHEMA_VERSION = max(m.version for m in (*TRIAGE_MIGRATIONS, *CORPUS_MIGRATIONS))
 
 

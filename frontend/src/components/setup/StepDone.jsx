@@ -6,18 +6,15 @@
 import { useNavigate } from 'react-router-dom';
 import Button from '../ui/Button.jsx';
 import { Banner } from '../form/Fields.jsx';
+import { DoctorChecklist } from '../settings/DeploymentCard.jsx';
 
 export default function StepDone({ pathsChanged = false }) {
   const navigate = useNavigate();
   return (
-    <div className="space-y-5 text-center py-4">
-      <div className="text-5xl" aria-hidden>🎉</div>
-      <div>
-        <h3 className="text-lg font-bold text-slate-900">You&apos;re set</h3>
-        <p className="text-sm text-slate-500 mt-1">
-          Your configuration is saved. The feed daemon will start scoring papers
-          against your goals.
-        </p>
+    <div className="space-y-5 py-4">
+      <div className="text-center">
+        <h3 className="text-lg font-bold text-slate-900">Verify your setup</h3>
+        <p className="text-sm text-slate-500 mt-1">Saved. Ready requires the real pipeline checks below.</p>
       </div>
 
       {/* The one genuine cross-step reminder: a path change only applies on restart,
@@ -30,9 +27,9 @@ export default function StepDone({ pathsChanged = false }) {
         </div>
       )}
 
-      <div>
-        <Button onClick={() => navigate('/today')}>Go to Today</Button>
-      </div>
+      <DoctorChecklist autoRun completion={
+        <div className="text-center"><Button onClick={() => navigate('/today')}>Open Today</Button></div>
+      } />
     </div>
   );
 }

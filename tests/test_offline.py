@@ -1,5 +1,4 @@
-"""Offline mode: the ZS_OFFLINE → HF-env switch, prefetch --check cache report,
-and the SPECTER2 friendly-error guidance."""
+"""Offline environment, cache reporting, and actionable model errors."""
 from __future__ import annotations
 
 import os
@@ -13,11 +12,12 @@ import zotero_summarizer.settings as settings_mod
 
 @pytest.fixture
 def clean_env(monkeypatch, tmp_path):
-    # Isolate from the repo's real .env + any inherited HF/ZS vars.
     monkeypatch.setattr(settings_mod, "default_project_root", lambda: tmp_path)
     for k in ("ZS_OFFLINE", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"):
         monkeypatch.delenv(k, raising=False)
-    return tmp_path
+    yield tmp_path
+    for k in ("ZS_OFFLINE", "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"):
+        os.environ.pop(k, None)
 
 
 def test_zs_offline_sets_hf_env(monkeypatch, clean_env):
@@ -54,7 +54,7 @@ def test_zs_offline_falsy_variants(monkeypatch, clean_env, val):
 # --- prefetch --check cache report ---
 
 def test_cache_report(monkeypatch):
-    from zotero_summarizer.cli import _app
+    from zotero_summarizer.services.setup.assets import cache_report
 
     class _Repo:
         def __init__(self, rid, size):
@@ -65,7 +65,7 @@ def test_cache_report(monkeypatch):
         "huggingface_hub.scan_cache_dir",
         lambda: SimpleNamespace(repos=[_Repo("allenai/specter2_base", 400_000_000)]),
     )
-    report = _app._cache_report([("gate", "allenai/specter2_base"), ("rerank", "BAAI/bge-reranker-v2-m3")])
+    report = cache_report([("gate", "allenai/specter2_base"), ("rerank", "BAAI/bge-reranker-v2-m3")])
     by = {r["repo_id"]: r for r in report}
     assert by["allenai/specter2_base"]["cached"] is True
     assert by["allenai/specter2_base"]["size_mb"] == 400.0
@@ -73,22 +73,34 @@ def test_cache_report(monkeypatch):
     assert by["BAAI/bge-reranker-v2-m3"]["size_mb"] == 0.0
 
 
-def test_model_targets_includes_four(monkeypatch):
-    from zotero_summarizer.cli import _app
+def test_model_targets_includes_four():
+    from zotero_summarizer.services.setup.assets import model_targets
     config = SimpleNamespace(
         corpus=SimpleNamespace(
             embedding_model="sentence-transformers/all-MiniLM-L6-v2",
             reranker_model="BAAI/bge-reranker-v2-m3",
         ),
-        # _model_targets reads quality_review.shadow_claim_check to decide whether to
-        # add the optional MiniCheck encoder target — off → exactly the four below.
         quality_review=SimpleNamespace(shadow_claim_check=False),
     )
-    repos = [r for _, r in _app._model_targets(config)]
+    repos = [r for _, r in model_targets(config)]
     assert "allenai/specter2_base" in repos
     assert "allenai/specter2" in repos
     assert "sentence-transformers/all-MiniLM-L6-v2" in repos
     assert "BAAI/bge-reranker-v2-m3" in repos
+
+
+@pytest.mark.parametrize(("name", "value"), [("ZS_OFFLINE", "true"), ("HF_HUB_OFFLINE", "1")])
+def test_strict_offline_blocks_uncached_pdf_and_rss_network(monkeypatch, tmp_path, name, value):
+    from zotero_summarizer.integrations.app_rss import AppRssReader
+    from zotero_summarizer.integrations.pdf_fetch import fetch_pdf
+    from zotero_summarizer.services.library import _pdf_acquire
+
+    monkeypatch.setenv(name, value)
+    assert fetch_pdf("https://example.com/paper.pdf", cache_dir=tmp_path) is None
+    assert AppRssReader(tmp_path / "missing.db").refresh_feeds()["offline"] is True
+    bomb = SimpleNamespace(fetch_work_by_doi=lambda *_: pytest.fail("OpenAlex network attempted"))
+    app = SimpleNamespace(unpaywall_client=bomb, openalex_cache=None, openalex_client=bomb)
+    assert _pdf_acquire._headless_sources(app, SimpleNamespace(prestige=SimpleNamespace(user_agent_email="")), "https://publisher.test/p", "10.1/x", "") == []
 
 
 # --- SPECTER2 friendly offline error (re-raised, not swallowed) ---

@@ -9,7 +9,7 @@ import fitz
 import pytest
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services.library import _paper_read_html, paper_render
+from zotero_summarizer.services.library import _paper_read_html, _paper_read_meta, paper_render
 
 
 def _make_pdf(path, *, arxiv: bool = False, refs: bool = True):
@@ -86,12 +86,10 @@ def test_build_paper_read_uses_local_tex_and_writes_expected_outputs(tmp_path):
     assert artifact["references_count"] == 2
     assert artifact["figures_count"] == 1
     assert (tmp_path / "figures" / artifact["figures"][0]["name"]).is_file()
-    notes = artifact["outputs"]["notes"]
     html = artifact["outputs"]["presentation"]
-    assert notes.endswith("_notes.md") and html.endswith("_presentation.html")
-    notes_text = open(notes, encoding="utf-8").read()
-    assert "GlassNet" in notes_text
-    assert "Quick Reference" in notes_text
+    assert "notes" not in artifact["outputs"]
+    assert not list(tmp_path.glob("*_notes.md"))
+    assert html.endswith("_presentation.html")
     html_text = open(html, encoding="utf-8").read()
     assert "const imageMap" in html_text
     assert 'id="ph-fig1"' in html_text
@@ -136,14 +134,16 @@ def test_arxiv_source_download_requires_explicit_consent(tmp_path, monkeypatch):
 
 def test_audit_reports_missing_placeholder(tmp_path):
     html = tmp_path / "x.html"
-    notes = tmp_path / "x.md"
     html.write_text("<html><script>const imageMap={}</script><section lang-zh>A</section><section lang-en>A</section></html>")
-    notes.write_text("notes")
     audit = _paper_read_html._audit_presentation(
-        html, notes, [{"name": "fig1_arch.png", "caption": "Figure 1"}]
+        html,
+        {"authors": "Author 1", "full_text": " ".join([r"\section{bad}"] * 9)},
+        [{"name": "fig1_arch.png", "caption": "Figure 1"}],
     )
     assert audit["status"] == "blocking"
     assert any("ph-fig1" in issue for issue in audit["blocking"])
+    assert any("residual LaTeX" in issue for issue in audit["blocking"])
+    assert any("placeholder authors" in issue for issue in audit["minor"])
 
 
 def test_presentation_has_standard_sections_and_no_bilingual_markup(tmp_path):
@@ -272,6 +272,36 @@ def test_tex_tier_persists_pdf_body_for_qa_and_sections(tmp_path):
     assert artifact.get("render_sections"), "render_sections (PDF sections) missing for TeX tier"
     # Comprehensive QA context now includes the real body text on a TeX paper.
     assert "ImageNet" in paper_render.artifact_text(artifact, max_chars=100_000)
+
+
+def test_comprehensive_context_uses_structured_review_not_legacy_sidecar(tmp_path):
+    legacy_notes = tmp_path / "old_notes.md"
+    legacy_notes.write_text("LEGACY SIDECAR MUST NOT BE READ", encoding="utf-8")
+    artifact = {
+        "title": "GlassNet", "full_text": "PDF BODY EVIDENCE",
+        "outputs": {"notes": str(legacy_notes)},
+    }
+    review = {
+        "digest": {"tldr": "STRUCTURED DIGEST"},
+        "quality": {"quality_band": "highlight"},
+        "goal_summaries": [{"goal": "Robust ML", "summary": "STRUCTURED GOAL"}],
+    }
+
+    context = _paper_read_meta.artifact_text(artifact, max_chars=10_000, review=review)
+
+    assert "STRUCTURED DIGEST" in context and "STRUCTURED GOAL" in context
+    assert "PDF BODY EVIDENCE" in context
+    assert "LEGACY SIDECAR" not in context
+
+
+def test_legacy_missing_notes_output_does_not_break_completed_artifact(tmp_path):
+    html = tmp_path / "brief.html"
+    html.write_text("brief", encoding="utf-8")
+    state = {
+        "status": "completed",
+        "outputs": {"presentation": str(html), "notes": str(tmp_path / "missing_notes.md")},
+    }
+    assert paper_render._completed_outputs_missing(state) is False
 
 
 def test_pdf_figures_dedup_in_prose_caption_mentions(tmp_path):

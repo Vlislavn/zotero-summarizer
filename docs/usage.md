@@ -141,31 +141,23 @@ abstract is too thin, that's the signal to add the deferred efetch backfill.
 
 ### HackerNoon (practitioner / engineering angle)
 
-HackerNoon adds the *building-agents* engineering view that arXiv (research) and
-PubMed (clinical) miss. It's a tag-filtered RSS feed — same **Settings → RSS
-feeds** flow as any other source. Tags are the only filter (no boolean queries),
-so pick a narrow one and let the gate + goal_sim do the rest:
+Add the two agent-engineering tags through the same **Settings → RSS feeds**
+form as every other source:
 
 ```
-https://hackernoon.com/tagged/llm/feed                     # best fit (~50/feed; LLM/agent eng.)
-https://hackernoon.com/tagged/artificial-intelligence/feed # broader (more general-ML noise)
-https://hackernoon.com/tagged/chatgpt/feed                 # optional
+https://hackernoon.com/tagged/ai-agents/feed
+https://hackernoon.com/tagged/agentic-ai/feed
 ```
 
-Validated live: the `llm` tag is genuinely on-point ("Guardrails That Stopped My
-AI Agent From Going Rogue", "API Gateway Pattern for Safer Enterprise AI Agents",
-"Local LLMs Need More Than OpenAI-Compatible Endpoints") with some SEO/marketing
-filler the gate filters out. Note the narrower `ai-agents` / `agentic-ai` /
-`generative-ai` tags **don't exist as feeds** — use `llm`.
+They use generic RSS identity/dedup and the same rank/slate. Only the triage rubric
+changes: concrete architecture, implementation, failures, measurements and reusable
+steps score well; promotion, SEO and unsupported trend claims do not. Selected posts
+continue through the existing web-article render/review rung.
 
-Two differences from the academic sources, both fine:
-- **Triage is title-driven.** HackerNoon's tag feed carries the title + a
-  one-sentence lede, no full abstract — so the gate/goal_sim rank mostly on the
-  (informative) title. Make sure your goals.yaml has an agentic-AI goal sentence.
-- **Triage-only — read on the web.** Blog posts have no PDF/DOI/PMC, so there's no
-  prestige (cold-start, never penalised) and the PDF-based deep-review/ask-paper
-  don't apply (they're built for papers with method checklists). HackerNoon picks
-  surface in the slate; click through to read. No app code is involved.
+Operational caveat (2026-08-27): HackerNoon documents tag RSS, but these two paths
+returned a Cloudflare 403 while `/feed` and some other tags returned XML. Refresh
+surfaces the upstream error in the feed row; retry when HackerNoon restores access.
+Do not work around it with an unmaintained source-specific scraper.
 
 ### Cover the flagship journal, not just the sub-journal
 

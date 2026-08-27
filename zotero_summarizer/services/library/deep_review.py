@@ -347,20 +347,24 @@ def _build_ctx(reader: Any = None) -> dict[str, Any]:
     }
 
 
-def _resolve_items(top_k: int, item_keys: list[str] | None, overrides: dict[str, str]) -> list[dict[str, Any]]:
+def _resolve_items(top_k: int, item_keys: list[str] | None, overrides: dict[str, Any]) -> list[dict[str, Any]]:
     """Build the per-item dicts: the explicit ``item_keys`` (per-paper button / fleet,
     honoring ``pdf_overrides``) or the top-``top_k`` unread reading-queue picks."""
     if item_keys:
         # Per-paper: title is re-read inside _review_one; gate_relevance is display-only.
-        return [
-            {
-                "item_key": key,
-                "title": "",
+        items = []
+        for key in item_keys:
+            override = overrides.get(key, "")
+            acquired = override if isinstance(override, dict) else None
+            item = {
+                "item_key": key, "title": "",
                 "gate_relevance": (reading_queue.get_cached_scoring(key) or {}).get("composite_score"),
-                "pdf_path": overrides.get(key, ""),
+                "pdf_path": acquired.get("path", "") if acquired else override,
             }
-            for key in item_keys
-        ]
+            if acquired:
+                item["acquired_pdf"] = acquired
+            items.append(item)
+        return items
     queue = reading_queue.build_reading_queue(limit=max(1, top_k))
     return [
         {"item_key": row["item_key"], "title": row.get("title") or "", "gate_relevance": row.get("relevance_score")}
@@ -384,12 +388,20 @@ def _review_worker(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str)
             _set_job_progress(item_key, {"phase": "acquire", "phase_label": "Fetching full text…"})
             acquired = _pdf_acquire.acquire_for_item(item_key, reader=ctx.get("reader"))
             if acquired.path is not None:
-                item.update({"pdf_path": str(acquired.path), "web_article": acquired.web_article})
+                item.update({
+                    "pdf_path": str(acquired.path), "web_article": acquired.web_article,
+                    "acquired_pdf": {
+                        "path": str(acquired.path), "source": acquired.source,
+                        "source_url": acquired.source_url,
+                    },
+                })
         entry = _review_one(
             item, focus_prompt=focus_prompt,
             progress_sink=lambda prog: _set_job_progress(item_key, prog), **kwargs,
         )
         if entry is not None:
+            if item.get("acquired_pdf"):
+                entry["acquired_pdf"] = item["acquired_pdf"]
             # DECLARED-but-gated fetch (paywall/no session): carry needs_login + landing URL for a sign-in link.
             if acquired is not None and acquired.needs_login and not item.get("pdf_path"):
                 entry["needs_login"] = True
@@ -422,7 +434,7 @@ def start(
     *,
     item_keys: list[str] | None = None,
     focus_prompt: str = "",
-    pdf_overrides: dict[str, str] | None = None,
+    pdf_overrides: dict[str, Any] | None = None,
     acquire_missing: bool = False,
     reader: Any = None,
 ) -> dict[str, Any]:

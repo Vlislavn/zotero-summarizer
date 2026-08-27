@@ -355,12 +355,13 @@ def zotero_upsert_user_note(item_key: str, note: str) -> None:
 
 
 def zotero_set_label_tag(item_key: str, priority: str) -> None:
-    """Write the user's explicit ``label:<priority>`` ground-truth tag to Zotero.
+    """Mirror the user's current ``label:<priority>`` verdict to Zotero.
 
     Direct write — mirrors :func:`zotero_upsert_verdict_note` so a verdict cast in
-    the app lands in Zotero instantly (the user labels in the app OR Zotero;
-    Zotero is the source of truth, reconciled on the next export). Mutually
-    exclusive within the ``label:*`` namespace. Raises on failure so the caller
+    the app lands in Zotero instantly; direct Zotero/iPad edits reconcile back on
+    the next export. The app owns current decision state/history; the tag is the
+    portable current-value mirror. Mutually exclusive within the ``label:*``
+    namespace. Raises on failure so the caller
     can report it; the verdict itself is already saved upstream and must not be
     blocked by this. Refuses while Zotero is open (DB-lock risk). No-op when the
     label is already set (idempotent)."""

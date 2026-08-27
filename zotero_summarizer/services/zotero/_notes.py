@@ -62,42 +62,37 @@ def build_triage_note_html(
     run_id: str | None = None,
     include_provenance: bool = True,
 ) -> str:
-    """Render a concise, Zotero-safe triage note: verdict + key findings +
-    relevance + a compact metadata footer (target <150 words rendered)."""
+    """Render the persisted triage artifact as a self-sufficient Zotero note."""
     glyph = _PRIORITY_GLYPH.get(summary.reading_priority, "•")
     priority_label = summary.reading_priority.replace("_", " ").title()
-
     verdict = (summary.triage_rationale or summary.should_deep_read or summary.executive_summary or "").strip()
     if not verdict:
         verdict = f"Triaged paper: {title or 'Untitled'}."
-
-    findings = [f for f in (summary.key_findings or []) if str(f).strip()][:3]
-    findings_html = "".join(f"<li>{html.escape(str(f))}</li>" for f in findings) or "<li><em>No specific findings extracted.</em></li>"
-
-    relevance = (summary.relevance_to_research or "").strip()
-    if not relevance:
-        relevance = "(No specific connection to your goals extracted.)"
-
-    tags_preview = ", ".join(html.escape(t) for t in (summary.tags or [])[:3]) or "—"
-    matched_goal = html.escape(summary.matched_goal or "—")
-
-    parts: list[str] = []
-    if include_provenance:
-        parts.append(build_provenance_comment(run_id=run_id))
-    parts.extend(
-        [
-            f"<h2>{html.escape(glyph)} {html.escape(priority_label)}</h2>",
-            f"<p>{html.escape(verdict)}</p>",
-            "<h2>Key findings</h2>",
-            f"<ul>{findings_html}</ul>",
-            "<h2>Relevance to my work</h2>",
-            f"<p>{html.escape(relevance)}</p>",
-        ]
+    parts = [build_provenance_comment(run_id=run_id)] if include_provenance else []
+    parts += [f"<h2>{html.escape(glyph)} {html.escape(priority_label)}</h2>",
+              f"<p>{html.escape(verdict)}</p>"]
+    text_sections = (
+        ("What this paper is about", summary.executive_summary),
+        ("Approach / methods", summary.methods),
+        ("Why it matters to my work", summary.relevance_to_research),
+        ("Limitations / uncertainty", summary.limitations),
+        ("Reading guidance", summary.should_deep_read),
     )
-
+    for heading, value in text_sections:
+        if value and value.strip():
+            parts += [f"<h2>{heading}</h2>", f"<p>{html.escape(value.strip())}</p>"]
+    for heading, values, limit in (
+        ("Key findings", summary.key_findings, 6),
+        ("What to read", summary.key_sections_to_read, 6),
+    ):
+        kept = [str(value).strip() for value in values if str(value).strip()][:limit]
+        if kept:
+            parts += [f"<h2>{heading}</h2>", "<ul>" + "".join(
+                f"<li>{html.escape(value)}</li>" for value in kept) + "</ul>"]
+    tags_preview = ", ".join(html.escape(t) for t in (summary.tags or [])[:6]) or "—"
     footer_bits = [
         f"score {summary.composite_relevance_score:.1f}",
-        f"goal: {matched_goal}",
+        f"goal: {html.escape(summary.matched_goal or '—')}",
         f"tags: {tags_preview}",
     ]
     if is_black_swan:
@@ -152,19 +147,35 @@ def build_digest_note_html(digest: Any) -> str:
     sections are skipped so it stays tight. Led by ``DIGEST_NOTE_MARKER``."""
     e = html.escape
     decision = (getattr(digest, "read_decision", "") or "—")
+    minutes = getattr(digest, "estimated_read_minutes", None)
+    timing = f" · {minutes} min" if minutes is not None else ""
     grade = getattr(digest, "grade", "") or "—"
     parts: list[str] = [
         f"<!-- {DIGEST_NOTE_MARKER};version=1 -->",
-        f"<h2>Digest — {e(decision)} · Quality {e(grade)}</h2>",
+        f"<h2>Digest — {e(decision)}{timing} · Quality {e(grade)}</h2>",
     ]
     if getattr(digest, "tldr", ""):
         parts.append(f"<p>{e(digest.tldr)}</p>")
     if getattr(digest, "read_why", ""):
         parts.append(f"<p><strong>Read?</strong> {e(decision)} — {e(digest.read_why)}</p>")
+    if getattr(digest, "original_value", ""):
+        parts.append(f"<p><strong>What the original adds:</strong> {e(digest.original_value)}</p>")
+    writing_reasons = list(getattr(digest, "writing_reasons", []) or [])
+    if writing_reasons:
+        parts.append(f"<p><strong>Writing · {e(digest.writing_friction)}:</strong> {e('; '.join(writing_reasons))}</p>")
+    parameters = getattr(digest, "parameters", None)
+    if parameters:
+        values = [parameters.dataset, parameters.sample_size, parameters.architecture,
+                  *parameters.baselines, *parameters.metrics]
+        parts.append(f"<p><strong>Technical parameters:</strong> {e('; '.join(x for x in values if x))}</p>")
     read_parts = list(getattr(digest, "read_parts", []) or [])[:3]
     if read_parts:
         parts.append("<p><strong>Read parts</strong></p><ul>"
                      + "".join(f"<li>{e(str(x))}</li>" for x in read_parts) + "</ul>")
+    skip_parts = list(getattr(digest, "skip_parts", []) or [])[:3]
+    if skip_parts:
+        parts.append("<p><strong>Skip parts</strong></p><ul>"
+                     + "".join(f"<li>{e(str(x))}</li>" for x in skip_parts) + "</ul>")
     for label, val in (
         ("Relevance", getattr(digest, "relevance", "")),
         ("Controversies", getattr(digest, "controversies", "")),

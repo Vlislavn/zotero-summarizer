@@ -2,34 +2,18 @@
 read-status filter, incremental cache, and graceful gate-off fallback."""
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
+from tests._reading_queue_support import (
+    FakeGate as _FakeGate,
+    FakeReader as _FakeReader,
+    Pred as _Pred,
+    isolate,
+    item as _item,
+    patch_state as _patch_state,
+    seed as _seed,
+)
 from zotero_summarizer.services.library import reading_queue
-
-
-class _FakeReader:
-    def __init__(self, items):
-        self._items = items
-
-    def get_items(self, *, limit=100, offset=0, collection_key=None, search=None, tag=None, include_abstract=True):
-        # The whole-library queue + scoring must read via get_all_items now; a
-        # reversion to the 500-window get_items should fail loudly here.
-        raise AssertionError("reading_queue must use get_all_items, not get_items")
-
-    def get_all_items(self, *, collection_key=None, search=None, tag=None, page_size=500, include_abstract=True):
-        # Whole-library scan source (the real one paginates get_items); the fake
-        # already returns everything in one page.
-        return {"items": self._items, "total": len(self._items)}
-
-
-class _Pred:
-    def __init__(self, item_key, raw_score, shap=None, aux=None):
-        self.item_key = item_key
-        self.raw_score = raw_score
-        self.shap_contribs = shap or []
-        self.aux_context = aux or {}
 
 
 def test_score_distribution_bins_by_band():
@@ -51,66 +35,11 @@ def test_score_distribution_bins_by_band():
     assert sum(b["count"] for b in dist["bins"]) == 5
 
 
-class _FakeGate:
-    def __init__(self, sha, scores=None):
-        self.golden_csv_sha256 = sha
-        self._scores = scores or {}
-
-    def predict(self, items, *, corpus_db_path, goals_config, return_shap=False, prestige_network=True):
-        return [
-            _Pred(
-                it["item_key"], self._scores.get(it["item_key"], 3.0),
-                shap=[
-                    {"feature": "semantic_match_specter2", "contribution": 0.5},
-                    {"feature": "bias", "contribution": 2.0},
-                ],
-                aux={"max_author_h_index": 20},
-            )
-            for it in items
-        ]
-
-
-def _item(key, pri="", date="2026-05-01", tags=()):
-    return {
-        "item_key": key, "title": f"T{key}", "abstract": "abs", "authors": "A",
-        "reading_priority": pri, "has_pdf": True, "date_added": date, "tags": list(tags),
-    }
-
-
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch, tmp_path):
-    """No real cache file, no background threads, clean job state per test.
-    Default: no user verdicts (handled-filter off) unless a test overrides it."""
-    from zotero_summarizer.storage import repositories
-
-    reading_queue.finish(error=None)
-    monkeypatch.setattr(reading_queue, "_cache_path", lambda: tmp_path / "rq.json")
-    monkeypatch.setattr(reading_queue, "run_in_background", lambda target: None)
-    monkeypatch.setattr(
-        reading_queue, "get_settings",
-        lambda: SimpleNamespace(corpus_db_path=tmp_path / "c.db", triage_db_path=tmp_path / "t.db"),
-    )
-    monkeypatch.setattr(repositories, "list_label_verdict_priorities", lambda db_path: {})
-    # No review-fleet proposals by default (hermetic — never reads the real model
-    # dir's proposed_verdicts.json); tests that exercise the attach override this.
-    from zotero_summarizer.services.library.review_fleet import verdict_store
-    monkeypatch.setattr(verdict_store, "read_all", lambda: {})
+    isolate(monkeypatch, tmp_path)
     yield
     reading_queue.finish(error=None)
-
-
-def _patch_state(monkeypatch, reader, gate):
-    monkeypatch.setattr(
-        reading_queue, "get_state",
-        lambda: SimpleNamespace(zotero_reader=reader, classifier_gate=gate, app_state=SimpleNamespace(config=object())),
-    )
-
-
-def _seed(sha, **scores):
-    reading_queue._write_cache(sha, {
-        k: {"relevance_score": v, "why_reason": "Topic match", "scoring": {"composite_score": v, "shap_top": []}}
-        for k, v in scores.items()
-    })
 
 
 def test_ranks_by_relevance_when_cached(monkeypatch):
@@ -191,6 +120,7 @@ def test_proposed_verdict_attached_to_rows(monkeypatch):
         lambda: {"A": {"proposed": "must_read", "confidence": 0.85}},
     )
     res = reading_queue.build_reading_queue()
+    assert [i["item_key"] for i in res["items"]] == ["B", "A"]  # proposal does not rerank
     by_key = {i["item_key"]: i for i in res["items"]}
     assert by_key["A"]["proposed_verdict"] == {"proposed": "must_read", "confidence": 0.85}
     assert by_key["B"]["proposed_verdict"] is None  # no proposal yet

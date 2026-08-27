@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from zotero_summarizer.settings import offline_requested
+
 
 if TYPE_CHECKING:
     from zotero_summarizer.integrations.unpaywall import UnpaywallClient
@@ -52,8 +54,10 @@ def fetch_pdf(
     # Deterministic per-URL filename — lets us short-circuit on repeat fetches.
     url_key = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
     final_path = cache_dir / f"{url_key}.pdf"
-    if final_path.exists() and final_path.stat().st_size > 0:
+    if valid_pdf_path(final_path, max_bytes=max_bytes):
         return final_path
+    if offline_requested():
+        return None
 
     client = http_client or httpx.Client(timeout=timeout, follow_redirects=True)
     try:
@@ -80,6 +84,17 @@ def fetch_pdf(
     finally:
         if http_client is None:
             client.close()
+
+
+def valid_pdf_path(path: Path, *, max_bytes: int = _DEFAULT_MAX_BYTES) -> bool:
+    """A bounded local file with PDF magic, suitable for cache reuse."""
+    try:
+        if not 0 < path.stat().st_size <= max_bytes:
+            return False
+        with path.open("rb") as handle:
+            return handle.read(4) == _PDF_MAGIC
+    except OSError:
+        return False
 
 
 def resolve_pdf_url(

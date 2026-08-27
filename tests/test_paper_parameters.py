@@ -14,6 +14,8 @@ from zotero_summarizer.services.library.quality_review import (
     _DEFAULT_DIGEST_PROMPT,
     assess_digest,
 )
+from zotero_summarizer.services.library._paper_read_html import _digest_section_html
+from zotero_summarizer.services.zotero._notes import build_digest_note_html
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
 
 
@@ -33,7 +35,7 @@ class _FakeLLM:
 def test_digest_with_no_parameters_yields_none_not_a_guess():
     """A non-empirical / parameter-less paper → parameters=None (abstention,
     not a fabricated parameters object)."""
-    digest = PaperDigest()  # all defaults — a valid, parameter-less digest
+    digest = PaperDigest(writing_friction="low", writing_reasons=[])
     llm = _FakeLLM([digest])
     out = assess_digest(title="T", full_text="position paper body",
                         config=_default_goals_config(), llm=llm)
@@ -50,7 +52,7 @@ def test_digest_with_parameters_parses_verbatim():
         architecture="encoder-decoder transformer",
         external_validation=True,
     )
-    digest = PaperDigest(parameters=params)
+    digest = PaperDigest(parameters=params, writing_friction="low", writing_reasons=[])
     llm = _FakeLLM([digest])
     out = assess_digest(title="T", full_text="empirical paper body",
                         config=_default_goals_config(), llm=llm)
@@ -58,6 +60,8 @@ def test_digest_with_parameters_parses_verbatim():
     assert out.parameters.dataset == "MIMIC-IV (n=12000)"
     assert out.parameters.baselines == ["GPT-4", "Llama-3"]
     assert out.parameters.external_validation is True
+    assert "MIMIC-IV" in _digest_section_html(out.model_dump())
+    assert "Technical parameters" in build_digest_note_html(out)
 
 
 def test_default_digest_prompt_instructs_parameter_extraction():

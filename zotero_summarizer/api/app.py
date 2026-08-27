@@ -42,6 +42,14 @@ def _install_spa(app: FastAPI) -> None:
         name="spa-assets",
     )
 
+    def public_file(name: str):
+        async def endpoint() -> FileResponse:
+            return FileResponse(str(_FRONTEND_DIST / name))
+        return endpoint
+
+    for name in ("sw.js", "manifest.webmanifest", "app-icon.svg"):
+        app.add_api_route(f"/{name}", public_file(name), methods=["GET"], include_in_schema=False)
+
     async def spa_index() -> FileResponse:
         return FileResponse(str(index_html))
 

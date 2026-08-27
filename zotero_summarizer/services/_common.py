@@ -208,16 +208,19 @@ def read_config(config_path: Path, calibration_path: Path | None = None) -> Goal
     config = apply_env_overrides(config)
     config = _disable_section_when_offline(config, "prestige")
     config = _disable_section_when_offline(config, "openreview")
+    config = _disable_section_when_offline(config, "full_text_refine")
     return _derive_local_num_ctx(config)
 
 
 def _is_offline() -> bool:
-    return (os.getenv("ZS_OFFLINE") or "").strip().lower() in ("1", "true", "yes", "on")
+    from zotero_summarizer.settings import offline_requested
+
+    return offline_requested()
 
 
 def _disable_section_when_offline(config: GoalsConfig, section: str) -> GoalsConfig:
     """Air-gap contract: ``ZS_OFFLINE`` forces a network-dependent enrichment section
-    (``prestige`` / ``openreview``) off so triage and scoring never reach the network.
+    off so triage and scoring never reach the network.
     Applied AFTER the env layer so ``ZS_OFFLINE`` beats an explicit ``ZS_*_ENABLED=1``.
     No-op when the section is already off or the app is online."""
     sec = getattr(config, section)

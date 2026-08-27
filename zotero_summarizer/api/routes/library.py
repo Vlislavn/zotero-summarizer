@@ -134,7 +134,7 @@ async def get_item_pdf(item_key: str) -> FileResponse:
 
 async def get_paper_render(item_key: str) -> dict[str, Any]:
     """Paper-read artifact status/metadata. Use POST ``/build`` to generate the
-    Markdown notes, HTML presentation, figures, and audit files."""
+    HTML presentation, figures, and audit files."""
     return await asyncio.to_thread(paper_render.render_paper, item_key)
 
 

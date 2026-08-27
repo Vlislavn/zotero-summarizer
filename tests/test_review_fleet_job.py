@@ -339,7 +339,9 @@ def test_needs_pdf_pick_acquires_then_re_reviews_and_proposes(monkeypatch):
 
     out = fleet.start(top_k=1)
     # pass 1 reviews from Zotero (needs_pdf), pass 2 re-reviews WITH the acquired path.
-    assert [s["pdf_overrides"] for s in starts] == [None, {"A": "/tmp/A.pdf"}]
+    assert [s["pdf_overrides"] for s in starts] == [
+        None, {"A": {"path": "/tmp/A.pdf", "source": "", "source_url": ""}},
+    ]
     assert upserts["A"]["proposed"] == "must_read"          # read + grade A
     assert out["proposed"] == 1 and out["status"] == "ready"
 

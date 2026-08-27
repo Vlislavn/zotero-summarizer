@@ -28,6 +28,7 @@ from zotero_summarizer.services.search.dedup import to_version_families
 from zotero_summarizer.services.search.federate import federate
 from zotero_summarizer.services.search.intent import _as_str_list, build_query_plan
 from zotero_summarizer.services.search.rank import rank_candidates, score_query_relevance
+from zotero_summarizer.settings import offline_requested
 
 LOGGER = logging.getLogger(__name__)
 
@@ -132,6 +133,8 @@ def run_agentic_rounds(session_id: str, *, deps: Any, max_rounds: int = 2) -> Re
     the LLM proposes no additions or the strong band stabilizes (work-based budget, no
     wall-clock cap). Serial by design (each round federates + one LLM call)."""
     sess = session_store.load(session_id)
+    if offline_requested():
+        return sess
     query = sess.raw_query or sess.intent.canonical_question
     for rnd in range(1, max_rounds + 1):
         before = _top_band_signature(sess.candidates)

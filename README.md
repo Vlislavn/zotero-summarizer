@@ -13,8 +13,8 @@ keep/trash decisions train the model, so tomorrow's slate is sharper.
 ```
 
 **Local-first · no telemetry · trained on _your_ labels** (nothing ships with the repo —
-the model learns from how you triage). Zotero stays the source of truth; the app only
-writes back changes you approve.
+the model learns from how you triage). The app owns current decisions and their history;
+Zotero remains the PDF/citation surface and a synced representation of approved tags/notes.
 
 ## Requirements
 

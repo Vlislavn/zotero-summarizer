@@ -16,7 +16,7 @@ make scan-diff    # the same, scoped to the .py you changed vs the base branch (
 
 | script | enforces |
 |---|---|
-| `check_file_loc.py` | `.py` ≤ 500 LOC; legacy files frozen at their `loc_allowlist.txt` ceiling |
+| `check_file_loc.py` | hard `.py` ≤ 500 LOC with no allowlist |
 | `check_import_policy.py` | the layered-import rules + "new service modules go in a domain subpackage" |
 | `check_module_readme.py` | every package has a README; editing a package's code re-stages its README |
 | `check_dead_code.py` | dead-code identification (two tiers, below); existing findings grandfathered |
@@ -24,7 +24,6 @@ make scan-diff    # the same, scoped to the .py you changed vs the base branch (
 | `check_slop.py` | AI-slop / dead-code patterns (Tier 7, below); existing findings grandfathered |
 | `check_overlaps.py` | all-pairs semantic overlap audit (run via `make scan`/`make scan-diff`, advisory — **not** a hook). A function paired with its OWN nested closure (same path, prefix-qualname) is suppressed — self-overlap, not duplication |
 | `check_allowlists.py` | `reconcile`: flags STALE grandfathers (committed key with no live finding) — run in `make scan` + the test suite. A reconciler whose tool isn't importable in the current env (e.g. vulture outside the venv) SKIPS with a note instead of crashing — mirrors the Makefile's Tier-2 skip contract |
-| `loc_allowlist.txt` | grandfathered oversized files (path + frozen ceiling) — shrink to empty |
 | `dead_code_allowlist.txt` | grandfathered orphan public symbols (`<path>:<symbol>`) — shrink to empty |
 | `vulture_allowlist.txt` | grandfathered Vulture findings, **path-anchored** (`<path>:<name>`) — shrink to empty |
 | `redundancy_allowlist.txt` | grandfathered redundancy findings (transforms + clone pairs) — shrink to empty |
@@ -64,7 +63,7 @@ code blocks:
   `vulture-scan` and the regenerator calls `make-allowlist` rather than re-typing
   the flags, so they can't drift from the gate.
 
-Both allowlists follow the `loc_allowlist.txt` rule: entries may be **removed**
+Both allowlists are shrink-only ratchets: entries may be **removed**
 (wire a real consumer, or delete the symbol) but a new entry needs a one-line
 justification. `check_allowlists.py reconcile` flags any entry whose target no
 longer produces a live finding (a stale grandfather), so they can only shrink.
@@ -143,12 +142,13 @@ invariant), every false positive is killed by a **guard** (not a special case), 
 preferred over text** (comments are read via `tokenize`, so a marker inside a string or
 f-string never trips a comment rule), and a detector never silently no-ops. Two subcommands:
 
-- **`slop-check`** (file-based, **BLOCKs**) — fires on the one *unambiguous* defect:
-  **debug-leftover**, a committed `breakpoint()` / `pdb.set_trace()` / `ipdb.set_trace()`.
+- **`slop-check`** (file-based, **BLOCKs**) — catches **debug-leftover**, a committed
+  `breakpoint()` / `pdb.set_trace()` / `ipdb.set_trace()`, plus the objective
+  code-in-head complexity limits configured below.
   Guards: `breakpoint` is skipped if shadowed (a domain `def breakpoint(...)`); imports
   are *not* treated as shadows (`import pdb` is how you reach the real debugger).
-- **`slop-sweep`** (whole-tree, **advisory**, always exits 0) — everything heuristic, so it
-  can never pressure a behaviour-changing edit:
+- **`slop-sweep`** (whole-tree, **advisory**, always exits 0) — reports every heuristic;
+  the touched-file hook promotes only the objective complexity limits below to blocking:
   - **swallowed-exception** — `except: pass` (spares `as _:` intentional ignores and
     re-raising/returning handlers; the repo's best-effort WAL-pragma idiom is grandfathered).
   - **silent-recovery** — a handler that only logs without the exception's context (spares
@@ -162,13 +162,14 @@ f-string never trips a comment rule), and a detector never silently no-ops. Two 
     and ≥3-line rationale blocks.
   - **generic-naming** — placeholder *def/class/param* names (`foo`/`bar`, `helper_2`),
     high-precision so ML names like `payload_v2` / `sha256` are spared.
-  - **function-too-long / too-many-params / deep-nesting** — Long-Method complexity; an
-    elif chain counts as one level, and flat data-shuttle / declarative bodies are spared.
+  - **function-too-long / too-many-params / deep-nesting** — BLOCK above 88 body code
+    lines, 6 required parameters, or 5 control-flow levels; an elif chain counts as
+    one level, and flat data-shuttle / declarative bodies are spared.
 
 Per-rule severity is config-overridable via `slop_severity.txt` (`rule=off|advise|block`,
 `off` drops it), inheriting aislop's rule-severity model. `slop_allowlist.txt`
-(`<path>:<line>:<rule>`) freezes today's findings — currently **0 blocking** and the repo's
-pre-existing long functions / best-effort handlers — so only *new* slop surfaces.
+(`<path>:<line>:<rule>`) freezes today's findings — currently empty — so only *new*
+slop surfaces.
 
 Regenerate the slop seed after a deliberate change:
 

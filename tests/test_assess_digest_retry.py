@@ -29,7 +29,7 @@ class _FakeLLM:
 
 def test_assess_digest_retries_on_malformed_then_succeeds():
     bad = '{"soundness": 0, "novelty": 0, "significance": 0, "reproducibility": 0, "clarity": 0}'
-    good = PaperDigest()  # all-default → valid (scores default to in-range values)
+    good = PaperDigest(writing_friction="low", writing_reasons=[])
     llm = _FakeLLM([bad, good])
     out = assess_digest(title="T", full_text="paper body", config=_default_goals_config(), llm=llm)
     assert isinstance(out, PaperDigest)
