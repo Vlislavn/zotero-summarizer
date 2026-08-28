@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { runDeepReview, fetchDeepReviewStatus } from '../../api/libraryApi.js';
 import { fetchLlmReachability } from '../../api/settingsApi.js';
 import Spinner from '../ui/Spinner.jsx';
+import { FullTextAccessNotice } from '../library/shared.jsx';
 import PaperReview from './review/PaperReview.jsx';
 
 // "92" -> "1m 32s", "8" -> "8s". Used for the live elapsed + ETA readout so the
@@ -101,23 +102,7 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
           {llm.detail && <div className="mt-1 text-[11px] text-amber-600 break-words">{llm.detail}</div>}
         </div>
       )}
-      {deep && deep.needs_pdf && deep.needs_login && deep.login_url && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] leading-relaxed text-amber-800">
-          <span className="font-semibold">Needs your library sign-in.</span>{' '}
-          The full text is behind your institution’s access.{' '}
-          <a href={deep.login_url} target="_blank" rel="noopener noreferrer" className="text-indigo-700 font-medium hover:underline">
-            Open it in your browser
-          </a>{' '}
-          to sign in, then re-run.
-        </div>
-      )}
-      {deep && deep.needs_pdf && !(deep.needs_login && deep.login_url) && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] leading-relaxed text-amber-800">
-          <span className="font-semibold">No full text available.</span>{' '}
-          The review tried open access, PubMed Central, and your library session
-          but couldn’t reach a readable copy.
-        </div>
-      )}
+      <FullTextAccessNotice deep={deep} />
 
       {reviewed && <PaperReview deep={deep} compact={compact} />}
 

@@ -168,12 +168,15 @@ def _pdf_for_item_or_acquire(item_key: str, *, allow_acquire_missing: bool) -> t
             status_code=424,
             details={"login_url": acquired.login_url},
         )
+    if acquired.outcome == "browser_extra_unavailable":
+        raise APIError(
+            error="browser_extra_unavailable",
+            message="Browser support is not installed; open Settings → University access.",
+            status_code=424,
+        )
     raise APIError(
         error="needs_pdf",
-        message=(
-            f"No local PDF for item {item_key}, and no fetchable full-text source "
-            "was found through arXiv, Open Access, or the browser acquisition path."
-        ),
+        message=f"No local PDF or fetchable full-text source for item {item_key}.",
         status_code=404,
     )
 

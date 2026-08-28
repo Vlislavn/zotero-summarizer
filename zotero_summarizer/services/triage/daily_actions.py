@@ -345,7 +345,9 @@ def _materialized_key_for(row: dict[str, Any]) -> str | None:
         conn.close()
 
 
-def materialize_feed_verdict(item_key: str, user_priority: str) -> dict[str, Any]:
+def materialize_feed_verdict(
+    item_key: str, user_priority: str, *, create_if_missing: bool = True,
+) -> dict[str, Any]:
     """Materialize ONE feed paper (identified by its verdict ``item_key`` /
     stable feed key) into the Zotero "Inbox", as a side-effect of a positive
     verdict set in the Today deep-review. Reuses the add-to-library machinery but
@@ -371,6 +373,8 @@ def materialize_feed_verdict(item_key: str, user_priority: str) -> dict[str, Any
     existing = _materialized_key_for(row)
     if existing:
         return {"added": False, "zotero_key": existing, "status": "already_in_library"}
+    if not create_if_missing:
+        return {"added": False, "zotero_key": None, "status": "not_applicable"}
 
     writer, _writer_error = _open_optional_writer()
     if writer is None:

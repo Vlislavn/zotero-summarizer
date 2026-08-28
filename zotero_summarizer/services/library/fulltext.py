@@ -86,6 +86,7 @@ def _summary(outcomes: list[dict[str, str]], backup_path: Any = None) -> dict[st
         "skipped_has_pdf": statuses.count("skipped_has_pdf"),
         "no_oa_source": statuses.count("no_oa_source"),
         "needs_login": statuses.count("needs_login"),
+        "browser_not_attempted": statuses.count("browser_not_attempted"),
         "failed_count": sum(s in {"fetch_failed", "write_failed"} for s in statuses),
         "backup_path": backup_path,
         "outcomes": outcomes,

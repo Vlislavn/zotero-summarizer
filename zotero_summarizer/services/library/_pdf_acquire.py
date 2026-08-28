@@ -161,12 +161,17 @@ def acquire_pdf_for(
     # paywall/needs_login path, and a paywalled paper out of the HTML renderer.
     scholarly = bool(arxiv_id or doi)
     proxied = _proxied_url(ua, url, doi)
+    browser_needed = bool(
+        (ua.enabled and scholarly and proxied)
+        or (getattr(qr, "review_web_articles", False) and not scholarly and _is_web_article(url))
+    )
     if not allow_browser:
-        if ua.enabled and scholarly and proxied:
-            return AcquireResult(
-                path=None, needs_login=True, login_url=proxied, outcome="needs_login"
-            )
+        if browser_needed:
+            return AcquireResult(path=None, outcome="browser_not_attempted")
         return AcquireResult(path=None, outcome="fetch_failed" if sources else "no_oa_source")
+    if browser_needed and not browser_fetch.is_available():
+        LOGGER.info("browser PDF fetch unavailable for %s: optional browser extra missing", item_key)
+        return AcquireResult(path=None, outcome="browser_extra_unavailable")
 
     return _browser_acquire(item_key, sources, url, doi, scholarly, allow_headed_fallback)
 

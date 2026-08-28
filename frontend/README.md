@@ -42,6 +42,11 @@ Paper map, figures, actions, and grounded Q&A. Independent Idea/Evidence/Writing
 signals cap recommendations while provenance retains raw output. HTML briefs and
 figures live beside source PDFs for Zotero compatibility.
 
+Missing-full-text recovery is one shared notice on every review surface. A missing
+optional browser package links to Settings; only an attempted authenticated fetch
+offers publisher sign-in, so installing support and refreshing a session are never
+presented as the same action.
+
 Fleet suggestions are proposals only: Confirm/Override writes them, and
 low-confidence or flagged proposals offer Override only.
 

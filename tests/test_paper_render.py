@@ -434,3 +434,26 @@ def test_build_paper_read_acquires_missing_pdf_when_allowed(tmp_path, monkeypatc
         "url": "https://www.nature.com/articles/s41746-024-01074-z",
         "allow_headed_fallback": True,
     }
+
+
+def test_acquire_missing_reports_browser_setup_instead_of_login(monkeypatch):
+    from zotero_summarizer.services.library import _pdf_acquire
+
+    detail = {"has_pdf": False, "pdf_path": "", "url": "https://publisher.example/x"}
+    monkeypatch.setattr(paper_render, "_item_detail", lambda _key: detail)
+    monkeypatch.setattr(
+        paper_render, "_pdf_from_detail",
+        lambda *_a: (_ for _ in ()).throw(
+            APIError(error="needs_pdf", message="missing", status_code=404),
+        ),
+    )
+    monkeypatch.setattr(
+        _pdf_acquire, "acquire_pdf_for",
+        lambda *_a, **_k: _pdf_acquire.AcquireResult(
+            path=None, outcome="browser_extra_unavailable",
+        ),
+    )
+
+    with pytest.raises(APIError) as caught:
+        paper_render._pdf_for_item_or_acquire("OTHER", allow_acquire_missing=True)
+    assert caught.value.error == "browser_extra_unavailable"

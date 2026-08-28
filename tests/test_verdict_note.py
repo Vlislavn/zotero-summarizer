@@ -145,6 +145,68 @@ def test_submit_verdict_swallows_optional_zotero_unavailable(monkeypatch):
     assert out["note_error"] is None
 
 
+def _submit_feed_verdict(monkeypatch, *, item_key, priority, add_result):
+    notes, labels = [], []
+    _patch_verdict_basics(
+        monkeypatch, note_fn=lambda ik, up, comment: notes.append((ik, up, comment)),
+    )
+    monkeypatch.setattr(golden_routes, "zotero_set_label_tag", lambda ik, up: labels.append((ik, up)))
+    monkeypatch.setattr(
+        golden_routes, "add_feed_verdict_to_library",
+        lambda *_a: dict(add_result),
+    )
+    out = asyncio.run(golden_routes.submit_verdict(
+        golden_routes.VerdictRequest(item_key=item_key, user_priority=priority, comment="why"),
+    ))
+    return out, notes, labels
+
+
+def test_new_feed_item_comment_uses_materialized_zotero_key(monkeypatch):
+    out, notes, labels = _submit_feed_verdict(
+        monkeypatch,
+        item_key="feed:g:different-story",
+        priority="must_read",
+        add_result={
+            "added_to_library": True, "add_status": "added", "add_error": None,
+            "_zotero_key": "REAL0001",
+        },
+    )
+    assert notes == [("REAL0001", "must_read", "why")]
+    assert labels == []  # materialization stamped the label in its creation write
+    assert out["label_written"] is out["note_written"] is True
+    assert "_zotero_key" not in out
+
+
+def test_existing_materialized_feed_mirrors_negative_to_real_key(monkeypatch):
+    out, notes, labels = _submit_feed_verdict(
+        monkeypatch,
+        item_key="feed:42",
+        priority="dont_read",
+        add_result={
+            "added_to_library": False, "add_status": "already_in_library", "add_error": None,
+            "_zotero_key": "REAL0002",
+        },
+    )
+    assert notes == [("REAL0002", "dont_read", "why")]
+    assert labels == [("REAL0002", "dont_read")]
+    assert out["label_written"] is out["note_written"] is True
+
+
+def test_unmaterialized_negative_feed_comment_stays_local_without_warning(monkeypatch):
+    out, notes, labels = _submit_feed_verdict(
+        monkeypatch,
+        item_key="feed:g:unmaterialized",
+        priority="dont_read",
+        add_result={
+            "added_to_library": False, "add_status": "not_applicable", "add_error": None,
+            "_zotero_key": None,
+        },
+    )
+    assert notes == labels == []
+    assert out["label_written"] is out["note_written"] is False
+    assert out["label_error"] is out["note_error"] is None
+
+
 # --------------------------------------------------------------------------- #
 # Review notes: builder, storage round-trip, save_review_note wiring
 # --------------------------------------------------------------------------- #

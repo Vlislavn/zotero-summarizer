@@ -263,13 +263,15 @@ def _review_one(
                 web_article=bool(item.get("web_article")),
             ))  # noqa: E501
             reporter.phase("note")
-            try:
-                from zotero_summarizer.services.zotero.zotero import zotero_upsert_digest_note
-                zotero_upsert_digest_note(item_key, digest)
-                note_written = True
-            except Exception as exc:  # noqa: BLE001 — note write must not fail the digest
-                note_error = f"{type(exc).__name__}: {exc}"
-                LOGGER.warning("digest note write for %s failed: %s", item_key, exc)
+            from zotero_summarizer.services.library import review_detail
+            if review_detail.classify_item_key(item_key) == review_detail.SOURCE_LIBRARY:
+                try:
+                    from zotero_summarizer.services.zotero.zotero import zotero_upsert_digest_note
+                    zotero_upsert_digest_note(item_key, digest)
+                    note_written = True
+                except Exception as exc:  # noqa: BLE001 — note write must not fail the digest
+                    note_error = f"{type(exc).__name__}: {exc}"
+                    LOGGER.warning("digest note write for %s failed: %s", item_key, exc)
             reporter.summary()
 
     return {
@@ -402,10 +404,13 @@ def _review_worker(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str)
         if entry is not None:
             if item.get("acquired_pdf"):
                 entry["acquired_pdf"] = item["acquired_pdf"]
-            # DECLARED-but-gated fetch (paywall/no session): carry needs_login + landing URL for a sign-in link.
-            if acquired is not None and acquired.needs_login and not item.get("pdf_path"):
-                entry["needs_login"] = True
-                entry["login_url"] = acquired.login_url
+            if acquired is not None and not item.get("pdf_path"):
+                entry["acquire_outcome"] = acquired.outcome
+                # Only an attempted, gated fetch gets a sign-in action. Missing
+                # browser support is a separate outcome consumed by the UI.
+                if acquired.needs_login:
+                    entry["needs_login"] = True
+                    entry["login_url"] = acquired.login_url
             _write_one(item_key, entry)
             _try_rebuild_render(item_key)
             from zotero_summarizer.services.library import quality_gate  # grade landed → L2 hide D/flag

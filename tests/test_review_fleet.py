@@ -332,6 +332,31 @@ def test_needs_library_login_pick_is_tallied_not_proposed(monkeypatch):
     assert verdict_store.read_all() == {}
 
 
+def test_missing_browser_extra_is_not_tallied_as_login(monkeypatch):
+    from zotero_summarizer.services.library import _pdf_acquire
+
+    _stub_queue(monkeypatch, ["OTHER"])
+    cache: dict = {}
+    _stub_deep_review(monkeypatch, cache, review=lambda _k, _ov: {"digest": None, "needs_pdf": True})
+    monkeypatch.setattr(fleet.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(
+        "zotero_summarizer.services.zotero.zotero.get_library_reader",
+        lambda: types.SimpleNamespace(get_item_detail=lambda _k: {"has_pdf": False}),
+    )
+    monkeypatch.setattr(
+        _pdf_acquire, "acquire_pdf_for",
+        lambda *_a, **_k: _pdf_acquire.AcquireResult(
+            path=None, outcome="browser_extra_unavailable",
+        ),
+    )
+
+    fleet.start(top_k=1)
+    result = fleet.status()
+    assert result["browser_extra_unavailable"] == 1
+    assert result["needs_library_login"] == 0
+    assert result["needs_login_items"] == []
+
+
 def test_per_item_failure_is_isolated(monkeypatch):
     """One bad item logs + is skipped; the rest still get proposals."""
     _stub_queue(monkeypatch, ["GOOD", "BAD"])

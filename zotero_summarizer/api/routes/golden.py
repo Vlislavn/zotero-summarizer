@@ -321,49 +321,44 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 — verdict save must not fail on enrichment
         LOGGER.warning("golden append for verdict %s failed: %s", req.item_key, exc)
 
-    # The verdict IS the user's explicit label — mirror it to Zotero as a
-    # `label:<priority>` tag for cross-device reading and later reconciliation.
-    # The app already owns the committed current row + trajectory. Library items only: feed:/note: keys
-    # have no Zotero item to tag yet and keep the label_verdicts path. Non-blocking
-    # + reported-not-raised, exactly like the verdict note below — the verdict is
-    # ALREADY durable above. The user authorized "keep my labels inside Zotero".
-    label_written = False
-    label_error: str | None = None
     source = review_detail_svc.classify_item_key(req.item_key)
-    if source not in (review_detail_svc.SOURCE_FEED, review_detail_svc.SOURCE_NOTE):
+    add_result = await asyncio.to_thread(
+        add_feed_verdict_to_library, req.item_key, req.user_priority,
+    )
+    mirror_key = req.item_key if source == review_detail_svc.SOURCE_LIBRARY else add_result.pop("_zotero_key", None)
+    # Mirror to the resolved real Zotero item. A newly materialized feed item
+    # already received this label in its creation write; all failures stay soft
+    # because the app's verdict row is committed above.
+    label_written = bool(add_result["added_to_library"])
+    label_error: str | None = None
+    if mirror_key and not label_written:
         try:
-            await asyncio.to_thread(zotero_set_label_tag, req.item_key, req.user_priority)
+            await asyncio.to_thread(zotero_set_label_tag, mirror_key, req.user_priority)
             label_written = True
         except Exception as exc:  # noqa: BLE001 — label write must not block the verdict
             if _is_optional_zotero_unavailable(exc):
-                LOGGER.info("verdict label tag mirror skipped for %s: Zotero unavailable", req.item_key)
+                LOGGER.info("verdict label tag mirror skipped for %s: Zotero unavailable", mirror_key)
             else:
                 label_error = f"{type(exc).__name__}: {exc}"
-                LOGGER.warning("verdict label tag write for %s failed: %s", req.item_key, exc)
+                LOGGER.warning("verdict label tag write for %s failed: %s", mirror_key, exc)
     # Save the comment to Zotero as a single (upserted) note. Direct write, but
     # the verdict is ALREADY durable above — a note failure (e.g. Zotero open)
     # must never block it, so it's reported, not raised. The user authorized
     # "comments I leave with a verdict should be saved to Zotero as a note".
     note_written = False
     note_error: str | None = None
-    if req.comment.strip():
+    if req.comment.strip() and mirror_key:
         try:
             await asyncio.to_thread(
-                zotero_upsert_verdict_note, req.item_key, req.user_priority, req.comment,
+                zotero_upsert_verdict_note, mirror_key, req.user_priority, req.comment,
             )
             note_written = True
         except Exception as exc:  # noqa: BLE001 — note write must not block the verdict
             if _is_optional_zotero_unavailable(exc):
-                LOGGER.info("verdict note mirror skipped for %s: Zotero unavailable", req.item_key)
+                LOGGER.info("verdict note mirror skipped for %s: Zotero unavailable", mirror_key)
             else:
                 note_error = f"{type(exc).__name__}: {exc}"
-                LOGGER.warning("verdict note write for %s failed: %s", req.item_key, exc)
-
-    # Positive verdict on a Today-feed paper → materialize into the Inbox (the
-    # helper no-ops for non-feed / dont_read and never blocks the durable verdict).
-    add_result = await asyncio.to_thread(
-        add_feed_verdict_to_library, req.item_key, req.user_priority,
-    )
+                LOGGER.warning("verdict note write for %s failed: %s", mirror_key, exc)
 
     stored = repositories.get_label_verdict(_db_path(), req.item_key)
     if stored is None:

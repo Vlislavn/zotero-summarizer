@@ -73,19 +73,21 @@ def test_skip_unavailable_and_write_failure_are_distinct(monkeypatch):
     results = {
         "NO": _pdf_acquire.AcquireResult(path=None, outcome="no_oa_source"),
         "FETCH": _pdf_acquire.AcquireResult(path=None, outcome="fetch_failed"),
+        "POLICY": _pdf_acquire.AcquireResult(path=None, outcome="browser_not_attempted"),
     }
     monkeypatch.setattr(fulltext._pdf_acquire, "acquire_pdf_for", lambda key, *_a, **_k: results[key])
     writer = _FakeWriter()
     monkeypatch.setattr(fulltext, "get_zotero_writer_or_raise", lambda: writer)
 
     result = fulltext.fetch_fulltext_for_items([
-        _item("HAVE", has_pdf=True), _item("NO"), _item("FETCH"),
+        _item("HAVE", has_pdf=True), _item("NO"), _item("FETCH"), _item("POLICY"),
     ])
 
     assert [row["status"] for row in result["outcomes"]] == [
-        "skipped_has_pdf", "no_oa_source", "fetch_failed",
+        "skipped_has_pdf", "no_oa_source", "fetch_failed", "browser_not_attempted",
     ]
     assert result["skipped_has_pdf"] == result["no_oa_source"] == result["failed_count"] == 1
+    assert result["browser_not_attempted"] == 1
     assert writer.calls == []
 
 

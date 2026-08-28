@@ -29,10 +29,11 @@ def status() -> dict[str, Any]:
     """Readiness for the Settings panel: ``{enabled, browser_available, logged_in,
     login_url, ezproxy_prefix_set}``."""
     ua = get_state().app_state.config.university_access
+    available = browser_fetch.is_available()
     return {
         "enabled": bool(ua.enabled),
-        "browser_available": browser_fetch.is_available(),
-        "logged_in": browser_fetch.is_logged_in(profile_dir(ua)),
+        "browser_available": available,
+        "logged_in": available and browser_fetch.is_logged_in(profile_dir(ua)),
         "login_url": ua.login_url,
         "ezproxy_prefix_set": bool(ua.ezproxy_prefix),
     }

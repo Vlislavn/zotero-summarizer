@@ -29,12 +29,16 @@ def _app(*, ua_enabled=False, ezproxy_prefix="", unpaywall=None, openalex=None, 
     )
 
 
-def _patch(monkeypatch, app, *, resolve=None, headless_fetch=None, browser_fetch=None, render=None):
+def _patch(
+    monkeypatch, app, *, resolve=None, headless_fetch=None, browser_fetch=None,
+    render=None, browser_available=True,
+):
     monkeypatch.setattr(_pdf_acquire, "get_state", lambda: app)
     monkeypatch.setattr(_pdf_acquire.pdf_fetch, "resolve_pdf_url", resolve or (lambda **_k: None))
     monkeypatch.setattr(_pdf_acquire.pdf_fetch, "fetch_pdf", headless_fetch or (lambda *_a, **_k: None))
     monkeypatch.setattr(_pdf_acquire.browser_fetch, "fetch_pdf_via_browser", browser_fetch or (lambda *_a, **_k: None))
     monkeypatch.setattr(_pdf_acquire.browser_fetch, "render_article_pdf", render or (lambda *_a, **_k: None))
+    monkeypatch.setattr(_pdf_acquire.browser_fetch, "is_available", lambda: browser_available)
 
 
 def test_arxiv_short_circuits_before_browser(monkeypatch):
@@ -237,7 +241,27 @@ def test_automatic_attachment_never_opens_a_browser(monkeypatch):
     result = _pdf_acquire.acquire_pdf_for(
         "A", {"url": "https://publisher.test/x", "doi": "10.1/x"}, allow_browser=False,
     )
-    assert result.outcome == "needs_login" and browser_calls == []
+    assert result.outcome == "browser_not_attempted" and browser_calls == []
+
+
+def test_missing_browser_extra_is_not_misreported_as_login(monkeypatch):
+    app = _app(ua_enabled=True)
+    _patch(monkeypatch, app, browser_available=False)
+    result = _pdf_acquire.acquire_pdf_for(
+        "OTHER", {"url": "https://publisher.example/paper", "doi": "10.2/other"},
+    )
+    assert result.outcome == "browser_extra_unavailable"
+    assert result.needs_login is False and result.login_url == ""
+
+
+def test_missing_browser_extra_covers_web_article_render(monkeypatch):
+    app = _app(review_web_articles=True)
+    _patch(monkeypatch, app, browser_available=False)
+    result = _pdf_acquire.acquire_pdf_for(
+        "BLOG", {"url": "https://engineering.example/story", "doi": ""},
+    )
+    assert result.outcome == "browser_extra_unavailable"
+    assert result.needs_login is False
 
 
 def test_web_article_rendered_when_enabled(monkeypatch):

@@ -22,10 +22,9 @@ _POSITIVE_PRIORITIES = ("must_read", "should_read", "could_read")
 
 
 def add_feed_verdict_to_library(item_key: str, user_priority: str) -> dict[str, Any]:
-    """A positive verdict on a Today-feed paper materializes it into the Zotero
-    "Inbox". Users expect setting a verdict in the Today deep-review to add the
-    paper (the separate "Add to library" click used to be required, and papers
-    silently never reached Zotero). No-op for non-feed sources and for dont_read.
+    """Resolve a feed verdict to its Zotero mirror target, materializing a missing
+    positive paper into Inbox. An existing target is returned for every priority;
+    an unmaterialized ``dont_read`` remains local-only.
 
     Returns the response-ready keys ``added_to_library`` / ``add_status`` /
     ``add_error``. Never raises: the verdict is ALREADY durable at the call site,
@@ -34,10 +33,12 @@ def add_feed_verdict_to_library(item_key: str, user_priority: str) -> dict[str, 
     from zotero_summarizer.services.triage import daily_actions
 
     source = review_detail_svc.classify_item_key(item_key)
-    if source != review_detail_svc.SOURCE_FEED or user_priority not in _POSITIVE_PRIORITIES:
+    if source != review_detail_svc.SOURCE_FEED:
         return {"added_to_library": False, "add_status": "not_applicable", "add_error": None}
     try:
-        result = daily_actions.materialize_feed_verdict(item_key, user_priority)
+        result = daily_actions.materialize_feed_verdict(
+            item_key, user_priority, create_if_missing=user_priority in _POSITIVE_PRIORITIES,
+        )
     except Exception as exc:  # noqa: BLE001 — verdict already durable; auto-add reported, not raised
         LOGGER.warning("verdict auto-add to library for %s failed: %s", item_key, exc)
         return {
@@ -48,6 +49,7 @@ def add_feed_verdict_to_library(item_key: str, user_priority: str) -> dict[str, 
         "added_to_library": bool(result.get("added")),
         "add_status": str(result.get("status") or ""),
         "add_error": None,
+        "_zotero_key": result.get("zotero_key"),
     }
 
 

@@ -16,7 +16,7 @@ import StoryToc from '../components/paper/review/StoryToc.jsx';
 import ActionRail from '../components/paper/review/ActionRail.jsx';
 import VerdictPicker from '../components/VerdictPicker.jsx';
 import { Chip } from '../components/paper/review/primitives.jsx';
-import { StatusBanner, timeAgo, formatShortDate } from '../components/library/shared.jsx';
+import { FullTextAccessNotice, StatusBanner, timeAgo, formatShortDate } from '../components/library/shared.jsx';
 import { gradeTone, bandTone, BAND_LABEL } from '../components/paper/review/tones.js';
 import Spinner from '../components/ui/Spinner.jsx';
 
@@ -48,21 +48,7 @@ function ReviewZone({ deep, runner, sectionOverlay }) {
           server, or pick a reachable model in <span className="font-semibold">Settings → LLM routing</span>.
         </div>
       )}
-      {deep && deep.needs_pdf && deep.needs_login && deep.login_url && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] leading-relaxed text-amber-800">
-          <span className="font-semibold">Needs your library sign-in.</span>{' '}
-          <a href={deep.login_url} target="_blank" rel="noopener noreferrer" className="font-medium text-indigo-700 hover:underline">
-            Open it in your browser
-          </a>{' '}
-          to sign in, then re-generate.
-        </div>
-      )}
-      {deep && deep.needs_pdf && !(deep.needs_login && deep.login_url) && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] leading-relaxed text-amber-800">
-          <span className="font-semibold">No full text available.</span>{' '}
-          The review tried open access, PubMed Central, and your library session but couldn&apos;t reach a readable copy.
-        </div>
-      )}
+      <FullTextAccessNotice deep={deep} />
 
       {reviewed ? (
         <PaperReview deep={deep} flat sectionOverlay={sectionOverlay} />
