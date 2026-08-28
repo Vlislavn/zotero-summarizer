@@ -54,6 +54,13 @@ Output strict JSON only with these keys:
 
 "limitations" (string): Key limitations and caveats.
 
+"method_and_code" (object or null): When the source contains a reusable method, model,
+workflow, benchmark, dataset, or software repository, return an object with
+"what_it_does" (string), "what_is_new" (string), "how_it_works" (array of strings),
+"evaluation" (string: datasets, baselines, metrics, ablations), "artifacts" (array of
+exact URLs copied from the source), and "how_i_could_use_it" (string). Otherwise null.
+Never invent or normalize a URL, and never claim reproducibility merely because a repository exists.
+
 CRITICAL: Your ENTIRE response must be a single valid JSON object. No markdown, no explanation, no code fences. Start with {{ and end with }}.
 """
 

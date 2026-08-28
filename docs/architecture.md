@@ -18,6 +18,7 @@ flowchart LR
     Human --> Golden[Golden labels]
     Golden --> Gate
     LLM --> Review[Full-text review]
+    Review --> Weekly[Weekly research engineering digest]
     Human --> Zotero[Zotero]
     Review --> Zotero
 ```
@@ -110,6 +111,7 @@ The daemon is optional automation, not a separate engine. The `feeds.*` block in
 | change labels / training data | `services/golden/` |
 | change the feed daemon / Today slate | `services/triage/` |
 | change reading / review surfaces | `services/library/` |
+| change the weekly project-specific research digest | `services/research_feed/` |
 | change what gets written to Zotero | `services/zotero/` |
 | touch the DB / SQL | `storage/` |
 | talk to Zotero / PDFs / LLM / OpenAlex | `integrations/` |

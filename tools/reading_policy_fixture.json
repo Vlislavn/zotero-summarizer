@@ -1,0 +1,91 @@
+{
+  "fixture": "reading-policy-v1-user-label-overlap-2026-08-28",
+  "provenance": "Frozen from 16 user-labelled deep-review cache overlaps plus issue #15's named perspective seed; labels are independent of the model outputs.",
+  "papers": [
+    {
+      "item_key": "I7427BEF", "title": "AgentClinic: a multimodal benchmark for tool-using clinical AI agents",
+      "human_priority": "must_read", "idea_worth_preserving": true, "writing_friction": "unknown", "scientific_concern": "no", "expected_read_decision": "read",
+      "signals": {"digest": {"read_decision": "read", "grade": "A", "novelty": 4, "significance": 4}, "quality": {"quality_band": "highlight", "basis": "full_text"}, "goal_summaries": [{"relevant": true}]}
+    },
+    {
+      "item_key": "ZBQCD3RW", "title": "Overcoming regulatory barriers to the implementation of AI agents in healthcare",
+      "human_priority": "must_read", "idea_worth_preserving": true, "writing_friction": "unknown", "scientific_concern": "no", "expected_read_decision": "read",
+      "signals": {"digest": {"read_decision": "read", "grade": "B", "novelty": 4, "significance": 4}, "quality": {"quality_band": "highlight", "basis": "full_text"}, "goal_summaries": [{"relevant": true}]}
+    },
+    {
+      "item_key": "2V4X35XN", "title": "AI-induced never-skilling in medical education",
+      "human_priority": "must_read", "idea_worth_preserving": true, "writing_friction": "unknown", "scientific_concern": "uncertain", "expected_read_decision": "read",
+      "signals": {"digest": {"read_decision": "read", "grade": "B", "novelty": 4, "significance": 4}, "quality": {"quality_band": "highlight", "basis": "full_text"}, "goal_summaries": [{"relevant": true}]}
+    },
+    {
+      "item_key": "feed:g:50b0bb412168612a3150d3e2301094239efd5e8e63f09a9678b5a8a4707b612f", "title": "SwarmWorld: Stigmergic technological evolution in societies of language-model agents",
+      "human_priority": "must_read", "idea_worth_preserving": true, "writing_friction": "low", "scientific_concern": "no", "expected_read_decision": "read",
+      "signals": {"digest": {"read_decision": "read", "grade": "A", "novelty": 5, "significance": 4, "writing_friction": "low"}, "quality": {"quality_band": "highlight", "basis": "full_text"}, "goal_summaries": [{"relevant": true}]}
+    },
+    {
+      "item_key": "feed:g:b9b4a1df9606f24a8929cc0b124ae343c4c517b502851bac6eef2a2fcd6d8b06", "title": "An agentic artificially intelligent X-ray scientist",
+      "human_priority": "should_read", "idea_worth_preserving": true, "writing_friction": "unknown", "scientific_concern": "no", "expected_read_decision": "skim",
+      "signals": {"digest": {"read_decision": "read", "grade": "B", "novelty": 4, "significance": 4}, "quality": {"quality_band": "highlight", "basis": "full_text"}, "goal_summaries": [{"relevant": true}]}
+    },
+    {
+      "item_key": "HSR6I6DI", "title": "CancerLLM: a large language model in cancer domain",
+      "human_priority": "should_read", "idea_worth_preserving": true, "writing_friction": "unknown", "scientific_concern": "no", "expected_read_decision": "skim",
+      "signals": {"digest": {"read_decision": "read", "grade": "B", "novelty": 3, "significance": 4}, "quality": {"quality_band": "highlight", "basis": "full_text"}, "goal_summaries": [{"relevant": true}]}
+    },
+    {
+      "item_key": "feed:g:ee817cfe1faecb6618a2a1f1969d7c1b805c302c8fc152f16d695a28d1356337", "title": "Agentic AI and cybersecurity, the story so far",
+      "human_priority": "should_read", "idea_worth_preserving": true, "writing_friction": "unknown", "scientific_concern": "no", "expected_read_decision": "skim",
+      "signals": {"digest": {"read_decision": "read", "grade": "B", "novelty": 3, "significance": 4}, "quality": {"quality_band": "highlight", "basis": "full_text"}, "goal_summaries": [{"relevant": true}]}
+    },
+    {
+      "item_key": "feed:g:de0cf6fb6d807e9debdac18e79dd1258ef796ad1494e2e3a4f77be82036f1058", "title": "ScienceFlow: A long-horizon agent for ML research, scientific discovery and beyond",
+      "human_priority": "should_read", "idea_worth_preserving": true, "writing_friction": "unknown", "scientific_concern": "no", "expected_read_decision": "skim",
+      "signals": {"digest": {"read_decision": "read", "grade": "B", "novelty": 4, "significance": 4}, "quality": {"quality_band": "highlight", "basis": "full_text"}, "goal_summaries": [{"relevant": true}]}
+    },
+    {
+      "item_key": "6C9E9EV7", "title": "Ratchet: A Minimal Hygiene Recipe for Self-Evolving LLM Agents",
+      "human_priority": "could_read", "idea_worth_preserving": true, "writing_friction": "unknown", "scientific_concern": "no", "expected_read_decision": "skim",
+      "signals": {"digest": {"read_decision": "read", "grade": "B", "novelty": 4, "significance": 4}, "quality": {"quality_band": "highlight", "basis": "full_text"}, "goal_summaries": [{"relevant": true}]}
+    },
+    {
+      "item_key": "WZUHIRWN", "title": "Teaching large language models to reason like expert diagnosticians",
+      "human_priority": "could_read", "idea_worth_preserving": true, "writing_friction": "unknown", "scientific_concern": "no", "expected_read_decision": "skim",
+      "signals": {"digest": {"read_decision": "read", "grade": "A", "novelty": 4, "significance": 5}, "quality": {"quality_band": "highlight", "basis": "full_text"}, "goal_summaries": [{"relevant": true}]}
+    },
+    {
+      "item_key": "BF2F7WJK", "title": "BALAR: A Bayesian Agentic Loop for Active Reasoning",
+      "human_priority": "could_read", "idea_worth_preserving": true, "writing_friction": "unknown", "scientific_concern": "no", "expected_read_decision": "skim",
+      "signals": {"digest": {"read_decision": "read", "grade": "A", "novelty": 5, "significance": 4}, "quality": {"quality_band": "neutral", "basis": "full_text"}, "goal_summaries": [{"relevant": true}]}
+    },
+    {
+      "item_key": "feed:g:b7fae31c463571014fe88394ded60f2e1c046a3fc73936db78cd12e77aa4efc3", "title": "From Triage to Discharge: A Survey of NLP Tasks, Methods, and Open Challenges in the Emergency Department",
+      "human_priority": "could_read", "idea_worth_preserving": true, "writing_friction": "unknown", "scientific_concern": "no", "expected_read_decision": "skim",
+      "signals": {"digest": {"read_decision": "read", "grade": "B", "novelty": 3, "significance": 4}, "quality": {"quality_band": "highlight", "basis": "full_text"}, "goal_summaries": [{"relevant": true}]}
+    },
+    {
+      "item_key": "BGYQ6HIG", "title": "OMGs: A multi-agent system supporting MDT decision-making across the ovarian tumour care continuum",
+      "human_priority": "dont_read", "idea_worth_preserving": false, "writing_friction": "unknown", "scientific_concern": "no", "expected_read_decision": "skip",
+      "signals": {"digest": {"read_decision": "read", "grade": "A", "novelty": 4, "significance": 5}, "quality": {"quality_band": "highlight", "basis": "full_text"}, "goal_summaries": [{"relevant": true}]}
+    },
+    {
+      "item_key": "8WZRX7F3", "title": "AutoResearchBench: Benchmarking AI Agents on Complex Scientific Literature Discovery",
+      "human_priority": "dont_read", "idea_worth_preserving": false, "writing_friction": "unknown", "scientific_concern": "no", "expected_read_decision": "skip",
+      "signals": {"digest": {"read_decision": "read", "grade": "B", "novelty": 4, "significance": 4}, "quality": {"quality_band": "highlight", "basis": "full_text"}, "goal_summaries": [{"relevant": true}]}
+    },
+    {
+      "item_key": "AEGCFE4D", "title": "Can AI Agents Synthesize Scientific Conclusions?",
+      "human_priority": "dont_read", "idea_worth_preserving": false, "writing_friction": "unknown", "scientific_concern": "no", "expected_read_decision": "skip",
+      "signals": {"digest": {"read_decision": "read", "grade": "B", "novelty": 4, "significance": 4}, "quality": {"quality_band": "highlight", "basis": "full_text"}, "goal_summaries": [{"relevant": true}]}
+    },
+    {
+      "item_key": "H9BQZLJ2", "title": "Computational Pathology in the Era of Emerging Foundation and Agentic AI",
+      "human_priority": "dont_read", "idea_worth_preserving": false, "writing_friction": "unknown", "scientific_concern": "no", "expected_read_decision": "skip",
+      "signals": {"digest": {"read_decision": "read", "grade": "B", "novelty": 3, "significance": 4}, "quality": {"quality_band": "highlight", "basis": "full_text"}, "goal_summaries": [{"relevant": true}]}
+    },
+    {
+      "item_key": "QRPEWC69", "title": "Towards World Models in Biomedical Research",
+      "human_priority": "dont_read", "idea_worth_preserving": true, "writing_friction": "high", "scientific_concern": "uncertain", "expected_read_decision": "skim",
+      "signals": {"digest": {"read_decision": "skim", "grade": "B", "novelty": 3, "significance": 4}, "quality": {"quality_band": "flag", "basis": "full_text"}, "goal_summaries": [{"relevant": true}]}
+    }
+  ]
+}

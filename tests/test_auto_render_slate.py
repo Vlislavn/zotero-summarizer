@@ -36,7 +36,7 @@ def _set_slate(monkeypatch, papers):
 
 def test_renders_top_reviewed_unrendered_in_rank_order(_wire, monkeypatch):
     _set_slate(monkeypatch, [_paper(_K(1), 3.0), _paper(_K(2), 5.0), _paper(_K(3), 1.0)])
-    monkeypatch.setattr(deep_review, "cached_review_keys", lambda: {_K(1), _K(2)})  # K(3) NOT reviewed
+    monkeypatch.setattr(deep_review, "current_review_keys", lambda: {_K(1), _K(2)})  # K(3) NOT reviewed
     monkeypatch.setattr(paper_render, "_read_state", lambda key: None)             # none rendered yet
 
     _tick._auto_render_slate("t1")
@@ -47,7 +47,7 @@ def test_renders_top_reviewed_unrendered_in_rank_order(_wire, monkeypatch):
 
 def test_skips_already_rendered(_wire, monkeypatch):
     _set_slate(monkeypatch, [_paper(_K(2), 5.0), _paper(_K(1), 3.0)])
-    monkeypatch.setattr(deep_review, "cached_review_keys", lambda: {_K(1), _K(2)})
+    monkeypatch.setattr(deep_review, "current_review_keys", lambda: {_K(1), _K(2)})
     # K(2) already has a completed render → skip it; K(1) still builds.
     monkeypatch.setattr(paper_render, "_read_state",
                         lambda key: {"status": "completed"} if key == _K(2) else None)

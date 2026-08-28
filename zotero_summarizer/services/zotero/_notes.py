@@ -81,6 +81,14 @@ def build_triage_note_html(
     for heading, value in text_sections:
         if value and value.strip():
             parts += [f"<h2>{heading}</h2>", f"<p>{html.escape(value.strip())}</p>"]
+    method = summary.method_and_code
+    if method is not None:
+        details = [method.what_it_does, method.what_is_new, *method.how_it_works,
+                   method.evaluation, method.how_i_could_use_it, *method.artifacts]
+        kept = [value.strip() for value in details if value.strip()]
+        if kept:
+            parts += ["<h2>Method and code</h2>", "<ul>" + "".join(
+                f"<li>{html.escape(value)}</li>" for value in kept) + "</ul>"]
     for heading, values, limit in (
         ("Key findings", summary.key_findings, 6),
         ("What to read", summary.key_sections_to_read, 6),

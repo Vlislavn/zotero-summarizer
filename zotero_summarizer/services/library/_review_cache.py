@@ -16,6 +16,7 @@ from zotero_summarizer.services._common import now_iso_z, write_json_atomic
 
 _CACHE_FILENAME = "deep_reviews.json"
 _CACHE_LOCK = threading.Lock()    # guards the read-merge-write of deep_reviews.json
+REVIEW_CONTRACT_VERSION = 2
 
 
 def _cache_path():
@@ -51,10 +52,23 @@ def get_cached_review(item_key: str) -> dict[str, Any] | None:
     return _read_all().get(item_key)
 
 
+def review_is_current(entry: dict[str, Any] | None) -> bool:
+    return bool(entry) and entry.get("review_contract_version") == REVIEW_CONTRACT_VERSION
+
+
+def get_current_review(item_key: str) -> dict[str, Any] | None:
+    entry = get_cached_review(item_key)
+    return entry if review_is_current(entry) else None
+
+
 def cached_review_keys() -> set[str]:
     """All item_keys with a stored deep review — one cache read (prewarm reuses this
     instead of calling ``get_cached_review`` per row, which re-reads the whole file)."""
     return set(_read_all())
+
+
+def current_review_keys() -> set[str]:
+    return {key for key, entry in _read_all().items() if review_is_current(entry)}
 
 
 def copy_review(src_key: str, dst_key: str) -> bool:
@@ -73,5 +87,6 @@ def copy_review(src_key: str, dst_key: str) -> bool:
 
 __all__ = [
     "_cache_path", "_read_all", "_write_all", "_write_one",
-    "get_cached_review", "cached_review_keys", "copy_review",
+    "REVIEW_CONTRACT_VERSION", "get_cached_review", "get_current_review",
+    "review_is_current", "cached_review_keys", "current_review_keys", "copy_review",
 ]

@@ -36,8 +36,24 @@ def test_digest_prompt_is_conservative_and_action_specific():
 def test_digest_llm_cannot_silently_default_the_writing_assessment():
     from zotero_summarizer.services.library.quality_review import _coerce_digest
 
-    with pytest.raises(ValueError, match="omitted required writing"):
+    with pytest.raises(ValueError, match="omitted required reading or writing"):
         _coerce_digest('{"read_decision":"skip"}')
+
+
+def test_new_reading_action_requires_decision_evidence():
+    from zotero_summarizer.services.library.quality_review import _coerce_digest
+
+    base = {
+        "read_decision": "read", "read_why": "Changes the design decision.",
+        "read_parts": ["§4.2, Table 3"], "skip_parts": [],
+        "estimated_read_minutes": 18, "original_value": "The ablation details.",
+        "writing_friction": "low", "writing_reasons": [],
+    }
+    assert _coerce_digest(base).read_decision == "read"
+    for missing in ("read_why", "read_parts", "estimated_read_minutes", "original_value"):
+        broken = {**base, missing: [] if missing == "read_parts" else (None if missing == "estimated_read_minutes" else "")}
+        with pytest.raises(ValueError):
+            _coerce_digest(broken)
 
 
 def test_row_quality_parse_and_contract():
@@ -68,7 +84,11 @@ class _RfCaptureLLM:
 
     def pydantic_prompt(self, *, prompt, pydantic_model, **kwargs):
         self.captured_rf = kwargs.get("response_format", None)
-        return PaperDigest(tldr="ok", writing_friction="low", writing_reasons=[])
+        return PaperDigest(
+            tldr="ok", read_decision="skip", read_why="The digest is sufficient.",
+            read_parts=[], skip_parts=[], estimated_read_minutes=None, original_value="",
+            writing_friction="low", writing_reasons=[],
+        )
 
 
 def test_assess_digest_threads_response_format_to_llm():

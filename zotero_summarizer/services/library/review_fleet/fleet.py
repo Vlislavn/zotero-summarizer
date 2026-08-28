@@ -158,12 +158,17 @@ def _set_progress(progress: dict[str, Any]) -> None:
         _STATE["progress"] = progress
 
 
+def _current_cache(item_key: str) -> dict[str, Any] | None:
+    cached = deep_review.get_cached_review(item_key)
+    return cached if deep_review.review_is_current(cached) else None
+
+
 def _usable_cache(item_key: str) -> dict[str, Any] | None:
     """The cached deep review for ``item_key`` IF it's usable — a real digest, or an
     honest ``needs_pdf`` (a re-review without a PDF is futile). A digest-less,
     has-PDF entry is a STALE FAILURE → ``None`` so it's recomputed (deep review works
     now). ``None`` when absent or stale."""
-    cached = deep_review.get_cached_review(item_key)
+    cached = _current_cache(item_key)
     if cached is not None and (cached.get("digest") is not None or cached.get("needs_pdf")):
         return cached
     return None
@@ -172,7 +177,7 @@ def _usable_cache(item_key: str) -> dict[str, Any] | None:
 def _has_digest(item_key: str) -> bool:
     """True once ``item_key`` carries a real digest — the terminal state a re-review
     aims for, so a re-acquired batch stops asking for it."""
-    cached = deep_review.get_cached_review(item_key)
+    cached = _current_cache(item_key)
     return cached is not None and cached.get("digest") is not None
 
 
@@ -247,7 +252,7 @@ def _acquire_missing_pdfs(keys: list[str], outcomes: dict[str, str]) -> tuple[di
     for item_key in keys:
         if item_key in outcomes:
             continue
-        review = deep_review.get_cached_review(item_key)
+        review = _current_cache(item_key)
         if not (review is None or review.get("needs_pdf") or review.get("digest") is None):
             continue  # already has a digest — nothing to acquire
         try:
@@ -287,7 +292,7 @@ def _propose_for_item(item_key: str, *, login: dict[str, dict[str, str]]) -> str
       - ``"failed"``               — the review never materialized (no review dict).
 
     Pure read of the cache the review/acquire passes populated — no LLM, no model load."""
-    review = deep_review.get_cached_review(item_key)
+    review = _current_cache(item_key)
     if review is None or review.get("needs_pdf") or review.get("digest") is None:
         if item_key in login:
             return "needs_library_login"

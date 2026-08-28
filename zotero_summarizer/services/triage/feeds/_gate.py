@@ -104,6 +104,8 @@ def _pack_review_payload(item: dict[str, Any], summary: Any = None) -> str | Non
     if shap is None and aux is None and summary_dict is None and not audit:
         return None
     payload: dict[str, Any] = {"shap": shap, "aux_context": aux, "summary": summary_dict}
+    if summary_dict is not None:
+        payload["summary_schema_version"] = 1
     if audit:
         # Phase 1.15 (2.3): counterfactual gate audit marker. The review UI
         # renders a 🎲 chip for these so the user knows the gate said

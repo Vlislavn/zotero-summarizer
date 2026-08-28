@@ -19,7 +19,7 @@ CLI setup/doctor ─┘                    ├─ per-stage inference
 | `status.py` | Cheap state: `configured` means personalized goals plus credential; `ready` also needs reachability and a successful Doctor run. |
 | `profiles.py` | Resolve hardware-gated Ollama profiles into the existing routing schema; never download. |
 | `assets.py` | Shared prefetch targets and fresh-process cache-only load checks. |
-| `doctor.py` | Persisted web/CLI checklist with stable IDs, recovery actions, single-flight execution, interrupted-run recovery, redaction, and real inference gating. |
+| `doctor.py` | Persisted web/CLI checklist with stable IDs, recovery actions, single-flight execution, interrupted-run recovery, redaction, and real inference gating. Recovery distinguishes absent/stopped Ollama; browser readiness checks the actual `patchright` runtime; the RSS probe is read-only so it cannot collide with daemon schema work. |
 | `calibration*.py` | Existing endpoint calibration and its single-flight job. |
 
 `light` uses `qwen3:8b` (12 GB memory / 8 GB disk floor); `balanced` uses

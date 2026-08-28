@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import re
 
+import pytest
+
 from zotero_summarizer.models import SummarizeResponse, TriageDimensions
 from zotero_summarizer.services.triage.feeds._daily_materialize import (
     _materialize_summary,
@@ -142,3 +144,19 @@ def test_delayed_materialization_restores_summary_and_marks_legacy_fallback():
     restored, source = _materialize_summary(pick)
     assert source == "legacy_sparse"
     assert restored.executive_summary == ""
+
+
+def test_stored_summary_versions_accept_legacy_and_reject_future():
+    from zotero_summarizer.services.library.review_summary import pick_stored_summary
+
+    summary = _summary()
+    legacy = {"shap_contribs_json": json.dumps({"summary": summary.model_dump()})}
+    current = {"shap_contribs_json": json.dumps({
+        "summary_schema_version": 1, "summary": summary.model_dump(),
+    })}
+    assert pick_stored_summary(legacy) == summary
+    assert pick_stored_summary(current) == summary
+    with pytest.raises(ValueError, match="unsupported stored summary"):
+        pick_stored_summary({"shap_contribs_json": json.dumps({
+            "summary_schema_version": 2, "summary": summary.model_dump(),
+        })})

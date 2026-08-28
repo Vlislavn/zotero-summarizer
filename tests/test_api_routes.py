@@ -114,8 +114,9 @@ def test_build_paper_render_route_passes_flags(monkeypatch):
 def test_ask_paper_route_returns_grounded_and_abstained(monkeypatch):
     seen: dict = {}
 
-    def _ask(item_key, question, *, mode):
+    def _ask(item_key, question, *, mode, history):
         seen["mode"] = mode
+        seen["history"] = history
         if "cohort" in question:
             return {"answer": None, "abstained": True, "quote": None, "mode": mode, "item_key": item_key}
         return {"answer": "ImageNet", "abstained": False, "quote": "a real sentence", "mode": mode}
@@ -127,7 +128,7 @@ def test_ask_paper_route_returns_grounded_and_abstained(monkeypatch):
         )
     )
     assert grounded["answer"] == "ImageNet" and grounded["abstained"] is False
-    assert seen["mode"] == "full_text"
+    assert seen == {"mode": "full_text", "history": []}
     abstained = asyncio.run(
         library_routes.ask_paper(library_routes.AskPaperRequest(item_key="K1", question="cohort size?"))
     )

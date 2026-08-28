@@ -38,7 +38,6 @@ from zotero_summarizer.services._common import (
     deep_review_fleet_concurrency,
     deep_review_sub_concurrency,
     now_iso_z,
-    settings,
 )
 
 from zotero_summarizer.models import PaperDigest
@@ -53,12 +52,16 @@ from zotero_summarizer.services.library import (
 # Cache I/O primitives live in _review_cache (split out for the LOC cap); re-exported
 # here so deep_review._read_all / get_cached_review / copy_review stay the public seam.
 from zotero_summarizer.services.library._review_cache import (  # noqa: F401
+    REVIEW_CONTRACT_VERSION,
     _cache_path,
     _read_all,
     _write_one,
     cached_review_keys,
     copy_review,
+    current_review_keys,
     get_cached_review,
+    get_current_review,
+    review_is_current,
 )
 from zotero_summarizer.services._common import state as get_state
 
@@ -66,15 +69,10 @@ LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_TOP_K = 5
 
-# ---------------------------------------------------------------------------
-# Per-item job registry + one provider-aware review pool (mirrors paper_render).
-# ---------------------------------------------------------------------------
-# Upper bound on concurrent paper reviews when a remote provider sets no
-# max_sub_concurrency (an API has no host-RAM limit, but unbounded fan-out is
+# Remote APIs still get a bounded default fan-out.
 # still impolite). Named constant, not a magic literal.
 _MAX_CONCURRENT = 8
-# Keep all running jobs + the most-recent finished ones, so the registry (and the
-# aggregate status's counts) stay bounded across a long session.
+# Keep running jobs plus a bounded recent history.
 _MAX_FINISHED_JOBS = 12
 
 _LOCK = threading.Lock()          # guards _JOBS
@@ -189,11 +187,6 @@ def _try_rebuild_render(item_key: str) -> None:
         LOGGER.warning("auto-rebuild after deep review failed for %s: %s", item_key, exc)
 
 
-# ---------------------------------------------------------------------------
-# Per-item work + the background job
-# ---------------------------------------------------------------------------
-
-
 def _review_one(
     item: dict[str, Any],
     *,
@@ -211,6 +204,7 @@ def _review_one(
     lean_tier: bool = False,
     sub_concurrency: int = 1,
     progress_sink: Any = None,
+    provenance: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Condensed paper DIGEST (what it's about + how to use it + quality) for one
     library item. ``None`` when the item vanished from Zotero (caller skips it).
@@ -232,6 +226,8 @@ def _review_one(
     pdf_path = str(item.get("pdf_path") or detail.get("pdf_path") or "")
 
     digest_dump = quality_dump = goal_dump = paper_type_dump = section_overlay = code_link_dump = None
+    model_read_decision = ""
+    reading_policy_flags: list[str] = []
     note_written = False
     note_error: str | None = None
 
@@ -262,6 +258,11 @@ def _review_one(
                 sub_concurrency=sub_concurrency, item_type=detail.get("item_type"),
                 web_article=bool(item.get("web_article")),
             ))  # noqa: E501
+            from zotero_summarizer.services.library.review_fleet.propose import apply_reading_policy
+            digest, model_read_decision, reading_policy_flags = apply_reading_policy(
+                digest, quality_dump, goal_dump,
+            )
+            digest_dump = digest.model_dump()
             reporter.phase("note")
             from zotero_summarizer.services.library import review_detail
             if review_detail.classify_item_key(item_key) == review_detail.SOURCE_LIBRARY:
@@ -275,12 +276,16 @@ def _review_one(
             reporter.summary()
 
     return {
+        "review_contract_version": REVIEW_CONTRACT_VERSION,
+        "provenance": provenance or {},
         "digest": digest_dump,
         "quality": quality_dump,
         "goal_summaries": goal_dump,
         "paper_type": paper_type_dump,
         "section_overlay": section_overlay,
         "code_link": code_link_dump,
+        "model_read_decision": model_read_decision,
+        "reading_policy_flags": reading_policy_flags,
         "needs_pdf": not bool(pdf_path),
         # Set by _review_worker from the acquire result when a fetch was DECLARED-but-
         # gated (paywall/no session) — the per-paper pane shows login_url as a
@@ -327,6 +332,9 @@ def _build_ctx(reader: Any = None) -> dict[str, Any]:
     from zotero_summarizer.services.zotero.zotero import get_library_reader
 
     reader = reader or get_library_reader(app)
+    from zotero_summarizer.models.providers import resolve_stage
+
+    resolved = resolve_stage(config.llm_routing, "deep_review")
     provider = app.resolve_stage_provider("deep_review")
     prestige_scores, prestige_floor_value = _load_prestige_context()
     return {
@@ -345,6 +353,11 @@ def _build_ctx(reader: Any = None) -> dict[str, Any]:
         # Decoder-level structured output: JSON Schema for PaperDigest when the provider supports it
         # (vLLM-style: logit constraint + reasoning survives, measured 2026-06-27); None → prompt-level fallback.
         "response_format": quality_review.build_response_format(PaperDigest) if getattr(provider, "structured_output", False) else None,
+        "provenance": {
+            "provider": getattr(provider, "name", resolved.provider.name),
+            "model": resolved.model,
+            "prompt_schema_version": REVIEW_CONTRACT_VERSION,
+        },
         "_provider": provider,
     }
 
@@ -479,4 +492,7 @@ def start(
     return {**status(), "accepted": True}
 
 
-__all__ = ["start", "status", "get_cached_review", "copy_review"]
+__all__ = [
+    "start", "status", "get_cached_review", "get_current_review",
+    "review_is_current", "cached_review_keys", "current_review_keys", "copy_review",
+]

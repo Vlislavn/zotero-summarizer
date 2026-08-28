@@ -116,9 +116,13 @@ def _stub_queue(monkeypatch, keys):
 
 def _cached_review(read_decision="read", grade="A"):
     return {
-        "digest": {"read_decision": read_decision, "grade": grade},
-        "quality": {"quality_band": "neutral"},
-        "goal_summaries": [],
+        "review_contract_version": fleet.deep_review.REVIEW_CONTRACT_VERSION,
+        "digest": {
+            "read_decision": read_decision, "grade": grade, "writing_friction": "low",
+            "novelty": 4, "significance": 4,
+        },
+        "quality": {"quality_band": "highlight"},
+        "goal_summaries": [{"relevant": True}],
     }
 
 
@@ -288,7 +292,10 @@ def test_needs_pdf_pick_is_acquired_then_re_reviewed_from_that_path(monkeypatch)
 
     def _review(_key, pdf_overrides):
         # WITH an override (re-review from the acquired path) → a digest; without → needs_pdf.
-        return _cached_review("read", "A") if pdf_overrides else {"digest": None, "needs_pdf": True}
+        return _cached_review("read", "A") if pdf_overrides else {
+            "review_contract_version": fleet.deep_review.REVIEW_CONTRACT_VERSION,
+            "digest": None, "needs_pdf": True,
+        }
 
     starts = _stub_deep_review(monkeypatch, cache, review=_review)
     monkeypatch.setattr(fleet.time, "sleep", lambda _s: None)

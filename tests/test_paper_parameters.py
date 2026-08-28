@@ -32,10 +32,18 @@ class _FakeLLM:
         return response
 
 
+def _digest(**updates):
+    return PaperDigest(
+        read_decision="skip", read_why="The digest is sufficient.", read_parts=[],
+        skip_parts=[], estimated_read_minutes=0, original_value="No extra value.",
+        writing_friction="low", writing_reasons=[], **updates,
+    )
+
+
 def test_digest_with_no_parameters_yields_none_not_a_guess():
     """A non-empirical / parameter-less paper → parameters=None (abstention,
     not a fabricated parameters object)."""
-    digest = PaperDigest(writing_friction="low", writing_reasons=[])
+    digest = _digest()
     llm = _FakeLLM([digest])
     out = assess_digest(title="T", full_text="position paper body",
                         config=_default_goals_config(), llm=llm)
@@ -52,7 +60,7 @@ def test_digest_with_parameters_parses_verbatim():
         architecture="encoder-decoder transformer",
         external_validation=True,
     )
-    digest = PaperDigest(parameters=params, writing_friction="low", writing_reasons=[])
+    digest = _digest(parameters=params)
     llm = _FakeLLM([digest])
     out = assess_digest(title="T", full_text="empirical paper body",
                         config=_default_goals_config(), llm=llm)

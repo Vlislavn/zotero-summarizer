@@ -25,7 +25,8 @@ _STRICT_RETRY_SUFFIX = (
     "\n\nIMPORTANT: your previous reply was not valid. Return ONE JSON object only "
     "(no prose, no code fences). Every score field (soundness/novelty/significance/"
     "reproducibility/clarity) MUST be an integer from 1 to 5 — never 0. Include "
-    "writing_friction and writing_reasons explicitly."
+    "all reading-action and writing fields explicitly. Read/skim need a concrete "
+    "reason, exact target, positive minute estimate, and original-only value."
 )
 
 
@@ -52,8 +53,17 @@ def _coerce_digest(raw: Any) -> PaperDigest:
     """Build a ``PaperDigest`` from an LLM reply, salvaging prose-embedded/fenced JSON.
     Raises ``ValidationError``/``ValueError`` when the reply can't yield a valid digest."""
     digest = raw if isinstance(raw, PaperDigest) else PaperDigest.model_validate(extract_json_blob(to_text(raw)))
-    if not {"writing_friction", "writing_reasons"} <= digest.model_fields_set:
-        raise ValueError("digest omitted required writing assessment")
+    required = {
+        "read_decision", "read_why", "read_parts", "skip_parts",
+        "estimated_read_minutes", "original_value", "writing_friction", "writing_reasons",
+    }
+    if not required <= digest.model_fields_set:
+        raise ValueError("digest omitted required reading or writing assessment")
+    if digest.read_decision in {"read", "skim"}:
+        if not digest.read_why.strip() or not any(part.strip() for part in digest.read_parts):
+            raise ValueError("read/skim requires a reason and exact target")
+        if not digest.original_value.strip() or not (digest.estimated_read_minutes or 0) > 0:
+            raise ValueError("read/skim requires original-only value and positive minutes")
     return digest
 
 # Fallback when goals.yaml has no `prompts.paper_digest`. A referee-grade digest

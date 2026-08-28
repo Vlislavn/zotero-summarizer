@@ -6,7 +6,7 @@ This is the fleet's brain, and it makes **no LLM call** — the expensive judgem
 module is the cheap, glassbox truth-table that folds those pre-computed signals
 into one reading verdict the human can Confirm/Override.
 
-Truth table (digest ``read_decision`` × ``grade``, then quality-adjusted):
+Truth table (effective digest ``read_decision`` × ``grade``):
 
     read  + grade A/B   -> must_read        skim -> should/could (by grade)
     read  + grade C/D/? -> should_read      skip -> could (match/unknown) / dont (real miss)
@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from zotero_summarizer.models.triage import ProposedVerdict
+from zotero_summarizer.models.triage import PaperDigest, ProposedVerdict
 from zotero_summarizer.services._common import now_iso_z
 
 # Grades that read as "this is a strong paper" for the verdict lift.
@@ -109,6 +109,54 @@ def _quality_flags(quality: dict[str, Any] | None) -> tuple[list[str], bool]:
     return flags, shaky
 
 
+def effective_read_decision(
+    digest: dict[str, Any] | None,
+    quality: dict[str, Any] | None,
+    *,
+    goal_summaries: Any = None,
+) -> tuple[str, list[str]]:
+    """Reserve full reading for the intersection of idea, goal, evidence, and effort."""
+    d, q = digest or {}, quality or {}
+    decision = str(d.get("read_decision") or "").strip().lower()
+    if decision != "read":
+        return decision if decision in {"skim", "skip"} else "", []
+    flags: list[str] = []
+    friction = str(d.get("writing_friction") or "")
+    if friction == "high":
+        flags.append("writing_friction")
+    elif friction not in {"low", "moderate"}:
+        flags.append("writing_not_assessed")
+    if _goal_evidence(goal_summaries) != "match":
+        flags.append("active_goal_not_confirmed")
+    idea_score = max(int(d.get("novelty") or 0), int(d.get("significance") or 0))
+    if idea_score < 4:
+        flags.append("idea_value_not_high")
+    band = str(q.get("quality_band") or "")
+    if str(q.get("basis") or "") != "non_paper" and band != "highlight":
+        flags.append("strong_evidence_not_confirmed")
+    if band == "flag" or any(str(value).strip() for value in (q.get("overstatements") or [])):
+        flags.append("weak_evidence")
+    return ("skim", flags) if flags else ("read", [])
+
+
+def apply_reading_policy(
+    digest: PaperDigest,
+    quality: dict[str, Any] | None,
+    goal_summaries: Any,
+) -> tuple[PaperDigest, str, list[str]]:
+    """Apply the glassbox reading cap while preserving the model's raw decision."""
+    raw = digest.read_decision
+    effective, flags = effective_read_decision(
+        digest.model_dump(), quality, goal_summaries=goal_summaries,
+    )
+    if effective != raw:
+        digest = digest.model_copy(update={
+            "read_decision": effective,
+            "read_why": "Full reading threshold not met. " + digest.read_why,
+        })
+    return digest, raw, flags
+
+
 def _confidence(read_decision: str, grade: str, *, goal_evidence: str, shaky: bool) -> float:
     """A bounded [0,1] confidence for the proposal.
 
@@ -171,13 +219,10 @@ def propose_verdict(
     goal_evidence = _goal_evidence(goal_summaries)
 
     flags, shaky = _quality_flags(quality)
-    effective_decision = read_decision
-    if read_decision == "read" and str((digest or {}).get("writing_friction") or "") == "high":
-        effective_decision = "skim"
-        flags.append("writing_friction")
-    if read_decision == "read" and ("quality_flag" in flags or "overstatements" in flags):
-        effective_decision = "skim"
-        flags.append("weak_evidence")
+    effective_decision, policy_flags = effective_read_decision(
+        digest, quality, goal_summaries=goal_summaries,
+    )
+    flags.extend(flag for flag in policy_flags if flag not in flags)
     verdict = _base_verdict(effective_decision, grade, goal_evidence=goal_evidence)
     confidence = _confidence(effective_decision, grade, goal_evidence=goal_evidence, shaky=shaky)
     rationale = _rationale(effective_decision, grade, verdict, goal_evidence=goal_evidence, shaky=shaky)
@@ -194,4 +239,4 @@ def propose_verdict(
     )
 
 
-__all__ = ["propose_verdict"]
+__all__ = ["apply_reading_policy", "effective_read_decision", "propose_verdict"]

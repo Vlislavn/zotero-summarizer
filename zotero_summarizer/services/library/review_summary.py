@@ -66,6 +66,9 @@ def _parse_stored_summary(
             )
         return None
     payload = _json.loads(blob)
+    version = int(payload.get("summary_schema_version", 0))
+    if version not in {0, 1}:
+        raise ValueError(f"unsupported stored summary schema version: {version}")
     summary_dict = payload.get("summary")
     if summary_dict is None:
         if required:

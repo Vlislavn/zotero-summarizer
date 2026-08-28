@@ -249,7 +249,8 @@ def _refine_with_retry(
             "The following text contains a research analysis. Return a single valid JSON "
             "object with keys: executive_summary, should_deep_read, key_sections_to_read, "
             "relevance_to_research, controversial_points, industry_academy_impact, "
-            "unknown_unknowns, implementation_quickstart, key_findings, methods, limitations. "
+            "unknown_unknowns, implementation_quickstart, key_findings, methods, limitations, "
+            "method_and_code. "
             "Return ONLY the JSON, no other text.\n\n" + refined_text
         )
         retry_text = to_text(llm.prompt(retry_prompt))
@@ -293,6 +294,7 @@ def _assemble_summary_response(
         key_findings=refined.key_findings,
         methods=refined.methods,
         limitations=refined.limitations,
+        method_and_code=refined.method_and_code,
         relevance_score=triage.score,
         composite_relevance_score=composite_score,
         reading_priority=mapped_priority,
@@ -374,7 +376,7 @@ def run_pipeline(req: SummarizeRequest, log_prefix: str | None = None) -> Summar
             "Extract the content and return it as a single valid JSON object with these keys: "
             "executive_summary, should_deep_read, key_sections_to_read, relevance_to_research, "
             "controversial_points, industry_academy_impact, unknown_unknowns, implementation_quickstart, "
-            "key_findings, methods, limitations. "
+            "key_findings, methods, limitations, method_and_code. "
             "Return ONLY the JSON object, no other text.\n\n" + refined_text
         )
         retry_text = to_text(llm.prompt(retry_prompt))

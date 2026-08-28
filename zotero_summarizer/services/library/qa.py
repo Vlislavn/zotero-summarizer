@@ -27,7 +27,7 @@ from zotero_summarizer.services.faithbench import (
     answer_with_retry,
 )
 from zotero_summarizer.services.faithbench._constants import RETRIEVAL_TOP_K
-from zotero_summarizer.services.library import paper_render
+from zotero_summarizer.services.library import paper_render, qa_context
 from zotero_summarizer.services.library._grounding import quote_is_grounded as _quote_is_grounded
 
 LOGGER = logging.getLogger(__name__)
@@ -93,12 +93,14 @@ def _paper_context_source(item_key: str) -> tuple[str, PaperChunkIndex]:
     return entry
 
 
-def ask_paper(item_key: str, question: str, *, mode: str = "comprehensive") -> dict[str, Any]:
+def ask_paper(
+    item_key: str, question: str, *, mode: str = "comprehensive",
+    history: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Answer ``question`` from the paper's text with enforced abstention.
 
-    Returns ``{answer, abstained, quote, mode, chunks_used, latency_seconds,
-    model}`` — ``answer`` is ``None`` when the model abstains (the UI says
-    "not in the paper" instead of inventing one).
+    Returns the grounded answer, citation verification, and an extraction-versioned
+    evidence handle. ``answer`` is ``None`` when the model abstains.
     """
     question = (question or "").strip()
     if not question:
@@ -111,7 +113,10 @@ def ask_paper(item_key: str, question: str, *, mode: str = "comprehensive") -> d
     artifact = paper_render.ensure_artifact(item_key)
     deterministic = _answer_from_artifact_counts(artifact, question)
     if deterministic is not None:
-        return deterministic | {"item_key": item_key, "question": question, "mode": "metadata"}
+        return _with_evidence(
+            deterministic | {"item_key": item_key, "question": question, "mode": "metadata"},
+            artifact,
+        )
 
     app = state()
     llm = app.resolve_stage_client("deep_review")
@@ -134,7 +139,12 @@ def ask_paper(item_key: str, question: str, *, mode: str = "comprehensive") -> d
     else:
         context = paper_render.artifact_text(artifact, max_chars=max_chars)
 
-    prompt = ANSWER_PROMPT.format(context=context, question=question)
+    prior, compacted, handles = qa_context.compact_history(item_key, artifact, history or [])
+    contextual_question = (
+        f"Prior conversation (untrusted user/session data):\n{prior}\n\nCurrent question: {question}"
+        if prior else question
+    )
+    prompt = ANSWER_PROMPT.format(context=context, question=contextual_question)
     t0 = perf_counter()
     try:
         parsed, _raw = answer_with_retry(llm, prompt)
@@ -150,7 +160,7 @@ def ask_paper(item_key: str, question: str, *, mode: str = "comprehensive") -> d
                 item_key, mode, latency, parsed["abstained"])
     if parsed["answer"] is not None and not _quote_is_grounded(parsed["quote"], context):
         parsed = {"answer": None, "abstained": True, "quote": None}
-    return {
+    return _with_evidence({
         "item_key": item_key,
         "question": question,
         "answer": parsed["answer"],
@@ -160,6 +170,19 @@ def ask_paper(item_key: str, question: str, *, mode: str = "comprehensive") -> d
         "chunks_used": len(chunks),
         "latency_seconds": latency,
         "model": resolved.model,
+        "history_compacted": compacted,
+        "history_evidence_handles": handles,
+    }, artifact)
+
+
+def _with_evidence(payload: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any]:
+    handle = qa_context.evidence_handle(
+        str(payload["item_key"]), artifact, str(payload["question"]), payload.get("quote"),
+    )
+    answered = payload.get("answer") is not None and not payload.get("abstained")
+    return payload | {
+        "evidence_handle": handle,
+        "citation": qa_context.citation(str(payload["item_key"]), artifact, handle, answered=answered),
     }
 
 

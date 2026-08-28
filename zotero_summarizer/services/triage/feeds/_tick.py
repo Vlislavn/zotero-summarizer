@@ -221,7 +221,7 @@ def _auto_review_slate(tick_id: str) -> None:
 
         db_path = settings().triage_db_path
         slate = assemble_daily_slate(db_path=db_path, K=k, quality_first=rank_quality_first_enabled())  # explicit arm: the P3 interleave is user-facing-GET only — a daemon merge must never claim the day's interleave_log nor widen auto-review beyond the shipped arm (README)
-        done = deep_review.cached_review_keys()
+        done = deep_review.current_review_keys()
         keys = [p.stable_feed_key for p in slate.papers
                 if p.stable_feed_key and p.stable_feed_key not in done][:k]
         if not keys:
@@ -235,7 +235,7 @@ def _auto_review_slate(tick_id: str) -> None:
 def _auto_render_slate(tick_id: str) -> None:
     """Build the full, heavy paper RENDER (notes.md / presentation.html / figures) for the
     TOP-``render_on_tick_k`` Today feed papers, so a top feed paper opens with the same brief
-    as a library item. Renders only keys ALREADY reviewed (``cached_review_keys`` — so the
+    as a library item. Renders only keys with a current review contract (so the
     brief folds the cached review in, one tick after ``_auto_review_slate``, never racing it)
     and NOT already rendered. Reuses ``paper_render.start_build`` (its own pool + single-flight;
     the PDF is a cache hit from the review, and the digest is cached → NO extra LLM). Resolves
@@ -253,7 +253,7 @@ def _auto_render_slate(tick_id: str) -> None:
 
         db_path = settings().triage_db_path
         slate = assemble_daily_slate(db_path=db_path, K=max(k, 5), quality_first=rank_quality_first_enabled())  # explicit arm — bypasses the P3 interleave (see _auto_review_slate)
-        reviewed = deep_review.cached_review_keys()
+        reviewed = deep_review.current_review_keys()
         # Top-K by composite rank, restricted to reviewed feed keys (so the brief has the
         # review folded in). slate.papers is role-grouped, so sort by composite_score.
         ranked = sorted(

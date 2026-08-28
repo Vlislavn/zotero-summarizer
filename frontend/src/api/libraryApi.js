@@ -333,11 +333,11 @@ export function paperFigureUrl(itemKey, name) {
  * POST /api/library/ask { item_key, question, mode } — correctness-first Q&A
  * over structured cached review data + full text. Metadata/count questions are
  * answered deterministically; model answers require grounded evidence.
- * Resolves to { answer, abstained, quote, mode, chunks_used, latency_seconds, model }.
+ * Resolves to the grounded answer plus citation verification and an evidence handle.
  */
-export async function askPaper(itemKey, question, { mode = 'comprehensive' } = {}) {
+export async function askPaper(itemKey, question, { mode = 'comprehensive', history = [] } = {}) {
   return request('/api/library/ask', {
     method: 'POST',
-    body: JSON.stringify({ item_key: itemKey, question, mode }),
+    body: JSON.stringify({ item_key: itemKey, question, mode, history }),
   });
 }

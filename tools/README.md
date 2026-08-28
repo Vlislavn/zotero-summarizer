@@ -15,6 +15,8 @@ One-off eval / ops scripts. Not imported by the app; each has a module docstring
 | `eval_slate_blend.py` | offline eval of the Today-slate ranking blend. |
 | `eval_temporal_objective.py` | offline eval of the temporal-split training objective. |
 | `eval_quality_promote.py` | offline eval of the quality→must_read promotion (`rank_blend.promote_band`) against firewalled user verdicts — precision + flooding per (goal, relevance) floor. Gates the `quality_promote` flip. |
+| `eval_reading_policy.py` | offline 17-paper, user-labelled gate for the conservative `read|skim|skip` policy: before/after read rate, full-read precision, idea rescue, and zero high-friction/weak-evidence full reads. Uses `reading_policy_fixture.json`; `--check` fails when a gate regresses. |
+| `eval_research_feed.py` | offline 30-real-paper Research Intelligence gate: precision@10, must-not-miss recall, artifact URL precision/fabrication, project-use coverage, review-time estimate, and read-action agreement from the separate 17-paper fixture. |
 | `validate_prestige_upgrade.py` | sanity-check the OpenAlex prestige enrichment. |
 | `precommit/` | the repo's custom pre-commit checks (LOC cap, layering, README freshness, dead-code, AI-slop). |
 

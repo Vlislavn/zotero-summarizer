@@ -71,10 +71,13 @@ async function deviceId() {
 export async function queueMutation({ item_key, field, operation = 'set', value = null, comment = null }) {
   const paperStore = await store('papers');
   const paper = await request(paperStore.get(item_key)) || { item_key, title: item_key, revisions: {} };
+  // ponytail: UI saves are serialized; use one meta+mutation transaction if callers enqueue concurrently.
+  const sequence = (await getMeta('mutation_sequence', 0)) + 1;
+  await setMeta('mutation_sequence', sequence);
   const mutation = {
     mutation_id: crypto.randomUUID(), device_id: await deviceId(), item_key, field,
     operation, value, comment, base_revision: paper.revisions?.[field] || 0,
-    created_at: new Date().toISOString(), status: 'pending',
+    created_at: new Date().toISOString(), sequence, status: 'pending',
   };
   await request((await store('mutations', 'readwrite')).put(mutation));
   if (field === 'verdict') {
@@ -95,7 +98,10 @@ export async function queueMutation({ item_key, field, operation = 'set', value 
 
 export async function pendingMutations() {
   const rows = await request((await store('mutations')).getAll());
-  return rows.filter((row) => row.status === 'pending').sort((a, b) => a.created_at.localeCompare(b.created_at));
+  return rows.filter((row) => row.status === 'pending').sort((a, b) => (
+    Number.isInteger(a.sequence) && Number.isInteger(b.sequence)
+      ? a.sequence - b.sequence : a.created_at.localeCompare(b.created_at)
+  ));
 }
 
 export async function applyPushResults(results) {

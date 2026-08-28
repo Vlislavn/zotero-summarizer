@@ -45,7 +45,10 @@ class _ReduceLLM:
         # The reduce model sees the chunk notes as its source text.
         assert "note 1" in prompt and "chunk 1" in prompt
         return PaperDigest(
-            tldr="synthesized from notes", writing_friction="low", writing_reasons=[],
+            tldr="synthesized from notes", read_decision="skip",
+            read_why="The synthesis is sufficient.", read_parts=[], skip_parts=[],
+            estimated_read_minutes=None, original_value="",
+            writing_friction="low", writing_reasons=[],
         )
 
 
@@ -81,7 +84,11 @@ class _DigestLLM:
     def pydantic_prompt(self, *, prompt, pydantic_model):
         self.seen_text = prompt
         self.pydantic_calls += 1
-        return PaperDigest(tldr="ok", writing_friction="low", writing_reasons=[])
+        return PaperDigest(
+            tldr="ok", read_decision="skip", read_why="The digest is sufficient.",
+            read_parts=[], skip_parts=[], estimated_read_minutes=None, original_value="",
+            writing_friction="low", writing_reasons=[],
+        )
 
 
 def test_digest_for_strategy_dispatches_by_chunk_strategy():

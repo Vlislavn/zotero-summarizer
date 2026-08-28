@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+import importlib.util
 import os
 from pathlib import Path
 import shutil
@@ -124,7 +125,16 @@ def _runtime_model(settings: Settings) -> dict[str, Any]:
     served: dict[str, list[str]] = {}
     for item in resolved:
         if item.provider.name not in served:
-            served[item.provider.name] = list_models_for_provider(item.provider)
+            try:
+                served[item.provider.name] = list_models_for_provider(item.provider)
+            except Exception as exc:
+                if item.provider.is_local and uses_ollama:
+                    return _row(
+                        "runtime_model", "needs_action", "Ollama is not running",
+                        f"{type(exc).__name__}: {exc}", action="Start Ollama",
+                        command="ollama serve",
+                    )
+                raise
     missing = [item for item in resolved if item.model not in served[item.provider.name]]
     if missing:
         item = missing[0]
@@ -172,10 +182,10 @@ def _ml_assets(settings: Settings) -> dict[str, Any]:
 
 
 def _rss_source(settings: Settings) -> dict[str, Any]:
-    from zotero_summarizer.storage import feeds, rss
-
-    with feeds.open_triage_conn(settings.triage_db_path) as conn:
-        count = len(rss.list_rss_feeds(conn))
+    with sqlite3.connect(
+        f"file:{settings.triage_db_path}?mode=ro", uri=True, timeout=10,
+    ) as conn:
+        count = int(conn.execute("SELECT count(*) FROM rss_feeds WHERE enabled = 1").fetchone()[0])
     return _row("rss_source", "ready" if count else "needs_action",
                 f"{count} RSS source{'s' if count != 1 else ''} enabled" if count else "No RSS source is enabled",
                 "Today needs at least one source.", action="Add a source in Settings")
@@ -198,10 +208,11 @@ def _dry_run(settings: Settings) -> dict[str, Any]:
 
 
 def _optional_extras(_: Settings) -> dict[str, Any]:
-    browsers = shutil.which("playwright") is not None
+    browsers = importlib.util.find_spec("patchright") is not None
     return _row("optional_extras", "ready" if browsers else "unavailable",
                 "Browser/PDF extras are available" if browsers else "Browser automation is optional and unavailable",
-                "Core local triage does not require browser automation.", action="Install browser extras")
+                "Core local triage does not require browser automation.", action="Install browser extras",
+                command=None if browsers else "uv sync --extra browser")
 
 
 _RUNNERS: dict[str, Callable[[Settings], dict[str, Any]]] = {

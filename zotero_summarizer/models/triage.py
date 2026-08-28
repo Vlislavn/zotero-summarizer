@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -13,6 +14,7 @@ __all__ = [
     "TriageDimensions",
     "TriageResult",
     "QualityReview",
+    "MethodAndCode",
     "PaperParameters",
     "PaperDigest",
     "GoalSummary",
@@ -86,6 +88,26 @@ class QualityReview(BaseModel):
     def _norm_grade(cls, value: Any) -> str:
         v = str(value or "").strip().upper()[:1]
         return v if v in {"A", "B", "C", "D"} else ""
+
+
+class MethodAndCode(BaseModel):
+    """Optional reusable method/artifact detail from the existing refine call."""
+
+    what_it_does: str = Field(default="")
+    what_is_new: str = Field(default="")
+    how_it_works: List[str] = Field(default_factory=list)
+    evaluation: str = Field(default="")
+    artifacts: List[str] = Field(default_factory=list)
+    how_i_could_use_it: str = Field(default="")
+
+    @field_validator("artifacts")
+    @classmethod
+    def _require_absolute_urls(cls, values: List[str]) -> List[str]:
+        cleaned = [value.strip() for value in values if value.strip()]
+        if any(urlsplit(value).scheme not in {"http", "https"} or not urlsplit(value).hostname
+               for value in cleaned):
+            raise ValueError("method artifacts must be absolute HTTP(S) URLs")
+        return cleaned
 
 
 class PaperParameters(BaseModel):
@@ -248,6 +270,7 @@ class RefinedSummary(BaseModel):
     key_findings: List[str] = Field(default_factory=list)
     methods: str = Field(default="")
     limitations: str = Field(default="")
+    method_and_code: Optional[MethodAndCode] = Field(default=None)
 
     @staticmethod
     def _coerce_text(value: Any, field_name: str, allow_bool: bool = False) -> str:
@@ -320,6 +343,7 @@ class SummarizeResponse(BaseModel):
     key_findings: List[str] = Field(default_factory=list)
     methods: str = ""
     limitations: str = ""
+    method_and_code: Optional[MethodAndCode] = Field(default=None)
     relevance_score: int = Field(..., ge=1, le=5)
     composite_relevance_score: float = Field(default=0.0, ge=0.0, le=5.0)
     reading_priority: str = ReadingPriority.COULD_READ.value

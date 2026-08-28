@@ -57,6 +57,11 @@ snapshots, a sync cursor, and a UUID mutation outbox. Verdicts/notes queue only
 on network failure; conflicts require Keep mine / Use server. PDFs, AI,
 annotation, acquisition, and rescoring remain server-only.
 
+The IndexedDB test kills/reimports the client module and proves cached context
+plus a persisted sequence for rapid same-millisecond verdicts survive while the server is absent. Ask Paper sends a
+bounded session history; the backend compacts older evidence to verified
+extraction handles, and the UI labels verified quotes without inventing pages.
+
 ## Structure and conventions
 
 ```text

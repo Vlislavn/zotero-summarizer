@@ -63,11 +63,19 @@ class RelTagSyncRequest(BaseModel):
     force: bool = Field(default=False)
 
 
+class AskPaperHistoryTurn(BaseModel):
+    question: str = Field(..., min_length=1, max_length=2000)
+    answer: str | None = Field(default=None, max_length=5000)
+    quote: str | None = Field(default=None, max_length=5000)
+    evidence_handle: dict[str, Any] | None = None
+
+
 class AskPaperRequest(BaseModel):
     item_key: str = Field(..., min_length=1)
     question: str = Field(..., min_length=1, max_length=2000)
     # comprehensive (default; metadata+notes+body) | retrieval (top-k chunks) | full_text (raw body)
     mode: Literal["comprehensive", "retrieval", "full_text"] = Field(default="comprehensive")
+    history: list[AskPaperHistoryTurn] = Field(default_factory=list, max_length=20)
 
 
 class PaperRenderBuildRequest(BaseModel):
@@ -182,7 +190,10 @@ async def ask_paper(req: AskPaperRequest) -> dict[str, Any]:
     """Grounded Q&A about one paper using the local deep_review-stage model and
     the benchmark-validated abstention prompt. ``answer`` is null when the model
     abstains (the paper doesn't contain the answer)."""
-    return await asyncio.to_thread(qa.ask_paper, req.item_key, req.question, mode=req.mode)
+    return await asyncio.to_thread(
+        qa.ask_paper, req.item_key, req.question, mode=req.mode,
+        history=[turn.model_dump(mode="json") for turn in req.history],
+    )
 
 
 async def run_deep_review(req: DeepReviewRunRequest) -> dict[str, Any]:

@@ -14,7 +14,8 @@ __init__.build_parser()
           ├─ register_goldenset_predict(gs_sub)   # _goldenset_predict.py:  predict-feed · analyze-notes · compare
           ├─ register_goldenset_migrate(gs_sub)   # _goldenset_migrate.py:  migrate-verdicts-to-zotero
           └─ register_goldenset_setup_tag_colors(gs_sub)  # _goldenset_setup_colors.py: setup-tag-colors
-   └─ register_faithbench(subparsers)  # _faithbench.py: faithbench build/run/judge/report
+   ├─ register_faithbench(subparsers)  # _faithbench.py: faithbench build/run/judge/report
+   └─ register_research_feed(...)      # _research_feed.py: research-feed run
 main() = build_parser().parse_args(argv).func(args)
 ```
 
@@ -31,5 +32,6 @@ main() = build_parser().parse_args(argv).func(args)
 | `_goldenset_migrate.py` | `migrate-verdicts-to-zotero` — one-time transfer of in-app verdicts (`label_verdicts`) into Zotero `label:<priority>` tags (`--dry-run`, idempotent, library items only, single batch backup) |
 | `_goldenset_setup_colors.py` | `setup-tag-colors` — prints the one-time Zotero setup (colors + number keys 1-4 for the four `label:<priority>` tags) for native keypress labeling. Non-destructive (prints the plan; writes nothing into your synced Zotero settings); `--json` for machine output |
 | `_faithbench.py` | `faithbench build/run/judge/report` — faithfulness mini-benchmark of the deep_review-stage model (span-verified QA + traps + review-claim grounding). `run` is resumable via `--run-id` and takes `--provider/--model` to sweep a model for THIS run only (no goals.yaml edit; recorded in the manifest); `judge` uses the pinned remote judge (`CUSTOM_BASE_URL`/`CUSTOM_API_KEY`). See `services/faithbench/README.md` |
+| `_research_feed.py` | `research-feed run --from … --to … [--venue …]`: bounded weekly JSON+Markdown; generates missing cards through existing deep review unless `--cached-only`; Zotero stays dry-run unless `--queue-zotero` is explicit. |
 
 Handlers use lazy imports inside the function bodies to keep CLI startup fast.

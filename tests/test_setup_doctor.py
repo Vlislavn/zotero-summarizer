@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import pytest
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services.setup.bootstrap import bootstrap_phase0
@@ -92,3 +93,37 @@ def test_doctor_rejects_unknown_check_and_marks_interrupted_run(tmp_path):
     resumed = doctor.doctor_status(settings)
     assert {row["id"] for row in resumed["checks"]} == set(doctor._CHECKS)
     assert resumed["checks"][1]["status"] == "needs_action"
+
+
+def test_optional_browser_check_uses_the_actual_runtime_package(monkeypatch):
+    monkeypatch.setattr(doctor.importlib.util, "find_spec", lambda name: object() if name == "patchright" else None)
+    assert doctor._optional_extras(None)["status"] == "ready"
+
+    monkeypatch.setattr(doctor.importlib.util, "find_spec", lambda _name: None)
+    missing = doctor._optional_extras(None)
+    assert missing["status"] == "unavailable"
+    assert missing["recovery"]["command"] == "uv sync --extra browser"
+
+
+def test_rss_check_never_runs_schema_writes(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    with sqlite3.connect(settings.triage_db_path) as conn:
+        conn.execute("INSERT INTO rss_feeds (name, url) VALUES ('Feed', 'https://example.test/rss')")
+    from zotero_summarizer.storage import feeds
+
+    monkeypatch.setattr(
+        feeds, "open_triage_conn", lambda *_a: pytest.fail("doctor must be read-only"),
+    )
+    assert doctor._rss_source(settings)["message"] == "1 RSS source enabled"
+
+
+def test_runtime_check_reports_a_stopped_ollama_service(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: "/usr/bin/ollama" if name == "ollama" else None)
+    from zotero_summarizer.services.llm import model_list
+
+    monkeypatch.setattr(model_list, "list_models_for_provider", lambda _provider: (_ for _ in ()).throw(RuntimeError("refused")))
+    row = doctor._runtime_model(settings)
+    assert row["status"] == "needs_action"
+    assert row["message"] == "Ollama is not running"
+    assert row["recovery"]["command"] == "ollama serve"

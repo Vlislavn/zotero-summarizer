@@ -141,12 +141,11 @@ abstract is too thin, that's the signal to add the deferred efetch backfill.
 
 ### HackerNoon (practitioner / engineering angle)
 
-Add the two agent-engineering tags through the same **Settings → RSS feeds**
-form as every other source:
+Add the working AI tag through the same **Settings → RSS feeds** form as every
+other source:
 
 ```
-https://hackernoon.com/tagged/ai-agents/feed
-https://hackernoon.com/tagged/agentic-ai/feed
+https://hackernoon.com/tagged/ai/feed
 ```
 
 They use generic RSS identity/dedup and the same rank/slate. Only the triage rubric
@@ -154,10 +153,11 @@ changes: concrete architecture, implementation, failures, measurements and reusa
 steps score well; promotion, SEO and unsupported trend claims do not. Selected posts
 continue through the existing web-article render/review rung.
 
-Operational caveat (2026-08-27): HackerNoon documents tag RSS, but these two paths
-returned a Cloudflare 403 while `/feed` and some other tags returned XML. Refresh
-surfaces the upstream error in the feed row; retry when HackerNoon restores access.
-Do not work around it with an unmaintained source-specific scraper.
+Operational caveat (verified 2026-08-29): HackerNoon documents tag RSS, but the
+narrow `ai-agents` and `agentic-ai` paths return Cloudflare 403. The broader
+official `ai` tag returns RSS and is the supported fallback; the practitioner
+rubric filters its wider input. Refresh surfaces any later upstream error in the
+feed row. Do not work around it with a source-specific scraper.
 
 ### Cover the flagship journal, not just the sub-journal
 

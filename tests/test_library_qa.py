@@ -94,6 +94,10 @@ def test_ask_paper_comprehensive_answers_from_artifact(tmp_path, monkeypatch):
     assert out["answer"] == "ImageNet" and out["abstained"] is False
     assert out["mode"] == "comprehensive" and out["chunks_used"] == 0
     assert out["model"] == "local-35b" and out["latency_seconds"] >= 0
+    assert out["citation"] == {
+        "claimed": True, "quote_verified": True, "location_verified": True,
+        "evidence_handle": out["evidence_handle"],
+    }
     assert "ImageNet" in llm.prompts[0]
 
     qa.ask_paper("KEY1", "How many epochs?", mode="retrieval")
@@ -195,6 +199,27 @@ def test_comprehensive_and_full_text_contexts_differ(tmp_path, monkeypatch):
     comp_prompt, full_prompt = llm.prompts[0], llm.prompts[1]
     assert "NOTES_AND_METADATA" in comp_prompt
     assert "NOTES_AND_METADATA" not in full_prompt  # raw body only, no notes wrapper
+
+
+def test_multi_turn_history_compacts_to_current_extraction_handles(tmp_path, monkeypatch):
+    pdf = tmp_path / "p.pdf"
+    pdf.write_bytes(b"%PDF-fake")
+    llm = _LLM()
+    _fake_state(tmp_path, pdf, _Extractor(), llm, monkeypatch)
+    first = qa.ask_paper("KEY1", "Which dataset was used?")
+    history = [
+        {"question": f"old question {index}", "answer": "long answer " * 30,
+         "quote": first["quote"], "evidence_handle": first["evidence_handle"]}
+        for index in range(6)
+    ]
+
+    out = qa.ask_paper("KEY1", "And how many epochs?", history=history)
+
+    assert out["history_compacted"] is True
+    assert out["history_evidence_handles"] == 2
+    assert "Earlier evidence checkpoint" in llm.prompts[-1]
+    assert "old question 0" not in llm.prompts[-1]
+    assert "old question 5" in llm.prompts[-1]
 
 
 def test_scoped_count_question_falls_through_to_llm(tmp_path, monkeypatch):
