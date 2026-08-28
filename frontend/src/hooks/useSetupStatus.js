@@ -1,10 +1,10 @@
-// The backend owns the usable/not-usable gate; pillars explain it.
+// The backend separates saved configuration from verified runtime health.
 
 import { useQuery } from '@tanstack/react-query';
 import { fetchSetupStatus } from '../api/setupApi.js';
 
 export function deriveConfigured(status) {
-  return Boolean(status?.ready);
+  return Boolean(status?.configured ?? status?.ready);
 }
 
 export function deriveSubsystemIssues(status) {

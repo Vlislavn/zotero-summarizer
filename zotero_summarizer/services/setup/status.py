@@ -135,10 +135,12 @@ async def get_setup_status() -> SetupStatusResponse:
     from zotero_summarizer.services.setup.doctor import doctor_status
 
     verified = bool(doctor_status(settings()).get("ready"))
-    ready = bool(config_status.valid and config_status.research_goals_count > 0
-                 and llm.api_key_present and llm.reachable and verified)
+    configured = bool(config_status.valid and config_status.research_goals_count > 0
+                      and llm.api_key_present)
+    ready = bool(configured and llm.reachable and verified)
 
     return SetupStatusResponse(
+        configured=configured,
         ready=ready,
         config=config_status,
         llm=llm,

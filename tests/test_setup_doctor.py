@@ -55,6 +55,31 @@ def test_local_modes_require_real_inference(tmp_path):
     assert modes["strict_offline"] == "not_started"
 
 
+def test_inference_check_preserves_distinct_failures_and_local_recovery(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    config = doctor.read_config(settings.config_path)
+    resolved = doctor.resolve_stage(config.llm_routing, "feed")
+
+    async def _failed(_routing):
+        return {"stages": [
+            {"stage": "feed", "provider": resolved.provider.name, "model": resolved.model,
+             "status": "fail", "detail": "timeout after 60s"},
+            {"stage": "backlog", "provider": resolved.provider.name, "model": resolved.model,
+             "status": "fail", "detail": "timeout after 60s"},
+            {"stage": "deep_review", "provider": resolved.provider.name, "model": resolved.model,
+             "status": "fail", "detail": "model does not support chat"},
+        ]}
+
+    from zotero_summarizer.services.llm import operational_check
+    monkeypatch.setattr(operational_check, "check_routing_stages", _failed)
+    row = doctor._llm_inference(settings)
+
+    assert row["detail"].count(f"{resolved.provider.name}/{resolved.model}") == 2
+    assert "feed, backlog" in row["detail"] and "deep_review" in row["detail"]
+    assert row["recovery"]["label"] == "Refresh model"
+    assert row["recovery"]["command"] == f"ollama pull {resolved.model}"
+
+
 def test_doctor_rejects_unknown_check_and_marks_interrupted_run(tmp_path):
     settings = _settings(tmp_path)
     with pytest.raises(APIError) as error:

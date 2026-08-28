@@ -11,6 +11,7 @@ describe('setup status derivation', () => {
       classifier: { trained: false },
     };
 
+    expect(deriveConfigured({ ...status, configured: true })).toBe(true);
     expect(deriveConfigured(status)).toBe(false);
     expect(derivePillars(status).zotero).toBe(false);
     expect(deriveConfigured({ ...status, ready: true })).toBe(true);

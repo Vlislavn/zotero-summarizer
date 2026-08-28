@@ -61,6 +61,7 @@ class SubsystemStatus(BaseModel):
 
 
 class SetupStatusResponse(BaseModel):
+    configured: bool
     ready: bool
     config: ConfigStatus
     llm: LlmStatus

@@ -135,14 +135,18 @@ def test_ready_false_when_model_is_unreachable(tmp_path, monkeypatch):
         return {"stages": [{"stage": "deep_review", "reachable": False}]}
 
     monkeypatch.setattr(status_mod.operational_check, "check_reachability", _down)
-    assert _run(get_setup_status()).ready is False
+    status = _run(get_setup_status())
+    assert status.configured is True
+    assert status.ready is False
 
 
 def test_ready_false_until_doctor_verifies_the_real_pipeline(tmp_path, monkeypatch):
     settings = _seed(tmp_path, key_value=_SECRET, db_found=True, feeds=1)
     (settings.data_dir / "setup_doctor.json").unlink()
     _patch_externals(monkeypatch, key_value=_SECRET, db_found=True, feeds=1)
-    assert _run(get_setup_status()).ready is False
+    status = _run(get_setup_status())
+    assert status.configured is True
+    assert status.ready is False
 
 
 def test_ready_true_without_zotero_db(tmp_path, monkeypatch):

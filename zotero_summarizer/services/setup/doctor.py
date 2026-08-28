@@ -142,8 +142,14 @@ def _llm_inference(settings: Settings) -> dict[str, Any]:
     config = read_config(settings.config_path, settings.calibration_path)
     result = asyncio.run(check_routing_stages(config.llm_routing))
     failed = [row for row in result["stages"] if row["status"] != "operational"]
-    detail = "; ".join(f"{row['stage']}={row['provider']}/{row['model']} "
-                       f"{row.get('detail', '')}" for row in result["stages"])
+    grouped: dict[tuple[str, str, str], list[str]] = {}
+    for row in result["stages"]:
+        key = (row["provider"], row["model"], row.get("detail") or row["status"])
+        grouped.setdefault(key, []).append(row["stage"])
+    detail = "; ".join(
+        f"{provider}/{model} ({', '.join(stages)}): {outcome}"
+        for (provider, model, outcome), stages in grouped.items()
+    )
     providers = {row.name: row for row in config.llm_routing.providers}
     stale = next((row for row in failed if providers[row["provider"]].is_local
                   and "does not support chat" in row.get("detail", "")), None)

@@ -12,7 +12,7 @@ from zotero_summarizer.services.llm.factory import build_client_for_provider
 LOGGER = logging.getLogger("zotero_summarizer")
 
 _PROBE_PROMPT = "Reply with the single word: ok"
-_PROBE_TIMEOUT_SECS = 8.0
+_PROBE_TIMEOUT_SECS = 30.0
 _LOCAL_PROBE_TIMEOUT_SECS = 60.0
 
 
