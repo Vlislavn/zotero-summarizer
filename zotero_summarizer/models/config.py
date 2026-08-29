@@ -1,10 +1,12 @@
 """Configuration models loaded from goals.yaml (LLM, corpus, gate, …)."""
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from zotero_summarizer.models.access_config import UniversityAccessConfig
 from zotero_summarizer.models.enrichment_config import OpenReviewConfig, PrestigeConfig
 from zotero_summarizer.models.feeds_config import FeedsConfig
 from zotero_summarizer.models.providers import (
@@ -64,7 +66,9 @@ class CorpusConfig(BaseModel):
     # (blind-judge Spearman 0.72 vs the gate's 0.40), but MiniLM has NOT been measured
     # head-to-head vs BGE-M3 / SPECTER2 — run `tools/eval_goal_embedder.py` (Phase 5).
     # Override: ZS_CORPUS_EMBEDDING_MODEL.
-    embedding_model: str = Field(default="sentence-transformers/all-MiniLM-L6-v2", min_length=1)
+    embedding_model: str = Field(
+        default="sentence-transformers/all-MiniLM-L6-v2", min_length=1
+    )
     similarity_threshold: float = Field(default=-0.30, ge=-1.0, le=1.0)
     stale_days_for_weak_negative: int = Field(default=30, ge=1, le=3650)
     # Hybrid Library search (BM25 lexical + dense cosine + cross-encoder rerank),
@@ -81,7 +85,9 @@ class FullTextRefineConfig(BaseModel):
 
     enabled: bool = Field(default=False)
     top_k: int = Field(default=2, ge=1, le=10)
-    max_pdf_bytes: int = Field(default=50_000_000, ge=1_000_000)  # figure-heavy clinical PDFs run >20 MB
+    max_pdf_bytes: int = Field(
+        default=50_000_000, ge=1_000_000
+    )  # figure-heavy clinical PDFs run >20 MB
     fetch_timeout_secs: float = Field(default=30.0, ge=1.0, le=300.0)
     unpaywall_email: str = Field(default="")
 
@@ -173,7 +179,9 @@ class QualityReviewConfig(BaseModel):
     # decay. Re-run the eval as verdicts accrue.
     quality_promote_goal_sim: float = Field(default=0.55, ge=0.0, le=1.0)
     quality_promote_relevance_floor: float = Field(default=3.0, ge=1.0, le=5.0)
-    max_pdf_bytes: int = Field(default=50_000_000, ge=1_000_000)  # figure-heavy clinical PDFs run >20 MB
+    max_pdf_bytes: int = Field(
+        default=50_000_000, ge=1_000_000
+    )  # figure-heavy clinical PDFs run >20 MB
     fetch_timeout_secs: float = Field(default=30.0, ge=1.0, le=300.0)
     # Hard cap on full-text chars fed to the reviewer (context safety).
     # validated-GOOD: faithbench run 20260612_193120 (commit 55bdd09) — 96.4% full-text
@@ -236,7 +244,9 @@ class QualityReviewConfig(BaseModel):
     # fewer map calls: 16k 116s < 8k 184s < 4k 249s); coverage/completeness identical. 8000 is a
     # mid-range default; only matters when chunk_strategy=map_reduce (rank ignores it). Capped by
     # the MAP model's num_ctx if map_reduce is enabled with a small local map model.
-    map_chunk_chars: int = Field(default=8000, ge=1000)  # chunk size for the map_reduce map step
+    map_chunk_chars: int = Field(
+        default=8000, ge=1000
+    )  # chunk size for the map_reduce map step
     # Auto QUALITY GATE (precision mode) — quality as a HARD filter, not an additive
     # bonus. A bad-quality paper on-topic is hidden (dont_read, source=auto_quality,
     # one-tap reversible) even if goal-matched; match stays the ranker among survivors.
@@ -259,54 +269,9 @@ class QualityReviewConfig(BaseModel):
     @field_validator("chunk_strategy")
     @classmethod
     def _validate_chunk_strategy(cls, value: str) -> str:
-        return _validate_choice(value, frozenset({"rank", "prefix", "map_reduce"}), "chunk_strategy")
-
-
-class UniversityAccessConfig(BaseModel):
-    """Institutional full-text access for the review fleet's PDF acquisition.
-
-    For non-arXiv / paywalled papers (Cloudflare-protected like bioRxiv, or behind a
-    journal subscription) a headless download can't pass. When ``enabled``, the fleet
-    drives a real browser (a persistent profile the user logs into once via the
-    ``login_url``) to fetch the PDF using the user's institutional session. Disabled
-    by default — the optional ``patchright`` browser dependency must be installed.
-
-    ``ezproxy_prefix`` is OPTIONAL: set it for an EZproxy library (the prefix is
-    prepended to the DOI/publisher URL); leave it empty for SSO/OpenAthens, where the
-    persisted login session carries access without a URL rewrite. ``browser_profile_dir``
-    blank means the app-owned default under ``data/`` (see Settings)."""
-
-    enabled: bool = Field(default=False)
-    ezproxy_prefix: str = Field(default="")
-    login_url: str = Field(default="")
-    browser_profile_dir: str = Field(default="")
-    headless: bool = Field(default=True)
-    fetch_timeout_secs: float = Field(default=60.0, ge=5.0, le=600.0)
-    # Reuse an EXISTING browser's session instead of a separate in-app login: read that
-    # browser's cookie store (``browser-cookie3``) and inject it into the fetch. ``""``
-    # = off. NOTE: ``safari`` does NOT work on macOS 15+/26 — Apple hardened Safari's
-    # container so its cookies are unreadable even with Full Disk Access; use ``chrome``
-    # / ``firefox``. The in-app login (``login_url``) remains the fallback.
-    cookie_browser: str = Field(default="")
-    # Browser DISTRIBUTION CHANNEL to drive: ``chrome`` (default) launches the REAL
-    # Google Chrome binary, whose fingerprint/UA match the ``cf_clearance`` cookie a
-    # cookie-source Chrome earned — so Cloudflare publishers (Nature/npj) accept the
-    # session, unlike bundled chromium (``""``). Any Playwright channel
-    # (chrome/chrome-beta/msedge/…); ``""`` = bundled chromium (no Chrome install needed).
-    browser_channel: str = Field(default="chrome")
-
-    @field_validator("cookie_browser")
-    @classmethod
-    def _validate_cookie_browser(cls, value: str) -> str:
-        allowed = frozenset({"", "chrome", "chromium", "firefox", "edge", "brave", "safari", "opera", "vivaldi"})
-        return _validate_choice(value, allowed, "cookie_browser")
-
-    @field_validator("browser_channel")
-    @classmethod
-    def _validate_browser_channel(cls, value: str) -> str:
-        allowed = frozenset({"", "chromium", "chrome", "chrome-beta", "chrome-dev", "chrome-canary",
-                              "msedge", "msedge-beta", "msedge-dev", "msedge-canary"})
-        return _validate_choice(value, allowed, "browser_channel")
+        return _validate_choice(
+            value, frozenset({"rank", "prefix", "map_reduce"}), "chunk_strategy"
+        )
 
 
 class ClassifierGateConfig(BaseModel):
@@ -328,7 +293,9 @@ class ClassifierGateConfig(BaseModel):
     # logreg beats lightgbm on the TEMPORAL hold-out (0.292 vs 0.217), and no
     # head-to-head `goldenset eval-baseline` on the current golden set has been run.
     enabled: bool = Field(default=True)
-    model_name: str = Field(default="lightgbm")         # lightgbm (fast) | tabpfn (best AUC) | logreg
+    model_name: str = Field(
+        default="lightgbm"
+    )  # lightgbm (fast) | tabpfn (best AUC) | logreg
     drop_priorities: List[str] = Field(default_factory=lambda: ["dont_read"])
     # ML-first backlog drain: when True (default) the bulk drain runs gate-only
     # (the classifier scores every survivor, NO per-item LLM call) and the LLM
@@ -356,7 +323,9 @@ class ClassifierGateConfig(BaseModel):
     @field_validator("model_name")
     @classmethod
     def _validate_model_name(cls, value: str) -> str:
-        return _validate_choice(value, frozenset({"tabpfn", "lightgbm", "logreg"}), "model_name")
+        return _validate_choice(
+            value, frozenset({"tabpfn", "lightgbm", "logreg"}), "model_name"
+        )
 
     @field_validator("drop_priorities")
     @classmethod
@@ -378,6 +347,7 @@ class GoalsConfig(BaseModel):
     reading_priority_scale: Dict[str, str] = Field(default_factory=dict)
     summary_structure: List[str] = Field(default_factory=list)
     output_language: str = Field(default="English")
+    llm_enabled: bool = Field(default=True)
     llm: LLMConfig
     # Per-stage provider+model routing. Optional in goals.yaml: when absent it is
     # synthesized from the legacy ``llm:`` block below (see ``_synthesize_routing``)
@@ -389,10 +359,14 @@ class GoalsConfig(BaseModel):
     prestige: PrestigeConfig = Field(default_factory=PrestigeConfig)
     openreview: OpenReviewConfig = Field(default_factory=OpenReviewConfig)
     full_text_refine: FullTextRefineConfig = Field(default_factory=FullTextRefineConfig)
-    recover_abstract: RecoverAbstractConfig = Field(default_factory=RecoverAbstractConfig)
+    recover_abstract: RecoverAbstractConfig = Field(
+        default_factory=RecoverAbstractConfig
+    )
     quality_review: QualityReviewConfig = Field(default_factory=QualityReviewConfig)
     classifier_gate: ClassifierGateConfig = Field(default_factory=ClassifierGateConfig)
-    university_access: UniversityAccessConfig = Field(default_factory=UniversityAccessConfig)
+    university_access: UniversityAccessConfig = Field(
+        default_factory=UniversityAccessConfig
+    )
 
     @field_validator("research_goals", "triage_criteria", "summary_structure")
     @classmethod
@@ -442,7 +416,9 @@ class GoalsConfig(BaseModel):
                         extra_body=self.llm.extra_body,
                     )
                 ],
-                default=DefaultModelConfig(provider="default", model=self.llm.refine_model),
+                default=DefaultModelConfig(
+                    provider="default", model=self.llm.refine_model
+                ),
             )
         return self
 
@@ -461,6 +437,7 @@ USER_OWNED_KEYS: frozenset[str] = frozenset(
         "reading_priority_scale",
         "summary_structure",
         "output_language",
+        "llm_enabled",
         "llm",
         "llm_routing",
         "university_access",

@@ -212,7 +212,7 @@ export default function Review() {
     setConfirming(true);
     setMessage('');
     try {
-      const result = await reviewConfirmAllGateRejected();
+      const result = await reviewConfirmAllGateRejected(items.map((item) => item.id));
       setMessage(
         `Appended ${result?.appended || 0} dont_read row(s) to golden CSV; `
         + `${result?.skipped_duplicate || 0} already there.`,
@@ -224,7 +224,7 @@ export default function Review() {
     } finally {
       setConfirming(false);
     }
-  }, [items.length]);
+  }, [items]);
 
   return (
     <div className="glass rounded-2xl border border-slate-200 p-4">

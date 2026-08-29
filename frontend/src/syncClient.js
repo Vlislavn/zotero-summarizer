@@ -4,6 +4,13 @@ import {
 } from './offlineStore.js';
 
 let running = null;
+const SYNC_TIMEOUT_MS = 15_000;
+
+function failureMessage(error) {
+  if (error?.message?.startsWith('Sync protocol changed')) return error.message;
+  if (error?.name === 'AbortError') return 'Sync timed out';
+  return 'Server unavailable';
+}
 
 export function syncNow() {
   if (running) return running;
@@ -12,19 +19,28 @@ export function syncNow() {
       await publishStatus();
       return;
     }
-    const mutations = await pendingMutations();
-    if (mutations.length) {
-      const pushed = await request('/api/sync/push', {
-        method: 'POST', body: JSON.stringify({ protocol: 1, mutations }),
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), SYNC_TIMEOUT_MS);
+    try {
+      const mutations = await pendingMutations();
+      if (mutations.length) {
+        const pushed = await request('/api/sync/push', {
+          method: 'POST', body: JSON.stringify({ protocol: 1, mutations }),
+          signal: controller.signal,
+        });
+        if (pushed.protocol !== 1) throw new Error('Sync protocol changed; refresh the app');
+        await applyPushResults(pushed.results);
+      }
+      const since = await getMeta('cursor', 0);
+      const pulled = await request(`/api/sync/pull?protocol=1&since=${since}`, {
+        signal: controller.signal,
       });
-      if (pushed.protocol !== 1) throw new Error('Sync protocol changed; refresh the app');
-      await applyPushResults(pushed.results);
+      if (pulled.protocol !== 1) throw new Error('Sync protocol changed; refresh the app');
+      await applyPull(pulled);
+    } finally {
+      clearTimeout(timeout);
     }
-    const since = await getMeta('cursor', 0);
-    const pulled = await request(`/api/sync/pull?protocol=1&since=${since}`);
-    if (pulled.protocol !== 1) throw new Error('Sync protocol changed; refresh the app');
-    await applyPull(pulled);
-  })().catch(() => publishStatus('Server unavailable')).finally(() => { running = null; });
+  })().catch((error) => publishStatus(failureMessage(error))).finally(() => { running = null; });
   return running;
 }
 

@@ -1,4 +1,5 @@
 """Schema, migrations, and connections for the feed-processing tables."""
+
 from __future__ import annotations
 
 import json
@@ -8,7 +9,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from zotero_summarizer.storage.feed_identity import legacy_feed_key, stable_feed_key_from_item
+from zotero_summarizer.storage.feed_identity import (
+    legacy_feed_key,
+    stable_feed_key_from_item,
+)
 from zotero_summarizer.storage.feeds_lookup import _col
 
 
@@ -148,10 +152,10 @@ MIGRATION_COLUMNS = (
     ("outcome_signal_weight", "REAL"),
     ("read_time_marked_at", "TEXT"),
     ("updated_at", "TEXT"),
-    ("shap_contribs_json", "TEXT"),   # Phase 1.14
+    ("shap_contribs_json", "TEXT"),  # Phase 1.14
     ("quality_review_json", "TEXT"),  # full-text quality review
-    ("abstract", "TEXT"),             # feed item abstract (for Today card)
-    ("pub_year", "INTEGER"),          # publication year parsed from publication_date
+    ("abstract", "TEXT"),  # feed item abstract (for Today card)
+    ("pub_year", "INTEGER"),  # publication year parsed from publication_date
 )
 
 
@@ -224,7 +228,9 @@ def _backfill_feed_key_aliases(conn: sqlite3.Connection) -> dict[str, int]:
                 """,
                 (old_key, stable),
             )
-            conn.execute("DELETE FROM feed_key_alias_ambiguities WHERE old_key = ?", (old_key,))
+            conn.execute(
+                "DELETE FROM feed_key_alias_ambiguities WHERE old_key = ?", (old_key,)
+            )
             inserted += 1
             continue
         ambiguous += 1
@@ -247,7 +253,9 @@ def _copy_legacy_label_verdicts_to_stable_keys(conn: sqlite3.Connection) -> int:
     """Duplicate old ``feed:<id>`` verdict rows onto their stable keys."""
     if not _table_exists(conn, "label_verdicts"):
         return 0
-    verdict_cols = {row[1] for row in conn.execute("PRAGMA table_info(label_verdicts)").fetchall()}
+    verdict_cols = {
+        row[1] for row in conn.execute("PRAGMA table_info(label_verdicts)").fetchall()
+    }
     if "source" not in verdict_cols:
         return 0
     cursor = conn.execute(
@@ -290,25 +298,31 @@ def _copy_legacy_label_verdicts_to_stable_keys(conn: sqlite3.Connection) -> int:
     return int(cursor.rowcount or 0)
 
 
-def init_feeds_schema(conn: sqlite3.Connection) -> None:
+def init_feeds_schema(conn: sqlite3.Connection, *, backfill: bool = True) -> None:
     """Create the feed tables and migrate older databases in place."""
     conn.execute(CREATE_TABLE)
     conn.execute(CREATE_RSS_FEEDS_TABLE)
     conn.execute(CREATE_RSS_ITEMS_TABLE)
     conn.execute(CREATE_FEED_KEY_ALIASES_TABLE)
     conn.execute(CREATE_FEED_KEY_ALIAS_AMBIGUITIES_TABLE)
-    existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(processed_feed_items)").fetchall()}
+    existing_cols = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(processed_feed_items)").fetchall()
+    }
     for col_name, col_def in MIGRATION_COLUMNS:
         if col_name not in existing_cols:
             try:
-                conn.execute(f"ALTER TABLE processed_feed_items ADD COLUMN {col_name} {col_def}")
+                conn.execute(
+                    f"ALTER TABLE processed_feed_items ADD COLUMN {col_name} {col_def}"
+                )
             except sqlite3.OperationalError as exc:
                 LOGGER.warning("Failed to add column %s: %s", col_name, exc)
     for stmt in INDEX_STATEMENTS:
         conn.execute(stmt)
-    _backfill_stable_feed_keys(conn)
-    _backfill_feed_key_aliases(conn)
-    _copy_legacy_label_verdicts_to_stable_keys(conn)
+    if backfill:
+        _backfill_stable_feed_keys(conn)
+        _backfill_feed_key_aliases(conn)
+        _copy_legacy_label_verdicts_to_stable_keys(conn)
 
 
 @contextmanager
@@ -319,7 +333,9 @@ def open_triage_conn(db_path: Path) -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(str(db_path), timeout=10)
     conn.row_factory = sqlite3.Row
     try:
-        init_feeds_schema(conn)
+        # Numbered startup migrations own O(N) legacy backfills. Per-operation
+        # opens retain cheap schema compatibility for standalone callers.
+        init_feeds_schema(conn, backfill=False)
         yield conn
     finally:
         conn.close()

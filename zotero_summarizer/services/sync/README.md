@@ -5,7 +5,17 @@ snapshots plus a monotonic field-change cursor; `push` applies ordered verdict o
 review-note mutations. Each mutation has a UUID and per-field base revision, so
 replay is idempotent, edits to different fields merge, and same-field divergence
 returns an explicit conflict. A resolution is another mutation naming the
-conflicted mutation.
+conflicted mutation. Delete tombstones retain their last revision, so a client
+that has pulled a deletion can edit from that revision without a false conflict;
+replaying a conflict UUID returns the same conflict rather than treating it as
+an applied write.
+
+An applied offline verdict then runs the same `golden.verdict_effects` command
+as the online route: training-row enrichment, positive-feed materialization,
+`label:*` mirror, and verdict-note mirror. Review notes share the same Zotero
+mirror too. These effects are idempotent and also run for `already_applied`, so
+a client retry repairs the commit→effect crash window without duplicate CSV rows
+or Zotero items.
 
 ```
 PWA IndexedDB queue ─push→ BEGIN IMMEDIATE: compare revision → write → remember UUID
@@ -17,3 +27,9 @@ field-level optimistic concurrency, not database replication: PDFs, annotations,
 AI runs, and Zotero filesystem state stay server-only. The JSONL label trajectory
 is still best-effort after the transaction; `sync_mutations` is the durable
 mutation/conflict audit.
+
+This protocol is currently safe for the default same-machine/loopback PWA only.
+It has no remote-user authentication or HTTPS bootstrap; exposing it to a LAN or
+internet client is deferred until that transport boundary exists. Post-commit
+mirrors remain best-effort like the online route, and the JSONL transition log is
+not an exactly-once transactional outbox.

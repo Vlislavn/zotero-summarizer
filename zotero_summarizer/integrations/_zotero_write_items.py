@@ -1,4 +1,5 @@
 """Item creation + feed materialization methods of ZoteroWriter (mixin)."""
+
 from __future__ import annotations
 
 import re
@@ -32,26 +33,40 @@ class ZoteroItemWriteMixin:
         collections, tag_changes, add_note) are queued separately by the
         orchestrator and reference the same `new_item_key`.
         """
-        item_columns = cols.items
-        item_data_columns = cols.item_data
-        item_data_value_columns = cols.item_data_values
-        creators_columns = cols.creators
-        item_creators_columns = cols.item_creators
+        new_item_id = self._insert_feed_item_row(
+            conn, new_item_key=new_item_key, payload=payload, item_columns=cols.items
+        )
+        if new_item_id is None:
+            return
+        self._insert_feed_item_data(conn, new_item_id, payload, cols)
+        authors_raw = payload.get("authors")
+        if authors_raw:
+            self._insert_creators(
+                conn,
+                item_id=new_item_id,
+                authors=authors_raw,
+                creators_columns=cols.creators,
+                item_creators_columns=cols.item_creators,
+            )
+
+    def _insert_feed_item_row(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        new_item_key: str,
+        payload: dict[str, Any],
+        item_columns: set[str],
+    ) -> int | None:
+        """Insert the top-level Zotero row; return None for an idempotent replay."""
         title = str(payload.get("title") or "").strip()
         if not title:
             raise ZoteroWriteError("Feed item payload missing title")
-
-        # Reject pre-existing keys to keep create idempotent.
         existing = conn.execute(
             "SELECT itemID FROM items WHERE key = ? LIMIT 1",
             (new_item_key,),
         ).fetchone()
         if existing:
-            # Idempotent re-apply: skip silently. The orchestrator's
-            # processed_feed_items table is the source of truth for "did we
-            # already do this"; this branch is for retry safety only.
-            return
-
+            return None
         item_type_name = str(payload.get("item_type") or "journalArticle").strip()
         if item_type_name not in self._ALLOWED_FEED_ITEM_TYPES:
             item_type_name = "journalArticle"
@@ -68,7 +83,9 @@ class ZoteroItemWriteMixin:
 
         required_item_columns = {"itemTypeID", "libraryID", "key"}
         if not required_item_columns.issubset(item_columns):
-            raise ZoteroWriteError("Unsupported Zotero schema: required items columns missing")
+            raise ZoteroWriteError(
+                "Unsupported Zotero schema: required items columns missing"
+            )
 
         now = self._sqlite_timestamp_now()
         insert_values: dict[str, Any] = {
@@ -93,14 +110,27 @@ class ZoteroItemWriteMixin:
             f"INSERT INTO items ({columns_sql}) VALUES ({placeholders})",
             tuple(insert_values.values()),
         )
-        new_item_id = int(cursor.lastrowid)
+        return int(cursor.lastrowid)
 
-        # Write itemData rows for every supplied field.
-        required_data_columns = {"itemID", "fieldID", "valueID"}
-        if not required_data_columns.issubset(item_data_columns):
-            raise ZoteroWriteError("Unsupported Zotero schema: required itemData columns missing")
-        if "valueID" not in item_data_value_columns or "value" not in item_data_value_columns:
-            raise ZoteroWriteError("Unsupported Zotero schema: itemDataValues columns missing")
+    def _insert_feed_item_data(
+        self,
+        conn: sqlite3.Connection,
+        item_id: int,
+        payload: dict[str, Any],
+        cols: WriteColumns,
+    ) -> None:
+        """Write every supported bibliographic field for a new feed item."""
+        if not {"itemID", "fieldID", "valueID"}.issubset(cols.item_data):
+            raise ZoteroWriteError(
+                "Unsupported Zotero schema: required itemData columns missing"
+            )
+        if (
+            "valueID" not in cols.item_data_values
+            or "value" not in cols.item_data_values
+        ):
+            raise ZoteroWriteError(
+                "Unsupported Zotero schema: itemDataValues columns missing"
+            )
 
         for payload_key, field_name in self._FEED_PAYLOAD_TO_FIELD:
             value = payload.get(payload_key)
@@ -116,18 +146,7 @@ class ZoteroItemWriteMixin:
             value_id = self._upsert_item_data_value(conn, text)
             conn.execute(
                 "INSERT OR IGNORE INTO itemData (itemID, fieldID, valueID) VALUES (?, ?, ?)",
-                (new_item_id, field_id, value_id),
-            )
-
-        # Authors -> creators + itemCreators
-        authors_raw = payload.get("authors")
-        if authors_raw:
-            self._insert_creators(
-                conn,
-                item_id=new_item_id,
-                authors=authors_raw,
-                creators_columns=creators_columns,
-                item_creators_columns=item_creators_columns,
+                (item_id, field_id, value_id),
             )
 
     @staticmethod
@@ -179,7 +198,12 @@ class ZoteroItemWriteMixin:
         if not required_creators_cols.issubset(creators_columns):
             return  # Schema unexpected; skip silently rather than failing the whole create.
 
-        required_item_creators_cols = {"itemID", "creatorID", "creatorTypeID", "orderIndex"}
+        required_item_creators_cols = {
+            "itemID",
+            "creatorID",
+            "creatorTypeID",
+            "orderIndex",
+        }
         if not required_item_creators_cols.issubset(item_creators_columns):
             return
 
@@ -227,90 +251,14 @@ class ZoteroItemWriteMixin:
         # Single token — treat as institution/single-name
         return ("", text, 1)
 
-    def _apply_mark_feed_item_read(
+    def _add_matched_collections(
         self,
         conn: sqlite3.Connection,
-        item_key: str,
-        payload: dict[str, Any],
-    ) -> None:
-        """Write `feedItems.readTime = datetime('now')` for a single feed item.
-
-        Phase 1.5: the daemon marks every processed feed item read so Zotero's
-        unread badge clears naturally. Format `YYYY-MM-DD HH:MM:SS` UTC matches
-        what Zotero's own client writes (verified against 11 pre-existing rows
-        in the user's live DB during pre-flight).
-
-        The payload provides `feed_library_id` + `feed_item_id` (Zotero's
-        internal `feedItems.itemID`). We do NOT key on the Zotero `key` field
-        here because feed items don't necessarily have one — only top-level
-        items in the user library do.
-        """
-        # item_key is unused for this change type (feed items are keyed by
-        # feedItems.itemID, not by the user-library `items.key` field) but kept
-        # in the signature to match the uniform dispatch shape used everywhere
-        # else in apply_changes().
-        _ = item_key
-        feed_library_id = int(payload.get("feed_library_id") or 0)
-        feed_item_id = int(payload.get("feed_item_id") or 0)
-        if feed_library_id <= 0 or feed_item_id <= 0:
-            raise ZoteroWriteError("mark_feed_item_read payload requires feed_library_id + feed_item_id")
-        # SQLite's datetime('now') is UTC, matches Zotero's own readTime format.
-        conn.execute(
-            "UPDATE feedItems SET readTime = datetime('now') WHERE itemID = ?",
-            (feed_item_id,),
-        )
-
-    def mark_feed_items_read(self, feed_item_ids: list[int]) -> int:
-        """Directly mark a batch of feed items as read in Zotero.
-
-        Phase 1.5 daemon entry point — bypasses the pending-changes review
-        queue because (a) the write is idempotent and recoverable, (b) the
-        user explicitly asked for the unread badge to clear automatically,
-        and (c) readTime is a Zotero-internal display field, not user data.
-
-        Returns the number of feedItems rows actually updated. MCP path
-        REJECTS this method via change_type isolation (defense in depth).
-        """
-        if not feed_item_ids:
-            return 0
-        if self.is_connector_running():
-            LOGGER.info("Zotero is running — mark_feed_items_read will retry on lock")
-
-        def _do() -> int:
-            conn = sqlite3.connect(str(self.db_path), timeout=15)
-            conn.row_factory = sqlite3.Row
-            try:
-                try:
-                    conn.execute("PRAGMA journal_mode=WAL")
-                except sqlite3.Error as _:
-                    pass
-                conn.execute("PRAGMA busy_timeout=15000")
-                placeholders = ",".join("?" for _ in feed_item_ids)
-                cursor = conn.execute(
-                    f"UPDATE feedItems SET readTime = datetime('now') "
-                    f"WHERE itemID IN ({placeholders}) AND readTime IS NULL",
-                    tuple(int(i) for i in feed_item_ids),
-                )
-                conn.commit()
-                return int(cursor.rowcount or 0)
-            except sqlite3.Error:
-                conn.rollback()
-                raise
-            finally:
-                conn.close()
-
-        try:
-            return self._retry_on_lock(_do, ctx="mark_feed_items_read")
-        except sqlite3.OperationalError as exc:
-            raise ZoteroWriteError(
-                f"DB still locked after retries — items will remain unread in Zotero until next tick: {exc}"
-            ) from exc
-        except sqlite3.Error as exc:
-            raise ZoteroWriteError(f"Failed to mark feed items read: {exc}") from exc
-
-    def _add_matched_collections(
-        self, conn: sqlite3.Connection, *, new_item_key: str,
-        matched_collections: list[str] | None, inbox_collection_name: str, cols: WriteColumns,
+        *,
+        new_item_key: str,
+        matched_collections: list[str] | None,
+        inbox_collection_name: str,
+        cols: WriteColumns,
     ) -> list[str]:
         """Add the item to each matched user collection (best-effort). Returns step labels."""
         steps: list[str] = []
@@ -322,8 +270,11 @@ class ZoteroItemWriteMixin:
             seen_paths.add(clean.casefold())
             try:
                 self._apply_collection_change(
-                    conn, item_key=new_item_key, payload={"collection_path": clean},
-                    item_columns=cols.items, collection_columns=cols.collections,
+                    conn,
+                    item_key=new_item_key,
+                    payload={"collection_path": clean},
+                    item_columns=cols.items,
+                    collection_columns=cols.collections,
                     collection_item_columns=cols.collection_items,
                 )
                 steps.append(f"add_to_collection:{clean}")
@@ -333,17 +284,152 @@ class ZoteroItemWriteMixin:
         return steps
 
     def _apply_materialization_tags(
-        self, conn: sqlite3.Connection, *, new_item_key: str,
-        tags: list[str], provenance_tag: str | None, cols: WriteColumns,
+        self,
+        conn: sqlite3.Connection,
+        *,
+        new_item_key: str,
+        tags: list[str],
+        provenance_tag: str | None,
+        cols: WriteColumns,
     ) -> None:
         """Apply the item's tags, appending the provenance auto-tag when provided."""
         all_tags = list(self._normalize_tags(tags))
         if provenance_tag and provenance_tag not in all_tags:
             all_tags.append(provenance_tag)
         self._apply_tag_change(
-            conn, item_key=new_item_key, payload={"add_tags": all_tags, "remove_tags": []},
-            item_columns=cols.items, tag_columns=cols.tags, item_tag_columns=cols.item_tags,
+            conn,
+            item_key=new_item_key,
+            payload={"add_tags": all_tags, "remove_tags": []},
+            item_columns=cols.items,
+            tag_columns=cols.tags,
+            item_tag_columns=cols.item_tags,
         )
+
+    def _add_inbox_collection(
+        self,
+        conn: sqlite3.Connection,
+        new_item_key: str,
+        inbox_collection_name: str,
+        cols: WriteColumns,
+    ) -> str:
+        """Add the Inbox link, creating that workflow collection when absent."""
+        payload = {"collection_path": inbox_collection_name}
+        try:
+            self._apply_collection_change(
+                conn,
+                item_key=new_item_key,
+                payload=payload,
+                item_columns=cols.items,
+                collection_columns=cols.collections,
+                collection_item_columns=cols.collection_items,
+            )
+            return "add_to_inbox"
+        except ZoteroWriteError:
+            self._ensure_collection(conn, inbox_collection_name, cols.collections)
+            self._apply_collection_change(
+                conn,
+                item_key=new_item_key,
+                payload=payload,
+                item_columns=cols.items,
+                collection_columns=cols.collections,
+                collection_item_columns=cols.collection_items,
+            )
+            return "add_to_inbox_after_autocreate"
+
+    def _materialize_in_conn(
+        self,
+        conn: sqlite3.Connection,
+        new_item_key: str,
+        feed_payload: dict[str, Any],
+        inbox_collection_name: str,
+        tags: list[str],
+        note_title: str = "",
+        note_html: str = "",
+        matched_collections: list[str] | None = None,
+        provenance_tag: str | None = None,
+    ) -> list[str]:
+        """Apply the item, collection, tag, and note steps on one transaction."""
+        cols = read_write_columns(lambda table: self._table_columns(conn, table))
+        self._apply_create_item_from_feed(
+            conn, new_item_key=new_item_key, payload=feed_payload, cols=cols
+        )
+        steps = [
+            "create_item",
+            self._add_inbox_collection(conn, new_item_key, inbox_collection_name, cols),
+        ]
+        steps.extend(
+            self._add_matched_collections(
+                conn,
+                new_item_key=new_item_key,
+                matched_collections=matched_collections,
+                inbox_collection_name=inbox_collection_name,
+                cols=cols,
+            )
+        )
+        self._apply_materialization_tags(
+            conn,
+            new_item_key=new_item_key,
+            tags=tags,
+            provenance_tag=provenance_tag,
+            cols=cols,
+        )
+        steps.append("apply_tags")
+        if note_html and note_html.strip():
+            self._apply_note_change(
+                conn,
+                item_key=new_item_key,
+                payload={"note_title": note_title, "note_html": note_html},
+                item_columns=cols.items,
+                note_columns=cols.item_notes,
+            )
+            steps.append("add_note")
+        return steps
+
+    def _run_feed_materialization(
+        self,
+        new_item_key: str,
+        feed_payload: dict[str, Any],
+        inbox_collection_name: str,
+        tags: list[str],
+        note_title: str = "",
+        note_html: str = "",
+        matched_collections: list[str] | None = None,
+        provenance_tag: str | None = None,
+        backup_path: str | None = None,
+    ) -> dict[str, Any]:
+        conn = sqlite3.connect(str(self.db_path), timeout=15)
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA foreign_keys=ON")
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+            except sqlite3.Error:
+                pass
+            conn.execute("PRAGMA busy_timeout=15000")
+            steps = self._materialize_in_conn(
+                conn,
+                new_item_key,
+                feed_payload,
+                inbox_collection_name,
+                tags,
+                note_title,
+                note_html,
+                matched_collections,
+                provenance_tag,
+            )
+            conn.commit()
+            if backup_path is not None:
+                self._prune_backups()
+            return {
+                "item_key": new_item_key,
+                "applied_steps": steps,
+                "backup_path": backup_path,
+            }
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def apply_feed_materialization(
         self,
@@ -356,7 +442,7 @@ class ZoteroItemWriteMixin:
         note_html: str,
         matched_collections: list[str] | None = None,
         provenance_tag: str | None = None,
-        create_backup: bool = False,
+        create_backup: bool = True,
     ) -> dict[str, Any]:
         """Apply ALL pieces of a feed materialization atomically.
 
@@ -378,98 +464,29 @@ class ZoteroItemWriteMixin:
         Returns {"item_key": ..., "applied_steps": [...]}.
         """
         if self.is_connector_running():
-            LOGGER.info(
-                "Zotero is running — apply_feed_materialization will retry up to 3× if DB is locked"
+            raise ZoteroWriteError(
+                "Zotero is running; close it before adding items to protect its live state"
             )
 
         backup_path: str | None = None
         if create_backup:
             backup_path = self.backup_database()
 
-        def _do() -> dict[str, Any]:
-            conn = sqlite3.connect(str(self.db_path), timeout=15)
-            conn.row_factory = sqlite3.Row
-            try:
-                conn.execute("PRAGMA foreign_keys=ON")
-                try:
-                    conn.execute("PRAGMA journal_mode=WAL")
-                except sqlite3.Error as _:
-                    pass
-                conn.execute("PRAGMA busy_timeout=15000")
-
-                cols = read_write_columns(lambda t: self._table_columns(conn, t))
-                item_columns = cols.items
-                note_columns = cols.item_notes
-                collection_columns = cols.collections
-                collection_item_columns = cols.collection_items
-
-                applied_steps: list[str] = []
-
-                # 1. Create the top-level item.
-                self._apply_create_item_from_feed(conn, new_item_key=new_item_key, payload=feed_payload, cols=cols)
-                applied_steps.append("create_item")
-
-                # 2. Inbox collection.
-                try:
-                    self._apply_collection_change(
-                        conn,
-                        item_key=new_item_key,
-                        payload={"collection_path": inbox_collection_name},
-                        item_columns=item_columns,
-                        collection_columns=collection_columns,
-                        collection_item_columns=collection_item_columns,
-                    )
-                    applied_steps.append("add_to_inbox")
-                except ZoteroWriteError:
-                    # Auto-create the Inbox collection if missing, then retry.
-                    self._ensure_collection(conn, inbox_collection_name, collection_columns)
-                    self._apply_collection_change(
-                        conn,
-                        item_key=new_item_key,
-                        payload={"collection_path": inbox_collection_name},
-                        item_columns=item_columns,
-                        collection_columns=collection_columns,
-                        collection_item_columns=collection_item_columns,
-                    )
-                    applied_steps.append("add_to_inbox_after_autocreate")
-
-                # 3. Matched user collections (best-effort: skip ones that don't exist).
-                applied_steps.extend(self._add_matched_collections(
-                    conn, new_item_key=new_item_key, matched_collections=matched_collections,
-                    inbox_collection_name=inbox_collection_name, cols=cols,
-                ))
-
-                # 4. Tags (+ provenance tag with auto-tag type if provided).
-                self._apply_materialization_tags(
-                    conn, new_item_key=new_item_key, tags=tags, provenance_tag=provenance_tag, cols=cols,
-                )
-                applied_steps.append("apply_tags")
-
-                # 5. Note.
-                if note_html and note_html.strip():
-                    self._apply_note_change(
-                        conn,
-                        item_key=new_item_key,
-                        payload={"note_title": note_title, "note_html": note_html},
-                        item_columns=item_columns,
-                        note_columns=note_columns,
-                    )
-                    applied_steps.append("add_note")
-
-                conn.commit()
-                return {
-                    "item_key": new_item_key,
-                    "applied_steps": applied_steps,
-                    "backup_path": backup_path,
-                }
-            except Exception:
-                conn.rollback()
-                raise
-            finally:
-                conn.close()
-
         try:
-            return self._retry_on_lock(_do, ctx="apply_feed_materialization")
+            return self._retry_on_lock(
+                lambda: self._run_feed_materialization(
+                    new_item_key,
+                    feed_payload,
+                    inbox_collection_name,
+                    tags,
+                    note_title,
+                    note_html,
+                    matched_collections,
+                    provenance_tag,
+                    backup_path,
+                ),
+                ctx="apply_feed_materialization",
+            )
         except sqlite3.OperationalError as exc:
             raise ZoteroWriteError(
                 f"Zotero DB locked after retries — item stays in triaged_pending for next selection run: {exc}"

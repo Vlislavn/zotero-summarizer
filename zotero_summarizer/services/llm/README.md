@@ -20,7 +20,11 @@ llm_routing → resolve_stage → ResolvedStage → factory → LLMClient
   local cold starts get 60 seconds and hosted checks 30 seconds. Failures become
   bounded results, not startup errors. Cheap `/models` reachability remains the
   proactive companion.
-- `model_list.py` lists sorted unique model IDs for an unsaved provider profile.
+- `model_list.py` lists sorted unique model IDs. Remote discovery accepts a
+  built-in preset or an identity already present in the live saved config; a
+  custom remote draft must be saved first. Loopback listing receives only a
+  non-secret local token, so a request cannot pair an arbitrary destination
+  with a server-held credential.
 - `presets.py` / `credentials.py` compile eight service cards to
   `ProviderConfig`; only redacted credential metadata crosses setup APIs.
 
@@ -29,6 +33,8 @@ llm_routing → resolve_stage → ResolvedStage → factory → LLMClient
 - `api_key_env` stores a variable name, never a secret; keys resolve at use time.
 - Startup never depends on a provider. Missing endpoints/keys surface only when
   a stage or explicit operational check runs.
+- `llm_enabled: false` returns an explicit disabled status without probing a
+  provider; runtime AI actions reject with a typed 409 until re-enabled.
 - Stages inherit `llm_routing.default` unless they override provider/model.
 - `ProviderConfig.temperature` and thinking options are translated in the
   factory; call sites do not build provider-specific wire payloads.

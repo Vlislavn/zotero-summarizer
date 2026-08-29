@@ -18,6 +18,7 @@ from zotero_summarizer.models import (
     SummarizeResponse,
 )
 from zotero_summarizer.services._common import LOGGER, unique_non_empty_strings
+
 # Re-exported so callers keep using `pending.build_*` / `from ...pending import *`.
 from zotero_summarizer.services.zotero._notes import (  # noqa: F401
     DIGEST_NOTE_MARKER,
@@ -127,7 +128,9 @@ def normalize_tag_values(value: Any) -> list[str]:
 
 
 def _build_exclusive_tag_change(
-    current_tags: list[str], target_tag: str, namespace_casefolded: frozenset[str] | set[str],
+    current_tags: list[str],
+    target_tag: str,
+    namespace_casefolded: frozenset[str] | set[str],
 ) -> dict[str, list[str]]:
     """Add ``target_tag`` and remove any OTHER tag in its mutually-exclusive
     namespace, leaving every tag outside that namespace untouched. Idempotent
@@ -141,14 +144,20 @@ def _build_exclusive_tag_change(
         folded = tag.casefold()
         if folded == target_folded:
             has_target = True
-        if folded in namespace_casefolded and folded != target_folded and folded not in seen:
+        if (
+            folded in namespace_casefolded
+            and folded != target_folded
+            and folded not in seen
+        ):
             seen.add(folded)
             remove_tags.append(tag)
     add_tags = [] if has_target else [target_tag]
     return {"add_tags": add_tags, "remove_tags": remove_tags}
 
 
-def build_label_tag_change(current_tags: list[str], priority: str) -> dict[str, list[str]]:
+def build_label_tag_change(
+    current_tags: list[str], priority: str
+) -> dict[str, list[str]]:
     """Mutually-exclusive explicit ground-truth label tag (``label:<priority>``).
 
     The user's deliberate verdict — now the single priority namespace (the machine
@@ -156,7 +165,9 @@ def build_label_tag_change(current_tags: list[str], priority: str) -> dict[str, 
     other ``label:*`` tag, never touching emoji feedback, ``zs:rel/*`` bands, or
     topical tags. Raises on an unknown priority (a validated 4-class enum upstream)."""
     return _build_exclusive_tag_change(
-        current_tags, label_tag_for_priority(priority), LABEL_TAG_CASEFOLDED,
+        current_tags,
+        label_tag_for_priority(priority),
+        LABEL_TAG_CASEFOLDED,
     )
 
 
@@ -167,7 +178,9 @@ def build_rel_tag_change(current_tags: list[str], band: str) -> dict[str, list[s
     the human label (``label:<band>``) or emoji feedback tags, so manual decisions
     are preserved."""
     return _build_exclusive_tag_change(
-        current_tags, f"{REL_TAG_PREFIX}{band}", REL_TAG_CASEFOLDED,
+        current_tags,
+        f"{REL_TAG_PREFIX}{band}",
+        REL_TAG_CASEFOLDED,
     )
 
 
@@ -182,9 +195,7 @@ def normalize_pending_tag_payload(payload: dict[str, Any]) -> dict[str, list[str
 def normalize_pending_collection_payload(payload: dict[str, Any]) -> dict[str, str]:
     collection_key = str(payload.get("collection_key") or "").strip()
     collection_path = str(
-        payload.get("collection_path")
-        or payload.get("collection_name")
-        or ""
+        payload.get("collection_path") or payload.get("collection_name") or ""
     ).strip()
     if not collection_key and not collection_path:
         raise ValueError("collection_key or collection_path must be provided")
@@ -205,9 +216,15 @@ def normalize_pending_note_payload(payload: dict[str, Any]) -> dict[str, str]:
     return {"note_title": note_title, "note_html": note_html}
 
 
-def effective_tag_payload(current_tags: list[str], payload: dict[str, list[str]]) -> dict[str, list[str]]:
+def effective_tag_payload(
+    current_tags: list[str], payload: dict[str, list[str]]
+) -> dict[str, list[str]]:
     current_folded = {tag.casefold() for tag in current_tags}
-    add_tags = [tag for tag in payload.get("add_tags", []) if tag.casefold() not in current_folded]
+    add_tags = [
+        tag
+        for tag in payload.get("add_tags", [])
+        if tag.casefold() not in current_folded
+    ]
     add_folded = {tag.casefold() for tag in add_tags}
     remove_tags = [
         tag
@@ -221,7 +238,9 @@ def normalize_collection_suggestions(collections: list[str]) -> list[str]:
     return unique_non_empty_strings(collections)
 
 
-def queue_changes_for_item(item_key: str, title: str, summary: SummarizeResponse) -> int:
+def queue_changes_for_item(
+    item_key: str, title: str, summary: SummarizeResponse
+) -> int:
     planner = PendingChangePlanner()
     changes = planner.triage_changes(
         item_key=item_key,
@@ -230,10 +249,14 @@ def queue_changes_for_item(item_key: str, title: str, summary: SummarizeResponse
         note_html=build_triage_note_html(title, summary),
         suggested_collections=summary.suggested_collections,
     )
-    return triage_db.insert_pending_changes(item_key=item_key, item_title=title, changes=planner.to_repository_rows(changes))
+    return triage_db.insert_pending_changes(
+        item_key=item_key, item_title=title, changes=planner.to_repository_rows(changes)
+    )
 
 
-async def list_pending_changes(status: str = ChangeStatus.PENDING.value, limit: int = 500) -> PendingChangesResponse:
+async def list_pending_changes(
+    status: str = ChangeStatus.PENDING.value, limit: int = 500
+) -> PendingChangesResponse:
     safe_status = str(status or "").strip().lower()
     if not safe_status:
         safe_status = ChangeStatus.PENDING.value
@@ -243,14 +266,26 @@ async def list_pending_changes(status: str = ChangeStatus.PENDING.value, limit: 
     return PendingChangesResponse(items=items)
 
 
-async def update_pending_change(change_id: int, req: PendingChangeUpdateRequest) -> dict[str, Any]:
+async def update_pending_change(
+    change_id: int, req: PendingChangeUpdateRequest
+) -> dict[str, Any]:
     safe_change_id = int(change_id)
     if safe_change_id <= 0:
-        raise APIError(error="validation_error", message="change_id must be a positive integer", status_code=422)
+        raise APIError(
+            error="validation_error",
+            message="change_id must be a positive integer",
+            status_code=422,
+        )
 
-    rows = await asyncio.to_thread(triage_db.get_pending_changes_by_ids, [safe_change_id], ChangeStatus.PENDING.value)
+    rows = await asyncio.to_thread(
+        triage_db.get_pending_changes_by_ids,
+        [safe_change_id],
+        ChangeStatus.PENDING.value,
+    )
     if not rows:
-        raise APIError(error="not_found", message="Pending change not found", status_code=404)
+        raise APIError(
+            error="not_found", message="Pending change not found", status_code=404
+        )
 
     change_type = str(rows[0].get("change_type") or "").strip()
     try:
@@ -267,23 +302,47 @@ async def update_pending_change(change_id: int, req: PendingChangeUpdateRequest)
                 status_code=422,
             )
     except ValueError as exc:
-        raise APIError(error="validation_error", message=str(exc), status_code=422) from exc
+        raise APIError(
+            error="validation_error", message=str(exc), status_code=422
+        ) from exc
 
-    updated = await asyncio.to_thread(triage_db.update_pending_change_payload, safe_change_id, payload)
+    updated = await asyncio.to_thread(
+        triage_db.update_pending_change_payload, safe_change_id, payload
+    )
     if not updated:
-        raise APIError(error="conflict", message="Pending change is no longer editable", status_code=409)
+        raise APIError(
+            error="conflict",
+            message="Pending change is no longer editable",
+            status_code=409,
+        )
 
-    LOGGER.info("Pending change updated change_id=%s change_type=%s", safe_change_id, change_type)
-    return {"updated": 1, "change_id": safe_change_id, "change_type": change_type, "payload": payload}
+    LOGGER.info(
+        "Pending change updated change_id=%s change_type=%s",
+        safe_change_id,
+        change_type,
+    )
+    return {
+        "updated": 1,
+        "change_id": safe_change_id,
+        "change_type": change_type,
+        "payload": payload,
+    }
 
 
-async def pending_change_count(status: str = ChangeStatus.PENDING.value) -> dict[str, int]:
+async def pending_change_count(
+    status: str = ChangeStatus.PENDING.value,
+) -> dict[str, int]:
     count = await asyncio.to_thread(triage_db.get_pending_change_count, status)
     return {"count": count}
 
 
 async def reject_pending_changes(req: PendingChangeMutationRequest) -> dict[str, int]:
-    updated = await asyncio.to_thread(triage_db.set_pending_changes_status, req.change_ids, ChangeStatus.REJECTED.value, "")
+    updated = await asyncio.to_thread(
+        triage_db.set_pending_changes_status,
+        req.change_ids,
+        ChangeStatus.REJECTED.value,
+        "",
+    )
     return {"updated": updated}
 
 
@@ -301,18 +360,32 @@ async def apply_pending_changes(req: PendingChangeMutationRequest) -> dict[str, 
 
     # retry re-applies FAILED rows via the SAME writer path (success → APPLIED,
     # failure → FAILED again); the default applies PENDING rows.
-    source_status = ChangeStatus.FAILED.value if req.retry else ChangeStatus.PENDING.value
-    changes = await asyncio.to_thread(triage_db.get_pending_changes_by_ids, req.change_ids, source_status)
+    source_status = (
+        ChangeStatus.FAILED.value if req.retry else ChangeStatus.PENDING.value
+    )
+    changes = await asyncio.to_thread(
+        triage_db.get_pending_changes_by_ids, req.change_ids, source_status
+    )
     if not changes:
         return {"applied": 0, "failed": 0, "backup_path": None, "failed_items": []}
 
     result = await asyncio.to_thread(writer.apply_changes, changes, True)
-    applied_ids = [int(change_id) for change_id in result.get("applied_ids", []) if int(change_id) > 0]
+    applied_ids = [
+        int(change_id)
+        for change_id in result.get("applied_ids", [])
+        if int(change_id) > 0
+    ]
     failed_items = list(result.get("failed", []))
     applied_id_set = set(applied_ids)
 
     if applied_ids:
-        await asyncio.to_thread(triage_db.set_pending_changes_status, applied_ids, ChangeStatus.APPLIED.value, "")
+        await asyncio.to_thread(
+            triage_db.set_pending_changes_status,
+            applied_ids,
+            ChangeStatus.APPLIED.value,
+            "",
+            source_status,
+        )
 
     for failed in failed_items:
         failed_id = int(failed.get("id") or 0)
@@ -322,27 +395,39 @@ async def apply_pending_changes(req: PendingChangeMutationRequest) -> dict[str, 
                 [failed_id],
                 ChangeStatus.FAILED.value,
                 str(failed.get("error") or ""),
+                source_status,
             )
 
     refreshed_item_keys = [
         str(change.get("item_key") or "").strip()
         for change in changes
-        if int(change.get("id") or 0) in applied_id_set and str(change.get("item_key") or "").strip()
+        if int(change.get("id") or 0) in applied_id_set
+        and str(change.get("item_key") or "").strip()
     ]
 
     inbox_removed = 0
     inbox_removed_error: str | None = None
     if refreshed_item_keys:
+        completed_item_keys = await asyncio.to_thread(
+            triage_db.item_keys_without_open_changes,
+            refreshed_item_keys,
+        )
         try:
-            inbox_removed = await asyncio.to_thread(
-                writer.remove_items_from_collection,
-                refreshed_item_keys,
-                "Inbox",
-                True,
+            inbox_removed = (
+                await asyncio.to_thread(
+                    writer.remove_items_from_collection,
+                    completed_item_keys,
+                    "Inbox",
+                    True,
+                )
+                if completed_item_keys
+                else 0
             )
         except Exception as exc:
             inbox_removed_error = str(exc)
-            LOGGER.warning("Failed removing applied items from Inbox collection", exc_info=True)
+            LOGGER.warning(
+                "Failed removing applied items from Inbox collection", exc_info=True
+            )
         await refresh_corpus_items_by_keys(refreshed_item_keys)
 
     LOGGER.info(

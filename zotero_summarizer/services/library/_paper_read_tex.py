@@ -216,20 +216,26 @@ def _figures_from_tex(text: str, source_dir: Path, figures_dir: Path) -> list[di
 
 
 def _resolve_figure_path(source_dir: Path, raw: str) -> Path | None:
-    candidate = (source_dir / raw).expanduser()
+    root = source_dir.resolve()
+    candidate = (root / raw).expanduser()
     options = [candidate]
     if not candidate.suffix:
         options.extend(candidate.with_suffix(ext) for ext in (".pdf", ".png", ".jpg", ".jpeg", ".eps"))
     for path in options:
         if path.is_file():
-            return path
+            resolved = path.resolve()
+            try:
+                resolved.relative_to(root)
+            except ValueError:
+                continue
+            return resolved
     # Case-insensitive fallback (Linux fs is case-sensitive; arXiv sources vary)
     stem_lower = Path(raw).stem.lower()
     suffix_lower = Path(raw).suffix.lower()
     suffixes = {suffix_lower} if suffix_lower else {".pdf", ".png", ".jpg", ".jpeg", ".eps"}
     for p in source_dir.rglob("*"):
         if p.is_file() and p.stem.lower() == stem_lower and p.suffix.lower() in suffixes:
-            return p
+            return p.resolve()
     return None
 
 

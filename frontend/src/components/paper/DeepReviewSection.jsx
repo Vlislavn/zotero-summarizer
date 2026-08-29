@@ -89,7 +89,11 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
   const reviewed = deep && !deep.needs_pdf && (deep.digest || deep.quality || (deep.goal_summaries || []).length);
   return (
     <div className="space-y-3">
-      {llm && llm.reachable === false && (
+      {llm?.enabled === false ? (
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] text-slate-700">
+          AI reviews are off. Enable them in <span className="font-semibold">Settings → AI models</span>.
+        </div>
+      ) : llm && llm.reachable === false && (
         // Amber, not rose: this is an APP-STATE notice (a server is down), not a
         // finding about the paper. Rose is reserved for the paper's own red-flags
         // below, so the two never compete (one-code-one-meaning / Von Restorff).
@@ -131,7 +135,7 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
           <button
             type="button"
             onClick={handleRun}
-            disabled={running || llm?.reachable === false}
+            disabled={running || llm?.enabled === false || llm?.reachable === false}
             className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-teal-700 text-white text-[13px] font-semibold hover:bg-teal-800 disabled:opacity-50"
             title="Run a condensed full-text digest (what it's about + how to use it + quality)"
           >

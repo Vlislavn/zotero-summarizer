@@ -1,4 +1,5 @@
 """repositories: pending queries (split)."""
+
 from __future__ import annotations
 
 import json  # noqa: F401
@@ -30,7 +31,9 @@ def _pending_rows(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
     return [PendingChangeRow.from_row(dict(row)).to_dict() for row in rows]
 
 
-def insert_pending_changes(item_key: str, item_title: str, changes: list[dict[str, Any]]) -> int:
+def insert_pending_changes(
+    item_key: str, item_title: str, changes: list[dict[str, Any]]
+) -> int:
     if not item_key.strip() or not changes:
         return 0
 
@@ -67,7 +70,9 @@ def insert_pending_changes(item_key: str, item_title: str, changes: list[dict[st
         conn.close()
 
 
-def get_pending_changes(status: str | None = ChangeStatus.PENDING.value, limit: int = 500) -> list[dict[str, Any]]:
+def get_pending_changes(
+    status: str | None = ChangeStatus.PENDING.value, limit: int = 500
+) -> list[dict[str, Any]]:
     safe_limit = max(1, min(limit, 5000))
     conn = _get_conn()
     try:
@@ -111,7 +116,30 @@ def get_pending_change_count(status: str = ChangeStatus.PENDING.value) -> int:
         conn.close()
 
 
-def get_pending_changes_by_ids(change_ids: list[int], status: str | None = None) -> list[dict[str, Any]]:
+def item_keys_without_open_changes(item_keys: list[str]) -> list[str]:
+    """Return selected item keys with no remaining pending/failed sibling row."""
+    normalized = list(
+        dict.fromkeys(str(key).strip() for key in item_keys if str(key).strip())
+    )
+    if not normalized:
+        return []
+    placeholders = ",".join("?" for _ in normalized)
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            f"SELECT DISTINCT item_key FROM pending_changes WHERE item_key IN ({placeholders})"
+            " AND status IN (?, ?)",
+            [*normalized, ChangeStatus.PENDING.value, ChangeStatus.FAILED.value],
+        ).fetchall()
+        open_keys = {str(row["item_key"]) for row in rows}
+        return [key for key in normalized if key not in open_keys]
+    finally:
+        conn.close()
+
+
+def get_pending_changes_by_ids(
+    change_ids: list[int], status: str | None = None
+) -> list[dict[str, Any]]:
     normalized = [int(change_id) for change_id in change_ids if int(change_id) > 0]
     if not normalized:
         return []
@@ -150,6 +178,7 @@ def set_pending_changes_status(
     change_ids: list[int],
     status: str,
     error_message: str | None = None,
+    expected_status: str | None = None,
 ) -> int:
     normalized = [int(change_id) for change_id in change_ids if int(change_id) > 0]
     if not normalized:
@@ -159,6 +188,7 @@ def set_pending_changes_status(
     conn = _get_conn()
     try:
         if status == ChangeStatus.APPLIED.value:
+            source = expected_status or ChangeStatus.PENDING.value
             cursor = conn.execute(
                 f"""
                 UPDATE pending_changes
@@ -168,9 +198,10 @@ def set_pending_changes_status(
                 WHERE id IN ({placeholders})
                   AND status = ?
                 """,
-                [status, (error_message or "").strip(), *normalized, ChangeStatus.PENDING.value],
+                [status, (error_message or "").strip(), *normalized, source],
             )
         elif status in {ChangeStatus.REJECTED.value, ChangeStatus.FAILED.value}:
+            source = expected_status or ChangeStatus.PENDING.value
             cursor = conn.execute(
                 f"""
                 UPDATE pending_changes
@@ -179,7 +210,7 @@ def set_pending_changes_status(
                 WHERE id IN ({placeholders})
                   AND status = ?
                 """,
-                [status, (error_message or "").strip(), *normalized, ChangeStatus.PENDING.value],
+                [status, (error_message or "").strip(), *normalized, source],
             )
         else:
             cursor = conn.execute(
@@ -225,6 +256,7 @@ __all__ = [
     "insert_pending_changes",
     "get_pending_changes",
     "get_pending_change_count",
+    "item_keys_without_open_changes",
     "get_pending_changes_by_ids",
     "set_pending_changes_status",
     "update_pending_change_payload",

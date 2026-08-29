@@ -434,6 +434,27 @@ def test_append_to_golden_is_idempotent_on_duplicate_key(patched_settings):
     assert rows[0]["item_key"] == "feed:42"
 
 
+def test_bulk_confirm_mutates_only_explicit_visible_ids(patched_settings):
+    db = sqlite3.connect(str(patched_settings / "triage.db"))
+    db.row_factory = sqlite3.Row
+    first = _insert_awaiting(db, feed_item_id=51, title="Visible")
+    second = _insert_awaiting(db, feed_item_id=52, title="Not visible")
+    db.execute(
+        "UPDATE processed_feed_items SET decision = ? WHERE id IN (?, ?)",
+        (fs.DECISION_GATE_REJECTED, first, second),
+    )
+    db.commit()
+    db.close()
+
+    result = review.confirm_remaining_gate_rejected([first])
+
+    assert result["total_considered"] == 1
+    with (patched_settings / "zotero-summarizer-golden.csv").open() as handle:
+        rows = list(_csv.DictReader(handle))
+    assert len(rows) == 1
+    assert rows[0]["title"] == "Visible"
+
+
 # ---------------------------------------------------------------------------
 # select_by_decisions (decision filter)
 # ---------------------------------------------------------------------------

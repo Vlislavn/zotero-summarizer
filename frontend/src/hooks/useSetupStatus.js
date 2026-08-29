@@ -19,6 +19,7 @@ export function derivePillars(status) {
   return {
     zotero: Boolean(zotero.db_found),
     llm: Boolean(llm.api_key_present && llm.reachable),
+    llmDisabled: llm.enabled === false,
     goals: Boolean(config.valid && (config.research_goals_count || 0) > 0),
     model: Boolean(classifier.trained),
   };

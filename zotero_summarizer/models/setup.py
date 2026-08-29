@@ -1,14 +1,27 @@
 """Redacted request/response contracts for ``/api/setup/*``."""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
 __all__ = [
-    "ClassifierStatus", "ConfigStatus", "ConnectionResult", "DetectedZoteroDir",
-    "DetectZoteroResponse", "FieldError", "LlmStatus", "PathEntry", "PathStatus",
-    "SetupStatusResponse", "SubsystemStatus", "UpdatePathsRequest",
-    "UpdatePathsResponse", "UpdatePathsValidation", "ValidateConfigRequest",
-    "ValidateConfigResponse", "ZoteroStatus",
+    "ClassifierStatus",
+    "ConfigStatus",
+    "ConnectionResult",
+    "DetectedZoteroDir",
+    "DetectZoteroResponse",
+    "FieldError",
+    "LlmStatus",
+    "PathEntry",
+    "PathStatus",
+    "SetupStatusResponse",
+    "SubsystemStatus",
+    "UpdatePathsRequest",
+    "UpdatePathsResponse",
+    "UpdatePathsValidation",
+    "ValidateConfigRequest",
+    "ValidateConfigResponse",
+    "ZoteroStatus",
 ]
 
 
@@ -20,6 +33,7 @@ class ConfigStatus(BaseModel):
 
 
 class LlmStatus(BaseModel):
+    enabled: bool = True
     default_provider: str | None = None
     default_model: str | None = None
     api_key_env: str | None = None  # name only; never the secret

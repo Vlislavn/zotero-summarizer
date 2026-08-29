@@ -9,7 +9,12 @@ import fitz
 import pytest
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services.library import _paper_read_html, _paper_read_meta, paper_render
+from zotero_summarizer.services.library import (
+    _paper_read_html,
+    _paper_read_meta,
+    _paper_read_tex,
+    paper_render,
+)
 
 
 def _make_pdf(path, *, arxiv: bool = False, refs: bool = True):
@@ -94,6 +99,16 @@ def test_build_paper_read_uses_local_tex_and_writes_expected_outputs(tmp_path):
     assert "const imageMap" in html_text
     assert 'id="ph-fig1"' in html_text
     assert artifact["audit"]["status"] == "passed"
+
+
+def test_tex_figure_reference_cannot_escape_source_directory(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    private = tmp_path / "private.png"
+    private.write_bytes(b"private")
+
+    assert _paper_read_tex._resolve_figure_path(source, "../private.png") is None
+    assert _paper_read_tex._resolve_figure_path(source, str(private)) is None
 
 
 def test_pdf_fallback_renders_vector_figure_regions_not_raw_page(tmp_path):

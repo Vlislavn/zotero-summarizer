@@ -16,24 +16,35 @@ from zotero_summarizer.integrations._zotero_write_common import (  # noqa: F401
     read_write_columns,
 )
 from zotero_summarizer.integrations._zotero_write_items import ZoteroItemWriteMixin
+from zotero_summarizer.integrations._zotero_write_feed import ZoteroFeedWriteMixin
 from zotero_summarizer.integrations._zotero_write_fields import ZoteroFieldWriteMixin
-from zotero_summarizer.integrations._zotero_write_attachments import ZoteroAttachmentWriteMixin
+from zotero_summarizer.integrations._zotero_write_attachments import (
+    ZoteroAttachmentWriteMixin,
+)
 from zotero_summarizer.integrations._zotero_write_tags import ZoteroTagMixin
-from zotero_summarizer.integrations._zotero_write_collections import ZoteroCollectionMixin
+from zotero_summarizer.integrations._zotero_write_collections import (
+    ZoteroCollectionMixin,
+)
 
 _T = TypeVar("_T")
 
 
 class ZoteroWriter(
-    ZoteroItemWriteMixin, ZoteroFieldWriteMixin, ZoteroAttachmentWriteMixin,
-    ZoteroTagMixin, ZoteroCollectionMixin,
+    ZoteroItemWriteMixin,
+    ZoteroFeedWriteMixin,
+    ZoteroFieldWriteMixin,
+    ZoteroAttachmentWriteMixin,
+    ZoteroTagMixin,
+    ZoteroCollectionMixin,
 ):
     """Write adapter that applies reviewed tag/note changes to Zotero SQLite."""
 
     _KEY_ALPHABET = "23456789ABCDEFGHIJKLMNPQRSTUVWXYZ"
 
     def __init__(self, zotero_data_dir: str | Path | None = None) -> None:
-        data_dir = Path(zotero_data_dir or (Path.home() / "Zotero")).expanduser().resolve()
+        data_dir = (
+            Path(zotero_data_dir or (Path.home() / "Zotero")).expanduser().resolve()
+        )
         db_path = data_dir / "zotero.sqlite"
         if not data_dir.exists():
             raise ZoteroWriteError(f"Zotero data directory not found: {data_dir}")
@@ -78,7 +89,10 @@ class ZoteroWriter(
                     raise
                 LOGGER.warning(
                     "DB locked%s (attempt %d/%d) — retrying in %.0fs",
-                    label, attempt, max_retries, delay_secs,
+                    label,
+                    attempt,
+                    max_retries,
+                    delay_secs,
                 )
                 time.sleep(delay_secs)
         raise RuntimeError("unreachable")  # pragma: no cover
@@ -97,7 +111,7 @@ class ZoteroWriter(
         WAL-resident pages consistently. The copy is then verified with
         ``PRAGMA integrity_check``; a bad backup raises (fail-fast) so it can
         never silently precede the write. Lock contention is retried."""
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
         backup_path = self.data_dir / f"zotero.sqlite.backup_{timestamp}"
 
         def _do() -> None:
@@ -119,18 +133,24 @@ class ZoteroWriter(
             check.close()
         if not row or str(row[0]).lower() != "ok":
             backup_path.unlink(missing_ok=True)
-            raise ZoteroWriteError(f"Backup failed integrity_check ({row}); aborting write.")
+            raise ZoteroWriteError(
+                f"Backup failed integrity_check ({row}); aborting write."
+            )
         return str(backup_path)
 
     def _prune_backups(self) -> None:
         """Keep only the ``_BACKUP_KEEP`` most-recent app-created backups (our
         timestamped glob only — never Zotero's own ``.bak`` files). Names sort
         chronologically, so lexical-desc == newest-first."""
-        backups = sorted(self.data_dir.glob(self._BACKUP_GLOB), key=lambda p: p.name, reverse=True)
-        for stale in backups[self._BACKUP_KEEP:]:
+        backups = sorted(
+            self.data_dir.glob(self._BACKUP_GLOB), key=lambda p: p.name, reverse=True
+        )
+        for stale in backups[self._BACKUP_KEEP :]:
             stale.unlink(missing_ok=True)
 
-    def apply_changes(self, changes: Sequence[dict[str, Any]], create_backup: bool = True) -> dict[str, Any]:
+    def apply_changes(
+        self, changes: Sequence[dict[str, Any]], create_backup: bool = True
+    ) -> dict[str, Any]:
         """Apply queued changes and return applied IDs and per-item failures.
 
         Wrapped in ``_retry_on_lock`` like every other Zotero write (Zotero's own
@@ -175,7 +195,11 @@ class ZoteroWriter(
                 conn.commit()
                 if backup_path is not None:
                     self._prune_backups()  # cap app-created backups (after a successful write)
-                return {"applied_ids": applied_ids, "failed": failed, "backup_path": backup_path}
+                return {
+                    "applied_ids": applied_ids,
+                    "failed": failed,
+                    "backup_path": backup_path,
+                }
             except sqlite3.Error:
                 conn.rollback()
                 raise
@@ -185,11 +209,15 @@ class ZoteroWriter(
         try:
             return self._retry_on_lock(_do, ctx="apply_changes")
         except sqlite3.OperationalError as exc:
-            raise ZoteroWriteError(f"Failed to apply queued changes: DB still locked after retries: {exc}") from exc
+            raise ZoteroWriteError(
+                f"Failed to apply queued changes: DB still locked after retries: {exc}"
+            ) from exc
         except sqlite3.Error as exc:
             raise ZoteroWriteError(f"Failed to apply queued changes: {exc}") from exc
 
-    def _dispatch_change(self, conn: sqlite3.Connection, change: dict[str, Any], cols: WriteColumns) -> None:
+    def _dispatch_change(
+        self, conn: sqlite3.Connection, change: dict[str, Any], cols: WriteColumns
+    ) -> None:
         """Validate one queued change and route it to the right ``_apply_*`` writer."""
         change_type = str(change.get("change_type") or "").strip()
         item_key = str(change.get("item_key") or "").strip()
@@ -199,52 +227,80 @@ class ZoteroWriter(
 
         if change_type == "tag_changes":
             self._apply_tag_change(
-                conn, item_key=item_key, payload=payload_dict,
-                item_columns=cols.items, tag_columns=cols.tags, item_tag_columns=cols.item_tags,
+                conn,
+                item_key=item_key,
+                payload=payload_dict,
+                item_columns=cols.items,
+                tag_columns=cols.tags,
+                item_tag_columns=cols.item_tags,
             )
         elif change_type == "add_note":
             self._apply_note_change(
-                conn, item_key=item_key, payload=payload_dict,
-                item_columns=cols.items, note_columns=cols.item_notes,
+                conn,
+                item_key=item_key,
+                payload=payload_dict,
+                item_columns=cols.items,
+                note_columns=cols.item_notes,
             )
         elif change_type == "upsert_note":
             self._apply_upsert_note_change(
-                conn, item_key=item_key, payload=payload_dict,
-                item_columns=cols.items, note_columns=cols.item_notes,
+                conn,
+                item_key=item_key,
+                payload=payload_dict,
+                item_columns=cols.items,
+                note_columns=cols.item_notes,
             )
         elif change_type == "add_to_collection":
             self._apply_collection_change(
-                conn, item_key=item_key, payload=payload_dict,
-                item_columns=cols.items, collection_columns=cols.collections,
+                conn,
+                item_key=item_key,
+                payload=payload_dict,
+                item_columns=cols.items,
+                collection_columns=cols.collections,
                 collection_item_columns=cols.collection_items,
             )
         elif change_type == "remove_from_collection":
             self._apply_collection_remove(
-                conn, item_key=item_key, payload=payload_dict,
-                item_columns=cols.items, collection_columns=cols.collections,
+                conn,
+                item_key=item_key,
+                payload=payload_dict,
+                item_columns=cols.items,
+                collection_columns=cols.collections,
             )
         elif change_type == "create_item_from_feed":
-            self._apply_create_item_from_feed(conn, new_item_key=item_key, payload=payload_dict, cols=cols)
+            self._apply_create_item_from_feed(
+                conn, new_item_key=item_key, payload=payload_dict, cols=cols
+            )
         elif change_type == "promote_from_inbox":
             # Promote = remove from "Inbox"; the user's target collection assignments are
             # queued as separate add_to_collection changes by the orchestrator.
             self._apply_collection_remove(
-                conn, item_key=item_key, payload={"collection_path": "Inbox"},
-                item_columns=cols.items, collection_columns=cols.collections,
+                conn,
+                item_key=item_key,
+                payload={"collection_path": "Inbox"},
+                item_columns=cols.items,
+                collection_columns=cols.collections,
             )
         elif change_type == "set_field":
             self._apply_set_field(
-                conn, item_key=item_key, payload=payload_dict,
-                item_data_columns=cols.item_data, item_columns=cols.items,
+                conn,
+                item_key=item_key,
+                payload=payload_dict,
+                item_data_columns=cols.item_data,
+                item_columns=cols.items,
             )
         elif change_type == "add_attachment":
             self._apply_add_attachment(
-                conn, item_key=item_key, payload=payload_dict,
-                item_columns=cols.items, item_data_columns=cols.item_data,
-                item_data_value_columns=cols.item_data_values,
+                conn,
+                item_key=item_key,
+                payload=payload_dict,
+                item_columns=cols.items,
+                item_data_columns=cols.item_data,
             )
         elif change_type == "mark_feed_item_read":
-            self._apply_mark_feed_item_read(conn, item_key=item_key, payload=payload_dict)
+            self._apply_mark_feed_item_read(
+                conn, item_key=item_key, payload=payload_dict
+            )
         else:
             raise ZoteroWriteError(f"Unsupported change type: {change_type}")
 
@@ -259,7 +315,9 @@ class ZoteroWriter(
             try:
                 parsed = json.loads(text)
             except json.JSONDecodeError as exc:
-                raise ZoteroWriteError("Invalid JSON payload in pending change") from exc
+                raise ZoteroWriteError(
+                    "Invalid JSON payload in pending change"
+                ) from exc
             if not isinstance(parsed, dict):
                 raise ZoteroWriteError("Pending change payload must be a JSON object")
             return parsed

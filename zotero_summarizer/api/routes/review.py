@@ -35,6 +35,10 @@ class RejectRequest(BaseModel):
     )
 
 
+class ConfirmGateRejectedRequest(BaseModel):
+    processed_ids: list[int] = Field(min_length=1, max_length=500)
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -135,13 +139,11 @@ async def apply_all() -> dict[str, Any]:
     return await asyncio.to_thread(review.apply_all_approved)
 
 
-async def confirm_gate_rejected() -> dict[str, Any]:
-    """Bulk-append dont_read rows to the golden CSV for every gate_rejected
-    item the user hasn't already relabelled. UI semantics: "no click means
-    I confirm the model was right." Triggers retrain via sha mismatch on the
-    next ``feeds run`` startup.
-    """
-    return await asyncio.to_thread(review.confirm_remaining_gate_rejected)
+async def confirm_gate_rejected(req: ConfirmGateRejectedRequest) -> dict[str, Any]:
+    """Append only the gate-rejected rows the user saw and confirmed."""
+    return await asyncio.to_thread(
+        review.confirm_remaining_gate_rejected, req.processed_ids,
+    )
 
 
 router.add_api_route("/api/feeds/review", list_review_queue, methods=["GET"])

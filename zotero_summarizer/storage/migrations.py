@@ -37,15 +37,22 @@ def _migration_offline_sync(conn: sqlite3.Connection) -> None:
     apply_sync_schema(conn)
 
 
+def _migration_reconcile_triage_schema(conn: sqlite3.Connection) -> None:
+    """Converge databases whose old v1 marker predates later baseline columns."""
+    repositories.apply_schema(conn)
+
+
 # Append-only, version-ordered. To change the schema, add a new Migration with
 # the next version number — never edit a shipped one or add inline ALTERs.
 TRIAGE_MIGRATIONS: list[Migration] = [
     Migration(1, "baseline_schema", _migration_baseline_triage),
     Migration(2, "offline_mutation_sync", _migration_offline_sync),
+    Migration(3, "reconcile_triage_schema", _migration_reconcile_triage_schema),
 ]
 CORPUS_MIGRATIONS: list[Migration] = [
     Migration(1, "baseline_embedding_cache", _migration_baseline_corpus),
     Migration(2, "sync_version_alignment", _migration_baseline_corpus),
+    Migration(3, "triage_reconcile_alignment", _migration_baseline_corpus),
 ]
 
 # Both namespaces advance in lockstep so one reported target stays meaningful;
@@ -131,7 +138,9 @@ def migrate_existing(settings: Settings | None = None) -> MigrationResult:
 
     # Constructing the cache initializes corpus tables without re-embedding; the
     # corpus migration then records the version against the same DB.
-    EmbeddingCache(effective_settings.corpus_db_path, "sentence-transformers/all-MiniLM-L6-v2")
+    EmbeddingCache(
+        effective_settings.corpus_db_path, "sentence-transformers/all-MiniLM-L6-v2"
+    )
     run_migrations(effective_settings.corpus_db_path, "corpus", CORPUS_MIGRATIONS)
 
     return MigrationResult(

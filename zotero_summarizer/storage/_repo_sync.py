@@ -135,7 +135,10 @@ def apply_sync_mutation(db_path: Path, request: dict[str, Any]) -> dict[str, Any
             if seen["request_json"] != request_json:
                 raise ValueError("mutation_id was already used for a different mutation")
             conn.commit()
-            return {**json.loads(seen["result_json"]), "status": "already_applied"}
+            stored = json.loads(seen["result_json"])
+            if stored["status"] == "conflict":
+                return stored
+            return {**stored, "status": "already_applied"}
 
         item_key, field = request["item_key"], request["field"]
         resolves = request.get("resolves_mutation_id")
@@ -199,22 +202,27 @@ def sync_current_fields(db_path: Path) -> dict[tuple[str, str], dict[str, Any]]:
         conn.execute("BEGIN")
         rows = conn.execute(
             """SELECT item_key, 'verdict' AS field, user_priority AS value,
-                      comment, source FROM label_verdicts
+                      comment, source, original_derived_priority AS model_priority
+                      FROM label_verdicts
                UNION ALL
-               SELECT item_key, 'review_note', note, NULL, NULL FROM review_notes"""
+               SELECT item_key, 'review_note', note, NULL, NULL, NULL FROM review_notes"""
         ).fetchall()
-        revisions = {
-            (row["item_key"], row["field"]): int(row["revision"])
-            for row in conn.execute(
-                """SELECT item_key, field, MAX(revision) AS revision
-                   FROM sync_changes GROUP BY item_key, field"""
-            ).fetchall()
-        }
+        revisions = conn.execute(
+            """SELECT item_key, field, MAX(revision) AS revision
+               FROM sync_changes GROUP BY item_key, field"""
+        ).fetchall()
     finally:
         conn.close()
     fields = {(row["item_key"], row["field"]): dict(row) for row in rows}
-    for key, row in fields.items():
-        row["revision"] = revisions.get(key, 0)
+    for revision in revisions:
+        key = (revision["item_key"], revision["field"])
+        row = fields.setdefault(key, {
+            "item_key": key[0], "field": key[1], "value": None,
+            "comment": None, "source": None, "model_priority": None,
+        })
+        row["revision"] = int(revision["revision"])
+    for row in fields.values():
+        row.setdefault("revision", 0)
     return fields
 
 

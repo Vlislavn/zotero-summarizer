@@ -16,4 +16,10 @@ describe('setup status derivation', () => {
     expect(derivePillars(status).zotero).toBe(false);
     expect(deriveConfigured({ ...status, ready: true })).toBe(true);
   });
+
+  it('distinguishes intentionally disabled AI from a broken provider', () => {
+    const pillars = derivePillars({ llm: { enabled: false } });
+    expect(pillars.llm).toBe(false);
+    expect(pillars.llmDisabled).toBe(true);
+  });
 });

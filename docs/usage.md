@@ -17,20 +17,20 @@ primitives underneath (they can't drift):
 
 - **Web — the `/setup` wizard.** A brand-new install is redirected here once
   (skippable/resumable): **Connect Zotero** (auto-detects likely Zotero data dirs, picks the
-  one whose `zotero.sqlite` exists) → **Connect LLM** (pick the provider, run a live
-  connection test) → **Describe research** (your goals). Empty-state "finish setup" cards on
+  one whose `zotero.sqlite` exists) → **Choose AI-assisted or ML-only** (AI mode can run a live
+  provider test) → **Describe research** (your goals). Empty-state "finish setup" cards on
   `/today` and `/library` link back here until you're ready.
-- **Terminal — `zotero-summarizer setup`.** The same three steps headless: detect/confirm
-  the Zotero dir, configure + probe the LLM provider, set your research goals.
+- **Terminal — `zotero-summarizer setup`.** The same steps headless. Use `--mode hosted`,
+  `--mode local`, or `--mode no-llm`; the hosted route is saved before its optional probe.
 
-**Secrets are name-only.** Neither front end ever has a raw-secret field. You give the
-**env-var name** that holds your key (e.g. `OPENAI_API_KEY`); the wizard checks whether that
-var is set and runs an *advisory* reachability probe, but you set the actual value yourself
-in `.env` (or your shell). That's deliberate: the app collects a name, you own the secret.
+**Secrets stay server-side.** The web wizard may accept a key and stores it in the OS
+keyring; status and config responses expose only redacted metadata. The terminal flow asks
+for an env-var name (for example `OPENAI_API_KEY`) and reads the value from your environment.
+ML-only mode stores no credential and deliberately skips AI Doctor checks.
 
-The wizard can finish before the secret/endpoint is live — **Next** gates only on a
+AI-assisted setup can finish before the secret/endpoint is live — **Next** gates only on a
 structurally-valid provider (type + base URL + key env-var name + model), not on a passing
-connection test. After editing `.env`, **restart the server** to apply the change.
+connection test. Environment changes require a restart; keyring saves apply immediately.
 
 ## Two ways to run triage
 
@@ -269,8 +269,9 @@ logs into anything on your behalf.
 Two files under the project root, both gitignored and created for you on first run (see
 [First-run setup](#first-run-setup)). The split of who owns what:
 
-- **`.env` = secrets you set + the two Zotero paths the app manages.** You add your API key
-  by name; the `/setup` wizard / `setup` CLI write `PDF_ROOT` / `ZOTERO_DATA_DIR` here for you.
+- **`.env` = optional environment-backed secrets + the two Zotero paths the app manages.**
+  The web wizard uses the OS keyring; the setup surfaces write `PDF_ROOT` /
+  `ZOTERO_DATA_DIR` here for you.
 - **`goals.yaml` = app-authored; don't hand-edit.** Edit research goals + LLM routing in the
   **Settings** page; the app serializes the file. (Hand-edits are tolerated but the app is the
   writer of record.)
@@ -279,7 +280,7 @@ Two files under the project root, both gitignored and created for you on first r
 
 Settings is chunked to keep the common path short:
 
-- **Essentials (always visible):** research goals, triage criteria, the default LLM provider,
+- **Essentials (always visible):** research goals, triage criteria, AI on/off, the default LLM provider,
   Zotero paths — plus a readiness strip (Zotero · LLM · Goals · Model).
 - **Advanced (one collapsible disclosure):** full stage routing, classifier gate (sub-fields
   appear only when the gate is enabled), corpus.
@@ -287,7 +288,8 @@ Settings is chunked to keep the common path short:
 The legacy `llm.draft_model / refine_model / api_base / api_key_env` inputs were **removed**
 from the UI — they duplicated the LLM-routing editor. The backend still auto-migrates an old
 `llm` block in `goals.yaml`, so existing configs keep working. The LLM API secret is
-**name-only** in the UI — never a raw-secret field.
+redacted on every response; a key entered in the web form goes directly to the server-side
+OS keyring.
 
 ### The guarded `.env` path writer + restart banner
 

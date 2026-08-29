@@ -116,7 +116,7 @@ function CandidateCard({ cand, onAdd }) {
   const sources = [...new Set((cand.provenance || []).map((p) => p.source))];
   const band = (cand.quality?.quality_band || '').toLowerCase();
   const meta = [cand.venue, cand.year].filter(Boolean).join(' · ');
-  const added = Boolean(cand.materialized_zotero_key);
+  const added = Boolean(cand.materialized_zotero_key || cand.existing_zotero_key);
   const rel = REL_BAND[cand.relevance_band];
   const why = Array.isArray(cand.why) ? cand.why : [];
   const [adding, setAdding] = useState(false);

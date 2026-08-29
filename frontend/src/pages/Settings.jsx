@@ -143,7 +143,9 @@ export default function Settings() {
         <DeploymentCard />
         <AiModelsSection
           status={status}
+          enabled={form.llm_enabled}
           routing={form.llm_routing}
+          onEnabledChange={(next) => updateField('llm_enabled', next)}
           onChange={(next) => updateField('llm_routing', next)}
           isDirty={isDirty}
           open={modelsOpen}
@@ -159,7 +161,8 @@ export default function Settings() {
 
         <RssFeedsSection />
 
-        <details className="glass rounded-2xl border border-slate-200 p-4">
+        <details id="university-access" defaultOpen={window.location.hash === '#university-access'}
+          className="glass rounded-2xl border border-slate-200 p-4 scroll-mt-20">
           <summary className="cursor-pointer text-sm font-semibold text-slate-700">
             Advanced · performance &amp; library access
           </summary>

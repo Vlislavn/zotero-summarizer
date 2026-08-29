@@ -270,9 +270,10 @@ def _confirm_or_reject_to_dont_read(processed_id: int) -> dict[str, Any]:
     return {"processed_id": processed_id, "golden_csv_row_added": appended}
 
 
-def confirm_remaining_gate_rejected(since_hours: int = 720) -> dict[str, Any]:
-    """Bulk-confirm: append a dont_read row to golden CSV for every
-    ``gate_rejected`` item the user hasn't already relabelled.
+def confirm_remaining_gate_rejected(
+    processed_ids: list[int], since_hours: int = 720,
+) -> dict[str, Any]:
+    """Bulk-confirm the exact visible ``gate_rejected`` rows supplied by the UI.
 
     Semantics: "no click = confirmation" — the user has implicitly agreed
     that the gate was correct for these items. Idempotent: rows whose
@@ -290,8 +291,10 @@ def confirm_remaining_gate_rejected(since_hours: int = 720) -> dict[str, Any]:
             conn,
             decisions=[feeds_storage.DECISION_GATE_REJECTED],
             since_hours=since_hours,
-            limit=10000,
+            limit=5000,
         )
+    requested = {int(value) for value in processed_ids if int(value) > 0}
+    rows = [row for row in rows if int(row.get("id") or 0) in requested]
     appended = 0
     skipped_duplicate = 0
     skipped_no_feed_id = 0

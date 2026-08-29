@@ -4,7 +4,7 @@ import sqlite3
 
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.services._common import read_config
-from zotero_summarizer.storage.migrations import migrate_existing
+from zotero_summarizer.storage.migrations import SCHEMA_VERSION, migrate_existing
 
 
 def test_settings_loads_from_project_root_env_file(monkeypatch, tmp_path):
@@ -39,7 +39,9 @@ def test_settings_loads_from_project_root_env_file(monkeypatch, tmp_path):
     assert settings.app_log_file == tmp_path / "data" / "logs/app.log"
     assert settings.triage_db_path == tmp_path / "data" / "triage_history.db"
     assert settings.corpus_db_path == tmp_path / "data" / "corpus_cache.db"
-    assert settings.golden_csv_path == tmp_path / "data" / "zotero-summarizer-golden.csv"
+    assert (
+        settings.golden_csv_path == tmp_path / "data" / "zotero-summarizer-golden.csv"
+    )
 
 
 def test_goals_config_expands_llm_api_base_from_env(monkeypatch, tmp_path):
@@ -95,6 +97,34 @@ def test_migrate_existing_initializes_both_databases(tmp_path):
             conn.close()
         assert row is not None
         assert int(row[0]) == result.schema_version
+
+
+def test_v2_marker_still_runs_later_schema_reconciliation(tmp_path):
+    settings = Settings.load(project_root=tmp_path)
+    settings.data_dir.mkdir(parents=True)
+    with sqlite3.connect(settings.triage_db_path) as conn:
+        conn.execute(
+            "CREATE TABLE schema_migrations (namespace TEXT PRIMARY KEY, version INTEGER NOT NULL,"
+            " applied_at TEXT DEFAULT (datetime('now')))"
+        )
+        conn.execute(
+            "INSERT INTO schema_migrations (namespace, version) VALUES ('triage', 2)"
+        )
+
+    migrate_existing(settings)
+
+    with sqlite3.connect(settings.triage_db_path) as conn:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        version = conn.execute(
+            "SELECT version FROM schema_migrations WHERE namespace = 'triage'"
+        ).fetchone()[0]
+    assert {"rss_feeds", "feed_key_aliases"} <= tables
+    assert version == SCHEMA_VERSION
 
 
 def test_apply_schema_adds_verdict_source_and_backfills(tmp_path):

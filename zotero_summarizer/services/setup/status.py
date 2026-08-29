@@ -33,7 +33,9 @@ def _config_status() -> tuple[ConfigStatus, object | None]:
     try:
         config = read_config(config_path)
     except (pydantic.ValidationError, ValueError, yaml.YAMLError) as exc:
-        return ConfigStatus(present=True, valid=False, research_goals_count=0, error=str(exc)), None
+        return ConfigStatus(
+            present=True, valid=False, research_goals_count=0, error=str(exc)
+        ), None
     from zotero_summarizer.services.setup.validate import has_personal_goals
 
     goals = [g for g in (config.research_goals or []) if str(g).strip()]
@@ -44,7 +46,16 @@ def _config_status() -> tuple[ConfigStatus, object | None]:
 async def _llm_status(config: object | None) -> LlmStatus:
     """Return default-stage names, redacted key presence, and reachability."""
     if config is None:
-        return LlmStatus(api_key_present=False, reachable=False, detail="config invalid or missing")
+        return LlmStatus(
+            api_key_present=False, reachable=False, detail="config invalid or missing"
+        )
+    if not bool(getattr(config, "llm_enabled", True)):
+        return LlmStatus(
+            enabled=False,
+            api_key_present=False,
+            reachable=False,
+            detail="AI features are disabled; ML-only triage remains available",
+        )
     resolved = resolve_stage(config.llm_routing, "deep_review")  # type: ignore[attr-defined]
     provider, model = resolved.provider, resolved.model
     preset_local = provider.is_local and provider.api_key_env == "OLLAMA_API_KEY"
@@ -135,9 +146,12 @@ async def get_setup_status() -> SetupStatusResponse:
     from zotero_summarizer.services.setup.doctor import doctor_status
 
     verified = bool(doctor_status(settings()).get("ready"))
-    configured = bool(config_status.valid and config_status.research_goals_count > 0
-                      and llm.api_key_present)
-    ready = bool(configured and llm.reachable and verified)
+    configured = bool(
+        config_status.valid
+        and config_status.research_goals_count > 0
+        and (not llm.enabled or llm.api_key_present)
+    )
+    ready = bool(configured and (not llm.enabled or llm.reachable) and verified)
 
     return SetupStatusResponse(
         configured=configured,

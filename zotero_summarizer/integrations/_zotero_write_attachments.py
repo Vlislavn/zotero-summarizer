@@ -46,7 +46,6 @@ class ZoteroAttachmentWriteMixin:
         payload: dict[str, Any],
         item_columns: set[str],
         item_data_columns: set[str],
-        item_data_value_columns: set[str],
     ) -> None:
         """Attach a local file (``payload['source_path']``) to the parent item
         ``item_key`` as a native imported_url Zotero attachment. Defaults to a PDF;

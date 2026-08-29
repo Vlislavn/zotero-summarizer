@@ -23,7 +23,7 @@ small set of shared/infra files at the top level.
 | `triage/` | the RSS daemon pipeline: feeds, summarization, selection, daily slate |
 | `library/` | Stage-2 reading: reading queue, deep/quality review, paper-read artifacts, feed review |
 | `search/` | Targeted Search — the query-driven *pull* surface (vs triage/library's *push*): topic → per-source query plan → concurrent federation (arXiv/EuropePMC/OpenAlex) → version-family dedup → cross-encoder query score under a constrained re-rank contract → light-review tier (quality before deep-set selection) → query-lensed deep read. Composes `library`'s read-only review layers; the only Zotero write is the explicit *Add to library* action (`materialize.py`). See `search/README.md`. |
-| `sync/` | local-first PWA boundary: compact paper snapshots + durable cursor pull; ordered UUID verdict/note mutations with per-field conflicts and explicit auditable resolution |
+| `sync/` | same-machine local-first PWA boundary: compact paper snapshots + durable cursor pull; ordered UUID verdict/note mutations with per-field conflicts and explicit auditable resolution; applied writes share online training/materialization/Zotero effects. Remote mobile remains disabled-by-deployment until auth + HTTPS exist |
 | `research_feed/` | bounded weekly Research Intelligence: profile/taxonomy, RSS adapter, existing deep-review reuse, engineering cards, JSON/Markdown, and opt-in idempotent tag queue |
 | `zotero/` | write path: pending changes, note rendering, Zotero read helpers |
 | `llm/` | provider presets, OS-keyring/env credential resolution, per-stage clients, model discovery and operational checks. See `llm/README.md`. |

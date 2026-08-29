@@ -10,7 +10,10 @@ function openDb() {
       req.result.createObjectStore('mutations', { keyPath: 'mutation_id' });
       req.result.createObjectStore('meta', { keyPath: 'key' });
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      req.result.onversionchange = () => req.result.close();
+      resolve(req.result);
+    };
     req.onerror = () => reject(req.error);
   });
   return database;
@@ -45,11 +48,25 @@ export async function cachedResponse(key) {
   return getMeta(`response:${key}`);
 }
 
-export async function savePapers(rows) {
+export async function savePapers(rows, refreshDetails = false) {
   const db = await openDb();
   await new Promise((resolve, reject) => {
-    const tx = db.transaction('papers', 'readwrite');
-    for (const row of rows || []) tx.objectStore('papers').put(row);
+    const tx = db.transaction(refreshDetails ? ['papers', 'meta'] : ['papers'], 'readwrite');
+    const papers = tx.objectStore('papers');
+    const meta = refreshDetails ? tx.objectStore('meta') : null;
+    for (const row of rows || []) {
+      papers.put(row);
+      if (meta) {
+        const key = `response:review:${row.item_key}`;
+        const cached = meta.get(key);
+        cached.onsuccess = () => {
+          if (!cached.result?.value) return;
+          meta.put({ key, value: {
+            ...cached.result.value, verdict: row.verdict, user_note: row.review_note,
+          } });
+        };
+      }
+    }
     tx.oncomplete = resolve;
     tx.onerror = () => reject(tx.error);
   });
@@ -59,39 +76,45 @@ export async function allPapers() {
   return request((await store('papers')).getAll());
 }
 
-async function deviceId() {
-  let id = await getMeta('device_id');
-  if (!id) {
-    id = crypto.randomUUID();
-    await setMeta('device_id', id);
-  }
-  return id;
-}
-
 export async function queueMutation({ item_key, field, operation = 'set', value = null, comment = null }) {
-  const paperStore = await store('papers');
-  const paper = await request(paperStore.get(item_key)) || { item_key, title: item_key, revisions: {} };
-  // ponytail: UI saves are serialized; use one meta+mutation transaction if callers enqueue concurrently.
-  const sequence = (await getMeta('mutation_sequence', 0)) + 1;
-  await setMeta('mutation_sequence', sequence);
-  const mutation = {
-    mutation_id: crypto.randomUUID(), device_id: await deviceId(), item_key, field,
-    operation, value, comment, base_revision: paper.revisions?.[field] || 0,
-    created_at: new Date().toISOString(), sequence, status: 'pending',
-  };
-  await request((await store('mutations', 'readwrite')).put(mutation));
-  if (field === 'verdict') {
-    paper.verdict = operation === 'delete' ? null : { user_priority: value, comment: comment || '', source: 'user' };
-  } else {
-    paper.review_note = operation === 'delete' ? null : value;
-  }
-  await request((await store('papers', 'readwrite')).put(paper));
-  const detail = await cachedResponse(`review:${item_key}`);
-  if (detail) {
-    if (field === 'verdict') detail.verdict = paper.verdict;
-    else detail.user_note = paper.review_note;
-    await cacheResponse(`review:${item_key}`, detail);
-  }
+  const db = await openDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(['papers', 'mutations', 'meta'], 'readwrite');
+    const papers = tx.objectStore('papers');
+    const mutations = tx.objectStore('mutations');
+    const meta = tx.objectStore('meta');
+    Promise.all([
+      request(papers.get(item_key)), request(meta.get('mutation_sequence')),
+      request(meta.get('device_id')), request(meta.get(`response:review:${item_key}`)),
+    ]).then(([storedPaper, storedSequence, storedDevice, storedDetail]) => {
+      const paper = storedPaper || { item_key, title: item_key, revisions: {} };
+      const sequence = (storedSequence?.value || 0) + 1;
+      const device = storedDevice?.value || crypto.randomUUID();
+      const mutation = {
+        mutation_id: crypto.randomUUID(), device_id: device, item_key, field,
+        operation, value, comment, model_priority: paper.model_priority || paper.reading_priority || null,
+        base_revision: paper.revisions?.[field] || 0,
+        created_at: new Date().toISOString(), sequence, status: 'pending',
+      };
+      if (field === 'verdict') {
+        paper.verdict = operation === 'delete' ? null : { user_priority: value, comment: comment || '', source: 'user' };
+      } else {
+        paper.review_note = operation === 'delete' ? null : value;
+      }
+      const detail = storedDetail?.value;
+      if (detail) {
+        if (field === 'verdict') detail.verdict = paper.verdict;
+        else detail.user_note = paper.review_note;
+        meta.put({ key: `response:review:${item_key}`, value: detail });
+      }
+      meta.put({ key: 'mutation_sequence', value: sequence });
+      meta.put({ key: 'device_id', value: device });
+      mutations.put(mutation);
+      papers.put(paper);
+    }).catch(reject);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
   await publishStatus('Saved on device');
   return { saved_offline: true, queued: true };
 }
@@ -100,7 +123,8 @@ export async function pendingMutations() {
   const rows = await request((await store('mutations')).getAll());
   return rows.filter((row) => row.status === 'pending').sort((a, b) => (
     Number.isInteger(a.sequence) && Number.isInteger(b.sequence)
-      ? a.sequence - b.sequence : a.created_at.localeCompare(b.created_at)
+      ? a.sequence - b.sequence || a.mutation_id.localeCompare(b.mutation_id)
+      : a.created_at.localeCompare(b.created_at) || a.mutation_id.localeCompare(b.mutation_id)
   ));
 }
 
@@ -130,7 +154,7 @@ export async function applyPushResults(results) {
 }
 
 export async function applyPull(payload) {
-  await savePapers(payload.papers || []);
+  await savePapers(payload.papers || [], true);
   await setMeta('cursor', payload.cursor || 0);
   await publishStatus();
 }

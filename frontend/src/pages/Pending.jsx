@@ -246,12 +246,16 @@ export default function Pending() {
         return;
       }
       const inboxRemoved = Number(data?.inbox_removed || 0);
-      setMessage(
-        inboxRemoved > 0
+      const applied = Number(data?.applied || 0);
+      const failed = Number(data?.failed || 0);
+      if (failed > 0) {
+        setMessage(`${applied} change(s) applied; ${failed} failed. Open the Failed tab to retry.`);
+      } else {
+        setMessage(inboxRemoved > 0
           ? `Selected changes applied. Removed from Inbox: ${inboxRemoved}.`
-          : 'Selected changes applied.',
-      );
-      setIsError(false);
+          : 'Selected changes applied.');
+      }
+      setIsError(failed > 0);
       load(status);
     },
     rollback: (err, _vars, ctx) => {

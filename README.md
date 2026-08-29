@@ -22,9 +22,9 @@ Zotero remains the PDF/citation surface and a synced representation of approved 
 - **Zotero desktop**, plus at least one **RSS feed** added in the app (arXiv,
   bioRxiv, or a **PubMed** saved search — see [docs/usage.md](docs/usage.md)
   "Adding sources"); existing Zotero feed subscriptions can be imported in one click
-- An **OpenAI-compatible LLM endpoint** — **local** (Ollama, vLLM, LM Studio,
-  `mlx_lm.server`) or **hosted** (any API). You provide the base URL + key.
-- *(developers only: Node 18+ to rebuild the UI — the built UI is already shipped)*
+- Optional: an **OpenAI-compatible LLM endpoint** — **local** (Ollama, vLLM,
+  LM Studio, `mlx_lm.server`) or **hosted** (any API). ML-only mode needs none.
+- **Node 20.19+** to build the browser UI from a clean checkout.
 
 **Hardware** — the app itself is light; the only heavy part is the **optional local LLM**:
 
@@ -44,7 +44,10 @@ The on-device ML (relevance gate + search) runs on **CPU** — no GPU required f
 # 1. Install (uv creates the env and installs from the lockfile)
 uv sync
 
-# 2. Run — first launch auto-creates goals.yaml + a .env skeleton and migrates the DB
+# 2. Build the browser UI (frontend/dist is generated, not committed)
+cd frontend && npm ci && npm run build && cd ..
+
+# 3. Run — first launch auto-creates goals.yaml + a .env skeleton and migrates the DB
 uv run zotero-summarizer serve
 ```
 
@@ -52,20 +55,20 @@ First run bootstraps everything and the in-app **`/setup` wizard** walks you thr
 rest — no manual file copying:
 
 ```
-uv sync ─▶ serve ─▶ open the app ─▶ /setup wizard ─▶ set ONE secret in .env ─▶ Triage backlog
-            (auto-bootstrap        Connect Zotero    by the env-var NAME the
-             goals.yaml/.env       Connect LLM       wizard shows you (e.g.
-             + migrate the DB)     Describe research  OPENAI_API_KEY) — then restart
+install ─▶ build UI ─▶ serve ─▶ /setup wizard ─▶ Today
+                               Connect Zotero
+                               Choose AI or ML-only
+                               Describe research
 ```
 
 Open <http://127.0.0.1:8000/>. A brand-new install lands on the **`/setup` wizard**
-(Connect Zotero → Connect LLM → Describe research) with Zotero-path auto-detect and a live
-LLM connection test. Prefer the terminal? Run `uv run zotero-summarizer setup` for the same
-guided flow headless.
+(Connect Zotero → choose AI-assisted or ML-only → Describe research) with Zotero-path
+auto-detect and an optional live LLM connection test. The web wizard can store an entered
+API key in the OS keyring and never returns it to the browser. The headless CLI asks only for
+an env-var name and saves the chosen routing before its optional probe. Use
+`setup --mode no-llm` when you want classifier-only triage without an endpoint.
 
-The wizard never asks for your raw API key — it collects the **env-var name** that holds it
-(e.g. `OPENAI_API_KEY`). You set the actual secret value yourself in `.env` (or your shell),
-then restart. With Zotero and the LLM connected, go to **Today** and click **Triage backlog**
+After setup, go to **Today** and click **Triage backlog**
 to score your unread feed papers, then start culling. *(Going offline? Run `uv run
 zotero-summarizer prefetch-models` once while online — see [docs/usage.md](docs/usage.md).)*
 
@@ -90,11 +93,11 @@ run** — no templates to copy:
 
 | File | You touch | Managed by |
 |---|---|---|
-| `.env` | the **one secret** (your API key, set by the name the wizard shows) | the app writes the two Zotero paths here for you via the `/setup` wizard / `setup` CLI |
+| `.env` | optional CLI-managed API-key environment values | the app writes the two Zotero paths here via the `/setup` wizard / `setup` CLI; the web wizard stores pasted keys in the OS keyring |
 | `goals.yaml` | nothing by hand | app-authored — edit research goals + LLM routing in **Settings**, don't hand-edit |
 
 The Settings page is split into **Essentials** (research goals, triage criteria, the default
-LLM provider, Zotero paths — always visible) and a collapsible **Advanced** section (full
+AI on/off, LLM provider, Zotero paths — always visible) and a collapsible **Advanced** section (full
 stage routing, classifier gate, corpus). Secrets stay **name-only** everywhere in the UI: it
 collects the env-var name, never the raw value. Everything else has working defaults. Full
 reference in [docs/usage.md](docs/usage.md).
@@ -104,6 +107,8 @@ reference in [docs/usage.md](docs/usage.md).
 ```bash
 uv run zotero-summarizer serve            # FastAPI server + browser UI (auto-bootstraps on first run)
 uv run zotero-summarizer setup            # headless guided onboarding (same flow as the /setup wizard)
+uv run zotero-summarizer doctor           # verify the real configured pipeline
+uv run zotero-summarizer calibrate        # optional measured runtime calibration
 uv run zotero-summarizer migrate          # init / upgrade the local databases (serve does this for you)
 uv run zotero-summarizer prefetch-models  # download ML models for offline use (--check = status)
 uv run zotero-summarizer feeds serve      # optional background daemon (auto-triage + daily pick)

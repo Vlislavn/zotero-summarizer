@@ -22,9 +22,12 @@ Vite proxies `/api/*` to `http://localhost:8000`; `npm run build` writes
 Legacy `/annotate`, `/review`, `/triage`, and `/pending` links redirect without
 dropping query parameters.
 
+Search coverage hits reuse their existing Zotero key: the card says In library
+and the server command cannot create a duplicate even if called directly.
+
 ## Setup and AI
 
-`/setup` is a skippable Zotero → AI → research wizard. Saving immediately
+`/setup` is a skippable Zotero → AI-assisted/ML-only → research wizard. Saving immediately
 unlocks Today; verification is optional and explicit. The wizard and Settings
 share the compact server-side Doctor checklist. The gate uses backend
 `configured`; stricter operational `ready` remains diagnostic.
@@ -34,6 +37,8 @@ the OS credential store; the UI receives only presence/source metadata. Local
 profiles are hardware-gated and show an explicit pull command—the app never
 starts a download. Advanced routing and unsurfaced config round-trip through
 `utils/configForm.js`. Provider/model saves hot-swap; path changes need restart.
+ML-only mode is a first-class completed setup state: readiness and paper review
+show AI off rather than reporting an unreachable model, and Settings can re-enable it.
 
 ## Paper review
 
@@ -43,12 +48,15 @@ signals cap recommendations while provenance retains raw output. HTML briefs and
 figures live beside source PDFs for Zotero compatibility.
 
 Missing-full-text recovery is one shared notice on every review surface. A missing
-optional browser package links to Settings; only an attempted authenticated fetch
-offers publisher sign-in, so installing support and refreshing a session are never
-presented as the same action.
+optional browser package links to Settings; an attempted authenticated fetch links
+to the University access control that opens the app's persistent browser profile.
+Opening the publisher in an unrelated default profile is never presented as recovery.
 
 Fleet suggestions are proposals only: Confirm/Override writes them, and
 low-confidence or flagged proposals offer Override only.
+
+Feed Review bulk confirmation sends the exact visible row IDs; Pending treats a
+partially failed HTTP-200 batch as an error and points to the Failed tab.
 
 ## Offline boundary
 
@@ -57,8 +65,17 @@ snapshots, a sync cursor, and a UUID mutation outbox. Verdicts/notes queue only
 on network failure; conflicts require Keep mine / Use server. PDFs, AI,
 annotation, acquisition, and rescoring remain server-only.
 
-The IndexedDB test kills/reimports the client module and proves cached context
-plus a persisted sequence for rapid same-millisecond verdicts survive while the server is absent. Ask Paper sends a
+After reconnect, the server gives queued verdicts and notes the same training,
+feed-materialization, and Zotero-mirror effects as online saves. This is a
+same-machine loopback PWA boundary; remote mobile needs a future authenticated
+HTTPS deployment rather than exposing `/api/sync` directly.
+
+Sequence allocation, mutation insert, optimistic paper state, and cached-detail
+update share one IndexedDB transaction; pulls refresh both the compact paper and
+any cached review detail. A 15-second sync deadline releases a stuck focus sync,
+and protocol incompatibility explicitly asks for an app refresh. The IndexedDB
+test kills/reimports the client module and proves cached context
+plus ordered concurrent mutations survive while the server is absent. Ask Paper sends a
 bounded session history; the backend compacts older evidence to verified
 extraction handles, and the UI labels verified quotes without inventing pages.
 

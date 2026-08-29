@@ -83,10 +83,10 @@ export function FullTextAccessNotice({ deep }) {
     return (
       <div className={cls} role="status">
         <span className="font-semibold">Your library session could not access this paper.</span>{' '}
-        <a href={deep.login_url} target="_blank" rel="noopener noreferrer" className="font-medium text-indigo-700 hover:underline">
-          Open the publisher page
+        <a href="/settings#university-access" className="font-medium text-indigo-700 hover:underline">
+          Open University access
         </a>{' '}
-        to sign in, then generate again.
+        and sign in through the app&apos;s saved browser profile, then generate again.
       </div>
     );
   }

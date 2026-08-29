@@ -12,7 +12,7 @@ import ActiveModelsSummary from './ActiveModelsSummary.jsx';
 import LlmRoutingSection from '../LlmRoutingSection.jsx';
 import StepConnectLlm from '../setup/StepConnectLlm.jsx';
 
-export default function AiModelsSection({ status, routing, onChange, isDirty, open, onToggle }) {
+export default function AiModelsSection({ status, enabled, routing, onEnabledChange, onChange, isDirty, open, onToggle }) {
   const ref = useRef(null);
   const [testedOk, setTestedOk] = useState(false);
 
@@ -24,10 +24,23 @@ export default function AiModelsSection({ status, routing, onChange, isDirty, op
 
   return (
     <section id="ai-models" className="glass rounded-2xl border border-slate-200 p-4 space-y-4 scroll-mt-20">
-      <StepConnectLlm status={status} routing={routing} onPatchRouting={onChange}
-        testedOk={testedOk} onTested={setTestedOk} />
+      <label className="flex items-start gap-2 text-sm text-slate-700">
+        <input type="checkbox" className="mt-0.5" checked={enabled}
+          onChange={(event) => onEnabledChange(event.target.checked)} />
+        <span><span className="font-semibold">Enable AI-assisted features</span>
+          <span className="block text-xs text-slate-500">Turn off for ML-only feed and backlog triage.</span></span>
+      </label>
 
-      <details
+      {enabled ? (
+        <StepConnectLlm status={status} routing={routing} onPatchRouting={onChange}
+          testedOk={testedOk} onTested={setTestedOk} />
+      ) : (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          AI reviews, Ask Paper, and model-written summaries are off. Feed scoring and classifier triage still work.
+        </div>
+      )}
+
+      {enabled && <details
         ref={ref}
         open={open}
         onToggle={(e) => onToggle?.(e.currentTarget.open)}
@@ -46,7 +59,7 @@ export default function AiModelsSection({ status, routing, onChange, isDirty, op
           <ActiveModelsSummary routing={routing} onEdit={() => {}} />
           <LlmRoutingSection value={routing} onChange={onChange} isDirty={isDirty} />
         </div>
-      </details>
+      </details>}
     </section>
   );
 }

@@ -1,4 +1,5 @@
 """Deployment routing and supported local-model profiles."""
+
 from __future__ import annotations
 
 import shutil
@@ -54,7 +55,9 @@ _LOCAL_URL = "http://localhost:11434/v1"
 
 def hardware_snapshot(settings: Any) -> dict[str, float]:
     """Portable RAM/free-disk facts used by both profile front-ends."""
-    data_parent = settings.data_dir if settings.data_dir.exists() else settings.data_dir.parent
+    data_parent = (
+        settings.data_dir if settings.data_dir.exists() else settings.data_dir.parent
+    )
     return {
         "memory_gb": round(psutil.virtual_memory().total / 1024**3, 1),
         "disk_free_gb": round(shutil.disk_usage(data_parent).free / 1024**3, 1),
@@ -75,8 +78,12 @@ def local_profile_catalog(settings: Any) -> dict[str, Any]:
             reasons.append(f"needs {profile['min_disk_gb']} GB free disk")
         row = {"id": name, **profile, "compatible": memory_ok and disk_ok}
         row["provider"] = _local_provider(_LOCAL_URL).model_dump(mode="json")
-        row["compatibility_detail"] = "; ".join(reasons) or "Compatible with detected hardware"
-        row["pull_command"] = f"ollama pull {profile['model']}" if profile["model"] else None
+        row["compatibility_detail"] = (
+            "; ".join(reasons) or "Compatible with detected hardware"
+        )
+        row["pull_command"] = (
+            f"ollama pull {profile['model']}" if profile["model"] else None
+        )
         rows.append(row)
     return {"version": LOCAL_PROFILE_VERSION, "hardware": hardware, "profiles": rows}
 
@@ -109,14 +116,14 @@ def apply_local_profile(
         raise ValueError("the existing-endpoint profile needs a model")
     provider = _local_provider(endpoint)
     raw = config.llm_routing.model_dump(mode="python")
-    raw["providers"] = [
-        p for p in raw["providers"] if p["name"] != provider.name
-    ] + [provider.model_dump(mode="python")]
+    raw["providers"] = [p for p in raw["providers"] if p["name"] != provider.name] + [
+        provider.model_dump(mode="python")
+    ]
     raw["default"] = {"provider": provider.name, "model": chosen_model}
     for stage in _STAGES:
         raw[stage] = {"provider": provider.name, "model": chosen_model}
     routing = LLMRoutingConfig.model_validate(raw)
-    return config.model_copy(update={"llm_routing": routing})
+    return config.model_copy(update={"llm_enabled": True, "llm_routing": routing})
 
 
 def set_local_profile(
@@ -151,5 +158,7 @@ def set_local_profile(
         "endpoint": endpoint,
         "source": row["source"],
         "size_gb": row["size_gb"],
-        "pull_command": f"ollama pull {resolved_model}" if profile_name != "existing" else None,
+        "pull_command": f"ollama pull {resolved_model}"
+        if profile_name != "existing"
+        else None,
     }

@@ -118,11 +118,11 @@ def test_list_models_for_provider_openai_sorts_and_dedupes(monkeypatch):
         ),
     )
     provider = ProviderConfig(
-        name="local", base_url="http://h/v1", api_key_env="LOCAL_KEY"
+        name="local", base_url="http://localhost:11434/v1", api_key_env="LOCAL_KEY"
     )
     out = model_list.list_models_for_provider(provider)
     assert out == ["a", "b"]  # sorted + de-duplicated
-    assert seen == {"base_url": "http://h/v1", "api_key": "secret"}
+    assert seen == {"base_url": "http://localhost:11434/v1", "api_key": "local"}
 
 
 def test_list_openai_models_raises_model_list_error_on_transport_failure(monkeypatch):
@@ -153,7 +153,7 @@ def test_list_models_for_provider_maps_unreachable_to_502(monkeypatch):
 
     monkeypatch.setattr(llm_models, "list_openai_models", _boom)
     provider = ProviderConfig(
-        name="local", base_url="http://h/v1", api_key_env="LOCAL_KEY"
+        name="local", base_url="http://localhost:11434/v1", api_key_env="LOCAL_KEY"
     )
     with pytest.raises(APIError) as ei:
         model_list.list_models_for_provider(provider)
@@ -188,13 +188,37 @@ def test_list_models_for_provider_missing_key_raises_apierror(monkeypatch):
     from zotero_summarizer.api.errors import APIError
     from zotero_summarizer.services.llm import model_list
 
-    monkeypatch.delenv("LOCAL_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(
+        "zotero_summarizer.services.llm.credentials.keyring.get_password",
+        lambda _service, _name: None,
+    )
     provider = ProviderConfig(
-        name="local", base_url="http://h/v1", api_key_env="LOCAL_KEY"
+        name="openrouter", base_url="https://openrouter.ai/api/v1",
+        api_key_env="OPENROUTER_API_KEY",
     )
     with pytest.raises(APIError) as ei:
         model_list.list_models_for_provider(provider)
     assert ei.value.error == "missing_api_key" and ei.value.status_code == 400
+
+
+def test_model_discovery_rejects_arbitrary_remote_secret_destination(monkeypatch):
+    from zotero_summarizer.api.errors import APIError
+    from zotero_summarizer.services.llm import model_list
+
+    monkeypatch.setattr(
+        model_list, "resolve_api_key",
+        lambda _provider: pytest.fail("credential must not be resolved"),
+    )
+    provider = ProviderConfig(
+        name="attacker", base_url="https://example.invalid/v1",
+        api_key_env="OPENROUTER_API_KEY",
+    )
+
+    with pytest.raises(APIError) as exc:
+        model_list.list_models_for_provider(provider)
+
+    assert exc.value.error == "unsafe_provider_discovery"
 
 
 def test_llm_models_route_returns_provider_shape(monkeypatch):

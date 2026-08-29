@@ -99,7 +99,8 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
   never a junk auto-create), builds a create-item payload FROM the Candidate (a LIST
   of authors + `publication_date`, NOT the ranker's `to_scoring_dict` shape), writes
   atomically via `apply_feed_materialization` (a locked DB after retries → 503, no
-  fake success), then stamps `materialized_zotero_key` back. The whole
+  fake success). A coverage hit reuses `existing_zotero_key` instead of creating a
+  duplicate; either path then stamps `materialized_zotero_key` back. The whole
   check-write-stamp runs under the session lock (`session.materialize_once`), so a
   concurrent auto-review can't lose the key AND two simultaneous Add clicks on one
   candidate write exactly once. Idempotent (re-add returns the existing key).
@@ -118,7 +119,7 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
 | `_targeted_review.py` | query-lensed deep read (composes library read-only layers; sections are currently empty, so that unused parameter is not exposed) |
 | `_fulltext.py` | OA full-text acquisition for a federated (non-Zotero) candidate: PMC → Europe PMC `fullTextXML` (a PMCID hit), else identifier → OA PDF |
 | `pipeline.py` | `run_screen` (fast) + `run_review` (slow) + dependencies; strict offline rejects before external search |
-| `materialize.py` | the one Search→Zotero write: `materialize_candidate(session_id, candidate_id, collection_key)` — resolve+validate collection (pre-lock 400), Candidate→feed_payload adapter, then check-write-stamp under the session lock via `session.materialize_once` (concurrent Adds write once) |
+| `materialize.py` | the one Search→Zotero write: `materialize_candidate(session_id, candidate_id, collection_key)` — resolve+validate collection (pre-lock 400), reuse a coverage hit or adapt Candidate→feed_payload, then check-write-stamp under the session lock via `session.materialize_once` (concurrent Adds write once) |
 | `refine.py` | bounded opt-in agentic PRF before auto-review; no-ops under strict offline |
 | `session.py` | one-JSON-per-session persistence under `settings().search_dir` + per-session lock: `claim` (status CAS, single-flights the worker), `save_merge` (whole-session save that preserves a concurrent Add's `materialized_zotero_key`), `update` (read-modify-write), `materialize_once` (Add's check-write-stamp under the lock, single-write). Malformed id → `APIError(400)` |
 

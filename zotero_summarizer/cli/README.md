@@ -35,3 +35,5 @@ main() = build_parser().parse_args(argv).func(args)
 | `_research_feed.py` | `research-feed run --from … --to … [--venue …]`: bounded weekly JSON+Markdown; generates missing cards through existing deep review unless `--cached-only`; Zotero stays dry-run unless `--queue-zotero` is explicit. |
 
 Handlers use lazy imports inside the function bodies to keep CLI startup fast.
+Hosted setup persists routing before its optional probe; `setup --mode no-llm`
+persists a valid ML-only choice that can later be changed in Settings.

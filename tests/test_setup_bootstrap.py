@@ -1,4 +1,5 @@
 """Phase-0 bootstrap is idempotent, non-destructive, and migration-safe."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -60,8 +61,13 @@ def test_present_files_are_not_overwritten(tmp_path):
     assert result.created_goals is False
     assert result.created_env is False
     # Content is byte-for-byte unchanged.
-    assert settings.config_path.read_text(encoding="utf-8") == "research_goals: [keep-me]\n"
-    assert settings.env_path.read_text(encoding="utf-8") == "OPENAI_API_KEY=sk-existing\n"
+    assert (
+        settings.config_path.read_text(encoding="utf-8")
+        == "research_goals: [keep-me]\n"
+    )
+    assert (
+        settings.env_path.read_text(encoding="utf-8") == "OPENAI_API_KEY=sk-existing\n"
+    )
 
 
 def test_idempotent_second_run_is_noop(tmp_path):
@@ -76,6 +82,8 @@ def test_idempotent_second_run_is_noop(tmp_path):
 
 
 def test_existing_triage_still_migrates_missing_corpus(tmp_path):
+    from zotero_summarizer.storage.migrations import SCHEMA_VERSION
+
     settings = _settings(tmp_path)
     settings.data_dir.mkdir(parents=True)
     sqlite3.connect(settings.triage_db_path).close()
@@ -89,9 +97,10 @@ def test_existing_triage_still_migrates_missing_corpus(tmp_path):
     ):
         with sqlite3.connect(db_path) as conn:
             version = conn.execute(
-                "SELECT version FROM schema_migrations WHERE namespace = ?", (namespace,),
+                "SELECT version FROM schema_migrations WHERE namespace = ?",
+                (namespace,),
             ).fetchone()
-        assert version == (2,)
+        assert version == (SCHEMA_VERSION,)
 
 
 def test_default_goals_validate_as_goalsconfig(tmp_path):

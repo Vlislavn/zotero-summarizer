@@ -6,6 +6,7 @@ reconstruct the note/payload/tags from the persisted ``processed_feed_items``
 row (re-querying the original Zotero feed item for fresh metadata) and write the
 item — Inbox + matched collections + tags + v3 note — flipping its DB decision.
 """
+
 from __future__ import annotations
 
 import json
@@ -93,9 +94,15 @@ def _materialize_summary(pick: _PendingScoredRow) -> tuple[SummarizeResponse, st
     try:
         stored = pick_stored_summary(pick.row)
     except (ValueError, TypeError, json.JSONDecodeError) as exc:
-        LOGGER.warning("invalid persisted summary for %s; using legacy fallback: %s", pick.key, exc)
+        LOGGER.warning(
+            "invalid persisted summary for %s; using legacy fallback: %s", pick.key, exc
+        )
         stored = None
-    return (stored, "persisted_summary") if stored is not None else (_summary_from_row(pick.row), "legacy_sparse")
+    return (
+        (stored, "persisted_summary")
+        if stored is not None
+        else (_summary_from_row(pick.row), "legacy_sparse")
+    )
 
 
 def _feed_payload_from_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -200,7 +207,9 @@ def materialize_pick(
     """
     LOGGER.info(
         "[%s] → inbox: %r  composite=%.2f%s",
-        run_id, str(pick.row.get("title") or "")[:60], pick.composite_score,
+        run_id,
+        str(pick.row.get("title") or "")[:60],
+        pick.composite_score,
         "  [black-swan]" if pick.is_black_swan else "",
     )
     try:
@@ -209,7 +218,9 @@ def materialize_pick(
         summary, summary_source = _materialize_summary(pick)
         feed_payload = _feed_payload_from_row(pick.row)
         matched = _matched_collections_from_row(pick.row)
-        tags = _tags_from_row(is_black_swan=pick.is_black_swan, black_swan_tag=ctx.black_swan_tag)
+        tags = _tags_from_row(
+            is_black_swan=pick.is_black_swan, black_swan_tag=ctx.black_swan_tag
+        )
         note_html = pending_service.build_triage_note_html(
             title=str(pick.row.get("title") or ""),
             summary=summary,
@@ -218,9 +229,14 @@ def materialize_pick(
             run_id=run_id,
         )
         words = len(re.findall(r"\b[\w'-]+\b", re.sub(r"<[^>]+>", " ", note_html)))
-        LOGGER.info("[%s] note source=%s words=%d sections=%d generic_fallback=%s",
-                    run_id, summary_source, words, note_html.count("<h2>"),
-                    summary_source == "legacy_sparse")
+        LOGGER.info(
+            "[%s] note source=%s words=%d sections=%d generic_fallback=%s",
+            run_id,
+            summary_source,
+            words,
+            note_html.count("<h2>"),
+            summary_source == "legacy_sparse",
+        )
         writer.apply_feed_materialization(
             new_item_key=new_key,
             feed_payload=feed_payload,
@@ -230,7 +246,6 @@ def materialize_pick(
             note_title=f"Triage: {str(pick.row.get('title') or '')[:80]}",
             note_html=note_html,
             provenance_tag=pending_service.SYSTEM_TAG_FEEDS_V3,
-            create_backup=False,
         )
         decision = (
             feeds_storage.DECISION_BLACK_SWAN
@@ -243,7 +258,9 @@ def materialize_pick(
                 feed_library_id=int(pick.row.get("feed_library_id") or 0),
                 feed_item_id=int(pick.row.get("feed_item_id") or 0),
                 decision=decision,
-                decision_reason=ctx.decision_reason if not pick.is_black_swan else "surprise_pick",
+                decision_reason=ctx.decision_reason
+                if not pick.is_black_swan
+                else "surprise_pick",
                 is_black_swan=pick.is_black_swan,
                 planned_zotero_key=new_key,
             )
@@ -257,7 +274,9 @@ def materialize_pick(
             conn.commit()
         LOGGER.info(
             "[%s] materialized: %r  key=%s",
-            run_id, str(pick.row.get("title") or "")[:60], new_key,
+            run_id,
+            str(pick.row.get("title") or "")[:60],
+            new_key,
         )
         return None
     except Exception as exc:
@@ -265,7 +284,9 @@ def materialize_pick(
         if "triaged_pending" in _exc_str or "database is locked" in _exc_str.lower():
             LOGGER.warning(
                 "[%s] materialization deferred for key %s (DB locked — item queued for next selection run): %s",
-                run_id, pick.key, exc,
+                run_id,
+                pick.key,
+                exc,
             )
         else:
             LOGGER.exception("[%s] materialization failed for key %s", run_id, pick.key)

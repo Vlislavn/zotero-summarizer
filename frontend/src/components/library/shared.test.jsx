@@ -25,6 +25,9 @@ it('keeps attempted access failure distinct from missing full text', () => {
     needs_pdf: true, needs_login: true, login_url: 'https://publisher.example/login',
   }} />);
   expect(screen.getByText(/session could not access/i)).toBeTruthy();
+  expect(screen.getByRole('link', { name: /university access/i }).getAttribute('href'))
+    .toBe('/settings#university-access');
+  expect(screen.queryByRole('link', { name: /publisher page/i })).toBeNull();
   first.unmount();
 
   render(<FullTextAccessNotice deep={{ needs_pdf: true, needs_login: false }} />);

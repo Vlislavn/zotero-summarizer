@@ -1,4 +1,5 @@
 """Setup draft validation remains read-only and reports field errors."""
+
 from __future__ import annotations
 
 import asyncio
@@ -40,6 +41,14 @@ def test_valid_config_no_errors_connection_null_when_not_tested():
     resp = _run(validate_config_draft(req))
     assert resp.valid is True
     assert resp.field_errors == []
+    assert resp.connection is None
+
+
+def test_ml_only_config_is_valid_without_a_connection_probe():
+    good = _valid_config_dict()
+    good["llm_enabled"] = False
+    resp = _run(validate_config_draft(ValidateConfigRequest(config=good)))
+    assert resp.valid is True
     assert resp.connection is None
 
 
@@ -98,7 +107,10 @@ def test_connection_reports_fail_without_raising(monkeypatch):
     monkeypatch.setattr(
         validate_mod.operational_check,
         "probe_provider",
-        lambda provider, model: {"status": "fail", "detail": "ConnectionError: refused"},
+        lambda provider, model: {
+            "status": "fail",
+            "detail": "ConnectionError: refused",
+        },
     )
 
     def _boom(provider):

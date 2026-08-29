@@ -1,4 +1,5 @@
 """App-owned RSS reader backed by ``rss_feeds`` / ``rss_items``."""
+
 from __future__ import annotations
 
 import ipaddress
@@ -54,7 +55,11 @@ def validate_rss_url(url: str) -> str:
     host = parts.hostname
     _reject_private_ip(host)
     try:
-        infos = socket.getaddrinfo(host, parts.port or (443 if parts.scheme == "https" else 80), type=socket.SOCK_STREAM)
+        infos = socket.getaddrinfo(
+            host,
+            parts.port or (443 if parts.scheme == "https" else 80),
+            type=socket.SOCK_STREAM,
+        )
     except socket.gaierror as exc:
         raise RssUrlRejected(f"RSS hostname could not be resolved: {host}") from exc
     if not infos:
@@ -65,10 +70,21 @@ def validate_rss_url(url: str) -> str:
     return safe_url
 
 
+def validate_public_response_peer(response: httpx.Response) -> None:
+    """Verify the connected peer, closing the DNS-validation race."""
+    stream = response.extensions.get("network_stream")
+    peer = stream.get_extra_info("server_addr") if stream is not None else None
+    if not peer:
+        raise RssUrlRejected("Could not verify the remote address")
+    _reject_private_ip(str(peer[0]))
+
+
 def _fetch_public_url(url: str, *, timeout: float) -> tuple[str, httpx.Headers]:
     current = validate_rss_url(url)
     for _ in range(5):
-        with httpx.Client(follow_redirects=False, timeout=timeout, trust_env=False) as client:
+        with httpx.Client(
+            follow_redirects=False, timeout=timeout, trust_env=False
+        ) as client:
             resp = client.get(
                 current,
                 headers={
@@ -76,6 +92,7 @@ def _fetch_public_url(url: str, *, timeout: float) -> tuple[str, httpx.Headers]:
                     "User-Agent": "zotero-summarizer/0.1 RSS reader",
                 },
             )
+            validate_public_response_peer(resp)
         if 300 <= resp.status_code < 400 and resp.headers.get("location"):
             current = validate_rss_url(urljoin(current, str(resp.headers["location"])))
             continue
@@ -101,7 +118,9 @@ def _entry_authors(entry: Any) -> str:
     return "; ".join(names)
 
 
-def _entry_to_item(entry: Any, *, feed: dict[str, Any], feed_title: str) -> dict[str, Any]:
+def _entry_to_item(
+    entry: Any, *, feed: dict[str, Any], feed_title: str
+) -> dict[str, Any]:
     link = str(entry.get("link") or "").strip()
     entry_id = str(entry.get("id") or "").strip()
     guid = str(entry.get("guid") or entry_id or "").strip()
@@ -123,7 +142,9 @@ def _entry_to_item(entry: Any, *, feed: dict[str, Any], feed_title: str) -> dict
         "canonical_url": link,
         "doi": doi,
         "arxiv_id": arxiv_id,
-        "publication_date": str(entry.get("published") or entry.get("updated") or "").strip(),
+        "publication_date": str(
+            entry.get("published") or entry.get("updated") or ""
+        ).strip(),
         "publication_title": str(feed_title or feed.get("name") or "").strip(),
         "authors": _entry_authors(entry),
         "item_type": "journalArticle",
@@ -160,7 +181,13 @@ class AppRssReader:
         This does not score anything and does not call an LLM.
         """
         if offline_requested():
-            return {"feeds": 0, "inserted": 0, "updated": 0, "errors": [], "offline": True}
+            return {
+                "feeds": 0,
+                "inserted": 0,
+                "updated": 0,
+                "errors": [],
+                "offline": True,
+            }
         import feedparser
 
         fetched = 0
@@ -176,15 +203,23 @@ class AppRssReader:
             for feed in feeds:
                 fetched += 1
                 try:
-                    body, headers = _fetch_public_url(str(feed["url"]), timeout=float(per_feed_timeout))
+                    body, headers = _fetch_public_url(
+                        str(feed["url"]), timeout=float(per_feed_timeout)
+                    )
                     parsed = feedparser.parse(body)
-                    feed_title = str((parsed.feed or {}).get("title") or feed.get("name") or "")
-                    for entry in list(parsed.entries or [])[: max(0, int(max_new_items_per_feed))]:
+                    feed_title = str(
+                        (parsed.feed or {}).get("title") or feed.get("name") or ""
+                    )
+                    for entry in list(parsed.entries or [])[
+                        : max(0, int(max_new_items_per_feed))
+                    ]:
                         item = _entry_to_item(entry, feed=feed, feed_title=feed_title)
                         if not item.get("stable_feed_key"):
                             continue
                         item_id, was_inserted = rss_storage.upsert_rss_item(
-                            conn, rss_feed_id=int(feed["id"]), item=item,
+                            conn,
+                            rss_feed_id=int(feed["id"]),
+                            item=item,
                         )
                         conn.execute(
                             "UPDATE rss_items SET rss_feed_id = ? WHERE id = ?",
@@ -202,11 +237,23 @@ class AppRssReader:
                     conn.commit()
                 except Exception as exc:
                     rss_storage.record_rss_fetch_result(
-                        conn, int(feed["id"]), error=f"{type(exc).__name__}: {exc}",
+                        conn,
+                        int(feed["id"]),
+                        error=f"{type(exc).__name__}: {exc}",
                     )
                     conn.commit()
-                    errors.append({"feed": str(feed.get("name") or feed.get("id")), "error": str(exc)})
-        return {"feeds": fetched, "inserted": inserted, "updated": updated, "errors": errors}
+                    errors.append(
+                        {
+                            "feed": str(feed.get("name") or feed.get("id")),
+                            "error": str(exc),
+                        }
+                    )
+        return {
+            "feeds": fetched,
+            "inserted": inserted,
+            "updated": updated,
+            "errors": errors,
+        }
 
     def get_feed_groups(self) -> list[dict[str, Any]]:
         with self._conn() as conn:
@@ -255,7 +302,9 @@ class AppRssReader:
                     "source_type": "app_rss",
                     "stable_feed_key": str(row["stable_feed_key"] or ""),
                     "feed_name": str(row["feed_name"] or ""),
-                    "guid": str(row["guid"] or row["entry_id"] or row["stable_feed_key"] or ""),
+                    "guid": str(
+                        row["guid"] or row["entry_id"] or row["stable_feed_key"] or ""
+                    ),
                     "title": str(row["title"] or ""),
                     "abstract": str(row["abstract"] or ""),
                     "url": str(row["url"] or row["canonical_url"] or ""),

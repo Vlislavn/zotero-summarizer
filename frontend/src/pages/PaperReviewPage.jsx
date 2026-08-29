@@ -40,7 +40,11 @@ function ReviewZone({ deep, runner, sectionOverlay }) {
   const reviewed = deep && !deep.needs_pdf && (deep.digest || deep.quality || (deep.goal_summaries || []).length);
   return (
     <div className="space-y-3">
-      {llm && llm.reachable === false && (
+      {llm?.enabled === false ? (
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] text-slate-700">
+          AI reviews are off. Enable them in <span className="font-semibold">Settings → AI models</span>.
+        </div>
+      ) : llm && llm.reachable === false && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] leading-relaxed text-amber-800" role="alert">
           <span className="font-semibold">Deep-review model unreachable.</span>{' '}
           <span className="font-mono text-[12px]">{llm.model || '(model unset)'}</span> at{' '}
@@ -75,7 +79,7 @@ function ReviewZone({ deep, runner, sectionOverlay }) {
           <button
             type="button"
             onClick={() => runner.run()}
-            disabled={llm?.reachable === false}
+            disabled={llm?.enabled === false || llm?.reachable === false}
             className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-[13px] font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
           >
             Generate review

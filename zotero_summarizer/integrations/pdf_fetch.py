@@ -17,9 +17,15 @@ import logging
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urljoin
 
 import httpx
 
+from zotero_summarizer.integrations.app_rss import (
+    RssUrlRejected,
+    validate_public_response_peer,
+    validate_rss_url,
+)
 from zotero_summarizer.settings import offline_requested
 
 
@@ -35,6 +41,45 @@ _DEFAULT_TIMEOUT_SECS = 30.0
 _DEFAULT_CACHE_DIR = Path.home() / ".cache" / "zotero-summarizer" / "pdfs"
 
 _ARXIV_ID_RE = re.compile(r"\b(\d{4}\.\d{4,5})(v\d+)?\b")
+_MAX_REDIRECTS = 5
+
+
+def _read_pdf_response(resp: httpx.Response, url: str, max_bytes: int) -> bytes | None:
+    if resp.status_code >= 400:
+        LOGGER.debug("pdf_fetch: HTTP %d for %s", resp.status_code, url)
+        return None
+    buf = bytearray()
+    for chunk in resp.iter_bytes(chunk_size=64_000):
+        buf.extend(chunk)
+        if len(buf) > max_bytes:
+            LOGGER.debug("pdf_fetch: %s exceeded max_bytes=%d", url, max_bytes)
+            return None
+    if bytes(buf[: len(_PDF_MAGIC)]) != _PDF_MAGIC:
+        LOGGER.debug("pdf_fetch: %s missing %%PDF magic", url)
+        return None
+    return bytes(buf)
+
+
+def _download_public_pdf(
+    client: httpx.Client,
+    url: str,
+    max_bytes: int,
+    *,
+    verify_peer: bool,
+) -> bytes | None:
+    current = validate_rss_url(url) if verify_peer else url
+    for _ in range(_MAX_REDIRECTS + 1):
+        with client.stream("GET", current, follow_redirects=False) as resp:
+            if verify_peer:
+                validate_public_response_peer(resp)
+            if 300 <= resp.status_code < 400 and resp.headers.get("location"):
+                current = validate_rss_url(
+                    urljoin(current, str(resp.headers["location"]))
+                )
+                continue
+            return _read_pdf_response(resp, current, max_bytes)
+    LOGGER.debug("pdf_fetch: too many redirects for %s", url)
+    return None
 
 
 def fetch_pdf(
@@ -58,27 +103,32 @@ def fetch_pdf(
         return final_path
     if offline_requested():
         return None
+    if http_client is None:
+        try:
+            validate_rss_url(url)
+        except RssUrlRejected as exc:
+            LOGGER.debug("pdf_fetch: rejected %s: %s", url, exc)
+            return None
 
-    client = http_client or httpx.Client(timeout=timeout, follow_redirects=True)
+    client = http_client or httpx.Client(
+        timeout=timeout,
+        follow_redirects=False,
+        trust_env=False,
+    )
     try:
-        with client.stream("GET", url) as resp:
-            if resp.status_code >= 400:
-                LOGGER.debug("pdf_fetch: HTTP %d for %s", resp.status_code, url)
-                return None
-            buf = bytearray()
-            for chunk in resp.iter_bytes(chunk_size=64_000):
-                buf.extend(chunk)
-                if len(buf) > max_bytes:
-                    LOGGER.debug("pdf_fetch: %s exceeded max_bytes=%d", url, max_bytes)
-                    return None
-            if len(buf) < len(_PDF_MAGIC) or not bytes(buf[: len(_PDF_MAGIC)]) == _PDF_MAGIC:
-                LOGGER.debug("pdf_fetch: %s missing %%PDF magic", url)
-                return None
-            tmp_path = cache_dir / f"{url_key}.tmp"
-            tmp_path.write_bytes(bytes(buf))
-            tmp_path.replace(final_path)
-            return final_path
-    except (httpx.HTTPError, OSError) as exc:
+        body = _download_public_pdf(
+            client,
+            url,
+            max_bytes,
+            verify_peer=http_client is None,
+        )
+        if body is None:
+            return None
+        tmp_path = cache_dir / f"{url_key}.tmp"
+        tmp_path.write_bytes(body)
+        tmp_path.replace(final_path)
+        return final_path
+    except (httpx.HTTPError, OSError, RssUrlRejected) as exc:
         LOGGER.debug("pdf_fetch: error fetching %s: %s", url, exc)
         return None
     finally:

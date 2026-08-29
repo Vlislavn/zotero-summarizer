@@ -72,7 +72,7 @@ export default function SetupFlow() {
   const validity = useMemo(() => {
     const zoteroOk = true;
     const provider = (draft?.llm_routing?.providers || [])[0];
-    const llmOk = Boolean(
+    const llmOk = draft?.llm_enabled === false || Boolean(
       provider
         && provider.api_key_env && String(provider.api_key_env).trim()
         && (provider.type !== 'openai' || (provider.base_url && String(provider.base_url).trim()))
@@ -183,13 +183,32 @@ export default function SetupFlow() {
           />
         )}
         {step === 1 && (
-          <StepConnectLlm
-            status={status}
-            routing={draft.llm_routing}
-            onPatchRouting={patchRouting}
-            testedOk={llmTestedOk}
-            onTested={setLlmTestedOk}
-          />
+          <div className="space-y-4">
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-semibold text-slate-800">How should summaries run?</legend>
+              <label className="flex items-start gap-2 rounded-lg border border-slate-200 p-3 cursor-pointer">
+                <input type="radio" name="setup-ai-mode" className="mt-0.5" checked={draft.llm_enabled !== false}
+                  onChange={() => patchDraft({ llm_enabled: true })} />
+                <span><span className="block text-sm font-medium">AI-assisted summaries</span>
+                  <span className="block text-xs text-slate-500">Connect a local or hosted language model.</span></span>
+              </label>
+              <label className="flex items-start gap-2 rounded-lg border border-slate-200 p-3 cursor-pointer">
+                <input type="radio" name="setup-ai-mode" className="mt-0.5" checked={draft.llm_enabled === false}
+                  onChange={() => patchDraft({ llm_enabled: false })} />
+                <span><span className="block text-sm font-medium">ML-only triage</span>
+                  <span className="block text-xs text-slate-500">Keep feed scoring and backlog triage; AI reviews and Ask Paper stay off.</span></span>
+              </label>
+            </fieldset>
+            {draft.llm_enabled !== false && (
+              <StepConnectLlm
+                status={status}
+                routing={draft.llm_routing}
+                onPatchRouting={patchRouting}
+                testedOk={llmTestedOk}
+                onTested={setLlmTestedOk}
+              />
+            )}
+          </div>
         )}
         {step === 2 && (
           <StepDescribeResearch
@@ -215,7 +234,7 @@ export default function SetupFlow() {
               <Button
                 onClick={handleFinish}
                 disabled={!allValid || finishMutation.isPending || validateMutation.isPending}
-                title={!allValid ? 'Complete the LLM and research steps to finish.' : undefined}
+                title={!allValid ? 'Choose an AI mode and add your research goals to finish.' : undefined}
               >
                 {finishMutation.isPending || validateMutation.isPending ? 'Saving…' : 'Finish'}
               </Button>
