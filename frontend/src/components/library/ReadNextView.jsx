@@ -110,12 +110,10 @@ export default function ReadNextView({
   sort = DEFAULT_SORT, onSortChange,
 }) {
   const computing = status === 'computing';
-  // Rescore is only actionable when scores are missing, stale, or in flight —
-  // when everything is scored and current, the button is noise (Hick's Law);
-  // retrain/hot-swap rescoring is automatic, so the quiet state needs no control.
+  // A failed read must leave Rescore available even with retained last-good rows.
   const errored = status === 'error';
   const rescoreActionable =
-    computing || errored || scoresStale || !computedAt
+    computing || errored || err != null || scoresStale || !computedAt
     || items.some((it) => typeof it.relevance_score !== 'number');
   const [expandedKey, setExpandedKey] = useState(null);
   const expandedPanelRef = useRef(null);
@@ -312,7 +310,7 @@ export default function ReadNextView({
       {computing && (
         <div className="mb-2 flex items-center gap-2 text-xs text-slate-600">
           <Spinner size="sm" color="teal" />
-          Scoring your whole library… first full scan (~2,400 papers) can take a few minutes; results stream in as they compute, then re-scans are fast.
+          Scoring your whole library… the complete result appears when scoring finishes. The previous cache is preserved if scoring fails.
         </div>
       )}
       {errored && error && (

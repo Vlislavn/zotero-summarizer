@@ -17,10 +17,10 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services.golden import (
@@ -49,7 +49,9 @@ _VALID_USER_PRIORITIES = ("must_read", "should_read", "could_read", "dont_read")
 
 
 class VerdictRequest(BaseModel):
-    item_key: str = Field(..., min_length=1, description="Zotero item key.")
+    item_key: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] = Field(
+        description="Zotero item key.",
+    )
     user_priority: str = Field(
         ...,
         min_length=1,
@@ -275,21 +277,10 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
             status_code=422,
         )
 
-    # Anchor original_derived_priority to the CURRENT provenance when the
-    # key is in the golden CSV; never the client. A key absent from the CSV
-    # (a Today feed item, or a paper that left the engaged set) is still
-    # labellable — the user's manual verdict must always be saveable. We
-    # then anchor to the existing verdict's original (preserve history) or
-    # "unknown".
+    # Current CSV provenance wins; the command owns prior-model fallback.
     provs = _load_all()
     prov_match = next((p for p in provs if p.item_key == req.item_key), None)
-    if prov_match is not None:
-        original = prov_match.derived_priority
-    else:
-        existing = repositories.get_label_verdict(_db_path(), req.item_key)
-        original = (
-            existing["original_derived_priority"] if existing is not None else "unknown"
-        )
+    original = prov_match.derived_priority if prov_match is not None else None
 
     row_id = label_verdicts.set_label_verdict(
         _db_path(),
@@ -299,19 +290,20 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
         surface="annotate_verdict",
         comment=req.comment,
     )
-    log_verdict_event(req.item_key, original, req.user_priority, req.comment)
-    effects = await asyncio.to_thread(
-        verdict_effects.apply_verdict_effects,
-        req.item_key,
-        req.user_priority,
-        req.comment,
-    )
-
     stored = repositories.get_label_verdict(_db_path(), req.item_key)
     if stored is None:
         raise RuntimeError(
             f"verdict UPSERT returned id={row_id} but get_label_verdict found nothing"
         )
+    log_verdict_event(req.item_key, stored["original_derived_priority"], req.user_priority, req.comment)
+    effects = await asyncio.to_thread(
+        verdict_effects.apply_verdict_effects,
+        _db_path(),
+        req.item_key,
+        req.user_priority,
+        req.comment,
+    )
+
     return {
         "id": row_id,
         "created_at": stored["created_at"],
@@ -359,9 +351,12 @@ async def list_verdicts(
             ),
             status_code=422,
         )
-    verdicts = repositories.list_label_verdicts(_db_path(), user_priority=user_priority)
+    # ponytail: whole local snapshot; add end-to-end pagination if volume demands it.
+    verdicts = await asyncio.to_thread(repositories.list_all_label_verdicts, _db_path())
+    if user_priority is not None:
+        verdicts = [v for v in verdicts if v["user_priority"] == user_priority]
     if source is not None:
-        verdicts = [v for v in verdicts if v.get("source") == source]
+        verdicts = [v for v in verdicts if v["source"] == source]
     return {"verdicts": verdicts, "total": len(verdicts)}
 
 
@@ -384,6 +379,10 @@ async def remove_verdict(item_key: str) -> dict[str, Any]:
     )
     if deleted and prior is not None:
         log_retract_event(safe_item_key, prior)
+    await asyncio.to_thread(
+        verdict_effects.mirror_current_verdict, _db_path(),
+        prior["item_key"] if prior is not None else safe_item_key,
+    )
     return {"deleted": deleted}
 
 

@@ -40,7 +40,7 @@ import time
 from typing import Any
 
 from zotero_summarizer.services._common import LOGGER, now_iso_z
-from zotero_summarizer.services.library import _flight, deep_review, reading_queue
+from zotero_summarizer.services.library import _flight, deep_review, paper_render, reading_queue
 from zotero_summarizer.services.library.review_fleet import propose, verdict_store
 
 _DEFAULT_TOP_K = 5
@@ -410,9 +410,11 @@ def start(top_k: int = _DEFAULT_TOP_K, *, item_keys: list[str] | None = None) ->
     run's status. The client relies on ``accepted`` (not a started_at timestamp) to tell
     "my pinned keys are running" from "a foreign run holds the latch — wait it out", which
     is robust to a prewarm that fires AFTER the click."""
+    keys = list(item_keys) if item_keys else None
+    for key in keys or []:
+        paper_render._state_path(key)
     if not try_start():
         return {**status(), "accepted": False}
-    keys = [str(k) for k in item_keys] if item_keys else None
     _flight.run_in_background(lambda: _run_job(max(1, top_k), item_keys=keys))
     return {**status(), "accepted": True}
 

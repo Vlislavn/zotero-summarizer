@@ -111,14 +111,12 @@ def test_quality_panel_flag_leads_with_red_flags():
 
 
 def test_presentation_integrates_brief_no_sections_dump_no_cdn():
-    html = h._render_presentation(CONTENT, "AgentClinic", DIGEST, QUALITY, GOALS)
+    html = h._render_presentation(CONTENT, DIGEST, QUALITY, GOALS)
     assert 'class="gauge"' in html and 'id="quality"' in html
     assert 'id="sections"' not in html and 'id="per-goal"' not in html  # the dumps are gone
     assert 'class="fade-in digest-fold"' in html  # digest collapsed by default
     assert "cdn.jsdelivr" not in html
     assert "READ" in html
-    notes = h._render_notes(CONTENT, DIGEST, QUALITY, GOALS)
-    assert "## Executive Summary" in notes and "## Relevance to your goals" in notes
 
 
 def test_abstained_hit_shows_withheld_not_evidence_found():
@@ -131,4 +129,4 @@ def test_abstained_hit_shows_withheld_not_evidence_found():
 def test_brief_empty_without_data():
     assert brief.brief_html(CONTENT, quality=None, goal_summaries=None) == ""
     digest_only = brief.brief_html(CONTENT, digest={"read_decision": "skip"}, quality=None, goal_summaries=None)
-    assert "OFF GOAL" not in digest_only and "Idea: not assessed" in digest_only and "fonts.googleapis" not in h._render_presentation(CONTENT, "Paper", DIGEST, None, None)
+    assert "OFF GOAL" not in digest_only and "Idea: not assessed" in digest_only and "fonts.googleapis" not in h._render_presentation(CONTENT, DIGEST, None, None)

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { runReviewFleet, fetchReviewFleetStatus, fetchReadingQueue } from '../api/libraryApi.js';
-import { isCoolUndecided, coolUndecidedKeys } from '../utils/relevanceBands.js';
+import { coolUndecidedKeys } from '../utils/relevanceBands.js';
 
 // "Review cool papers": loop the review fleet over EVERY undecided high-relevance
 // pick (not a fixed 5) so deep reviews + verdicts stream in without per-paper
@@ -19,7 +19,7 @@ const AUTO_REVIEW_MAX_DRAINS = 5;   // bound: how many foreign (prewarm) runs to
 
 const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
-export function useReviewCoolLoop({ queue, queueArgs, applyQueueData, loadQueue, zoteroReady, setMessage, setIsError }) {
+export function useReviewCoolLoop({ queue, prestigeFloor = null, queueArgs, applyQueueData, loadQueue, zoteroReady, setMessage, setIsError }) {
   const [fleetStatus, setFleetStatus] = useState({
     status: 'idle', completed: 0, total: 0, proposed: 0,
     skipped_no_fulltext: 0, failed: 0, error: null, started_at: null, progress: {},
@@ -31,7 +31,7 @@ export function useReviewCoolLoop({ queue, queueArgs, applyQueueData, loadQueue,
   const [autoReview, setAutoReview] = useState({ active: false, stopping: false });
 
   // Undecided cool picks (high relevance, no proposal/label) — the bar's count.
-  const coolUndecided = useMemo(() => queue.filter(isCoolUndecided).length, [queue]);
+  const coolUndecided = useMemo(() => coolUndecidedKeys(queue, prestigeFloor).length, [queue, prestigeFloor]);
 
   // Lightweight mount-resume poller: reflect an already-running fleet and reload
   // ONCE when it finishes (NOT the streaming auto-loop).
@@ -103,7 +103,8 @@ export function useReviewCoolLoop({ queue, queueArgs, applyQueueData, loadQueue,
           break;
         }
         applyQueueData(data);
-        const next = coolUndecidedKeys(data.items).filter((k) => !attempted.has(k));
+        const next = coolUndecidedKeys(data.items, data.distribution?.prestige_floor ?? null)
+          .filter((k) => !attempted.has(k));
         if (next.length === 0) break;  // every cool paper now attempted or decided → stop
         const chunk = next.slice(0, FLEET_CHUNK);
         const started = await runReviewFleet({ itemKeys: chunk });

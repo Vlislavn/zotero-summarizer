@@ -47,6 +47,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ### Fixed
 
+- Deep review no longer polls forever when an OpenAI-compatible response stalls: the shared client factory now applies `SUMMARY_TIMEOUT_SECONDS` to transport reads, allowing the existing worker error boundary to terminate the job and drain queued reviews.
+- Author bylines no longer claim `h=0` when OpenAlex returns authors without resolvable IDs. Unknown/zero max h-index is now `None`, ignored as prestige evidence, and hidden for historical rows.
 - Targeted Search re-rank was near-unconstrained: `query_score` is a sigmoid `[0,1]` (1-label CrossEncoder → ST default), but `rank.py` assumed unbounded logits and used `EPSILON=0.5`, collapsing `[0,1]` to 2 buckets — quality could reorder a `0.51` paper above a `0.99` one. Retuned `DEFAULT_EPSILON=0.05` (~20 buckets) + fixed the stale comment; regression test fails under the old `0.5`.
 - Targeted Search now auto-starts the deep review of the top papers right after `/screen` (single-flight `session.claim` CAS; `run_review` `save_merge`s after the light band and each deep read so the UI watches reviews fill in). Concurrent "Add to library" can't lose-update the worker (per-session lock; add-only `materialized_zotero_key` preserved). Manual "Deep-review" button removed from `/search`.
 - Targeted Search produced no plan and no deep reads on a live run. Intent parse now salvages a small model's fenced/nested/trailing-junk JSON (`extract_json_blob` + one strict retry + dict-of-lists synonym flatten) instead of bare `json.loads` silently falling back to the raw query; a genuine fallback sets `SearchIntent.parse_ok=False` so a degraded plan is visible.

@@ -71,9 +71,7 @@ class ZoteroAttachmentWriteMixin:
             raise ZoteroWriteError("add_attachment: no user library")
         library_id = int(lib["libraryID"])
 
-        filename = self._safe_attachment_filename(
-            payload.get("filename"), content_type, fallback="fulltext.pdf",
-        )
+        filename = self._safe_attachment_filename(payload.get("filename"), content_type)
         att_key = self._new_item_key(conn)
 
         # File FIRST (orphan-on-rollback is harmless; a missing-file DB row is not).
@@ -129,11 +127,13 @@ class ZoteroAttachmentWriteMixin:
         raise ZoteroWriteError("add_attachment: could not generate a unique item key")  # pragma: no cover
 
     @staticmethod
-    def _safe_attachment_filename(name: Any, content_type: str, *, fallback: str) -> str:
+    def _safe_attachment_filename(name: Any, content_type: str) -> str:
         """Strip path separators / control chars; force the extension that matches
         ``content_type`` (so Zotero renders it). Unknown types keep the given name."""
         ext = _CONTENT_TYPE_EXT.get(content_type, "")
-        base = "".join(c for c in str(name or "").strip() if c not in '/\\\x00').strip() or fallback
-        if ext and not base.lower().endswith(ext):
-            base += ext
-        return base[:120]
+        base = "".join(c for c in str(name or "") if c.isprintable() and c not in '/\\').strip()
+        if ext and base.lower().endswith(ext):
+            base = base[:-len(ext)]
+        if base in {"", ".", ".."}:
+            base = "fulltext"
+        return base[:120 - len(ext)] + ext

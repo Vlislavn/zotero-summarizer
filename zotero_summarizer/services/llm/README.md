@@ -11,8 +11,9 @@ llm_routing → resolve_stage → ResolvedStage → factory → LLMClient
 ## Files
 
 - `factory.py` dispatches OpenAI-compatible/native Anthropic clients and resolves
-  secrets from the keyring with env fallback. Its optional `enable_thinking`
-  overrides only clients already advertising that capability.
+  secrets from the keyring with env fallback. OpenAI-compatible transports receive
+  the process `SUMMARY_TIMEOUT_SECONDS` request deadline; its optional
+  `enable_thinking` overrides only clients already advertising that capability.
 - `thinking.py` translates effort to Anthropic budgets, OpenAI
   `reasoning_effort`, or qwen/vLLM `enable_thinking`.
 - `operational_check.py` owns the tiny manual inference probe used by stage
@@ -38,3 +39,5 @@ llm_routing → resolve_stage → ResolvedStage → factory → LLMClient
 - Stages inherit `llm_routing.default` unless they override provider/model.
 - `ProviderConfig.temperature` and thinking options are translated in the
   factory; call sites do not build provider-specific wire payloads.
+- OpenAI-compatible response reads are bounded by `Settings.summary_timeout_seconds`;
+  transport timeout errors propagate to each worker's existing error boundary.

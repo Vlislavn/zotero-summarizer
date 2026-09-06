@@ -85,7 +85,7 @@ class _FakePred:
 
 
 class _FakeGate:
-    golden_csv_sha256 = "newsha"
+    model_sha256 = "newsha"
 
     def __init__(self, mapping):
         self.mapping = mapping

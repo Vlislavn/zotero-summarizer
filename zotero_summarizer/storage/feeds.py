@@ -320,7 +320,6 @@ def update_to_decision(
     decision: str,
     decision_reason: str = "",
     is_black_swan: bool | None = None,
-    planned_zotero_key: str | None = None,
 ) -> bool:
     """Transition an existing row's decision (e.g. triaged_pending -> selected).
 
@@ -332,9 +331,6 @@ def update_to_decision(
     if is_black_swan is not None:
         assignments.append("is_black_swan = ?")
         params.append(1 if is_black_swan else 0)
-    if planned_zotero_key is not None:
-        assignments.append("planned_zotero_key = ?")
-        params.append(planned_zotero_key)
     params.extend([feed_library_id, feed_item_id])
     cursor = conn.execute(
         f"""
@@ -412,6 +408,7 @@ def record_materialization(
             final_outcome = ?,
             updated_at = datetime('now')
         WHERE feed_library_id = ? AND feed_item_id = ?
+          AND materialized_zotero_key IS NULL
         """,
         (materialized_zotero_key, eligible_at, OUTCOME_PENDING, feed_library_id, feed_item_id),
     )
@@ -488,6 +485,7 @@ def record_read_marked(
 from zotero_summarizer.storage.feeds_history import (  # noqa: F401,E402
     due_outcome_checks,
     record_outcome,
+    reserve_materialization_key,
     select_by_decisions,
     select_pending_triaged,
 )

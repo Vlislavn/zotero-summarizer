@@ -20,6 +20,7 @@ from zotero_summarizer.services.zotero.pending import (
     build_verdict_note_html,
 )
 from zotero_summarizer.storage import repositories
+from zotero_summarizer.storage.migrations import TRIAGE_MIGRATIONS, run_migrations
 
 
 def _query(writer: ZoteroWriter, sql: str, params=()):
@@ -106,17 +107,8 @@ def _patch_verdict_basics(monkeypatch, *, note_fn):
             "add_error": None,
         },
     )
-    monkeypatch.setattr(
-        repositories, "insert_or_update_label_verdict", lambda *a, **k: 1
-    )
-    monkeypatch.setattr(
-        repositories,
-        "get_label_verdict",
-        lambda *a, **k: {
-            "original_derived_priority": "unknown",
-            "created_at": "2026-05-23T00:00:00Z",
-        },
-    )
+    with repositories.with_db_path(golden_routes._db_path()):
+        repositories.init_db()
     monkeypatch.setattr(
         golden_routes.verdict_effects, "zotero_set_label_tag", lambda *_a: None
     )
@@ -206,6 +198,11 @@ def _submit_feed_verdict(monkeypatch, *, item_key, priority, add_result):
         monkeypatch,
         note_fn=lambda ik, up, comment: notes.append((ik, up, comment)),
     )
+    with sqlite3.connect(golden_routes._db_path()) as conn:
+        conn.execute(
+            "INSERT INTO processed_feed_items(feed_library_id, feed_item_id, stable_feed_key, guid, title, decision, run_id, materialized_zotero_key) VALUES (2, 42, ?, 'g', 'Paper', 'auto_materialized', 'run', ?)",
+            (item_key, add_result.get("_zotero_key")),
+        )
     monkeypatch.setattr(
         golden_routes.verdict_effects,
         "zotero_set_label_tag",
@@ -239,7 +236,8 @@ def test_new_feed_item_comment_uses_materialized_zotero_key(monkeypatch):
         },
     )
     assert notes == [("REAL0001", "must_read", "why")]
-    assert labels == []  # materialization stamped the label in its creation write
+    # Revalidate current state after creation; the real setter skips an already-set tag.
+    assert labels == [("REAL0001", "must_read")]
     assert out["label_written"] is out["note_written"] is True
     assert "_zotero_key" not in out
 
@@ -293,12 +291,7 @@ def test_build_user_note_html_marked_and_escaped():
 
 
 def _init_triage_db(path: Path) -> Path:
-    conn = sqlite3.connect(str(path))
-    try:
-        repositories.apply_schema(conn)
-        conn.commit()
-    finally:
-        conn.close()
+    run_migrations(path, "triage", TRIAGE_MIGRATIONS)
     return path
 
 

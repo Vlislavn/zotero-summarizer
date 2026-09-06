@@ -3,8 +3,6 @@
 Split out of review.py; the public append helpers are re-exported there."""
 from __future__ import annotations
 
-import csv as _csv
-import json as _json
 import logging
 import sqlite3
 from dataclasses import asdict
@@ -14,6 +12,8 @@ from typing import Any
 from zotero_summarizer.models import SummarizeResponse
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.golden.goldenset import GoldenSample, _PRIORITY_TO_RELEVANCE
+from zotero_summarizer.services.golden.csv_store import edit_csv
+from zotero_summarizer.services.triage.daily_select._candidate import parse_payload
 from zotero_summarizer.storage import feeds as feeds_storage
 from zotero_summarizer.storage.feed_identity import row_feed_keys
 
@@ -65,7 +65,7 @@ def _parse_stored_summary(
                 f"row id={row.get('id')} has no summary payload; cannot approve"
             )
         return None
-    payload = _json.loads(blob)
+    payload = parse_payload(row)
     version = int(payload.get("summary_schema_version", 0))
     if version not in {0, 1}:
         raise ValueError(f"unsupported stored summary schema version: {version}")
@@ -108,8 +108,7 @@ def _build_summary_for_queue(row: dict[str, Any], new_priority: str) -> Summariz
     is what the Zotero triage note will display; it makes clear that the
     classification came from the user via the review UI, not from the LLM.
     """
-    blob = (row.get("shap_contribs_json") or "").strip()
-    payload = _json.loads(blob) if blob else {}
+    payload = parse_payload(row)
     summary_dict = payload.get("summary")
     if summary_dict is not None:
         summary = SummarizeResponse.model_validate(summary_dict)
@@ -225,30 +224,11 @@ def _write_golden_sample(sample: GoldenSample, csv_path: Path) -> bool:
     """Append one :class:`GoldenSample` to the golden CSV, preserving the
     existing header/columns. Idempotent on ``item_key`` (returns False when the
     key is already present). Shared by the feed-row and verdict appenders."""
-    if not csv_path.exists():
-        raise FileNotFoundError(
-            f"golden CSV not found at {csv_path}; run `goldenset export` first"
-        )
-    with csv_path.open("r", encoding="utf-8", newline="") as f:
-        reader = _csv.DictReader(f)
-        existing = list(reader)
-        existing_fields = list(reader.fieldnames or [])
-    if not existing_fields:
-        raise ValueError(f"golden CSV at {csv_path} has no header — cannot append a row")
-    if any((r.get("item_key") or "") == sample.item_key for r in existing):
-        LOGGER.info("golden CSV already contains %s; skipping append", sample.item_key)
-        return False
-    new_row = {k: (v if isinstance(v, str) else str(v)) for k, v in asdict(sample).items()}
-    for col in existing_fields:
-        new_row.setdefault(col, "")
-    tmp = csv_path.with_suffix(csv_path.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8", newline="") as f:
-        writer = _csv.DictWriter(f, fieldnames=existing_fields)
-        writer.writeheader()
-        for r in existing:
-            writer.writerow(r)
-        writer.writerow({k: new_row.get(k, "") for k in existing_fields})
-    tmp.replace(csv_path)
+    with edit_csv(csv_path) as (fields, rows):
+        if any(row["item_key"] == sample.item_key for row in rows):
+            return False
+        new_row = asdict(sample)
+        rows.append({key: new_row.get(key, "") for key in fields})
     return True
 
 
@@ -288,32 +268,16 @@ def append_verdict_to_golden(
     return _write_golden_sample(sample, csv_path)
 
 
-def append_to_golden(
+def prepare_training_sample(
     row: dict[str, Any],
     *,
     label: str,
     note: str,
     signal_tier: str = "feed_user_label",
-    golden_csv_path: Path | None = None,
-) -> bool:
-    """Append one row to ``zotero-summarizer-golden.csv``.
-
-    Writes a :class:`GoldenSample`-shaped row so the CSV stays schema-
-    compatible with the golden-set training pipeline. The sha256 of the CSV
-    changes after this call, which the next ``feeds run`` start (or per-tick
-    check in ``feeds serve``) will detect and trigger a background retrain.
-    Returns False if the row is already present (idempotent on duplicate
-    item_key).
-    """
+) -> GoldenSample:
+    """Resolve full metadata without publishing a label or training example."""
     if label not in _PRIORITY_TO_RELEVANCE:
         raise ValueError(f"unknown label {label!r}")
-    settings_ = get_settings()
-    csv_path = golden_csv_path or settings_.golden_csv_path
-    if not csv_path.exists():
-        raise FileNotFoundError(
-            f"golden CSV not found at {csv_path}; run `goldenset export` first"
-        )
-
     feed_item_id = int(row.get("feed_item_id") or 0)
     new_key = row_feed_keys(row)[0]
     # Resolve abstract + authors + venue from the live Zotero feedItems table.
@@ -330,7 +294,7 @@ def append_to_golden(
     venue = feed_meta.get("publication_title", "") or feed_meta.get("venue", "")
     year = feed_meta.get("year", "")
 
-    sample = GoldenSample(
+    return GoldenSample(
         item_key=new_key,
         title=str(row.get("title") or ""),
         authors=authors,
@@ -366,4 +330,15 @@ def append_to_golden(
         our_priority="",
         our_corpus_affinity="",
     )
+
+
+def append_to_golden(
+    row: dict[str, Any], *, label: str, note: str,
+    signal_tier: str = "feed_user_label", golden_csv_path: Path | None = None,
+) -> bool:
+    """Append a metadata-rich CSV sample for the standalone/Today callers."""
+    csv_path = golden_csv_path or get_settings().golden_csv_path
+    if not csv_path.exists():
+        raise FileNotFoundError(f"golden CSV not found at {csv_path}; run `goldenset export` first")
+    sample = prepare_training_sample(row, label=label, note=note, signal_tier=signal_tier)
     return _write_golden_sample(sample, csv_path)

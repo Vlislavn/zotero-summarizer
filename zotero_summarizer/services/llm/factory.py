@@ -10,6 +10,7 @@ from zotero_summarizer.models.providers import (
     ResolvedStage,
 )
 from zotero_summarizer.services._adapters import build_llm
+from zotero_summarizer.services._common import settings
 from zotero_summarizer.services.llm.credentials import get_api_key
 from zotero_summarizer.services.llm.thinking import (
     apply_effort_openai,
@@ -62,6 +63,7 @@ def build_client_for_provider(
             max_tokens=provider.max_tokens,
             temperature=provider.temperature,
             extra_body=extra_body,
+            request_timeout_seconds=settings().summary_timeout_seconds,
         )
 
     if provider.type == ProviderType.anthropic:

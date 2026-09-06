@@ -40,7 +40,8 @@ def set_label_verdict(
     event_source: str | None = None,
     transition_comment: str | None = None,
     history_known: bool = True,
-) -> int:
+    expected_revision: int | None = None,
+) -> int | None:
     """Commit the current snapshot, then append a human transition if applicable.
 
     Machine writes never replace a deliberate user verdict. ``history_known`` is
@@ -56,11 +57,10 @@ def set_label_verdict(
     ):
         return int(existing["id"])
 
-    stored_original = (
-        original_derived_priority
-        or (existing or {}).get("original_derived_priority")
-        or "unknown"
-    )
+    stored_original = original_derived_priority
+    if stored_original is None:
+        prior_original = (existing or {}).get("original_derived_priority")
+        stored_original = prior_original if prior_original in READING_PRIORITY_SORT_RANK else "unknown"
     model_priority = stored_original
     if model_priority not in READING_PRIORITY_SORT_RANK and existing is not None:
         model_priority = existing.get("original_derived_priority")
@@ -71,7 +71,10 @@ def set_label_verdict(
         user_priority=user_priority,
         comment=comment,
         source=source,
+        expected_revision=expected_revision,
     )
+    if row_id is None:
+        return None
     if source == VERDICT_SOURCE_USER:
         log_committed_transition(
             item_key=stored_key,
@@ -87,13 +90,14 @@ def set_label_verdict(
 
 def retract_label_verdict(
     db_path: Path, *, item_key: str, surface: str, event_source: str = VERDICT_SOURCE_USER,
+    expected_revision: int | None = None,
 ) -> bool:
     """Delete the current snapshot and record a prior human label as retracted."""
     existing = repositories.get_label_verdict(db_path, item_key)
     if existing is None:
         return False
     stored_key = existing["item_key"]
-    deleted = repositories.delete_label_verdict(db_path, stored_key)
+    deleted = repositories.delete_label_verdict(db_path, stored_key, expected_revision=expected_revision)
     if deleted and existing.get("source") == VERDICT_SOURCE_USER:
         log_committed_transition(
             item_key=stored_key,

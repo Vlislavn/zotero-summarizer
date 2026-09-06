@@ -44,6 +44,7 @@ class Settings:
     # goals.yaml and ZS_* env. Derived, like the model joblib — never hand-authored.
     calibration_path: Path
     env_path: Path
+    # Bounds each OpenAI-compatible HTTP request and the complete triage summary job.
     summary_timeout_seconds: int
     triage_job_concurrency: int
     pdf_root: Path
@@ -52,6 +53,9 @@ class Settings:
     app_log_file: Path
     triage_db_path: Path
     corpus_db_path: Path
+    model_dir: Path
+    tuned_params_path: Path
+    pdf_cache_dir: Path
     golden_csv_path: Path
     golden_jsonl_path: Path
     # Append-only agentic interaction log (immutable human-decision trajectory).
@@ -98,6 +102,9 @@ class Settings:
             app_log_file=app_log_file,
             triage_db_path=data_dir / "triage_history.db",
             corpus_db_path=data_dir / "corpus_cache.db",
+            model_dir=data_dir / "models",
+            tuned_params_path=data_dir / "optuna-best-params.json",
+            pdf_cache_dir=data_dir / "pdfs",
             golden_csv_path=data_dir / "zotero-summarizer-golden.csv",
             golden_jsonl_path=data_dir / "zotero-summarizer-golden.jsonl",
             interaction_log_path=data_dir / "interaction-events.jsonl",

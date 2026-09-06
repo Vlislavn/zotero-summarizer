@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +27,6 @@ _PAPER_FIELDS = (
     "quality_band",
     "proposed_verdict",
 )
-LOGGER = logging.getLogger(__name__)
 
 
 def _paper_snapshots(db_path: Path) -> list[dict[str, Any]]:
@@ -118,26 +116,24 @@ def _log_applied_verdict(mutation: dict[str, Any], result: dict[str, Any]) -> No
     )
 
 
-def _run_post_commit_effects(mutation: dict[str, Any], result: dict[str, Any]) -> None:
+def _run_post_commit_effects(db_path: Path, mutation: dict[str, Any], result: dict[str, Any]) -> None:
     if result["status"] not in {"applied", "already_applied"}:
         return
     if mutation["operation"] != "set":
-        return
-    try:
         if mutation["field"] == "verdict":
-            verdict_effects.apply_verdict_effects(
-                mutation["item_key"],
-                mutation["value"],
-                mutation.get("comment") or "",
-            )
-        else:
-            verdict_effects.mirror_review_note(
-                mutation["item_key"],
-                mutation.get("value") or "",
-            )
-    except Exception as exc:  # noqa: BLE001 - current state already committed
-        LOGGER.warning(
-            "sync post-commit effects for %s failed: %s", mutation["item_key"], exc
+            verdict_effects.mirror_current_verdict(db_path, mutation["item_key"])
+        return
+    if mutation["field"] == "verdict":
+        verdict_effects.apply_verdict_effects(
+            db_path,
+            mutation["item_key"],
+            mutation["value"],
+            mutation.get("comment") or "",
+        )
+    else:
+        verdict_effects.mirror_review_note(
+            mutation["item_key"],
+            mutation.get("value") or "",
         )
 
 
@@ -152,17 +148,18 @@ def push(db_path: Path, mutations: list[dict[str, Any]]) -> dict[str, Any]:
         try:
             _validate_mutation(effective)
             result = repositories.apply_sync_mutation(db_path, effective)
-            if effective["field"] == "verdict":
-                _log_applied_verdict(effective, result)
-            _run_post_commit_effects(effective, result)
-            if result["status"] in {"applied", "already_applied"}:
-                last_applied[key] = result["applied_revision"]
         except ValueError as exc:
             result = {
                 "mutation_id": mutation["mutation_id"],
                 "status": "rejected",
                 "error": str(exc),
             }
+        else:
+            if effective["field"] == "verdict":
+                _log_applied_verdict(effective, result)
+            _run_post_commit_effects(db_path, effective, result)
+            if result["status"] in {"applied", "already_applied"}:
+                last_applied[key] = result["applied_revision"]
         results.append(result)
     return {"protocol": 1, "results": results, **repositories.sync_status(db_path)}
 

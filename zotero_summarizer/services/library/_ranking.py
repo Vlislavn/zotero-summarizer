@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from zotero_summarizer.domain import score_to_priority
 from zotero_summarizer.services._common import band_primary_enabled
 from zotero_summarizer.services._common import quality_promote_enabled
 from zotero_summarizer.services._common import settings as get_settings
@@ -21,6 +22,7 @@ from zotero_summarizer.services.library._score_distribution import entry_prestig
 from zotero_summarizer.services.model.rank_blend import (
     GOAL_BLEND_WEIGHT,
     blend_scores,
+    order_within_bands,
     promote_band,
     quality_bonus,
 )
@@ -103,23 +105,6 @@ def _goal_affinity(item_keys: list[str]) -> dict[str, float]:
     return cache.goal_affinity_for_items(item_keys)
 
 
-# Bounded deep-review QUALITY lift (user-requested: "качественные статьи наверху").
-# The math lives in the shared, pure ``rank_blend.quality_bonus`` (one definition
-# for both consumers); this module only adapts the queue record + resolves the mode.
-# Added to the normalized blend key, capped so it only reorders WITHIN a relevance
-# band (banding derives from the raw 1-5 score, not this key). A paper with no
-# review gets 0.
-
-
-def _quality_bonus(rec: dict[str, Any]) -> float:
-    """Capped quality lift for a queue row — the shared pure
-    ``rank_blend.quality_bonus`` adapted to the reading-queue record shape; the
-    grade-only-vs-band-primary mode is the shared ``_common.band_primary_enabled``."""
-    return quality_bonus(
-        rec.get("quality_band"), rec.get("quality_grade"), use_band=band_primary_enabled()
-    )
-
-
 def _known_prestige(rec: dict[str, Any]) -> float | None:
     """The row's prestige score ONLY when it is real OpenAlex evidence
     (``prestige_known``) — else None. Cold-start / uncited / no-record rows have
@@ -145,14 +130,18 @@ def _blended_sort(unread: list[dict[str, Any]]) -> None:
         [None if r.get("goal_sim") is None else float(r["goal_sim"]) for r in scored],
         [_known_prestige(r) for r in scored],
     )
-    blended = {id(r): k for r, k in zip(scored, keys)}
-
-    def key(r: dict[str, Any]) -> tuple[int, float, str]:
-        if r["relevance_score"] is None:
-            return (0, 0.0, r["date_added"])  # unscored → bottom
-        return (1, blended[id(r)] + _quality_bonus(r), r["date_added"])
-
-    unread.sort(key=key, reverse=True)
+    base = sorted(zip(scored, keys), key=lambda pair: (pair[1], pair[0]["date_added"]), reverse=True)
+    use_band = band_primary_enabled()
+    order = order_within_bands(
+        [score_to_priority(r["relevance_score"]) for r, _ in base],
+        [(key + quality_bonus(r.get("quality_band"), r.get("quality_grade"), use_band=use_band),
+          r["date_added"]) for r, key in base],
+    )
+    unscored = sorted(
+        (r for r in unread if r["relevance_score"] is None),
+        key=lambda r: r["date_added"], reverse=True,
+    )
+    unread[:] = [base[i][0] for i in order] + unscored
 
 
 def sort_unread(unread: list[dict[str, Any]], *, model_ready: bool) -> None:
@@ -312,7 +301,6 @@ __all__ = [
     "_dedup_by_content",
     "_goal_affinity",
     "_known_prestige",
-    "_quality_bonus",
     "_blended_sort",
     "_build_recs",
     "_is_read",

@@ -11,7 +11,7 @@ Key design points (see the plan):
     cache, so it's instant; recompute happens solely on an explicit Rescore
     (``refresh=True``). This is the fix for "scoring re-runs slowly on open".
   * Scores survive a gate retrain: the cache stores the gate's
-    ``golden_csv_sha256`` only to flag staleness (``scores_stale``), not to wipe
+    ``model_sha256`` only to flag staleness (``scores_stale``), not to wipe
     scores — a retrain no longer forces a full rescore on the next open.
   * Read-status is applied LIVE at request time (current Zotero emoji tags), so
     a paper you just tagged 🧠 drops out immediately, no rescore.
@@ -111,12 +111,11 @@ def _gate():
 
 def _gate_sha() -> str | None:
     gate = _gate()
-    return gate.golden_csv_sha256 if gate is not None else None
+    return gate.model_sha256 if gate is not None else None
 
 
 def _cache_path():
-    from zotero_summarizer.services.model.classifier_persistence import DEFAULT_MODEL_DIR
-    return DEFAULT_MODEL_DIR / _CACHE_FILENAME
+    return get_settings().model_dir / _CACHE_FILENAME
 
 
 def _read_cache(gate_sha: str) -> dict[str, Any]:
@@ -196,24 +195,19 @@ def _why_reason(scoring: dict[str, Any]) -> str | None:
 
 
 def _score_items(
-    items: list[dict[str, Any]], *, return_shap: bool, prestige_network: bool = True,
+    items: list[dict[str, Any]], *, gate: Any, config: Any, prestige_network: bool = True,
 ) -> dict[str, Any]:
-    """Score items with the loaded gate → ``{item_key: FeedPrediction}``.
-    Empty when the gate is unavailable (caller falls back).
+    """Score items with the caller's pinned gate and inference config.
 
     ``prestige_network=False`` makes the gate's OpenAlex prestige lookup
     cache-only (no network) — used by the interactive ``live_scoring`` path so
     opening a paper never blocks on a multi-second OpenAlex search."""
-    gate = _gate()
-    if gate is None or not items:
-        return {}
     settings_ = get_settings()
-    config = get_state().app_state.config
     preds = gate.predict(
         items,
         corpus_db_path=settings_.corpus_db_path,
         goals_config=config,
-        return_shap=return_shap,
+        return_shap=True,
         prestige_network=prestige_network,
     )
     return {p.item_key: p for p in preds}
@@ -221,29 +215,25 @@ def _score_items(
 
 _SCORE_BATCH = 50
 
-# Cache entry for an item the gate produced no prediction for. Recording it
-# (rather than skipping) is what stops the perpetual "Scoring…" spinner: an
-# un-scorable item is marked attempted once, so it no longer counts as
-# "missing" and never re-triggers the background pass.
+# A completed pass attempted this item but received no prediction. The next
+# explicit Rescore retries it; opening the queue never triggers scoring.
 _UNSCORABLE = {"relevance_score": None, "why_reason": None, "scoring": None, "unscorable": True}
 
 
-def _compute_scores_into_cache(gate_sha: str, *, full: bool = False) -> None:
-    """Background: score unread library items for ``gate_sha``.
+def _compute_scores_into_cache() -> None:
+    """Rebuild the whole-library snapshot, then publish it atomically.
 
-    Every *attempted* item gets a cache entry — a real score or an
-    ``_UNSCORABLE`` sentinel — so an item the gate can't score is recorded once
-    and never re-triggers the pass. ``full=True`` (manual Rescore) re-attempts
-    EVERY item (including prior sentinels) but starts from the EXISTING cache
-    and overwrites entries batch by batch — mid-run readers (the queue, the
-    rank/tag syncs) see "old score until replaced by new score", and a mid-run
-    crash keeps the old scores. The old wipe-up-front semantics left the cache
-    near-empty for the minutes a whole-library pass takes and truncated on a
-    crash. Entries for items that left the library are purged only after the
-    pass COMPLETES (what the wipe used to provide). Batched with a flush after
-    each so partial results appear while a large run is still in progress.
+    Explicit Rescore never reads the old cache, so it can replace corrupt JSON.
+    Readers keep the old snapshot (and its staleness) until every batch succeeds;
+    a failure leaves its bytes untouched. Each attempted item gets a prediction
+    or an ``_UNSCORABLE`` sentinel. Departed items disappear only on success.
     """
     try:
+        gate = _gate()
+        if gate is None:
+            raise RuntimeError("Classifier gate is unavailable; load a model before Rescore")
+        gate_sha = gate.model_sha256
+        config = get_state().app_state.config
         # Whole-library scan (read AND unread) so every scorable paper gets a
         # cached score — needed for the global Zotero rank. The displayed queue
         # routes read items aside separately; here we score them too. No-abstract
@@ -253,11 +243,10 @@ def _compute_scores_into_cache(gate_sha: str, *, full: bool = False) -> None:
             it for it in page.get("items", [])
             if (it.get("abstract") or "").strip()
         ]
-        cached = _read_cache(gate_sha)
-        todo = items if full else [it for it in items if it["item_key"] not in cached]
-        for start in range(0, len(todo), _SCORE_BATCH):
-            chunk = todo[start:start + _SCORE_BATCH]
-            preds = _score_items(chunk, return_shap=True)
+        cached = {}
+        for start in range(0, len(items), _SCORE_BATCH):
+            chunk = items[start:start + _SCORE_BATCH]
+            preds = _score_items(chunk, gate=gate, config=config)
             for it in chunk:
                 pred = preds.get(it["item_key"])
                 if pred is None:
@@ -277,13 +266,6 @@ def _compute_scores_into_cache(gate_sha: str, *, full: bool = False) -> None:
             goal_sims = _goal_affinity([it["item_key"] for it in chunk])
             for it in chunk:
                 cached[it["item_key"]]["goal_sim"] = goal_sims.get(it["item_key"])
-            _write_cache(gate_sha, cached)
-        if full:
-            # Complete pass: now (and only now) drop entries for items no longer
-            # in the library, so deletions don't linger in the cache forever.
-            current_keys = {it["item_key"] for it in items}
-            cached = {k: v for k, v in cached.items() if k in current_keys}
-        # Persist once more so a full rebuild with an empty todo still lands.
         _write_cache(gate_sha, cached)
     except Exception as exc:  # noqa: BLE001 — surfaced via last_error + re-raised
         finish(error=f"{type(exc).__name__}: {exc}")
@@ -297,11 +279,14 @@ def live_scoring(item: dict[str, Any]) -> dict[str, Any] | None:
     item isn't in the queue cache yet, so an opened paper still explains itself."""
     if not str(item.get("title") or "").strip() or not str(item.get("abstract") or "").strip():
         return None
+    gate = _gate()
+    if gate is None:
+        return None
     key = item.get("item_key") or item.get("item_id")
     # Cache-only prestige: this runs on the request path (opening a paper's "why
     # this score?" detail), so it must never block on an OpenAlex network search.
     # The score for an item that was triaged/rescored is already in the cache.
-    preds = _score_items([item], return_shap=True, prestige_network=False)
+    preds = _score_items([item], gate=gate, config=get_state().app_state.config, prestige_network=False)
     pred = preds.get(key)
     return scoring_from_prediction(pred) if pred is not None else None
 
@@ -390,7 +375,7 @@ def build_reading_queue(
     gate_sha = _gate_sha()
     model_ready = gate_sha is not None
     cached, computed_at, stale = (
-        _read_cache_with_meta(gate_sha) if model_ready else ({}, None, False)
+        _read_cache_with_meta(gate_sha) if model_ready and not refresh else ({}, None, False)
     )
     verdict_priority = _verdict_priorities()
     # Two display-only sidecars merged into each row (never fed to the hide/pin
@@ -413,7 +398,7 @@ def build_reading_queue(
     err = last_error() if model_ready else None
     if model_ready and refresh:
         if try_start():
-            run_in_background(lambda: _compute_scores_into_cache(gate_sha, full=True))
+            run_in_background(_compute_scores_into_cache)
         status = "computing"
     elif is_running():
         status = "computing"
@@ -422,10 +407,9 @@ def build_reading_queue(
     else:
         status = "ready"
 
-    items = unread[:limit]
     if include_read:
         read.sort(key=lambda c: c["date_added"], reverse=True)
-        items = items + read[:limit]
+    items = (unread + read if include_read else unread)[:limit]
 
     return {
         "status": status,

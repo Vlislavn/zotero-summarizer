@@ -11,7 +11,9 @@ from unittest.mock import patch
 import pytest
 
 from zotero_summarizer.services.library import review, review_materialize, review_summary
+from zotero_summarizer.services.golden.hybrid_gt import apply_hybrid
 from zotero_summarizer.storage import feeds as fs
+from zotero_summarizer.storage import repositories
 
 
 # ---------------------------------------------------------------------------
@@ -23,7 +25,8 @@ def _init_triage_db(tmp_path: Path) -> sqlite3.Connection:
     db = tmp_path / "triage.db"
     conn = sqlite3.connect(str(db))
     conn.row_factory = sqlite3.Row
-    fs.init_feeds_schema(conn)
+    repositories.apply_schema(conn)
+    conn.commit()
     return conn
 
 
@@ -199,7 +202,7 @@ def test_reject_appends_dont_read_to_golden(patched_settings):
     db.close()
 
     result = review.reject(row_id, write_to_golden=True)
-    assert result["golden_csv_row_added"] is True
+    assert result == {"processed_id": row_id, "state": "user_rejected"}
 
     # State flipped.
     db = sqlite3.connect(str(patched_settings / "triage.db"))
@@ -207,9 +210,9 @@ def test_reject_appends_dont_read_to_golden(patched_settings):
     row = db.execute("SELECT decision FROM processed_feed_items WHERE id = ?", (row_id,)).fetchone()
     assert row["decision"] == fs.DECISION_USER_REJECTED
 
-    # Golden CSV grew by one row with dont_read.
+    # Training includes the durable review sample; CSV is no longer the write target.
     with (patched_settings / "zotero-summarizer-golden.csv").open() as f:
-        rows = list(_csv.DictReader(f))
+        rows = apply_hybrid(list(_csv.DictReader(f)), patched_settings / "triage.db")
     assert len(rows) == 1
     assert rows[0]["gold_priority_final"] == "dont_read"
     assert rows[0]["title"] == "Reject me"
@@ -224,11 +227,12 @@ def test_reject_without_golden_write_does_not_touch_csv(patched_settings):
     db.close()
 
     result = review.reject(row_id, write_to_golden=False)
-    assert result["golden_csv_row_added"] is False
+    assert result == {"processed_id": row_id, "state": "user_rejected"}
 
     with (patched_settings / "zotero-summarizer-golden.csv").open() as f:
         rows = list(_csv.DictReader(f))
     assert rows == []
+    assert apply_hybrid(rows, patched_settings / "triage.db") == []
 
 
 def test_relabel_to_dont_read_routes_through_reject(patched_settings):
@@ -239,7 +243,7 @@ def test_relabel_to_dont_read_routes_through_reject(patched_settings):
     db.close()
 
     result = review.relabel(row_id, "dont_read")
-    assert result["golden_csv_row_added"] is True
+    assert result == {"processed_id": row_id, "state": "user_rejected"}
 
     db = sqlite3.connect(str(patched_settings / "triage.db"))
     db.row_factory = sqlite3.Row
@@ -259,7 +263,7 @@ def test_relabel_to_must_read_approves_and_appends(patched_settings):
 
     result = review.relabel(row_id, "must_read")
     assert result["state"] == fs.DECISION_USER_APPROVED
-    assert result["golden_csv_row_added"] is True
+    assert result == {"processed_id": row_id, "state": "user_approved"}
 
     db = sqlite3.connect(str(patched_settings / "triage.db"))
     db.row_factory = sqlite3.Row
@@ -267,7 +271,7 @@ def test_relabel_to_must_read_approves_and_appends(patched_settings):
     assert row["decision"] == fs.DECISION_USER_APPROVED
 
     with (patched_settings / "zotero-summarizer-golden.csv").open() as f:
-        rows = list(_csv.DictReader(f))
+        rows = apply_hybrid(list(_csv.DictReader(f)), patched_settings / "triage.db")
     assert len(rows) == 1
     assert rows[0]["gold_priority_final"] == "must_read"
 
@@ -300,7 +304,7 @@ def test_apply_all_approved_without_zotero_marks_pending_sync(patched_settings, 
 
     class _UnavailableWriter:
         def __init__(self, *a, **k):
-            raise RuntimeError("zotero unavailable")
+            raise zotero_write.ZoteroWriteError("zotero unavailable")
 
     monkeypatch.setattr(zotero_write, "ZoteroWriter", _UnavailableWriter)
     res = review.apply_all_approved()
@@ -358,7 +362,7 @@ def test_apply_all_approved_ignores_created_at_window(patched_settings, monkeypa
 
     class _UnavailableWriter:
         def __init__(self, *a, **k):
-            raise RuntimeError("zotero unavailable")
+            raise zotero_write.ZoteroWriteError("zotero unavailable")
 
     monkeypatch.setattr(zotero_write, "ZoteroWriter", _UnavailableWriter)
     res = review.apply_all_approved()
@@ -448,9 +452,9 @@ def test_bulk_confirm_mutates_only_explicit_visible_ids(patched_settings):
 
     result = review.confirm_remaining_gate_rejected([first])
 
-    assert result["total_considered"] == 1
+    assert result == {"confirmed": 1, "skipped": 0}
     with (patched_settings / "zotero-summarizer-golden.csv").open() as handle:
-        rows = list(_csv.DictReader(handle))
+        rows = apply_hybrid(list(_csv.DictReader(handle)), patched_settings / "triage.db")
     assert len(rows) == 1
     assert rows[0]["title"] == "Visible"
 

@@ -12,8 +12,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import ValidationError
-
 from zotero_summarizer.models import GoalsConfig, PaperDigest
 from zotero_summarizer.services._common import extract_json_blob, to_text
 from zotero_summarizer.services.library._review_text import select_review_text
@@ -25,7 +23,8 @@ _STRICT_RETRY_SUFFIX = (
     "\n\nIMPORTANT: your previous reply was not valid. Return ONE JSON object only "
     "(no prose, no code fences). Every score field (soundness/novelty/significance/"
     "reproducibility/clarity) MUST be an integer from 1 to 5 — never 0. Include "
-    "all reading-action and writing fields explicitly. Read/skim need a concrete "
+    "all reading-action and writing fields explicitly. Reading action MUST be read, skim or skip. "
+    "Read/skim need a concrete "
     "reason, exact target, positive minute estimate, and original-only value."
 )
 
@@ -59,6 +58,8 @@ def _coerce_digest(raw: Any) -> PaperDigest:
     }
     if not required <= digest.model_fields_set:
         raise ValueError("digest omitted required reading or writing assessment")
+    if digest.read_decision not in {"read", "skim", "skip"}:
+        raise ValueError("digest reading action must be read, skim or skip")
     if digest.read_decision in {"read", "skim"}:
         if not digest.read_why.strip() or not any(part.strip() for part in digest.read_parts):
             raise ValueError("read/skim requires a reason and exact target")
@@ -182,7 +183,7 @@ def assess_digest(
     extra = {"response_format": response_format} if response_format else {}
     try:
         digest = _coerce_digest(llm.pydantic_prompt(prompt=prompt, pydantic_model=PaperDigest, **extra))
-    except (ValidationError, ValueError):
+    except ValueError:
         retry = llm.pydantic_prompt(prompt=prompt + _STRICT_RETRY_SUFFIX, pydantic_model=PaperDigest, **extra)
         digest = _coerce_digest(retry)
     return digest.model_copy(update={"basis": "full_text"})

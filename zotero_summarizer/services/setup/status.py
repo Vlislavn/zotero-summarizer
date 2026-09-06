@@ -122,8 +122,7 @@ def _zotero_status() -> ZoteroStatus:
 
 
 async def _classifier_status() -> ClassifierStatus:
-    """Map the trained ModelCard to the advisory classifier panel. ``{"model":
-    null}`` (no model on disk) → ``trained=false``."""
+    """Report the currently loaded gate, not the presence of an offline artifact."""
     card = await model_card()
     model = card.get("model")
     if not model:

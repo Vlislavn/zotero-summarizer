@@ -15,21 +15,23 @@ class ZoteroFeedWriteMixin:
     def _apply_mark_feed_item_read(
         self,
         conn: sqlite3.Connection,
-        item_key: str,
         payload: dict[str, Any],
     ) -> None:
         """Mark one Zotero feed item read from its internal numeric ID."""
-        _ = item_key
         feed_library_id = int(payload.get("feed_library_id") or 0)
         feed_item_id = int(payload.get("feed_item_id") or 0)
         if feed_library_id <= 0 or feed_item_id <= 0:
             raise ZoteroWriteError(
                 "mark_feed_item_read payload requires feed_library_id + feed_item_id"
             )
-        conn.execute(
-            "UPDATE feedItems SET readTime = datetime('now') WHERE itemID = ?",
-            (feed_item_id,),
+        cursor = conn.execute(
+            "UPDATE feedItems SET readTime = COALESCE(readTime, datetime('now')) WHERE itemID = ? "
+            "AND itemID IN (SELECT i.itemID FROM items i JOIN libraries l ON l.libraryID = i.libraryID "
+            "WHERE i.libraryID = ? AND l.type = 'feed')",
+            (feed_item_id, feed_library_id),
         )
+        if cursor.rowcount != 1:
+            raise ZoteroWriteError("Feed item does not belong to the supplied feed library")
 
     def mark_feed_items_read(self, feed_item_ids: list[int]) -> int:
         """Idempotently clear Zotero's unread badge for a batch of feed items."""
@@ -42,10 +44,7 @@ class ZoteroFeedWriteMixin:
             conn = sqlite3.connect(str(self.db_path), timeout=15)
             conn.row_factory = sqlite3.Row
             try:
-                try:
-                    conn.execute("PRAGMA journal_mode=WAL")
-                except sqlite3.Error:
-                    pass
+                conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA busy_timeout=15000")
                 placeholders = ",".join("?" for _ in feed_item_ids)
                 cursor = conn.execute(

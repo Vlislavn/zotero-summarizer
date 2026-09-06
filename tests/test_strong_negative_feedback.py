@@ -15,37 +15,20 @@ import pytest
 from tests._zotero_fixtures import add_library_item, build_zotero_db
 from zotero_summarizer.services.triage.feeds import (
     _compute_outcome_from_membership,
-    _feedback_type_from_outcome,
-    _relevance_from_weight,
 )
-from zotero_summarizer.storage import feeds as fs
-
-
-def test_feedback_type_mapping_strong_negative_on_delete():
-    assert _feedback_type_from_outcome(fs.OUTCOME_DELETED_ALL) == "implicit_negative_strong"
-    assert _feedback_type_from_outcome(fs.OUTCOME_TRASHED) == "implicit_negative_strong"
-    assert _feedback_type_from_outcome(fs.OUTCOME_UNKNOWN) == "implicit_negative_strong"
-
-
-def test_feedback_type_mapping_engagement_is_positive():
-    assert _feedback_type_from_outcome(fs.OUTCOME_ENGAGED) == "implicit_engagement"
-    assert _feedback_type_from_outcome(fs.OUTCOME_MOVED_COLLECTION) == "implicit_engagement"
-
-
-def test_feedback_type_mapping_kept_inbox_is_weak_negative():
-    assert _feedback_type_from_outcome(fs.OUTCOME_KEPT_INBOX) == "implicit_weak_negative"
+from zotero_summarizer.storage import feeds as fs, repositories
 
 
 def test_relevance_from_weight_spans_full_range():
     # -3 -> 1.0 (strong negative)
-    assert _relevance_from_weight(-3.0) == pytest.approx(1.0, abs=0.01)
+    assert fs.relevance_from_signal_weight(-3.0) == pytest.approx(1.0, abs=0.01)
     # 0 -> 3.0 (neutral)
-    assert _relevance_from_weight(0.0) == pytest.approx(3.0, abs=0.01)
+    assert fs.relevance_from_signal_weight(0.0) == pytest.approx(3.0, abs=0.01)
     # +3 -> 5.0 (strong positive)
-    assert _relevance_from_weight(3.0) == pytest.approx(5.0, abs=0.01)
+    assert fs.relevance_from_signal_weight(3.0) == pytest.approx(5.0, abs=0.01)
     # Clamps to [1, 5]
-    assert _relevance_from_weight(-100.0) == 1.0
-    assert _relevance_from_weight(100.0) == 5.0
+    assert fs.relevance_from_signal_weight(-100.0) == 1.0
+    assert fs.relevance_from_signal_weight(100.0) == 5.0
 
 
 def test_full_outcome_resolution_chain_simulates_user_deletion(tmp_path: Path, monkeypatch):
@@ -65,7 +48,7 @@ def test_full_outcome_resolution_chain_simulates_user_deletion(tmp_path: Path, m
     # Triage DB: insert a processed_feed_items row pointing at K1 with eligible_at in the past.
     triage_conn = sqlite3.connect(":memory:")
     triage_conn.row_factory = sqlite3.Row
-    fs.init_feeds_schema(triage_conn)
+    repositories.apply_schema(triage_conn)
     fs.record_decision(
         triage_conn, run_id="t1",
         feed_item={"feed_library_id": 2, "item_id": 999, "guid": "g999", "title": "The Rejected Paper"},
@@ -87,9 +70,11 @@ def test_full_outcome_resolution_chain_simulates_user_deletion(tmp_path: Path, m
 
     # Write outcome to processed_feed_items.
     fs.record_outcome(triage_conn, feed_library_id=2, feed_item_id=999,
-                     final_outcome=outcome, signal_weight=weight)
+                     final_outcome=outcome)
     row = triage_conn.execute(
         "SELECT final_outcome, outcome_signal_weight FROM processed_feed_items WHERE feed_item_id=999"
     ).fetchone()
     assert row["final_outcome"] == "deleted_all"
     assert row["outcome_signal_weight"] == -3.0
+    feedback = triage_conn.execute("SELECT signal, inferred_relevance FROM user_feedback").fetchone()
+    assert tuple(feedback) == ("feed_outcome:deleted_all", 1.0)

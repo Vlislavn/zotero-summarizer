@@ -311,22 +311,25 @@ def test_gate_rejected_decision_constant_exists():
 
 
 def test_retrain_not_scheduled_when_sha_matches(tmp_path):
-    """If golden CSV sha == cached gate sha → no retrain triggered."""
-    from zotero_summarizer.services import run_log
+    """Matching complete training identity does not schedule another worker."""
+    from zotero_summarizer.services.model import classifier_inputs
 
     golden = tmp_path / "zotero-summarizer-golden.csv"
     golden.write_text("item_key,gold_priority_final\nP1,must_read\n", encoding="utf-8")
-    current_sha = run_log.file_sha256(golden, prefix_len=64)
-
     gate = _StubGate({})
-    gate.golden_csv_sha256 = current_sha
+    gate.training_metadata["training_input_sha256"] = "matching-inputs"
     fake_state = SimpleNamespace(
         classifier_gate=gate,
         classifier_gate_training=False,
+        app_state=SimpleNamespace(config=SimpleNamespace(classifier_gate=SimpleNamespace(
+            model_name="tabpfn", n_folds=5, pca_dim=100,
+        ))),
     )
-    fake_settings = SimpleNamespace(project_root=tmp_path, golden_csv_path=golden)
+    fake_settings = SimpleNamespace(golden_csv_path=golden, corpus_db_path=tmp_path / "corpus.db",
+                                    triage_db_path=tmp_path / "triage.db")
     with patch.object(feeds, "get_state", return_value=fake_state), \
          patch.object(feeds, "get_settings", return_value=fake_settings), \
+         patch.object(classifier_inputs, "load_training_inputs", return_value=SimpleNamespace(sha256="matching-inputs")), \
          patch("threading.Thread") as mock_thread:
         feeds._maybe_schedule_gate_retrain("tick_test")
     mock_thread.assert_not_called()
@@ -335,6 +338,7 @@ def test_retrain_not_scheduled_when_sha_matches(tmp_path):
 
 def test_retrain_scheduled_when_sha_differs(tmp_path):
     """sha mismatch + no training in progress → background thread is started."""
+    from zotero_summarizer.services.model import classifier_inputs
     golden = tmp_path / "zotero-summarizer-golden.csv"
     golden.write_text("item_key,gold_priority_final\nP1,must_read\n", encoding="utf-8")
 
@@ -343,13 +347,19 @@ def test_retrain_scheduled_when_sha_differs(tmp_path):
     fake_state = SimpleNamespace(
         classifier_gate=gate,
         classifier_gate_training=False,
+        app_state=SimpleNamespace(config=SimpleNamespace(classifier_gate=SimpleNamespace(
+            model_name="lightgbm", n_folds=5, pca_dim=100,
+        ))),
     )
-    fake_settings = SimpleNamespace(project_root=tmp_path, golden_csv_path=golden)
+    fake_settings = SimpleNamespace(golden_csv_path=golden, corpus_db_path=tmp_path / "corpus.db",
+                                    triage_db_path=tmp_path / "triage.db")
     with patch.object(feeds, "get_state", return_value=fake_state), \
          patch.object(feeds, "get_settings", return_value=fake_settings), \
+         patch.object(classifier_inputs, "load_training_inputs", return_value=SimpleNamespace(sha256="changed-inputs")), \
          patch("threading.Thread") as mock_thread:
         feeds._maybe_schedule_gate_retrain("tick_test")
     mock_thread.assert_called_once()
+    assert mock_thread.call_args.kwargs["args"] == (golden, "lightgbm")
     assert fake_state.classifier_gate_training is True
 
 

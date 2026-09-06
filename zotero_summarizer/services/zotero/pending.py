@@ -129,14 +129,14 @@ def normalize_tag_values(value: Any) -> list[str]:
 
 def _build_exclusive_tag_change(
     current_tags: list[str],
-    target_tag: str,
+    target_tag: str | None,
     namespace_casefolded: frozenset[str] | set[str],
 ) -> dict[str, list[str]]:
     """Add ``target_tag`` and remove any OTHER tag in its mutually-exclusive
     namespace, leaving every tag outside that namespace untouched. Idempotent
-    (empty add when the target is already present). The single implementation
-    behind the per-namespace builders below."""
-    target_folded = target_tag.casefold()
+    (empty add when the target is already present). ``None`` clears the namespace.
+    The single implementation behind the per-namespace builders below."""
+    target_folded = target_tag.casefold() if target_tag is not None else None
     has_target = False
     remove_tags: list[str] = []
     seen: set[str] = set()
@@ -151,22 +151,23 @@ def _build_exclusive_tag_change(
         ):
             seen.add(folded)
             remove_tags.append(tag)
-    add_tags = [] if has_target else [target_tag]
+    add_tags = [] if has_target or target_tag is None else [target_tag]
     return {"add_tags": add_tags, "remove_tags": remove_tags}
 
 
 def build_label_tag_change(
-    current_tags: list[str], priority: str
+    current_tags: list[str], priority: str | None
 ) -> dict[str, list[str]]:
     """Mutually-exclusive explicit ground-truth label tag (``label:<priority>``).
 
     The user's deliberate verdict — now the single priority namespace (the machine
     ``zs:<priority>`` tag was retired). Adds ``label:<priority>`` and removes any
     other ``label:*`` tag, never touching emoji feedback, ``zs:rel/*`` bands, or
-    topical tags. Raises on an unknown priority (a validated 4-class enum upstream)."""
+    topical tags. ``None`` removes all recognized label tags. Other unknown
+    priorities still raise; an empty string is not a retraction."""
     return _build_exclusive_tag_change(
         current_tags,
-        label_tag_for_priority(priority),
+        label_tag_for_priority(priority) if priority is not None else None,
         LABEL_TAG_CASEFOLDED,
     )
 
@@ -238,9 +239,9 @@ def normalize_collection_suggestions(collections: list[str]) -> list[str]:
     return unique_non_empty_strings(collections)
 
 
-def queue_changes_for_item(
+def plan_changes_for_item(
     item_key: str, title: str, summary: SummarizeResponse
-) -> int:
+) -> list[dict[str, Any]]:
     planner = PendingChangePlanner()
     changes = planner.triage_changes(
         item_key=item_key,
@@ -249,9 +250,7 @@ def queue_changes_for_item(
         note_html=build_triage_note_html(title, summary),
         suggested_collections=summary.suggested_collections,
     )
-    return triage_db.insert_pending_changes(
-        item_key=item_key, item_title=title, changes=planner.to_repository_rows(changes)
-    )
+    return planner.to_repository_rows(changes)
 
 
 async def list_pending_changes(

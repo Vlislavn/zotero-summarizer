@@ -36,6 +36,12 @@ queues suggested Zotero changes for you to approve.
 
 ## More
 
+`Settings.model_dir`, `tuned_params_path`, and `pdf_cache_dir` select
+`data/models/`, `data/optuna-best-params.json`, and `data/pdfs/` below the active
+project. Model/library caches never resolve an application cache from HOME.
+Existing home-global artifacts are left untouched and are not auto-imported;
+retrain/recompute in the selected project or explicitly copy trusted artifacts.
+
 Subpackages each have their own README. Start with
 [docs/architecture.md](../docs/architecture.md) for the end-to-end mental model,
 then the [README](../README.md) for setup + usage.

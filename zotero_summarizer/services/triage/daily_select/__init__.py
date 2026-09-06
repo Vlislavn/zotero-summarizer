@@ -10,7 +10,7 @@ Composition: (K-2) model + 1 surprise + 1 diversity (default K=5 -> 3/1/1), with
 a 168 h lookback by default. Candidates are ordered by the shared relevance ×
 goal-text × prestige blend (``services/model/rank_blend``) and the WHOLE pool is
 offered to the role pickers — ``backlog_cap`` only bounds the never-empty
-fallback fetch, never the picker pool (a pre-pick cap starved the
+fallback's cleaned rows, never the picker pool (a pre-pick cap starved the
 surprise/diversity roles of the off-mainstream papers they exist to find). The
 model quota scales with K so a larger K actually yields more cards
 (surprise/diversity stay at 1 each); without this the fixed 3/1/1 roles capped
@@ -24,7 +24,7 @@ spot-check now lives in its own labeled Today section + the Review page
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from zotero_summarizer.domain import (
@@ -40,13 +40,14 @@ from zotero_summarizer.services.triage.daily_select._candidate import (
     attach_quality_from_reviews,
     attach_rank_scores,
     dedup_keep_newest,
+    make_candidate,
+    row_created_at,
 )
 from zotero_summarizer.services.triage.daily_select._dataclasses import DailySlate, SlatePaper
 from zotero_summarizer.services.triage.daily_select._relevance import attach_why
 from zotero_summarizer.services.triage.daily_select._querying import (
     fetch_decided_content_keys,
     fetch_handled_keys,
-    fetch_recent_rows_by_decisions,
     fetch_rows_by_decisions,
     fetch_trashed_guids,
     open_ro,
@@ -156,7 +157,7 @@ def _drop_content_dupes(
     survivors: list[dict] = []
     seen_doi: set[str] = set()
     seen_arxiv: set[str] = set()
-    for row in sorted(rows, key=lambda r: str(r.get("created_at") or ""), reverse=True):
+    for row in sorted(rows, key=row_created_at, reverse=True):
         doi = normalize_doi(str(row.get("doi") or ""))
         arxiv = normalize_arxiv_id(str(row.get("arxiv_id") or ""))
         if (doi and doi in blocked_doi) or (arxiv and arxiv in blocked_arxiv):
@@ -183,9 +184,13 @@ def _fetch_primary_unhandled(
     DOI/arXiv) of a paper already decided on / in the library, with the
     never-empty recent fallback. Returns ``(rows, fellback_to_recent)``.
 
-    The single source of truth for "what's genuinely awaiting the user" — both
-    the slate and the header counter consume this so they never disagree.
+    The single source of truth for "what's genuinely awaiting the user" —
+    the slate, header counter and rescoring consume this pool.
     """
+    if backlog_cap <= 0:
+        raise ValueError(f"backlog_cap must be positive; got {backlog_cap}")
+    if lookback_hours <= 0:
+        raise ValueError(f"lookback_hours must be positive; got {lookback_hours}")
     handled_guids, handled_label_keys = fetch_handled_keys(conn)
     blocked_doi, blocked_arxiv = fetch_decided_content_keys(
         conn,
@@ -198,26 +203,21 @@ def _fetch_primary_unhandled(
         trashed_outcomes=_TRASH_OUTCOMES,
     )
 
-    def _clean(rows: list[dict]) -> list[dict]:
-        rows = _drop_trashed_guids(rows, trashed_guids=trashed_guids)
-        rows = _drop_handled(
-            rows, handled_guids=handled_guids, handled_label_keys=handled_label_keys,
-        )
-        return _drop_content_dupes(
-            rows, blocked_doi=blocked_doi, blocked_arxiv=blocked_arxiv,
-        )
-
     primary_decisions = [_DECISION_AWAITING_REVIEW, _DECISION_TRIAGED_PENDING]
-    rows = _clean(fetch_rows_by_decisions(
-        conn, decisions=primary_decisions, lookback_hours=lookback_hours, now=now,
+    # ponytail: read the primary backlog in memory; page only if its size warrants it.
+    rows = fetch_rows_by_decisions(conn, decisions=primary_decisions)
+    rows = _drop_trashed_guids(rows, trashed_guids=trashed_guids)
+    rows = _drop_handled(
+        rows, handled_guids=handled_guids, handled_label_keys=handled_label_keys,
+    )
+    rows = dedup_keep_newest(_drop_content_dupes(
+        rows, blocked_doi=blocked_doi, blocked_arxiv=blocked_arxiv,
     ))
-    fellback = False
-    if not rows:
-        rows = _clean(fetch_recent_rows_by_decisions(
-            conn, decisions=primary_decisions, limit=backlog_cap,
-        ))
-        fellback = bool(rows)
-    return rows, fellback
+    cutoff = now.astimezone(timezone.utc) - timedelta(hours=lookback_hours)
+    recent = [row for row in rows if row_created_at(row) >= cutoff]
+    if recent:
+        return recent, False
+    return rows[:backlog_cap], bool(rows)
 
 
 def count_awaiting_unhandled(
@@ -241,7 +241,7 @@ def count_awaiting_unhandled(
         )
     finally:
         conn.close()
-    return len(dedup_keep_newest(rows))
+    return len(rows)
 
 
 def _assemble_interleaved(
@@ -335,7 +335,7 @@ def assemble_daily_slate(
          the surprise/diversity pickers see every candidate, so an
          off-mainstream paper the composite ranks low is still reachable by
          the role built to find it. ``backlog_cap`` only bounds the
-         never-empty fallback FETCH (step 1's recent-rows query), not the
+         never-empty fallback after handled/duplicate removal, not the
          picker pool.
       4. Attach pool-relative ``why`` chips (goal bands = cohort terciles).
       5. Greedy role allocation with model_fallback rolling for empty roles.
@@ -346,10 +346,6 @@ def assemble_daily_slate(
     """
     if K <= 0:
         raise ValueError(f"K must be positive; got {K}")
-    if backlog_cap <= 0:
-        raise ValueError(f"backlog_cap must be positive; got {backlog_cap}")
-    if lookback_hours <= 0:
-        raise ValueError(f"lookback_hours must be positive; got {lookback_hours}")
     if quality_first is None and rank_interleave_enabled():
         # P3 online interleave (ADR-A9/GAP-G11): both arms compete inside one slate.
         # Only the top-level call dispatches — the two arm builds below pass an
@@ -376,7 +372,7 @@ def assemble_daily_slate(
     finally:
         conn.close()
 
-    deduped = dedup_keep_newest(primary_rows)
+    deduped = [make_candidate(row) for row in primary_rows]
     pool_size = len(deduped)
 
     # Bridge the deep-review QUALITY signal onto the slate: feed-GUID-keyed

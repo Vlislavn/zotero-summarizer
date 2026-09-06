@@ -12,7 +12,7 @@ import json
 import threading
 from typing import Any
 
-from zotero_summarizer.services._common import now_iso_z, write_json_atomic
+from zotero_summarizer.services._common import now_iso_z, settings, write_json_atomic
 
 _CACHE_FILENAME = "deep_reviews.json"
 _CACHE_LOCK = threading.Lock()    # guards the read-merge-write of deep_reviews.json
@@ -20,8 +20,7 @@ REVIEW_CONTRACT_VERSION = 2
 
 
 def _cache_path():
-    from zotero_summarizer.services.model.classifier_persistence import DEFAULT_MODEL_DIR
-    return DEFAULT_MODEL_DIR / _CACHE_FILENAME
+    return settings().model_dir / _CACHE_FILENAME
 
 
 def _read_all() -> dict[str, Any]:

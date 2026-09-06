@@ -11,7 +11,7 @@ from typing import Any
 
 from zotero_summarizer.integrations import browser_fetch, pdf_fetch, pubmed
 from zotero_summarizer.integrations._zotero_read_common import _arxiv_id_from_url_or_doi
-from zotero_summarizer.services._common import LOGGER, state as get_state
+from zotero_summarizer.services._common import LOGGER, settings, state as get_state
 from zotero_summarizer.services.library.university_access import profile_dir as _profile_dir
 from zotero_summarizer.settings import offline_requested
 
@@ -93,7 +93,7 @@ def _browser_acquire(
         channel = str(getattr(ua, "browser_channel", "") or "")
         for source, candidate in _dedupe_sources([*sources, ("browser", proxied)]):
             path = browser_fetch.fetch_pdf_via_browser(
-                candidate, profile_dir=profile, cache_dir=None,
+                candidate, profile_dir=profile, cache_dir=settings().pdf_cache_dir,
                 timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes, headless=ua.headless,
                 cookie_browser=cb, channel=channel,
                 render_fallback=(web_articles and candidate == proxied),
@@ -105,7 +105,7 @@ def _browser_acquire(
                 )
         if allow_headed_fallback and ua.headless:
             path = browser_fetch.fetch_pdf_via_browser(
-                proxied, profile_dir=profile, cache_dir=None,
+                proxied, profile_dir=profile, cache_dir=settings().pdf_cache_dir,
                 timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes, headless=False,
                 cookie_browser=cb, channel=channel, render_fallback=web_articles,
             )
@@ -118,7 +118,7 @@ def _browser_acquire(
         return AcquireResult(path=None, needs_login=True, login_url=proxied, outcome="needs_login")
     if web_articles and not scholarly and _is_web_article(url):
         rendered = browser_fetch.render_article_pdf(
-            url, cache_dir=None, timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes
+            url, cache_dir=settings().pdf_cache_dir, timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes
         )
         if rendered is not None:
             return AcquireResult(
@@ -146,7 +146,10 @@ def acquire_pdf_for(
 
     sources = _headless_sources(app, config, url, doi, arxiv_id)
     for source, candidate in sources:
-        path = pdf_fetch.fetch_pdf(candidate, max_bytes=qr.max_pdf_bytes, timeout=qr.fetch_timeout_secs)
+        path = pdf_fetch.fetch_pdf(
+            candidate, cache_dir=settings().pdf_cache_dir,
+            max_bytes=qr.max_pdf_bytes, timeout=qr.fetch_timeout_secs,
+        )
         if path is not None:
             return AcquireResult(
                 path=path, source=source, source_url=candidate, outcome=f"acquired_{source}"

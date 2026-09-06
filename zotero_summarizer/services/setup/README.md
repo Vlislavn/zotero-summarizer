@@ -30,9 +30,23 @@ endpoint. Add runtimes only with install and verification paths.
 Doctor state is `data/setup_doctor.json`; stale `running` rows become Needs
 action. It is current state, not an audit log. Recovery strings are displayed,
 never executed. `--fix` only runs idempotent bootstrap/migrations.
+Bootstrap owns migration; Doctor does not repeat it. Path validation snapshots
+read the resulting `.env`, including unchanged paths and empty update requests.
+Calibration accepts 1–10 papers, checks item paths (including symlinks) remain
+inside `Settings.paper_render_dir`, and loads input before contacting a model.
 ML-only mode marks model/inference/dry-run checks as intentionally skipped and
 keeps classifier triage available; it can be changed later in Settings.
+
+The advisory classifier panel uses the same loaded-gate card as Settings. A
+saved but unloaded artifact is not reported as the active classifier; no model
+file or run-log parsing is needed for this panel.
 
 The `.env` writer/bootstrap exception exists because paths must resolve before
 `Settings.data_dir`. Setup may import models, storage, integrations,
 `api.errors`, and services; never API routes. Lower layers never import setup.
+
+Gate asset targets carry the same immutable base/adapter revisions as the
+classifier loader. The cheap cache report checks that revision, not merely any
+bytes under the repository; an old snapshot cannot satisfy a new pin. Prefetch
+uses the actual pinned loader. Snapshot presence remains a cheap inventory
+check, while Doctor's fresh-process offline load verifies loadability.

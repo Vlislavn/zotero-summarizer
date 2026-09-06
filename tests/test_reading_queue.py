@@ -1,5 +1,5 @@
 """Tests for the Stage-2 library reading queue: gate-relevance ranking, live
-read-status filter, incremental cache, and graceful gate-off fallback."""
+read-status filter, atomic score cache, and explicit gate-off behavior."""
 from __future__ import annotations
 
 import pytest
@@ -353,7 +353,7 @@ def test_unscorable_item_gets_sentinel_and_stops_recompute(monkeypatch):
     """The core fix: an item the gate can't score is cached as a sentinel so it
     no longer counts as 'missing' and never re-triggers the background pass."""
     _patch_state(monkeypatch, _FakeReader([_item("A"), _item("U")]), _PartialGate("sha1", skip={"U"}))
-    reading_queue._compute_scores_into_cache("sha1")
+    reading_queue._compute_scores_into_cache()
     cached = reading_queue._read_cache("sha1")
     assert cached["A"]["relevance_score"] is not None
     assert cached["U"].get("unscorable") is True
@@ -371,7 +371,7 @@ def test_rescore_stores_goal_sim_in_cache(monkeypatch):
     instead of re-running the corpus matmul on every load."""
     _patch_state(monkeypatch, _FakeReader([_item("A"), _item("B")]), _FakeGate("sha1", {"A": 3.0, "B": 4.0}))
     monkeypatch.setattr(reading_queue, "_goal_affinity", lambda keys: {"A": 0.7})
-    reading_queue._compute_scores_into_cache("sha1", full=True)
+    reading_queue._compute_scores_into_cache()
     cached = reading_queue._read_cache("sha1")
     assert cached["A"]["goal_sim"] == 0.7
     assert cached["B"]["goal_sim"] is None  # no goal embedding → None, but key present
@@ -382,7 +382,7 @@ def test_full_library_scoring_includes_read_items(monkeypatch):
     🧠 emoji). Needed so every paper has a cached score for the global Zotero rank."""
     reader = _FakeReader([_item("A"), _item("R", tags=["🧠"])])
     _patch_state(monkeypatch, reader, _FakeGate("sha1", {"A": 3.0, "R": 4.0}))
-    reading_queue._compute_scores_into_cache("sha1", full=True)
+    reading_queue._compute_scores_into_cache()
     cached = reading_queue._read_cache("sha1")
     assert cached["A"]["relevance_score"] == 3.0
     assert cached["R"]["relevance_score"] == 4.0  # read item scored too (not skipped)
@@ -394,17 +394,15 @@ def test_no_abstract_item_never_enters_cache(monkeypatch):
     noabs = {**_item("N"), "abstract": ""}
     reader = _FakeReader([_item("A"), noabs])
     _patch_state(monkeypatch, reader, _FakeGate("sha1", {"A": 3.0}))
-    reading_queue._compute_scores_into_cache("sha1", full=True)
+    reading_queue._compute_scores_into_cache()
     cached = reading_queue._read_cache("sha1")
     assert "A" in cached
     assert "N" not in cached  # no abstract → skipped entirely
 
 
 def test_full_rescore_preserves_old_scores_on_crash(monkeypatch):
-    """A full Rescore must START FROM the existing cache and overwrite in place
-    — never wipe up front. If the gate dies mid-run, the old scores survive on
-    disk (the old semantics left a truncated, near-empty cache) and the error
-    is surfaced via last_error."""
+    """Rescore must preserve the existing file if the gate fails, and surface
+    the error via last_error."""
 
     class _ExplodingGate(_FakeGate):
         def predict(self, items, **kwargs):
@@ -414,7 +412,7 @@ def test_full_rescore_preserves_old_scores_on_crash(monkeypatch):
     _seed("sha1", A=2.5, B=4.5)
     reading_queue.try_start()
     with pytest.raises(RuntimeError, match="OpenAlex melted"):
-        reading_queue._compute_scores_into_cache("sha1", full=True)
+        reading_queue._compute_scores_into_cache()
     cached = reading_queue._read_cache("sha1")
     assert cached["A"]["relevance_score"] == 2.5  # old scores intact
     assert cached["B"]["relevance_score"] == 4.5
@@ -422,13 +420,13 @@ def test_full_rescore_preserves_old_scores_on_crash(monkeypatch):
 
 
 def test_full_rescore_reattempts_everything_and_purges_departed(monkeypatch):
-    """full=True re-attempts EVERY item (stale scores get replaced, prior
+    """Rescore re-attempts EVERY item (stale scores get replaced, prior
     sentinels retried) and — only after the pass completes — purges cache
     entries for items that left the library, so deletions don't linger."""
     reader = _FakeReader([_item("A"), _item("B")])
     _patch_state(monkeypatch, reader, _FakeGate("sha1", {"A": 3.7, "B": 4.1}))
     _seed("sha1", A=1.0, GONE=2.0)  # stale score for A; GONE left the library
-    reading_queue._compute_scores_into_cache("sha1", full=True)
+    reading_queue._compute_scores_into_cache()
     cached = reading_queue._read_cache("sha1")
     assert cached["A"]["relevance_score"] == 3.7  # re-attempted, not kept stale
     assert cached["B"]["relevance_score"] == 4.1

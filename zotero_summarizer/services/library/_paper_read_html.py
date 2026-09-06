@@ -1,4 +1,4 @@
-"""Pure Markdown rendering plus persisted HTML/audit paper-read outputs."""
+"""Audit staged paper briefs before publishing their HTML and images."""
 from __future__ import annotations
 
 import html
@@ -7,146 +7,52 @@ import re
 from pathlib import Path
 from typing import Any
 
+from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services._common import now_iso_z
 
+_FIGURE_NAME_RE = re.compile(r"^fig\d+_[A-Za-z0-9_.-]+\.(png|jpe?g)$")
 
-def _paper_short_name(title: str, fallback: str) -> str:
-    words = re.findall(r"[A-Za-z0-9]+", title or "")
-    ignored = {"a", "an", "the", "of", "for", "with", "and", "paper"}
-    selected = [w for w in words if w.lower() not in ignored][:4]
-    return "_".join(selected) or re.sub(r"[^A-Za-z0-9]+", "_", fallback).strip("_") or "paper"
+
+def _audit_passed(audit: Any) -> bool:
+    return isinstance(audit, dict) and audit.get("status") == "passed" and audit.get("blocking") == []
 
 
 def write_outputs(
-    pdf_path: Path,
+    directory: Path,
     content: dict[str, Any],
     *,
+    staging: Path,
     digest: dict[str, Any] | None = None,
     quality: dict[str, Any] | None = None,
     goal_summaries: list[dict[str, Any]] | None = None,
     code_link: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Write the presentation and audit files next to the source PDF."""
-    short = _paper_short_name(str(content.get("title") or ""), pdf_path.stem)
-    html_path = pdf_path.parent / f"{short}_presentation.html"
-    html_path.write_text(_render_presentation(content, short, digest, quality, goal_summaries, code_link), encoding="utf-8")
-    audit = _audit_presentation(html_path, content, content.get("figures") or [])
-    audit_path = pdf_path.parent / f"{short}_audit.json"
-    audit_path.write_text(json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")
+    """Publish staged outputs only after all blocking checks pass."""
+    html_text = _render_presentation(content, digest, quality, goal_summaries, code_link)
+    audit = _audit_presentation(html_text, content, staging / "figures")
+    if not _audit_passed(audit):
+        raise APIError(error="paper_audit_failed", message="Paper audit failed; rebuild after fixing extraction",
+                       status_code=422, details={"audit": audit})
+    (staging / "paper_presentation.html").write_text(html_text, encoding="utf-8")
+    (staging / "paper_audit.json").write_text(json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")
+    # ponytail: per-file atomic replacement; immutable generations if bundle-atomic reads become required.
+    for source in staging.rglob("*"):
+        if source.is_file():
+            target = directory / source.relative_to(staging)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            source.replace(target)
+    html_path = directory / "paper_presentation.html"
+    audit_path = directory / "paper_audit.json"
     return {
-        "paper_name": short,
         "presentation_path": str(html_path),
         "audit_path": str(audit_path),
-        "figures_dir": str(pdf_path.parent / "figures"),
+        "figures_dir": str(directory / "figures"),
         "audit": audit,
     }
 
 
-def _render_notes(
-    content: dict[str, Any],
-    digest: dict[str, Any] | None = None,
-    quality: dict[str, Any] | None = None,
-    goal_summaries: list[dict[str, Any]] | None = None,
-) -> str:
-    title = str(content.get("title") or "Untitled")
-    authors = str(content.get("authors") or "Unknown authors")
-    keywords = ", ".join(content.get("keywords") or [])
-    figures = list(content.get("figures") or [])
-    lines: list[str] = [
-        f"# {title}", "",
-        f"> **Authors**: {authors}", ">",
-        f"> **Keywords**: {keywords or 'not provided'}", ">",
-        f"> **Source tier**: {content.get('source_tier', 'pdf')}", "",
-        "---", "",
-    ]
-    if digest:
-        if digest.get("tldr"):
-            lines += ["## TL;DR", "", str(digest["tldr"]), ""]
-        if digest.get("executive_summary"):
-            lines += ["## Executive Summary", "", str(digest["executive_summary"]), ""]
-        decision = str(digest.get("read_decision") or "")
-        why = str(digest.get("read_why") or "")
-        if decision:
-            minutes = digest.get("estimated_read_minutes")
-            timing = f" · {int(minutes)} min" if minutes is not None else ""
-            lines += [f"## Read decision: {decision.upper()}{timing}{f' — {why}' if why else ''}", ""]
-        for label, key in [
-            ("Relevance", "relevance"), ("Controversies", "controversies"),
-            ("Industry impact", "industry_impact"), ("Academy impact", "academy_impact"),
-            ("Impact", "impact"), ("Methods", "methods"), ("Limitations", "limitations"),
-            ("Unknown unknowns", "unknown_unknowns"), ("What the original adds", "original_value"),
-        ]:
-            val = str(digest.get(key) or "")
-            if val:
-                lines += [f"## {label}", "", val, ""]
-        for label, key in [
-            ("Key findings", "key_findings"), ("Read parts", "read_parts"), ("Skip parts", "skip_parts"),
-            ("Implementation", "implementation"),
-        ]:
-            items = [str(x) for x in (digest.get(key) or []) if x]
-            if items:
-                lines += [f"## {label}", ""] + [f"- {x}" for x in items] + [""]
-        strength = str(digest.get("key_strength") or "")
-        weakness = str(digest.get("key_weakness") or "")
-        if strength:
-            lines += [f"**Strength**: {strength}", ""]
-        if weakness:
-            lines += [f"**Weakness**: {weakness}", ""]
-    else:
-        lines += ['*Deep review not yet run — use "Run deeper review" to generate a digest.*', ""]
-    lines += _notes_quality_and_goals(quality, goal_summaries)
-    body_sections = [
-        s for s in (content.get("render_sections") or content.get("sections") or [])
-        if str(s.get("text") or "").strip()
-    ]
-    if body_sections:
-        lines += ["## Sections", ""]
-        for sec in body_sections:
-            lines += [f"### {sec.get('title') or 'Section'}", "", _reflow_prose(str(sec.get("text") or "")), ""]
-    lines += [
-        "## Quick Reference", "",
-        "| Item | Value |", "|---|---|",
-        f"| Pages | {content.get('n_pages', 0)} |",
-        f"| Figures | {len([f for f in figures if f.get('name')])} |",
-        f"| References | {content.get('references_count', 0)} |", "",
-    ]
-    if figures:
-        lines += ["## Figures", ""]
-        for idx, fig in enumerate(figures, start=1):
-            caption = fig.get("caption") or fig.get("label") or f"Figure {idx}"
-            lines.append(f"> **[Figure {idx}: {caption}]**")
-    return "\n".join(lines).strip() + "\n"
-
-
-def _notes_quality_and_goals(
-    quality: dict[str, Any] | None, goal_summaries: list[dict[str, Any]] | None
-) -> list[str]:
-    """Quality verdict + per-goal relevance as markdown (empty when absent)."""
-    lines: list[str] = []
-    if quality and quality.get("quality_band"):
-        lines += [f"## Quality: {str(quality['quality_band']).upper()}", ""]
-        rubric = quality.get("rubric") or {}
-        if rubric:
-            lines += [f"- {k.replace('_', ' ')}: {v}" for k, v in rubric.items()] + [""]
-        for label, key in [("Red flags", "red_flags"), ("Overstated claims", "overstatements")]:
-            items = [str(x) for x in (quality.get(key) or []) if x]
-            if items:
-                lines += [f"**{label}**:", ""] + [f"- {x}" for x in items] + [""]
-    fired = [g for g in (goal_summaries or [])
-             if g.get("retrieval_state") == "hit" and g.get("relevant") and g.get("summary")]
-    if fired:
-        lines += ["## Relevance to your goals", ""]
-        for g in fired:
-            lines += [f"### {g.get('goal')}", "", str(g.get("summary")), ""]
-            secs = ", ".join(g.get("key_sections") or [])
-            if secs:
-                lines += [f"*Key sections for you: {secs}*", ""]
-    return lines
-
-
 def _render_presentation(
     content: dict[str, Any],
-    short_name: str,
     digest: dict[str, Any] | None = None,
     quality: dict[str, Any] | None = None,
     goal_summaries: list[dict[str, Any]] | None = None,
@@ -162,9 +68,8 @@ def _render_presentation(
     brief_block = brief.brief_html(content, digest=digest, quality=quality, goal_summaries=goal_summaries)
     quality_block = brief.quality_panel_html(quality)
     empty_state = (
-        '<section class="fade-in"><div class="empty-state">No readable content could be '
-        "extracted from this PDF (no figures or digest). It may be a scanned or image-only "
-        "document — open the original PDF in Zotero, or run a deep review to add a digest."
+        '<section class="fade-in"><div class="empty-state">No figures or review are available yet. '
+        "Open the original PDF in Zotero for the full text, or run a deep review to add a digest."
         "</div></section>"
         if not figures and not digest and not quality and not (goal_summaries or []) else ""
     )
@@ -180,7 +85,7 @@ def _render_presentation(
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{_h(short_name)} — Paper Brief</title>
+<title>{_h(title)} — Paper Brief</title>
 <style>{_css()}{brief.brief_css()}</style>
 </head>
 <body>
@@ -293,22 +198,12 @@ def _figures_section_html(figures: list[dict[str, Any]]) -> str:
   </section>"""
 
 
-def _reflow_prose(text: str) -> str:
-    """Turn PDF hard-wrapped lines into flowing prose: de-hyphenate words split
-    across a line break and collapse intra-paragraph newlines, while keeping
-    blank-line paragraph breaks. Used by the pure Markdown renderer."""
-    text = (text or "").replace("\r\n", "\n")
-    text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)  # de-hyphenate "in-\nformation"
-    paragraphs = re.split(r"\n\s*\n", text)
-    return "\n\n".join(" ".join(p.split()) for p in paragraphs if p.strip())
-
-
 def _audit_presentation(
-    html_path: Path,
+    html_text: str,
     content: dict[str, Any],
-    figures: list[dict[str, Any]],
+    figures_dir: Path,
 ) -> dict[str, Any]:
-    html_text = html_path.read_text(encoding="utf-8") if html_path.exists() else ""
+    figures = content.get("figures") or []
     source_text = str(content.get("qa_text") or content.get("full_text") or "")
     if not source_text:
         source_text = "\n".join(
@@ -320,8 +215,6 @@ def _audit_presentation(
 
     if not source_text.strip():
         blocking.append("extracted paper content is empty")
-    if "const imageMap" not in html_text:
-        blocking.append("HTML missing imageMap")
     if "<section" not in html_text:
         blocking.append("HTML has no sections")
 
@@ -329,7 +222,13 @@ def _audit_presentation(
     all_figures = [f for f in figures if f.get("caption") or f.get("label")]
     if all_figures and not named:
         blocking.append(f"all {len(all_figures)} figures are placeholders — no images generated")
+    expected_map = {f"ph-fig{i}": f"figures/{fig['name']}" for i, fig in enumerate(named, 1)}
+    if f"const imageMap = {json.dumps(expected_map, ensure_ascii=False)};" not in html_text:
+        blocking.append("HTML imageMap does not match generated figures")
     for idx, fig in enumerate(named, start=1):
+        name = fig["name"]
+        if not _FIGURE_NAME_RE.fullmatch(name) or not (figures_dir / name).is_file():
+            blocking.append(f"missing or invalid figure image {name}")
         if f'id="ph-fig{idx}"' not in html_text:
             blocking.append(f"missing placeholder ph-fig{idx} for {fig['name']}")
 

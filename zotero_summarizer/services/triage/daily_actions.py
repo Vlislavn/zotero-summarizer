@@ -40,22 +40,21 @@ def _db_path():
 
 
 def _load_rows(item_ids: list[int]) -> list[dict[str, Any]]:
-    """Fetch processed_feed_items rows for the given PKs (missing PKs skipped)."""
+    """Resolve unique PKs in request order; reject invalid/missing IDs before writes."""
+    if not item_ids or any(type(pk) is not int or not 0 < pk < 2**63 for pk in item_ids):
+        raise APIError("validation_error", "item_ids must be nonempty positive SQLite integers", 422)
     conn = sqlite3.connect(str(_db_path()))
     conn.row_factory = sqlite3.Row
     try:
         rows: list[dict[str, Any]] = []
-        for pk in item_ids:
-            row = feeds_storage.get_processed_feed_item_by_pk(conn, int(pk))
-            if row is not None:
-                rows.append(dict(row))
+        for pk in dict.fromkeys(item_ids):
+            row = feeds_storage.get_processed_feed_item_by_pk(conn, pk)
+            if row is None:
+                raise APIError("not_found", f"processed_feed_items id={pk} not found", 404)
+            rows.append(row)
         return rows
     finally:
         conn.close()
-
-
-def _golden_key(row: dict[str, Any]) -> str:
-    return row_feed_keys(row)[0]
 
 
 def _record_label(
@@ -83,7 +82,7 @@ def _record_label(
     if original_priority is None:
         original_priority = (row.get("reading_priority") or "").strip() or "unknown"
     review.append_to_golden(row, label=priority, note=note, signal_tier=signal_tier)
-    item_key = _golden_key(row)
+    item_key = row_feed_keys(row)[0]
     label_verdicts.set_label_verdict(
         _db_path(),
         item_key=item_key,

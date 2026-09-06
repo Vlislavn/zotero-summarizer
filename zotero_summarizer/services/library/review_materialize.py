@@ -4,10 +4,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from zotero_summarizer.domain import label_tag_for_priority
+from zotero_summarizer.domain import VERDICT_SOURCE_USER, label_tag_for_priority
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.library.review_summary import pick_stored_summary
-from zotero_summarizer.storage import feeds as feeds_storage
+from zotero_summarizer.storage import feeds as feeds_storage, repositories
+from zotero_summarizer.storage.feed_identity import row_feed_keys
 
 
 LOGGER = logging.getLogger(__name__)
@@ -30,13 +31,16 @@ def materialize_row(
     from zotero_summarizer.services.zotero import pending as pending_service
 
     row_id = int(row["id"])
-    new_key = _generate_zotero_key(used_keys)
+    new_key = feeds_storage.reserve_materialization_key(
+        get_settings().triage_db_path, row_id, _generate_zotero_key(used_keys)
+    )
     stored = pick_stored_summary(row)
     summary = stored if stored is not None else _summary_from_row(row)
     feed_payload = _feed_payload_from_row(row)
     tags = _tags_from_row(is_black_swan=False, black_swan_tag="")
     if label_priority:
         tags = [*tags, label_tag_for_priority(label_priority)]
+        summary.reading_priority = label_priority
     note_html = pending_service.build_triage_note_html(
         title=str(row.get("title") or ""),
         summary=summary,
@@ -55,35 +59,38 @@ def materialize_row(
         provenance_tag=pending_service.SYSTEM_TAG_FEEDS_V3,
     )
     with feeds_storage.open_triage_conn(get_settings().triage_db_path) as conn:
-        feeds_storage.update_to_decision(
-            conn,
-            feed_library_id=int(row["feed_library_id"]),
-            feed_item_id=int(row["feed_item_id"]),
-            decision=feeds_storage.DECISION_SELECTED,
-            decision_reason=f"materialized_via_{reason}",
-            planned_zotero_key=new_key,
-        )
-        feeds_storage.record_materialization(
+        if feeds_storage.record_materialization(
             conn,
             feed_library_id=int(row["feed_library_id"]),
             feed_item_id=int(row["feed_item_id"]),
             materialized_zotero_key=new_key,
             outcome_window_days=7,
-        )
+        ):
+            feeds_storage.update_to_decision(
+                conn,
+                feed_library_id=int(row["feed_library_id"]),
+                feed_item_id=int(row["feed_item_id"]),
+                decision=feeds_storage.DECISION_SELECTED,
+                decision_reason=f"materialized_via_{reason}",
+            )
         conn.commit()
     return new_key
 
 
 def apply_all_approved(since_hours: int | None = None) -> dict[str, Any]:
-    """Materialize every approved row; keep unavailable-Zotero rows pending."""
-    from zotero_summarizer.integrations.zotero_write import ZoteroWriter
+    """Apply the complete approval snapshot; missing Zotero stays pending.
+
+    Unexpected errors propagate; successfully materialized predecessors remain
+    selected and are not repeated on retry. This is not a cross-store transaction.
+    """
+    from zotero_summarizer.integrations.zotero_write import ZoteroWriteError, ZoteroWriter
 
     with feeds_storage.open_triage_conn(get_settings().triage_db_path) as conn:
         rows = feeds_storage.select_by_decisions(
             conn,
             decisions=[feeds_storage.DECISION_USER_APPROVED],
             since_hours=since_hours,
-            limit=5000,
+            limit=None,
         )
 
     if not rows:
@@ -98,7 +105,7 @@ def apply_all_approved(since_hours: int | None = None) -> dict[str, Any]:
     settings_ = get_settings()
     try:
         writer = ZoteroWriter(settings_.zotero_data_dir)
-    except Exception as exc:  # noqa: BLE001 - Zotero is optional for approved feed rows.
+    except ZoteroWriteError as exc:  # Missing Zotero is an explicit local-first pending-sync state.
         LOGGER.warning("apply_all_approved: Zotero writer unavailable; rows remain pending sync: %s", exc)
         with feeds_storage.open_triage_conn(settings_.triage_db_path) as conn:
             for row in rows:
@@ -124,26 +131,21 @@ def apply_all_approved(since_hours: int | None = None) -> dict[str, Any]:
             "failed": [],
         }
 
-    applied = 0
-    failed: list[dict[str, Any]] = []
+    # ponytail: O(N) snapshot of approvals/verdicts; stream batches if library size requires it.
+    verdicts = {verdict["item_key"]: verdict
+                for verdict in repositories.list_all_label_verdicts(settings_.triage_db_path)}
     used_keys: set[str] = set()
     for row in rows:
-        row_id = int(row["id"])
-        try:
-            materialize_row(row, writer=writer, used_keys=used_keys, reason="review_apply")
-            applied += 1
-        except Exception as exc:
-            LOGGER.exception("apply_all_approved failed for row id=%s", row_id)
-            failed.append({
-                "id": row_id,
-                "title": str(row.get("title") or ""),
-                "error": str(exc),
-            })
+        verdict = next((verdicts[key] for key in row_feed_keys(row) if key in verdicts), None)
+        priority = verdict["user_priority"] if verdict is not None and verdict["source"] == VERDICT_SOURCE_USER else None
+        if priority == "dont_read":
+            raise ValueError(f"Approved row {row['id']} now has a dont_read verdict")
+        materialize_row(row, writer=writer, used_keys=used_keys, label_priority=priority)
 
     return {
-        "applied": applied,
+        "applied": len(rows),
         "pending_sync": 0,
         "zotero_sync_error": None,
-        "failed_count": len(failed),
-        "failed": failed[:20],
+        "failed_count": 0,
+        "failed": [],
     }

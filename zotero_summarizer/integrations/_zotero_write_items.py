@@ -11,6 +11,7 @@ from zotero_summarizer.integrations._zotero_write_common import (  # noqa: F401
     WriteColumns,
     ZoteroWriteError,
     read_write_columns,
+    resolve_user_library_item_id,
 )
 
 
@@ -260,7 +261,7 @@ class ZoteroItemWriteMixin:
         inbox_collection_name: str,
         cols: WriteColumns,
     ) -> list[str]:
-        """Add the item to each matched user collection (best-effort). Returns step labels."""
+        """Add every requested user collection, raising if any target is invalid."""
         steps: list[str] = []
         seen_paths = {inbox_collection_name.casefold()}
         for path in matched_collections or []:
@@ -268,19 +269,14 @@ class ZoteroItemWriteMixin:
             if not clean or clean.casefold() in seen_paths:
                 continue
             seen_paths.add(clean.casefold())
-            try:
-                self._apply_collection_change(
-                    conn,
-                    item_key=new_item_key,
-                    payload={"collection_path": clean},
-                    item_columns=cols.items,
-                    collection_columns=cols.collections,
-                    collection_item_columns=cols.collection_items,
-                )
-                steps.append(f"add_to_collection:{clean}")
-            except ZoteroWriteError as _:
-                # Don't fail materialization for missing user collections.
-                pass
+            self._apply_collection_change(
+                conn,
+                item_key=new_item_key,
+                payload={"collection_path": clean},
+                item_columns=cols.items,
+                collection_item_columns=cols.collection_items,
+            )
+            steps.append(f"add_to_collection:{clean}")
         return steps
 
     def _apply_materialization_tags(
@@ -314,27 +310,16 @@ class ZoteroItemWriteMixin:
     ) -> str:
         """Add the Inbox link, creating that workflow collection when absent."""
         payload = {"collection_path": inbox_collection_name}
-        try:
-            self._apply_collection_change(
-                conn,
-                item_key=new_item_key,
-                payload=payload,
-                item_columns=cols.items,
-                collection_columns=cols.collections,
-                collection_item_columns=cols.collection_items,
-            )
-            return "add_to_inbox"
-        except ZoteroWriteError:
+        if self._find_collection_id(conn, "", inbox_collection_name) is None:
             self._ensure_collection(conn, inbox_collection_name, cols.collections)
-            self._apply_collection_change(
-                conn,
-                item_key=new_item_key,
-                payload=payload,
-                item_columns=cols.items,
-                collection_columns=cols.collections,
-                collection_item_columns=cols.collection_items,
-            )
-            return "add_to_inbox_after_autocreate"
+        self._apply_collection_change(
+            conn,
+            item_key=new_item_key,
+            payload=payload,
+            item_columns=cols.items,
+            collection_item_columns=cols.collection_items,
+        )
+        return "add_to_inbox"
 
     def _materialize_in_conn(
         self,
@@ -349,6 +334,8 @@ class ZoteroItemWriteMixin:
         provenance_tag: str | None = None,
     ) -> list[str]:
         """Apply the item, collection, tag, and note steps on one transaction."""
+        if resolve_user_library_item_id(conn, new_item_key, required=False) is not None:
+            return []  # A committed operation includes all steps, even if the user later edits it.
         cols = read_write_columns(lambda table: self._table_columns(conn, table))
         self._apply_create_item_from_feed(
             conn, new_item_key=new_item_key, payload=feed_payload, cols=cols
@@ -401,11 +388,9 @@ class ZoteroItemWriteMixin:
         conn.row_factory = sqlite3.Row
         try:
             conn.execute("PRAGMA foreign_keys=ON")
-            try:
-                conn.execute("PRAGMA journal_mode=WAL")
-            except sqlite3.Error:
-                pass
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA busy_timeout=15000")
+            conn.execute("BEGIN IMMEDIATE")
             steps = self._materialize_in_conn(
                 conn,
                 new_item_key,

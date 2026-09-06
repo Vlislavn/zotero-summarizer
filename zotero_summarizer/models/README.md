@@ -27,3 +27,7 @@ deliberate ML-only state, not an unreachable-provider error.
 
 **Boundaries:** depends only on `pydantic` + `domain`. Nothing here imports
 `services/`/`storage/`/`api/`.
+
+`CorpusItem.doi` defaults to an empty string for older imports. It carries
+identity metadata independently of title/abstract embedding content, enabling
+self-exclusion when the same paper appears under another title.

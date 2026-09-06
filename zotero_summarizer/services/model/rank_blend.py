@@ -36,15 +36,13 @@ Blend contract (mirrors the measured Library behaviour exactly):
 """
 from __future__ import annotations
 
+from collections import deque
+from statistics import median
+
 from zotero_summarizer.domain import ReadingPriority
 
 GOAL_BLEND_WEIGHT = 0.4
 PRESTIGE_BLEND_WEIGHT = 0.15
-
-
-def _median(vals: list[float]) -> float:
-    s = sorted(vals)
-    return s[len(s) // 2]
 
 
 def _norm(v: float, lo: float, hi: float, degenerate: float = 0.5) -> float:
@@ -86,7 +84,7 @@ def blend_scores(
     rlo, rhi = min(rels), max(rels)
     glo, ghi = (min(gss), max(gss)) if gss else (0.0, 1.0)
     plo, phi = (min(prs), max(prs)) if prs else (0.0, 1.0)
-    pmed = _median(prs) if prs else None
+    pmed = median(prs) if prs else None
 
     w_goal = goal_weight if gss else 0.0
     w_prest = prestige_weight if pmed is not None else 0.0
@@ -111,11 +109,9 @@ def blend_scores(
 
 
 # --- Order-time deep-review QUALITY lift -------------------------------------
-# A SMALL, capped bonus the CONSUMER adds to the blend key (this module only
-# computes it — stays pure). It reorders WITHIN a relevance band: banding is
-# derived independently from the raw 1-5 relevance score, never from this sort
-# key, so the bonus cannot move a paper across a band at ANY magnitude. The cap
-# only bounds the within-band reorder REACH.
+# A small bonus for ordering WITHIN raw relevance bands. The cap alone cannot
+# prevent crossing a boundary: consumers must preserve the base blend's category
+# slots with order_within_bands. Raw scores and classifications remain unchanged.
 #
 # Two modes, the consumer selects via ``use_band``:
 #   * grade-only (DEFAULT — the shipped, measured behaviour): the A-D referee grade.
@@ -141,25 +137,37 @@ def quality_bonus(
     grade: str | None,
     *,
     use_band: bool = False,
-    grade_table: dict[str, float] = DEFAULT_QUALITY_BONUS,
-    band_table: dict[str, float] = DEFAULT_QUALITY_BAND_BONUS,
-    grade_nudge: float = 0.5,
 ) -> float:
     """Capped deep-review quality lift for one row (pure; the consumer adds it).
 
-    ``use_band=False`` → grade-only (``grade_table[grade]``, default 0.0 when
-    ungraded). ``use_band=True`` → band-primary: ``band_table[band]`` plus
-    ``grade_nudge`` × the grade lift, EXCEPT a band whose base is 0.0
+    ``use_band=False`` → grade-only (default 0.0 when ungraded).
+    ``use_band=True`` → band-primary: band bonus plus half the grade lift,
+    EXCEPT a band whose base is 0.0
     (``neutral``/``uncertain``/unknown) returns exactly 0.0 so a borderline paper
     is never demoted by its grade.
     """
     g = str(grade or "").upper()
     if not use_band:
-        return grade_table.get(g, 0.0)
-    base = band_table.get(str(band or "").lower(), 0.0)
+        return DEFAULT_QUALITY_BONUS.get(g, 0.0)
+    base = DEFAULT_QUALITY_BAND_BONUS.get(str(band or "").lower(), 0.0)
     if base == 0.0:
         return 0.0
-    return base + grade_nudge * grade_table.get(g, 0.0)
+    return base + 0.5 * DEFAULT_QUALITY_BONUS.get(g, 0.0)
+
+
+def order_within_bands(bands: list[str], keys: list[tuple[float, str]]) -> list[int]:
+    """Permute an already base-ordered cohort without changing its band slots.
+
+    Higher quality-adjusted keys (score, caller's tie-break) come first within
+    each band, even when that band's slots are interleaved with other bands.
+    Equal keys retain base order. No band-first sort: goals may cross raw bands.
+    """
+    if len(bands) != len(keys):
+        raise ValueError("parallel lists required: bands and keys")
+    groups: dict[str, deque[int]] = {}
+    for i in sorted(range(len(bands)), key=keys.__getitem__, reverse=True):
+        groups.setdefault(bands[i], deque()).append(i)
+    return [groups[band].popleft() for band in bands]
 
 
 # Default thresholds for promote_band. Set by tools/eval_quality_promote.py on 68
@@ -225,5 +233,6 @@ __all__ = [
     "DEFAULT_PROMOTE_RELEVANCE_FLOOR",
     "blend_scores",
     "quality_bonus",
+    "order_within_bands",
     "promote_band",
 ]

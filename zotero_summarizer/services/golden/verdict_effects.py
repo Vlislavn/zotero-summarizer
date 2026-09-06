@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
@@ -15,6 +16,7 @@ from zotero_summarizer.services.zotero.zotero import (
     zotero_upsert_user_note,
     zotero_upsert_verdict_note,
 )
+from zotero_summarizer.storage import label_mirrors
 
 LOGGER = logging.getLogger(__name__)
 _POSITIVE_PRIORITIES = ("must_read", "should_read", "could_read")
@@ -100,12 +102,28 @@ def _optional_zotero(exc: BaseException) -> bool:
     return isinstance(exc, APIError) and exc.error == "zotero_unavailable"
 
 
-def apply_verdict_effects(item_key: str, priority: str, comment: str) -> dict[str, Any]:
+def mirror_current_verdict(db_path: Path, item_key: str, *, redeliver: bool = False) -> bool:
+    """Mirror current state, never an obsolete request; acknowledge deletions."""
+    try:
+        with label_mirrors.current_label(db_path, item_key, redeliver=redeliver) as desired:
+            if desired is None:
+                return False
+            zotero_set_label_tag(*desired)
+        return True
+    except APIError as exc:
+        # Local-first verdicts remain usable without configured Zotero. Leaving
+        # the receipt absent keeps an explicit retraction retryable.
+        if not _optional_zotero(exc):
+            raise
+        return False
+
+
+def apply_verdict_effects(db_path: Path, item_key: str, priority: str, comment: str) -> dict[str, Any]:
     """Run the online/offline training, materialization, and mirror effects.
 
-    Every effect is idempotent and best-effort because the current verdict has
-    already committed. Replaying a stored sync mutation safely repairs an effect
-    missed by a process crash without creating a second library item or CSV row.
+    Labels recheck current state; the other enrichments keep their best-effort
+    contract and use the submitted values. A stored sync mutation can retry
+    effects after a crash without creating a second library item or CSV row.
     """
     try:
         append_training_row(item_key, priority, comment)
@@ -119,12 +137,13 @@ def apply_verdict_effects(item_key: str, priority: str, comment: str) -> dict[st
         if source == review_detail.SOURCE_LIBRARY
         else add_result.pop("_zotero_key", None)
     )
-    label_written = bool(add_result["added_to_library"])
+    label_written = False
     label_error = None
-    if mirror_key and not label_written:
+    if mirror_key:
         try:
-            zotero_set_label_tag(mirror_key, priority)
-            label_written = True
+            label_written = mirror_current_verdict(
+                db_path, item_key, redeliver=bool(add_result["added_to_library"]),
+            )
         except Exception as exc:  # noqa: BLE001 - mirror is post-commit
             if not _optional_zotero(exc):
                 label_error = f"{type(exc).__name__}: {exc}"

@@ -7,6 +7,7 @@ They live here so the orchestrator stays a thin, readable sequence.
 from __future__ import annotations
 
 import random
+from itertools import chain, islice, zip_longest
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any
@@ -80,55 +81,22 @@ def _pick_unread_batch_round_robin(
     if not feed_library_ids:
         return []
 
-    # Unlimited mode: return everything unread from all specified feeds.
+    if batch_size is not None and batch_size <= 0:
+        raise ValueError("batch_size must be positive or None")
+    feed_order = list(dict.fromkeys(feed_library_ids))
+    if batch_size is not None:
+        random.shuffle(feed_order)
+    pools = [
+        reader.get_feed_items(
+            feed_library_id=int(lib_id), unread_only=True, order="oldest_first",
+            limit=None if batch_size is None else batch_size * 2,
+        )
+        for lib_id in feed_order
+    ]
     if batch_size is None:
-        all_items: list[dict[str, Any]] = []
-        for lib_id in feed_library_ids:
-            try:
-                items = reader.get_feed_items(
-                    feed_library_id=int(lib_id),
-                    unread_only=True,
-                    order="oldest_first",
-                )
-            except Exception as exc:
-                LOGGER.warning("get_feed_items failed for feed_library_id=%s: %s", lib_id, exc)
-                items = []
-            all_items.extend(items)
-        return all_items
-
-    # Bounded mode: probe each feed; tile round-robin until batch_size.
-    per_feed_pool: dict[int, list[dict[str, Any]]] = {}
-    for lib_id in feed_library_ids:
-        try:
-            items = reader.get_feed_items(
-                feed_library_id=int(lib_id),
-                unread_only=True,
-                order="oldest_first",
-                limit=batch_size * 2,  # small headroom for dedup losses
-            )
-        except Exception as exc:
-            LOGGER.warning("get_feed_items failed for feed_library_id=%s: %s", lib_id, exc)
-            items = []
-        per_feed_pool[int(lib_id)] = items
-
-    selected: list[dict[str, Any]] = []
-    feed_order = list(feed_library_ids)
-    random.shuffle(feed_order)  # avoid feed_id ordering bias across ticks
-    cursor = 0
-    while len(selected) < batch_size:
-        progressed_this_round = False
-        for _ in range(len(feed_order)):
-            lib_id = feed_order[cursor % len(feed_order)]
-            cursor += 1
-            pool = per_feed_pool.get(lib_id, [])
-            if pool:
-                selected.append(pool.pop(0))
-                progressed_this_round = True
-                if len(selected) >= batch_size:
-                    break
-        if not progressed_this_round:
-            break
-    return selected
+        return list(chain.from_iterable(pools))
+    round_robin = (item for row in zip_longest(*pools) for item in row if item is not None)
+    return list(islice(round_robin, batch_size))
 
 
 def pick_and_log(
@@ -156,7 +124,7 @@ def pick_and_log(
 
 
 def prepare_unprocessed(
-    raw: list[dict[str, Any]], *, tick_id: str
+    raw: list[dict[str, Any]], *, tick_id: str, dry_run: bool = False
 ) -> tuple[list[dict[str, Any]], int, list[tuple[int, int, str]]]:
     """Dedup against processed rows; collect stale-unread + clear retryable errors.
 
@@ -177,7 +145,7 @@ def prepare_unprocessed(
             (fl, fi, source_by_pair.get((fl, fi), "zotero"))
             for fl, fi in stale_pairs
         ]
-        cleared = feeds_storage.clear_error_rows(conn, unprocessed)
+        cleared = 0 if dry_run else feeds_storage.clear_error_rows(conn, unprocessed)
         if cleared:
             conn.commit()
             LOGGER.info("[%s] cleared %d stale error row(s) for retry", tick_id, cleared)

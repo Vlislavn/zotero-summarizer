@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from zotero_summarizer.models.setup import (
     DetectZoteroResponse,
@@ -79,7 +79,7 @@ async def save_ai_credential(req: CredentialRequest) -> dict:
 
 class CalibrateRequest(BaseModel):
     item_keys: list[str] | None = None
-    papers: int = 3
+    papers: int = Field(default=3, ge=1, le=10)
 
 
 async def calibrate(req: CalibrateRequest) -> dict:

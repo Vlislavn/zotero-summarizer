@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import csv
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -16,6 +15,7 @@ from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.runtime import AppContext, set_context
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.storage import repositories
+from zotero_summarizer.storage.migrations import TRIAGE_MIGRATIONS, run_migrations
 
 
 GOLDEN_HEADER = [
@@ -33,13 +33,7 @@ def _make_project(tmp_path: Path, rows: list[dict[str, str]]) -> Settings:
         w.writeheader()
         for r in rows:
             w.writerow({k: r.get(k, "") for k in GOLDEN_HEADER})
-    conn = sqlite3.connect(str(settings.triage_db_path))
-    try:
-        conn.execute(repositories._CREATE_LABEL_VERDICTS_TABLE)
-        conn.execute(repositories._CREATE_REVIEW_NOTES_TABLE)
-        conn.commit()
-    finally:
-        conn.close()
+    run_migrations(settings.triage_db_path, "triage", TRIAGE_MIGRATIONS)
     set_context(AppContext(settings=settings))
     return settings
 

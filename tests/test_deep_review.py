@@ -7,12 +7,12 @@ import pytest
 
 from zotero_summarizer.services.library import _map_reduce, _review_cache, deep_review
 from zotero_summarizer.services.zotero import zotero as zotero_svc
-from zotero_summarizer.services._common import read_config, settings as _settings
+from zotero_summarizer.services.setup.bootstrap import _default_goals_config
 
 
 @pytest.fixture(scope="module")
 def config():
-    return read_config(_settings().config_path)
+    return _default_goals_config()
 
 
 @pytest.fixture(autouse=True)

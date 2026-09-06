@@ -179,9 +179,9 @@ def _apply_prestige(
     summary.composite_relevance_score = float(new_composite)
     summary.reading_priority = scoring_service.map_priority_from_score(new_composite)
     LOGGER.info(
-        "[%s] prestige: h=%d venue=%d cites=%d score=%.2f composite=%.2f",
+        "[%s] prestige: h=%s venue=%d cites=%d score=%.2f composite=%.2f",
         log_prefix,
-        work.max_author_h_index if work else 0,
+        work.max_author_h_index if work else None,
         work.venue_works_count if work else 0,
         work.cited_by_count if work else 0,
         score,

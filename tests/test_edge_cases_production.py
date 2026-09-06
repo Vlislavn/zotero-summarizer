@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import csv
-import sqlite3
 import threading
 from pathlib import Path
 
@@ -22,6 +21,7 @@ from zotero_summarizer.runtime import AppContext, set_context
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.services.library import review_detail as rd
 from zotero_summarizer.storage import repositories
+from zotero_summarizer.storage.migrations import TRIAGE_MIGRATIONS, run_migrations
 
 
 GOLDEN_HEADER = [
@@ -31,7 +31,7 @@ GOLDEN_HEADER = [
 
 
 def _make_project(tmp_path: Path, rows: list[dict[str, str]]) -> Settings:
-    """Create a hermetic project root with a golden CSV + label_verdicts table."""
+    """Create a hermetic project root with a golden CSV and the runtime schema."""
     settings = Settings.load(project_root=tmp_path)
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     csv_path = settings.golden_csv_path
@@ -40,14 +40,7 @@ def _make_project(tmp_path: Path, rows: list[dict[str, str]]) -> Settings:
         w.writeheader()
         for r in rows:
             w.writerow({k: r.get(k, "") for k in GOLDEN_HEADER})
-    # Create the label_verdicts table directly in the tmp triage DB.
-    conn = sqlite3.connect(str(settings.triage_db_path))
-    try:
-        conn.execute(repositories._CREATE_LABEL_VERDICTS_TABLE)
-        conn.execute(repositories._CREATE_REVIEW_NOTES_TABLE)
-        conn.commit()
-    finally:
-        conn.close()
+    run_migrations(settings.triage_db_path, "triage", TRIAGE_MIGRATIONS)
     set_context(AppContext(settings=settings))
     return settings
 
@@ -190,7 +183,7 @@ def test_concurrent_verdict_upserts_single_row(tmp_path):
         t.join()
 
     assert errors == [], f"concurrent UPSERT raised: {errors}"
-    rows = repositories.list_label_verdicts(db)
+    rows = repositories.list_all_label_verdicts(db)
     matching = [r for r in rows if r["item_key"] == "RACE0001"]
     assert len(matching) == 1, f"expected exactly 1 row, got {len(matching)}"
     assert matching[0]["user_priority"] in priorities
@@ -224,5 +217,5 @@ def test_concurrent_distinct_verdict_writes(tmp_path):
         t.join()
 
     assert errors == [], f"concurrent writes raised: {errors}"
-    rows = repositories.list_label_verdicts(db)
+    rows = repositories.list_all_label_verdicts(db)
     assert len([r for r in rows if r["item_key"].startswith("K")]) == 50

@@ -5,10 +5,10 @@ import json
 import logging
 import math
 import os
-import re
 import sqlite3
 import threading
 from datetime import datetime, timezone
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -21,12 +21,9 @@ from zotero_summarizer.domain import (
 )
 from zotero_summarizer.models import CorpusItem
 from zotero_summarizer.storage.corpus_read import CorpusReadMixin
-from zotero_summarizer.storage.corpus_types import EMBEDDING_DIM, CorpusMatchResult  # noqa: F401
+from zotero_summarizer.storage.corpus_types import CorpusMatchResult  # noqa: F401
 
-try:
-    from sentence_transformers import SentenceTransformer
-except Exception:  # pragma: no cover - optional dependency fallback
-    SentenceTransformer = None
+from sentence_transformers import SentenceTransformer
 
 
 LOGGER = logging.getLogger("zotero_summarizer.embedding_cache")
@@ -43,8 +40,9 @@ def open_corpus_conn(db_path: Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA journal_mode=WAL")
-    except sqlite3.Error as _:
-        pass
+    except BaseException:
+        conn.close()
+        raise
     return conn
 
 
@@ -57,21 +55,18 @@ class EmbeddingCache(CorpusReadMixin):
     def __init__(self, db_path: Path, model_name: str) -> None:
         self.db_path = db_path
         self.model_name = model_name
+        self._encoder_id = json.dumps(["sentence-transformers", version("sentence-transformers"), model_name])
         self._model = None
-        self._dim = None
-        self._model_load_attempted = False
-        self._warned_fallback = False
         # SentenceTransformer/torch inference is not safe to call from multiple
         # threads on one shared model; the backlog drain scores survivors on a
         # thread pool, so serialize the embedding forward pass. Only the fast
         # torch step is guarded — the slow LLM HTTP calls still overlap.
         self._embed_lock = threading.Lock()
         # Cached corpus matrix for the vectorized affinity_and_goals() fast path:
-        # {version, stale_days, matrix (np float32 N×dim), weights (np N)}.
-        # Rebuilt when _corpus_version changes (bumped on any corpus write) so we
+        # {fingerprint, stale_days, matrix (np float32 N×dim), weights (np N)}.
+        # Rebuilt when the DB fingerprint changes (including external writes) so we
         # parse the (large) embedding set once, not per scored item.
         self._affinity_cache: dict[str, Any] | None = None
-        self._corpus_version = 0
         self._init_db()
 
     def _conn(self) -> sqlite3.Connection:
@@ -116,6 +111,9 @@ class EmbeddingCache(CorpusReadMixin):
             conn.commit()
         finally:
             conn.close()
+        from zotero_summarizer.storage.migrations import CORPUS_MIGRATIONS, run_migrations
+
+        run_migrations(self.db_path, "corpus", CORPUS_MIGRATIONS)
 
     def upsert_goals(self, goals: Sequence[str]) -> None:
         normalized_goals = sorted({str(goal or "").strip() for goal in goals if str(goal or "").strip()})
@@ -125,13 +123,14 @@ class EmbeddingCache(CorpusReadMixin):
                 embedding = self._embed(goal_text)
                 conn.execute(
                     """
-                    INSERT INTO goal_embeddings (goal, embedding_json)
-                    VALUES (?, ?)
+                    INSERT INTO goal_embeddings (goal, embedding_json, encoder_id)
+                    VALUES (?, ?, ?)
                     ON CONFLICT(goal) DO UPDATE SET
                         embedding_json = excluded.embedding_json,
+                        encoder_id = excluded.encoder_id,
                         updated_at = datetime('now')
                     """,
-                    (goal_text, json.dumps(embedding)),
+                    (goal_text, json.dumps(embedding), self._encoder_id),
                 )
 
             if normalized_goals:
@@ -153,12 +152,12 @@ class EmbeddingCache(CorpusReadMixin):
             row = conn.execute("SELECT COUNT(*) AS total FROM corpus_embeddings").fetchone()
             conn.execute("DELETE FROM corpus_embeddings")
             conn.commit()
-            self._corpus_version += 1  # invalidate the cached affinity matrix
             return int(row["total"] or 0) if row else 0
         finally:
             conn.close()
 
-    def upsert_items(self, items: Sequence[CorpusItem]) -> tuple[int, int]:
+    def upsert_items(self, items: Sequence[CorpusItem], *, missing_item_ids: Sequence[str] = ()) -> tuple[int, int]:
+        """Upsert current rows and remove confirmed-missing keys in one transaction."""
         imported = 0
         updated = 0
         conn = self._conn()
@@ -172,67 +171,44 @@ class EmbeddingCache(CorpusReadMixin):
                 content_hash = self._content_hash(item.title, item.abstract)
                 existing = conn.execute(
                     """
-                    SELECT title, abstract, tags_json, collections_json, annotation_count,
-                           manual_note_count, created_at, content_hash
+                    SELECT title, abstract, doi, tags_json, collections_json, annotation_count,
+                           manual_note_count, created_at, content_hash, encoder_id, embedding_json
                     FROM corpus_embeddings
                     WHERE item_id = ?
                     """,
                     (item.item_id,),
                 ).fetchone()
 
+                embedding_current = existing is not None and (
+                    existing["content_hash"] == content_hash and existing["encoder_id"] == self._encoder_id
+                )
                 if existing:
                     metadata_unchanged = (
                         str(existing["title"] or "") == item.title
                         and str(existing["abstract"] or "") == item.abstract
+                        and existing["doi"] == item.doi
                         and str(existing["tags_json"] or "[]") == tags_json
                         and str(existing["collections_json"] or "[]") == collections_json
                         and int(existing["annotation_count"] or 0) == int(item.annotation_count)
                         and int(existing["manual_note_count"] or 0) == int(item.manual_note_count)
                         and str(existing["created_at"] or "") == str(item.created_at or "")
                     )
-                    if existing["content_hash"] == content_hash and metadata_unchanged:
+                    if embedding_current and metadata_unchanged:
                         continue
 
-                    if existing["content_hash"] == content_hash:
-                        conn.execute(
-                            """
-                            UPDATE corpus_embeddings
-                            SET title = ?,
-                                abstract = ?,
-                                tags_json = ?,
-                                collections_json = ?,
-                                annotation_count = ?,
-                                manual_note_count = ?,
-                                created_at = ?,
-                                updated_at = datetime('now')
-                            WHERE item_id = ?
-                            """,
-                            (
-                                item.title,
-                                item.abstract,
-                                tags_json,
-                                collections_json,
-                                int(item.annotation_count),
-                                int(item.manual_note_count),
-                                item.created_at,
-                                item.item_id,
-                            ),
-                        )
-                        updated += 1
-                        continue
-
-                embedding = self._embed(text)
+                embedding_json = existing["embedding_json"] if embedding_current else json.dumps(self._embed(text))
                 conn.execute(
                     """
                     INSERT INTO corpus_embeddings (
-                        item_id, title, abstract, tags_json, collections_json,
+                        item_id, title, abstract, doi, tags_json, collections_json,
                         annotation_count, manual_note_count, created_at,
-                        content_hash, embedding_json
+                        content_hash, embedding_json, encoder_id
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(item_id) DO UPDATE SET
                         title = excluded.title,
                         abstract = excluded.abstract,
+                        doi = excluded.doi,
                         tags_json = excluded.tags_json,
                         collections_json = excluded.collections_json,
                         annotation_count = excluded.annotation_count,
@@ -240,105 +216,58 @@ class EmbeddingCache(CorpusReadMixin):
                         created_at = excluded.created_at,
                         content_hash = excluded.content_hash,
                         embedding_json = excluded.embedding_json,
+                        encoder_id = excluded.encoder_id,
                         updated_at = datetime('now')
                     """,
                     (
                         item.item_id,
                         item.title,
                         item.abstract,
+                        item.doi,
                         tags_json,
                         collections_json,
                         int(item.annotation_count),
                         int(item.manual_note_count),
                         item.created_at,
                         content_hash,
-                        json.dumps(embedding),
+                        embedding_json,
+                        self._encoder_id,
                     ),
                 )
                 if existing:
                     updated += 1
                 else:
                     imported += 1
+            conn.executemany("DELETE FROM corpus_embeddings WHERE item_id = ?", ((key,) for key in missing_item_ids))
             conn.commit()
         finally:
             conn.close()
-        if imported or updated:
-            self._corpus_version += 1  # invalidate the cached affinity matrix
         return imported, updated
 
     def _load_model(self):
-        if self._model_load_attempted:
-            return self._model
-        self._model_load_attempted = True
-        if self._model is not None:
-            return self._model
-        if SentenceTransformer is None:
-            LOGGER.warning("sentence-transformers is unavailable; corpus matching will fall back to hashed embeddings")
-            return None
-        if os.environ.get("PYTEST_CURRENT_TEST"):
-            # Avoid optional model/proxy/native initialization inside forked pytest workers.
-            LOGGER.info("pytest detected; corpus matching will fall back to hashed embeddings")
-            return None
-        LOGGER.info("Loading embedding model: %s", self.model_name)
-        try:
-            kwargs: dict[str, Any] = {"device": "cpu"}
-            self._model = SentenceTransformer(self.model_name, **kwargs)
-            # sentence-transformers renamed the API; prefer the new name
-            # when available and fall back to the old one for older
-            # installations. Both are documented as the canonical way to
-            # read the embedding dimension.
-            if hasattr(self._model, "get_embedding_dimension"):
-                self._dim = int(self._model.get_embedding_dimension() or 0) or None
-            elif hasattr(self._model, "get_sentence_embedding_dimension"):
-                self._dim = int(self._model.get_sentence_embedding_dimension() or 0) or None
-        except Exception:
-            LOGGER.exception("Failed to load embedding model: %s", self.model_name)
-            self._model = None
+        if self._model is None:
+            LOGGER.info("Loading embedding model: %s", self.model_name)
+            self._model = SentenceTransformer(self.model_name, device="cpu")
         return self._model
 
     def _embed(self, text: str) -> list[float]:
-        cleaned = text.strip()
-        if not cleaned:
-            return [0.0] * self._vector_dim()
-
         with self._embed_lock:  # torch encode is not thread-safe (see __init__)
             model = self._load_model()
-            if model is not None:
-                vector = model.encode(cleaned, normalize_embeddings=True)
-                if hasattr(vector, "tolist"):
-                    values = [float(v) for v in vector.tolist()]
-                else:
-                    values = [float(v) for v in vector]
-                self._dim = len(values) or self._dim
-                return values
-        if not self._warned_fallback:
-            LOGGER.warning("Using hashed fallback embeddings; corpus similarity quality will be degraded")
-            self._warned_fallback = True
-        return self._fallback_embedding(cleaned)
-
-    def _fallback_embedding(self, text: str, dim: int | None = None) -> list[float]:
-        dim = dim or self._vector_dim()
-        vector = [0.0] * dim
-        tokens = re.findall(r"[a-zA-Z0-9_]+", text.lower())
-        for token in tokens:
-            digest = hashlib.md5(token.encode("utf-8")).hexdigest()
-            idx = int(digest, 16) % dim
-            vector[idx] += 1.0
-        norm = math.sqrt(sum(x * x for x in vector))
-        if norm == 0:
-            return vector
-        return [x / norm for x in vector]
+            values = [float(v) for v in model.encode(text.strip(), normalize_embeddings=True)]
+        if not values or not all(math.isfinite(v) for v in values):
+            raise ValueError("Corpus encoder returned an empty or non-finite vector")
+        return values
 
     @staticmethod
     def _build_text(title: str, abstract: str) -> str:
         return f"{(title or '').strip()}. {(abstract or '').strip()}".strip()
 
-    @staticmethod
-    def _content_hash(title: str, abstract: str) -> str:
+    def _content_hash(self, title: str, abstract: str) -> str:
         base = json.dumps(
             {
                 "title": (title or "").strip(),
                 "abstract": (abstract or "").strip(),
+                "encoder_id": self._encoder_id,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -347,16 +276,12 @@ class EmbeddingCache(CorpusReadMixin):
 
     @staticmethod
     def _parse_embedding(raw: str) -> list[float]:
-        try:
-            value = json.loads(raw or "[]")
-            if isinstance(value, list):
-                return [float(v) for v in value]
-        except Exception as _:
-            pass
-        return [0.0] * EMBEDDING_DIM
-
-    def _vector_dim(self) -> int:
-        return int(self._dim or EMBEDDING_DIM)
+        value = json.loads(raw)
+        if not isinstance(value, list) or not value:
+            raise ValueError("Corpus embedding must be a nonempty numeric vector")
+        if any(type(v) not in (int, float) or not math.isfinite(v) for v in value):
+            raise ValueError("Corpus embedding must contain finite numbers")
+        return value
 
     @staticmethod
     def _parse_list(raw: str | None) -> list[str]:
@@ -370,7 +295,9 @@ class EmbeddingCache(CorpusReadMixin):
 
     @staticmethod
     def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
-        n = min(len(a), len(b))
+        if len(a) != len(b):
+            raise ValueError("Corpus embedding dimensions differ; resync the corpus")
+        n = len(a)
         if n == 0:
             return 0.0
         dot = 0.0
@@ -421,37 +348,19 @@ class EmbeddingCache(CorpusReadMixin):
             stale_days_for_weak_negative=stale_days_for_weak_negative,
         )
 
-        has_explicit_approve = bool(signals["explicit_approve"])
-        has_explicit_reject = bool(signals["explicit_reject"])
-        has_brain = bool(signals["brain"])
-        has_eyes = bool(signals["eyes"])
-        has_thumbsdown = bool(signals["thumbs_down"])
-
-        if has_explicit_reject:
+        if signals["explicit_reject"]:
             return -3.0
-
-        if has_thumbsdown:
+        if signals["thumbs_down"]:
             return -2.0
-
-        weight = 1.0
-        if has_explicit_approve:
-            weight = max(weight, 4.0)
-        if has_brain:
-            weight = max(weight, 3.0)
-        if has_eyes:
-            weight = max(weight, 2.0)
-        if annotation_count > 0:
-            weight = max(weight, 2.0)
+        if signals["explicit_approve"]:
+            return 4.0
+        if signals["brain"]:
+            return 3.0
+        if signals["eyes"] or annotation_count > 0:
+            return 2.0
         if manual_note_count > 0:
-            weight = max(weight, 1.5)
-
-        has_signal = bool(signals["has_positive_signal"])
-        if not has_signal:
-            if bool(signals["stale_weak_negative"]):
-                return 0.3
-            return 0.0
-
-        return weight
+            return 1.5
+        return -0.3 if signals["stale_weak_negative"] else 0.0
 
     def _engagement_signals(
         self,

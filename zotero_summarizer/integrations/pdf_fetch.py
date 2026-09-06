@@ -23,7 +23,7 @@ import httpx
 
 from zotero_summarizer.integrations.app_rss import (
     RssUrlRejected,
-    validate_public_response_peer,
+    stream_public_url,
     validate_rss_url,
 )
 from zotero_summarizer.settings import offline_requested
@@ -38,7 +38,6 @@ LOGGER = logging.getLogger(__name__)
 _PDF_MAGIC = b"%PDF"
 _DEFAULT_MAX_BYTES = 50_000_000  # figure-heavy clinical/Nature PDFs run >20 MB
 _DEFAULT_TIMEOUT_SECS = 30.0
-_DEFAULT_CACHE_DIR = Path.home() / ".cache" / "zotero-summarizer" / "pdfs"
 
 _ARXIV_ID_RE = re.compile(r"\b(\d{4}\.\d{4,5})(v\d+)?\b")
 _MAX_REDIRECTS = 5
@@ -67,11 +66,10 @@ def _download_public_pdf(
     *,
     verify_peer: bool,
 ) -> bytes | None:
-    current = validate_rss_url(url) if verify_peer else url
+    current = url
     for _ in range(_MAX_REDIRECTS + 1):
-        with client.stream("GET", current, follow_redirects=False) as resp:
-            if verify_peer:
-                validate_public_response_peer(resp)
+        stream = stream_public_url(client, current) if verify_peer else client.stream("GET", current, follow_redirects=False)
+        with stream as resp:
             if 300 <= resp.status_code < 400 and resp.headers.get("location"):
                 current = validate_rss_url(
                     urljoin(current, str(resp.headers["location"]))
@@ -87,13 +85,13 @@ def fetch_pdf(
     *,
     max_bytes: int = _DEFAULT_MAX_BYTES,
     timeout: float = _DEFAULT_TIMEOUT_SECS,
-    cache_dir: Path | None = None,
+    cache_dir: Path,
     http_client: httpx.Client | None = None,
 ) -> Path | None:
     """Stream a PDF to disk; return the cached path or ``None`` on any failure."""
     if not url:
         return None
-    cache_dir = (cache_dir or _DEFAULT_CACHE_DIR).expanduser()
+    cache_dir = cache_dir.expanduser()
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     # Deterministic per-URL filename — lets us short-circuit on repeat fetches.
@@ -114,6 +112,7 @@ def fetch_pdf(
         timeout=timeout,
         follow_redirects=False,
         trust_env=False,
+        limits=httpx.Limits(max_keepalive_connections=0),
     )
     try:
         body = _download_public_pdf(

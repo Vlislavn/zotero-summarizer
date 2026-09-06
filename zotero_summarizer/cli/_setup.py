@@ -256,6 +256,7 @@ def _calibrate(args: argparse.Namespace) -> int:
 
     if args.tier3:
         from zotero_summarizer.services._common import load_golden_rows, read_config
+        from zotero_summarizer.services.golden.hybrid_gt import apply_hybrid
         from zotero_summarizer.services.model.eval_baseline import run_baseline
 
         classifiers = [
@@ -265,7 +266,7 @@ def _calibrate(args: argparse.Namespace) -> int:
 
         def _classifier_eval(s: Settings) -> dict[str, dict[str, float]]:
             cfg = read_config(s.config_path, s.calibration_path)
-            rows = load_golden_rows(s.golden_csv_path)
+            rows = apply_hybrid(load_golden_rows(s.golden_csv_path), s.triage_db_path)
             scores: dict[str, dict[str, float]] = {}
             for clf in classifiers:
                 report = run_baseline(
@@ -335,7 +336,8 @@ def register_setup(subparsers) -> None:
         help="Comma-separated paper item keys to sweep (default: auto-pick built briefs)",
     )
     calib.add_argument(
-        "--papers", type=int, default=3, help="How many papers to sweep (default 3)"
+        "--papers", type=int, choices=range(1, 11), default=3,
+        help="How many papers to sweep (1–10, default 3)"
     )
     calib.add_argument(
         "--tier3",

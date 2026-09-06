@@ -20,11 +20,6 @@ from zotero_summarizer.storage import repositories as triage_db
 from zotero_summarizer.storage.corpus import EmbeddingCache
 
 
-_STARTUP_RSS_MAX_FEEDS = int(os.environ.get("ZS_STARTUP_RSS_MAX_FEEDS", "5"))
-_STARTUP_RSS_MAX_NEW_PER_FEED = int(os.environ.get("ZS_STARTUP_RSS_MAX_NEW_PER_FEED", "10"))
-_STARTUP_RSS_TIMEOUT_SECS = float(os.environ.get("ZS_STARTUP_RSS_TIMEOUT_SECS", "8"))
-
-
 def _load_config(current_settings: Settings, override_model: str | None) -> GoalsConfig:
     """Read + validate goals.yaml.
 
@@ -64,10 +59,8 @@ def _init_models(
     app_state.pdf_extractor = build_pdf_extractor()
     app_state.embedding_cache = EmbeddingCache(current_settings.corpus_db_path, config.corpus.embedding_model)
     if config.corpus.enabled:
-        model = app_state.embedding_cache._load_model()
-        if model is None:
-            LOGGER.warning("Embedding model unavailable at startup; corpus matching will use fallback embeddings")
-    app_state.embedding_cache.upsert_goals(config.research_goals)
+        app_state.embedding_cache._load_model()
+        app_state.embedding_cache.upsert_goals(config.research_goals)
 
 
 def _init_database(current_settings: Settings, app_state: RuntimeState) -> None:
@@ -129,7 +122,7 @@ def _init_metadata_clients(app_state: RuntimeState, config: GoalsConfig, current
         )
 
 
-def _init_classifier_gate(app_state: RuntimeState, config: GoalsConfig, current_settings: Settings) -> None:
+def _init_classifier_gate(app_state: RuntimeState, config: GoalsConfig, current_settings: Settings, *, background: bool = True) -> None:
     """Phase 1.13: hybrid daemon classifier gate. Startup must stay fast, so it
     NEVER retrains synchronously: it loads the cached artifact as-is (even if
     its golden sha is stale after a Refresh-labels export) and delegates any
@@ -149,6 +142,7 @@ def _init_classifier_gate(app_state: RuntimeState, config: GoalsConfig, current_
     from threading import Lock as _Lock
     from zotero_summarizer.services.model import classifier, classifier_persistence
     from zotero_summarizer.services.triage import feeds
+    from zotero_summarizer.services.triage.feeds._gate import _gate_quality_label
 
     golden_csv = current_settings.golden_csv_path
     if not golden_csv.exists():
@@ -162,27 +156,12 @@ def _init_classifier_gate(app_state: RuntimeState, config: GoalsConfig, current_
     # Lock must be set before scheduling the background retrain so the worker
     # can atomically swap the gate in.
     app_state.classifier_gate_lock = _Lock()
-    model_path = (
-        classifier_persistence.DEFAULT_MODEL_DIR
-        / f"{config.classifier_gate.model_name}.joblib"
+    model_path = classifier_persistence.model_path(
+        current_settings.model_dir, config.classifier_gate.model_name
     )
     gate = None
     if model_path.exists():
-        try:
-            gate = classifier_persistence.load_trained(model_path)
-        except (ModuleNotFoundError, ImportError, AttributeError) as exc:
-            # The artifact was pickled against an older module layout (e.g.
-            # before the services/ domain reorg moved classifier_persistence
-            # under services/model/). It can't be unpickled now. Treat it like a
-            # stale model: leave the gate off and retrain in the background,
-            # which re-saves the artifact under the current import paths
-            # (self-healing). A regenerable cache file must never brick startup.
-            LOGGER.warning(
-                "Cached classifier %s is incompatible with the current "
-                "module layout (%s); ignoring it and retraining in "
-                "background (gate off until ready)",
-                config.classifier_gate.model_name, exc,
-            )
+        gate = classifier_persistence.load_trained(model_path)
     # A cached model trained against an older feature pipeline (e.g. a Sprint-1
     # 777-dim artifact when the builder now emits 780) can't predict the current
     # feature matrix and would crash every triage. Treat it like "no usable
@@ -200,20 +179,12 @@ def _init_classifier_gate(app_state: RuntimeState, config: GoalsConfig, current_
         gate = None
     if gate is not None:
         app_state.classifier_gate = gate
-        # Sprint-1 swapped the gate's objective to regression (oof_spearman).
-        # Older runs stored oof_auc. Surface whichever the current model carries
-        # so startup never breaks on a missing key.
         md = gate.training_metadata
-        quality_label = (
-            f"AUC={md['oof_auc']:.3f}" if "oof_auc" in md else
-            f"Spearman={md['oof_spearman']:.3f}" if "oof_spearman" in md else
-            "quality=n/a"
-        )
         LOGGER.info(
             "Classifier gate loaded (cached): %s (n_train=%d, %s, golden_sha=%s, drop=%s)",
             gate.classifier_name,
             md["n_train"],
-            quality_label,
+            _gate_quality_label(md),
             gate.golden_csv_sha256[:12],
             config.classifier_gate.drop_priorities,
         )
@@ -223,9 +194,11 @@ def _init_classifier_gate(app_state: RuntimeState, config: GoalsConfig, current_
         # loaded cached gate is final, so re-score the slate ourselves — a model
         # trained offline (CLI) then loaded on this restart would otherwise leave
         # Today on whatever scores each row got at triage time.
-        if not feeds.schedule_gate_retrain_async("startup"):
+        if background and not feeds.schedule_gate_retrain_async("startup"):
             feeds.schedule_slate_rescore_async("startup-cached-gate")
     else:
+        if not background:
+            raise RuntimeError("No compatible cached classifier; train it before a dry-run")
         # No usable cached model (missing, or rejected as stale above).
         LOGGER.info(
             "Classifier gate %s not ready; training in background "
@@ -291,7 +264,10 @@ def _schedule_startup_rss_refresh(
     current_settings: Settings,
 ) -> bool:
     """Schedule a small fetch-only app RSS refresh on startup."""
-    if loop is None or _STARTUP_RSS_MAX_FEEDS <= 0 or _STARTUP_RSS_MAX_NEW_PER_FEED <= 0:
+    max_feeds = int(os.environ.get("ZS_STARTUP_RSS_MAX_FEEDS", "5"))
+    max_new = int(os.environ.get("ZS_STARTUP_RSS_MAX_NEW_PER_FEED", "10"))
+    timeout = float(os.environ.get("ZS_STARTUP_RSS_TIMEOUT_SECS", "8"))
+    if loop is None or max_feeds <= 0 or max_new <= 0:
         return False
 
     def _run_refresh() -> None:
@@ -299,23 +275,20 @@ def _schedule_startup_rss_refresh(
 
         reader = AppRssReader(current_settings.triage_db_path)
         result = reader.refresh_feeds(
-            max_feeds=_STARTUP_RSS_MAX_FEEDS,
-            max_new_items_per_feed=_STARTUP_RSS_MAX_NEW_PER_FEED,
-            per_feed_timeout=_STARTUP_RSS_TIMEOUT_SECS,
+            max_feeds=max_feeds,
+            max_new_items_per_feed=max_new,
+            per_feed_timeout=timeout,
         )
         LOGGER.info("startup app RSS refresh complete: %s", result)
 
     async def _worker() -> None:
-        try:
-            await asyncio.to_thread(_run_refresh)
-        except Exception as exc:  # noqa: BLE001 — background startup helper
-            LOGGER.warning("startup app RSS refresh failed: %s", exc)
+        await asyncio.to_thread(_run_refresh)
 
     loop.create_task(_worker())
     return True
 
 
-def startup(override_model: str | None = None) -> None:
+def startup(override_model: str | None = None, *, background: bool = True) -> None:
     current_settings = settings()
     setup_logging()
 
@@ -329,7 +302,7 @@ def startup(override_model: str | None = None) -> None:
     _init_models(app_state, config, current_settings)
     _init_database(current_settings, app_state)
     _init_metadata_clients(app_state, config, current_settings)
-    _init_classifier_gate(app_state, config, current_settings)
+    _init_classifier_gate(app_state, config, current_settings, background=background)
     _init_zotero(app_state, current_settings)
 
     # Loud boot-time readiness sweep so a missing critical dep (e.g. lightgbm)
@@ -344,6 +317,9 @@ def startup(override_model: str | None = None) -> None:
         else:
             LOGGER.error("readiness: %s NOT READY — %s", st.name, st.detail)
 
+    if not background:
+        LOGGER.info("Startup initialized for dry-run; background work and job recovery disabled")
+        return
     interrupted_jobs = _load_persisted_jobs(app_state)
 
     # ``get_running_loop`` raises if there's no running loop (test mode);

@@ -10,10 +10,9 @@ from typing import Any, Callable
 import numpy as np
 
 from zotero_summarizer.services.model import classifier
+from zotero_summarizer.services.model.library_features import PositiveLibrary, _empty_library
 
 LOGGER = logging.getLogger(__name__)
-
-DEFAULT_MODEL_DIR = Path.home() / ".cache" / "zotero-summarizer" / "models"
 
 # Per-item aux (corpus affinity + OpenAlex prestige) is I/O-bound — run it
 # across items concurrently to overlap the OpenAlex network latency. This is
@@ -115,6 +114,7 @@ class TrainedClassifier:
 
     classifier_name: str           # "tabpfn" | "lightgbm" | "logreg"
     golden_csv_sha256: str          # full sha (not prefix) for invalidation
+    model_sha256: str = field(init=False, repr=False)  # assigned by store after save/load
     feature_dim: int                # 777 = 768 SPECTER2 + 9 extras (Sprint 1)
     pca_dim: int                    # only meaningful for TabPFN
     # Training payload — what we need to predict
@@ -127,45 +127,32 @@ class TrainedClassifier:
     t_keep: float = 0.0
     t_must: float = 0.0
     t_could: float = 0.0
-    # Library-conditioned feature payload (Sprint 1 + Sprint 2).
-    library_embeddings: np.ndarray | None = None  # (n_P, EMBEDDING_DIM) L2-normalised
-    library_centroid: np.ndarray | None = None    # (EMBEDDING_DIM,) L2-normalised
-    library_recent_centroid: np.ndarray | None = None  # mean(P ∩ last 90d), L2-norm
-    library_authors_lower: frozenset[str] | None = None  # surnames in P, lower-case
+    positive_library: PositiveLibrary | None = None
     # Training metadata
     training_metadata: dict[str, Any] = field(default_factory=dict)
 
     # ------------------------------------------------------------------ predict
 
     def _build_predict_library(self):
-        """Reconstruct the PositiveLibrary from persisted centroids (LOO inert here:
-        persisted P has no item_keys, and a brand-new scored item is never in P)."""
-        from zotero_summarizer.services.model.library_features import PositiveLibrary
-
-        zero_centroid = np.zeros(classifier.EMBEDDING_DIM, dtype=np.float32)
-        if self.library_embeddings is not None and self.library_centroid is not None:
+        """New archives retain exclusion metadata; old centroid-only payloads load unchanged."""
+        if self.positive_library is not None:
+            return self.positive_library
+        # Legacy joblib fields survive in __dict__, but are no longer constructor arguments.
+        embeddings = getattr(self, "library_embeddings", None)
+        centroid = getattr(self, "library_centroid", None)
+        recent = getattr(self, "library_recent_centroid", None)
+        if embeddings is not None and centroid is not None:
             return PositiveLibrary(
-                embeddings=self.library_embeddings,
-                centroid=self.library_centroid,
-                recent_centroid=(
-                    self.library_recent_centroid
-                    if self.library_recent_centroid is not None
-                    else self.library_centroid
-                ),
-                item_keys=tuple(),
-                authors_lower=self.library_authors_lower or frozenset(),
-                raw_embeddings=self.library_embeddings,
-                recent_mask=np.zeros(self.library_embeddings.shape[0], dtype=bool),
+                embeddings=embeddings,
+                centroid=centroid,
+                recent_centroid=recent if recent is not None else centroid,
+                paper_groups=tuple(),
+                authors_lower=getattr(self, "library_authors_lower", None) or frozenset(),
+                author_tokens=tuple(),
+                raw_embeddings=embeddings,
+                recent_mask=np.zeros(embeddings.shape[0], dtype=bool),
             )
-        return PositiveLibrary(
-            embeddings=np.zeros((0, classifier.EMBEDDING_DIM), dtype=np.float32),
-            centroid=zero_centroid,
-            recent_centroid=zero_centroid,
-            item_keys=tuple(),
-            authors_lower=frozenset(),
-            raw_embeddings=np.zeros((0, classifier.EMBEDDING_DIM), dtype=np.float32),
-            recent_mask=np.zeros((0,), dtype=bool),
-        )
+        return _empty_library()
 
     def _shap_per_item(self, valid: list, X_new: Any, return_shap: bool) -> list:
         """Per-item TreeSHAP contributions (LightGBM only); a list of Nones otherwise.
@@ -269,16 +256,14 @@ class TrainedClassifier:
             title = (it.get("title") or "").strip()
             abstract = (it.get("abstract") or "").strip()
             venue = (it.get("publication_title") or it.get("venue") or "").strip()
-            cache_key = cache_keys[i]
             emb = embeddings[i]
             X_new[i, :classifier.EMBEDDING_DIM] = emb
             doi = (it.get("doi") or "").strip()
             year_str = (it.get("publication_date") or it.get("year") or "")[:4]
             affinity, prestige, ctx = aux_results[i]
             aux_contexts.append(ctx)
-            authors_str = (it.get("authors") or "").strip()
             nearest, centroid, recent, drift, authors_overlap = compute_library_features(
-                emb, library, candidate_authors=authors_str, exclude_item_key=cache_key,
+                emb, library, candidate_row=it,
             )
             feature_row = {"doi": doi, "venue": venue, "year": year_str}
             X_new[i, classifier.EMBEDDING_DIM:] = classifier._extra_features(
@@ -371,4 +356,3 @@ class TrainedClassifier:
                 self.fitted_model, self._model_input(X_new)
             )
         raise ValueError(f"unknown classifier_name {self.classifier_name!r}")
-

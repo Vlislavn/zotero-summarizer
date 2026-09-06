@@ -176,6 +176,10 @@ different shapes; it degrades to deterministic-only when no embedding model is a
 
 ## Verify a change
 
+Backend tests isolate runtime state and the default project root per test, hide
+inherited provider credentials/keyring entries, and block TCP connections. Mock
+integrations explicitly; a unit test must never use a live model or Zotero service.
+
 ```bash
 zotero-summarizer smoke-test                       # app constructs
 pre-commit run --all-files                         # guardrails

@@ -23,7 +23,7 @@ class _FakeReader:
 
 class _FakeGate:
     def __init__(self, sha):
-        self.golden_csv_sha256 = sha
+        self.model_sha256 = sha
 
 
 def _item(key, date="2026-05-01"):

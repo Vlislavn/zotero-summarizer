@@ -8,7 +8,7 @@ Thin wrapper around :mod:`services.review`. The UI calls these to:
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -31,12 +31,12 @@ class RelabelRequest(BaseModel):
 class RejectRequest(BaseModel):
     write_to_golden: bool = Field(
         default=True,
-        description="Append a dont_read row to zotero-summarizer-golden.csv (triggers retrain).",
+        description="Save metadata for this dont_read verdict as a training example.",
     )
 
 
 class ConfirmGateRejectedRequest(BaseModel):
-    processed_ids: list[int] = Field(min_length=1, max_length=500)
+    processed_ids: list[Annotated[int, Field(strict=True, gt=0)]] = Field(min_length=1, max_length=500)
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +61,7 @@ async def list_review_queue(
     main triage queue.
 
     ``sort`` controls ordering:
-      * ``recent`` (default) — by created_at DESC, the existing behaviour.
+      * ``recent`` (default) — by created_at DESC.
       * ``border`` — Sprint-3+ active learning: rank by abs(composite_score
         − nearest priority threshold). The most "uncertain" rows surface
         first so triaging them maximises model improvement per click.
@@ -78,26 +78,7 @@ async def list_review_queue(
             message=f"sort must be one of ('recent', 'border'); got {sort!r}",
             status_code=422,
         )
-    items = await asyncio.to_thread(review.list_by_state, state, since_hours, limit)
-    if sort == "border":
-        from zotero_summarizer.domain import (
-            PRIORITY_COULD_READ_THRESHOLD,
-            PRIORITY_MUST_READ_THRESHOLD,
-            PRIORITY_SHOULD_READ_THRESHOLD,
-        )
-        thresholds = (
-            PRIORITY_COULD_READ_THRESHOLD,
-            PRIORITY_SHOULD_READ_THRESHOLD,
-            PRIORITY_MUST_READ_THRESHOLD,
-        )
-
-        def _border_dist(row: dict[str, Any]) -> float:
-            score = row.get("composite_score")
-            if score is None:
-                return 1e9
-            return float(min(abs(float(score) - t) for t in thresholds))
-
-        items = sorted(items, key=_border_dist)
+    items = await asyncio.to_thread(review.list_by_state, state, since_hours, limit, sort=sort)
     return {"state": state, "items": items, "count": len(items), "sort": sort}
 
 
@@ -133,17 +114,20 @@ async def apply_all() -> dict[str, Any]:
     """Materialize every user_approved row into Zotero (Inbox + tags + note).
 
     Calls :func:`review.apply_all_approved`, which uses the daemon-direct
-    ``apply_feed_materialization`` path (NOT pending_changes). Returns per-row
-    failure detail so the UI can show "applied N, M failed" + reasons.
+    ``apply_feed_materialization`` path (NOT pending_changes). Missing Zotero
+    returns pending-sync status; unexpected errors abort and propagate.
     """
     return await asyncio.to_thread(review.apply_all_approved)
 
 
 async def confirm_gate_rejected(req: ConfirmGateRejectedRequest) -> dict[str, Any]:
-    """Append only the gate-rejected rows the user saw and confirmed."""
-    return await asyncio.to_thread(
-        review.confirm_remaining_gate_rejected, req.processed_ids,
-    )
+    """Save explicit negative verdicts for the displayed gate-rejected rows."""
+    try:
+        return await asyncio.to_thread(review.confirm_remaining_gate_rejected, req.processed_ids)
+    except KeyError as exc:
+        raise APIError(error="not_found", message=str(exc), status_code=404) from exc
+    except ValueError as exc:
+        raise APIError(error="validation_error", message=str(exc), status_code=422) from exc
 
 
 router.add_api_route("/api/feeds/review", list_review_queue, methods=["GET"])

@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from zotero_summarizer.services._common import write_json_atomic
 from zotero_summarizer.services.golden.relabel_audit._constants import (
     AUDIT_PRIORITY_NAMES,
     PRIORITY_TO_SCORE,
@@ -50,11 +51,7 @@ def write_session(
         ],
         "responses": {},
     }
-    session_path.parent.mkdir(parents=True, exist_ok=True)
-    session_path.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    write_json_atomic(session_path, payload)
 
 
 def read_session(session_path: Path) -> dict[str, Any]:
@@ -82,10 +79,7 @@ def record_response(
         "new_relevance": PRIORITY_TO_SCORE[new_priority],
         "timestamp_iso": now_iso(),
     }
-    session_path.write_text(
-        json.dumps(session, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    write_json_atomic(session_path, session)
     return session
 
 

@@ -133,6 +133,8 @@ def _seed_verdict(triage_db: Path, item_key: str, priority: str) -> None:
 def test_reconcile_mirrors_user_label_tier_and_is_idempotent(tmp_path):
     db_path = _verdict_db(tmp_path)
     zdb = build_zotero_db(tmp_path / "zotero")
+    item = add_library_item(zdb, item_key="AAAA1111", title="labeled")
+    add_tag_to_item(zdb, item_id=item, tag_name="label:must_read")
     samples = [
         _sample("AAAA1111", "must_read"),
         SimpleNamespace(item_key="BBBB2222", gold_signal_tier="strong_positive",
@@ -142,15 +144,18 @@ def test_reconcile_mirrors_user_label_tier_and_is_idempotent(tmp_path):
     assert counts.synced == 1
     assert get_label_verdict(db_path, "AAAA1111")["user_priority"] == "must_read"
     assert get_label_verdict(db_path, "BBBB2222") is None
-    # second pass is a no-op (already in sync; AAAA1111 absent from Zotero → never retracted)
+    # Second pass is a no-op: both stores are already in sync.
     assert user_labels.reconcile_label_verdicts(samples, zdb, db_path).synced == 0
 
 
 def test_reconcile_updates_stale_verdict_and_counts_drift(tmp_path):
     db_path = _verdict_db(tmp_path)
     zdb = build_zotero_db(tmp_path / "zotero")
+    item = add_library_item(zdb, item_key="CCCC3333", title="changed")
+    add_tag_to_item(zdb, item_id=item, tag_name="label:could_read")
     user_labels.reconcile_label_verdicts([_sample("CCCC3333", "could_read")], zdb, db_path)
     # the Zotero label later changes to must_read → reconcile must win + count the drift
+    add_tag_to_item(zdb, item_id=item, tag_name="label:must_read")
     counts = user_labels.reconcile_label_verdicts([_sample("CCCC3333", "must_read")], zdb, db_path)
     assert counts.changed == 1
     assert get_label_verdict(db_path, "CCCC3333")["user_priority"] == "must_read"
@@ -170,6 +175,9 @@ def test_reconcile_logs_assignment_change_replay_and_retraction(tmp_path, monkey
     assert user_labels.reconcile_label_verdicts(
         [_sample("TRACK001", "should_read")], zdb, db_path,
     ).synced == 1
+    with sqlite3.connect(zdb) as conn:
+        conn.execute("DELETE FROM itemTags WHERE itemID = ?", (item_id,))
+    add_tag_to_item(zdb, item_id=item_id, tag_name="label:dont_read")
     assert user_labels.reconcile_label_verdicts(
         [_sample("TRACK001", "dont_read")], zdb, db_path,
     ).changed == 1
@@ -194,6 +202,8 @@ def test_reconcile_logs_assignment_change_replay_and_retraction(tmp_path, monkey
 def test_reconcile_promotes_same_value_machine_row_to_zotero_user(tmp_path, monkeypatch):
     db_path = _verdict_db(tmp_path)
     zdb = build_zotero_db(tmp_path / "zotero")
+    item = add_library_item(zdb, item_key="PROMOTE1", title="promoted")
+    add_tag_to_item(zdb, item_id=item, tag_name="label:dont_read")
     log_path = tmp_path / "interaction-events.jsonl"
     monkeypatch.setattr(
         interaction_log, "settings",
@@ -338,7 +348,7 @@ def _patch_migrate(monkeypatch, tmp_path, writer_cls=_FakeWriter):
     ]
     fake_settings = SimpleNamespace(zotero_data_dir=tmp_path, triage_db_path=tmp_path / "t.db")
     monkeypatch.setattr(mig.Settings, "load", staticmethod(lambda project_root=None: fake_settings))
-    monkeypatch.setattr(repositories, "list_label_verdicts", lambda *_a, **_k: verdicts)
+    monkeypatch.setattr(repositories, "list_all_label_verdicts", lambda *_a, **_k: verdicts)
     monkeypatch.setattr(zotero_read, "ZoteroReader", _FakeReader)
     monkeypatch.setattr(zotero_write, "ZoteroWriter", writer_cls)
     return mig

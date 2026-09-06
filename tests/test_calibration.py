@@ -212,3 +212,46 @@ def test_user_owned_keys_never_in_env_registry_still_holds() -> None:
     from zotero_summarizer.models.config import USER_OWNED_KEYS
     for ov in REGISTRY:
         assert ov.path.split(".", 1)[0] not in USER_OWNED_KEYS
+
+
+@pytest.mark.parametrize("key", ["../../secret", "/tmp/secret", ".", "..", "", " ", "a/b", "a\\b", "a\0b", "escape"])
+def test_calibration_rejects_unsafe_paths_before_model_calls(tmp_path, key):
+    from zotero_summarizer.api.errors import APIError
+    from zotero_summarizer.services.setup.calibration import run_full_calibration
+
+    root = tmp_path / "render"
+    root.mkdir()
+    (root / "escape").symlink_to(tmp_path, target_is_directory=True)
+    (tmp_path / "paper_read.json").write_text('{"qa_text":"private text"}')
+    with pytest.raises(APIError) as exc:
+        run_full_calibration(SimpleNamespace(paper_render_dir=root), item_keys=[key])
+    assert exc.value.status_code == 422
+
+
+@pytest.mark.parametrize("limit", [-1, 0, 11, 1000000])
+def test_calibration_bounds_apply_to_http_cli_and_service(tmp_path, limit):
+    from pydantic import ValidationError
+    from zotero_summarizer.api.errors import APIError
+    from zotero_summarizer.api.routes.setup import CalibrateRequest
+    from zotero_summarizer.cli import build_parser
+    from zotero_summarizer.services.setup.calibration import run_full_calibration
+
+    with pytest.raises(ValidationError):
+        CalibrateRequest(papers=limit)
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["calibrate", "--papers", str(limit)])
+    with pytest.raises(APIError):
+        run_full_calibration(SimpleNamespace(paper_render_dir=tmp_path), papers_limit=limit)
+
+
+def test_calibration_reads_unique_papers_with_a_total_limit(tmp_path):
+    from zotero_summarizer.services.setup.calibration import load_review_papers
+
+    for key in ("KEY1", "feed:2"):
+        directory = tmp_path / key
+        directory.mkdir()
+        (directory / "paper_read.json").write_text(json.dumps({"title": key, "qa_text": "body"}))
+    settings = SimpleNamespace(paper_render_dir=tmp_path)
+    assert load_review_papers(settings, item_keys=["KEY1", "KEY1", "feed:2"]) == [("KEY1", "body"), ("feed:2", "body")]
+    assert load_review_papers(settings, limit=1) == [("KEY1", "body")]
+    assert load_review_papers(settings, item_keys=[]) == []

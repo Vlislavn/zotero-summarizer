@@ -366,6 +366,7 @@ class CorpusItem(BaseModel):
     item_id: str = Field(..., min_length=1)
     title: str = Field(..., min_length=1)
     abstract: str = ""
+    doi: str = ""
     tags: List[str] = Field(default_factory=list)
     collections: List[str] = Field(default_factory=list)
     annotation_count: int = Field(default=0, ge=0)

@@ -128,8 +128,8 @@ def test_applied_and_replayed_mutations_run_idempotent_domain_effects(
     service.push(db, [verdict, note])
 
     assert verdict_calls == [
-        ("P1", "could_read", "offline"),
-        ("P1", "could_read", "offline"),
+        (db, "P1", "could_read", "offline"),
+        (db, "P1", "could_read", "offline"),
     ]
     assert note_calls == [("P1", "my note"), ("P1", "my note")]
 

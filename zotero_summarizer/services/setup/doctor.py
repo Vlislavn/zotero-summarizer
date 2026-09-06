@@ -360,10 +360,8 @@ def run_doctor(
     try:
         if fix:
             from zotero_summarizer.services.setup.bootstrap import bootstrap_phase0
-            from zotero_summarizer.storage.migrations import migrate_existing
 
             bootstrap_phase0(settings)
-            migrate_existing(settings)
         current = doctor_status(settings)
         by_id = {row["id"]: row for row in current["checks"]}
         for row in by_id.values():

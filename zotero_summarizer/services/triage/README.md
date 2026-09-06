@@ -65,7 +65,8 @@ final, as before. Skipped in `gate_only` mode (no LLM).
 | `prompts.py` | validated injection-safe code defaults; HackerNoon gets the practitioner rubric through the same triage contract; legacy refinement cannot recommend deep/full reading from absent/short full text; `DEFAULT_MAP_PROMPT` serves map-reduce deep review |
 | `select.py` | plateau/elbow cutoff for daily materialization |
 | `daily_actions.py` | Today keep/trash → Zotero + training labels. "Add" files into the user-chosen collection (`add_to_library(item_ids, target_collection_key=None)` resolves the picker's key → name via `ZoteroReader.collection_name_for_key`, an unknown key → 400; default None → "Inbox") and writes a PROVISIONAL verdict (`label_verdicts.source='machine_add'`, tier `feed_interest`) — captured as interest but UNCHECKED, so `golden/hybrid_gt` caps its effective training label at weak `could_read` (not the `should_read` shown for display intent) until you verify it or the 7-day materialization outcome resolves; trash stays a deliberate `user` verdict and flows through `golden.label_verdicts`, which preserves its prior→new transition and prevents a later machine-add retry from overwriting it. A positive verdict (must/should/could) on a feed paper now auto-materializes it into the Inbox too — `materialize_feed_verdict(item_key, user_priority, create_if_missing=True)` reuses the same `_materialize_one`/`_mark_pending` core as `add_to_library` but writes NO training label (the verdict is already saved), instead stamping `user_priority` as the new item's ground-truth `label:<priority>` tag in the same write so it reaches Zotero even while Zotero stays open (the standalone `zotero_set_label_tag` refuses to). With `create_if_missing=False`, it resolves an already-materialized target for a negative verdict/comment without creating a rejected paper; `dont_read` never adds. On "Add", an IN-PLACE Today review (cached under `stable_feed_key`) is copied onto the new library `item_key` (`deep_review.copy_review`) so the deep review persists into the library. Both keep (`today_keep`) and trash (`today_trash`) also append a `human_feedback` event to the agentic interaction log via `_record_label` (`services.interaction_log.log_feed_decision`) — the gate's pre-mutation derived priority + the human's keep/trash. The daemon gate retrain (`feeds/_gate`) threads `triage_db_path` into `load_or_train`, so it applies this overlay too (not just `/admin/retrain`). **Trash marks the feed items read best-effort**: the `dont_read` labels are the source of truth and are committed per-row, so a Zotero-DB-lock on `mark_feed_items_read` reports `marked_read: 0` + `marked_read_error` instead of 500-ing the whole batch after the labels already saved (matches the per-row best-effort contract) |
-| `triage_jobs.py` | background triage-job lifecycle (`/api/triage/run`); persists a snapshot copy so the DB-write thread never serialises a live-mutating job |
+| `triage_jobs.py` | owns on-demand triage workers and their item task groups; cancellation is `cancelling` until blocking work drains, then `cancelled`; job snapshots and cancellation/start writes serialize under the existing start lock |
+| `_execution.py` | context-preserving blocking calls that retain thread ownership on timeout/task cancellation, plus cooperative pipeline stop checks; a deadline stops subsequent work and drains the current call before releasing the slot |
 | `triage_backlog.py` | single-thread **ML-only** drain of un-triaged feed backlog (gate scores; no LLM); `allow_daily_selection=False` — the UI button never auto-materialises into the Inbox; `status()` surfaces `gate_reject_rate`. On completion it **auto-rescores the slate** (`rescored`/`rescore_error` in `status()`) so freshly-drained rows rank consistently with what was already there |
 | `rescore_slate.py` | re-score the CURRENT Today slate in place with the live gate; rewrites only the gate-derived fields via `storage.feeds.update_scores` — never a card's decision/read-status, and skips already-handled rows so nothing is re-surfaced. It is now triggered **automatically** (not just by `POST /api/daily/rescore-slate`): after a backlog drain, after any gate retrain (daemon or UI `install_gate`), and at startup for a cached gate — so Today always reflects the current model |
 | `daily_select/` | the role-allocated Today slate (see its README) |
@@ -96,6 +97,63 @@ Deferred upgrade if this hurts ranking: a PMID→efetch abstract backfill in
 [docs/usage.md](../../../docs/usage.md) "Adding sources".
 
 Today Add reuses a copied deep-review PDF when present, otherwise runs the non-interactive OA acquisition chain; its response separates item materialization from typed per-paper attachment outcomes.
+
+Add/Trash preflight the complete requested batch before opening a Zotero writer
+or changing labels/read state. The shared `_load_rows` accepts nonempty positive
+SQLite integer PKs, processes duplicates once in first-seen order, and raises
+404 for a missing row (including mixed valid/missing batches), never a successful
+zero-count reply. HTTP rejects coercible strings/floats/bools with 422. Counts
+refer to unique rows. This fixes duplicate IDs within one request, not the
+cross-store crash/concurrent-materialization window tracked separately as A057.
+
+Today rescoring reports the full artifact `model_sha256` as `gate_sha`, matching
+the reading-score cache and interaction log; a training CSV hash is not a model ID.
+It reuses `daily_select._fetch_primary_unhandled` with the slate and its counter:
+handled/trash/content/GUID filtering precedes fallback and its cap; mixed SQL/ISO
+timestamps are compared as UTC instants. There is no separate rescore candidate
+policy; only abstract-less survivors are omitted from gate prediction.
+
+Job cancellation returns `cancelling` / `cancelled=false` while work is still
+active; poll the existing status endpoint (MCP forwards the same values).
+Repeating cancellation remains safe. No new job may start while one is running
+or cancelling. Stop checks after reads/pipeline calls and before planning and
+the atomic result/queue write prevent subsequent effects. An already-entered
+transaction may finish while cancelling; cancellation does not roll it back. Only after every
+item thread drains does the worker publish `cancelled`, with no late result.
+On process restart a persisted cancellation becomes cancelled, never resumed.
+
+Job detail and list APIs expose `active_items: [{item_key, title}]` instead of
+the misleading singular `current_item_key`/`current_title`. The worker-owned map
+tracks each item before its detail read, updates the title before summarization,
+and removes it in `finally` after blocking calls drain (success, failure, timeout
+or cancellation). Concurrent items are all visible; completed papers are not
+reported as active. Live jobs are pinned during cache trimming, and the list
+endpoint overlays their in-memory state onto persisted history.
+
+Activity is process-local, not resumable data: snapshots omit the map, historical
+SQLite columns remain unused by the API, and reload/restart reports no active
+items until workers actually run. No migration, extra progress writes or timer.
+This remains a single-process job runner; a future distributed runner would need
+worker-owned leases rather than treating stored activity as proof of live work.
+
+Per-item triage prepares its pending-change plan before storage commits the
+result and all pending rows together; queue-disabled jobs skip planning. Resume
+skips only successful items and clears previous-attempt errors before retrying
+failed/unstarted keys. SQL and planning failures remain visible item errors,
+with neither a result nor a partial queue. The job snapshot is a separate
+transaction: a process crash after the item commit but before its snapshot can
+still replay that item; no exactly-once guarantee or new transaction framework.
+
+A summary deadline signals the shared stop, aborts further items/stages, and
+reports a failed job only after in-flight calls settle. Local/remote concurrency
+slots therefore remain occupied while threads actually run. The PDF pipeline
+checks its optional cancellation event between extraction, corpus matching,
+chunk calls, refinement/retry and triage; it reuses the abstract pipeline's
+refinement and triage helpers. Existing synchronous callers need no event.
+Python cannot interrupt a native call or withdraw an already-submitted provider
+request: timeouts/cancellation may take longer than the configured deadline,
+and the current call may still incur cost. For a forcibly bounded local stop,
+process isolation is required. No detached thread is declared terminal here.
 
 **Boundaries:** imports `model/` (gate), `zotero/` (pending), and shared
 scoring; standard services rules.

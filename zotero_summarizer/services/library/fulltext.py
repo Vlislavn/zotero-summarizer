@@ -84,21 +84,28 @@ def _summary(outcomes: list[dict[str, str]], backup_path: Any = None) -> dict[st
     return {
         "attached": sum(s.startswith("attached_") for s in statuses),
         "skipped_has_pdf": statuses.count("skipped_has_pdf"),
-        "no_oa_source": statuses.count("no_oa_source"),
-        "needs_login": statuses.count("needs_login"),
-        "browser_not_attempted": statuses.count("browser_not_attempted"),
-        "failed_count": sum(s in {"fetch_failed", "write_failed"} for s in statuses),
         "backup_path": backup_path,
         "outcomes": outcomes,
     }
 
 
 def fetch_fulltext_for_items(items: list[dict[str, Any]], *, force: bool = False) -> dict[str, Any]:
-    """Acquire and attach PDFs, returning aggregate and per-item outcomes."""
+    """Acquire once per key, then attach. Acquisition errors abort before writes.
+
+    First occurrence supplies metadata, but any existing-PDF flag wins over a
+    duplicate wanting acquisition. Outcome/progress counts describe unique keys.
+    """
     writer = get_zotero_writer_or_raise()
     if writer.is_connector_running() and not force:  # fast-fail before downloading
         return {"error": "zotero_running", "requires_force": True,
                 "message": "Zotero appears to be running; close Zotero or confirm force apply."}
+
+    unique: dict[str, dict[str, Any]] = {}
+    for item in items:
+        key = str(item["item_key"])
+        if key not in unique or item.get("has_pdf"):
+            unique[key] = item
+    items = list(unique.values())
 
     outcomes: list[dict[str, str]] = []
     candidates: list[dict[str, str]] = []

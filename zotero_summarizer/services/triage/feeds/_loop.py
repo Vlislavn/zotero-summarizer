@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import signal
+import sys
 from typing import Any
 
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
@@ -26,6 +27,10 @@ async def run_daemon_loop(
 
     `max_ticks=None` runs forever; set a finite value for testing.
     """
+    if max_ticks is not None and max_ticks < 0:
+        raise ValueError("max_ticks must be nonnegative")
+    if max_ticks == 0:
+        return
     config = _load_config()
     feeds_cfg = config["feeds"]
     tick_seconds = int(feeds_cfg.get("daemon_tick_seconds") or 300)
@@ -38,36 +43,30 @@ async def run_daemon_loop(
         LOGGER.info("daemon received shutdown signal — finishing current tick")
         stop_event.set()
 
-    loop = asyncio.get_event_loop()
-    for sig_name in ("SIGINT", "SIGTERM"):
-        sig = getattr(signal, sig_name, None)
-        if sig is not None:
-            try:
-                loop.add_signal_handler(sig, _on_signal)
-            except (NotImplementedError, RuntimeError) as _:
-                # Windows doesn't support add_signal_handler for SIGTERM.
-                pass
-
+    loop = asyncio.get_running_loop()
+    registered = []
     tick_count = 0
-    while not stop_event.is_set():
-        try:
+    try:
+        if sys.platform != "win32":
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.add_signal_handler(sig, _on_signal)
+                registered.append(sig)
+        while not stop_event.is_set():
             report = await asyncio.to_thread(
-                run_daemon_tick,
-                reader=reader,
-                writer=writer,
-                feed_library_ids=feed_library_ids,
-                batch_size=daemon_batch,
+                run_daemon_tick, reader=reader, writer=writer,
+                feed_library_ids=feed_library_ids, batch_size=daemon_batch,
             )
-            LOGGER.info("tick %d: %s", tick_count + 1, report.as_dict())
-        except Exception:
-            LOGGER.exception("daemon tick raised; sleeping then retrying")
-        tick_count += 1
-        if max_ticks is not None and tick_count >= max_ticks:
-            break
-        try:
-            await asyncio.wait_for(stop_event.wait(), timeout=tick_seconds)
-            break  # stop_event set during the wait
-        except asyncio.TimeoutError:
-            continue
-
+            tick_count += 1
+            LOGGER.info("tick %d: %s", tick_count, report.as_dict())
+            if report.errors or report.fatal_llm_error:
+                raise RuntimeError(f"Feed tick {report.tick_id} failed: errors={report.errors}, fatal_llm_error={report.fatal_llm_error}")
+            if max_ticks is not None and tick_count >= max_ticks:
+                break
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=tick_seconds)
+            except asyncio.TimeoutError:
+                continue
+    finally:
+        for sig in registered:
+            loop.remove_signal_handler(sig)
     LOGGER.info("daemon exiting after %d ticks", tick_count)

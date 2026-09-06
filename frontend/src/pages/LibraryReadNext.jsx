@@ -26,6 +26,7 @@ import {
   DEFAULT_SORT, sortQueue, serializeSort, hydrateSort,
 } from '../utils/relevanceBands.js';
 import { isMachineTag } from '../utils/tags.js';
+import { fulltextMessage } from './todayHelpers.js';
 
 // Library page — a single "Read next" surface (Stage 2). The former Browse tab
 // and Triage monitor are merged in: the sidebar collection/tag filters + a
@@ -390,15 +391,24 @@ export default function LibraryReadNext() {
       const r = s?.result || {};
       setFetchingFulltext(false);
       if (r.error) { setMessage(`Full-text fetch failed: ${r.error}`); setIsError(true); return; }
-      const unavailable = (r.no_oa_source || 0) + (r.needs_login || 0) + (r.failed_count || 0);
+      const pdf = fulltextMessage(r);
+      if (!pdf) {
+        setMessage('Full-text fetch failed: Full-text result is missing outcomes');
+        setIsError(true);
+        return;
+      }
       setMessage(
         `Attached ${r.attached || 0} full-text PDF(s) to Zotero`
-        + ` (skipped ${r.skipped_has_pdf || 0} already attached; ${unavailable} unavailable).`
+        + ` (skipped ${r.skipped_has_pdf || 0} already attached; ${pdf.unavailable} unavailable).`
         + (r.attached ? ' They upload to zotero.org on the next sync.' : '')
         + (r.backup_path ? ` Backup: ${r.backup_path}.` : ''),
       );
       setIsError(false);
-    }).catch(() => { ftPollRef.current = setTimeout(pollFulltext, 6000); });  // transient — keep polling
+    }).catch((err) => {
+      setFetchingFulltext(false);
+      setMessage(`Full-text status unavailable: ${err.message || err}. The server job may still be running.`);
+      setIsError(true);
+    });
   }
 
   // ------ "Review cool papers" auto-review loop ------
@@ -409,6 +419,7 @@ export default function LibraryReadNext() {
     fleetStatus, autoReview, coolUndecided, handleReviewCool, stopReviewCool,
   } = useReviewCoolLoop({
     queue, queueArgs, applyQueueData, loadQueue, zoteroConnected, setMessage, setIsError,
+    prestigeFloor: filterCtx.prestigeFloor,
   });
 
   // One-click Zotero export chain (Tesler: the system owns the rescore→tags→
@@ -424,7 +435,7 @@ export default function LibraryReadNext() {
     try {
       const meta = await fetchReadingQueue({ limit: 1, refresh: false });
       if (meta?.scores_stale || !meta?.computed_at) {
-        setMessage('Step 1/3 — rescoring the library against the current model (a few minutes; progress streams in)…');
+        setMessage('Step 1/3 — rescoring the library against the current model; scores update when the full pass completes…');
         await fetchReadingQueue({ limit: 1, refresh: true });
         let running = true;
         for (let i = 0; running && i < 120; i += 1) {  // bail after ~16 min

@@ -60,12 +60,13 @@ def test_cache_report(monkeypatch):
         def __init__(self, rid, size):
             self.repo_id = rid
             self.size_on_disk = size
+            self.revisions = []
 
     monkeypatch.setattr(
         "huggingface_hub.scan_cache_dir",
         lambda: SimpleNamespace(repos=[_Repo("allenai/specter2_base", 400_000_000)]),
     )
-    report = cache_report([("gate", "allenai/specter2_base"), ("rerank", "BAAI/bge-reranker-v2-m3")])
+    report = cache_report([("gate", "allenai/specter2_base", None), ("rerank", "BAAI/bge-reranker-v2-m3", None)])
     by = {r["repo_id"]: r for r in report}
     assert by["allenai/specter2_base"]["cached"] is True
     assert by["allenai/specter2_base"]["size_mb"] == 400.0
@@ -82,7 +83,7 @@ def test_model_targets_includes_four():
         ),
         quality_review=SimpleNamespace(shadow_claim_check=False),
     )
-    repos = [r for _, r in model_targets(config)]
+    repos = [r for _, r, _ in model_targets(config)]
     assert "allenai/specter2_base" in repos
     assert "allenai/specter2" in repos
     assert "sentence-transformers/all-MiniLM-L6-v2" in repos

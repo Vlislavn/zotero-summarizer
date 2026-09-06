@@ -13,14 +13,12 @@ from __future__ import annotations
 
 import logging
 import re
-import threading
-from pathlib import Path
 from time import perf_counter
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models.providers import resolve_stage
-from zotero_summarizer.services._common import settings, state
+from zotero_summarizer.services._common import state
 from zotero_summarizer.services.faithbench import (
     ANSWER_PROMPT,
     PaperChunkIndex,
@@ -37,61 +35,6 @@ MODES = ("comprehensive", "retrieval", "full_text")
 # A "how many" question scoped to a specific figure/table/section is NOT a
 # whole-document count — let the LLM answer it instead of returning a doc total.
 _SCOPED_REF_RE = re.compile(r"\b(?:figure|fig|table|tbl|section|sec|eq|equation|appendix)\.?\s*\d", re.IGNORECASE)
-
-# Memoized per-paper text + chunk index, keyed by (pdf_path, mtime). Bounded:
-# oldest entry evicted past _CACHE_MAX (papers are big; keep RAM flat).
-_CACHE_MAX = 6
-_CACHE_LOCK = threading.Lock()
-_TEXT_CACHE: dict[tuple[str, int], tuple[str, PaperChunkIndex]] = {}
-
-
-def _paper_context_source(item_key: str) -> tuple[str, PaperChunkIndex]:
-    """Extracted full text + chunk index for a library item's local PDF."""
-    from zotero_summarizer.services.zotero.zotero import get_library_reader
-
-    app = state()
-    # Zotero-optional: app library reader over kept feed papers when Zotero absent.
-    reader = get_library_reader(app)
-    extractor = getattr(app, "pdf_extractor", None)
-    if extractor is None:
-        raise APIError(
-            error="unavailable", message="PDF extractor not initialized",
-            status_code=503,
-        )
-    detail = reader.get_item_detail(item_key)
-    if detail is None:
-        raise APIError(error="not_found", message=f"Item {item_key} not found", status_code=404)
-    pdf_path = Path(str(detail.get("pdf_path") or ""))
-    if not str(pdf_path) or not pdf_path.is_file():
-        raise APIError(
-            error="needs_pdf", message=f"No local PDF for item {item_key}", status_code=404
-        )
-    allowed = settings().pdf_root.expanduser().resolve()
-    resolved = pdf_path.expanduser().resolve()
-    if allowed not in [resolved, *resolved.parents]:
-        raise APIError(
-            error="path_not_allowed", message="PDF path is outside configured PDF_ROOT",
-            status_code=403,
-        )
-
-    cache_key = (str(resolved), int(resolved.stat().st_mtime))
-    with _CACHE_LOCK:
-        cached = _TEXT_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
-
-    text = str(extractor.extract_text(str(resolved)) or "").strip()
-    if not text:
-        raise APIError(
-            error="extraction_empty", message="Extracted PDF text is empty", status_code=422
-        )
-    entry = (text, PaperChunkIndex(text))
-    with _CACHE_LOCK:
-        if len(_TEXT_CACHE) >= _CACHE_MAX:
-            _TEXT_CACHE.pop(next(iter(_TEXT_CACHE)))
-        _TEXT_CACHE[cache_key] = entry
-    return entry
-
 
 def ask_paper(
     item_key: str, question: str, *, mode: str = "comprehensive",
@@ -110,7 +53,7 @@ def ask_paper(
             error="validation_error", message=f"mode must be one of {MODES}", status_code=422
         )
 
-    artifact = paper_render.ensure_artifact(item_key)
+    artifact = paper_render.build_paper_read(item_key)
     deterministic = _answer_from_artifact_counts(artifact, question)
     if deterministic is not None:
         return _with_evidence(
@@ -119,7 +62,6 @@ def ask_paper(
         )
 
     app = state()
-    llm = app.resolve_stage_client("deep_review")
     config = app.app_state.config
     max_chars = int(config.quality_review.max_text_chars)
     resolved = resolve_stage(config.llm_routing, "deep_review")
@@ -129,12 +71,14 @@ def ask_paper(
     #   full_text     — the raw extracted PDF body only (no notes wrapper)
     #   comprehensive — metadata + structured review + PDF body (default)
     chunks: list[str] = []
+    text = paper_render.qa_body_text(artifact).strip()
+    if mode != "comprehensive" and not text:
+        raise APIError(error="extraction_empty", message="Extracted PDF text is empty", status_code=422)
     if mode == "retrieval":
-        text, index = _paper_context_source(item_key)
-        chunks = index.top_chunks(question, RETRIEVAL_TOP_K)
+        # ponytail: build this lexical index per question; cache by artifact key only if profiling warrants it.
+        chunks = PaperChunkIndex(text).top_chunks(question, RETRIEVAL_TOP_K)
         context = "\n\n[...]\n\n".join(chunks) if chunks else text[:max_chars]
     elif mode == "full_text":
-        text, _index = _paper_context_source(item_key)
         context = text[:max_chars]
     else:
         context = paper_render.artifact_text(artifact, max_chars=max_chars)
@@ -145,16 +89,9 @@ def ask_paper(
         if prior else question
     )
     prompt = ANSWER_PROMPT.format(context=context, question=contextual_question)
+    llm = app.resolve_stage_client("deep_review")
     t0 = perf_counter()
-    try:
-        parsed, _raw = answer_with_retry(llm, prompt)
-    except ValueError:
-        # LLM output had no recoverable JSON answer (empty / malformed — often a
-        # transient endpoint hiccup, or a reasoning model emptying `content` at
-        # low max_tokens). Untrusted LLM output at this boundary becomes an
-        # abstention, not an unhandled 500 — the user sees "no grounded answer".
-        LOGGER.warning("qa: item=%s mode=%s — unparseable LLM output; abstaining", item_key, mode)
-        parsed = {"answer": None, "abstained": True, "quote": None}
+    parsed, _raw = answer_with_retry(llm, prompt)
     latency = round(perf_counter() - t0, 2)
     LOGGER.info("qa: item=%s mode=%s latency=%.1fs abstained=%s",
                 item_key, mode, latency, parsed["abstained"])

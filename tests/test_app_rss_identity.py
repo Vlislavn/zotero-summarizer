@@ -9,7 +9,6 @@ from zotero_summarizer.integrations import app_rss
 from zotero_summarizer.integrations.app_rss import (
     AppRssReader,
     RssUrlRejected,
-    validate_public_response_peer,
     validate_rss_url,
 )
 from zotero_summarizer.services.library.app_library_reader import AppLibraryReader
@@ -323,24 +322,3 @@ def test_validate_rss_url_rejects_local_and_private_urls(monkeypatch) -> None:
     monkeypatch.setattr(app_rss.socket, "getaddrinfo", fake_getaddrinfo)
     with pytest.raises(RssUrlRejected):
         validate_rss_url("https://example.com/rss")
-
-
-def test_validate_public_response_peer_rejects_dns_rebinding() -> None:
-    response = type(
-        "Response",
-        (),
-        {
-            "extensions": {
-                "network_stream": type(
-                    "Stream",
-                    (),
-                    {
-                        "get_extra_info": lambda self, _name: ("192.168.1.9", 443),
-                    },
-                )()
-            },
-        },
-    )()
-
-    with pytest.raises(RssUrlRejected):
-        validate_public_response_peer(response)

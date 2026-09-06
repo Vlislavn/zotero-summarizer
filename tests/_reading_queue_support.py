@@ -28,7 +28,7 @@ class Pred:
 
 class FakeGate:
     def __init__(self, sha, scores=None):
-        self.golden_csv_sha256 = sha
+        self.model_sha256 = sha
         self._scores = scores or {}
 
     def predict(self, items, *, corpus_db_path, goals_config, return_shap=False, prestige_network=True):

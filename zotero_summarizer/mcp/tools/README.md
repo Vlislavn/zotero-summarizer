@@ -16,3 +16,9 @@ tool fn ── helpers.normalize ──> api_client.request() ──> /api/*
 | `status.py` | health / liveness probes |
 
 **Boundaries:** same as `mcp/` — HTTP only, no `services/`/`api/`/`storage/`.
+
+`get_job_status` forwards the API's `active_items` list (item key and title),
+including parallel items still draining during cancellation. The old singular
+`current_item_key`/`current_title` fields are removed; update client and API
+together. Missing activity in the response is a contract error, not an invented
+empty list. Historical/terminal jobs receive an explicit empty list from the API.

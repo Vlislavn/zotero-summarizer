@@ -226,6 +226,11 @@ def test_evidence_true_for_author_h_index_only_but_floor_stays_unknown():
     assert _entry_prestige(entry) == (None, False)      # but not "known" for the floor
 
 
+def test_zero_h_index_is_not_treated_as_prestige_evidence():
+    entry = {"scoring": {"prestige_inputs": {"max_author_h_index": 0}}}
+    assert entry_prestige_evidence(entry) == (None, False)
+
+
 def test_evidence_true_for_citation_percentile():
     entry = {"scoring": {"prestige_inputs": {"citation_percentile": 0.8}}}
     assert entry_prestige_evidence(entry)[1] is True

@@ -34,15 +34,30 @@ def _pending_rows(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
 def insert_pending_changes(
     item_key: str, item_title: str, changes: list[dict[str, Any]]
 ) -> int:
-    if not item_key.strip() or not changes:
+    conn = _get_conn()
+    try:
+        count = _insert_pending_changes(conn, item_key, item_title, changes)
+        conn.commit()
+        return count
+    finally:
+        conn.close()
+
+
+def _insert_pending_changes(
+    conn: sqlite3.Connection, item_key: str, item_title: str, changes: list[dict[str, Any]]
+) -> int:
+    """Stage queue rows in the caller's transaction; never commit here."""
+    if not changes:
         return 0
+    if not item_key.strip():
+        raise ValueError("Pending changes require an item key")
 
     rows: list[tuple[str, str, str, str]] = []
     for change in changes:
         change_type = str(change.get("change_type", "")).strip()
         payload = change.get("payload", {})
         if not change_type:
-            continue
+            raise ValueError("Pending changes require a change type")
         rows.append(
             (
                 item_key.strip(),
@@ -52,22 +67,14 @@ def insert_pending_changes(
             )
         )
 
-    if not rows:
-        return 0
-
-    conn = _get_conn()
-    try:
-        conn.executemany(
-            """
-            INSERT INTO pending_changes (item_key, item_title, change_type, payload_json)
-            VALUES (?, ?, ?, ?)
-            """,
-            rows,
-        )
-        conn.commit()
-        return len(rows)
-    finally:
-        conn.close()
+    conn.executemany(
+        """
+        INSERT INTO pending_changes (item_key, item_title, change_type, payload_json)
+        VALUES (?, ?, ?, ?)
+        """,
+        rows,
+    )
+    return len(rows)
 
 
 def get_pending_changes(

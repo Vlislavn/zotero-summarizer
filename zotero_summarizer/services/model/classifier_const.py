@@ -9,12 +9,13 @@ LOGGER = logging.getLogger(__name__)
 
 
 SPECTER2_MODEL_NAME = "allenai/specter2_base"
+SPECTER2_MODEL_REVISION = "3447645e1def9117997203454fa4495937bfbd83"
 # Sprint-3a (May 2026): load the `proximity` adapter on top of SPECTER2 base.
 # The proximity adapter (Singh et al. 2023, allenai/specter2) is fine-tuned
 # for nearest-neighbour retrieval — exactly the geometry our P-set features
-# need. Adapter switch invalidates every cached embedding; the content_hash
-# below is keyed by adapter name so the change auto-busts the cache.
+# need. Pin changes invalidate model reuse and cached vectors together.
 SPECTER2_ADAPTER_NAME = "allenai/specter2"
+SPECTER2_ADAPTER_REVISION = "2081559630a80fc5851d8f798a05ba81e9468089"
 EMBEDDING_DIM = 768
 # Extras layout (12 dims after Sprint 2):
 #   0  has_doi                  binary
@@ -35,7 +36,6 @@ EMBEDDING_DIM = 768
 N_EXTRA_FEATURES = 12
 FEATURE_DIM = EMBEDDING_DIM + N_EXTRA_FEATURES
 POSITIVE_CLASSES = frozenset({"must_read", "should_read"})
-CURRENT_YEAR = 2026          # for `year_recency` feature; bump or compute dynamically
 
 # TabPFN runs on CPU, never the shared GPU pool. Unlike the persistent ~0.5 GB
 # SPECTER2 encoder (which earns its MPS slot — see classifier_embed._select_device),
@@ -116,7 +116,6 @@ __all__ = [
     "N_EXTRA_FEATURES",
     "FEATURE_DIM",
     "POSITIVE_CLASSES",
-    "CURRENT_YEAR",
     "TABPFN_DEVICE",
     "_SCHEMA",
     "ClassifierReport",

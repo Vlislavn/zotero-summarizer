@@ -208,3 +208,20 @@ def test_runtime_check_reports_a_stopped_ollama_service(tmp_path, monkeypatch):
     assert row["status"] == "needs_action"
     assert row["message"] == "Ollama is not running"
     assert row["recovery"]["command"] == "ollama serve"
+
+
+def test_doctor_fix_migrates_once(tmp_path, monkeypatch):
+    from zotero_summarizer.storage import migrations
+
+    settings = _settings(tmp_path)
+    calls = []
+    migrate = migrations.migrate_existing
+
+    def counted(settings):
+        calls.append(settings)
+        return migrate(settings)
+
+    monkeypatch.setattr(migrations, "migrate_existing", counted)
+    monkeypatch.setitem(doctor._RUNNERS, "database", lambda _: doctor._row("database", "ready", "ok"))
+    doctor.run_doctor(settings, check_ids=["database"], fix=True)
+    assert calls == [settings]

@@ -74,20 +74,24 @@ def test_skip_unavailable_and_write_failure_are_distinct(monkeypatch):
         "NO": _pdf_acquire.AcquireResult(path=None, outcome="no_oa_source"),
         "FETCH": _pdf_acquire.AcquireResult(path=None, outcome="fetch_failed"),
         "POLICY": _pdf_acquire.AcquireResult(path=None, outcome="browser_not_attempted"),
+        "OFFLINE": _pdf_acquire.AcquireResult(path=None, outcome="offline_uncached"),
+        "EXTRA": _pdf_acquire.AcquireResult(path=None, outcome="browser_extra_unavailable"),
+        "LOGIN": _pdf_acquire.AcquireResult(path=None, outcome="needs_login"),
     }
     monkeypatch.setattr(fulltext._pdf_acquire, "acquire_pdf_for", lambda key, *_a, **_k: results[key])
     writer = _FakeWriter()
     monkeypatch.setattr(fulltext, "get_zotero_writer_or_raise", lambda: writer)
 
     result = fulltext.fetch_fulltext_for_items([
-        _item("HAVE", has_pdf=True), _item("NO"), _item("FETCH"), _item("POLICY"),
+        _item("HAVE", has_pdf=True), *(_item(key) for key in results),
     ])
 
     assert [row["status"] for row in result["outcomes"]] == [
         "skipped_has_pdf", "no_oa_source", "fetch_failed", "browser_not_attempted",
+        "offline_uncached", "browser_extra_unavailable", "needs_login",
     ]
-    assert result["skipped_has_pdf"] == result["no_oa_source"] == result["failed_count"] == 1
-    assert result["browser_not_attempted"] == 1
+    assert set(result) == {"attached", "skipped_has_pdf", "backup_path", "outcomes"}
+    assert result["attached"] == 0 and result["skipped_has_pdf"] == 1
     assert writer.calls == []
 
 
@@ -97,7 +101,7 @@ def test_write_failure_is_per_item(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(fulltext, "get_zotero_writer_or_raise", lambda: _FakeWriter(fail=True))
     result = fulltext.fetch_fulltext_for_items([_item()])
-    assert result["outcomes"][0]["status"] == "write_failed" and result["failed_count"] == 1
+    assert result["outcomes"][0]["status"] == "write_failed" and result["attached"] == 0
 
 
 def test_bulk_delegates_to_same_engine(monkeypatch):

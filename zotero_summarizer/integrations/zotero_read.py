@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import re
-import shutil
 import sqlite3
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -29,11 +27,7 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
     """
 
     _RETRY_DELAYS_SECONDS = (0.0, 0.05)
-    # Zotero runs the live DB in WAL mode, where a read-only connection does NOT
-    # block on a writer — the only contention is the brief exclusive lock during
-    # a checkpoint. A 0.2s budget tripped on those routinely, sending every read
-    # to the whole-DB snapshot copy (176 MB × once PER page). 2s lets the rare
-    # checkpoint clear in place, so the snapshot fallback is a true last resort.
+    # Allow brief WAL checkpoint contention; persistent locks remain errors.
     _SQLITE_TIMEOUT_SECONDS = 2.0
 
     def __init__(self, zotero_data_dir: str | Path | None = None) -> None:
@@ -61,8 +55,13 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
               AND i.libraryID = ({_USER_LIBRARY_ID_SELECT})
               AND it.typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL})
         """
-        query_collections = "SELECT COUNT(*) AS value FROM collections"
-        query_tags = "SELECT COUNT(*) AS value FROM tags"
+        query_collections = f"SELECT COUNT(*) AS value FROM collections WHERE libraryID = ({_USER_LIBRARY_ID_SELECT})"
+        query_tags = f"""
+            SELECT COUNT(DISTINCT it.tagID) AS value FROM itemTags it
+            JOIN items i ON i.itemID = it.itemID
+            WHERE i.libraryID = ({_USER_LIBRARY_ID_SELECT})
+              AND i.itemID NOT IN (SELECT itemID FROM deletedItems)
+        """
         query_items_with_pdf = f"""
             SELECT COUNT(DISTINCT ia.parentItemID) AS value
             FROM itemAttachments ia
@@ -72,6 +71,7 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
             WHERE ia.parentItemID IS NOT NULL
               AND lower(COALESCE(ia.contentType, '')) = 'application/pdf'
               AND di.itemID IS NULL
+              AND ia.itemID NOT IN (SELECT itemID FROM deletedItems)
               AND parent.libraryID = ({_USER_LIBRARY_ID_SELECT})
               AND it.typeName NOT IN ({_NON_BIBLIOGRAPHIC_TYPES_SQL})
         """
@@ -172,14 +172,7 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
         return self._execute_read(_read)
 
     def _connect(self) -> sqlite3.Connection:
-        return self._connect_db(self.db_path)
-
-    def _connect_db(self, db_path: Path, *, immutable: bool = False) -> sqlite3.Connection:
-        # immutable=1 disables WAL replay and change detection. Safe ONLY for snapshot
-        # copies in a temp dir (where the file truly won't change). Never apply to the
-        # live Zotero DB while Zotero may be writing — that produces stale reads.
-        params = "mode=ro&immutable=1" if immutable else "mode=ro"
-        uri = f"file:{db_path}?{params}"
+        uri = f"{self.db_path.as_uri()}?mode=ro"
         conn = sqlite3.connect(uri, uri=True, timeout=self._SQLITE_TIMEOUT_SECONDS)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA query_only = ON")
@@ -204,36 +197,7 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
                 raise ZoteroReadError(f"Failed to query Zotero DB: {exc}") from exc
             except sqlite3.Error as exc:
                 raise ZoteroReadError(f"Failed to query Zotero DB: {exc}") from exc
-        if last_error is not None:
-            try:
-                return self._execute_snapshot_read(fn)
-            except ZoteroReadError:
-                raise ZoteroReadError(f"Zotero DB is busy: {last_error}") from last_error
-        raise ZoteroReadError("Unable to query Zotero DB")
-
-    def _execute_snapshot_read(self, fn):
-        with tempfile.TemporaryDirectory(prefix="zotero-snapshot-") as tmp_dir:
-            snapshot_dir = Path(tmp_dir)
-            snapshot_db_path = snapshot_dir / self.db_path.name
-            self._copy_database_snapshot(snapshot_db_path)
-            # immutable=1 tells SQLite to skip WAL replay on the snapshot copy. This
-            # gives us a consistent point-in-time view even if the source DB's WAL/SHM
-            # was mid-flight when we copied — without needing write access to checkpoint.
-            conn = self._connect_db(snapshot_db_path, immutable=True)
-            try:
-                return fn(conn)
-            except sqlite3.Error as exc:
-                raise ZoteroReadError(f"Failed to query Zotero snapshot DB: {exc}") from exc
-            finally:
-                conn.close()
-
-    def _copy_database_snapshot(self, snapshot_db_path: Path) -> None:
-        for suffix in ("", "-wal", "-shm", "-journal"):
-            source_path = Path(f"{self.db_path}{suffix}")
-            if not source_path.exists():
-                continue
-            target_path = Path(f"{snapshot_db_path}{suffix}")
-            shutil.copy2(source_path, target_path)
+        raise ZoteroReadError(f"Zotero DB is busy: {last_error}") from last_error
 
     @staticmethod
     def _is_busy_error(exc: sqlite3.OperationalError) -> bool:

@@ -2,6 +2,10 @@
 
 One-off eval / ops scripts. Not imported by the app; each has a module docstring with usage.
 
+Prestige validation and quality-promotion evaluation read model artifacts and
+library caches through `Settings.model_dir` (`data/models/`), not a HOME constant.
+Prestige validation uses the shared ZIP/legacy-joblib artifact resolver.
+
 | script | what it does |
 |---|---|
 | `bench_deep_review.py` | benchmark a deep-review DIGEST model (candidate) vs a strong reference on quality + time + memory, judged blinded/pairwise by a pinned independent LLM judge. `--run-name` persists a versioned, resumable run under `data/deep_review_sweep/`. See **`docs/benchmarking.md`** (local-only, gitignored). |
@@ -13,7 +17,7 @@ One-off eval / ops scripts. Not imported by the app; each has a module docstring
 | `bench_llm_params.py` | the LLM baseline + agreement scorer for `bench_gliner2` 0c: runs the SAME 6-field schema through a hosted LLM (api.kather.ai) on the same gold abstracts, joins `params_encoder.jsonl`, reports per-field presence/value agreement + encoder over-emission + abstention (no independent params gold exists → agreement-with-the-incumbent-LLM is the decision metric). Needs `CUSTOM_API_KEY`. |
 | `eval_goal_embedder.py` | offline eval of the goal-similarity embedder. |
 | `eval_slate_blend.py` | offline eval of the Today-slate ranking blend. |
-| `eval_temporal_objective.py` | offline eval of the temporal-split training objective. |
+| `eval_temporal_objective.py` | offline eval of the temporal-split training objective; reuses production's aligned training matrix and train-only engagement-column rebuild for shuffled folds and both temporal objectives. |
 | `eval_quality_promote.py` | offline eval of the quality→must_read promotion (`rank_blend.promote_band`) against firewalled user verdicts — precision + flooding per (goal, relevance) floor. Gates the `quality_promote` flip. |
 | `eval_reading_policy.py` | offline 17-paper, user-labelled gate for the conservative `read|skim|skip` policy: before/after read rate, full-read precision, idea rescue, and zero high-friction/weak-evidence full reads. Uses `reading_policy_fixture.json`; `--check` fails when a gate regresses. |
 | `eval_research_feed.py` | offline 30-real-paper Research Intelligence gate: precision@10, must-not-miss recall, artifact URL precision/fabrication, project-use coverage, review-time estimate, and read-action agreement from the separate 17-paper fixture. |

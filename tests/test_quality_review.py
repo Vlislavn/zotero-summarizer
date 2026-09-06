@@ -103,3 +103,54 @@ def test_assess_digest_threads_response_format_to_llm():
     assess_digest(title="T", full_text="body text " * 200, config=cfg, llm=llm,
                   max_chars=60000, response_format=rf)
     assert llm.captured_rf is rf  # forwarded to the pydantic_prompt call
+
+
+def _reading_reply(decision):
+    return {
+        "read_decision": decision, "read_why": "The original changes the design.",
+        "read_parts": ["Section 2"], "skip_parts": [], "estimated_read_minutes": 5,
+        "original_value": "Implementation details.", "writing_friction": "low", "writing_reasons": [],
+    }
+
+
+@pytest.mark.parametrize("decision", ["banana", "", None, 42])
+@pytest.mark.parametrize("parsed", [False, True])
+def test_coerce_rejects_invalid_normalized_reading_action(decision, parsed):
+    from zotero_summarizer.services.library.quality_review import _coerce_digest
+
+    reply = _reading_reply(decision)
+    if parsed:
+        reply = PaperDigest.model_validate(reply)
+    with pytest.raises(ValueError, match="reading action"):
+        _coerce_digest(reply)
+
+
+@pytest.mark.parametrize("decision", ["read", "skim", "skip"])
+def test_coerce_accepts_each_valid_reading_action(decision):
+    from zotero_summarizer.services.library.quality_review import _coerce_digest
+
+    assert _coerce_digest(_reading_reply(decision)).read_decision == decision
+
+
+@pytest.mark.parametrize("retry_action", ["banana", "skip"])
+def test_assessment_retries_invalid_action_once_then_validates_again(retry_action):
+    from zotero_summarizer.services.library.quality_review import assess_digest
+    from zotero_summarizer.services.setup.bootstrap import _default_goals_config
+
+    class Model:
+        def __init__(self):
+            self.prompts = []
+
+        def pydantic_prompt(self, *, prompt, **kwargs):
+            self.prompts.append(prompt)
+            return _reading_reply("banana" if len(self.prompts) == 1 else retry_action)
+
+    model = Model()
+    args = dict(title="Study", full_text="A qualitative study.", config=_default_goals_config(), llm=model)
+    if retry_action == "banana":
+        with pytest.raises(ValueError, match="reading action"):
+            assess_digest(**args)
+    else:
+        assert assess_digest(**args).read_decision == "skip"
+    assert len(model.prompts) == 2
+    assert "previous reply was not valid" in model.prompts[1]

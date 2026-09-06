@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import Event
 from time import perf_counter
 from typing import Any
 
@@ -18,6 +19,7 @@ from zotero_summarizer.domain import ReadingPriority
 from zotero_summarizer.services import corpus
 from zotero_summarizer.services.model import scoring
 from zotero_summarizer.services.triage.prompts import DEFAULT_REFINE_PROMPT, DEFAULT_TRIAGE_PROMPT
+from zotero_summarizer.services.triage._execution import check_cancelled
 from zotero_summarizer.services._common import (
     LOGGER,
     build_log_prefix,
@@ -238,9 +240,12 @@ def _refine_with_retry(
     req: SummarizeRequest,
     paper_text: str,
     prefix: str,
+    cancel_event: Event | None = None,
 ) -> RefinedSummary:
+    check_cancelled(cancel_event)
     refine_prompt = _build_refine_prompt(config, req, paper_text)
     refined_text = to_text(llm.prompt(refine_prompt))
+    check_cancelled(cancel_event)
     try:
         return RefinedSummary.model_validate(extract_json_blob(refined_text))
     except ValueError:
@@ -253,7 +258,9 @@ def _refine_with_retry(
             "method_and_code. "
             "Return ONLY the JSON, no other text.\n\n" + refined_text
         )
+        check_cancelled(cancel_event)
         retry_text = to_text(llm.prompt(retry_prompt))
+        check_cancelled(cancel_event)
         return RefinedSummary.model_validate(extract_json_blob(retry_text))
 
 
@@ -312,7 +319,10 @@ def _assemble_summary_response(
     )
 
 
-def run_pipeline(req: SummarizeRequest, log_prefix: str | None = None) -> SummarizeResponse:
+def run_pipeline(
+    req: SummarizeRequest, log_prefix: str | None = None, *, cancel_event: Event | None = None,
+) -> SummarizeResponse:
+    check_cancelled(cancel_event)
     app_state = state()
     config: GoalsConfig = app_state.app_state.config
     llm: LLMClient = app_state.resolve_stage_client("feed")
@@ -322,9 +332,11 @@ def run_pipeline(req: SummarizeRequest, log_prefix: str | None = None) -> Summar
     log_context(prefix, "pipeline started pdf_path=%s", req.pdf_path)
     extract_started = perf_counter()
     raw_text = _extract_pdf_text(req.pdf_path)
+    check_cancelled(cancel_event)
     log_context(prefix, "pdf extracted chars=%d in %.2fs", len(raw_text), perf_counter() - extract_started)
 
     corpus_context = corpus.run_corpus_match(req, raw_text)
+    check_cancelled(cancel_event)
     log_context(
         prefix,
         "corpus stage has_corpus=%s affinity=%.3f positive=%.3f negative=%.3f matched_goal=%s",
@@ -356,44 +368,23 @@ def run_pipeline(req: SummarizeRequest, log_prefix: str | None = None) -> Summar
         )
         log_context(prefix, "chunk 1 summary started chars=%d", len(chunk1))
         s1 = to_text(llm.prompt(summary_prompt.format(text=chunk1)))
+        check_cancelled(cancel_event)
         log_context(prefix, "chunk 2 summary started chars=%d", len(chunk2))
         s2 = to_text(llm.prompt(summary_prompt.format(text=chunk2)))
+        check_cancelled(cancel_event)
         paper_text = f"[Part 1 summary]\n{s1}\n\n[Part 2 summary]\n{s2}"
     else:
         paper_text = raw_text
 
-    refine_prompt = _build_refine_prompt(config, req, paper_text)
     refine_started = perf_counter()
-    log_context(prefix, "refine started prompt_chars=%d", len(refine_prompt))
-    refined_text = to_text(llm.prompt(refine_prompt))
-    LOGGER.debug("%s refine raw output (first 500 chars): %s", prefix, refined_text[:500])
-    try:
-        refined_data = extract_json_blob(refined_text)
-    except ValueError:
-        LOGGER.warning("%s refine JSON parse failed, retrying with extraction prompt", prefix)
-        retry_prompt = (
-            "The following text contains a research analysis. "
-            "Extract the content and return it as a single valid JSON object with these keys: "
-            "executive_summary, should_deep_read, key_sections_to_read, relevance_to_research, "
-            "controversial_points, industry_academy_impact, unknown_unknowns, implementation_quickstart, "
-            "key_findings, methods, limitations, method_and_code. "
-            "Return ONLY the JSON object, no other text.\n\n" + refined_text
-        )
-        retry_text = to_text(llm.prompt(retry_prompt))
-        try:
-            refined_data = extract_json_blob(retry_text)
-        except ValueError:
-            LOGGER.error("%s refine retry parse failed raw_output=%s", prefix, retry_text[:2000])
-            raise
-    refined = RefinedSummary.model_validate(refined_data)
+    refined = _refine_with_retry(llm, config, req, paper_text, prefix, cancel_event)
     log_context(prefix, "refine completed in %.2fs", perf_counter() - refine_started)
 
-    triage_prompt = _build_triage_prompt(config, req, refined, corpus_context)
     triage_started = perf_counter()
     log_context(prefix, "triage started")
-    triage = llm.pydantic_prompt(prompt=triage_prompt, pydantic_model=TriageResult)
-    if not isinstance(triage, TriageResult):
-        triage = TriageResult.model_validate(extract_json_blob(to_text(triage)))
+    check_cancelled(cancel_event)
+    triage = _run_triage(llm, config, req, refined, corpus_context)
+    check_cancelled(cancel_event)
 
     composite_score = scoring.compute_composite_score(triage, float(corpus_context.get("affinity_score", 0.0)))
     mapped_priority = scoring.map_priority_from_score(composite_score)

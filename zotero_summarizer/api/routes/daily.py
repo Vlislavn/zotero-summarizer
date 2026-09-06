@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import asdict
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -434,7 +434,7 @@ async def submit_daily_verdict(body: DailyVerdictRequest) -> dict[str, Any]:
 
 
 class BatchItemsRequest(BaseModel):
-    item_ids: list[int] = Field(
+    item_ids: list[Annotated[int, Field(strict=True, gt=0, lt=2**63)]] = Field(
         ..., min_length=1,
         description="processed_feed_items PKs (SlatePaper.item_id) to act on.",
     )

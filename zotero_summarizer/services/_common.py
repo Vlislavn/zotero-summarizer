@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 from datetime import datetime, timezone
 import json
 import logging
@@ -8,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+from tempfile import NamedTemporaryFile
 from typing import Any, Callable
 
 import yaml
@@ -17,6 +17,7 @@ from zotero_summarizer.models.config import USER_OWNED_KEYS
 from zotero_summarizer.models.providers import ProviderConfig
 from zotero_summarizer.runtime import get_context
 from zotero_summarizer.services.config_overrides import apply_calibration, apply_env_overrides
+from zotero_summarizer.services.golden.csv_store import read_snapshot
 from zotero_summarizer.settings import Settings
 
 
@@ -350,9 +351,13 @@ def atomic_write(path: Path, write: Callable[[Path], None]) -> None:
     half-written or truncated file at ``path`` (POSIX rename is atomic). Used for
     irreplaceable artifacts like the golden CSV and the model joblib.
     """
-    tmp_path = path.with_name(path.name + ".tmp")
-    write(tmp_path)
-    os.replace(tmp_path, path)
+    with NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        write(tmp_path)
+        os.replace(tmp_path, path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def connect_sqlite_ro(db_path: Path, *, timeout: float = 5.0) -> sqlite3.Connection:
@@ -409,21 +414,17 @@ def read_json_or_empty(path: Path) -> dict[str, Any]:
 
 
 def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    """Write ``payload`` as JSON to ``path`` via tmp + ``replace`` (atomic on POSIX),
-    creating parent dirs. A crash/race can never leave a half-written cache file.
+    """Publish complete JSON via ``atomic_write``, creating parent directories.
     The caller owns the envelope (e.g. ``{"updated_at": now_iso_z(), ...}``)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(path)
+    atomic_write(path, lambda tmp: tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8"))
 
 
 def load_golden_rows(csv_path: Path) -> list[dict[str, str]]:
     """Read the golden CSV into a list of row dicts. Fail-fast if missing."""
     if not csv_path.exists():
         raise FileNotFoundError(f"golden CSV not found at {csv_path}")
-    with csv_path.open(newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+    return read_snapshot(csv_path)[0]
 
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")

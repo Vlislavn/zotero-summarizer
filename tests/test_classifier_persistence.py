@@ -86,26 +86,33 @@ def _write_golden_csv(path: Path, n_pos: int = 12, n_neg: int = 12) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_train_and_save_writes_joblib_and_json(tmp_path: Path):
+@pytest.mark.parametrize("explicit_output", [True, False])
+def test_train_and_save_writes_archive(tmp_path: Path, explicit_output):
+    from zotero_summarizer.runtime import AppContext, set_context
+    from zotero_summarizer.settings import Settings
+
+    settings = Settings.load(project_root=tmp_path)
+    set_context(AppContext(settings=settings))
     golden = tmp_path / "golden.csv"
     _write_golden_csv(golden)
-    output_dir = tmp_path / "models"
+    output_dir = tmp_path / "custom-models" if explicit_output else settings.model_dir
     with patch.object(classifier_embed, "compute_embeddings_batch", side_effect=_fake_embeddings_batch):
         trained = classifier_persistence.train_and_save(
             golden,
             classifier_name="lightgbm",
             corpus_db_path=tmp_path / "corpus.db",
             goals_config=None,
-            output_dir=output_dir,
+            output_dir=output_dir if explicit_output else None,
             n_folds=4,
         )
 
     assert trained.classifier_name == "lightgbm"
     assert trained.fitted_model is not None
-    assert (output_dir / "lightgbm.joblib").exists()
-    assert (output_dir / "lightgbm.json").exists()
+    from zotero_summarizer.services.model.classifier_store import read_metadata
 
-    meta = json.loads((output_dir / "lightgbm.json").read_text())
+    assert (output_dir / "lightgbm.zip").exists()
+    assert not (output_dir / "lightgbm.json").exists()
+    meta = read_metadata(output_dir / "lightgbm.zip")
     assert meta["classifier_name"] == "lightgbm"
     assert meta["golden_csv_sha256"] == trained.golden_csv_sha256
     assert meta["thresholds"]["keep"] == round(trained.t_keep, 4)
@@ -183,7 +190,7 @@ def test_predict_after_load_matches_in_memory_predict(tmp_path: Path):
             corpus_db_path=tmp_path / "corpus.db",
             goals_config=None,
         )
-        reloaded = classifier_persistence.load_trained(output_dir / "lightgbm.joblib")
+        reloaded = classifier_persistence.load_trained(output_dir / "lightgbm.zip")
         pred_reloaded = reloaded.predict(
             new_items,
             corpus_db_path=tmp_path / "corpus.db",
@@ -230,7 +237,7 @@ def test_load_or_train_loads_when_sha_matches(tmp_path: Path):
         "loaded artefact should have the same trained_at timestamp"
 
 
-def test_load_or_train_retrains_when_sha_changes(tmp_path: Path):
+def test_load_or_train_retrains_when_training_text_changes(tmp_path: Path):
     golden = tmp_path / "golden.csv"
     _write_golden_csv(golden)
     output_dir = tmp_path / "models"
@@ -244,9 +251,7 @@ def test_load_or_train_retrains_when_sha_changes(tmp_path: Path):
             output_dir=output_dir,
             n_folds=4,
         )
-        # Mutate the golden CSV — sha changes.
-        with golden.open("a", encoding="utf-8") as f:
-            f.write("\n")  # extra blank — content differs → sha changes.
+        golden.write_text(golden.read_text().replace("Positive paper 0", "New positive paper"))
         second = classifier_persistence.load_or_train(
             golden,
             classifier_name="lightgbm",

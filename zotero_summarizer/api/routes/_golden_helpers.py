@@ -106,9 +106,6 @@ def _compute_border_into_cache(golden_sha: str, top_k: int) -> None:
     from zotero_summarizer.services.model import active_learning
     from zotero_summarizer.services.library import border_cache
     from zotero_summarizer.services._common import read_config
-    from zotero_summarizer.services.model.classifier_persistence import (
-        DEFAULT_MODEL_DIR,
-    )
 
     try:
         settings = get_settings()
@@ -125,7 +122,7 @@ def _compute_border_into_cache(golden_sha: str, top_k: int) -> None:
             db_path=settings.triage_db_path,  # anchor disagreement to label:* truth
         )
         border_cache.write_cache(
-            DEFAULT_MODEL_DIR,
+            settings.model_dir,
             golden_sha,
             [_suggestion_to_dict(s) for s in suggestions],
         )

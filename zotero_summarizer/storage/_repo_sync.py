@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from zotero_summarizer.domain import VERDICT_SOURCE_USER
+from zotero_summarizer.domain import READING_PRIORITY_SORT_RANK, VERDICT_SOURCE_USER
+from zotero_summarizer.storage import review_notes
 from zotero_summarizer.storage.repositories import _connect_to
 
 SYNC_SCHEMA = """
@@ -79,13 +80,12 @@ def _canonical(conn: sqlite3.Connection, item_key: str, field: str) -> dict[str,
                  "source": row["source"], "model_priority": row["original_derived_priority"]}
                 if row else {"value": None, "comment": None, "source": None,
                              "model_priority": None})
-    row = conn.execute(
-        "SELECT note FROM review_notes WHERE item_key = ?", (item_key,),
-    ).fetchone()
-    return {"value": row["note"] if row else None}
+    return {"value": review_notes.current(conn, item_key)["value"]}
 
 
 def _latest_revision(conn: sqlite3.Connection, item_key: str, field: str) -> int:
+    if field == "review_note":
+        return review_notes.current(conn, item_key)["revision"]
     row = conn.execute(
         "SELECT COALESCE(MAX(revision), 0) FROM sync_changes "
         "WHERE item_key = ? AND field = ?", (item_key, field),
@@ -95,29 +95,25 @@ def _latest_revision(conn: sqlite3.Connection, item_key: str, field: str) -> int
 
 def _write_value(conn: sqlite3.Connection, request: dict[str, Any]) -> None:
     item_key, field = request["item_key"], request["field"]
+    if field == "review_note":
+        review_notes.write(conn, item_key, None if request["operation"] == "delete" else request["value"])
+        return
     if request["operation"] == "delete":
-        table = "label_verdicts" if field == "verdict" else "review_notes"
-        conn.execute(f"DELETE FROM {table} WHERE item_key = ?", (item_key,))
+        conn.execute("DELETE FROM label_verdicts WHERE item_key = ?", (item_key,))
         return
     now = datetime.now(timezone.utc).isoformat()
-    if field == "verdict":
-        conn.execute(
-            """INSERT INTO label_verdicts
-               (item_key, original_derived_priority, user_priority, comment, created_at, source)
-               VALUES (?, ?, ?, ?, ?, ?)
-               ON CONFLICT(item_key) DO UPDATE SET
-                 user_priority=excluded.user_priority, comment=excluded.comment,
-                 created_at=excluded.created_at, source=excluded.source""",
-            (item_key, request.get("model_priority") or "unknown", request["value"],
-             request.get("comment") or "", now, VERDICT_SOURCE_USER),
-        )
-    else:
-        conn.execute(
-            """INSERT INTO review_notes(item_key, note, updated_at) VALUES (?, ?, ?)
-               ON CONFLICT(item_key) DO UPDATE SET
-                 note=excluded.note, updated_at=excluded.updated_at""",
-            (item_key, request.get("value") or "", now),
-        )
+    model_priority = request.get("model_priority")
+    conn.execute(
+        """INSERT INTO label_verdicts
+           (item_key, original_derived_priority, user_priority, comment, created_at, source)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(item_key) DO UPDATE SET
+             original_derived_priority=excluded.original_derived_priority,
+             user_priority=excluded.user_priority, comment=excluded.comment,
+             created_at=excluded.created_at, source=excluded.source""",
+        (item_key, model_priority if model_priority in READING_PRIORITY_SORT_RANK else "unknown", request["value"],
+         request.get("comment") or "", now, VERDICT_SOURCE_USER),
+    )
 
 
 def apply_sync_mutation(db_path: Path, request: dict[str, Any]) -> dict[str, Any]:
@@ -203,14 +199,13 @@ def sync_current_fields(db_path: Path) -> dict[tuple[str, str], dict[str, Any]]:
         rows = conn.execute(
             """SELECT item_key, 'verdict' AS field, user_priority AS value,
                       comment, source, original_derived_priority AS model_priority
-                      FROM label_verdicts
-               UNION ALL
-               SELECT item_key, 'review_note', note, NULL, NULL, NULL FROM review_notes"""
+                      FROM label_verdicts"""
         ).fetchall()
         revisions = conn.execute(
             """SELECT item_key, field, MAX(revision) AS revision
-               FROM sync_changes GROUP BY item_key, field"""
+               FROM sync_changes WHERE field = 'verdict' GROUP BY item_key, field"""
         ).fetchall()
+        note_fields = review_notes.snapshots(conn)
     finally:
         conn.close()
     fields = {(row["item_key"], row["field"]): dict(row) for row in rows}
@@ -223,6 +218,7 @@ def sync_current_fields(db_path: Path) -> dict[tuple[str, str], dict[str, Any]]:
         row["revision"] = int(revision["revision"])
     for row in fields.values():
         row.setdefault("revision", 0)
+    fields.update(note_fields)
     return fields
 
 

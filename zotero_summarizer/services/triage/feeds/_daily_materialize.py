@@ -197,14 +197,8 @@ def materialize_pick(
     run_id: str,
     used_keys: set[str],
     ctx: _MaterializeCtx,
-) -> dict[str, Any] | None:
-    """Materialize one selected pick into Zotero + flip its DB decision.
-
-    Returns ``None`` on success, or an ``{key, error}`` dict when the write
-    failed. A DB-lock / ``triaged_pending`` error defers the item to the next
-    run (warning only); any other error is logged with a full traceback. This
-    per-item boundary keeps one bad row from aborting the whole daily run.
-    """
+) -> str:
+    """Materialize a pick using its durable key; failures propagate for retry."""
     LOGGER.info(
         "[%s] → inbox: %r  composite=%.2f%s",
         run_id,
@@ -212,82 +206,69 @@ def materialize_pick(
         pick.composite_score,
         "  [black-swan]" if pick.is_black_swan else "",
     )
-    try:
-        new_key = _generate_zotero_key(used_keys)
-        pick.row["planned_zotero_key"] = new_key
-        summary, summary_source = _materialize_summary(pick)
-        feed_payload = _feed_payload_from_row(pick.row)
-        matched = _matched_collections_from_row(pick.row)
-        tags = _tags_from_row(
-            is_black_swan=pick.is_black_swan, black_swan_tag=ctx.black_swan_tag
-        )
-        note_html = pending_service.build_triage_note_html(
-            title=str(pick.row.get("title") or ""),
-            summary=summary,
-            is_black_swan=pick.is_black_swan,
-            surprise_score=pick.surprise_score if pick.is_black_swan else None,
-            run_id=run_id,
-        )
-        words = len(re.findall(r"\b[\w'-]+\b", re.sub(r"<[^>]+>", " ", note_html)))
-        LOGGER.info(
-            "[%s] note source=%s words=%d sections=%d generic_fallback=%s",
-            run_id,
-            summary_source,
-            words,
-            note_html.count("<h2>"),
-            summary_source == "legacy_sparse",
-        )
-        writer.apply_feed_materialization(
-            new_item_key=new_key,
-            feed_payload=feed_payload,
-            inbox_collection_name=ctx.inbox_collection_name,
-            matched_collections=matched,
-            tags=tags,
-            note_title=f"Triage: {str(pick.row.get('title') or '')[:80]}",
-            note_html=note_html,
-            provenance_tag=pending_service.SYSTEM_TAG_FEEDS_V3,
-        )
-        decision = (
-            feeds_storage.DECISION_BLACK_SWAN
-            if pick.is_black_swan
-            else feeds_storage.DECISION_SELECTED
-        )
-        with _triage_conn() as conn:
+    new_key = feeds_storage.reserve_materialization_key(
+        get_settings().triage_db_path, int(pick.row["id"]), _generate_zotero_key(used_keys)
+    )
+    summary, summary_source = _materialize_summary(pick)
+    feed_payload = _feed_payload_from_row(pick.row)
+    matched = _matched_collections_from_row(pick.row)
+    tags = _tags_from_row(
+        is_black_swan=pick.is_black_swan, black_swan_tag=ctx.black_swan_tag
+    )
+    note_html = pending_service.build_triage_note_html(
+        title=str(pick.row.get("title") or ""),
+        summary=summary,
+        is_black_swan=pick.is_black_swan,
+        surprise_score=pick.surprise_score if pick.is_black_swan else None,
+        run_id=run_id,
+    )
+    words = len(re.findall(r"\b[\w'-]+\b", re.sub(r"<[^>]+>", " ", note_html)))
+    LOGGER.info(
+        "[%s] note source=%s words=%d sections=%d generic_fallback=%s",
+        run_id,
+        summary_source,
+        words,
+        note_html.count("<h2>"),
+        summary_source == "legacy_sparse",
+    )
+    writer.apply_feed_materialization(
+        new_item_key=new_key,
+        feed_payload=feed_payload,
+        inbox_collection_name=ctx.inbox_collection_name,
+        matched_collections=matched,
+        tags=tags,
+        note_title=f"Triage: {str(pick.row.get('title') or '')[:80]}",
+        note_html=note_html,
+        provenance_tag=pending_service.SYSTEM_TAG_FEEDS_V3,
+    )
+    decision = (
+        feeds_storage.DECISION_BLACK_SWAN
+        if pick.is_black_swan
+        else feeds_storage.DECISION_SELECTED
+    )
+    with _triage_conn() as conn:
+        if feeds_storage.record_materialization(
+            conn,
+            feed_library_id=int(pick.row["feed_library_id"]),
+            feed_item_id=int(pick.row["feed_item_id"]),
+            materialized_zotero_key=new_key,
+            outcome_window_days=ctx.outcome_window_days,
+        ):
             feeds_storage.update_to_decision(
                 conn,
-                feed_library_id=int(pick.row.get("feed_library_id") or 0),
-                feed_item_id=int(pick.row.get("feed_item_id") or 0),
+                feed_library_id=int(pick.row["feed_library_id"]),
+                feed_item_id=int(pick.row["feed_item_id"]),
                 decision=decision,
                 decision_reason=ctx.decision_reason
                 if not pick.is_black_swan
                 else "surprise_pick",
                 is_black_swan=pick.is_black_swan,
-                planned_zotero_key=new_key,
             )
-            feeds_storage.record_materialization(
-                conn,
-                feed_library_id=int(pick.row.get("feed_library_id") or 0),
-                feed_item_id=int(pick.row.get("feed_item_id") or 0),
-                materialized_zotero_key=new_key,
-                outcome_window_days=ctx.outcome_window_days,
-            )
-            conn.commit()
-        LOGGER.info(
-            "[%s] materialized: %r  key=%s",
-            run_id,
-            str(pick.row.get("title") or "")[:60],
-            new_key,
-        )
-        return None
-    except Exception as exc:
-        _exc_str = str(exc)
-        if "triaged_pending" in _exc_str or "database is locked" in _exc_str.lower():
-            LOGGER.warning(
-                "[%s] materialization deferred for key %s (DB locked — item queued for next selection run): %s",
-                run_id,
-                pick.key,
-                exc,
-            )
-        else:
-            LOGGER.exception("[%s] materialization failed for key %s", run_id, pick.key)
-        return {"key": pick.key, "error": _exc_str}
+        conn.commit()
+    LOGGER.info(
+        "[%s] materialized: %r  key=%s",
+        run_id,
+        str(pick.row.get("title") or "")[:60],
+        new_key,
+    )
+    return new_key

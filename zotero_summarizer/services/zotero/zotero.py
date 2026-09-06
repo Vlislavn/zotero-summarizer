@@ -291,133 +291,57 @@ async def zotero_update_item_tags(item_key: str, req: ZoteroItemTagUpdateRequest
     }
 
 
-def zotero_upsert_verdict_note(item_key: str, user_priority: str, comment: str) -> None:
-    """Write (or update in place) the user's verdict comment as a Zotero note.
-
-    Direct write — mirrors how tag chips persist immediately. Raises on failure
-    so the caller can report it; the verdict itself is already saved upstream and
-    must not be blocked by this. Refuses while Zotero is open (DB-lock risk),
-    surfacing a clear message rather than corrupting the library.
-    """
-    from zotero_summarizer.services.zotero.pending import VERDICT_NOTE_MARKER, build_verdict_note_html
-
+def _apply_mirror_change(item_key: str, change_type: str, payload: dict[str, Any]) -> None:
     writer = get_zotero_writer_or_raise()
     if writer.is_connector_running():
-        raise ZoteroWriteError("Zotero is open; close it to save the verdict note.")
-    note_html = build_verdict_note_html(user_priority, comment)
+        raise ZoteroWriteError("Zotero is open; close it to save changes.")
     result = writer.apply_changes(
-        [{
-            "id": 0,
-            "item_key": item_key,
-            "change_type": "upsert_note",
-            "payload_json": {
-                "note_html": note_html,
-                "marker": VERDICT_NOTE_MARKER,
-                "note_title": f"Verdict: {user_priority}",
-            },
-        }],
-        False,
+        [{"id": 0, "item_key": item_key, "change_type": change_type, "payload_json": payload}],
+        True,
     )
-    failed = list(result.get("failed") or [])
-    if failed:
-        raise ZoteroWriteError(str(failed[0].get("error") or "verdict note write failed"))
+    if result["failed"]:
+        raise ZoteroWriteError(result["failed"][0]["error"])
+
+
+def zotero_upsert_verdict_note(item_key: str, user_priority: str, comment: str) -> None:
+    """Mirror the verdict comment; refuse an open Zotero, back up, then upsert."""
+    from zotero_summarizer.services.zotero.pending import VERDICT_NOTE_MARKER, build_verdict_note_html
+
+    _apply_mirror_change(
+        item_key, "upsert_note",
+        {"note_html": build_verdict_note_html(user_priority, comment),
+         "marker": VERDICT_NOTE_MARKER, "note_title": f"Verdict: {user_priority}"},
+    )
 
 
 def zotero_upsert_user_note(item_key: str, note: str) -> None:
-    """Write (or update in place) the user's free-text review note as a Zotero note.
-
-    Mirrors :func:`zotero_upsert_verdict_note` — a direct upsert under its own
-    marker so the note lives on the Zotero item too. Raises on failure so the
-    caller can report it; the note is already saved in-app and must not be blocked
-    by this. Refuses while Zotero is open (DB-lock risk)."""
+    """Mirror the user's review note through the same backup-first write boundary."""
     from zotero_summarizer.services.zotero.pending import USER_NOTE_MARKER, build_user_note_html
 
-    writer = get_zotero_writer_or_raise()
-    if writer.is_connector_running():
-        raise ZoteroWriteError("Zotero is open; close it to save your notes.")
-    note_html = build_user_note_html(note)
-    result = writer.apply_changes(
-        [{
-            "id": 0,
-            "item_key": item_key,
-            "change_type": "upsert_note",
-            "payload_json": {
-                "note_html": note_html,
-                "marker": USER_NOTE_MARKER,
-                "note_title": "My notes",
-            },
-        }],
-        False,
+    _apply_mirror_change(
+        item_key, "upsert_note",
+        {"note_html": build_user_note_html(note), "marker": USER_NOTE_MARKER, "note_title": "My notes"},
     )
-    failed = list(result.get("failed") or [])
-    if failed:
-        raise ZoteroWriteError(str(failed[0].get("error") or "user note write failed"))
 
 
-def zotero_set_label_tag(item_key: str, priority: str) -> None:
-    """Mirror the user's current ``label:<priority>`` verdict to Zotero.
-
-    Direct write — mirrors :func:`zotero_upsert_verdict_note` so a verdict cast in
-    the app lands in Zotero instantly; direct Zotero/iPad edits reconcile back on
-    the next export. The app owns current decision state/history; the tag is the
-    portable current-value mirror. Mutually exclusive within the ``label:*``
-    namespace. Raises on failure so the caller
-    can report it; the verdict itself is already saved upstream and must not be
-    blocked by this. Refuses while Zotero is open (DB-lock risk). No-op when the
-    label is already set (idempotent)."""
-    reader = get_zotero_reader_or_raise()
-    writer = get_zotero_writer_or_raise()
-    if writer.is_connector_running():
-        raise ZoteroWriteError("Zotero is open; close it to save the label tag.")
-    detail = reader.get_item_detail(item_key)
+def zotero_set_label_tag(item_key: str, priority: str | None) -> None:
+    """Mirror a human label (``None`` clears it); preserve unrelated tags."""
+    detail = get_zotero_reader_or_raise().get_item_detail(item_key)
     if detail is None:
         raise ZoteroWriteError(f"item {item_key!r} not found in Zotero")
-    current_tags = [str(t or "").strip() for t in (detail.get("tags") or []) if str(t or "").strip()]
-    payload = build_label_tag_change(current_tags, priority)
-    if not payload["add_tags"] and not payload["remove_tags"]:
-        return
-    result = writer.apply_changes(
-        [{
-            "id": 0,
-            "item_key": item_key,
-            "change_type": "tag_changes",
-            "payload_json": payload,
-        }],
-        False,
-    )
-    failed = list(result.get("failed") or [])
-    if failed:
-        raise ZoteroWriteError(str(failed[0].get("error") or "label tag write failed"))
+    payload = build_label_tag_change(detail["tags"], priority)
+    if payload["add_tags"] or payload["remove_tags"]:
+        _apply_mirror_change(item_key, "tag_changes", payload)
 
 
 def zotero_upsert_digest_note(item_key: str, digest: Any) -> None:
-    """Write (or update in place) the deep-review digest as one Zotero note.
-
-    Direct write mirroring the verdict note. Raises on failure so the deep-review
-    job can record it; the in-app digest is unaffected. Refuses while Zotero is
-    open (DB-lock risk)."""
+    """Mirror the digest through the same backup-first write boundary."""
     from zotero_summarizer.services.zotero.pending import DIGEST_NOTE_MARKER, build_digest_note_html
 
-    writer = get_zotero_writer_or_raise()
-    if writer.is_connector_running():
-        raise ZoteroWriteError("Zotero is open; close it to save the digest note.")
-    note_html = build_digest_note_html(digest)
-    result = writer.apply_changes(
-        [{
-            "id": 0,
-            "item_key": item_key,
-            "change_type": "upsert_note",
-            "payload_json": {
-                "note_html": note_html,
-                "marker": DIGEST_NOTE_MARKER,
-                "note_title": "Deep digest",
-            },
-        }],
-        False,
+    _apply_mirror_change(
+        item_key, "upsert_note",
+        {"note_html": build_digest_note_html(digest), "marker": DIGEST_NOTE_MARKER, "note_title": "Deep digest"},
     )
-    failed = list(result.get("failed") or [])
-    if failed:
-        raise ZoteroWriteError(str(failed[0].get("error") or "digest note write failed"))
 
 
 async def zotero_update_item_collections(item_key: str, req: ZoteroItemCollectionUpdateRequest) -> dict[str, Any]:

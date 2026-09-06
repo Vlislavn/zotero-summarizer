@@ -10,33 +10,39 @@ from typing import Any
 from zotero_summarizer.services._common import read_config
 
 
-def model_targets(config: Any) -> list[tuple[str, str]]:
+def model_targets(config: Any) -> list[tuple[str, str, str | None]]:
     from zotero_summarizer.services.model.classifier_const import (
         SPECTER2_ADAPTER_NAME,
+        SPECTER2_ADAPTER_REVISION,
         SPECTER2_MODEL_NAME,
+        SPECTER2_MODEL_REVISION,
     )
 
     targets = [
-        ("gate encoder", SPECTER2_MODEL_NAME),
-        ("gate adapter", SPECTER2_ADAPTER_NAME),
-        ("corpus embeddings", config.corpus.embedding_model),
-        ("search reranker", config.corpus.reranker_model),
+        ("gate encoder", SPECTER2_MODEL_NAME, SPECTER2_MODEL_REVISION),
+        ("gate adapter", SPECTER2_ADAPTER_NAME, SPECTER2_ADAPTER_REVISION),
+        ("corpus embeddings", config.corpus.embedding_model, None),
+        ("search reranker", config.corpus.reranker_model, None),
     ]
     if config.quality_review.shadow_claim_check:
         from zotero_summarizer.services.model.claim_checker import hf_repo_for
 
-        targets.append(("claim checker", hf_repo_for(config.quality_review.claim_check_model)))
+        targets.append(("claim checker", hf_repo_for(config.quality_review.claim_check_model), None))
     return targets
 
 
-def cache_report(targets: list[tuple[str, str]]) -> list[dict[str, Any]]:
+def cache_report(targets: list[tuple[str, str, str | None]]) -> list[dict[str, Any]]:
     from huggingface_hub import scan_cache_dir
 
-    sizes = {repo.repo_id: int(repo.size_on_disk) for repo in scan_cache_dir().repos}
+    sizes = {}
+    for repo in scan_cache_dir().repos:
+        sizes[repo.repo_id, None] = int(repo.size_on_disk)
+        for revision in repo.revisions:
+            sizes[repo.repo_id, revision.commit_hash] = int(revision.size_on_disk)
     return [
-        {"label": label, "repo_id": repo, "cached": sizes.get(repo, 0) > 0,
-         "size_mb": round(sizes.get(repo, 0) / 1e6, 1)}
-        for label, repo in targets
+        {"label": label, "repo_id": repo, "cached": sizes.get((repo, revision), 0) > 0,
+         "size_mb": round(sizes.get((repo, revision), 0) / 1e6, 1)}
+        for label, repo, revision in targets
     ]
 
 

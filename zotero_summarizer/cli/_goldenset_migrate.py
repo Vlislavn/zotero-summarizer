@@ -31,7 +31,7 @@ def _goldenset_migrate_verdicts(args: argparse.Namespace) -> int:
 
     settings = Settings.load(project_root=args.project_root)
     reader = ZoteroReader(settings.zotero_data_dir)
-    verdicts = repositories.list_label_verdicts(settings.triage_db_path, limit=5000)
+    verdicts = repositories.list_all_label_verdicts(settings.triage_db_path)
 
     planned: list[dict] = []
     skipped_non_library = 0

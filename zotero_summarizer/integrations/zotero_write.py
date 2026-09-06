@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import random
 import sqlite3
 import time
 from http.client import HTTPConnection
@@ -115,7 +114,7 @@ class ZoteroWriter(
         backup_path = self.data_dir / f"zotero.sqlite.backup_{timestamp}"
 
         def _do() -> None:
-            src = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True, timeout=15)
+            src = sqlite3.connect(f"{self.db_path.as_uri()}?mode=ro", uri=True, timeout=15)
             try:
                 dst = sqlite3.connect(str(backup_path))
                 try:
@@ -126,7 +125,7 @@ class ZoteroWriter(
                 src.close()
 
         self._retry_on_lock(_do, ctx="backup")
-        check = sqlite3.connect(f"file:{backup_path}?mode=ro&immutable=1", uri=True)
+        check = sqlite3.connect(f"{backup_path.as_uri()}?mode=ro&immutable=1", uri=True)
         try:
             row = check.execute("PRAGMA integrity_check").fetchone()
         finally:
@@ -153,11 +152,9 @@ class ZoteroWriter(
     ) -> dict[str, Any]:
         """Apply queued changes and return applied IDs and per-item failures.
 
-        Wrapped in ``_retry_on_lock`` like every other Zotero write (Zotero's own
-        connector holds the DB open while running): the per-change SAVEPOINT is a
-        deferred transaction, so a 'database is locked' error only surfaces at the
-        first actual write inside the loop — the retry must therefore cover the
-        whole connect→dispatch→commit body, not just the initial connect.
+        One explicit transaction encloses the row savepoints. Lock errors retry
+        the entire transaction, including errors raised during dispatch; invalid
+        rows are reported individually, while unexpected errors roll back and raise.
         """
         if not changes:
             return {"applied_ids": [], "failed": [], "backup_path": None}
@@ -169,10 +166,8 @@ class ZoteroWriter(
             conn.row_factory = sqlite3.Row
             try:
                 conn.execute("PRAGMA foreign_keys=ON")
-                try:
-                    conn.execute("PRAGMA journal_mode=WAL")
-                except sqlite3.Error as _:
-                    pass
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("BEGIN IMMEDIATE")
 
                 cols = read_write_columns(lambda t: self._table_columns(conn, t))
 
@@ -181,15 +176,14 @@ class ZoteroWriter(
 
                 for change in changes:
                     change_id = int(change.get("id") or 0)
-                    savepoint_name = f"change_{change_id or random.randint(1000, 9999)}"
-                    conn.execute(f"SAVEPOINT {savepoint_name}")
+                    conn.execute("SAVEPOINT change_row")
                     try:
                         self._dispatch_change(conn, change, cols)
-                        conn.execute(f"RELEASE {savepoint_name}")
+                        conn.execute("RELEASE change_row")
                         applied_ids.append(change_id)
-                    except Exception as exc:
-                        conn.execute(f"ROLLBACK TO {savepoint_name}")
-                        conn.execute(f"RELEASE {savepoint_name}")
+                    except (ZoteroWriteError, ValueError, TypeError, sqlite3.IntegrityError) as exc:
+                        conn.execute("ROLLBACK TO change_row")
+                        conn.execute("RELEASE change_row")
                         failed.append({"id": change_id, "error": str(exc)})
 
                 conn.commit()
@@ -200,7 +194,7 @@ class ZoteroWriter(
                     "failed": failed,
                     "backup_path": backup_path,
                 }
-            except sqlite3.Error:
+            except Exception:
                 conn.rollback()
                 raise
             finally:
@@ -208,10 +202,6 @@ class ZoteroWriter(
 
         try:
             return self._retry_on_lock(_do, ctx="apply_changes")
-        except sqlite3.OperationalError as exc:
-            raise ZoteroWriteError(
-                f"Failed to apply queued changes: DB still locked after retries: {exc}"
-            ) from exc
         except sqlite3.Error as exc:
             raise ZoteroWriteError(f"Failed to apply queued changes: {exc}") from exc
 
@@ -256,7 +246,6 @@ class ZoteroWriter(
                 item_key=item_key,
                 payload=payload_dict,
                 item_columns=cols.items,
-                collection_columns=cols.collections,
                 collection_item_columns=cols.collection_items,
             )
         elif change_type == "remove_from_collection":
@@ -265,7 +254,6 @@ class ZoteroWriter(
                 item_key=item_key,
                 payload=payload_dict,
                 item_columns=cols.items,
-                collection_columns=cols.collections,
             )
         elif change_type == "create_item_from_feed":
             self._apply_create_item_from_feed(
@@ -279,7 +267,6 @@ class ZoteroWriter(
                 item_key=item_key,
                 payload={"collection_path": "Inbox"},
                 item_columns=cols.items,
-                collection_columns=cols.collections,
             )
         elif change_type == "set_field":
             self._apply_set_field(
@@ -299,7 +286,7 @@ class ZoteroWriter(
             )
         elif change_type == "mark_feed_item_read":
             self._apply_mark_feed_item_read(
-                conn, item_key=item_key, payload=payload_dict
+                conn, payload=payload_dict
             )
         else:
             raise ZoteroWriteError(f"Unsupported change type: {change_type}")

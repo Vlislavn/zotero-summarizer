@@ -325,7 +325,7 @@ You set the **secret** rows by hand; the **path** rows are written for you by th
 | `PDF_ROOT` | app-managed | Your Zotero PDF storage, e.g. `/Users/you/Zotero/storage` — written by the setup flow; blank → defaults to your home dir |
 | `ZOTERO_DATA_DIR` | app-managed | Your Zotero data dir, e.g. `/Users/you/Zotero` — written by the setup flow; blank → defaults to `~/Zotero` |
 | `CUSTOM_BASE_URL` / `CUSTOM_API_KEY` | no | Optional second provider for the *Today* "Triage backlog" drain (a stronger model for the freshest papers). Leave blank to skip |
-| `SUMMARY_TIMEOUT_SECONDS` | no | LLM call timeout (default 900) |
+| `SUMMARY_TIMEOUT_SECONDS` | no | Per-request OpenAI-compatible LLM timeout and whole-triage summary deadline (default 420) |
 | `TRIAGE_JOB_CONCURRENCY` | no | Parallel triage jobs (default 4, max 16) |
 | `ZS_OFFLINE` | no | `1` → cache-only model loading (offline) |
 | `ZS_DEEP_REVIEW_PREWARM_K` | no | Top-N deep reviews to background-prewarm on launch (overrides `quality_review.prewarm_on_startup_k`, default 5; `0` disables) |

@@ -178,6 +178,7 @@ CREATE TABLE IF NOT EXISTS label_verdicts (
     comment                    TEXT NOT NULL,
     created_at                 TEXT NOT NULL,
     source                     TEXT NOT NULL DEFAULT 'user',
+    training_sample_json       TEXT,
     UNIQUE(item_key)
 );
 """

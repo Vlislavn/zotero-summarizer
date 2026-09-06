@@ -5,10 +5,10 @@ Produces only an ORDER + a per-row search score — it never touches the gate's
 relevance score, banding, or the histogram (the ``derivation == prediction``
 invariant of ``_ranking`` holds).
 
-Degradation ladder (search must never hard-fail — requested, since the reranker
-downloads on first use): rerank → (model loading/off) RRF fusion → (no BM25)
-dense-only → (corpus off / no candidates) empty, so the caller falls back to the
-existing substring search. The returned ``status`` carries the UI flags.
+Reranker loading/disabled → RRF fusion; BM25 disabled → dense-only; corpus off
+or no candidates → empty, allowing caller substring search. These are explicit
+availability states, not error recovery: enabled retriever and model failures
+propagate, per the user's fail-fast instruction. ``status`` carries the UI flags.
 """
 from __future__ import annotations
 

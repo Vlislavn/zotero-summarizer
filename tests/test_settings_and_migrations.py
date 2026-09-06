@@ -100,9 +100,16 @@ def test_migrate_existing_initializes_both_databases(tmp_path):
 
 
 def test_v2_marker_still_runs_later_schema_reconciliation(tmp_path):
+    from zotero_summarizer.storage import repositories
+    from zotero_summarizer.storage._repo_sync import apply_sync_schema
+
     settings = Settings.load(project_root=tmp_path)
     settings.data_dir.mkdir(parents=True)
     with sqlite3.connect(settings.triage_db_path) as conn:
+        # Keep the v2 sync schema while omitting later baseline tables.
+        conn.execute(repositories._CREATE_LABEL_VERDICTS_TABLE)
+        conn.execute(repositories._CREATE_REVIEW_NOTES_TABLE)
+        apply_sync_schema(conn)
         conn.execute(
             "CREATE TABLE schema_migrations (namespace TEXT PRIMARY KEY, version INTEGER NOT NULL,"
             " applied_at TEXT DEFAULT (datetime('now')))"

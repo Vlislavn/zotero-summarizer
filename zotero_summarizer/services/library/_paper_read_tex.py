@@ -2,27 +2,26 @@
 from __future__ import annotations
 
 import io
-import logging
 import re
 import shutil
 import tarfile
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
+from urllib.parse import urljoin
 
 import fitz
 import httpx
 
-LOGGER = logging.getLogger(__name__)
+from zotero_summarizer.integrations.app_rss import stream_public_url
+from zotero_summarizer.settings import offline_requested
 
-# arXiv source download / extraction caps (tar-bomb + OOM guards). The download
-# is an opt-in best-effort enhancement (gated by ``allow_arxiv_source``); on any
-# cap hit or malformed archive we return ``None`` and the pipeline falls back to
-# PDF extraction — the established contract, not error-masking.
+# Bounds on response bytes, extracted file bytes and archive members.
+# Failures propagate; only offline policy and HTTP 404 mean no source attempt/result.
 _MAX_ARCHIVE_BYTES = 80 * 1024 * 1024  # compressed download cap
 _MAX_EXTRACT_BYTES = 200 * 1024 * 1024  # total uncompressed cap
 _MAX_MEMBERS = 5000
 
-_TEX_DIR_NAMES = {"source", "tex", "latex"}
 _TITLE_RE = re.compile(r"\\title(?:\[[^\]]*\])?\{(?P<body>.*?)\}", re.DOTALL)
 _AUTHOR_RE = re.compile(r"\\author(?:\[[^\]]*\])?\{(?P<body>.*?)\}", re.DOTALL)
 _ABSTRACT_RE = re.compile(r"\\begin\{abstract\}(?P<body>.*?)\\end\{abstract\}", re.DOTALL)
@@ -58,60 +57,56 @@ _TEX_INNER_ARG_RE = re.compile(r"\\[a-zA-Z]+\*?(?:\[[^\]]*\])?\{([^{}]*)\}")
 _MATH_INLINE_RE = re.compile(r"\$[^$]{1,1000}\$", re.DOTALL)
 
 
-def find_local_source(pdf_path: Path) -> Path | None:
-    """Find local TeX source next to the PDF using paper-render's L1 rule."""
-    pdf_dir = pdf_path.parent
-    candidates: list[Path] = []
-    for path in pdf_dir.rglob("*"):
-        try:
-            depth = len(path.relative_to(pdf_dir).parts)
-        except ValueError:
-            continue
-        if depth > 3:
-            continue
-        if path.is_dir() and path.name.lower() in _TEX_DIR_NAMES:
-            candidates.append(path)
-        elif path.is_file() and path.suffix.lower() == ".tex":
-            candidates.append(path.parent)
-    if not candidates:
+def download_arxiv_source(arxiv_id: str, source_dir: Path) -> Path | None:
+    """Publish a complete TeX tarball; offline/404 mean absence, errors propagate.
+
+    Existing nonempty sources belong to the user and are never merged/replaced.
+    A same-filesystem rename publishes only after extraction and TeX validation.
+    """
+    if offline_requested():
         return None
-    return sorted(set(candidates), key=lambda p: (len(p.relative_to(pdf_dir).parts), str(p)))[0]
-
-
-def download_arxiv_source(arxiv_id: str, pdf_path: Path) -> Path | None:
-    """Download and safely extract the arXiv source tarball into `source/`.
-
-    Streams with a compressed-size cap and never writes the raw archive to disk.
-    Returns ``None`` (→ PDF fallback) on a non-200, an over-cap or malformed
-    archive — the opt-in contract, not error-masking."""
-    source_dir = pdf_path.parent / "source"
-    source_dir.mkdir(parents=True, exist_ok=True)
+    if source_dir.is_symlink():
+        raise ValueError("Source directory cannot be a symlink")
+    if source_dir.exists() and any(source_dir.iterdir()):
+        raise FileExistsError(f"Source directory is not empty: {source_dir}")
     data = _download_capped(f"https://arxiv.org/e-print/{arxiv_id}")
-    if not data:
+    if data is None:
         return None
-    try:
-        with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as tar:
-            _safe_extract(tar, source_dir)
-    except tarfile.TarError as exc:
-        LOGGER.warning("arxiv source extract rejected for %s: %s", arxiv_id, exc)
-        return None
-    return source_dir if list(source_dir.rglob("*.tex")) else None
+    source_dir.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(dir=source_dir.parent, prefix=".arxiv-source-") as staging:
+        staged = Path(staging) / "source"
+        staged.mkdir()
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:*", errorlevel=2) as tar:
+            _safe_extract(tar, staged)
+        if not any(path.is_file() and path.stat().st_size for path in staged.rglob("*.tex")):
+            raise tarfile.TarError("Source archive contains no nonempty TeX file")
+        staged.replace(source_dir)
+    return source_dir
 
 
 def _download_capped(url: str) -> bytes | None:
-    """Stream ``url`` into memory, bailing past ``_MAX_ARCHIVE_BYTES``."""
-    chunks: list[bytes] = []
-    total = 0
-    with httpx.stream("GET", url, follow_redirects=True, timeout=60.0) as response:
-        if response.status_code != 200:
-            return None
-        for chunk in response.iter_bytes():
-            total += len(chunk)
-            if total > _MAX_ARCHIVE_BYTES:
-                LOGGER.warning("arxiv source over %d-byte cap, skipping: %s", _MAX_ARCHIVE_BYTES, url)
-                return None
-            chunks.append(chunk)
-    return b"".join(chunks) or None
+    """Bound raw response bytes; every redirect re-enters the public-IP boundary."""
+    with httpx.Client(timeout=60.0, trust_env=False, headers={"Accept-Encoding": "identity"},
+                      limits=httpx.Limits(max_keepalive_connections=0)) as client:
+        for _ in range(6):
+            if httpx.URL(url).scheme != "https":
+                raise ValueError("arXiv source requires HTTPS")
+            with stream_public_url(client, url) as response:
+                if 300 <= response.status_code < 400 and response.headers.get("location"):
+                    url = urljoin(url, response.headers["location"])
+                    continue
+                if response.status_code == 404:
+                    return None
+                response.raise_for_status()
+                if response.headers.get("content-encoding", "identity").lower() != "identity":
+                    raise ValueError("Unsupported arXiv source HTTP encoding")
+                body = bytearray()
+                for chunk in response.iter_raw(chunk_size=64 * 1024):
+                    if len(body) + len(chunk) > _MAX_ARCHIVE_BYTES:
+                        raise ValueError("arXiv source exceeds response size limit")
+                    body.extend(chunk)
+                return bytes(body)
+    raise ValueError("arXiv source redirected too many times")
 
 
 def parse_tex_source(source_dir: Path, figures_dir: Path) -> dict[str, Any]:
@@ -304,19 +299,17 @@ def _clean_tex(text: str) -> str:
 
 
 def _safe_extract(tar: tarfile.TarFile, target_dir: Path) -> None:
-    """Extract with traversal + tar-bomb guards. ``filter='data'`` (Py 3.12)
-    blocks symlinks/absolute/parent paths; we additionally cap member count and
-    cumulative uncompressed size."""
-    resolved_target = target_dir.resolve()
-    members = tar.getmembers()
-    if len(members) > _MAX_MEMBERS:
-        raise tarfile.TarError(f"archive has too many members: {len(members)}")
+    """Extract regular files/directories into staging, with per-member checks."""
     total = 0
-    for member in members:
-        total += max(0, int(member.size))
+    for count, member in enumerate(tar, 1):
+        if count > _MAX_MEMBERS:
+            raise tarfile.TarError("archive has too many members")
+        path = Path(member.name)
+        if path.is_absolute() or ".." in path.parts or "\\" in member.name:
+            raise tarfile.TarError(f"unsafe path in archive: {member.name}")
+        if not (member.isfile() or member.isdir()) or member.size < 0:
+            raise tarfile.TarError(f"unsupported member in archive: {member.name}")
+        total += member.size
         if total > _MAX_EXTRACT_BYTES:
             raise tarfile.TarError("archive exceeds uncompressed size cap")
-        target = (target_dir / member.name).resolve()
-        if resolved_target not in [target, *target.parents]:
-            raise tarfile.TarError(f"unsafe path in archive: {member.name}")
-    tar.extractall(target_dir, filter="data")
+        tar.extract(member, target_dir, filter="data")

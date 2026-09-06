@@ -173,13 +173,9 @@ export async function fetchCalibrateStatus() {
 
 /**
  * GET /api/admin/model
- * Returns the freshest-on-disk trained classifier's metadata for the
- * Settings model card. Resolves to ``{model: null}`` when no model has
- * been trained yet, or
- *   { model: { classifier_name, trained_at, git_commit, n_train,
- *              n_positive_library, feature_dim, objective, oof_spearman,
- *              golden_csv_sha256_prefix, thresholds, joblib_path,
- *              joblib_size_bytes, joblib_mtime, runlog } }.
+ * Returns the loaded gate, not an offline artifact or evaluation run:
+ *   { model: { classifier_name, trained_at, n_train, oof_spearman_verified } }.
+ * Resolves to {model: null} when this process has no loaded gate.
  */
 export async function fetchModelCard() {
   return request(`${ADMIN_BASE}/model`);

@@ -19,3 +19,8 @@ errors.py  ── APIError -> uniform JSON error body + handlers
 
 **Boundaries:** may import `services/`, `models`, `errors`. Routes should hold
 no business logic — push it into `services/`.
+
+Validation errors expose only field locations and error types; integration errors
+use fixed messages so rejected secrets and local paths are never echoed. Partial
+frontend builds keep SPA navigation available; missing assets/public files and
+both `/api` and unknown `/api/*` requests return 404.

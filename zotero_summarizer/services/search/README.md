@@ -125,6 +125,9 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
 
 ## Deferred (ponytail seams, known ceilings)
 
+OA PDF acquisition explicitly passes the selected `Settings.pdf_cache_dir`
+(`data/pdfs/`), shared with Library acquisition only within the same project.
+
 - **Library channel**: `federate` already accepts a `LibraryFinder`; wiring it needs
   DOI/arXiv identifier columns on `corpus_embeddings` so a library hit can
   cross-source dedup against externals. Until then `default_deps` passes `None`.

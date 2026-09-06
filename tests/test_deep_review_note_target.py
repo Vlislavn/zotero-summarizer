@@ -4,13 +4,13 @@ from __future__ import annotations
 import pytest
 
 from tests.test_deep_review import _StubExtractor, _StubReader, _detail, _run, _wire
-from zotero_summarizer.services._common import read_config, settings as _settings
+from zotero_summarizer.services.setup.bootstrap import _default_goals_config
 from zotero_summarizer.services.library import _pdf_acquire, _review_cache, deep_review
 
 
 @pytest.fixture
 def config():
-    return read_config(_settings().config_path)
+    return _default_goals_config()
 
 
 @pytest.fixture(autouse=True)

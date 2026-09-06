@@ -33,3 +33,14 @@ It has no remote-user authentication or HTTPS bootstrap; exposing it to a LAN or
 internet client is deferred until that transport boundary exists. Post-commit
 mirrors remain best-effort like the online route, and the JSONL transition log is
 not an exactly-once transactional outbox.
+
+Verdict `delete` effects now share the online retraction command, including UUID
+replay. SQLite deletion revisions remain pending until tag removal is confirmed;
+a replay consults the current label under a write transaction, not the historical
+mutation value. Conflicts/rejections do not run effects. The dispatcher no longer
+catches every effect exception: retraction writer failures propagate and remain
+retryable; only the explicit Zotero-unconfigured local-first boundary is optional.
+Only pre-commit validation/storage `ValueError`s become rejected mutations;
+post-commit effect errors propagate without misreporting the durable write.
+Set-label mirrors also read current state, including after materialization.
+Review-note deletion and older CSV/comment enrichment contracts are unchanged.
