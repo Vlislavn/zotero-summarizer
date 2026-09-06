@@ -167,7 +167,6 @@ def fire_full() -> int:
     from zotero_summarizer.services._common import settings as get_settings
     from zotero_summarizer.services.library import deep_review
     return apply_auto_quality_gate(
-        get_settings().triage_db_path, deep_review._read_all(),
+        get_settings().triage_db_path, deep_review.current_reviews(),
         llm_floor=floor, hide_grades=grades, hide_bands=bands,
     )
-

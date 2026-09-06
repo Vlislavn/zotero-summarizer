@@ -62,7 +62,7 @@ def test_offline_alias_conflict_replay_delete_and_pull_share_one_revision(tmp_pa
     _materialize(path)
     monkeypatch.setattr(service.verdict_effects, "mirror_review_note", lambda *args: {})
     monkeypatch.setattr(service.reading_queue, "build_reading_queue", lambda **kw: {"items": [{"item_key": "PAPER001"}]})
-    monkeypatch.setattr(service.deep_review, "_read_all", lambda: {})
+    monkeypatch.setattr(service.deep_review, "current_reviews", lambda: {})
     paper = next(p for p in service.pull(path, 0)["papers"] if p["item_key"] == "PAPER001")
     assert paper["review_note"] == "before adding"
     assert paper["revisions"]["review_note"] == base

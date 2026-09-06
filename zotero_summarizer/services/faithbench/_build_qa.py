@@ -16,6 +16,7 @@ import re
 from typing import Any, Callable
 
 from zotero_summarizer.services._common import extract_json_blob, to_text
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.faithbench._constants import (
     DEFAULT_QA_PER_PAPER,
     DEFAULT_TRAPS_PER_PAPER,
@@ -34,6 +35,7 @@ from zotero_summarizer.storage.corpus_bm25 import tokenize
 LOGGER = logging.getLogger(__name__)
 
 _QA_GENERATION_PROMPT = (
+    UNTRUSTED_INPUT_RULE + "\n\n"
     "You write extractive QA pairs from an excerpt of an academic paper.\n"
     "Rules:\n"
     "- The answer MUST be a short contiguous span copied VERBATIM from the excerpt "
@@ -78,7 +80,8 @@ def generate_candidates(
     """
     candidates: list[dict[str, Any]] = []
     for window in _windows(text):
-        prompt = _QA_GENERATION_PROMPT.format(title=title, window=window, n=per_window)
+        prompt = _QA_GENERATION_PROMPT.format(
+            title=untrusted_input(title), window=untrusted_input(window), n=per_window)
         raw = to_text(llm.prompt(prompt))
         try:
             payload = extract_json_blob(raw)

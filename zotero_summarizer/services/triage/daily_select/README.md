@@ -9,6 +9,9 @@ removed entirely — it degenerated into an endless one-at-a-time stream when
 the primary pool emptied, and the spot-check now lives in the Review page +
 Today's SpotCheck section (`services/library/review.list_by_state`).
 
+Quality joins consume only deep reviews whose PDF and generation identity is
+still current; stale cached grades cannot reorder a new slate.
+
 ```
 processed_feed_items ─_querying.open_ro→ rows ─drop handled ─drop trashed-GUID ─drop content dupes─┐
                                                   │ (trashed-GUID = never-show-again; content by DOI/arXiv vs decided/library)

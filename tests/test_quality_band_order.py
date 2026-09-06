@@ -20,7 +20,7 @@ def quality_mode(request, monkeypatch):
     monkeypatch.setenv("ZS_QUALITY_BAND_PRIMARY", str(int(request.param)))
     reviews = {"BELOW": {"quality": {"grade": "A", "quality_band": "highlight"}},
                "AT": {"quality": {"grade": "D", "quality_band": "flag"}}}
-    monkeypatch.setattr(deep_review, "_read_all", lambda: reviews)
+    monkeypatch.setattr(deep_review, "current_reviews", lambda: reviews)
 
 
 @pytest.mark.parametrize("edge", [2.0, 3.5, 4.5])

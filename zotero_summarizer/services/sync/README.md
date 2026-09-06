@@ -28,6 +28,9 @@ AI runs, and Zotero filesystem state stay server-only. The JSONL label trajector
 is still best-effort after the transaction; `sync_mutations` is the durable
 mutation/conflict audit.
 
+Snapshot review payloads are filtered through the same PDF/model/config identity
+check as Library policy consumers; stale deep-review output is never synced as current.
+
 This protocol is currently safe for the default same-machine/loopback PWA only.
 It has no remote-user authentication or HTTPS bootstrap; exposing it to a LAN or
 internet client is deferred until that transport boundary exists. The JSONL

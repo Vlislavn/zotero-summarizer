@@ -81,6 +81,7 @@ def test_http_scope_reaches_real_workers_once(client, monkeypatch, payload, expe
     monkeypatch.setattr(deep_review, "_ensure_pool", lambda provider: SimpleNamespace(
         submit=lambda fn, *args: fn(*args),
     ))
+    monkeypatch.setattr(deep_review, "review_is_current", lambda entry, _key: bool(entry))
     monkeypatch.setattr(deep_review.reading_queue, "build_reading_queue",
                         lambda **kw: scans.append(kw) or {"items": [{"item_key": "AUTO"}]})
     monkeypatch.setattr(deep_review.reading_queue, "get_cached_scoring", lambda key: None)

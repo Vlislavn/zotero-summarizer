@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from html import unescape
 from itertools import product
 from types import SimpleNamespace
 
@@ -97,7 +98,9 @@ def test_clipped_selection_preserves_document_order_and_occurrences(monkeypatch,
 
 
 def _captured_context(prompt):
-    return prompt.split("Paper text:\n", 1)[1].split("\n\nQuestion:", 1)[0]
+    wrapped = prompt.split("Paper text:\n", 1)[1].split("\n\nQuestion:", 1)[0]
+    assert wrapped.startswith("<untrusted_input>") and wrapped.endswith("</untrusted_input>")
+    return unescape(wrapped.removeprefix("<untrusted_input>").removesuffix("</untrusted_input>"))
 
 
 @pytest.mark.parametrize("budget", [1, 50, 89, 90, 150])
@@ -150,5 +153,5 @@ def test_claim_judge_caps_retrieval_and_fulltext_second_pass(monkeypatch, field)
                        max_chars=50, judge_model="fake", field=field, research_goals="A goal")
     assert len(prompts) == 2
     for prompt in prompts:
-        context = prompt.split("Paper text:\n", 1)[1].split("\n\nReturn ONE JSON", 1)[0]
+        context = _captured_context(prompt.replace("\n\nReturn ONE JSON", "\n\nQuestion:"))
         assert len(context) <= 50

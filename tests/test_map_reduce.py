@@ -13,6 +13,12 @@ from zotero_summarizer.services.library._map_reduce import (
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
 
 
+@pytest.fixture(autouse=True)
+def _isolate_digest_generation(monkeypatch):
+    from zotero_summarizer.services.library import _digest_verification
+    monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
+
+
 def test_split_chunks_basic_and_overlap():
     text = "x" * 20000
     chunks = split_chunks(text, 8000, overlap=200)

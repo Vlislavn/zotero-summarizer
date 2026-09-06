@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from zotero_summarizer.services._common import extract_json_blob, to_text
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.faithbench._corpus import sha256_text
 from zotero_summarizer.services.library import quality_review
 
@@ -34,6 +35,7 @@ CLAIM_FIELDS = (
 )
 
 _DECOMPOSE_PROMPT = (
+    UNTRUSTED_INPUT_RULE + "\n\n"
     "Split the review snippets below into ATOMIC, self-contained factual claims "
     "about the PAPER'S CONTENT (one verifiable fact per claim; resolve pronouns; "
     "repeat the subject). DROP subjective judgments, recommendations, and "
@@ -112,7 +114,8 @@ def decompose_digest(
     if not snippets:
         raise ValueError("Digest contains no claim-bearing text")
     rendered = "\n".join(f"- [{field}] {text}" for field, text in snippets.items())
-    prompt = _DECOMPOSE_PROMPT.format(title=title, snippets=rendered)
+    prompt = _DECOMPOSE_PROMPT.format(
+        title=untrusted_input(title), snippets=untrusted_input(rendered))
     raw = to_text(decompose_llm.prompt(prompt))
     try:
         payload = extract_json_blob(raw)

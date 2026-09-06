@@ -60,11 +60,11 @@ def _trap(**overrides) -> TrapItem:
     return TrapItem(**base)
 
 
-def _row(answer, *, abstained=None, status="ok", error=None):
+def _row(answer, *, abstained=None, status="ok", error=None, quote=None):
     parsed = None if answer == "MALFORMED" else {
         "answer": answer,
         "abstained": (answer is None) if abstained is None else abstained,
-        "quote": None,
+        "quote": quote if quote is not None else "We trained on the ImageNet dataset using 1,281,167 images.",
     }
     return {
         "run_id": "r", "item_id": "qa:P1:0", "track": "qa", "condition": "full_text",
@@ -100,6 +100,12 @@ def test_normalized_exact_match_passes_without_judge(answer):
     verdict = hard_qa_judgment(_qa(), _row(answer))
     assert verdict is not None and verdict.success is True
     assert verdict.method == JudgeMethod.EXACT
+
+
+def test_correct_answer_with_missing_or_unrelated_quote_fails():
+    for quote in ("", "The paper evaluated a different model on the CIFAR benchmark only."):
+        verdict = hard_qa_judgment(_qa(), _row("ImageNet", quote=quote), PAPER_TEXT)
+        assert verdict.success is False
 
 
 def test_numeric_tolerance_and_integer_strictness():
@@ -416,7 +422,9 @@ def test_unit_mismatch_is_escalated_and_persisted_as_rejected(tmp_path):
     qa = _qa(gold_answer="90 epochs", answer_type="number", paper_text_sha256=meta.papers[0].text_sha256,
              span_start=PAPER_TEXT.index("90 epochs"), span_end=PAPER_TEXT.index("90 epochs") + len("90 epochs"),
              evidence_sentence="The top-1 accuracy was 85.3 percent after 90 epochs.")
-    paths.responses.write_text(json.dumps(_row("90 cats")) + "\n", encoding="utf-8")
+    paths.responses.write_text(json.dumps(_row(
+        "90 cats", quote="The top-1 accuracy was 85.3 percent after 90 epochs.",
+    )) + "\n", encoding="utf-8")
     judge = FakeJudge([{"equivalent": False, "reason": "different units and entities"}])
 
     counts = judge_run(inputs=RunInputs(meta, [qa], papers_dir, paths), judge_llm=judge,

@@ -5,11 +5,12 @@ import types
 
 import pytest
 
-from zotero_summarizer.services.library import _map_reduce, _review_cache, deep_review
+from zotero_summarizer.services.library import _digest_verification, _map_reduce, _review_cache, deep_review
 from zotero_summarizer.services.zotero import zotero as zotero_svc
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
-
-
+@pytest.fixture(autouse=True)
+def _isolate_digest_generation(monkeypatch):
+    monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
 @pytest.fixture(scope="module")
 def config():
     return _default_goals_config()
@@ -88,6 +89,7 @@ def _detail(*, title="T", pdf_path="/x/p.pdf", doi="10.1/x", url="", abstract="a
 
 
 def _wire(monkeypatch, config, *, reader, extractor, note_fn=None):
+    monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
     monkeypatch.setattr(deep_review, "get_state", lambda: _fake_state(config, extractor=extractor, reader=reader))
     monkeypatch.setattr(zotero_svc, "zotero_upsert_digest_note", note_fn or (lambda _ik, _d: None))
     # Keep ORCHESTRATION tests hermetic: stub the heavy enrichment layers (real
@@ -107,8 +109,6 @@ def test_status_exposes_progress_field():
     UI can show what a running review is doing; {} when idle."""
     s = deep_review.status()
     assert "progress" in s and s["progress"] == {}
-
-
 def test_run_job_clears_progress_when_done(config, monkeypatch):
     """A finished run resets progress to {} so the next poll doesn't show a stale
     phase from the last review."""
@@ -482,7 +482,7 @@ def test_build_library_detail_surfaces_deep_review(monkeypatch):
         "needs_pdf": False, "gate_relevance": 3.0, "reviewed_at": "2026-05-23T00:00:00Z",
         "zotero_note_written": True, "zotero_note_error": None,
     }
-    monkeypatch.setattr(deep_review, "get_cached_review", lambda key: entry if key == "K1" else None)
+    monkeypatch.setattr(deep_review, "get_current_review", lambda key: entry if key == "K1" else None)
     monkeypatch.setattr(reading_queue, "get_cached_scoring", lambda key: None)
     monkeypatch.setattr(reading_queue, "live_scoring", lambda item: None)
 

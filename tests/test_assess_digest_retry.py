@@ -14,6 +14,12 @@ from zotero_summarizer.services.library.quality_review import assess_digest
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
 
 
+@pytest.fixture(autouse=True)
+def _isolate_digest_generation(monkeypatch):
+    from zotero_summarizer.services.library import _digest_verification
+    monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
+
+
 class _FakeLLM:
     """Returns queued responses for successive pydantic_prompt calls."""
 

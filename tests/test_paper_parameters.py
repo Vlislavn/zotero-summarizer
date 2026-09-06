@@ -9,6 +9,8 @@ NEVER a fabricated guess.
 """
 from __future__ import annotations
 
+import pytest
+
 from zotero_summarizer.models import PaperDigest, PaperParameters
 from zotero_summarizer.services.library.quality_review import (
     _DEFAULT_DIGEST_PROMPT,
@@ -17,6 +19,12 @@ from zotero_summarizer.services.library.quality_review import (
 from zotero_summarizer.services.library._paper_read_html import _digest_section_html
 from zotero_summarizer.services.zotero._notes import build_digest_note_html
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
+
+
+@pytest.fixture(autouse=True)
+def _isolate_digest_generation(monkeypatch):
+    from zotero_summarizer.services.library import _digest_verification
+    monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
 
 
 class _FakeLLM:

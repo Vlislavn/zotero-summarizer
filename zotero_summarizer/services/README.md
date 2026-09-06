@@ -12,6 +12,9 @@ precedence over legacy joblib files; loading errors propagate rather than silent
 triggering a replacement model.
 Startup reuses the gate-install quality label: unavailable Spearman is `n/a`,
 while a measured zero remains `0.000`.
+When Zotero corpus import is available, startup completes that reconciliation
+before comparing classifier inputs or retraining, so dependency/model encoder
+changes cannot expose the trainer to a half-migrated embedding table.
 
 `lifecycle.startup(background=False)` initializes dry-run clients/caches but
 does not resume persisted jobs, refresh RSS, train/rescore the gate, import the

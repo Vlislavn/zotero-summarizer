@@ -49,8 +49,7 @@ from zotero_summarizer.services.library import (
     quality_review,
     reading_queue,
 )
-# Cache I/O primitives live in _review_cache (split out for the LOC cap); re-exported
-# here so deep_review._read_all / get_cached_review / copy_review stay the public seam.
+# Cache primitives are re-exported here as the public seam.
 from zotero_summarizer.services.library._review_cache import (  # noqa: F401
     REVIEW_CONTRACT_VERSION,
     _cache_path,
@@ -59,6 +58,7 @@ from zotero_summarizer.services.library._review_cache import (  # noqa: F401
     cached_review_keys,
     copy_review,
     current_review_keys,
+    current_reviews,
     get_cached_review,
     get_current_review,
     review_is_current,
@@ -496,5 +496,5 @@ def start(
 
 __all__ = [
     "start", "status", "get_cached_review", "get_current_review",
-    "review_is_current", "cached_review_keys", "current_review_keys", "copy_review",
+    "review_is_current", "cached_review_keys", "current_review_keys", "current_reviews", "copy_review",
 ]

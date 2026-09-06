@@ -29,6 +29,12 @@ from zotero_summarizer.services.faithbench._runner import (
     generation_identity,
 )
 
+
+@pytest.fixture(autouse=True)
+def _isolate_digest_generation(monkeypatch):
+    from zotero_summarizer.services.library import _digest_verification
+    monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
+
 # Long enough that the retrieval condition (top-6 of ~1200-char chunks) selects
 # a strict subset of the text — a paper shorter than one chunk would make the
 # full_text and retrieval prompts legitimately identical.

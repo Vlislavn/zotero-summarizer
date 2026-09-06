@@ -40,7 +40,7 @@ def _paper_snapshots(db_path: Path) -> list[dict[str, Any]]:
         for row in queue.get("items", [])
     }
     fields = repositories.sync_current_fields(db_path)
-    reviews = deep_review._read_all()
+    reviews = deep_review.current_reviews()
     for item_key, _field in fields:
         papers.setdefault(item_key, {"item_key": item_key, "title": item_key})
     for item_key, paper in papers.items():

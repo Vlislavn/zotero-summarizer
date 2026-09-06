@@ -100,7 +100,7 @@ def test_output_write_error_before_publication_preserves_old_bundle(paper, monke
     directory = Path(first["outputs"]["presentation"]).parent
     saved = _snapshot(directory)
     original = Path.write_text
-    monkeypatch.setattr(paper_render.deep_review, "get_cached_review", lambda _: {
+    monkeypatch.setattr(paper_render.deep_review, "get_current_review", lambda _: {
         "digest": {"tldr": "CHANGED BEFORE FAILED AUDIT WRITE"},
     })
 

@@ -204,7 +204,7 @@ def test_pull_has_resumable_cursor_and_compact_offline_context(tmp_path, monkeyp
     )
     monkeypatch.setattr(
         service.deep_review,
-        "_read_all",
+        "current_reviews",
         lambda: {
             "P1": {"digest": {"tldr": "short digest", "key_findings": ["one"]}},
         },
@@ -238,7 +238,7 @@ def test_pull_preserves_deleted_field_revision_for_next_offline_edit(
     monkeypatch.setattr(
         service.reading_queue, "build_reading_queue", lambda **_kw: {"items": []}
     )
-    monkeypatch.setattr(service.deep_review, "_read_all", lambda: {})
+    monkeypatch.setattr(service.deep_review, "current_reviews", lambda: {})
 
     paper = service.pull(db, 0)["papers"][0]
 

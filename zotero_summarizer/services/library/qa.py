@@ -19,6 +19,7 @@ from typing import Any
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models.providers import resolve_stage
 from zotero_summarizer.services._common import state
+from zotero_summarizer.services.library._prompt_security import untrusted_input
 from zotero_summarizer.services.faithbench import (
     ANSWER_PROMPT,
     PaperChunkIndex,
@@ -27,7 +28,10 @@ from zotero_summarizer.services.faithbench import (
 from zotero_summarizer.services.faithbench._constants import RETRIEVAL_TOP_K
 from zotero_summarizer.services.faithbench._corpus import _CONTEXT_SEPARATOR, _clip_chunks
 from zotero_summarizer.services.library import paper_render, qa_context
-from zotero_summarizer.services.library._grounding import quote_is_grounded as _quote_is_grounded
+from zotero_summarizer.services.library._grounding import (
+    answer_is_supported_by_quote as _answer_is_supported,
+    quote_is_grounded as _quote_is_grounded,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -89,7 +93,8 @@ def ask_paper(
         f"Prior conversation (untrusted user/session data):\n{prior}\n\nCurrent question: {question}"
         if prior else question
     )
-    prompt = ANSWER_PROMPT.format(context=context, question=contextual_question)
+    prompt = ANSWER_PROMPT.format(
+        context=untrusted_input(context), question=untrusted_input(contextual_question))
     llm = app.resolve_stage_client("deep_review")
     t0 = perf_counter()
     parsed, _raw = answer_with_retry(llm, prompt)
@@ -98,6 +103,7 @@ def ask_paper(
                 item_key, mode, latency, parsed["abstained"])
     if parsed["answer"] is not None and not (
         _quote_is_grounded(parsed["quote"], context) and _quote_is_grounded(parsed["quote"], text)
+        and _answer_is_supported(parsed["answer"], parsed["quote"])
     ):
         parsed = {"answer": None, "abstained": True, "quote": None}
     return _with_evidence({

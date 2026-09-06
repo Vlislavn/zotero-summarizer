@@ -22,6 +22,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from zotero_summarizer.models import GoalSummary
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.faithbench._corpus import chunk_text
 from zotero_summarizer.services.library._grounding import quote_is_grounded
 from zotero_summarizer.storage.corpus_bm25 import tokenize
@@ -340,7 +341,9 @@ def _one_goal(goal: str, ctx: _GoalCtx) -> GoalSummary:
     if early is not None:
         return early
     parsed = ctx.llm.pydantic_prompt(
-        prompt=ctx.prompt_tmpl.format(goal=goal, passages=ret.context), pydantic_model=GoalFacetResponse
+        prompt=UNTRUSTED_INPUT_RULE + "\n\n" + ctx.prompt_tmpl.format(
+            goal=untrusted_input(goal), passages=untrusted_input(ret.context)),
+        pydantic_model=GoalFacetResponse,
     )
     return _facet_to_summary(ret, relevant=parsed.relevant, summary=parsed.summary, quotes=parsed.supporting_quotes)
 
@@ -349,10 +352,10 @@ def _batch_goals(retrievals: list[_GoalRetrieval], ctx: _GoalCtx) -> dict[int, _
     """ONE LLM call summarizing ALL gate-passing goals. Returns ``{goal_index: facet}``
     for the indices the model returned (a missing index → caller marks that goal
     hit/abstained; a malformed JSON raises out to the goal-layer boundary)."""
-    blocks = "\n\n".join(
+    blocks = untrusted_input("\n\n".join(
         f"[Goal {i}]: {r.goal}\nPassages:\n{r.context}" for i, r in enumerate(retrievals)
-    )
-    prompt = _BATCHED_GOAL_PROMPT.format(n=len(retrievals), blocks=blocks)
+    ))
+    prompt = UNTRUSTED_INPUT_RULE + "\n\n" + _BATCHED_GOAL_PROMPT.format(n=len(retrievals), blocks=blocks)
     parsed = ctx.llm.pydantic_prompt(prompt=prompt, pydantic_model=BatchedGoalResponse)
     return {
         int(f.goal_index): f for f in (parsed.summaries or [])

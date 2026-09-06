@@ -381,7 +381,7 @@ def attach_quality_from_reviews(candidates: list[dict[str, Any]]) -> int:
     'no quality'."""
     from zotero_summarizer.services.library import deep_review  # lazy cross-domain read
 
-    reviews = deep_review._read_all()
+    reviews = deep_review.current_reviews()
     joinable = 0
     matched = 0
     for cand in candidates:

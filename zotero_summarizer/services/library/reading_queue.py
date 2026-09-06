@@ -386,7 +386,7 @@ def build_reading_queue(
 
     unread, read = _build_recs(
         rows, cached=cached, verdict_priority=verdict_priority,
-        reviews=_dr._read_all(), proposed_verdicts=verdict_store.read_all(),
+        reviews=_dr.current_reviews(), proposed_verdicts=verdict_store.read_all(),
     )
     unread, read, search_flags = _order_and_dedup(
         unread, read, search=search, semantic_requested=semantic_requested,

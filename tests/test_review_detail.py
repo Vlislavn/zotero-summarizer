@@ -365,7 +365,7 @@ def test_build_feed_detail_by_key_folds_in_cached_review(tmp_path, monkeypatch):
     monkeypatch.setattr(rd, "_fetch_feed_metadata", _no_zotero)
     monkeypatch.setattr(rd, "build_scoring", lambda row: None)
     monkeypatch.setattr(rd._candidate, "parse_payload", lambda row: {})
-    monkeypatch.setattr(deep_review, "get_cached_review", lambda key: {"quality": {"grade": "A"}})
+    monkeypatch.setattr(deep_review, "get_current_review", lambda key: {"quality": {"grade": "A"}})
 
     feed_key = "feed:d:" + ("a" * 64)
     detail = rd.build_feed_detail_by_key(triage_db_path=tmp_path / "t.db", zotero_data_dir=tmp_path, feed_key=feed_key)

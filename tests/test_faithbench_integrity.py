@@ -245,7 +245,8 @@ def test_changed_judge_configuration_cannot_reuse_old_verdicts(judged_run):
     counts = faithbench.judge_run(inputs=inputs, judge_llm=judge, judge_model="new-judge", max_text_chars=60_000)
     assert counts["judged"] == 4 and counts["skipped"] == 0
     report = faithbench.build_report(paths=paths, faithbench_dir=settings.faithbench_dir)
-    assert report["judge"]["models_used"] == ["new-judge"]
+    assert report["judge"]["models_used"] == []
+    assert {row["judge_context"]["model"] for row in load_jsonl(paths.judgments)[-4:]} == {"new-judge"}
     assert report["totals"]["n_judgments"] == 4
 
 

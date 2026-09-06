@@ -87,6 +87,10 @@ def current_review_keys() -> set[str]:
     return {key for key, entry in _read_all().items() if review_is_current(entry, key)}
 
 
+def current_reviews() -> dict[str, Any]:
+    return {key: entry for key, entry in _read_all().items() if review_is_current(entry, key)}
+
+
 def copy_review(src_key: str, dst_key: str) -> bool:
     """Copy a cached review from ``src_key`` to ``dst_key`` (no-op if absent / same key).
     Lets an in-place Today review (cached under ``stable_feed_key``) persist onto the new
@@ -104,5 +108,5 @@ def copy_review(src_key: str, dst_key: str) -> bool:
 __all__ = [
     "_cache_path", "_read_all", "_write_all", "_write_one",
     "REVIEW_CONTRACT_VERSION", "get_cached_review", "get_current_review",
-    "review_is_current", "cached_review_keys", "current_review_keys", "copy_review",
+    "review_is_current", "cached_review_keys", "current_review_keys", "current_reviews", "copy_review",
 ]

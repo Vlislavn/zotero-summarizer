@@ -70,7 +70,7 @@ def test_review_callers_preserve_labels_until_explicit_triage_gate(monkeypatch, 
 
     from test_deep_review import _StubExtractor, _StubReader, _detail, _wire
     from zotero_summarizer.services._common import settings
-    from zotero_summarizer.services.library import app_library_reader, deep_review
+    from zotero_summarizer.services.library import app_library_reader, deep_review, _review_identity
     from zotero_summarizer.services.library.review_fleet import fleet, verdict_store
     from zotero_summarizer.services.research_feed import runner
     from zotero_summarizer.services.setup.bootstrap import _default_goals_config
@@ -100,6 +100,7 @@ def test_review_callers_preserve_labels_until_explicit_triage_gate(monkeypatch, 
     monkeypatch.setattr(fleet, "_LATCH", fleet._flight.FlightLatch())
     monkeypatch.setattr(fleet, "_STATE", dict(fleet._STATE))
     monkeypatch.setattr(fleet._flight, "run_in_background", lambda fn: fn())
+    monkeypatch.setattr(_review_identity, "current_review_identity", lambda key, stored: stored)
 
     assert deep_review.get_cached_review("REVIEWED") is None
     if caller == "fleet":
@@ -249,7 +250,7 @@ def test_gate_runner_propagates_cache_read_failure(monkeypatch):
         raise OSError("review cache unavailable")
 
     monkeypatch.setenv("ZS_AUTO_QUALITY_GATE", "1")
-    monkeypatch.setattr(deep_review, "_read_all", unreadable)
+    monkeypatch.setattr(deep_review, "current_reviews", unreadable)
     with pytest.raises(OSError, match="review cache unavailable"):
         quality_gate.fire_full()
 

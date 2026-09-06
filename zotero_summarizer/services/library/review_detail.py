@@ -304,7 +304,7 @@ def build_feed_detail_by_key(
     from zotero_summarizer.services.library import deep_review
 
     cached_review = (
-        deep_review.get_cached_review(feed_key)
+        deep_review.get_current_review(feed_key)
         if isinstance(feed_key, str) and is_stable_feed_key(feed_key)
         else None
     )
@@ -434,7 +434,7 @@ def build_library_detail(
         "notes": list(detail.get("notes") or []),
         "date_added": str(detail.get("date_added", "")),
         "scoring": scoring,
-        "deep_review": deep_review.get_cached_review(item_key),
+        "deep_review": deep_review.get_current_review(item_key),
     }
 
 

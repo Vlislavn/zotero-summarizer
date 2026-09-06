@@ -5,6 +5,8 @@ ranking contract is the whole reason the feature exists (spec §8)."""
 
 from __future__ import annotations
 
+import pytest
+
 from zotero_summarizer.services.search._models import (
     Candidate,
     QueryPlan,
@@ -18,6 +20,12 @@ from zotero_summarizer.services.search.intent import build_query_plan, parse_int
 from zotero_summarizer.services.search.rank import constrained_key, rank_candidates
 from zotero_summarizer.services.search.review import light_review, select_deep_set
 from zotero_summarizer.services.search._targeted_review import targeted_review
+
+
+@pytest.fixture(autouse=True)
+def _isolate_digest_generation(monkeypatch):
+    from zotero_summarizer.services.library import _digest_verification
+    monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
 
 
 def _c(title, **kw):

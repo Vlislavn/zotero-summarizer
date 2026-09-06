@@ -5,6 +5,10 @@ and writes review claims **faithfully** (grounded in the paper, no
 hallucination) — the go/no-go gate before building the Library-tab deep-review
 browser + paper Q&A feature.
 
+Every builder, answer, decomposition and judge prompt treats paper text, generated
+claims/questions and candidate answers as escaped untrusted data; embedded directives
+cannot close the boundary or replace the surrounding instruction.
+
 ```
                       build                     run                      judge                report
 Zotero PDFs ──► [_corpus]──► papers/<key>-<sha>.txt │                      │                    │

@@ -22,6 +22,7 @@ from decimal import Decimal
 from typing import Any, Callable
 
 from zotero_summarizer.services._common import extract_json_blob, now_iso_z, to_text
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.faithbench._constants import (
     CLAIM_JUDGE_TOP_K,
     MAX_CONTAINMENT_ANSWER_CHARS,
@@ -56,12 +57,14 @@ from zotero_summarizer.services.faithbench._runner import (
     trial_key,
     _response_sha,
 )
+from zotero_summarizer.services.library._grounding import answer_is_supported_by_quote, quote_is_grounded
 
 LOGGER = logging.getLogger(__name__)
 
 _NUMBER_RE = re.compile(r"[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?")
 
 _EQUIV_PROMPT = (
+    UNTRUSTED_INPUT_RULE + "\n\n"
     "You judge whether a candidate answer is factually equivalent to the gold "
     "answer for a question about an academic paper.\n"
     "- The gold answer is a VERBATIM span from the paper; the evidence sentence "
@@ -75,6 +78,7 @@ _EQUIV_PROMPT = (
 )
 
 _CLAIM_PROMPT = (
+    UNTRUSTED_INPUT_RULE + "\n\n"
     "You judge whether a claim about an academic paper is supported by the "
     "paper's text below.\n"
     '- "supported": the text states or directly entails the claim.\n'
@@ -93,6 +97,7 @@ _CLAIM_PROMPT = (
 # facts: a paper that never engages with a goal topic stays unsupported (that
 # is goal-projection hallucination, the failure this track must keep catching).
 _RELEVANCE_CLAIM_PROMPT = (
+    UNTRUSTED_INPUT_RULE + "\n\n"
     "You judge a claim taken from a recommendation that explains why an "
     "academic paper matters to a reader with these research goals:\n{goals}\n\n"
     "Such claims may rephrase the paper's content in the reader's goal "
@@ -124,7 +129,7 @@ def parse_number(text: str) -> Decimal | None:
 
 
 def hard_qa_judgment(
-    item: BenchmarkItem, response_row: dict[str, Any]
+    item: BenchmarkItem, response_row: dict[str, Any], paper_text: str = "",
 ) -> Judgment | None:
     """Rungs 1-7 of the ladder. ``None`` means undecided → escalate to the LLM."""
     if response_row.get("status") != "ok":
@@ -158,6 +163,15 @@ def hard_qa_judgment(
         )
 
     answer = str(parsed.get("answer") or "")
+    quote = str(parsed.get("quote") or "")
+    if paper_text and (
+        not quote_is_grounded(quote, paper_text)
+        or not answer_is_supported_by_quote(item.gold_answer, quote)
+    ):
+        return Judgment(
+            success=False, failure_reason=FailureReason.WRONG_ANSWER,
+            details="answer is not supported by a grounded response quote",
+        )
     if item.answer_type == "number":  # rung: numeric tolerance
         if answer.strip() and answer.strip() == item.gold_answer.strip():
             return Judgment(success=True, method=JudgeMethod.EXACT)
@@ -214,8 +228,9 @@ def judge_equivalence(
     judge_llm: Any, *, item: QAItem, answer: str, judge_model: str
 ) -> Judgment:
     prompt = _EQUIV_PROMPT.format(
-        question=item.question, gold=item.gold_answer,
-        evidence=item.evidence_sentence or "(none recorded)", candidate=answer,
+        question=untrusted_input(item.question), gold=untrusted_input(item.gold_answer),
+        evidence=untrusted_input(item.evidence_sentence or "(none recorded)"),
+        candidate=untrusted_input(answer),
     )
     try:
         payload = _judge_json(judge_llm, prompt)
@@ -257,9 +272,11 @@ def judge_claim(
     def render(context: str) -> str:
         if relevance:
             return _RELEVANCE_CLAIM_PROMPT.format(
-                goals=research_goals, claim=claim, context=context
+                goals=untrusted_input(research_goals), claim=untrusted_input(claim),
+                context=untrusted_input(context),
             )
-        return _CLAIM_PROMPT.format(claim=claim, context=context)
+        return _CLAIM_PROMPT.format(
+            claim=untrusted_input(claim), context=untrusted_input(context))
 
     chunks = _clip_chunks(substrate.index.top_chunks(claim, CLAIM_JUDGE_TOP_K), max_chars)
     context = _CONTEXT_SEPARATOR.join(chunks) if chunks else substrate.text[:max_chars]
@@ -338,7 +355,8 @@ def _judge_qa_row(row: dict[str, Any], *, item_id: str, ctx: _JudgeContext) -> N
         ctx.emit(row, Judgment(success=None, failure_reason=FailureReason.HARNESS_FAULT,
                                details=f"{item_id} not in benchmark file"), None)
         return
-    verdict = hard_qa_judgment(item, row)
+    verdict = hard_qa_judgment(
+        item, row, ctx.substrates[item.paper_item_key].text)
     if verdict is None:
         ctx.counts["escalated"] += 1
         assert isinstance(item, QAItem)

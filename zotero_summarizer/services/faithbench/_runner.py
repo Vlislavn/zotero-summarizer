@@ -28,6 +28,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from zotero_summarizer.services._common import atomic_write, extract_json_blob, now_iso_z, to_text, write_json_atomic
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.faithbench import _build_claims
 from zotero_summarizer.services.faithbench._constants import RETRIEVAL_TOP_K
 from zotero_summarizer.services.faithbench._corpus import (
@@ -39,7 +40,6 @@ from zotero_summarizer.services.faithbench._dataset import (
 )
 
 LOGGER = logging.getLogger(__name__)
-
 CONDITIONS = ("full_text", "retrieval")
 TRACKS = ("qa", "claims")
 CLAIMS_CONDITION = "digest"
@@ -47,6 +47,7 @@ CLAIMS_CONDITION = "digest"
 # Public: services/library/qa.py reuses this EXACT prompt so the product Q&A
 # runs the same instruction the benchmark validated (single source of truth).
 ANSWER_PROMPT = (
+    UNTRUSTED_INPUT_RULE + "\n\n"
     "Answer the question using ONLY the provided paper text. If the text does "
     "not contain the answer, you MUST abstain — do not guess, do not use outside "
     "knowledge.\n\n"
@@ -341,7 +342,8 @@ def _qa_trial(ctx: _TrialContext, item: BenchmarkItem, condition: str, run_numbe
         index=ctx.indexes.get(item.paper_item_key) or PaperChunkIndex(text),
         max_chars=ctx.max_chars,
     )
-    prompt = ANSWER_PROMPT.format(context=context, question=item.question)
+    prompt = ANSWER_PROMPT.format(
+        context=untrusted_input(context), question=untrusted_input(item.question))
     started = now_iso_z()
     t0 = perf_counter()
     parsed, raw = answer_with_retry(ctx.llm, prompt)

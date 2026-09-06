@@ -16,6 +16,7 @@ import re
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 
 from zotero_summarizer.services.library._paper_type_checklists import CHECKLISTS, Family, PaperType
 
@@ -169,10 +170,11 @@ def detect(
 
     active = ", ".join(k for k, v in signals.items() if v) or "none"
     verdict = llm.pydantic_prompt(
-        prompt=_PROMPT.format(
+        prompt=UNTRUSTED_INPUT_RULE + "\n\n" + _PROMPT.format(
             type_defs=_TYPE_DEFS, item_hint=_ITEMTYPE_HINT.get((item_type or "").strip(), item_type or "(none)"),
-            signals=active, title=title or "(untitled)", abstract=(abstract or "(none)")[:1500],
-            headings=", ".join(str(h) for h in (headings or [])[:25]) or "(none)",
+            signals=active, title=untrusted_input(title or "(untitled)"),
+            abstract=untrusted_input((abstract or "(none)")[:1500]),
+            headings=untrusted_input(", ".join(str(h) for h in (headings or [])[:25]) or "(none)"),
         ),
         pydantic_model=_TypeVerdict,
     )

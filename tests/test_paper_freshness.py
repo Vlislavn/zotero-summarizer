@@ -52,7 +52,7 @@ def paper(tmp_path, monkeypatch):
     monkeypatch.setattr(app_library_reader, "AppLibraryReader", lambda path: feed_reader)
     monkeypatch.setattr(paper_render, "settings", lambda: config)
     monkeypatch.setattr(paper_render, "_JOBS", {})
-    monkeypatch.setattr(deep_review, "get_cached_review", lambda key: None)
+    monkeypatch.setattr(deep_review, "get_current_review", lambda key: None)
     return SimpleNamespace(config=config, pdf=pdf, detail=detail)
 
 

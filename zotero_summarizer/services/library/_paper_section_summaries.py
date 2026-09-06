@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from pydantic import BaseModel, Field
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 
 # Body chars per section fed to the summarizer — enough to characterize a section
 # without spending the prompt budget on a long paper's full body.
@@ -48,12 +49,12 @@ def summarize_sections(sections: list[dict[str, Any]], llm: Any) -> dict[str, st
     usable = [s for s in (sections or []) if str(s.get("text") or "").strip()][:_MAX_SECTIONS]
     if not usable:
         return {}
-    blocks = "\n\n".join(
+    blocks = untrusted_input("\n\n".join(
         f"[Section {i}] {s.get('title') or 'Section'}\n{str(s.get('text') or '')[:_SECTION_BODY_CHARS]}"
         for i, s in enumerate(usable)
-    )
+    ))
     parsed = llm.pydantic_prompt(
-        prompt=_SECTION_SUMMARY_PROMPT.format(blocks=blocks),
+        prompt=UNTRUSTED_INPUT_RULE + "\n\n" + _SECTION_SUMMARY_PROMPT.format(blocks=blocks),
         pydantic_model=_SectionSummaryResponse,
     )
     out: dict[str, str] = {}

@@ -122,7 +122,24 @@ def _init_metadata_clients(app_state: RuntimeState, config: GoalsConfig, current
         )
 
 
-def _init_classifier_gate(app_state: RuntimeState, config: GoalsConfig, current_settings: Settings, *, background: bool = True) -> None:
+def _schedule_startup_gate_refresh(gate: object | None, reason: str = "startup") -> None:
+    from zotero_summarizer.services.triage import feeds
+
+    started = feeds.schedule_gate_retrain_async(reason, allow_initial=gate is None)
+    if gate is not None and not started:
+        feeds.schedule_slate_rescore_async(f"{reason}-cached-gate")
+
+
+async def _sync_corpus_before_gate_refresh(app_state: RuntimeState, *, gate_enabled: bool) -> None:
+    await corpus.auto_import_corpus_from_zotero()
+    if gate_enabled:
+        _schedule_startup_gate_refresh(app_state.classifier_gate, "startup-corpus")
+
+
+def _init_classifier_gate(
+    app_state: RuntimeState, config: GoalsConfig, current_settings: Settings, *,
+    background: bool = True, defer_retrain: bool = False,
+) -> None:
     """Phase 1.13: hybrid daemon classifier gate. Startup must stay fast, so it
     NEVER retrains synchronously: it loads the cached artifact as-is (even if
     its golden sha is stale after a Refresh-labels export) and delegates any
@@ -141,7 +158,6 @@ def _init_classifier_gate(app_state: RuntimeState, config: GoalsConfig, current_
 
     from threading import Lock as _Lock
     from zotero_summarizer.services.model import classifier, classifier_persistence
-    from zotero_summarizer.services.triage import feeds
     from zotero_summarizer.services.triage.feeds._gate import _gate_quality_label
 
     golden_csv = current_settings.golden_csv_path
@@ -194,8 +210,8 @@ def _init_classifier_gate(app_state: RuntimeState, config: GoalsConfig, current_
         # loaded cached gate is final, so re-score the slate ourselves — a model
         # trained offline (CLI) then loaded on this restart would otherwise leave
         # Today on whatever scores each row got at triage time.
-        if background and not feeds.schedule_gate_retrain_async("startup"):
-            feeds.schedule_slate_rescore_async("startup-cached-gate")
+        if background and not defer_retrain:
+            _schedule_startup_gate_refresh(gate)
     else:
         if not background:
             raise RuntimeError("No compatible cached classifier; train it before a dry-run")
@@ -205,7 +221,8 @@ def _init_classifier_gate(app_state: RuntimeState, config: GoalsConfig, current_
             "(gate off until ready, daemon LLM-scores everything meanwhile)",
             config.classifier_gate.model_name,
         )
-        feeds.schedule_gate_retrain_async("startup", allow_initial=True)
+        if not defer_retrain:
+            _schedule_startup_gate_refresh(None)
 
 
 def _init_zotero(app_state: RuntimeState, current_settings: Settings) -> None:
@@ -302,8 +319,21 @@ def startup(override_model: str | None = None, *, background: bool = True) -> No
     _init_models(app_state, config, current_settings)
     _init_database(current_settings, app_state)
     _init_metadata_clients(app_state, config, current_settings)
-    _init_classifier_gate(app_state, config, current_settings, background=background)
     _init_zotero(app_state, current_settings)
+
+    try:
+        loop = asyncio.get_running_loop() if background else None
+    except RuntimeError:
+        loop = None
+    defer_gate_retrain = bool(
+        loop is not None and config.corpus.enabled and app_state.zotero_reader is not None
+    )
+    if defer_gate_retrain:
+        _init_classifier_gate(
+            app_state, config, current_settings, background=background, defer_retrain=True,
+        )
+    else:
+        _init_classifier_gate(app_state, config, current_settings, background=background)
 
     # Loud boot-time readiness sweep so a missing critical dep (e.g. lightgbm)
     # is visible in the log at once, not discovered later as a silent gate=None.
@@ -327,17 +357,14 @@ def startup(override_model: str | None = None, *, background: bool = True) -> No
     # never run, producing "coroutine never awaited" warnings. We take the
     # running loop when available and otherwise skip task scheduling —
     # production (FastAPI lifespan) always has a loop.
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
     resumed_jobs = _resume_interrupted_jobs(app_state, loop)
     rss_refresh_scheduled = _schedule_startup_rss_refresh(loop, current_settings)
 
     auto_corpus_import_started = False
-    if config.corpus.enabled and app_state.zotero_reader is not None and loop is not None:
-        loop.create_task(corpus.auto_import_corpus_from_zotero())
+    if defer_gate_retrain:
+        loop.create_task(_sync_corpus_before_gate_refresh(
+            app_state, gate_enabled=config.classifier_gate.enabled,
+        ))
         auto_corpus_import_started = True
 
     # Launch-time deep-review prewarm: background-compute the top-K not-yet-cached

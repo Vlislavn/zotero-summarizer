@@ -7,6 +7,12 @@ from zotero_summarizer.models import PaperDigest, QualityReview
 from zotero_summarizer.services.triage.daily_select import _candidate as cand
 
 
+@pytest.fixture(autouse=True)
+def _isolate_digest_generation(monkeypatch):
+    from zotero_summarizer.services.library import _digest_verification
+    monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
+
+
 def test_quality_review_grade_normalization():
     assert QualityReview(grade="a").grade == "A"
     assert QualityReview(grade="B)").grade == "B"

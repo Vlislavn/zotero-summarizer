@@ -8,7 +8,7 @@ import types
 import pytest
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services.library import _review_cache, qa
+from zotero_summarizer.services.library import _review_cache, _review_identity, qa
 
 PAPER_TEXT = (
     "We evaluated GlassNet on the ImageNet dataset. "
@@ -165,6 +165,22 @@ def test_ask_paper_rejects_ungrounded_quotes(tmp_path, monkeypatch):
     assert out["abstained"] is True and out["answer"] is None
 
 
+def test_ask_paper_rejects_answer_not_contained_in_grounded_quote(tmp_path, monkeypatch):
+    pdf = tmp_path / "p.pdf"
+    pdf.write_bytes(b"%PDF-fake")
+
+    class _UnrelatedAnswerLLM:
+        def prompt(self, prompt, **kwargs):
+            return json.dumps({
+                "answer": "CIFAR-10",
+                "quote": "We evaluated GlassNet on the ImageNet dataset.",
+            })
+
+    _fake_state(tmp_path, pdf, _Extractor(), _UnrelatedAnswerLLM(), monkeypatch)
+    out = qa.ask_paper("KEY1", "Which dataset was used?")
+    assert out["abstained"] is True and out["answer"] is None
+
+
 @pytest.mark.parametrize("review_field", ["digest", "quality", "goal_summaries"])
 @pytest.mark.parametrize("in_pdf", [False, True])
 def test_generated_review_is_context_but_not_paper_evidence(tmp_path, monkeypatch, review_field, in_pdf):
@@ -183,7 +199,12 @@ def test_generated_review_is_context_but_not_paper_evidence(tmp_path, monkeypatc
     monkeypatch.setattr(qa.paper_render, "artifact_text", original_context)
     review_value = {"digest": {"tldr": quote}, "quality": {"red_flags": [quote]},
                     "goal_summaries": [{"summary": quote}]}[review_field]
-    _review_cache._write_one("KEY1", {review_field: review_value})
+    identity = {"fixture": "current"}
+    monkeypatch.setattr(_review_identity, "current_review_identity", lambda key, stored: stored)
+    _review_cache._write_one("KEY1", {
+        "review_contract_version": _review_cache.REVIEW_CONTRACT_VERSION,
+        "review_identity": identity, review_field: review_value,
+    })
 
     result = qa.ask_paper("KEY1", "Which benchmark was evaluated?")
 

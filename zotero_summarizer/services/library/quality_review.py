@@ -14,6 +14,7 @@ from typing import Any
 
 from zotero_summarizer.models import GoalsConfig, PaperDigest
 from zotero_summarizer.services._common import extract_json_blob, to_text
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.library._review_text import select_review_text
 
 # Reinforced-retry suffix: a reasoning model (e.g. a remote endpoint) occasionally
@@ -66,6 +67,21 @@ def _coerce_digest(raw: Any) -> PaperDigest:
         if not digest.original_value.strip() or not (digest.estimated_read_minutes or 0) > 0:
             raise ValueError("read/skim requires original-only value and positive minutes")
     return digest
+
+
+def _verify_generated_digest(
+    digest: PaperDigest, text: str, verifier: Any, generator: Any, goals: str,
+) -> None:
+    from zotero_summarizer.services.library._digest_verification import (
+        DigestVerifierUnavailable, verify_digest,
+    )
+
+    try:
+        verify_digest(digest, text, verifier, research_goals=goals)
+    except DigestVerifierUnavailable:
+        if verifier is generator:
+            raise
+        verify_digest(digest, text, generator, research_goals=goals)
 
 # Fallback when goals.yaml has no `prompts.paper_digest`. A referee-grade digest
 # (NeurIPS/ICLR rubric) condensed into scannable fields, personalised to the
@@ -144,6 +160,7 @@ _DEFAULT_DIGEST_PROMPT = (
 def assess_digest(
     *, title: str, full_text: str, config: GoalsConfig, llm: Any, focus_prompt: str = "",
     max_chars: int | None = None, prefix: bool = False, response_format: dict[str, Any] | None = None,
+    verifier_llm: Any = None,
 ) -> PaperDigest:
     """Condensed paper digest (quality + the user's 7-point investigation) from
     the full text (must be non-empty). Personalised to ``config.research_goals``.
@@ -167,10 +184,13 @@ def assess_digest(
     # ``prefix`` bypasses ranking for the naive-truncate A/B baseline.
     text = full_text[:cap] if prefix else select_review_text([], full_text, budget=cap)
     goals = "; ".join(g for g in (config.research_goals or []) if str(g).strip()) or "(not specified)"
-    prompt = template.format(title=title or "Untitled", full_text=text, research_goals=goals)
+    prompt = UNTRUSTED_INPUT_RULE + "\n\n" + template.format(
+        title=untrusted_input(title or "Untitled"), full_text=untrusted_input(text),
+        research_goals=untrusted_input(goals),
+    )
     if focus_prompt:
         prompt += (
-            f"\n\nReader's focus note: {focus_prompt}\n"
+            f"\n\nReader's focus note: {untrusted_input(focus_prompt)}\n"
             "Please adjust your review emphasis to highlight or downplay aspects matching this focus."
         )
     # onprem/remote returns the raw (often empty or out-of-range) string when its own
@@ -186,4 +206,19 @@ def assess_digest(
     except ValueError:
         retry = llm.pydantic_prompt(prompt=prompt + _STRICT_RETRY_SUFFIX, pydantic_model=PaperDigest, **extra)
         digest = _coerce_digest(retry)
-    return digest.model_copy(update={"basis": "full_text"})
+    digest = digest.model_copy(update={"basis": "full_text"})
+    verifier = verifier_llm or llm
+    try:
+        _verify_generated_digest(digest, text, verifier, llm, goals)
+    except ValueError as exc:
+        correction = llm.pydantic_prompt(
+            prompt=(
+                prompt + "\n\nThe previous digest failed source verification: "
+                + str(exc) + "\nReturn a corrected, fully source-grounded JSON digest only."
+            ),
+            pydantic_model=PaperDigest,
+            **extra,
+        )
+        digest = _coerce_digest(correction).model_copy(update={"basis": "full_text"})
+        _verify_generated_digest(digest, text, verifier, llm, goals)
+    return digest

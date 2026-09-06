@@ -17,6 +17,7 @@ import re
 from typing import Any
 
 from zotero_summarizer.services._common import extract_json_blob, to_text
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.search._models import SearchIntent, QueryPlan
 
 LOGGER = logging.getLogger(__name__)
@@ -79,10 +80,10 @@ def parse_intent(raw_query: str, questions: list[str], *, llm: Any) -> SearchInt
 
     q_block = ""
     if questions:
-        q_block = "The researcher also wants these questions answered:\n" + "\n".join(
-            f"- {q}" for q in questions
-        ) + "\n"
-    prompt = _PROMPT.format(topic=raw, questions_block=q_block)
+        q_block = "The researcher also wants these questions answered:\n" + untrusted_input(
+            "\n".join(f"- {q}" for q in questions)) + "\n"
+    prompt = UNTRUSTED_INPUT_RULE + "\n\n" + _PROMPT.format(
+        topic=untrusted_input(raw), questions_block=q_block)
     try:
         parsed = _parse_once(prompt, llm=llm)
     except ValueError:

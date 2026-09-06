@@ -92,3 +92,22 @@ def test_startup_rss_reads_project_env_after_import(tmp_path, monkeypatch):
 
     asyncio.run(run())
     assert seen == [{"max_feeds": 2, "max_new_items_per_feed": 3, "per_feed_timeout": 1.5}]
+
+
+def test_startup_corpus_sync_precedes_gate_refresh(monkeypatch):
+    events = []
+    app_state = RuntimeState()
+    app_state.classifier_gate = object()
+
+    async def sync():
+        events.append("corpus")
+
+    monkeypatch.setattr(lifecycle.corpus, "auto_import_corpus_from_zotero", sync)
+    monkeypatch.setattr(
+        lifecycle, "_schedule_startup_gate_refresh",
+        lambda gate, reason="startup": events.append((reason, gate)),
+    )
+
+    asyncio.run(lifecycle._sync_corpus_before_gate_refresh(app_state, gate_enabled=True))
+
+    assert events == ["corpus", ("startup-corpus", app_state.classifier_gate)]

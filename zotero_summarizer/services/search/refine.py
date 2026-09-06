@@ -21,6 +21,7 @@ import os
 from typing import Any
 
 from zotero_summarizer.services._common import extract_json_blob, to_text
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.search import session as session_store
 from zotero_summarizer.services.search._models import Candidate, ResearchSession, SearchIntent
 from zotero_summarizer.services.search._relevance import attach_relevance
@@ -77,10 +78,10 @@ def refine_once(sess: ResearchSession, *, llm: Any) -> dict[str, list[str]]:
     top = sess.candidates[:_REFINE_TOP_N]
     if not top:
         return {"add_concepts": [], "drop_terms": []}
-    prompt = _REFINE_PROMPT.format(
-        question=sess.intent.canonical_question or sess.raw_query,
-        concepts=", ".join(sess.intent.concepts) or sess.raw_query,
-        results_block="\n".join(_result_line(c) for c in top),
+    prompt = UNTRUSTED_INPUT_RULE + "\n\n" + _REFINE_PROMPT.format(
+        question=untrusted_input(sess.intent.canonical_question or sess.raw_query),
+        concepts=untrusted_input(", ".join(sess.intent.concepts) or sess.raw_query),
+        results_block=untrusted_input("\n".join(_result_line(c) for c in top)),
     )
     try:
         parsed = extract_json_blob(to_text(llm.prompt(prompt)))

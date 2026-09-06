@@ -5,6 +5,9 @@ This domain is *pull*: you give a research topic, and it federates the open
 literature + (later) your library, ranks by real relevance, and deep-reads a few —
 a query-scoped research session, not a standing feed.
 
+Intent parsing and agentic refinement wrap user queries, questions and retrieved
+metadata with the shared escaped untrusted-input boundary before any LLM call.
+
 ```
 topic + questions
    │  intent.parse_intent (1 LLM call; raw-query fallback if garbled — spec §7)
