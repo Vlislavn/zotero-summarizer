@@ -4,7 +4,7 @@ repos:
   - repo: local
     hooks:
       - id: file-loc-limit
-        name: file LOC <= 500 (legacy files grandfathered, may not grow)
+        name: hard file LOC <= 500 (no exceptions)
         entry: python3 tools/precommit/check_file_loc.py
         language: system
         types: [python]
@@ -57,7 +57,7 @@ repos:
         always_run: true
 
       - id: slop-check
-        name: AI-slop blocked (new debug-leftovers; grandfathered)
+        name: debug leftovers + code-in-head complexity blocked
         entry: python3 tools/precommit/check_slop.py slop-check
         language: system
         types: [python]

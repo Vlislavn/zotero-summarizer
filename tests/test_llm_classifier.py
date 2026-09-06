@@ -7,8 +7,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import ValidationError
 
-from zotero_summarizer.services.model import llm_classifier
 from zotero_summarizer.services.model.llm_classifier import (
     LLMClassification,
     _LLMVerdict,
@@ -49,24 +49,22 @@ def test_classify_skips_rows_with_empty_title_or_abstract():
     by_key = {c.item_key: c for c in out}
     assert by_key["OK"].priority == "must_read"
     assert by_key["MISSING_T"].priority == ""
-    assert by_key["MISSING_T"].error == "missing title or abstract"
+    assert by_key["MISSING_T"].skip_reason == "missing title or abstract"
     assert by_key["MISSING_A"].priority == ""
 
 
-def test_classify_swallows_llm_errors():
+def test_classify_propagates_llm_errors():
     llm = MagicMock()
     llm.pydantic_prompt.side_effect = RuntimeError("connection timeout")
     rows = [_row("A"), _row("B")]
-    out = classify_papers_with_llm(rows, llm, research_goals=[], workers=2)
-    assert len(out) == 2
-    assert all(c.priority == "" for c in out)
-    assert all("connection timeout" in c.error for c in out)
+    with pytest.raises(RuntimeError, match="connection timeout") as caught:
+        classify_papers_with_llm(rows, llm, research_goals=[], workers=2)
+    assert caught.value is llm.pydantic_prompt.side_effect
 
 
-def test_verdict_rejects_invalid_priority_via_normalisation():
-    """nonsense → coerced to could_read via normalize_reading_priority."""
-    v = _LLMVerdict(priority="nonsense", confidence=0.5, rationale="meh")
-    assert v.priority == "could_read"
+def test_verdict_rejects_invalid_priority():
+    with pytest.raises(ValidationError):
+        _LLMVerdict(priority="nonsense", confidence=0.5, rationale="meh")
 
 
 def test_verdict_accepts_all_four_valid_priorities():
@@ -107,22 +105,20 @@ def test_write_predictions_rejects_invalid_classifier_name(tmp_path: Path):
             write_predictions_to_csv(csv_path, classifications, classifier_name=bad)
 
 
-def test_parallel_classification_preserves_order(tmp_path: Path):
+def test_parallel_classification_preserves_order():
     """Even with workers>1, the result list is in input order."""
     llm = MagicMock()
-    # Each call yields a distinct priority so we can detect reordering.
     expected_priorities = [
         "must_read", "should_read", "could_read", "dont_read",
         "must_read", "should_read", "could_read", "dont_read",
     ]
 
     def fake_pp(prompt: str, pydantic_model):
-        # Use len of prompt to pick a priority — different prompts give
-        # different lengths, deterministic. But here we rely on dictionary
-        # order via the rows list — easier to use a counter.
-        return _verdict(p="must_read")
+        index = int(prompt.split("Title: Title ")[1].splitlines()[0])
+        return _verdict(expected_priorities[index])
 
-    llm.pydantic_prompt.side_effect = lambda **kw: _verdict("must_read")
+    llm.pydantic_prompt.side_effect = fake_pp
     rows = [_row(f"K{i}", title=f"Title {i}") for i in range(8)]
     out = classify_papers_with_llm(rows, llm, research_goals=["x"], workers=4)
     assert [c.item_key for c in out] == [r["item_key"] for r in rows]
+    assert [c.priority for c in out] == expected_priorities

@@ -3,22 +3,24 @@
 The whole app in one mental model, plus the rules the pre-commit hooks enforce.
 Read this before editing; every package also has its own `README.md`.
 
-## The loop
+## Product loop — what does the system do?
 
-```
-  app RSS pool (self-fetched, own DB) ─┐
-                                       ▼
-   [triage]  cheap ML gate ──reject──> dropped
-                                       │
-                                       │ survivors → LLM summary + relevance score
-                                       ▼
-   SQLite (data/) ──> [api] ──> React UI  (Today / Library / Annotate / Settings)
-        ▲                                   │
-        │                                   │ you cull / read / label
-   retrain [model] <── [golden] dataset <───┘
-                                            │ approve changes
-                                 [zotero] ──> Zotero: daily picks → Inbox,
-                                              label tags/notes, read-state sync
+Read this first when onboarding or changing triage, ranking, review, or feedback
+semantics. It is for users, researchers, product owners, and new contributors.
+
+```mermaid
+flowchart LR
+    RSS[RSS sources] --> Triage[Triage]
+    Triage --> Gate[ML gate]
+    Gate --> LLM[LLM summary]
+    LLM --> Slate[Ranked slate]
+    Slate --> Human[Human decision]
+    Human --> Golden[Golden labels]
+    Golden --> Gate
+    LLM --> Review[Full-text review]
+    Review --> Weekly[Weekly research engineering digest]
+    Human --> Zotero[Zotero]
+    Review --> Zotero
 ```
 
 1. **triage** fetches RSS itself into an app-owned pool and scores it (gate
@@ -31,6 +33,43 @@ Read this before editing; every package also has its own `README.md`.
    the *Inbox*, approved label tags/notes (queued + reviewed, backup first),
    and an automatic read-state sync that marks Zotero's own feed cards read
    once the app has triaged them.
+
+## Runtime view — which subsystem owns this?
+
+Read this when implementing a feature, adding an integration, or debugging a
+cross-boundary workflow. It is the main view for developers and reviewers.
+
+```mermaid
+flowchart LR
+    UI[React UI] --> API[FastAPI]
+    API --> Services[Domain services]
+    Services --> Storage[SQLite storage]
+    Services --> Integrations[Integrations]
+    Integrations --> Zotero[Zotero]
+    Integrations --> Models[LLM / ML models]
+    Integrations --> Sources[PDFs / RSS / OpenAlex]
+    MCP[MCP client] -->|HTTP| API
+```
+
+## Code layering — what may import what?
+
+Read this before creating or moving modules, or while reviewing architecture
+changes. It mirrors the rules enforced by `check_import_policy.py`.
+
+```mermaid
+flowchart LR
+    API[api] --> Services[services]
+    Services --> Storage[storage]
+    Services --> Integrations[integrations]
+    Storage --> Core[models · contracts · domain · settings · runtime]
+    Integrations --> Core
+    MCP[mcp] -. HTTP only .-> API
+```
+
+Start with the product loop, then drill into the runtime and layering views only
+as needed. Add a focused data-ownership, sequence, deployment, or component view
+only when multiple writers, non-obvious orchestration, multiple processes, or an
+oversized domain makes that deeper view necessary.
 
 ## Why it's built this way (decisions + evidence)
 
@@ -72,6 +111,7 @@ The daemon is optional automation, not a separate engine. The `feeds.*` block in
 | change labels / training data | `services/golden/` |
 | change the feed daemon / Today slate | `services/triage/` |
 | change reading / review surfaces | `services/library/` |
+| change the weekly project-specific research digest | `services/research_feed/` |
 | change what gets written to Zotero | `services/zotero/` |
 | touch the DB / SQL | `storage/` |
 | talk to Zotero / PDFs / LLM / OpenAlex | `integrations/` |
@@ -80,12 +120,7 @@ The daemon is optional automation, not a separate engine. The `feeds.*` block in
 
 The live JSON API is self-documenting: run `serve` and open `/docs` (OpenAPI).
 
-## Layering (lower never imports higher)
-
-```
-api → services → storage / integrations → models · contracts · domain · settings · runtime
-mcp → (HTTP only; imports none of the above)
-```
+## Layering rules (lower never imports higher)
 
 - `integrations/`, `storage/` never import `services/` or `api/`.
 - `mcp/` never imports `services/`, `api/`, or `storage/`.
@@ -113,7 +148,8 @@ mcp → (HTTP only; imports none of the above)
 
 Install once: `pre-commit install`. CI runs the same checks plus the test suites.
 
-1. **≤500 LOC per `.py`** (`tools/precommit/check_file_loc.py`). Split, don't extend.
+1. **≤500 LOC per `.py`, no exceptions** (`tools/precommit/check_file_loc.py`).
+   There is no grandfather list; split by responsibility.
 2. **Layering / structure policy** (`check_import_policy.py`) — the rules above; new
    service modules must live in a domain subpackage, not at `services/` top level.
 3. **Module READMEs** (`check_module_readme.py`) — every package has one, and editing
@@ -125,8 +161,9 @@ Install once: `pre-commit install`. CI runs the same checks plus the test suites
 5. **AI-slop** (`check_slop.py`) — adopts [aislop](https://github.com/scanaislop/aislop)'s
    deterministic slop/dead-code detectors (swallowed exceptions, debug leftovers, mutable
    defaults, untracked TODOs, narrative/trivial comments, generic names, Long-Method
-   complexity). Only a committed `breakpoint()`/`pdb.set_trace()` BLOCKs; the rest are
-   advisory. Existing findings frozen in `slop_allowlist.txt`.
+   complexity). Debug leftovers BLOCK, as do touched functions above 88 body lines,
+   6 required parameters, or 5 control-flow levels; other heuristics stay advisory.
+   Existing findings are frozen in `slop_allowlist.txt`.
 
 **Seeing findings (advisory, not enforced):** two commands, differing only in scope —
 `make scan` (every detector across the whole tree) and `make scan-diff` (the same, scoped to
@@ -138,6 +175,10 @@ similarity + API-Jaccard — surfacing consolidation candidates whose intent ove
 different shapes; it degrades to deterministic-only when no embedding model is available.
 
 ## Verify a change
+
+Backend tests isolate runtime state and the default project root per test, hide
+inherited provider credentials/keyring entries, and block TCP connections. Mock
+integrations explicitly; a unit test must never use a live model or Zotero service.
 
 ```bash
 zotero-summarizer smoke-test                       # app constructs

@@ -31,9 +31,8 @@ _CHECK_REDUNDANCY = "tools/precommit/check_redundancy.py"
 _CHECK_SLOP = "tools/precommit/check_slop.py"
 
 # (label, committed allowlist file, argv that dumps the LIVE keys, required
-# third-party module or None). The loc_allowlist is excluded by design: its
-# keys are ``<path> <ceiling>`` with grow-not-shrink semantics, not a finding
-# dump. ``make scan`` already skips the Tier-2 vulture scan when vulture is
+# third-party module or None). The hard LOC gate has no allowlist.
+# ``make scan`` already skips the Tier-2 vulture scan when vulture is
 # absent from the env (it runs in the gate: 'make lint'); the vulture-backed
 # reconciler mirrors that same contract instead of crashing the advisory scan.
 RECONCILERS = [

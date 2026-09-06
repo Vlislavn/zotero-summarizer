@@ -23,8 +23,7 @@ def _new_job(job_id: str, item_keys: list[str], status: str = "running") -> dict
         "updated_at": "2026-04-02T18:00:00+00:00",
         "total": len(item_keys),
         "completed": 0,
-        "current_item_key": "",
-        "current_title": "",
+        "active_items": {},
         "queue_changes": False,
         "item_keys": list(item_keys),
         "results": [],
@@ -117,7 +116,7 @@ def test_triage_job_runs_items_in_parallel(monkeypatch):
     in_flight = 0
     max_in_flight = 0
 
-    def fake_pipeline(_req, _prefix):
+    def fake_pipeline(_req, _prefix, *, cancel_event=None):
         nonlocal in_flight, max_in_flight
         with tracker_lock:
             in_flight += 1
@@ -137,7 +136,7 @@ def test_triage_job_runs_items_in_parallel(monkeypatch):
     monkeypatch.setattr(app_module, "get_zotero_reader_or_raise", lambda: FakeReader())
     monkeypatch.setattr(app_module.summarization, "run_pipeline", fake_pipeline)
     monkeypatch.setattr(app_module.triage_db, "upsert_triage_job", lambda job: None)
-    monkeypatch.setattr(app_module.triage_db, "insert_result", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app_module.triage_db, "insert_result", lambda *args, **kwargs: 0)
 
     async def _run() -> None:
         await app_module.run_triage_job_worker(job_id, item_keys, queue_changes=False)
@@ -179,7 +178,7 @@ def test_triage_job_resume_skips_processed_keys(monkeypatch):
                 "abstract": "Abstract",
             }
 
-    def fake_pipeline(_req, _prefix):
+    def fake_pipeline(_req, _prefix, *, cancel_event=None):
         return SummarizeResponse(
             executive_summary="ok",
             relevance_score=3,
@@ -192,7 +191,7 @@ def test_triage_job_resume_skips_processed_keys(monkeypatch):
     monkeypatch.setattr(app_module, "get_zotero_reader_or_raise", lambda: FakeReader())
     monkeypatch.setattr(app_module.summarization, "run_pipeline", fake_pipeline)
     monkeypatch.setattr(app_module.triage_db, "upsert_triage_job", lambda job: None)
-    monkeypatch.setattr(app_module.triage_db, "insert_result", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app_module.triage_db, "insert_result", lambda *args, **kwargs: 0)
 
     async def _run() -> None:
         await app_module.run_triage_job_worker(job_id, item_keys, queue_changes=False)
@@ -228,7 +227,7 @@ def test_triage_job_marks_failed_when_any_item_errors(monkeypatch):
                 "abstract": "Abstract",
             }
 
-    def fake_pipeline(_req, _prefix):
+    def fake_pipeline(_req, _prefix, *, cancel_event=None):
         return SummarizeResponse(
             executive_summary="ok",
             relevance_score=3,
@@ -241,7 +240,7 @@ def test_triage_job_marks_failed_when_any_item_errors(monkeypatch):
     monkeypatch.setattr(app_module, "get_zotero_reader_or_raise", lambda: FakeReader())
     monkeypatch.setattr(app_module.summarization, "run_pipeline", fake_pipeline)
     monkeypatch.setattr(app_module.triage_db, "upsert_triage_job", lambda job: None)
-    monkeypatch.setattr(app_module.triage_db, "insert_result", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app_module.triage_db, "insert_result", lambda *args, **kwargs: 0)
 
     async def _run() -> None:
         await app_module.run_triage_job_worker(job_id, item_keys, queue_changes=False)
@@ -281,7 +280,6 @@ def test_triage_job_marks_failed_when_reader_unavailable(monkeypatch):
 
     job = _state().triage_jobs[job_id]
     assert job["status"] == "failed"
-    assert job["current_item_key"] == ""
-    assert job["current_title"] == ""
+    assert job["active_items"] == {}
     assert len(job["errors"]) == 1
     assert job["errors"][0]["item_key"] == "job"

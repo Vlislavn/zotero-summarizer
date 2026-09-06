@@ -36,12 +36,21 @@ export function scoreToBand(score) {
   return 'dont_read';
 }
 
+function effectiveBand(it, floor) {
+  const band = scoreToBand(it.relevance_score);
+  if (floor == null || it.prestige_known !== true || typeof it.prestige_score !== 'number'
+      || it.prestige_score >= floor) return band;
+  if (band === 'must_read') return 'should_read';
+  if (band === 'should_read') return 'could_read';
+  return band;
+}
+
 // "Cool" = a high-relevance pick (must/should-read band) the user hasn't decided
 // yet: no fleet proposal (proposed_verdict) and no own label (user_priority). The
 // auto-review ("Review cool papers") loops the fleet over exactly these.
-export function isCoolUndecided(it) {
+export function isCoolUndecided(it, floor = null) {
   if (!it || it.proposed_verdict || it.user_priority) return false;
-  const band = scoreToBand(typeof it.relevance_score === 'number' ? it.relevance_score : null);
+  const band = effectiveBand(it, floor);
   return band === 'must_read' || band === 'should_read';
 }
 
@@ -49,8 +58,8 @@ export function isCoolUndecided(it) {
 // pins these to the fleet (so it reviews the SAME rows the UI counts — a cool paper
 // can sit deep in the blended queue while the band-agnostic fleet selector would
 // review higher-blended could_read rows first).
-export function coolUndecidedKeys(items) {
-  return (items || []).filter(isCoolUndecided).map((it) => it.item_key);
+export function coolUndecidedKeys(items, floor = null) {
+  return (items || []).filter((it) => isCoolUndecided(it, floor)).map((it) => it.item_key);
 }
 
 // Default = identity filter (the list is unchanged).
@@ -123,8 +132,7 @@ export function buildPredicate(filters, ctx) {
   const goalHigh = ctx?.goalHigh ?? new Set();
 
   return (it) => {
-    const score = typeof it.relevance_score === 'number' ? it.relevance_score : null;
-    const band = scoreToBand(score);
+    const band = effectiveBand(it, floor);
 
     if (bandSet.size && (band === null || !bandSet.has(band))) return false;
 

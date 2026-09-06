@@ -17,36 +17,30 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
-import logging
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services.golden import hybrid_gt, label_provenance
-from zotero_summarizer.services.library import review_detail as review_detail_svc
-from zotero_summarizer.services.zotero.zotero import (
-    zotero_set_label_tag,
-    zotero_upsert_user_note,
-    zotero_upsert_verdict_note,
+from zotero_summarizer.services.golden import (
+    hybrid_gt,
+    label_provenance,
+    label_verdicts,
+    verdict_effects,
 )
+from zotero_summarizer.services.library import review_detail as review_detail_svc
 from zotero_summarizer.storage import repositories
 from zotero_summarizer.api.routes._golden_border import router as _border_router
 from zotero_summarizer.api.routes._golden_helpers import (
-    _append_verdict_golden,
     _build_source_payload,
     _db_path,
     _golden_csv_path,
     _load_all,
     _zotero_candidate_keys,
-    add_feed_verdict_to_library,
     log_retract_event,
     log_verdict_event,
 )
-
-LOGGER = logging.getLogger(__name__)
-
 
 router = APIRouter()
 
@@ -54,16 +48,13 @@ router = APIRouter()
 _VALID_USER_PRIORITIES = ("must_read", "should_read", "could_read", "dont_read")
 
 
-def _is_optional_zotero_unavailable(exc: BaseException) -> bool:
-    """The local verdict is already persisted; a missing Zotero DB is an optional
-    mirror failure and should not leak into the verdict response."""
-    return isinstance(exc, APIError) and exc.error == "zotero_unavailable"
-
-
 class VerdictRequest(BaseModel):
-    item_key: str = Field(..., min_length=1, description="Zotero item key.")
+    item_key: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] = Field(
+        description="Zotero item key.",
+    )
     user_priority: str = Field(
-        ..., min_length=1,
+        ...,
+        min_length=1,
         description="One of: must_read | should_read | could_read | dont_read.",
     )
     comment: str = Field(
@@ -80,12 +71,6 @@ class ReviewNoteRequest(BaseModel):
     )
 
 
-
-
-
-
-
-
 async def get_one(item_key: str) -> dict[str, Any]:
     """Return the full provenance breakdown for one paper."""
     provs = _load_all()
@@ -97,8 +82,6 @@ async def get_one(item_key: str) -> dict[str, Any]:
         message=f"item_key {item_key!r} not in golden CSV",
         status_code=404,
     )
-
-
 
 
 async def list_all(
@@ -138,20 +121,22 @@ async def list_all(
     for p in provs:
         seen_keys.add(p.item_key)
         v = verdicts.get(p.item_key)
-        items_all.append({
-            "item_key": p.item_key,
-            "title": p.title,
-            "persisted_priority": p.persisted_priority,
-            "derived_priority": p.derived_priority,
-            "effective_priority": _effective(p),
-            "user_priority": v["user_priority"] if v is not None else None,
-            "is_user_override": bool(v is not None),
-            "derived_score": p.derived_score,
-            "is_direct_user_verdict": p.is_direct_user_verdict,
-            "is_manual_override": p.is_manual_override,
-            "orphaned": False,
-            "flags": list(p.flags),
-        })
+        items_all.append(
+            {
+                "item_key": p.item_key,
+                "title": p.title,
+                "persisted_priority": p.persisted_priority,
+                "derived_priority": p.derived_priority,
+                "effective_priority": _effective(p),
+                "user_priority": v["user_priority"] if v is not None else None,
+                "is_user_override": bool(v is not None),
+                "derived_score": p.derived_score,
+                "is_direct_user_verdict": p.is_direct_user_verdict,
+                "is_manual_override": p.is_manual_override,
+                "orphaned": False,
+                "flags": list(p.flags),
+            }
+        )
 
     # Orphaned verdicts: a manual label whose paper left the golden CSV.
     # Keep it visible (and editable via the no-404 detail path) so a
@@ -159,20 +144,22 @@ async def list_all(
     for key, v in verdicts.items():
         if key in seen_keys:
             continue
-        items_all.append({
-            "item_key": key,
-            "title": "(no longer in current set)",
-            "persisted_priority": None,
-            "derived_priority": None,
-            "effective_priority": v["user_priority"],
-            "user_priority": v["user_priority"],
-            "is_user_override": True,
-            "derived_score": None,
-            "is_direct_user_verdict": False,
-            "is_manual_override": True,
-            "orphaned": True,
-            "flags": ["orphaned"],
-        })
+        items_all.append(
+            {
+                "item_key": key,
+                "title": "(no longer in current set)",
+                "persisted_priority": None,
+                "derived_priority": None,
+                "effective_priority": v["user_priority"],
+                "user_priority": v["user_priority"],
+                "is_user_override": True,
+                "derived_score": None,
+                "is_direct_user_verdict": False,
+                "is_manual_override": True,
+                "orphaned": True,
+                "flags": ["orphaned"],
+            }
+        )
 
     filtered = items_all
     if priority:
@@ -181,7 +168,10 @@ async def list_all(
         filtered = [it for it in filtered if flag in it["flags"]]
     if collection or tag or search:
         candidate_keys = await asyncio.to_thread(
-            _zotero_candidate_keys, collection=collection, tag=tag, search=search,
+            _zotero_candidate_keys,
+            collection=collection,
+            tag=tag,
+            search=search,
         )
         filtered = [it for it in filtered if it["item_key"] in candidate_keys]
 
@@ -194,10 +184,6 @@ async def list_all(
         "total_rows": len(items_all),
         "flag_counts": flag_counts,
     }
-
-
-
-
 
 
 async def review_detail(item_key: str) -> dict[str, Any]:
@@ -245,7 +231,9 @@ async def review_detail(item_key: str) -> dict[str, Any]:
     if source_payload is None:
         # Live source gone — fall back to a stub from the golden CSV row.
         csv_row = await asyncio.to_thread(
-            review_detail_svc.load_csv_row, _golden_csv_path(), safe_item_key,
+            review_detail_svc.load_csv_row,
+            _golden_csv_path(),
+            safe_item_key,
         )
         if csv_row is not None:
             source_payload = review_detail_svc.build_csv_stub_detail(csv_row)
@@ -269,7 +257,8 @@ async def review_detail(item_key: str) -> dict[str, Any]:
         **source_payload,
         "provenance": (
             label_provenance.provenance_to_dict(prov_match)
-            if prov_match is not None else None
+            if prov_match is not None
+            else None
         ),
         "verdict": verdict_row,
         "user_note": repositories.get_review_note(_db_path(), safe_item_key) or "",
@@ -288,98 +277,37 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
             status_code=422,
         )
 
-    # Anchor original_derived_priority to the CURRENT provenance when the
-    # key is in the golden CSV; never the client. A key absent from the CSV
-    # (a Today feed item, or a paper that left the engaged set) is still
-    # labellable — the user's manual verdict must always be saveable. We
-    # then anchor to the existing verdict's original (preserve history) or
-    # "unknown".
+    # Current CSV provenance wins; the command owns prior-model fallback.
     provs = _load_all()
     prov_match = next((p for p in provs if p.item_key == req.item_key), None)
-    if prov_match is not None:
-        original = prov_match.derived_priority
-    else:
-        existing = repositories.get_label_verdict(_db_path(), req.item_key)
-        original = existing["original_derived_priority"] if existing is not None else "unknown"
+    original = prov_match.derived_priority if prov_match is not None else None
 
-    row_id = repositories.insert_or_update_label_verdict(
+    row_id = label_verdicts.set_label_verdict(
         _db_path(),
         item_key=req.item_key,
         original_derived_priority=original,
         user_priority=req.user_priority,
+        surface="annotate_verdict",
         comment=req.comment,
     )
-    log_verdict_event(req.item_key, original, req.user_priority, req.comment)
-    # Make the verdict a first-class training row (covers materialized-but-unread
-    # items the engagement-only export skips). Idempotent + no-op if source gone.
-    # Boundary: the verdict is ALREADY durably saved above — this golden-row
-    # enrichment must never block that, so a metadata-fetch failure is logged,
-    # not raised (the hybrid overlay still trains any existing row from the
-    # verdict). The user authorized "make sure verdicts go to training".
-    try:
-        await asyncio.to_thread(
-            _append_verdict_golden, req.item_key, req.user_priority, req.comment,
-        )
-    except Exception as exc:  # noqa: BLE001 — verdict save must not fail on enrichment
-        LOGGER.warning("golden append for verdict %s failed: %s", req.item_key, exc)
-
-    # The verdict IS the user's explicit label — write it to Zotero as a
-    # `label:<priority>` tag so the ground truth lives in Zotero (source of truth,
-    # reconciled back on the next export). Library items only: feed:/note: keys
-    # have no Zotero item to tag yet and keep the label_verdicts path. Non-blocking
-    # + reported-not-raised, exactly like the verdict note below — the verdict is
-    # ALREADY durable above. The user authorized "keep my labels inside Zotero".
-    label_written = False
-    label_error: str | None = None
-    source = review_detail_svc.classify_item_key(req.item_key)
-    if source not in (review_detail_svc.SOURCE_FEED, review_detail_svc.SOURCE_NOTE):
-        try:
-            await asyncio.to_thread(zotero_set_label_tag, req.item_key, req.user_priority)
-            label_written = True
-        except Exception as exc:  # noqa: BLE001 — label write must not block the verdict
-            if _is_optional_zotero_unavailable(exc):
-                LOGGER.info("verdict label tag mirror skipped for %s: Zotero unavailable", req.item_key)
-            else:
-                label_error = f"{type(exc).__name__}: {exc}"
-                LOGGER.warning("verdict label tag write for %s failed: %s", req.item_key, exc)
-    # Save the comment to Zotero as a single (upserted) note. Direct write, but
-    # the verdict is ALREADY durable above — a note failure (e.g. Zotero open)
-    # must never block it, so it's reported, not raised. The user authorized
-    # "comments I leave with a verdict should be saved to Zotero as a note".
-    note_written = False
-    note_error: str | None = None
-    if req.comment.strip():
-        try:
-            await asyncio.to_thread(
-                zotero_upsert_verdict_note, req.item_key, req.user_priority, req.comment,
-            )
-            note_written = True
-        except Exception as exc:  # noqa: BLE001 — note write must not block the verdict
-            if _is_optional_zotero_unavailable(exc):
-                LOGGER.info("verdict note mirror skipped for %s: Zotero unavailable", req.item_key)
-            else:
-                note_error = f"{type(exc).__name__}: {exc}"
-                LOGGER.warning("verdict note write for %s failed: %s", req.item_key, exc)
-
-    # Positive verdict on a Today-feed paper → materialize into the Inbox (the
-    # helper no-ops for non-feed / dont_read and never blocks the durable verdict).
-    add_result = await asyncio.to_thread(
-        add_feed_verdict_to_library, req.item_key, req.user_priority,
-    )
-
     stored = repositories.get_label_verdict(_db_path(), req.item_key)
     if stored is None:
         raise RuntimeError(
             f"verdict UPSERT returned id={row_id} but get_label_verdict found nothing"
         )
+    log_verdict_event(req.item_key, stored["original_derived_priority"], req.user_priority, req.comment)
+    effects = await asyncio.to_thread(
+        verdict_effects.apply_verdict_effects,
+        _db_path(),
+        req.item_key,
+        req.user_priority,
+        req.comment,
+    )
+
     return {
         "id": row_id,
         "created_at": stored["created_at"],
-        "note_written": note_written,
-        "note_error": note_error,
-        "label_written": label_written,
-        "label_error": label_error,
-        **add_result,
+        **effects,
     }
 
 
@@ -390,28 +318,26 @@ async def save_review_note(req: ReviewNoteRequest) -> dict[str, Any]:
     to mirror to and skip the write, matching the verdict route."""
     safe_item_key = str(req.item_key or "").strip()
     if not safe_item_key:
-        raise APIError(error="validation_error", message="item_key is required", status_code=422)
+        raise APIError(
+            error="validation_error", message="item_key is required", status_code=422
+        )
     await asyncio.to_thread(
-        repositories.upsert_review_note, _db_path(), safe_item_key, req.note,
+        repositories.upsert_review_note,
+        _db_path(),
+        safe_item_key,
+        req.note,
     )
-    note_written = False
-    note_error: str | None = None
-    source = review_detail_svc.classify_item_key(safe_item_key)
-    if source not in (review_detail_svc.SOURCE_FEED, review_detail_svc.SOURCE_NOTE):
-        try:
-            await asyncio.to_thread(zotero_upsert_user_note, safe_item_key, req.note)
-            note_written = True
-        except Exception as exc:  # noqa: BLE001 — note is already saved; mirror is best-effort
-            if _is_optional_zotero_unavailable(exc):
-                LOGGER.info("review note mirror skipped for %s: Zotero unavailable", safe_item_key)
-            else:
-                note_error = f"{type(exc).__name__}: {exc}"
-                LOGGER.warning("review note write for %s failed: %s", safe_item_key, exc)
-    return {"saved": True, "note_written": note_written, "note_error": note_error}
+    mirror = await asyncio.to_thread(
+        verdict_effects.mirror_review_note,
+        safe_item_key,
+        req.note,
+    )
+    return {"saved": True, **mirror}
 
 
 async def list_verdicts(
-    user_priority: str | None = None, source: str | None = None,
+    user_priority: str | None = None,
+    source: str | None = None,
 ) -> dict[str, Any]:
     """List recorded verdicts, optionally filtered by ``user_priority`` and/or
     ``source`` provenance (e.g. ``source=auto_quality`` for the auto quality-gate's
@@ -425,11 +351,12 @@ async def list_verdicts(
             ),
             status_code=422,
         )
-    verdicts = repositories.list_label_verdicts(
-        _db_path(), user_priority=user_priority
-    )
+    # ponytail: whole local snapshot; add end-to-end pagination if volume demands it.
+    verdicts = await asyncio.to_thread(repositories.list_all_label_verdicts, _db_path())
+    if user_priority is not None:
+        verdicts = [v for v in verdicts if v["user_priority"] == user_priority]
     if source is not None:
-        verdicts = [v for v in verdicts if v.get("source") == source]
+        verdicts = [v for v in verdicts if v["source"] == source]
     return {"verdicts": verdicts, "total": len(verdicts)}
 
 
@@ -445,9 +372,17 @@ async def remove_verdict(item_key: str) -> dict[str, Any]:
     # Read the prior verdict BEFORE delete so the retraction event keeps the
     # model/human pair the DELETE is about to destroy.
     prior = repositories.get_label_verdict(_db_path(), safe_item_key)
-    deleted = repositories.delete_label_verdict(_db_path(), safe_item_key)
+    deleted = label_verdicts.retract_label_verdict(
+        _db_path(),
+        item_key=safe_item_key,
+        surface="annotate_retract",
+    )
     if deleted and prior is not None:
         log_retract_event(safe_item_key, prior)
+    await asyncio.to_thread(
+        verdict_effects.mirror_current_verdict, _db_path(),
+        prior["item_key"] if prior is not None else safe_item_key,
+    )
     return {"deleted": deleted}
 
 
@@ -474,10 +409,6 @@ async def effective_labels_list() -> dict[str, Any]:
         "items": list(merged.values()),
         "total": len(merged),
     }
-
-
-
-
 
 
 router.add_api_route("/api/golden/provenance", get_one, methods=["GET"])

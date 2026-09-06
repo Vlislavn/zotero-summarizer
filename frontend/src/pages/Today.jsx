@@ -28,6 +28,7 @@ import {
 } from '../api/dailyApi.js';
 import { fetchReview } from '../api/reviewApi.js';
 import { reviewPaperUrl } from './reviewHelpers.js';
+import { fulltextMessage } from './todayHelpers.js';
 
 // ---------------------------------------------------------------------------
 // Spot-check — a capped, clearly-labeled sample of papers the filter rejected,
@@ -97,11 +98,12 @@ function SpotCheck({ onNavigate }) {
   const busy = addMut.isPending || trashMut.isPending;
 
   const act = useCallback(
-    (mutation, id, verb, note = '') => {
+    (mutation, id, verb) => {
       mutation.mutate([id], {
-        onSuccess: () => {
+        onSuccess: (res) => {
           setDismissed((prev) => new Set(prev).add(id));
-          setMsg(`${verb} 1 paper${note}.`);
+          const pdf = fulltextMessage(res?.fulltext);
+          setMsg(`${verb} 1 paper${pdf ? ` — ${pdf.text}` : ''}.`);
           queryClient.invalidateQueries({ queryKey: ['daily-pipeline'] });
         },
       });
@@ -138,7 +140,7 @@ function SpotCheck({ onNavigate }) {
             key={item.id}
             item={item}
             busy={busy}
-            onAdd={(id) => act(addMut, id, 'Added', ' — saved to Zotero')}
+            onAdd={(id) => act(addMut, id, 'Added')}
             onTrash={(id) => act(trashMut, id, 'Trashed')}
           />
         ))}
@@ -275,6 +277,11 @@ export default function Today() {
           if (res?.failed_count > 0) {
             bits.push(`${res.failed_count} failed`);
             warn = true;
+          }
+          const pdf = fulltextMessage(res?.fulltext);
+          if (pdf) {
+            bits.push(pdf.text);
+            warn ||= pdf.unavailable > 0;
           }
           const text = `${verb} ${n} paper${n === 1 ? '' : 's'}${bits.length ? ` — ${bits.join(', ')}` : ''}.`;
           setActionMsg({ text, tone: warn ? 'warn' : 'success' });

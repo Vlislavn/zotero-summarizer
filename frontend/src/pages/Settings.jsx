@@ -1,21 +1,5 @@
-// Settings — thin orchestrator. Owns the runtime-config query, the local form
-// state seeded from it, the JSON dirty-check, and the sticky save bar; delegates
-// the actual fields to settings/ subcomponents. The surface is now just INTENT +
-// the LLM/Zotero CONNECTION (Tesler's Law: the human owns intent + environment;
-// every technical knob — classifier gate, corpus thresholds, quality_review,
-// prestige, tokens — is a validated code default, overridable via ZS_* env or
-// per-user calibration, NOT a UI control). Components:
-//
-//   ReadinessStrip     — Zotero·LLM·Goals·Model pills (from useSetupStatus)
-//   AiModelsSection    — the LLM connection + per-stage routing (one editor)
-//   EssentialsSection  — goals, triage criteria, output language, Zotero paths
-//   UniversityAccessPanel — institutional-login toggle (authorization)
-//   ModelCard / AdminSection — unchanged
-//
-// The old AdvancedSection (classifier-gate knobs + corpus-similarity slider) is
-// GONE. The transforms live in utils/configForm.js (shared with the wizard);
-// system-owned keys round-trip from baseConfig untouched and the backend persists
-// only the user-owned keys (services/_common.write_user_config).
+// Basic Settings owns AI, research intent, Zotero and sources; operational
+// controls are disclosed separately and unsurfaced config round-trips unchanged.
 
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -23,8 +7,6 @@ import { fetchConfig, updateConfig } from '../api/settingsApi.js';
 import { configToFormState, formStateToConfig } from '../utils/configForm.js';
 import { humanizeError } from '../utils/humanizeError.js';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
-import AdminSection from '../components/AdminSection.jsx';
-import ModelCard from '../components/ModelCard.jsx';
 import { Banner } from '../components/form/Fields.jsx';
 import Button from '../components/ui/Button.jsx';
 import ReadinessStrip from '../components/settings/ReadinessStrip.jsx';
@@ -39,17 +21,11 @@ export default function Settings() {
   const queryClient = useQueryClient();
   const { status } = useSetupStatus();
 
-  // React Query owns the canonical server snapshot. The form is local state
-  // seeded from `data` on mount and after every successful save.
   const configQuery = useQuery({ queryKey: ['runtime-config'], queryFn: fetchConfig });
 
   const [form, setForm] = useState(null);
   const [savedBanner, setSavedBanner] = useState('');
-  // Controls the AI Models editor disclosure so the Active-Models summary rows
-  // can expand + scroll it (the readiness LLM pill jumps to the region above it).
   const [modelsOpen, setModelsOpen] = useState(false);
-  // Zotero paths are written through the dedicated /api/setup/paths route, so
-  // they live OUTSIDE the GoalsConfig form (and outside its dirty-check).
   const [pathForm, setPathForm] = useState({ zotero_data_dir: '', pdf_root: '' });
 
   const seededFormState = useMemo(
@@ -57,7 +33,6 @@ export default function Settings() {
     [configQuery.data],
   );
 
-  // Cheap dirty-check by JSON-serialised comparison.
   const isDirty = useMemo(() => {
     if (!form || !seededFormState) return false;
     try {
@@ -73,7 +48,6 @@ export default function Settings() {
     }
   }, [seededFormState, form]);
 
-  // Seed the path form once from the resolved status values (don't clobber edits).
   useEffect(() => {
     if (status?.paths) {
       setPathForm((prev) => {
@@ -166,17 +140,18 @@ export default function Settings() {
       <ReadinessStrip />
 
       <form onSubmit={handleSave} className="space-y-4">
-        {/* AI Models — first (Serial Position): the live "what's running now" view
-            + the single providers/stage-routing editor (temperature · thinking). */}
+        <DeploymentCard />
         <AiModelsSection
+          status={status}
+          enabled={form.llm_enabled}
           routing={form.llm_routing}
+          onEnabledChange={(next) => updateField('llm_enabled', next)}
           onChange={(next) => updateField('llm_routing', next)}
           isDirty={isDirty}
           open={modelsOpen}
           onToggle={setModelsOpen}
         />
 
-        {/* Triage — research goals, criteria, output language, Zotero paths. */}
         <EssentialsSection
           form={form}
           onUpdate={updateField}
@@ -184,20 +159,23 @@ export default function Settings() {
           onUpdatePath={updatePathField}
         />
 
-        {/* University-access config — folded into the one form so the single sticky
-            Save commits it (the panel keeps only its login action). */}
-        <UniversityAccessPanel form={form} onUpdate={updateField} />
-
         <RssFeedsSection />
 
-        {/* Save bar — sticky-bottom so the action target stays within reach (Fitts's
-            Law). ONE status slot: error wins, then unsaved, then saved/idle. */}
+        <details id="university-access" defaultOpen={window.location.hash === '#university-access'}
+          className="glass rounded-2xl border border-slate-200 p-4 scroll-mt-20">
+          <summary className="cursor-pointer text-sm font-semibold text-slate-700">
+            Advanced · performance &amp; library access
+          </summary>
+          <div className="space-y-4 mt-4">
+            <UniversityAccessPanel form={form} onUpdate={updateField} />
+            <CalibrationCard />
+          </div>
+        </details>
+
         <div className="sticky bottom-0 -mx-4 px-4 py-3 bg-white/95 backdrop-blur border-t border-slate-200 z-10 flex items-center gap-3">
           <Button type="submit" disabled={saving || !isDirty}>
             {saving ? 'Saving…' : 'Save changes'}
           </Button>
-          {/* A way out (Tesler): revert every edit to the last-saved config without a
-              page reload. Only offered while dirty — resets the form to its baseline. */}
           {isDirty && !saving && (
             <button
               type="button"
@@ -226,18 +204,6 @@ export default function Settings() {
         </div>
       </form>
 
-      {/* Deployment profile (local vs hybrid) + "Calibrate to my setup" — actions, not
-          config edits, so they sit outside the form. Both apply/measure immediately. */}
-      <DeploymentCard />
-      <CalibrationCard />
-
-      {/* Read-only model card + admin actions sit OUTSIDE the config form so their
-          action buttons can't be conflated with the config submit. */}
-      <ModelCard />
-
-      {/* Admin section lives outside the config form so its action buttons
-          (refresh-labels, retrain) can't be conflated with the config submit. */}
-      <AdminSection />
     </div>
   );
 }

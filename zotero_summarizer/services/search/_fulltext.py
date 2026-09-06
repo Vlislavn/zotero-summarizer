@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from zotero_summarizer.integrations import europepmc, pdf_fetch
+from zotero_summarizer.services._common import settings
 from zotero_summarizer.services.search._models import Candidate
 
 
@@ -40,7 +41,7 @@ def acquire_full_text(cand: Candidate, *, extractor: Any, unpaywall: Any = None)
     )
     if not url:
         return ""
-    path = pdf_fetch.fetch_pdf(url)
+    path = pdf_fetch.fetch_pdf(url, cache_dir=settings().pdf_cache_dir)
     if path is None:
         return ""
     return extractor.extract_text(path).strip()

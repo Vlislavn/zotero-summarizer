@@ -32,6 +32,7 @@ from zotero_summarizer.services.search.federate import LibraryFinder, federate
 from zotero_summarizer.services.search.intent import build_query_plan, parse_intent
 from zotero_summarizer.services.search.rank import rank_candidates, score_query_relevance
 from zotero_summarizer.services.search.review import light_review, select_deep_set
+from zotero_summarizer.settings import offline_requested
 
 # Light-review the top band, then let quality reorder within it and the deep-set
 # selector pull 3-4 for the full read (spec §5 steps 7a-7b). Named constants — a
@@ -109,6 +110,10 @@ def default_deps() -> SearchDeps:
 def run_screen(raw_query: str, questions: list[str], *, deps: SearchDeps) -> ResearchSession:
     """Phase 1: intent → plan → federate → score → rank → persist. Returns a saved
     ``ResearchSession`` with candidates ordered by the constrained contract."""
+    if offline_requested():
+        from zotero_summarizer.api.errors import APIError
+
+        raise APIError("strict_offline", "Targeted Search needs external literature sources", status_code=409)
     intent = parse_intent(raw_query, questions, llm=deps.llm)
     plan = build_query_plan(intent)
     candidates = federate(
@@ -183,7 +188,7 @@ def run_review(session_id: str, *, deps: SearchDeps, top_n: int = LIGHT_REVIEW_N
     deep_set = select_deep_set(sess.candidates, k=k)
     for cand in deep_set:
         targeted_review(
-            cand, full_text=fulltext.get(cand.candidate_id, ""), sections=[],
+            cand, full_text=fulltext.get(cand.candidate_id, ""),
             query=sess.raw_query, questions=sess.questions, config=deps.config, llm=deps.llm,
         )
         session_store.save_merge(sess)  # incremental: each deep review appears as it lands

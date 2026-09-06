@@ -10,7 +10,9 @@ import threading
 
 import numpy as np
 
-from zotero_summarizer.storage.corpus_types import CorpusMatchResult
+from zotero_summarizer.storage.corpus_types import (
+    CorpusAffinity, CorpusMatchResult, _paper_identity, _same_paper, _weighted_affinity,
+)
 
 # Module-level (PROCESS-wide) cache of the whole normalized corpus-embedding
 # matrix, keyed by a corpus-file fingerprint. The reading queue builds a FRESH
@@ -32,41 +34,56 @@ def _corpus_fingerprint(db_path: str) -> tuple:
     filesystem's mtime granularity is too coarse to move on a sub-second commit."""
     st = os.stat(db_path)
     wal = f"{db_path}-wal"
-    if os.path.exists(wal):
+    try:
         wst = os.stat(wal)
-        wal_sig = (wst.st_mtime_ns, wst.st_size)
-    else:
+    except FileNotFoundError:
+        # SQLite removes the optional WAL when its last connection closes.
         wal_sig = (0, 0)
+    else:
+        wal_sig = (wst.st_mtime_ns, wst.st_size)
     return (st.st_mtime_ns, st.st_size, *wal_sig)
 
 
 class CorpusReadMixin:
 
-    def _corpus_arrays(self, stale_days: int) -> tuple[np.ndarray, np.ndarray]:
-        """``(matrix, weights)`` for the corpus, cached until the corpus changes.
+    def list_item_ids(self) -> list[str]:
+        """All mirrored keys, including legacy rows; no vectors or pagination."""
+        conn = self._conn()
+        try:
+            return [row["item_id"] for row in conn.execute("SELECT item_id FROM corpus_embeddings")]
+        finally:
+            conn.close()
+
+    def _embedding_rows(self, conn: sqlite3.Connection, table: str) -> list[sqlite3.Row]:
+        rows = conn.execute(f"SELECT * FROM {table}").fetchall()
+        if any(row["encoder_id"] != self._encoder_id for row in rows):
+            raise ValueError("Corpus encoder changed or is unknown; resync the corpus and research goals")
+        return rows
+
+    def _corpus_arrays(self, stale_days: int) -> tuple[np.ndarray, np.ndarray, list[tuple[str, str]]]:
+        """``(matrix, weights, identities)`` cached until the corpus changes.
 
         ``matrix``: (N, dim) float32 normalized embeddings; ``weights``: (N,)
         engagement weights for ``stale_days``. Parsing the (large) embedding set
         is the expensive part — done once and reused across scored items, rebuilt
-        only when ``_corpus_version`` (bumped on any corpus write) or
+        only when the corpus-file fingerprint or
         ``stale_days`` changes."""
+        # ponytail: DB-wide invalidation; use table revisions if lookup-cache churn dominates.
+        fingerprint = (self._encoder_id, *_corpus_fingerprint(str(self.db_path)))
         cache = self._affinity_cache
         if (
             cache is not None
-            and cache["version"] == self._corpus_version
+            and cache["fingerprint"] == fingerprint
             and cache["stale_days"] == stale_days
         ):
-            return cache["matrix"], cache["weights"]
+            return cache["matrix"], cache["weights"], cache["identities"]
         conn = self._conn()
         try:
-            rows = conn.execute(
-                "SELECT tags_json, collections_json, annotation_count, manual_note_count, "
-                "created_at, embedding_json FROM corpus_embeddings"
-            ).fetchall()
+            rows = self._embedding_rows(conn, "corpus_embeddings")
         finally:
             conn.close()
         if not rows:
-            matrix = np.zeros((0, self._vector_dim()), dtype=np.float32)
+            matrix = np.zeros((0, 0), dtype=np.float32)
             weights = np.zeros((0,), dtype=np.float32)
         else:
             matrix = np.asarray(
@@ -85,40 +102,34 @@ class CorpusReadMixin:
                 ],
                 dtype=np.float32,
             )
+        identities = [_paper_identity(row["title"], row["doi"]) for row in rows]
         self._affinity_cache = {
-            "version": self._corpus_version,
+            "fingerprint": fingerprint,
             "stale_days": stale_days,
             "matrix": matrix,
             "weights": weights,
+            "identities": identities,
         }
-        return matrix, weights
+        return matrix, weights, identities
 
     def affinity_and_goals(
-        self, title: str, abstract: str, stale_days_for_weak_negative: int = 30
+        self, title: str, abstract: str, stale_days_for_weak_negative: int = 30,
+        *, doi: str = "",
     ) -> tuple[float, dict[str, float] | None]:
-        """ONE candidate embed → ``(engagement affinity, per-goal cosines)``.
+        """One candidate embed → engagement affinity and per-goal cosines.
 
-        The single computational definition of both per-candidate corpus
-        signals, from the same ``_build_text(title, abstract)`` input:
-
-        * ``affinity`` — engagement-weighted pos−neg cosine over the corpus
-          (what the user DID; the gate's ``corpus_affinity`` feature).
-          Identical math to :meth:`match_candidate`'s affinity but ~1000×
-          cheaper at scale (one numpy matmul over the cached corpus matrix vs
-          a Python cosine loop with a JSON re-parse each call); the full
-          ``match_candidate`` (collections / goals / top items) stays for the
-          review UI.
-        * ``goal_sims`` — ``{goal text: cosine}`` against each stored
-          research-goal embedding (what the user SAID they want), or ``None``
-          when no goals are stored — strictly "signal unavailable", never a
-          fake 0.0. Aggregation (max / weighting) is the caller's policy.
-
-        Distinct numbers, deliberately computed from one embedding so they can
-        never drift apart the way two separate embed paths would."""
-        matrix, weights = self._corpus_arrays(stale_days_for_weak_negative)
+        Affinity is the engagement-weighted positive minus negative mean
+        cosine. The candidate's DOI/title matches are excluded, as in full
+        matching; cached arrays avoid reparsing corpus vectors per request.
+        Goals are independent of engagement: ``{goal text: cosine}``, or None
+        when unavailable. Aggregating those goal scores is the caller's policy.
+        """
+        matrix, weights, identities = self._corpus_arrays(stale_days_for_weak_negative)
+        candidate_identity = _paper_identity(title, doi)
+        weights = np.where([_same_paper(candidate_identity, paper) for paper in identities], 0.0, weights)
         conn = self._conn()
         try:
-            goal_rows = conn.execute("SELECT goal, embedding_json FROM goal_embeddings").fetchall()
+            goal_rows = self._embedding_rows(conn, "goal_embeddings")
         finally:
             conn.close()
         if matrix.shape[0] == 0 and not goal_rows:
@@ -130,15 +141,7 @@ class CorpusReadMixin:
 
         affinity = 0.0
         if matrix.shape[0] > 0:
-            sims = matrix @ cand
-            pos = weights > 0
-            neg = weights < 0
-            pos_den = float(weights[pos].sum())
-            neg_w = -weights[neg]
-            neg_den = float(neg_w.sum())
-            positive_similarity = float((sims[pos] * weights[pos]).sum() / pos_den) if pos_den > 0 else 0.0
-            negative_similarity = float((sims[neg] * neg_w).sum() / neg_den) if neg_den > 0 else 0.0
-            affinity = round(self._clamp(positive_similarity - negative_similarity, -1.0, 1.0), 4)
+            affinity = round(float(_weighted_affinity(matrix @ cand, weights)), 4)
 
         goal_sims: dict[str, float] | None = None
         if goal_rows:
@@ -152,6 +155,23 @@ class CorpusReadMixin:
             goal_sims = acc or None
         return affinity, goal_sims
 
+    def corpus_affinity(self, rows: list[dict[str, str]], stale_days: int = 30) -> CorpusAffinity:
+        """Freeze corpus weights and candidate similarities once for all folds."""
+        matrix, weights, identities = self._corpus_arrays(stale_days)
+        similarities = np.zeros((len(rows), len(weights)), dtype=np.float32)
+        same = np.zeros(similarities.shape, dtype=bool)
+        # ponytail: O(candidates×corpus) memory; block the matrix if corpora outgrow RAM.
+        for i, row in enumerate(rows):
+            identity = _paper_identity(row.get("title") or "", row.get("doi") or "")
+            same[i] = [_same_paper(identity, paper) for paper in identities]
+            if len(weights):
+                candidate = np.asarray(self._embed(self._build_text(
+                    row.get("title") or "", row.get("abstract") or "",
+                )), dtype=np.float32)
+                norm = np.linalg.norm(candidate)
+                similarities[i] = matrix @ (candidate / norm if norm > 0 else candidate)
+        return CorpusAffinity(similarities, weights, same)
+
     def _normalized_corpus_matrix(self) -> tuple[dict[str, int], np.ndarray, np.ndarray]:
         """``(item_id→row, normalized_matrix, valid_mask)`` for the WHOLE corpus,
         cached process-wide and rebuilt only when the corpus file's mtime changes.
@@ -161,14 +181,14 @@ class CorpusReadMixin:
         across queue opens (one JSON parse of the embedding set, reused until the
         corpus is re-embedded). An empty corpus table → empty matrix."""
         path = str(self.db_path)
-        fp = _corpus_fingerprint(path)  # EmbeddingCache.__init__ always creates the file
+        fp = (self._encoder_id, *_corpus_fingerprint(path))
         with _TARGET_EMB_LOCK:
             hit = _TARGET_EMB_CACHE.get(path)
             if hit is not None and hit[0] == fp:
                 return hit[1], hit[2], hit[3]
         conn = self._conn()
         try:
-            rows = conn.execute("SELECT item_id, embedding_json FROM corpus_embeddings").fetchall()
+            rows = self._embedding_rows(conn, "corpus_embeddings")
         finally:
             conn.close()
         if rows:
@@ -177,7 +197,7 @@ class CorpusReadMixin:
             valid = norms[:, 0] > 0
             mat = mat / np.where(norms > 0, norms, 1.0)
         else:
-            mat = np.zeros((0, self._vector_dim()), dtype=np.float32)
+            mat = np.zeros((0, 0), dtype=np.float32)
             valid = np.zeros((0,), dtype=bool)
         index = {str(r["item_id"]): i for i, r in enumerate(rows)}
         with _TARGET_EMB_LOCK:
@@ -223,7 +243,7 @@ class CorpusReadMixin:
             return {}
         conn = self._conn()
         try:
-            goal_rows = conn.execute("SELECT embedding_json FROM goal_embeddings").fetchall()
+            goal_rows = self._embedding_rows(conn, "goal_embeddings")
         finally:
             conn.close()
         if not goal_rows:
@@ -256,19 +276,15 @@ class CorpusReadMixin:
         abstract: str,
         stale_days_for_weak_negative: int = 30,
         top_k: int = 3,
+        *, doi: str = "",
     ) -> CorpusMatchResult:
         candidate_embedding = self._embed(self._build_text(title, abstract))
+        candidate_identity = _paper_identity(title, doi)
 
         conn = self._conn()
         try:
-            corpus_rows = conn.execute(
-                """
-                SELECT item_id, title, tags_json, collections_json, annotation_count,
-                       manual_note_count, created_at, embedding_json
-                FROM corpus_embeddings
-                """
-            ).fetchall()
-            goal_rows = conn.execute("SELECT goal, embedding_json FROM goal_embeddings").fetchall()
+            corpus_rows = self._embedding_rows(conn, "corpus_embeddings")
+            goal_rows = self._embedding_rows(conn, "goal_embeddings")
         finally:
             conn.close()
 
@@ -293,6 +309,8 @@ class CorpusReadMixin:
         collection_den: dict[str, float] = {}
 
         for row in corpus_rows:
+            if _same_paper(candidate_identity, _paper_identity(row["title"], row["doi"])):
+                continue
             embedding = self._parse_embedding(row["embedding_json"])
             sim = self._cosine(candidate_embedding, embedding)
             weight = self._engagement_weight(
@@ -369,7 +387,7 @@ class CorpusReadMixin:
         try:
             row = conn.execute(
                 """
-                SELECT item_id, title, abstract, tags_json, collections_json,
+                SELECT item_id, title, abstract, doi, tags_json, collections_json,
                        annotation_count, manual_note_count, created_at, updated_at
                 FROM corpus_embeddings
                 WHERE item_id = ?
@@ -414,7 +432,7 @@ class CorpusReadMixin:
             ).fetchone()
             rows = conn.execute(
                 f"""
-                SELECT item_id, title, abstract, tags_json, collections_json,
+                SELECT item_id, title, abstract, doi, tags_json, collections_json,
                        annotation_count, manual_note_count, created_at, updated_at
                 FROM corpus_embeddings
                 {where_sql}
@@ -459,6 +477,7 @@ class CorpusReadMixin:
             "item_id": str(row["item_id"] or ""),
             "title": str(row["title"] or ""),
             "abstract": str(row["abstract"] or ""),
+            "doi": str(row["doi"] or ""),
             "tags": tags,
             "collections": collections,
             "annotation_count": annotation_count,

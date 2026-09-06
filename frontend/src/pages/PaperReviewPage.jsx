@@ -16,7 +16,7 @@ import StoryToc from '../components/paper/review/StoryToc.jsx';
 import ActionRail from '../components/paper/review/ActionRail.jsx';
 import VerdictPicker from '../components/VerdictPicker.jsx';
 import { Chip } from '../components/paper/review/primitives.jsx';
-import { StatusBanner, timeAgo, formatShortDate } from '../components/library/shared.jsx';
+import { FullTextAccessNotice, StatusBanner, timeAgo, formatShortDate } from '../components/library/shared.jsx';
 import { gradeTone, bandTone, BAND_LABEL } from '../components/paper/review/tones.js';
 import Spinner from '../components/ui/Spinner.jsx';
 
@@ -40,7 +40,11 @@ function ReviewZone({ deep, runner, sectionOverlay }) {
   const reviewed = deep && !deep.needs_pdf && (deep.digest || deep.quality || (deep.goal_summaries || []).length);
   return (
     <div className="space-y-3">
-      {llm && llm.reachable === false && (
+      {llm?.enabled === false ? (
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] text-slate-700">
+          AI reviews are off. Enable them in <span className="font-semibold">Settings → AI models</span>.
+        </div>
+      ) : llm && llm.reachable === false && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] leading-relaxed text-amber-800" role="alert">
           <span className="font-semibold">Deep-review model unreachable.</span>{' '}
           <span className="font-mono text-[12px]">{llm.model || '(model unset)'}</span> at{' '}
@@ -48,21 +52,7 @@ function ReviewZone({ deep, runner, sectionOverlay }) {
           server, or pick a reachable model in <span className="font-semibold">Settings → LLM routing</span>.
         </div>
       )}
-      {deep && deep.needs_pdf && deep.needs_login && deep.login_url && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] leading-relaxed text-amber-800">
-          <span className="font-semibold">Needs your library sign-in.</span>{' '}
-          <a href={deep.login_url} target="_blank" rel="noopener noreferrer" className="font-medium text-indigo-700 hover:underline">
-            Open it in your browser
-          </a>{' '}
-          to sign in, then re-generate.
-        </div>
-      )}
-      {deep && deep.needs_pdf && !(deep.needs_login && deep.login_url) && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] leading-relaxed text-amber-800">
-          <span className="font-semibold">No full text available.</span>{' '}
-          The review tried open access, PubMed Central, and your library session but couldn&apos;t reach a readable copy.
-        </div>
-      )}
+      <FullTextAccessNotice deep={deep} />
 
       {reviewed ? (
         <PaperReview deep={deep} flat sectionOverlay={sectionOverlay} />
@@ -89,7 +79,7 @@ function ReviewZone({ deep, runner, sectionOverlay }) {
           <button
             type="button"
             onClick={() => runner.run()}
-            disabled={llm?.reachable === false}
+            disabled={llm?.enabled === false || llm?.reachable === false}
             className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-[13px] font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
           >
             Generate review

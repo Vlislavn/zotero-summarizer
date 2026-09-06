@@ -17,25 +17,28 @@ browser lib + sibling integration constants. It takes ``profile_dir``/``cache_di
 as arguments (a ``services`` concern resolves them from ``Settings``); it never
 reaches for config or services.
 
-Best-effort by contract (authorized: the user opted into browser automation and the
-review-fleet reports an honest per-item outcome): a missing browser dependency, a
-not-logged-in profile, or a fetch failure returns ``None`` — the caller degrades to
-``needs_library_login`` / ``no_fetchable_source`` rather than crashing. Single
-browser at a time (a module lock) — both for the unified-memory RAM budget and to
-dodge Chromium's per-profile ``SingletonLock``.
+An absent optional dependency or a non-PDF result returns ``None``; acquisition
+errors propagate. All launched browsers use the same public-only egress boundary.
+Single browser at a time (a module lock) — both for the unified-memory RAM budget
+and to dodge Chromium's per-profile ``SingletonLock``.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import logging
 import threading
 from pathlib import Path
 from typing import Any, Callable, NamedTuple
+from urllib.parse import urljoin
+
+from zotero_summarizer.integrations._browser_network import public_browser_options
+from zotero_summarizer.integrations.app_rss import validate_rss_url
 
 from zotero_summarizer.integrations.pdf_fetch import (
-    _DEFAULT_CACHE_DIR,
     _DEFAULT_MAX_BYTES,
     _PDF_MAGIC,
+    valid_pdf_path,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -139,11 +142,83 @@ def _cache_path(url: str, cache_dir: Path) -> Path:
     return cache_dir / f"{url_key}.pdf"
 
 
+def _read_stream(cdp: Any, handle: str, max_bytes: int) -> bytes:
+    """Read at most the limit plus one detection byte; always release the stream."""
+    body = bytearray()
+    try:
+        if max_bytes < 0:
+            raise ValueError("max_bytes must be non-negative")
+        while True:
+            result = cdp.send("IO.read", {"handle": handle, "size": min(64_000, max_bytes - len(body) + 1)})
+            chunk = base64.b64decode(result["data"], validate=True) if result.get("base64Encoded") else result["data"].encode()
+            if len(body) + len(chunk) > max_bytes:
+                raise ValueError("Browser response exceeds max_bytes")
+            body.extend(chunk)
+            if result["eof"]:
+                return bytes(body)
+            if not chunk:
+                raise ValueError("Browser stream made no progress")
+    finally:
+        cdp.send("IO.close", {"handle": handle})
+
+
+def _print_pdf(cdp: Any, max_bytes: int) -> bytes:
+    result = cdp.send("Page.printToPDF", {
+        "transferMode": "ReturnAsStream", "paperWidth": 8.27, "paperHeight": 11.7,
+        "printBackground": False, "marginTop": 0, "marginBottom": 0,
+        "marginLeft": 0, "marginRight": 0,
+    })
+    return _read_stream(cdp, result["stream"], max_bytes)
+
+
+def _authenticate_proxy(cdp: Any, event: dict, proxy: dict, attempted: set[str]) -> None:
+    challenge = event["authChallenge"]
+    response = {"response": "CancelAuth"}
+    if (challenge["source"] == "Proxy" and challenge["origin"].rstrip("/") == proxy["server"]
+            and event["requestId"] not in attempted):
+        attempted.add(event["requestId"])
+        response = {"response": "ProvideCredentials", "username": proxy["username"], "password": proxy["password"]}
+    cdp.send("Fetch.continueWithAuth", {"requestId": event["requestId"], "authChallengeResponse": response})
+
+
+def _capture_response(cdp: Any, event: dict, captured: list[bytes], max_bytes: int, frame_id: str) -> None:
+    request = {"requestId": event["requestId"]}
+    headers = event.get("responseHeaders", [])
+    is_pdf = any(h["name"].lower() == "content-type" and "application/pdf" in h["value"].lower() for h in headers)
+    is_document = event.get("frameId") == frame_id and event["resourceType"] == "Document"
+    code = event.get("responseStatusCode", 0)
+    if code in {0, 401, 407} or 300 <= code < 400 or not (is_pdf or is_document):
+        cdp.send("Fetch.continueRequest", request)
+        return
+    if captured:
+        cdp.send("Fetch.failRequest", {**request, "errorReason": "Aborted"})
+        return
+    captured.append(b"")  # Reserve the single capture while synchronous CDP pumps other events.
+    try:
+        stream = cdp.send("Fetch.takeResponseBodyAsStream", request)
+        body = _read_stream(cdp, stream["stream"], max_bytes)
+    except Exception:
+        captured.clear()
+        cdp.send("Fetch.failRequest", {**request, "errorReason": "Aborted"})
+        raise
+    if 200 <= code < 300 and _looks_pdf(body, max_bytes=max_bytes):
+        captured[0] = body
+        cdp.send("Fetch.failRequest", {**request, "errorReason": "Aborted"})
+        return
+    captured.clear()
+    # The stream is decoded. Preserve HTML/JS and cookies, not stale wire framing.
+    headers = [h for h in headers if h["name"].lower() not in {"content-encoding", "content-length", "transfer-encoding"}]
+    cdp.send("Fetch.fulfillRequest", {
+        **request, "responseCode": code, "responseHeaders": headers,
+        "body": base64.b64encode(body).decode("ascii"),
+    })
+
+
 def fetch_pdf_via_browser(
     url: str,
     *,
     profile_dir: Path,
-    cache_dir: Path | None = None,
+    cache_dir: Path,
     timeout: float = 60.0,
     max_bytes: int = _DEFAULT_MAX_BYTES,
     headless: bool = True,
@@ -158,20 +233,18 @@ def fetch_pdf_via_browser(
     an injected ``cf_clearance`` so Cloudflare publishers accept it; ``""`` = bundled
     chromium).
 
-    Three strategies: (1) an authenticated context request (carries the profile's
-    cookies — best for a direct-PDF link behind EZproxy); (2) full navigation with
-    response interception (publishers that stream the PDF inline); (3) for a landing
-    page that didn't stream one, follow its ``citation_pdf_url`` meta (the Highwire tag
-    Nature/Springer/Elsevier/Wiley expose) and fetch THAT through the cookie'd context.
+    Navigate with the profile's cookies and intercept bounded response streams;
+    follow the landing page's PDF metadata/download links when necessary. No
+    APIResponse.body() or unbounded context-request buffer is used.
     When ``cookie_browser`` is set (e.g. ``chrome``), the user's existing session from
     THAT browser is injected first (no separate in-app login). ``None`` on a missing
-    dep, a non-PDF, or any browser error (authorized best-effort contract)."""
+    dep or a non-PDF. Navigation, transport and security errors propagate."""
     if not url:
         return None
-    cache_dir = (cache_dir or _DEFAULT_CACHE_DIR).expanduser()
+    cache_dir = cache_dir.expanduser()
     cache_dir.mkdir(parents=True, exist_ok=True)
     final_path = _cache_path(url, cache_dir)
-    if final_path.exists() and final_path.stat().st_size > 0:
+    if valid_pdf_path(final_path, max_bytes=max_bytes):
         return final_path
 
     sync_playwright, error_class = _load_playwright()
@@ -199,49 +272,45 @@ def fetch_pdf_via_browser(
 def render_article_pdf(
     url: str,
     *,
-    cache_dir: Path | None = None,
+    cache_dir: Path,
     timeout: float = 60.0,
     max_bytes: int = _DEFAULT_MAX_BYTES,
 ) -> Path | None:
     """Render a WEB ARTICLE (an HTML page with no PDF — blog / Substack / news / docs)
-    to a PDF via headless Chromium ``page.pdf()``, so the PDF-only review pipeline can
-    digest it. Returns the cached path or ``None`` (missing dep / nav failure / non-PDF)
-    — best-effort, same contract as ``fetch_pdf_via_browser``.
+    to a PDF via headless Chromium's streamed print output, so the PDF-only review pipeline can
+    digest it. Returns the cached path or ``None`` (missing dep / non-PDF).
+    Navigation, transport and security errors propagate.
 
     Uses an EPHEMERAL context (a public page needs no session) and a cache key prefixed
-    ``render:`` so it never collides with a real fetched PDF at the same URL. ``page.pdf``
-    is Chromium-headless only — exactly our stack. For a web article the rendered DOM IS
+    ``render:`` so it never collides with a real fetched PDF at the same URL.
+    For a web article the rendered DOM IS
     the document, so this is the correct full text (unlike a publisher PDF, where
-    ``page.pdf`` would lose the real file — never use it there)."""
+    printing would lose the real file — never use it there)."""
     if not url:
         return None
-    cache_dir = (cache_dir or _DEFAULT_CACHE_DIR).expanduser()
+    cache_dir = cache_dir.expanduser()
     cache_dir.mkdir(parents=True, exist_ok=True)
     final_path = _cache_path("render:" + url, cache_dir)
-    if final_path.exists() and final_path.stat().st_size > 0:
+    if valid_pdf_path(final_path, max_bytes=max_bytes):
         return final_path
 
-    sync_playwright, error_class = _load_playwright()
+    sync_playwright, _ = _load_playwright()
     if sync_playwright is None:
         return None
     if not _BROWSER_LOCK.acquire(blocking=False):
         LOGGER.info("article render skipped: another browser session is in flight")
         return None
-    catch: tuple[type[BaseException], ...] = (OSError,) if error_class is None else (error_class, OSError)
     timeout_ms = int(timeout * 1000)
-    body = b""
     try:
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
+        with public_browser_options(url, timeout) as network, sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True, **network)
             try:
-                page = browser.new_context().new_page()
+                ctx = browser.new_context()
+                page = ctx.new_page()
                 page.goto(url, wait_until="load", timeout=timeout_ms)
-                body = page.pdf(format="A4", print_background=False)
+                body = _print_pdf(ctx.new_cdp_session(page), max_bytes)
             finally:
                 browser.close()
-    except catch as exc:
-        LOGGER.info("article render failed for %s: %s", url, exc)
-        body = b""
     finally:
         _BROWSER_LOCK.release()
 
@@ -262,19 +331,16 @@ _PDF_LINK_JS = (
 )
 
 
-def _pdf_candidates(page: Any, landing_url: str, catch: tuple[type[BaseException], ...]) -> list[str]:
+def _pdf_candidates(page: Any, landing_url: str) -> list[str]:
     """Ordered, de-duped PDF links to try for a landing page: the ``citation_pdf_url``
     meta first, then the page's on-page "Download PDF" anchors (the meta can 30x to HTML).
-    Excludes the landing URL itself. Best-effort DOM reads (a selector failure → skip)."""
+    Excludes the landing URL itself. DOM failures propagate."""
     out: list[str] = []
-    try:
-        meta = page.query_selector("meta[name='citation_pdf_url']")
-        content = meta.get_attribute("content") if meta else None
-        if content:
-            out.append(content)
-        out.extend(page.eval_on_selector_all("a", _PDF_LINK_JS) or [])
-    except catch as exc:
-        LOGGER.debug("browser: PDF-link discovery failed: %s", exc)
+    meta = page.query_selector("meta[name='citation_pdf_url']")
+    content = meta.get_attribute("content") if meta else None
+    if content:
+        out.append(content)
+    out.extend(page.eval_on_selector_all("a", _PDF_LINK_JS) or [])
     seen: set[str] = set()
     deduped: list[str] = []
     for u in out:
@@ -296,9 +362,8 @@ def _drive_browser(
     channel: str = "",
     render_fallback: bool = False,
 ) -> bytes:
-    """Launch a persistent context and return the captured PDF bytes (``b''`` on any
-    failure). Caught errors: the browser lib's own error class + OSError — mirrors
-    ``pdf_fetch.fetch_pdf``'s narrow boundary, never a bare except.
+    """Launch a public-only persistent context and return captured PDF bytes.
+    Transport, security, DOM and cookie-injection errors propagate.
 
     ``render_fallback``: if the page declares NO PDF (no ``citation_pdf_url`` — i.e. it
     is web content like a Nature news/comment piece, not a real paper), render the page
@@ -309,82 +374,53 @@ def _drive_browser(
     profile_dir.mkdir(parents=True, exist_ok=True)
     timeout_ms = int(timeout * 1000)
     catch: tuple[type[BaseException], ...] = (OSError,) if error_class is None else (error_class, OSError)
-    try:
-        with sync_playwright() as pw:
-            ctx = pw.chromium.launch_persistent_context(
-                str(profile_dir), channel=(channel or None), headless=headless, no_viewport=True)
-            try:
-                if cookie_browser:
-                    cookies = _load_browser_cookies(cookie_browser)
-                    if cookies:
-                        try:
-                            ctx.add_cookies(cookies)  # bring the user's live browser session
-                            LOGGER.info("injected %d %s cookies into the fetch context", len(cookies), cookie_browser)
-                        except catch as exc:  # a malformed cookie must not kill the fetch
-                            LOGGER.info("%s cookie injection failed (continuing without): %s", cookie_browser, exc)
-                # (1) authenticated direct request — cheapest, carries cookies.
-                resp = ctx.request.get(url, timeout=timeout_ms)
-                if resp.ok:
-                    body = resp.body()
-                    if _looks_pdf(body, max_bytes=max_bytes):
-                        return body
-                # (2) navigate + intercept the first application/pdf response.
-                captured: list[bytes] = []
-
-                def _on_response(response: Any) -> None:
-                    if captured:
-                        return
-                    content_type = (response.headers or {}).get("content-type", "")
-                    if "application/pdf" not in content_type.lower():
-                        return
-                    try:
-                        captured.append(response.body())
-                    except catch as exc:
-                        LOGGER.debug("browser: could not read PDF response body: %s", exc)
-
-                page = ctx.new_page()
-                page.on("response", _on_response)
-                page.goto(url, wait_until="load", timeout=timeout_ms)
+    with public_browser_options(url, timeout) as network, sync_playwright() as pw:
+        ctx = pw.chromium.launch_persistent_context(
+            str(profile_dir), channel=(channel or None), headless=headless, no_viewport=True, **network)
+        try:
+            if cookie_browser:
+                cookies = _load_browser_cookies(cookie_browser)
+                if cookies:
+                    ctx.add_cookies(cookies)
+            captured: list[bytes] = []
+            page = ctx.new_page()
+            cdp = ctx.new_cdp_session(page)
+            errors: list[Exception] = []
+            cdp.on("error", lambda error: errors.append(error))
+            frame_id = cdp.send("Page.getFrameTree")["frameTree"]["frame"]["id"]
+            attempted: set[str] = set()
+            cdp.on("Fetch.authRequired", lambda event: _authenticate_proxy(cdp, event, network["proxy"], attempted))
+            cdp.on("Fetch.requestPaused", lambda event: _capture_response(cdp, event, captured, max_bytes, frame_id))
+            cdp.send("Fetch.enable", {"handleAuthRequests": True, "patterns": [
+                {"urlPattern": "*", "requestStage": stage} for stage in ("Request", "Response")
+            ]})
+            candidates = [url]
+            for index, target in enumerate(candidates):
+                target = validate_rss_url(urljoin(url, target))
+                try:
+                    page.goto(target, wait_until="load", timeout=timeout_ms)
+                except catch:
+                    if not captured or not _looks_pdf(captured[0], max_bytes=max_bytes):
+                        raise
+                finally:
+                    if errors:  # CDP callback errors belong to this navigation, not asyncio's log.
+                        raise errors[0]
                 if captured:
                     return captured[0]
-                # (3) a landing page that didn't stream a PDF: follow its declared PDF
-                # links. Try the ``citation_pdf_url`` meta (Highwire tag) AND the page's
-                # actual "Download PDF" controls — the meta can be a REDIRECT TRAP (Nature's
-                # Oscar platform 30x's ``<article>.pdf`` back to the HTML landing, while the
-                # on-page Download-PDF button points to the real file, e.g. ``_reference.pdf``).
-                candidates = _pdf_candidates(page, url, catch)
-                for pdf_url in candidates:
-                    # (3a) cheap, cookie'd API request first — carries the session.
-                    resp2 = ctx.request.get(pdf_url, timeout=timeout_ms)
-                    if resp2.ok and _looks_pdf(resp2.body(), max_bytes=max_bytes):
-                        return resp2.body()
-                    # (3b) ``ctx.request`` gets none of patchright's page-level stealth and
-                    # never runs a JS challenge, so a Cloudflare publisher bot-walls it even
-                    # with cookies. Navigate to the PDF as a REAL page so the challenge runs
-                    # + cf_clearance carries; ``_on_response`` grabs the application/pdf body
-                    # (a download aborts the nav AFTER the response fires → already captured).
-                    captured.clear()
-                    try:
-                        page.goto(pdf_url, wait_until="load", timeout=timeout_ms)
-                    except catch as exc:
-                        LOGGER.debug("browser: pdf nav aborted (download?), using intercept: %s", exc)
-                    if captured:
-                        return captured[0]
-                if candidates:
-                    # Real PDF link(s) were DECLARED but none fetched (gated behind a login
-                    # for this publisher, or a hard interactive challenge). Don't render a
-                    # paywall stub — let the caller report "needs login" honestly.
-                    return b""
-                # (4) no declared PDF anywhere → web content (e.g. a Nature news/comment
-                # piece with a DOI). Render the page itself so it can still be reviewed.
-                if render_fallback:
-                    return page.pdf(format="A4", print_background=False)
+                if index == 0:
+                    candidates.extend(_pdf_candidates(page, url))
+            if len(candidates) > 1:
+                # Real PDF link(s) were DECLARED but none fetched (gated behind a login
+                # for this publisher, or a hard interactive challenge). Don't render a
+                # paywall stub — let the caller report "needs login" honestly.
                 return b""
-            finally:
-                ctx.close()  # flushes the persistent profile's cookies to disk
-    except catch as exc:
-        LOGGER.info("browser fetch failed for %s: %s", url, exc)
-        return b""
+            # (4) no declared PDF anywhere → web content (e.g. a Nature news/comment
+            # piece with a DOI). Render the page itself so it can still be reviewed.
+            if render_fallback:
+                return _print_pdf(cdp, max_bytes)
+            return b""
+        finally:
+            ctx.close()  # flushes the persistent profile's cookies to disk
 
 
 def open_login_window(login_url: str, profile_dir: Path, *, channel: str = "",
@@ -402,17 +438,15 @@ def open_login_window(login_url: str, profile_dir: Path, *, channel: str = "",
     profile_dir.mkdir(parents=True, exist_ok=True)
     catch: tuple[type[BaseException], ...] = (OSError,) if error_class is None else (error_class, OSError)
     try:
-        with sync_playwright() as pw:
+        with public_browser_options(login_url, timeout) as network, sync_playwright() as pw:
             ctx = pw.chromium.launch_persistent_context(
-                str(profile_dir), channel=(channel or None), headless=False, no_viewport=True)
+                str(profile_dir), channel=(channel or None), headless=False, no_viewport=True, **network)
             try:
                 page = ctx.pages[0] if ctx.pages else ctx.new_page()
                 if login_url:
                     page.goto(login_url, wait_until="load", timeout=int(min(timeout, 120.0) * 1000))
                 # Wait for the user to finish + close the window (pages drop to 0).
                 page.wait_for_event("close", timeout=int(timeout * 1000))
-            except catch as exc:
-                LOGGER.info("login window closed/timed out: %s", exc)
             finally:
                 ctx.close()  # flush cookies
         # Mark that the user ran the connect flow (the session now lives in the

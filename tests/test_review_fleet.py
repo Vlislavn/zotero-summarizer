@@ -1,8 +1,8 @@
 """Review-fleet (Phase-2 background pre-decision of Read-next verdicts).
 
-Covers three modules with stubs (no real LLM / Zotero / model load); ``prewarm`` lives
+Covers two modules with stubs (no real LLM / Zotero / model load); proposal tests live
+in ``test_review_fleet_propose.py`` and ``prewarm`` lives
 in ``test_review_fleet_prewarm.py``:
-  * ``propose.propose_verdict`` — the pure deterministic truth-table (the brain).
   * ``verdict_store`` — atomic JSON sidecar round-trip + clear + corrupt-loud.
   * ``fleet`` — the single-flight, BATCHED provider-aware job: cache reuse, the one
     batched deep_review.start call, sequential PDF acquire + re-review, the status
@@ -16,135 +16,10 @@ import types
 
 import pytest
 
-from zotero_summarizer.models.triage import ProposedVerdict
 from zotero_summarizer.services.library.review_fleet import (
     fleet,
-    propose,
     verdict_store,
 )
-
-
-# ===========================================================================
-# propose.propose_verdict — pure truth-table
-# ===========================================================================
-
-
-def _digest(read_decision="read", grade="A"):
-    return {"read_decision": read_decision, "grade": grade}
-
-
-def _quality(band="neutral", overstatements=None, red_flags=None, grade=""):
-    return {
-        "quality_band": band,
-        "overstatements": overstatements or [],
-        "red_flags": red_flags or [],
-        "grade": grade,
-    }
-
-
-def _goals(*relevant_flags):
-    return [{"relevant": r} for r in relevant_flags]
-
-
-def test_read_high_grade_proposes_must_read():
-    v = propose.propose_verdict(_digest("read", "A"), _quality())
-    assert isinstance(v, ProposedVerdict)
-    assert v.proposed == "must_read"
-    assert v.digest_read_decision == "read"
-    assert v.grade == "A"
-    assert v.confidence >= 0.8
-    assert v.source == "review_fleet"
-    assert v.proposed_at  # stamped
-
-
-def test_read_low_grade_proposes_should_read():
-    v = propose.propose_verdict(_digest("read", "C"), _quality())
-    assert v.proposed == "should_read"
-
-
-def test_skim_high_grade_proposes_should_read():
-    assert propose.propose_verdict(_digest("skim", "A"), _quality()).proposed == "should_read"
-
-
-def test_skim_low_grade_proposes_could_read():
-    assert propose.propose_verdict(_digest("skim", "D"), _quality()).proposed == "could_read"
-
-
-def test_skip_goal_miss_proposes_dont_read():
-    """A clean skip with NO goal match is the only path that proposes a hide."""
-    v = propose.propose_verdict(_digest("skip", "D"), _quality(), goal_summaries=_goals(False, False))
-    assert v.proposed == "dont_read"
-
-
-def test_skip_goal_match_keeps_could_read_not_dont_read():
-    """ASYMMETRY: a wrong hide costs more than a wrong keep, so a goal-matched
-    skip is biased UP to could_read instead of dont_read."""
-    v = propose.propose_verdict(_digest("skip", "D"), _quality(), goal_summaries=_goals(True))
-    assert v.proposed == "could_read"
-
-
-def test_no_digest_never_proposes_a_hide():
-    """No read_decision (e.g. no PDF) → a safe could_read, never dont_read."""
-    for digest in (None, {}, {"read_decision": "", "grade": ""}):
-        v = propose.propose_verdict(digest, None)
-        assert v.proposed == "could_read"
-        assert v.digest_read_decision == ""
-
-
-def test_uncertain_band_lowers_confidence_and_flags():
-    strong = propose.propose_verdict(_digest("read", "A"), _quality(band="neutral"))
-    shaky = propose.propose_verdict(_digest("read", "A"), _quality(band="uncertain"))
-    assert "quality_uncertain" in shaky.flags
-    assert shaky.confidence < strong.confidence
-    assert "uncertain" in shaky.rationale
-
-
-def test_overstatements_lower_confidence_and_flag():
-    strong = propose.propose_verdict(_digest("read", "A"), _quality())
-    shaky = propose.propose_verdict(_digest("read", "A"), _quality(overstatements=["claim X unsupported"]))
-    assert "overstatements" in shaky.flags
-    assert shaky.confidence < strong.confidence
-
-
-def test_flag_band_and_red_flags_surface_as_flags():
-    v = propose.propose_verdict(
-        _digest("read", "B"), _quality(band="flag", red_flags=["self-citation ring"])
-    )
-    assert "quality_flag" in v.flags
-    assert "red_flags" in v.flags
-
-
-def test_grade_falls_back_to_quality_when_digest_ungraded():
-    v = propose.propose_verdict(_digest("read", ""), _quality(grade="A"))
-    assert v.grade == "A"
-    assert v.proposed == "must_read"  # high grade still lifts the verdict
-
-
-def test_unknown_read_decision_is_normalized_to_empty():
-    v = propose.propose_verdict({"read_decision": "MAYBE", "grade": "A"}, _quality())
-    assert v.digest_read_decision == ""
-    assert v.proposed == "could_read"
-
-
-def test_confidence_is_bounded_unit_interval():
-    # Worst-case stack of penalties must still clamp to >= 0.0.
-    v = propose.propose_verdict(_digest("skim", ""), _quality(band="uncertain", overstatements=["a"]))
-    assert 0.0 <= v.confidence <= 1.0
-
-
-def test_propose_is_deterministic():
-    a = propose.propose_verdict(_digest("read", "A"), _quality(), goal_summaries=_goals(True))
-    b = propose.propose_verdict(_digest("read", "A"), _quality(), goal_summaries=_goals(True))
-    assert a.proposed == b.proposed and a.confidence == b.confidence and a.flags == b.flags
-
-
-def test_goal_summaries_non_list_is_unknown_not_a_miss():
-    # A malformed / absent goal board is UNKNOWN, not a goal-MISS: absence of
-    # evidence is never evidence to hide, so a skip stays could_read (the
-    # no-wrong-hide asymmetry). Only a real evaluated miss licenses dont_read.
-    v = propose.propose_verdict(_digest("skip", "D"), _quality(), goal_summaries="not-a-list")
-    assert v.proposed == "could_read"
-    assert v.confidence < 0.6  # withheld → Override-only on the card
 
 
 # ===========================================================================
@@ -164,7 +39,7 @@ def test_read_all_empty_when_absent(_store_path):
 
 
 def test_upsert_then_read_all_round_trip(_store_path):
-    proposal = propose.propose_verdict(_digest("read", "A"), _quality()).model_dump()
+    proposal = {"proposed": "must_read"}
     verdict_store.upsert("ABC123", proposal)
     stored = verdict_store.read_all()
     assert set(stored) == {"ABC123"}
@@ -240,7 +115,15 @@ def _stub_queue(monkeypatch, keys):
 
 
 def _cached_review(read_decision="read", grade="A"):
-    return {"digest": _digest(read_decision, grade), "quality": _quality(), "goal_summaries": []}
+    return {
+        "review_contract_version": fleet.deep_review.REVIEW_CONTRACT_VERSION,
+        "digest": {
+            "read_decision": read_decision, "grade": grade, "writing_friction": "low",
+            "novelty": 4, "significance": 4,
+        },
+        "quality": {"quality_band": "highlight"},
+        "goal_summaries": [{"relevant": True}],
+    }
 
 
 def _stub_deep_review(monkeypatch, cache, *, status="ready", review=None):
@@ -409,7 +292,10 @@ def test_needs_pdf_pick_is_acquired_then_re_reviewed_from_that_path(monkeypatch)
 
     def _review(_key, pdf_overrides):
         # WITH an override (re-review from the acquired path) → a digest; without → needs_pdf.
-        return _cached_review("read", "A") if pdf_overrides else {"digest": None, "needs_pdf": True}
+        return _cached_review("read", "A") if pdf_overrides else {
+            "review_contract_version": fleet.deep_review.REVIEW_CONTRACT_VERSION,
+            "digest": None, "needs_pdf": True,
+        }
 
     starts = _stub_deep_review(monkeypatch, cache, review=_review)
     monkeypatch.setattr(fleet.time, "sleep", lambda _s: None)
@@ -424,7 +310,9 @@ def test_needs_pdf_pick_is_acquired_then_re_reviewed_from_that_path(monkeypatch)
 
     fleet.start(top_k=1)
     # Pass 1 reviews from Zotero (needs_pdf), pass 2 re-reviews WITH the acquired override.
-    assert [s["pdf_overrides"] for s in starts] == [{}, {"A": "/tmp/acquired.pdf"}]
+    assert [s["pdf_overrides"] for s in starts] == [
+        {}, {"A": {"path": "/tmp/acquired.pdf", "source": "", "source_url": ""}},
+    ]
     assert verdict_store.read_all()["A"]["proposed"] == "must_read"
 
 
@@ -449,6 +337,31 @@ def test_needs_library_login_pick_is_tallied_not_proposed(monkeypatch):
     assert s["needs_library_login"] == 1
     assert s["completed"] == 1
     assert verdict_store.read_all() == {}
+
+
+def test_missing_browser_extra_is_not_tallied_as_login(monkeypatch):
+    from zotero_summarizer.services.library import _pdf_acquire
+
+    _stub_queue(monkeypatch, ["OTHER"])
+    cache: dict = {}
+    _stub_deep_review(monkeypatch, cache, review=lambda _k, _ov: {"digest": None, "needs_pdf": True})
+    monkeypatch.setattr(fleet.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(
+        "zotero_summarizer.services.zotero.zotero.get_library_reader",
+        lambda: types.SimpleNamespace(get_item_detail=lambda _k: {"has_pdf": False}),
+    )
+    monkeypatch.setattr(
+        _pdf_acquire, "acquire_pdf_for",
+        lambda *_a, **_k: _pdf_acquire.AcquireResult(
+            path=None, outcome="browser_extra_unavailable",
+        ),
+    )
+
+    fleet.start(top_k=1)
+    result = fleet.status()
+    assert result["browser_extra_unavailable"] == 1
+    assert result["needs_library_login"] == 0
+    assert result["needs_login_items"] == []
 
 
 def test_per_item_failure_is_isolated(monkeypatch):

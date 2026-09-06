@@ -1,25 +1,28 @@
 """App-owned RSS reader backed by ``rss_feeds`` / ``rss_items``."""
+
 from __future__ import annotations
 
 import ipaddress
 import socket
+import zlib
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin
 
 import httpx
 
-from zotero_summarizer.integrations._zotero_read_common import _arxiv_id_from_url_or_doi
+from zotero_summarizer.integrations._zotero_read_common import _INJECTION_CHAR_PATTERN, _arxiv_id_from_url_or_doi
 from zotero_summarizer.storage import feeds as feeds_storage
 from zotero_summarizer.storage import rss as rss_storage
 from zotero_summarizer.storage.feed_identity import (
     doi_from_text,
     stable_feed_key_from_item,
 )
+from zotero_summarizer.settings import offline_requested
 
 
 class RssUrlRejected(ValueError):
-    """Raised when a feed URL is not safe for server-side fetching."""
+    """A rejected feed destination or response document."""
 
 
 def _reject_private_ip(host: str) -> None:
@@ -27,33 +30,31 @@ def _reject_private_ip(host: str) -> None:
         ip = ipaddress.ip_address(host)
     except ValueError:
         return
-    if (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_multicast
-        or ip.is_reserved
-        or ip.is_unspecified
-    ):
+    if not ip.is_global or ip.is_multicast:
         raise RssUrlRejected(f"RSS URL resolves to a non-public address: {host}")
 
 
-def validate_rss_url(url: str) -> str:
-    """Validate a user-supplied RSS URL before network fetch.
-
-    Only public ``http``/``https`` network URLs are allowed. Local files,
-    loopback, link-local, private, reserved, and unresolved hosts are rejected.
-    """
-    safe_url = str(url or "").strip()
-    parts = urlsplit(safe_url)
-    if parts.scheme.lower() not in {"http", "https"}:
+def _resolve_public_url(url: str) -> tuple[httpx.URL, str]:
+    try:
+        target = httpx.URL(str(url).strip())
+    except httpx.InvalidURL as exc:
+        raise RssUrlRejected("Malformed RSS URL") from exc
+    if target.scheme not in {"http", "https"}:
         raise RssUrlRejected("RSS URL must use http or https")
-    if not parts.hostname:
+    if not target.host:
         raise RssUrlRejected("RSS URL must include a hostname")
-    host = parts.hostname
+    if target.userinfo:
+        raise RssUrlRejected("RSS URL must not include credentials")
+    if target.port is not None and not 1 <= target.port <= 65535:
+        raise RssUrlRejected("RSS URL port must be between 1 and 65535")
+    host = target.raw_host.decode("ascii")
     _reject_private_ip(host)
     try:
-        infos = socket.getaddrinfo(host, parts.port or (443 if parts.scheme == "https" else 80), type=socket.SOCK_STREAM)
+        infos = socket.getaddrinfo(
+            host,
+            target.port or (443 if target.scheme == "https" else 80),
+            type=socket.SOCK_STREAM,
+        )
     except socket.gaierror as exc:
         raise RssUrlRejected(f"RSS hostname could not be resolved: {host}") from exc
     if not infos:
@@ -61,25 +62,76 @@ def validate_rss_url(url: str) -> str:
     for info in infos:
         address = str(info[4][0])
         _reject_private_ip(address)
-    return safe_url
+    return target, str(infos[0][4][0])
 
 
-def _fetch_public_url(url: str, *, timeout: float) -> tuple[str, httpx.Headers]:
-    current = validate_rss_url(url)
-    for _ in range(5):
-        with httpx.Client(follow_redirects=False, timeout=timeout, trust_env=False) as client:
-            resp = client.get(
-                current,
-                headers={
-                    "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.5",
-                    "User-Agent": "zotero-summarizer/0.1 RSS reader",
-                },
-            )
-        if 300 <= resp.status_code < 400 and resp.headers.get("location"):
-            current = validate_rss_url(urljoin(current, str(resp.headers["location"])))
-            continue
-        resp.raise_for_status()
-        return resp.text, resp.headers
+def validate_rss_url(url: str) -> str:
+    """Validate and normalize a public HTTP(S) destination."""
+    target, _ = _resolve_public_url(url)
+    return str(target)
+
+
+def stream_public_url(client: httpx.Client, url: str):
+    """Pin the request to a validated IP, retaining its origin Host and TLS name.
+
+    HTTPX's sni_hostname preserves certificate verification without a second
+    hostname lookup. Redirects must re-enter this boundary.
+    """
+    target, address = _resolve_public_url(url)
+    return client.stream(
+        "GET", target.copy_with(host=address), follow_redirects=False,
+        headers={"Host": target.netloc.decode("ascii")},
+        extensions={"sni_hostname": target.raw_host.decode("ascii")},
+    )
+
+
+_RSS_MAX_BYTES = 8 * 1024 * 1024
+
+
+def _read_rss_body(resp: httpx.Response) -> bytes:
+    encoding = resp.headers.get("content-encoding", "identity").lower()
+    if encoding not in {"identity", "gzip"}:
+        raise RssUrlRejected("Unsupported RSS content encoding")
+    try:
+        length = int(resp.headers.get("content-length", "0"))
+    except ValueError as exc:
+        raise RssUrlRejected("Invalid RSS response size") from exc
+    if not 0 <= length <= _RSS_MAX_BYTES:
+        raise RssUrlRejected("RSS response exceeds size limit")
+    decoder = zlib.decompressobj(16 + zlib.MAX_WBITS) if encoding == "gzip" else None
+    body = bytearray()
+    wire_bytes = 0
+    for chunk in resp.iter_raw():
+        wire_bytes += len(chunk)
+        if wire_bytes > _RSS_MAX_BYTES:
+            raise RssUrlRejected("RSS response exceeds size limit")
+        if decoder is not None:
+            try:
+                chunk = decoder.decompress(chunk, _RSS_MAX_BYTES - len(body) + 1)
+            except zlib.error as exc:
+                raise RssUrlRejected("Invalid RSS gzip encoding") from exc
+        if len(body) + len(chunk) > _RSS_MAX_BYTES:
+            raise RssUrlRejected("RSS response exceeds size limit")
+        body.extend(chunk)
+    if decoder is not None and (not decoder.eof or decoder.unused_data):
+        raise RssUrlRejected("Invalid or trailing RSS gzip encoding")
+    return bytes(body)
+
+
+def _fetch_public_url(url: str, *, timeout: float) -> tuple[bytes, httpx.Headers]:
+    current = url
+    with httpx.Client(timeout=timeout, trust_env=False,
+                      limits=httpx.Limits(max_keepalive_connections=0), headers={
+        "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml",
+        "Accept-Encoding": "gzip, identity", "User-Agent": "zotero-summarizer/0.1 RSS reader",
+    }) as client:
+        for _ in range(5):
+            with stream_public_url(client, current) as resp:
+                if 300 <= resp.status_code < 400 and resp.headers.get("location"):
+                    current = urljoin(current, resp.headers["location"])
+                    continue
+                resp.raise_for_status()
+                return _read_rss_body(resp), resp.headers
     raise RssUrlRejected("RSS URL redirected too many times")
 
 
@@ -100,13 +152,13 @@ def _entry_authors(entry: Any) -> str:
     return "; ".join(names)
 
 
-def _entry_to_item(entry: Any, *, feed: dict[str, Any], feed_title: str) -> dict[str, Any]:
+def _entry_to_item(
+    entry: Any, *, feed: dict[str, Any], feed_title: str
+) -> dict[str, Any]:
     link = str(entry.get("link") or "").strip()
     entry_id = str(entry.get("id") or "").strip()
     guid = str(entry.get("guid") or entry_id or "").strip()
     summary = str(entry.get("summary") or entry.get("description") or "").strip()
-    doi = str(entry.get("doi") or "").strip() or doi_from_text(entry_id, link, summary)
-    arxiv_id = _arxiv_id_from_url_or_doi(link or entry_id, doi)
     item = {
         "feed_library_id": int(feed["id"]),
         "item_id": 0,
@@ -120,13 +172,17 @@ def _entry_to_item(entry: Any, *, feed: dict[str, Any], feed_title: str) -> dict
         "abstract": summary,
         "url": link,
         "canonical_url": link,
-        "doi": doi,
-        "arxiv_id": arxiv_id,
-        "publication_date": str(entry.get("published") or entry.get("updated") or "").strip(),
+        "doi": str(entry.get("doi") or ""),
+        "publication_date": str(
+            entry.get("published") or entry.get("updated") or ""
+        ).strip(),
         "publication_title": str(feed_title or feed.get("name") or "").strip(),
         "authors": _entry_authors(entry),
         "item_type": "journalArticle",
     }
+    item = {key: _INJECTION_CHAR_PATTERN.sub("", value).strip() if isinstance(value, str) else value for key, value in item.items()}
+    item["doi"] = item["doi"] or doi_from_text(item["entry_id"], item["url"], item["abstract"])
+    item["arxiv_id"] = _arxiv_id_from_url_or_doi(item["url"] or item["entry_id"], item["doi"])
     item["stable_feed_key"] = stable_feed_key_from_item(item)
     return item
 
@@ -158,12 +214,19 @@ class AppRssReader:
 
         This does not score anything and does not call an LLM.
         """
+        if offline_requested():
+            return {
+                "feeds": 0,
+                "inserted": 0,
+                "updated": 0,
+                "errors": [],
+                "offline": True,
+            }
         import feedparser
 
         fetched = 0
         inserted = 0
         updated = 0
-        errors: list[dict[str, str]] = []
         with self._conn() as conn:
             feeds = rss_storage.list_rss_feeds(conn)
             # ponytail: LRU rotation via Python sort ('' < any timestamp puts
@@ -173,19 +236,25 @@ class AppRssReader:
             for feed in feeds:
                 fetched += 1
                 try:
-                    body, headers = _fetch_public_url(str(feed["url"]), timeout=float(per_feed_timeout))
+                    body, headers = _fetch_public_url(
+                        str(feed["url"]), timeout=float(per_feed_timeout)
+                    )
                     parsed = feedparser.parse(body)
-                    feed_title = str((parsed.feed or {}).get("title") or feed.get("name") or "")
-                    for entry in list(parsed.entries or [])[: max(0, int(max_new_items_per_feed))]:
+                    if parsed.bozo or not parsed.version:
+                        raise RssUrlRejected("Invalid RSS/Atom feed document")
+                    feed_title = str(
+                        (parsed.feed or {}).get("title") or feed.get("name") or ""
+                    )
+                    for entry in list(parsed.entries or [])[
+                        : max(0, int(max_new_items_per_feed))
+                    ]:
                         item = _entry_to_item(entry, feed=feed, feed_title=feed_title)
                         if not item.get("stable_feed_key"):
                             continue
-                        item_id, was_inserted = rss_storage.upsert_rss_item(
-                            conn, rss_feed_id=int(feed["id"]), item=item,
-                        )
-                        conn.execute(
-                            "UPDATE rss_items SET rss_feed_id = ? WHERE id = ?",
-                            (int(feed["id"]), item_id),
+                        _, was_inserted = rss_storage.upsert_rss_item(
+                            conn,
+                            rss_feed_id=int(feed["id"]),
+                            item=item,
                         )
                         inserted += 1 if was_inserted else 0
                         updated += 0 if was_inserted else 1
@@ -198,12 +267,20 @@ class AppRssReader:
                     )
                     conn.commit()
                 except Exception as exc:
+                    conn.rollback()
                     rss_storage.record_rss_fetch_result(
-                        conn, int(feed["id"]), error=f"{type(exc).__name__}: {exc}",
+                        conn,
+                        int(feed["id"]),
+                        error=f"{type(exc).__name__}: {exc}",
                     )
                     conn.commit()
-                    errors.append({"feed": str(feed.get("name") or feed.get("id")), "error": str(exc)})
-        return {"feeds": fetched, "inserted": inserted, "updated": updated, "errors": errors}
+                    raise
+        return {
+            "feeds": fetched,
+            "inserted": inserted,
+            "updated": updated,
+            "errors": [],
+        }
 
     def get_feed_groups(self) -> list[dict[str, Any]]:
         with self._conn() as conn:
@@ -227,7 +304,7 @@ class AppRssReader:
         self,
         feed_library_id: int | None = None,
         since: str | None = None,
-        limit: int = 1000,
+        limit: int | None = 1000,
         unread_only: bool = False,
         order: str = "newest_first",
     ) -> list[dict[str, Any]]:
@@ -252,7 +329,9 @@ class AppRssReader:
                     "source_type": "app_rss",
                     "stable_feed_key": str(row["stable_feed_key"] or ""),
                     "feed_name": str(row["feed_name"] or ""),
-                    "guid": str(row["guid"] or row["entry_id"] or row["stable_feed_key"] or ""),
+                    "guid": str(
+                        row["guid"] or row["entry_id"] or row["stable_feed_key"] or ""
+                    ),
                     "title": str(row["title"] or ""),
                     "abstract": str(row["abstract"] or ""),
                     "url": str(row["url"] or row["canonical_url"] or ""),

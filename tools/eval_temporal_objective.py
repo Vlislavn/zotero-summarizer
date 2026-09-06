@@ -81,8 +81,9 @@ def main() -> None:
     from zotero_summarizer.services.golden import hybrid_gt
     from zotero_summarizer.services.model import classifier, golden_metrics
     from zotero_summarizer.services.model.classifier_training import _featurize_training_matrix
-    from zotero_summarizer.services.model.label_weights import compute_row_weights
-    from zotero_summarizer.services.model.library_features import load_positive_library_from_rows
+    from zotero_summarizer.services.model.library_features import (
+        load_positive_library_from_rows, recompute_engagement_columns,
+    )
 
     settings_ = get_settings()
     goals_config = read_config(settings_.config_path)
@@ -94,12 +95,11 @@ def main() -> None:
     _keys, _titles, _abstracts, y_cont, train_rows = data
     library = load_positive_library_from_rows(all_rows, settings_.corpus_db_path)
     print(f"featurising {len(train_rows)} rows (production path, cached embeds)…")
-    X = _featurize_training_matrix(
+    matrix = _featurize_training_matrix(
         data, library,
         corpus_db_path=settings_.corpus_db_path, goals_config=goals_config,
     )
-    y = np.asarray(y_cont, dtype=np.float64)
-    sw = compute_row_weights(train_rows)
+    X, y, sw = matrix.X, matrix.y, matrix.sample_weight
     groups = [paper_group_id(r) for r in train_rows]
     gold = [(r.get("gold_priority_final") or "").strip() for r in train_rows]
 
@@ -111,13 +111,15 @@ def main() -> None:
     # --- 1. Shuffled GroupKFold OOF (the currently-reported number), same data.
     preds_oof = np.zeros(len(y))
     for tr, vl in GroupKFold(n_splits=5).split(X, groups=groups):
+        X_fold = recompute_engagement_columns(X, train_rows, tr, matrix.corpus_affinity)
         _, p = classifier._fit_predict(
-            "lightgbm", X[tr], y[tr], X[vl], objective="regression", sample_weight=sw[tr],
+            "lightgbm", X_fold[tr], y[tr], X_fold[vl], objective="regression", sample_weight=sw[tr],
         )
         preds_oof[vl] = p
     print(f"\nshuffled GroupKFold OOF : Spearman={spearmanr(y, preds_oof).statistic:.3f}")
 
     # --- 2. Temporal holdout, regression (the production objective).
+    X = recompute_engagement_columns(X, train_rows, tr_idx, matrix.corpus_affinity)
     _, p_reg = classifier._fit_predict(
         "lightgbm", X[tr_idx], y[tr_idx], X[te_idx],
         objective="regression", sample_weight=sw[tr_idx],

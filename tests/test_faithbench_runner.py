@@ -204,7 +204,10 @@ class FakeDigestModel:
         return PaperDigest(
             tldr="GlassNet reaches 85.3 percent top-1 on ImageNet.",
             read_decision="read", read_why="strong result", grade="A",
+            read_parts=["§4 Results"], skip_parts=[], estimated_read_minutes=15,
+            original_value="The complete experimental evidence.",
             key_strength="large training set", key_weakness="no ablations",
+            writing_friction="low", writing_reasons=[],
         )
 
 

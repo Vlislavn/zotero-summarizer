@@ -11,9 +11,9 @@ from zotero_summarizer.cli._helpers import _resolve_feed_ids, progress_printer
 
 def _goldenset_predict_feed(args: argparse.Namespace) -> int:
     """Pull unread items from a feed, predict 4-class priority, save for review."""
-    import csv as _csv
-
     from zotero_summarizer.integrations.zotero_read import ZoteroReader
+    from zotero_summarizer.services._common import load_golden_rows, read_config
+    from zotero_summarizer.services.golden.hybrid_gt import apply_hybrid
     from zotero_summarizer.services.model import classifier
 
     settings = Settings.load(project_root=args.project_root)
@@ -21,40 +21,22 @@ def _goldenset_predict_feed(args: argparse.Namespace) -> int:
     if args.feeds:
         feed_filter = _resolve_feed_ids(args.feeds, settings)
 
-    # Load training rows from the golden CSV.
     input_csv = Path(args.golden_csv or settings.golden_csv_path)
-    if not input_csv.exists():
-        raise FileNotFoundError(f"Golden CSV not found at {input_csv}; run `goldenset export` first.")
-    with input_csv.open("r", encoding="utf-8", newline="") as f:
-        training_rows = list(_csv.DictReader(f))
+    training_rows = apply_hybrid(load_golden_rows(input_csv), settings.triage_db_path)
 
     # Pull unread items from the requested feed.
     reader = ZoteroReader(settings.zotero_data_dir)
     feed_library_ids = feed_filter or [int(f["library_id"]) for f in reader.get_feed_groups()]
 
-    # Build a skip-set of already-annotated feed items so we surface fresh ones
-    # only when --exclude-annotated is set. Annotated rows live in the golden
-    # CSV with item_key formatted as "feed:<integer_id>".
-    skip_ids: set[str] = set()
-    if args.exclude_annotated:
-        for r in training_rows:
-            key = (r.get("item_key") or "").strip()
-            if key.startswith("feed:"):
-                skip_ids.add(key.removeprefix("feed:"))
-
     new_items: list[dict] = []
-    # Pull more than requested so we have headroom after the skip filter.
-    fetch_target = args.limit * 4 if args.exclude_annotated else args.limit
     for lib_id in feed_library_ids:
         items = reader.get_feed_items(
             feed_library_id=lib_id,
             unread_only=True,
             order="newest_first",
-            limit=fetch_target,
+            limit=args.limit,
         )
         for it in items:
-            if str(it.get("item_id", "")) in skip_ids:
-                continue
             new_items.append(it)
             if len(new_items) >= args.limit:
                 break
@@ -66,7 +48,6 @@ def _goldenset_predict_feed(args: argparse.Namespace) -> int:
         print(json.dumps({"error": "no unread items found", "feeds": feed_library_ids}, indent=2))
         return 1
 
-    from zotero_summarizer.services._common import read_config
     goals_config = read_config(settings.config_path)
 
     predictions, thresholds = classifier.predict_new_items(
@@ -244,23 +225,13 @@ def register_goldenset_predict(gs_sub) -> None:
         "--folds",
         type=int,
         default=5,
-        help="Stratified k-fold count used to fit the calibrator + tune thresholds. Default: 5.",
+        help="Paper-group fold count for the OOF diagnostic (at least 2). Default: 5.",
     )
     gs_pred.add_argument(
         "--pca-dim",
         type=int,
         default=100,
         help="PCA target dim for SPECTER2 embedding when --classifier=tabpfn. Default: 100.",
-    )
-    gs_pred.add_argument(
-        "--calibration",
-        choices=["isotonic", "sigmoid", "none"],
-        default="isotonic",
-    )
-    gs_pred.add_argument(
-        "--threshold-strategy",
-        choices=["youden", "f1"],
-        default="youden",
     )
     gs_pred.add_argument(
         "--golden-csv",
@@ -355,4 +326,3 @@ def register_goldenset_predict(gs_sub) -> None:
     )
     gs_compare.add_argument("--project-root", default=None)
     gs_compare.set_defaults(func=_goldenset_compare)
-

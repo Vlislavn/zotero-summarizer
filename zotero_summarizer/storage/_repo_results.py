@@ -21,6 +21,7 @@ from zotero_summarizer.storage.repositories import (  # noqa: F401
     _rows_to_dicts,
     _sort_expression,
 )
+from zotero_summarizer.storage._repo_pending import _insert_pending_changes
 
 
 def create_batch_run(batch_id: str, total_items: int, successful_items: int, failed_items: int) -> None:
@@ -46,14 +47,11 @@ def insert_result(
     item_id: str,
     title: str,
     response_dict: dict[str, Any],
-    batch_id: str | None = None,
-    forced_priority: str | None = None,
-    normalized_score: float | None = None,
-    percentile: float | None = None,
-    rank: int | None = None,
     pdf_path: str | None = None,
-    prestige_score: float | None = None,
-) -> None:
+    *,
+    pending_changes: list[dict[str, Any]] | None = None,
+) -> int:
+    """Commit a result and its planned review queue together; return the queue count."""
     conn = _get_conn()
     try:
         conn.execute(
@@ -66,23 +64,25 @@ def insert_result(
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                batch_id,
+                None,
                 item_id,
                 title,
                 response_dict.get("relevance_score"),
                 response_dict.get("composite_relevance_score"),
                 response_dict.get("reading_priority"),
-                forced_priority if forced_priority is not None else response_dict.get("reading_priority"),
-                normalized_score if normalized_score is not None else 0.0,
-                percentile if percentile is not None else 0.0,
-                rank if rank is not None else 0,
+                response_dict.get("reading_priority"),
+                0.0,
+                0.0,
+                0,
                 response_dict.get("triage_confidence", 0.0),
                 pdf_path,
                 json.dumps(response_dict, ensure_ascii=False),
-                prestige_score if prestige_score is not None else response_dict.get("prestige_score"),
+                response_dict.get("prestige_score"),
             ),
         )
+        count = _insert_pending_changes(conn, item_id, title, pending_changes or [])
         conn.commit()
+        return count
     finally:
         conn.close()
 

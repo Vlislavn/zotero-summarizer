@@ -66,9 +66,24 @@ def test_board_absorbs_per_goal_summary_sections_and_quote():
 
 
 def test_flag_verdict_inlines_the_red_flag():
-    html = brief.brief_html(CONTENT, quality=FLAG_Q, goal_summaries=GOALS)
-    assert "SKIM" in html and "FLAGGED" in html
+    html = brief.brief_html(CONTENT, digest=DIGEST, quality=FLAG_Q, goal_summaries=GOALS)
+    assert "SKIM" in html and "evidence weak" in html
     assert "near-perfect 99.2% metric with no leakage discussion" in html  # visible in the verdict bar
+
+
+def test_brief_keeps_idea_evidence_and_writing_separate():
+    digest = {**DIGEST, "read_decision": "skim", "novelty": 5, "significance": 4,
+              "writing_friction": "high", "writing_reasons": ["Taxonomy mixes axes."]}
+    html = brief.brief_html(CONTENT, digest=digest, quality=QUALITY, goal_summaries=GOALS)
+    assert "Idea: high" in html and "Evidence: NEUTRAL" in html and "Writing: high" in html
+
+
+def test_digest_action_overrides_relevance_without_hiding_relevance():
+    digest = {"read_decision": "skip", "read_why": "The digest captures the useful result.",
+              "estimated_read_minutes": 4}
+    html = brief.brief_html(CONTENT, digest=digest, quality=HIGHLIGHT_Q, goal_summaries=GOALS)
+    assert "DIGEST IS ENOUGH · 4 MIN" in html and "digest captures" in html
+    assert "HIGH RELEVANCE" in html and "DEEP-READ" not in html
 
 
 def test_no_fired_goal_is_skip():
@@ -96,13 +111,12 @@ def test_quality_panel_flag_leads_with_red_flags():
 
 
 def test_presentation_integrates_brief_no_sections_dump_no_cdn():
-    html = h._render_presentation(CONTENT, "AgentClinic", DIGEST, QUALITY, GOALS)
+    html = h._render_presentation(CONTENT, DIGEST, QUALITY, GOALS)
     assert 'class="gauge"' in html and 'id="quality"' in html
     assert 'id="sections"' not in html and 'id="per-goal"' not in html  # the dumps are gone
     assert 'class="fade-in digest-fold"' in html  # digest collapsed by default
     assert "cdn.jsdelivr" not in html
-    notes = h._render_notes(CONTENT, DIGEST, QUALITY, GOALS)
-    assert "## Executive Summary" in notes and "## Relevance to your goals" in notes
+    assert "READ" in html
 
 
 def test_abstained_hit_shows_withheld_not_evidence_found():
@@ -114,3 +128,5 @@ def test_abstained_hit_shows_withheld_not_evidence_found():
 
 def test_brief_empty_without_data():
     assert brief.brief_html(CONTENT, quality=None, goal_summaries=None) == ""
+    digest_only = brief.brief_html(CONTENT, digest={"read_decision": "skip"}, quality=None, goal_summaries=None)
+    assert "OFF GOAL" not in digest_only and "Idea: not assessed" in digest_only and "fonts.googleapis" not in h._render_presentation(CONTENT, DIGEST, None, None)

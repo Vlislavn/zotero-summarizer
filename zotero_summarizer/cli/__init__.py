@@ -40,7 +40,8 @@ apply_offline_env()
 from zotero_summarizer.cli._app import register_app  # noqa: E402
 from zotero_summarizer.cli._faithbench import register_faithbench  # noqa: E402
 from zotero_summarizer.cli._feeds import register_feeds  # noqa: E402
-from zotero_summarizer.cli._goldenset import register_goldenset  # noqa: E402
+from zotero_summarizer.cli._goldenset import register_goldenset, _validate_goldenset_args  # noqa: E402
+from zotero_summarizer.cli._research_feed import register_research_feed  # noqa: E402
 from zotero_summarizer.cli._setup import register_setup  # noqa: E402
 from zotero_summarizer.cli._helpers import _resolve_feed_ids  # noqa: F401,E402  (re-export for tests)
 
@@ -53,12 +54,19 @@ def build_parser() -> argparse.ArgumentParser:
     register_feeds(subparsers)
     register_goldenset(subparsers)
     register_faithbench(subparsers)
+    register_research_feed(subparsers)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    from zotero_summarizer.runtime import AppContext, set_context
+    from zotero_summarizer.settings import Settings
+
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "goldenset":
+        _validate_goldenset_args(args, parser)
+    set_context(AppContext(settings=Settings.load(project_root=getattr(args, "project_root", None))))
     return int(args.func(args))
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import pytest
 
 from zotero_summarizer.storage import corpus as embedding_cache
 from zotero_summarizer.models import CorpusItem
@@ -47,14 +48,14 @@ def test_upsert_items_updates_metadata_without_reembedding(monkeypatch, tmp_path
     assert json.loads(row["collections_json"]) == ["Research > Agents"]
 
 
-def test_fallback_embeddings_use_model_dimension(monkeypatch, tmp_path):
-    monkeypatch.setattr(embedding_cache, "SentenceTransformer", None)
+def test_encoding_error_propagates(monkeypatch, tmp_path):
     cache = embedding_cache.EmbeddingCache(tmp_path / "corpus_cache.db", "test-model")
-
-    vector = cache._embed("agent safety policy enforcement")
-
-    assert len(vector) == 384
-    assert sum(abs(value) for value in vector) > 0
+    model = cache._load_model()
+    def fail(*args, **kwargs):
+        raise RuntimeError("encode failed")
+    monkeypatch.setattr(model, "encode", fail)
+    with pytest.raises(RuntimeError, match="encode failed"):
+        cache._embed("agent safety policy enforcement")
 
 
 def test_match_candidate_applies_positive_and_negative_feedback(monkeypatch, tmp_path):
@@ -128,7 +129,7 @@ def test_affinity_and_goals_matches_match_candidate(monkeypatch, tmp_path):
 
 
 def test_affinity_cache_invalidates_on_upsert(monkeypatch, tmp_path):
-    """Adding a corpus item bumps the version → the cached matrix rebuilds."""
+    """Adding a corpus item changes the fingerprint → the matrix rebuilds."""
     monkeypatch.setattr(embedding_cache, "SentenceTransformer", None)
     cache = embedding_cache.EmbeddingCache(tmp_path / "corpus_cache.db", "test-model")
     monkeypatch.setattr(cache, "_embed", lambda t: [1.0, 0.0, 0.0])
@@ -136,9 +137,9 @@ def test_affinity_cache_invalidates_on_upsert(monkeypatch, tmp_path):
     cache.upsert_items([CorpusItem(item_id="p1", title="A", abstract="x", tags=["🧠"], collections=[])])
     a1, _ = cache.affinity_and_goals("cand", "y")  # builds the cache; only a positive → 1.0
     assert a1 == 1.0
-    v1 = cache._corpus_version
+    matrix = cache._affinity_cache["matrix"]
 
     cache.upsert_items([CorpusItem(item_id="p2", title="B", abstract="z", tags=["❌"], collections=[])])
-    assert cache._corpus_version > v1               # write bumped the version
     a2, _ = cache.affinity_and_goals("cand", "y")  # rebuilt with the strong negative → 0.0
+    assert cache._affinity_cache["matrix"] is not matrix
     assert a2 == 0.0

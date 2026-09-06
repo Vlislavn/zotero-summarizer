@@ -1,152 +1,98 @@
-"""Tests for GET /api/admin/model — the Settings model-card endpoint.
-
-Calls the route handler ``model_card`` directly (it's a plain async
-function). The handler now lives in ``services/model/model_card.py`` (lifted out
-of the api layer); ``admin`` re-exports it, so the route is unchanged. For each
-case we point ``settings.project_root`` at a tmp directory and override the
-``_model_dir`` helper *on the service module* (where ``model_card`` resolves it)
-to read from the same tmp tree, so nothing touches the user's real ``~/.cache``.
-"""
+"""Current-model cards describe the loaded gate, never an unrelated disk run."""
 from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
+from types import SimpleNamespace
+from zipfile import ZipFile
 
 import pytest
 
 from zotero_summarizer.api.routes import admin as admin_route
 from zotero_summarizer.runtime import AppContext, set_context
-from zotero_summarizer.services.model import model_card as model_card_svc
 from zotero_summarizer.settings import Settings
+from zotero_summarizer.services.setup.status import _classifier_status
 
 
-def _seed_settings(tmp_path: Path) -> None:
-    """Point the runtime at ``tmp_path`` for project_root + triage DB.
-
-    ``Settings.load(project_root=...)`` derives every per-project path
-    (triage_history.db, corpus_cache.db, golden CSV) from the same root,
-    so a single argument is enough to hermetically sandbox the run.
-    """
-    set_context(AppContext(settings=Settings.load(project_root=tmp_path)))
-
-
-def _override_model_dir(monkeypatch: pytest.MonkeyPatch, model_dir: Path) -> None:
-    """Make ``model_card``'s ``_model_dir()`` return ``model_dir`` instead of
-    ~/.cache/.../models. Patched on the service module (where ``model_card``
-    resolves the helper); ``admin`` re-exports the same object."""
-    monkeypatch.setattr(model_card_svc, "_model_dir", lambda: model_dir)
+def _seed(tmp_path, *, loaded=True):
+    context = AppContext(settings=Settings.load(project_root=tmp_path))
+    context.state.classifier_gate = SimpleNamespace(
+        classifier_name="lightgbm",
+        training_metadata={
+            "n_train": 1171, "trained_at": "2026-05-15T22:15:20Z",
+            "oof_spearman_verified": 0.14,
+        },
+    ) if loaded else None
+    set_context(context)
+    return context
 
 
-def _run(coro):
-    return asyncio.run(coro)
+def _archive(context, name, metadata):
+    model_dir = context.settings.model_dir
+    model_dir.mkdir(parents=True, exist_ok=True)
+    with ZipFile(model_dir / f"{name}.zip", "w") as archive:
+        archive.writestr("model.joblib", b"not a pickle")
+        archive.writestr("metadata.json", json.dumps({"classifier_name": name, **metadata}))
 
 
-def test_model_card_empty_when_no_model_on_disk(tmp_path: Path, monkeypatch):
-    _seed_settings(tmp_path)
-    _override_model_dir(monkeypatch, tmp_path / "models")  # does not exist
-    out = _run(admin_route.model_card())
-    assert out == {"model": None}
+def test_current_card_reads_live_metadata_without_disk(tmp_path):
+    _seed(tmp_path)
+    assert asyncio.run(admin_route.model_card()) == {"model": {
+        "classifier_name": "lightgbm", "n_train": 1171,
+        "trained_at": "2026-05-15T22:15:20Z", "oof_spearman_verified": 0.14,
+    }}
 
 
-def test_model_card_returns_metadata_from_json_twin(tmp_path: Path, monkeypatch):
-    _seed_settings(tmp_path)
-    model_dir = tmp_path / "models"
-    model_dir.mkdir()
-
-    twin = {
-        "classifier_name": "lightgbm",
-        "golden_csv_sha256": "d4e039e152a38b83e5cd09c16bded7943a96a56941747a8c8e798dbbb0abf23c",
-        "feature_dim": 780,
-        "pca_dim": 100,
-        "thresholds": {"keep": 0.4, "must": 0.7, "could": 0.5},
-        "n_train": 1171,
-        "n_positive_library": 516,
-        "objective": "regression",
-        "oof_spearman": 0.7617,
-        "trained_at": "2026-05-15T22:15:20Z",
-        "git_commit": "4d24654",
-    }
-    (model_dir / "lightgbm.json").write_text(json.dumps(twin))
-    (model_dir / "lightgbm.joblib").write_bytes(b"stub")  # just needs to exist + have size
-
-    _override_model_dir(monkeypatch, model_dir)
-    out = _run(admin_route.model_card())
-
-    assert out["model"] is not None
-    m = out["model"]
-    assert m["classifier_name"] == "lightgbm"
-    assert m["n_train"] == 1171
-    assert m["oof_spearman"] == pytest.approx(0.7617)
-    assert m["trained_at"] == "2026-05-15T22:15:20Z"
-    assert m["git_commit"] == "4d24654"
-    assert m["golden_csv_sha256_prefix"] == "d4e039e152a3"
-    assert m["thresholds"] == {"keep": 0.4, "must": 0.7, "could": 0.5}
-    assert m["joblib_size_bytes"] == 4
-    assert m["runlog"] is None  # no classifier-runs.jsonl present
+def test_no_loaded_gate_does_not_claim_saved_model_is_active(tmp_path):
+    context = _seed(tmp_path, loaded=False)
+    _archive(context, "lightgbm", {"n_train": 50})
+    assert asyncio.run(admin_route.model_card()) == {"model": None}
 
 
-def test_model_card_skips_orphan_json_without_joblib(tmp_path: Path, monkeypatch):
-    """A .json twin without a paired .joblib is half-deleted; skip it."""
-    _seed_settings(tmp_path)
-    model_dir = tmp_path / "models"
-    model_dir.mkdir()
-    (model_dir / "lightgbm.json").write_text(json.dumps({"classifier_name": "lightgbm"}))
-    # No .joblib alongside.
-
-    _override_model_dir(monkeypatch, model_dir)
-    out = _run(admin_route.model_card())
-    assert out == {"model": None}
-
-
-def test_model_card_picks_freshest_when_multiple_models_exist(tmp_path: Path, monkeypatch):
-    """Two models on disk → return the one whose .json mtime is newer."""
-    _seed_settings(tmp_path)
-    model_dir = tmp_path / "models"
-    model_dir.mkdir()
-
-    older = {"classifier_name": "logreg", "trained_at": "2026-05-10T00:00:00Z"}
-    newer = {"classifier_name": "lightgbm", "trained_at": "2026-05-15T22:15:20Z"}
-
-    older_json = model_dir / "logreg.json"
-    newer_json = model_dir / "lightgbm.json"
-    older_json.write_text(json.dumps(older))
-    newer_json.write_text(json.dumps(newer))
-    (model_dir / "logreg.joblib").write_bytes(b"x")
-    (model_dir / "lightgbm.joblib").write_bytes(b"x")
-
-    import os
-    # Force older_json mtime to be in the past.
-    os.utime(older_json, (1_700_000_000, 1_700_000_000))
-    os.utime(model_dir / "logreg.joblib", (1_700_000_000, 1_700_000_000))
-
-    _override_model_dir(monkeypatch, model_dir)
-    out = _run(admin_route.model_card())
-    assert out["model"]["classifier_name"] == "lightgbm"
+@pytest.mark.parametrize("offline_name", ["logreg", "lightgbm"])
+def test_offline_retrain_does_not_replace_live_card(tmp_path, offline_name):
+    context = _seed(tmp_path)
+    context.state.app_state = SimpleNamespace(config=SimpleNamespace(
+        classifier_gate=SimpleNamespace(model_name="logreg"),
+    ))
+    _archive(context, offline_name, {
+        "n_train": 9999, "trained_at": "2099-01-01T00:00:00Z",
+        "oof_spearman_verified": 0.99,
+    })
+    card = asyncio.run(admin_route.model_card())["model"]
+    assert card["classifier_name"] == "lightgbm"
+    assert card["n_train"] == 1171
+    assert card["oof_spearman_verified"] == 0.14
 
 
-def test_model_card_includes_latest_runlog_entry(tmp_path: Path, monkeypatch):
-    """When classifier-runs.jsonl has a matching entry, surface it as ``runlog``."""
-    _seed_settings(tmp_path)
-    model_dir = tmp_path / "models"
-    model_dir.mkdir()
-    (model_dir / "lightgbm.json").write_text(json.dumps({"classifier_name": "lightgbm"}))
-    (model_dir / "lightgbm.joblib").write_bytes(b"x")
+def test_unrelated_or_truncated_run_log_cannot_change_card(tmp_path):
+    context = _seed(tmp_path)
+    _archive(context, "lightgbm", {"n_train": 12})
+    log = context.settings.data_dir / "classifier-runs.jsonl"
+    log.write_text('{"classifier":"lightgbm","cv":{"n_train":12}}\n{"truncated":')
+    card = asyncio.run(admin_route.model_card())["model"]
+    assert card["n_train"] == 1171
+    assert "runlog" not in card
 
-    log_path = tmp_path / "data" / "classifier-runs.jsonl"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    older_entry = {
-        "run_id": "20260510_logreg", "timestamp": "2026-05-10T10:00:00Z",
-        "classifier": "logreg", "type": "train_artifact", "cv": {"auc": 0.60},
-    }
-    newer_entry = {
-        "run_id": "20260515_lightgbm", "timestamp": "2026-05-15T22:15:20Z",
-        "classifier": "lightgbm", "type": "train_artifact", "cv": {"auc": 0.71},
-    }
-    log_path.write_text("\n".join(json.dumps(e) for e in (older_entry, newer_entry)))
 
-    _override_model_dir(monkeypatch, model_dir)
-    out = _run(admin_route.model_card())
-    assert out["model"]["runlog"] is not None
-    assert out["model"]["runlog"]["run_id"] == "20260515_lightgbm"
-    assert out["model"]["runlog"]["cv"]["auc"] == pytest.approx(0.71)
+@pytest.mark.parametrize("loaded", [True, False])
+def test_setup_classifier_status_uses_same_live_source(tmp_path, loaded):
+    context = _seed(tmp_path, loaded=loaded)
+    _archive(context, "logreg", {"trained_at": "2099-01-01T00:00:00Z"})
+    status = asyncio.run(_classifier_status())
+    assert status.trained is loaded
+    assert status.classifier_name == ("lightgbm" if loaded else None)
+
+
+def test_hot_swap_changes_card_without_file_write(tmp_path):
+    context = _seed(tmp_path)
+    before = asyncio.run(admin_route.model_card())["model"]
+    context.state.classifier_gate = SimpleNamespace(
+        classifier_name="logreg",
+        training_metadata={"n_train": 2000, "trained_at": "2026-09-05T12:00:00Z"},
+    )
+    after = asyncio.run(admin_route.model_card())["model"]
+    assert before["classifier_name"] == "lightgbm"
+    assert after["classifier_name"] == "logreg"
+    assert after["n_train"] == 2000
+    assert after["oof_spearman_verified"] is None

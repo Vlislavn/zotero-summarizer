@@ -1,6 +1,8 @@
 // Thin fetch wrappers for the /api/zotero/*, /api/library/*, and
 // /api/triage/run endpoints used by the Library and Annotate pages.
 
+import { allPapers, cacheResponse, cachedResponse } from '../offlineStore.js';
+
 async function request(path, options = {}) {
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
@@ -87,7 +89,17 @@ export async function fetchReadingQueue({
     // "Meaning" mode → hybrid (BM25 + dense + cross-encoder rerank) on the server.
     if (semantic) qs.set('semantic', 'true');
   }
-  return request(`/api/library/reading-queue?${qs.toString()}`);
+  const path = `/api/library/reading-queue?${qs.toString()}`;
+  try {
+    const data = await request(path);
+    await cacheResponse(path, data).catch((err) => console.warn('offline queue cache unavailable', err));
+    return data;
+  } catch (err) {
+    const cached = !err.status && await cachedResponse(path);
+    if (cached) return { ...cached, offline: true };
+    if (!err.status) return { status: 'offline', items: await allPapers(), offline: true };
+    throw err;
+  }
 }
 
 /**
@@ -197,9 +209,9 @@ export async function syncRelTags({ force = false } = {}) {
 
 /**
  * POST /api/library/fetch-fulltext { force }
- * Bulk: download arXiv full-text PDFs for every library paper that has an arXiv
- * link but no PDF, and attach them natively to Zotero (imported_url; uploads on
- * next sync). Background job; backup-first + connector-guarded. Resolves to
+ * Bulk: acquire arXiv/Unpaywall/PMC/OpenAlex/direct OA PDFs for library papers
+ * without an attachment, then attach them natively to Zotero. Background job;
+ * non-interactive, backup-first, connector-guarded. Resolves to
  * { status: 'started'|'running' } or { requires_force, message }.
  */
 export async function fetchFulltext({ force = false } = {}) {
@@ -319,13 +331,13 @@ export function paperFigureUrl(itemKey, name) {
 
 /**
  * POST /api/library/ask { item_key, question, mode } — correctness-first Q&A
- * over generated paper-read notes + full text. Metadata/count questions are
+ * over structured cached review data + full text. Metadata/count questions are
  * answered deterministically; model answers require grounded evidence.
- * Resolves to { answer, abstained, quote, mode, chunks_used, latency_seconds, model }.
+ * Resolves to the grounded answer plus citation verification and an evidence handle.
  */
-export async function askPaper(itemKey, question, { mode = 'comprehensive' } = {}) {
+export async function askPaper(itemKey, question, { mode = 'comprehensive', history = [] } = {}) {
   return request('/api/library/ask', {
     method: 'POST',
-    body: JSON.stringify({ item_key: itemKey, question, mode }),
+    body: JSON.stringify({ item_key: itemKey, question, mode, history }),
   });
 }

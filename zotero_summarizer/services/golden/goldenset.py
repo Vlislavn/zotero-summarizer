@@ -12,18 +12,21 @@ Zotero — :func:`_write_csv` preserves them across re-exports.
 
 from __future__ import annotations
 
-import csv
 import json
 import logging
-from dataclasses import asdict, dataclass
+from collections import Counter
+from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from pydantic import TypeAdapter
 
 from zotero_summarizer.domain import LABEL_TAG_PREFIX
 from zotero_summarizer.services import emoji_signals
 from zotero_summarizer.services._common import atomic_write, connect_sqlite_ro
 from zotero_summarizer.services.golden import user_labels
+from zotero_summarizer.services.golden.csv_store import edit_csv
 from zotero_summarizer.storage.feeds import _parse_pub_year
 
 
@@ -102,13 +105,13 @@ def export_golden_dataset(
 
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     output_jsonl.parent.mkdir(parents=True, exist_ok=True)
-    _write_csv(samples, output_csv, preserve_keys=preserve_keys)
+    samples = _write_csv(samples, output_csv, preserve_keys=preserve_keys, triage_db_path=triage_db_path)
     _write_jsonl(samples, output_jsonl)
 
     return {
         "total": len(samples),
-        "by_class": _class_distribution(samples),
-        "by_strength": _strength_distribution(samples),
+        "by_class": dict(Counter(sample.gold_priority_inferred for sample in samples)),
+        "by_strength": dict(Counter(sample.gold_signal_strength for sample in samples)),
         "user_labels_synced": label_counts.synced,
         "user_labels_changed": label_counts.changed,
         "user_labels_removed": label_counts.removed,
@@ -415,44 +418,32 @@ def _days_since(date_str: Any, now: datetime) -> int:
 
 def _write_csv(
     samples: list[GoldenSample], path: Path, *, preserve_keys: frozenset[str] = frozenset(),
-) -> None:
+    triage_db_path: Path | None = None,
+) -> list[GoldenSample]:
     """Write Zotero-derived ``samples`` and preserve existing rows that aren't
     re-derivable from Zotero: namespaced keys (``feed:*`` / ``note:*``) and any
     key in ``preserve_keys`` (user-verdicted items — e.g. a materialized library
     paper marked ``dont_read`` that the engagement-only export wouldn't emit).
     """
-    if not samples:
-        path.write_text("")
-        return
-    fieldnames = list(asdict(samples[0]).keys())
+    fieldnames = [field.name for field in fields(GoldenSample)]
     sample_keys = {s.item_key for s in samples}
+    adapter = TypeAdapter(GoldenSample)
+    with edit_csv(path, create_fields=fieldnames) as (columns, rows):
+        combined = [*samples, *(
+            adapter.validate_python(row) for row in rows
+            if row["item_key"] not in sample_keys
+            and (":" in row["item_key"] or row["item_key"] in preserve_keys)
+        )]
+        if triage_db_path is not None:
+            from zotero_summarizer.services.golden.hybrid_gt import apply_hybrid
 
-    preserved: list[dict[str, str]] = []
-    if path.exists():
-        with path.open("r", newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            if reader.fieldnames is None or "item_key" not in reader.fieldnames:
-                raise ValueError(
-                    f"existing golden CSV {path} has no item_key column — "
-                    f"refusing to overwrite it"
-                )
-            for row in reader:
-                key = row["item_key"]
-                if key not in sample_keys and (":" in key or key in preserve_keys):
-                    preserved.append({c: row.get(c, "") for c in fieldnames})
-
-    def _write(target: Path) -> None:
-        with target.open("w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            for s in samples:
-                writer.writerow(asdict(s))
-            for r in preserved:
-                writer.writerow(r)
-
-    # tmp + os.replace: a crash mid-write must never truncate the golden CSV
-    # (months of labels live here and the preserved rows are already in memory).
-    atomic_write(path, _write)
+            combined_keys = {sample.item_key for sample in combined}
+            effective = apply_hybrid((asdict(sample) for sample in combined), triage_db_path)
+            combined.extend(adapter.validate_python(row) for row in effective
+                            if row["item_key"] not in combined_keys)
+        columns[:] = fieldnames
+        rows[:] = [asdict(sample) for sample in combined]
+    return combined
 
 
 def _write_jsonl(samples: list[GoldenSample], path: Path) -> None:
@@ -462,23 +453,6 @@ def _write_jsonl(samples: list[GoldenSample], path: Path) -> None:
                 f.write(json.dumps(asdict(s), ensure_ascii=False) + "\n")
 
     atomic_write(path, _write)
-
-
-def _distribution(samples: list[GoldenSample], attr: str) -> dict[str, int]:
-    """Histogram of ``getattr(sample, attr)`` over ``samples``."""
-    out: dict[str, int] = {}
-    for s in samples:
-        key = getattr(s, attr)
-        out[key] = out.get(key, 0) + 1
-    return out
-
-
-def _class_distribution(samples: list[GoldenSample]) -> dict[str, int]:
-    return _distribution(samples, "gold_priority_inferred")
-
-
-def _strength_distribution(samples: list[GoldenSample]) -> dict[str, int]:
-    return _distribution(samples, "gold_signal_strength")
 
 
 # ---------------------------------------------------------------------------

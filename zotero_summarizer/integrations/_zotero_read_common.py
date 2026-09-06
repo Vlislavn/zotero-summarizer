@@ -40,7 +40,7 @@ _INJECTION_CHAR_PATTERN = re.compile(
 
 
 _ARXIV_RE = re.compile(
-    r"(?:arxiv[.:/]|arxiv\.org/(?:abs|pdf)/)([0-9]{4}\.[0-9]{4,5}(?:v\d+)?|[a-z\-]+(?:\.[A-Z]{2})?/\d{7})",
+    r"(?:arxiv[.:/]|(?:arxiv\.org|ar5iv[^/]*)/(?:abs|pdf|html)/)([0-9]{4}\.[0-9]{4,5}(?:v\d+)?|[a-z\-]+(?:\.[A-Z]{2})?/\d{7})",
     re.IGNORECASE,
 )
 

@@ -4,8 +4,7 @@ Covers the single shared install path (``feeds.install_gate``) that both retrain
 flows converge on:
   * the swap is atomic and the slate is re-scored right after, so already-triaged
     Today rows pick up the new model without a manual ``rescore-slate`` call;
-  * a post-swap rescore failure is swallowed (the gate is already live) and never
-    bubbles up as a fake install/retrain failure;
+  * a post-swap rescore failure propagates without pretending to undo the swap;
   * the daemon's background retrain worker installs through the same path and
     always clears the in-progress flag.
 """
@@ -18,6 +17,7 @@ import pytest
 
 import zotero_summarizer.services.triage.feeds._gate as gate_mod
 from zotero_summarizer.services.triage import rescore_slate as rescore_mod
+from zotero_summarizer.settings import Settings
 
 
 class _FakeGate:
@@ -80,17 +80,15 @@ def test_install_gate_rescore_false_skips_rescore(monkeypatch):
     assert calls == []                              # rescore intentionally skipped
 
 
-def test_install_gate_swallows_rescore_failure(monkeypatch):
-    # The gate is already live; a rescore blow-up must NOT look like an install
-    # failure — install_gate returns None and the swap still stuck.
+def test_install_gate_propagates_rescore_failure(monkeypatch):
     app_state = SimpleNamespace(classifier_gate=None, classifier_gate_lock=threading.Lock())
     monkeypatch.setattr(gate_mod, "get_state", lambda: app_state)
     calls = _stub_rescore(monkeypatch, raises=True)
 
     gate = _FakeGate()
-    result = gate_mod.install_gate(gate, reason="test")   # must not raise
+    with pytest.raises(RuntimeError, match="boom"):
+        gate_mod.install_gate(gate, reason="test")
 
-    assert result is None
     assert app_state.classifier_gate is gate
     assert len(calls) == 1
 
@@ -98,7 +96,8 @@ def test_install_gate_swallows_rescore_failure(monkeypatch):
 # --- daemon background retrain → install_gate -----------------------------
 
 
-def test_daemon_retrain_worker_installs_and_rescores(monkeypatch, tmp_path):
+@pytest.mark.parametrize("rescore_fails", [False, True])
+def test_daemon_retrain_worker_installs_and_rescores(monkeypatch, tmp_path, rescore_fails):
     from zotero_summarizer.services.model import classifier_persistence
 
     new_gate = _FakeGate(sha="freshsha000000")
@@ -116,12 +115,15 @@ def test_daemon_retrain_worker_installs_and_rescores(monkeypatch, tmp_path):
         )),
     )
     monkeypatch.setattr(gate_mod, "get_state", lambda: app_state)
-    monkeypatch.setattr(gate_mod, "get_settings", lambda: SimpleNamespace(
-        corpus_db_path=tmp_path / "corpus.db",
-        triage_db_path=tmp_path / "triage.db"))
-    calls = _stub_rescore(monkeypatch)
+    monkeypatch.setattr(gate_mod, "get_settings", lambda: Settings.load(project_root=tmp_path))
+    calls = _stub_rescore(monkeypatch, raises=rescore_fails)
 
-    gate_mod._gate_retrain_worker(tmp_path / "golden.csv", "logreg")
+    if rescore_fails:
+        with pytest.raises(RuntimeError, match="boom"):
+            gate_mod._gate_retrain_worker(tmp_path / "golden.csv", "logreg")
+        assert "boom" in app_state.classifier_gate_error
+    else:
+        gate_mod._gate_retrain_worker(tmp_path / "golden.csv", "logreg")
 
     assert app_state.classifier_gate is new_gate        # swapped to the retrained gate
     assert len(calls) == 1                               # slate rescored after swap
@@ -144,9 +146,7 @@ def test_daemon_retrain_worker_clears_flag_and_reraises_on_train_failure(monkeyp
         )),
     )
     monkeypatch.setattr(gate_mod, "get_state", lambda: app_state)
-    monkeypatch.setattr(gate_mod, "get_settings", lambda: SimpleNamespace(
-        corpus_db_path=tmp_path / "corpus.db",
-        triage_db_path=tmp_path / "triage.db"))
+    monkeypatch.setattr(gate_mod, "get_settings", lambda: Settings.load(project_root=tmp_path))
 
     with pytest.raises(RuntimeError, match="train exploded"):
         gate_mod._gate_retrain_worker(tmp_path / "golden.csv", "logreg")
@@ -154,3 +154,22 @@ def test_daemon_retrain_worker_clears_flag_and_reraises_on_train_failure(monkeyp
     # Old gate kept; flag cleared so the next tick can retry.
     assert app_state.classifier_gate.golden_csv_sha256 == "oldsha"
     assert app_state.classifier_gate_training is False
+
+
+def test_daemon_import_failure_records_error_and_clears_flag(monkeypatch, tmp_path):
+    import builtins
+
+    runtime = SimpleNamespace(classifier_gate_training=True)
+    monkeypatch.setattr(gate_mod, "get_state", lambda: runtime)
+    original_import = builtins.__import__
+
+    def fail_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "zotero_summarizer.services.model" and "classifier_persistence" in fromlist:
+            raise ImportError("classifier dependency missing")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fail_import)
+    with pytest.raises(ImportError, match="classifier dependency missing"):
+        gate_mod._gate_retrain_worker(tmp_path / "golden.csv", "logreg")
+    assert "classifier dependency missing" in runtime.classifier_gate_error
+    assert runtime.classifier_gate_training is False

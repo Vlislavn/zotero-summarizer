@@ -40,6 +40,7 @@ def build_llm(
     # asserted in test_adapters_openai / test_provider_routing). Override per provider.
     temperature: float = 0,
     extra_body: dict[str, Any] | None = None,
+    request_timeout_seconds: float | None = None,
 ) -> InstrumentedLLMClient:
     llm_cls, _ = _load_onprem()
     kwargs: dict[str, Any] = dict(
@@ -53,6 +54,8 @@ def build_llm(
     )
     if extra_body:
         kwargs["extra_body"] = extra_body
+    if request_timeout_seconds is not None:
+        kwargs["timeout"] = request_timeout_seconds
     return InstrumentedLLMClient(llm_cls(**kwargs))
 
 

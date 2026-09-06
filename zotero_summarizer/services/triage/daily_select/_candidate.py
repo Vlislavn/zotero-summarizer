@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import math
+from datetime import datetime, timezone
 from typing import Any
 
 from zotero_summarizer.services._common import LOGGER
@@ -222,12 +223,13 @@ def row_pub_year(row: dict[str, Any]) -> int | None:
 def row_top_author_h_index(payload: dict[str, Any]) -> int | None:
     """Top-author h-index from ``aux_context.max_author_h_index``.
 
-    Returns ``None`` when OpenAlex never matched this paper. The UI uses
+    Returns ``None`` when OpenAlex never matched this paper or supplied no
+    positive author evidence. The UI uses
     this to conditionally render an `(h=42)` badge next to authors.
     """
     aux = _aux_dict(payload)
     h = aux.get("max_author_h_index")
-    if h is None:
+    if h is None or float(h) <= 0:
         return None
     return int(h)
 
@@ -351,15 +353,19 @@ def make_candidate(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def dedup_keep_newest(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Group rows by item_key, keep the largest created_at (lex compare)."""
+    """Keep raw rows by identity, newest first (also suitable for rescoring)."""
     grouped: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        cand = make_candidate(row)
-        key = cand["item_key"]
-        existing = grouped.get(key)
-        if existing is None or cand["created_at"] > existing["created_at"]:
-            grouped[key] = cand
+    for row in sorted(rows, key=row_created_at, reverse=True):
+        grouped.setdefault(_row_item_key(row), row)
     return list(grouped.values())
+
+
+def row_created_at(row: dict[str, Any]) -> datetime:
+    """Parse SQL/ISO timestamps; naive SQLite values are UTC, invalid data raises."""
+    stamp = datetime.fromisoformat(row["created_at"])
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return stamp.astimezone(timezone.utc)
 
 
 def attach_quality_from_reviews(candidates: list[dict[str, Any]]) -> int:

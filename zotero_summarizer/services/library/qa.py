@@ -6,28 +6,26 @@ prompt the faithfulness benchmark validated
 (``services.faithbench.ANSWER_PROMPT``) — the product runs what was measured.
 
 Default mode is ``comprehensive``: deterministic metadata answers first, then
-the generated paper-read notes plus full text. ``retrieval`` remains available
-as the fast mode.
+the structured cached review plus full text. ``retrieval`` remains available as
+the fast mode.
 """
 from __future__ import annotations
 
 import logging
 import re
-import threading
-from pathlib import Path
 from time import perf_counter
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models.providers import resolve_stage
-from zotero_summarizer.services._common import settings, state
+from zotero_summarizer.services._common import state
 from zotero_summarizer.services.faithbench import (
     ANSWER_PROMPT,
     PaperChunkIndex,
     answer_with_retry,
 )
 from zotero_summarizer.services.faithbench._constants import RETRIEVAL_TOP_K
-from zotero_summarizer.services.library import paper_render
+from zotero_summarizer.services.library import paper_render, qa_context
 from zotero_summarizer.services.library._grounding import quote_is_grounded as _quote_is_grounded
 
 LOGGER = logging.getLogger(__name__)
@@ -38,67 +36,14 @@ MODES = ("comprehensive", "retrieval", "full_text")
 # whole-document count — let the LLM answer it instead of returning a doc total.
 _SCOPED_REF_RE = re.compile(r"\b(?:figure|fig|table|tbl|section|sec|eq|equation|appendix)\.?\s*\d", re.IGNORECASE)
 
-# Memoized per-paper text + chunk index, keyed by (pdf_path, mtime). Bounded:
-# oldest entry evicted past _CACHE_MAX (papers are big; keep RAM flat).
-_CACHE_MAX = 6
-_CACHE_LOCK = threading.Lock()
-_TEXT_CACHE: dict[tuple[str, int], tuple[str, PaperChunkIndex]] = {}
-
-
-def _paper_context_source(item_key: str) -> tuple[str, PaperChunkIndex]:
-    """Extracted full text + chunk index for a library item's local PDF."""
-    from zotero_summarizer.services.zotero.zotero import get_library_reader
-
-    app = state()
-    # Zotero-optional: app library reader over kept feed papers when Zotero absent.
-    reader = get_library_reader(app)
-    extractor = getattr(app, "pdf_extractor", None)
-    if extractor is None:
-        raise APIError(
-            error="unavailable", message="PDF extractor not initialized",
-            status_code=503,
-        )
-    detail = reader.get_item_detail(item_key)
-    if detail is None:
-        raise APIError(error="not_found", message=f"Item {item_key} not found", status_code=404)
-    pdf_path = Path(str(detail.get("pdf_path") or ""))
-    if not str(pdf_path) or not pdf_path.is_file():
-        raise APIError(
-            error="needs_pdf", message=f"No local PDF for item {item_key}", status_code=404
-        )
-    allowed = settings().pdf_root.expanduser().resolve()
-    resolved = pdf_path.expanduser().resolve()
-    if allowed not in [resolved, *resolved.parents]:
-        raise APIError(
-            error="path_not_allowed", message="PDF path is outside configured PDF_ROOT",
-            status_code=403,
-        )
-
-    cache_key = (str(resolved), int(resolved.stat().st_mtime))
-    with _CACHE_LOCK:
-        cached = _TEXT_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
-
-    text = str(extractor.extract_text(str(resolved)) or "").strip()
-    if not text:
-        raise APIError(
-            error="extraction_empty", message="Extracted PDF text is empty", status_code=422
-        )
-    entry = (text, PaperChunkIndex(text))
-    with _CACHE_LOCK:
-        if len(_TEXT_CACHE) >= _CACHE_MAX:
-            _TEXT_CACHE.pop(next(iter(_TEXT_CACHE)))
-        _TEXT_CACHE[cache_key] = entry
-    return entry
-
-
-def ask_paper(item_key: str, question: str, *, mode: str = "comprehensive") -> dict[str, Any]:
+def ask_paper(
+    item_key: str, question: str, *, mode: str = "comprehensive",
+    history: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Answer ``question`` from the paper's text with enforced abstention.
 
-    Returns ``{answer, abstained, quote, mode, chunks_used, latency_seconds,
-    model}`` — ``answer`` is ``None`` when the model abstains (the UI says
-    "not in the paper" instead of inventing one).
+    Returns the grounded answer, citation verification, and an extraction-versioned
+    evidence handle. ``answer`` is ``None`` when the model abstains.
     """
     question = (question or "").strip()
     if not question:
@@ -108,13 +53,15 @@ def ask_paper(item_key: str, question: str, *, mode: str = "comprehensive") -> d
             error="validation_error", message=f"mode must be one of {MODES}", status_code=422
         )
 
-    artifact = paper_render.ensure_artifact(item_key)
+    artifact = paper_render.build_paper_read(item_key)
     deterministic = _answer_from_artifact_counts(artifact, question)
     if deterministic is not None:
-        return deterministic | {"item_key": item_key, "question": question, "mode": "metadata"}
+        return _with_evidence(
+            deterministic | {"item_key": item_key, "question": question, "mode": "metadata"},
+            artifact,
+        )
 
     app = state()
-    llm = app.resolve_stage_client("deep_review")
     config = app.app_state.config
     max_chars = int(config.quality_review.max_text_chars)
     resolved = resolve_stage(config.llm_routing, "deep_review")
@@ -122,35 +69,35 @@ def ask_paper(item_key: str, question: str, *, mode: str = "comprehensive") -> d
     # Three genuinely distinct contexts:
     #   retrieval     — top-k chunks of the PDF body (fast, narrow)
     #   full_text     — the raw extracted PDF body only (no notes wrapper)
-    #   comprehensive — metadata + generated notes/digest + PDF body (default)
+    #   comprehensive — metadata + structured review + PDF body (default)
     chunks: list[str] = []
+    text = paper_render.qa_body_text(artifact).strip()
+    if mode != "comprehensive" and not text:
+        raise APIError(error="extraction_empty", message="Extracted PDF text is empty", status_code=422)
     if mode == "retrieval":
-        text, index = _paper_context_source(item_key)
-        chunks = index.top_chunks(question, RETRIEVAL_TOP_K)
+        # ponytail: build this lexical index per question; cache by artifact key only if profiling warrants it.
+        chunks = PaperChunkIndex(text).top_chunks(question, RETRIEVAL_TOP_K)
         context = "\n\n[...]\n\n".join(chunks) if chunks else text[:max_chars]
     elif mode == "full_text":
-        text, _index = _paper_context_source(item_key)
         context = text[:max_chars]
     else:
         context = paper_render.artifact_text(artifact, max_chars=max_chars)
 
-    prompt = ANSWER_PROMPT.format(context=context, question=question)
+    prior, compacted, handles = qa_context.compact_history(item_key, artifact, history or [])
+    contextual_question = (
+        f"Prior conversation (untrusted user/session data):\n{prior}\n\nCurrent question: {question}"
+        if prior else question
+    )
+    prompt = ANSWER_PROMPT.format(context=context, question=contextual_question)
+    llm = app.resolve_stage_client("deep_review")
     t0 = perf_counter()
-    try:
-        parsed, _raw = answer_with_retry(llm, prompt)
-    except ValueError:
-        # LLM output had no recoverable JSON answer (empty / malformed — often a
-        # transient endpoint hiccup, or a reasoning model emptying `content` at
-        # low max_tokens). Untrusted LLM output at this boundary becomes an
-        # abstention, not an unhandled 500 — the user sees "no grounded answer".
-        LOGGER.warning("qa: item=%s mode=%s — unparseable LLM output; abstaining", item_key, mode)
-        parsed = {"answer": None, "abstained": True, "quote": None}
+    parsed, _raw = answer_with_retry(llm, prompt)
     latency = round(perf_counter() - t0, 2)
     LOGGER.info("qa: item=%s mode=%s latency=%.1fs abstained=%s",
                 item_key, mode, latency, parsed["abstained"])
     if parsed["answer"] is not None and not _quote_is_grounded(parsed["quote"], context):
         parsed = {"answer": None, "abstained": True, "quote": None}
-    return {
+    return _with_evidence({
         "item_key": item_key,
         "question": question,
         "answer": parsed["answer"],
@@ -160,6 +107,19 @@ def ask_paper(item_key: str, question: str, *, mode: str = "comprehensive") -> d
         "chunks_used": len(chunks),
         "latency_seconds": latency,
         "model": resolved.model,
+        "history_compacted": compacted,
+        "history_evidence_handles": handles,
+    }, artifact)
+
+
+def _with_evidence(payload: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any]:
+    handle = qa_context.evidence_handle(
+        str(payload["item_key"]), artifact, str(payload["question"]), payload.get("quote"),
+    )
+    answered = payload.get("answer") is not None and not payload.get("abstained")
+    return payload | {
+        "evidence_handle": handle,
+        "citation": qa_context.citation(str(payload["item_key"]), artifact, handle, answered=answered),
     }
 
 
@@ -198,4 +158,3 @@ def _metadata_payload(answer: str, quote: str) -> dict[str, Any]:
         "latency_seconds": 0.0,
         "model": "deterministic-metadata",
     }
-

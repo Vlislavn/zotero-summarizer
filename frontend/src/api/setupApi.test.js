@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   detectZotero,
+  fetchAiPresets,
+  fetchDoctorStatus,
   fetchSetupStatus,
+  saveAiCredential,
+  runDoctor,
   updatePaths,
   validateSetup,
 } from './setupApi.js';
 
-// settingsApi's request() resolves a success via res.json() (not res.text()),
-// so the mock fetch must expose a json() method.
 function mockFetch(body = {}, { ok = true, status = 200 } = {}) {
   global.fetch = vi.fn().mockResolvedValue({
     ok,
@@ -27,8 +29,15 @@ describe('setup API wrappers', () => {
     mockFetch({ ready: false });
     await expect(fetchSetupStatus()).resolves.toEqual({ ready: false });
     expect(global.fetch.mock.calls[0][0]).toBe('/api/setup/status');
-    // Default fetch (no options.method) is a GET.
     expect(global.fetch.mock.calls[0][1]?.method).toBeUndefined();
+  });
+
+  it('shares the doctor contract with web retries', async () => {
+    mockFetch({ ready: true });
+    await fetchDoctorStatus();
+    await runDoctor(['ml_assets']);
+    expect(global.fetch.mock.calls[0][0]).toBe('/api/setup/doctor');
+    expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual({ check_ids: ['ml_assets'] });
   });
 
   it('GETs Zotero candidates from /api/setup/detect-zotero', async () => {
@@ -60,6 +69,17 @@ describe('setup API wrappers', () => {
       config: { research_goals: ['x'] },
       test_connection: true,
     });
+  });
+
+  it('lists presets and stores a credential without putting it in the URL', async () => {
+    mockFetch({});
+    await fetchAiPresets();
+    await saveAiCredential('OPENROUTER_API_KEY', 'sk-private');
+    expect(global.fetch.mock.calls[0][0]).toBe('/api/setup/ai-presets');
+    const [url, options] = global.fetch.mock.calls[1];
+    expect(url).toBe('/api/setup/ai-credential');
+    expect(options.method).toBe('PUT');
+    expect(JSON.parse(options.body)).toEqual({ name: 'OPENROUTER_API_KEY', api_key: 'sk-private' });
   });
 
   it('defaults validateSetup test_connection to false', async () => {

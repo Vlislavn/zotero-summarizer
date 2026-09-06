@@ -1,44 +1,22 @@
-"""Fetch full-text PDFs from arXiv and attach them natively to Zotero items.
+"""Acquire OA PDFs and attach them to Zotero, backup-first and non-interactively.
 
-Two entry points share one engine:
-  * ``fetch_fulltext_for_items`` — attach PDFs for a known set of items (used by
-    the initial-add hook for just-materialized papers).
-  * ``start_bulk`` / ``fetch_fulltext_bulk`` — scan the WHOLE library for papers
-    that have an arXiv link but no PDF yet and attach them (the Library button),
-    run as a single background job with progress.
-
-Reuses the proven ``pdf_fetch.resolve_pdf_url`` (arXiv-first) + ``fetch_pdf``
-(streams to cache, %PDF-checked, size-capped). Idempotent: items that already
-have a PDF are skipped. Writes go through ``ZoteroWriter.apply_changes(create_
-backup=True)`` (WAL-consistent backup) and are connector-guarded — the library
-syncs to zotero.org, so we never write while Zotero is open. arXiv fetches run at
-bounded concurrency to stay polite.
+Today Add and whole-library retry share this engine and can reuse a deep-review path.
 """
 from __future__ import annotations
 
-import re
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Any
 
-from zotero_summarizer.integrations import pdf_fetch
-from zotero_summarizer.integrations._zotero_read_common import _arxiv_id_from_url_or_doi
+from zotero_summarizer.integrations.pdf_fetch import valid_pdf_path
+from zotero_summarizer.services.library import _pdf_acquire
 from zotero_summarizer.services.zotero.zotero import (
     get_zotero_reader_or_raise,
     get_zotero_writer_or_raise,
 )
 
-# Hosts in the arXiv ecosystem whose URLs embed an arXiv id but may dodge the
-# stricter ``arxiv.org/(abs|pdf)`` matcher — e.g. ar5iv (HTML5 renderings) and
-# ``arxiv.org/html/<id>``. Matching the host CLASS (not a specific id) keeps the
-# fetch arXiv-only while covering these forms.
-_ARXIV_HOSTS = ("arxiv.org", "ar5iv")
-_ARXIV_ID_IN_URL = re.compile(r"(\d{4}\.\d{4,5}(?:v\d+)?)")
+_ATTACH_TITLE = "Full Text PDF"
 
-_FETCH_WORKERS = 8  # concurrent arXiv downloads — I/O-bound; bounded to stay polite
-_ATTACH_TITLE = "arXiv Full Text PDF"
-
-# Single-flight background-job state for the bulk run (mirrors reading_queue).
 _LOCK = threading.Lock()
 _RUNNING = False
 _RESULT: dict[str, Any] | None = None
@@ -78,90 +56,89 @@ def _finish(result: dict[str, Any]) -> None:
         _RESULT = result
 
 
-def _arxiv_pdf_url(url: str, doi: str) -> str | None:
-    """The arXiv PDF URL for a paper, or None when it has no arXiv link. arXiv
-    only (the goal) — we do NOT fall back to Unpaywall/raw URLs here."""
-    arxiv_id = _arxiv_id_from_url_or_doi(url or "", doi or "")
-    if not arxiv_id and url:
-        # ar5iv / arxiv.org/html URLs embed the id but dodge the abs|pdf matcher.
-        low = url.lower()
-        if any(host in low for host in _ARXIV_HOSTS):
-            m = _ARXIV_ID_IN_URL.search(url)
-            if m:
-                arxiv_id = m.group(1)
-    if not arxiv_id:
-        return None
-    return pdf_fetch.resolve_pdf_url(doi=None, arxiv_id=arxiv_id, url=None)
+def _acquire(item: dict[str, Any]) -> dict[str, str]:
+    """Return an attachment candidate or a typed non-fatal outcome."""
+    key = str(item["item_key"])
+    cached = item.get("cached_acquisition")
+    if isinstance(cached, dict):
+        path = Path(str(cached.get("path") or "")).expanduser()
+        if valid_pdf_path(path):
+            return {
+                "item_key": key, "path": str(path), "source": str(cached.get("source") or "cached"),
+                "source_url": str(cached.get("source_url") or ""), "status": "ready_cached",
+            }
+    result = _pdf_acquire.acquire_pdf_for(key, item, allow_browser=False)
+    if result.path is None:
+        return {
+            "item_key": key, "status": result.outcome,
+            "source": result.source, "source_url": result.source_url,
+        }
+    return {
+        "item_key": key, "path": str(result.path), "source": result.source,
+        "source_url": result.source_url, "status": f"ready_{result.source}",
+    }
+
+
+def _summary(outcomes: list[dict[str, str]], backup_path: Any = None) -> dict[str, Any]:
+    statuses = [row["status"] for row in outcomes]
+    return {
+        "attached": sum(s.startswith("attached_") for s in statuses),
+        "skipped_has_pdf": statuses.count("skipped_has_pdf"),
+        "backup_path": backup_path,
+        "outcomes": outcomes,
+    }
 
 
 def fetch_fulltext_for_items(items: list[dict[str, Any]], *, force: bool = False) -> dict[str, Any]:
-    """Fetch + attach arXiv PDFs for ``items`` (each ``{item_key, url, doi,
-    has_pdf}``). Skips items that already have a PDF or no arXiv link. Returns
-    ``{attached, skipped_has_pdf, no_arxiv, failed_count, backup_path}`` or a
-    ``{requires_force: True}`` notice when Zotero is running."""
+    """Acquire once per key, then attach. Acquisition errors abort before writes.
+
+    First occurrence supplies metadata, but any existing-PDF flag wins over a
+    duplicate wanting acquisition. Outcome/progress counts describe unique keys.
+    """
     writer = get_zotero_writer_or_raise()
     if writer.is_connector_running() and not force:  # fast-fail before downloading
         return {"error": "zotero_running", "requires_force": True,
                 "message": "Zotero appears to be running; close Zotero or confirm force apply."}
 
-    candidates: list[tuple[str, str]] = []  # (item_key, arxiv_pdf_url)
-    skipped_has_pdf = no_arxiv = 0
+    unique: dict[str, dict[str, Any]] = {}
+    for item in items:
+        key = str(item["item_key"])
+        if key not in unique or item.get("has_pdf"):
+            unique[key] = item
+    items = list(unique.values())
+
+    outcomes: list[dict[str, str]] = []
+    candidates: list[dict[str, str]] = []
+    with _LOCK:
+        _PROGRESS.update(done=0, total=sum(not it.get("has_pdf") for it in items))
     for it in items:
         if it.get("has_pdf"):
-            skipped_has_pdf += 1
+            outcomes.append({"item_key": str(it["item_key"]), "status": "skipped_has_pdf", "source": ""})
             continue
-        url = _arxiv_pdf_url(str(it.get("url") or ""), str(it.get("doi") or ""))
-        if not url:
-            no_arxiv += 1
-            continue
-        candidates.append((str(it["item_key"]), url))
+        outcome = _acquire(it)
+        (candidates if outcome["status"].startswith("ready_") else outcomes).append(outcome)
+        with _LOCK:
+            _PROGRESS["done"] += 1
 
-    with _LOCK:
-        _PROGRESS.update(done=0, total=len(candidates))
-
-    failed: list[dict[str, str]] = []
-    fetched: list[tuple[str, str, str]] = []  # (item_key, source_path, source_url)
-
-    if candidates:
-        with ThreadPoolExecutor(max_workers=min(_FETCH_WORKERS, len(candidates))) as pool:
-            # Submit all; consume in COMPLETION order so progress reflects what's
-            # actually finished (pool.map would yield strictly in submission order
-            # — one slow download would stall the counter while others complete).
-            futures = {pool.submit(pdf_fetch.fetch_pdf, url): (key, url) for key, url in candidates}
-            for fut in as_completed(futures):
-                key, url = futures[fut]
-                path = fut.result()  # fetch_pdf returns None on failure (no raise)
-                with _LOCK:
-                    _PROGRESS["done"] += 1
-                if path is None:
-                    failed.append({"item_key": key, "error": "arXiv fetch failed (404/non-PDF/timeout)"})
-                else:
-                    fetched.append((key, str(path), url))
-
-    if not fetched:
-        return {"attached": 0, "skipped_has_pdf": skipped_has_pdf, "no_arxiv": no_arxiv,
-                "failed_count": len(failed), "backup_path": None}
+    if not candidates:
+        return _summary(outcomes)
 
     changes = [
-        {"id": 0, "item_key": key, "change_type": "add_attachment",
-         "payload_json": {"source_path": path, "filename": url.rsplit("/", 1)[-1],
-                          "source_url": url, "title": _ATTACH_TITLE}}
-        for key, path, url in fetched
+        {"id": index, "item_key": row["item_key"], "change_type": "add_attachment",
+         "payload_json": {"source_path": row["path"], "filename": Path(row["path"]).name,
+                          "source_url": row["source_url"], "title": _ATTACH_TITLE}}
+        for index, row in enumerate(candidates)
     ]
     result = writer.apply_changes(changes, True)  # True = backup first
-    return {
-        "attached": len(result.get("applied_ids") or []),
-        "skipped_has_pdf": skipped_has_pdf,
-        "no_arxiv": no_arxiv,
-        "failed_count": len(failed) + len(result.get("failed") or []),
-        "backup_path": result.get("backup_path"),
-    }
+    applied = {int(value) for value in result.get("applied_ids") or []}
+    for index, row in enumerate(candidates):
+        row["status"] = f"attached_{row['status'][len('ready_'):]}" if index in applied else "write_failed"
+        outcomes.append(row)
+    return _summary(outcomes, result.get("backup_path"))
 
 
 def fetch_fulltext_bulk(*, force: bool = False) -> dict[str, Any]:
-    """Whole-library: attach arXiv PDFs to every paper with an arXiv link and no
-    PDF. Reads the library once (items + url/DOI fields), delegates to
-    :func:`fetch_fulltext_for_items`."""
+    """Whole-library retry through the same acquisition + attachment engine."""
     reader = get_zotero_reader_or_raise()
     items = reader.get_all_items(include_abstract=False).get("items", [])
     urls = reader.get_field_values("url")

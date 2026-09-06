@@ -57,7 +57,11 @@ export default function AskPaperBox({ itemKey, variant = 'disclosure', allowRawP
     setError(null);
     setQuestion(q);
     try {
-      const res = await askPaper(itemKey, q, { mode });
+      const prior = history.slice(0, 20).reverse().map((entry) => ({
+        question: entry.q, answer: entry.answer, quote: entry.quote,
+        evidence_handle: entry.evidence_handle,
+      }));
+      const res = await askPaper(itemKey, q, { mode, history: prior });
       // Drop a late answer if the component unmounted or the row changed.
       if (!mountedRef.current || askedKey !== itemKey) return;
       idRef.current += 1;
@@ -163,7 +167,9 @@ export default function AskPaperBox({ itemKey, variant = 'disclosure', allowRawP
                     “{entry.quote}”
                   </blockquote>
                 )}
-                <div className="text-[11px] text-slate-400">{metaLine(entry)}</div>
+                <div className="text-[11px] text-slate-400">
+                  {metaLine(entry)}{entry.citation?.quote_verified ? ' · verified quote' : ''}
+                </div>
               </div>
             ))}
           </div>

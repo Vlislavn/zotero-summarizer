@@ -1,15 +1,11 @@
-"""First-run setup endpoints (``/api/setup/*``).
+"""Thin HTTP front-end over the shared setup services."""
 
-Thin handlers over ``services/setup``: a readiness probe, a read-only Zotero-dir
-detector, an allowlisted ``.env`` path writer, and a dry-run config validator.
-The same service functions back the ``zotero-summarizer setup`` CLI.
-"""
 from __future__ import annotations
 
 import asyncio
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from zotero_summarizer.models.setup import (
     DetectZoteroResponse,
@@ -19,13 +15,13 @@ from zotero_summarizer.models.setup import (
     ValidateConfigRequest,
     ValidateConfigResponse,
 )
+from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.setup import (
     detect_zotero_data_dirs,
     get_setup_status,
     validate_config_draft,
     write_env_paths,
 )
-from zotero_summarizer.services._common import settings as get_settings
 
 router = APIRouter()
 
@@ -42,12 +38,7 @@ async def detect_zotero() -> DetectZoteroResponse:
 
 
 async def update_paths(req: UpdatePathsRequest) -> UpdatePathsResponse:
-    """Persist the allowlisted path keys into ``.env`` (restart required).
-
-    Only the keys the caller actually supplied (non-null) are written — an
-    omitted field leaves its current ``.env`` line untouched. The allowlist +
-    path-existence checks (→ 422) live in the service.
-    """
+    """Persist supplied allowlisted paths; the service validates them."""
     updates: dict[str, str] = {}
     if req.pdf_root is not None:
         updates["PDF_ROOT"] = req.pdf_root
@@ -58,75 +49,81 @@ async def update_paths(req: UpdatePathsRequest) -> UpdatePathsResponse:
 
 
 async def validate_config(req: ValidateConfigRequest) -> ValidateConfigResponse:
-    """Validate a GoalsConfig draft; optionally probe the default provider. Never
-    persists or hot-swaps."""
+    """Validate a draft and optionally probe it; write nothing."""
     return await validate_config_draft(req)
+
+
+class CredentialRequest(BaseModel):
+    name: str
+    api_key: str
+
+
+async def list_ai_presets() -> dict:
+    """Return provider cards, compiled configs, and redacted credential status."""
+    from zotero_summarizer.services.llm.presets import list_presets
+    from zotero_summarizer.services.setup.profiles import local_profile_catalog
+
+    presets, local = await asyncio.gather(
+        asyncio.to_thread(list_presets),
+        asyncio.to_thread(local_profile_catalog, get_settings()),
+    )
+    return {"presets": presets, "local_profiles": local}
+
+
+async def save_ai_credential(req: CredentialRequest) -> dict:
+    """Store one API key in the OS keyring; never echo it in the response."""
+    from zotero_summarizer.services.llm.credentials import store_api_key
+
+    return {"credential": await asyncio.to_thread(store_api_key, req.name, req.api_key)}
 
 
 class CalibrateRequest(BaseModel):
     item_keys: list[str] | None = None
-    papers: int = 3
+    papers: int = Field(default=3, ge=1, le=10)
 
 
 async def calibrate(req: CalibrateRequest) -> dict:
-    """"Calibrate to my setup" — Tier-1 env probe + Tier-2 text-budget sweep on the
-    resolved deep-review endpoint, persisted to data/calibration.json (applied on next
-    config load). Kicks the sweep off on a background thread and returns immediately with
-    the initial job status; the client polls ``/api/setup/calibrate/status`` for live
-    ``completed/total`` progress (the sweep is bounded but slow — a few papers × budgets).
-    Remote endpoints are memory-safe; a local one is memory-pre-flighted."""
+    """Start the existing environment/text-budget calibration job."""
     from zotero_summarizer.services.setup import calibration_job
 
-    return calibration_job.start(get_settings(), item_keys=req.item_keys, papers_limit=req.papers)
+    return calibration_job.start(
+        get_settings(), item_keys=req.item_keys, papers_limit=req.papers
+    )
 
 
 async def calibrate_status() -> dict:
-    """Live calibration progress: ``{status, completed, total, phase, result, error}``.
-    Mirrors the deep-review status poll so the card can show "reviewed N of M"."""
+    """Return live calibration progress."""
     from zotero_summarizer.services.setup import calibration_job
 
     return calibration_job.status()
 
 
-async def list_profiles() -> dict:
-    """The deployment presets + which one the current routing matches."""
-    from zotero_summarizer.services._common import read_config
-    from zotero_summarizer.services.setup.profiles import PROFILES, detect_profile
-
-    cfg = await asyncio.to_thread(read_config, get_settings().config_path, get_settings().calibration_path)
-    return {"profiles": PROFILES, "current": detect_profile(cfg)}
+class DoctorRequest(BaseModel):
+    check_ids: list[str] | None = None
+    fix: bool = False
 
 
-class SetProfileRequest(BaseModel):
-    profile: str
-    local_depth: str | None = None
+async def doctor_status() -> dict:
+    from zotero_summarizer.services.setup.doctor import doctor_status as read_status
+
+    return await asyncio.to_thread(read_status, get_settings())
 
 
-async def set_deployment_profile(req: SetProfileRequest) -> dict:
-    """Apply a preset (rewrites llm_routing: which stage runs local vs API + review depth)."""
-    from zotero_summarizer.services.setup.profiles import set_profile
+async def run_doctor(req: DoctorRequest) -> dict:
+    from zotero_summarizer.services.setup.doctor import run_doctor as run_checks
 
-    return await asyncio.to_thread(set_profile, get_settings(), req.profile, local_depth=req.local_depth)
-
-
-class MeasureProfileRequest(BaseModel):
-    include_local: bool = False
+    return await asyncio.to_thread(
+        run_checks, get_settings(), check_ids=req.check_ids, fix=req.fix,
+    )
 
 
-async def measure_profile(req: MeasureProfileRequest) -> dict:
-    """Measure which stages are token/compute-heavy per provider → recommend a profile.
-    Remote-only by default (a local gen loads a multi-GB model); ``include_local`` opts in."""
-    from zotero_summarizer.services.setup.profiles import run_full_profile_measure
-
-    return await asyncio.to_thread(run_full_profile_measure, get_settings(), include_local=req.include_local)
-
-
-router.add_api_route("/api/setup/profiles", list_profiles, methods=["GET"])
-router.add_api_route("/api/setup/profile", set_deployment_profile, methods=["POST"])
-router.add_api_route("/api/setup/profile/measure", measure_profile, methods=["POST"])
+router.add_api_route("/api/setup/doctor", doctor_status, methods=["GET"])
+router.add_api_route("/api/setup/doctor", run_doctor, methods=["POST"])
 router.add_api_route("/api/setup/status", setup_status, methods=["GET"])
 router.add_api_route("/api/setup/detect-zotero", detect_zotero, methods=["GET"])
 router.add_api_route("/api/setup/paths", update_paths, methods=["PUT"])
 router.add_api_route("/api/setup/validate-config", validate_config, methods=["POST"])
+router.add_api_route("/api/setup/ai-presets", list_ai_presets, methods=["GET"])
+router.add_api_route("/api/setup/ai-credential", save_ai_credential, methods=["PUT"])
 router.add_api_route("/api/setup/calibrate", calibrate, methods=["POST"])
 router.add_api_route("/api/setup/calibrate/status", calibrate_status, methods=["GET"])

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -13,6 +14,7 @@ __all__ = [
     "TriageDimensions",
     "TriageResult",
     "QualityReview",
+    "MethodAndCode",
     "PaperParameters",
     "PaperDigest",
     "GoalSummary",
@@ -88,6 +90,26 @@ class QualityReview(BaseModel):
         return v if v in {"A", "B", "C", "D"} else ""
 
 
+class MethodAndCode(BaseModel):
+    """Optional reusable method/artifact detail from the existing refine call."""
+
+    what_it_does: str = Field(default="")
+    what_is_new: str = Field(default="")
+    how_it_works: List[str] = Field(default_factory=list)
+    evaluation: str = Field(default="")
+    artifacts: List[str] = Field(default_factory=list)
+    how_i_could_use_it: str = Field(default="")
+
+    @field_validator("artifacts")
+    @classmethod
+    def _require_absolute_urls(cls, values: List[str]) -> List[str]:
+        cleaned = [value.strip() for value in values if value.strip()]
+        if any(urlsplit(value).scheme not in {"http", "https"} or not urlsplit(value).hostname
+               for value in cleaned):
+            raise ValueError("method artifacts must be absolute HTTP(S) URLs")
+        return cleaned
+
+
 class PaperParameters(BaseModel):
     """Structured technical parameters extracted from the paper's FULL TEXT during
     the deep review (top-K only — the triage feed stage stays abstract-based). This
@@ -114,6 +136,11 @@ class PaperDigest(QualityReview):
     read_decision: str = Field(default="")  # read | skim | skip
     read_why: str = Field(default="")
     read_parts: List[str] = Field(default_factory=list)
+    skip_parts: List[str] = Field(default_factory=list)
+    estimated_read_minutes: Optional[int] = Field(default=None, ge=0)
+    original_value: str = Field(default="")
+    writing_friction: Literal["low", "moderate", "high"] = Field(default="low")
+    writing_reasons: List[str] = Field(default_factory=list, max_length=3)
     relevance: str = Field(default="")
     controversies: str = Field(default="")
     impact: str = Field(default="")
@@ -135,6 +162,19 @@ class PaperDigest(QualityReview):
     def _norm_read_decision(cls, value: Any) -> str:
         v = str(value or "").strip().lower()
         return v if v in {"read", "skim", "skip"} else ""
+
+    @model_validator(mode="after")
+    def _reading_contract(self) -> "PaperDigest":
+        if self.writing_friction != "low" and not any(x.strip() for x in self.writing_reasons):
+            raise ValueError("moderate/high writing friction requires a concrete reason")
+        if self.writing_friction == "high" and self.read_decision == "read":
+            self.read_decision = "skim"
+        if self.read_decision == "skim" and not any(part.strip() for part in self.read_parts):
+            raise ValueError("skim requires at least one exact read target")
+        if self.read_decision == "skip":
+            self.read_parts = []
+            self.original_value = ""
+        return self
 
 
 class GoalSummary(BaseModel):
@@ -230,6 +270,7 @@ class RefinedSummary(BaseModel):
     key_findings: List[str] = Field(default_factory=list)
     methods: str = Field(default="")
     limitations: str = Field(default="")
+    method_and_code: Optional[MethodAndCode] = Field(default=None)
 
     @staticmethod
     def _coerce_text(value: Any, field_name: str, allow_bool: bool = False) -> str:
@@ -302,6 +343,7 @@ class SummarizeResponse(BaseModel):
     key_findings: List[str] = Field(default_factory=list)
     methods: str = ""
     limitations: str = ""
+    method_and_code: Optional[MethodAndCode] = Field(default=None)
     relevance_score: int = Field(..., ge=1, le=5)
     composite_relevance_score: float = Field(default=0.0, ge=0.0, le=5.0)
     reading_priority: str = ReadingPriority.COULD_READ.value
@@ -324,6 +366,7 @@ class CorpusItem(BaseModel):
     item_id: str = Field(..., min_length=1)
     title: str = Field(..., min_length=1)
     abstract: str = ""
+    doi: str = ""
     tags: List[str] = Field(default_factory=list)
     collections: List[str] = Field(default_factory=list)
     annotation_count: int = Field(default=0, ge=0)

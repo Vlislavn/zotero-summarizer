@@ -40,11 +40,6 @@ WANT = {MUST, SHOULD}
 DONT = ReadingPriority.DONT_READ.value
 
 
-def _model_dir() -> Path:
-    from zotero_summarizer.services.model.classifier_persistence import DEFAULT_MODEL_DIR
-    return DEFAULT_MODEL_DIR
-
-
 def load_rows(triage_db: Path, model_dir: Path) -> list[dict]:
     """Join user verdicts × grade × (goal_sim, relevance) by item_key. Fail loud if a
     required artifact is missing — a silent empty join would read as 'rule is safe'."""
@@ -139,7 +134,7 @@ def main() -> None:
         return
 
     settings = get_settings()
-    rows = load_rows(settings.triage_db_path, _model_dir())
+    rows = load_rows(settings.triage_db_path, settings.model_dir)
     print(f"joined rows (verdict ∩ grade ∩ gate) = {len(rows)}\n")
     if not rows:
         print("no joinable ground truth yet — verdict more reviewed papers first.")

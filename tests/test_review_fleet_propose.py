@@ -25,10 +25,14 @@ from zotero_summarizer.services.library.review_fleet import propose
 # --- helpers: build the cached-signal dicts the way the fleet reads them -----------
 
 
-def _digest(read_decision=None, grade=None):
-    d: dict = {}
+def _digest(read_decision=None, grade=None, **extra):
+    d: dict = dict(extra)
     if read_decision is not None:
         d["read_decision"] = read_decision
+        if str(read_decision).strip().lower() == "read":
+            d.setdefault("novelty", 4)
+            d.setdefault("significance", 4)
+            d.setdefault("writing_friction", "low")
     if grade is not None:
         d["grade"] = grade
     return d
@@ -57,16 +61,15 @@ def _goals(*, matched):
 #   read  -> must (A/B) / should (C/D/?)
 #   skim  -> should (A/B) / could (C/D/?)
 #   skip  -> could (goal matched) / dont (goal miss)     <- the asymmetry
-# Goal-match only changes the SKIP rows; for read/skim it is verdict-neutral, so we
-# assert both goal values give the same verdict to lock that invariant in.
+# Full read additionally requires a confirmed goal match and highlighted evidence.
 
 _TRUTH_TABLE = [
-    # read: strong grade -> must_read, weak/none -> should_read (goal-neutral)
+    # read: a missing goal match caps to skim before the grade mapping.
     ("read", "A", True, "must_read"),
-    ("read", "A", False, "must_read"),
+    ("read", "A", False, "should_read"),
     ("read", "B", True, "must_read"),
     ("read", "C", True, "should_read"),
-    ("read", "D", False, "should_read"),
+    ("read", "D", False, "could_read"),
     ("read", "", True, "should_read"),
     # skim: strong grade -> should_read, weak/none -> could_read (goal-neutral)
     ("skim", "A", True, "should_read"),
@@ -88,7 +91,7 @@ _TRUTH_TABLE = [
 def test_truth_table_maps_to_expected_priority(read_decision, grade, goal_matched, expected):
     out = propose.propose_verdict(
         _digest(read_decision=read_decision, grade=grade or None),
-        _quality(band="ok"),
+        _quality(band="highlight" if read_decision == "read" else "neutral"),
         goal_summaries=_goals(matched=goal_matched),
     )
     assert isinstance(out, ProposedVerdict)
@@ -100,21 +103,21 @@ def test_truth_table_maps_to_expected_priority(read_decision, grade, goal_matche
     assert 0.0 <= out.confidence <= 1.0
 
 
-def test_read_and_skim_verdict_is_goal_independent():
-    """The goal-match toggle must move ONLY the skip rows — read/skim are stable."""
-    for decision in ("read", "skim"):
-        for grade in ("A", "C", ""):
-            matched = propose.propose_verdict(
-                _digest(read_decision=decision, grade=grade or None),
-                _quality(band="ok"),
-                goal_summaries=_goals(matched=True),
-            )
-            missed = propose.propose_verdict(
-                _digest(read_decision=decision, grade=grade or None),
-                _quality(band="ok"),
-                goal_summaries=_goals(matched=False),
-            )
-            assert matched.proposed == missed.proposed
+def test_read_requires_goal_match_but_skim_does_not():
+    matched = propose.propose_verdict(
+        _digest(read_decision="read", grade="A"), _quality(band="highlight"),
+        goal_summaries=_goals(matched=True),
+    )
+    missed = propose.propose_verdict(
+        _digest(read_decision="read", grade="A"), _quality(band="highlight"),
+        goal_summaries=_goals(matched=False),
+    )
+    assert matched.proposed == "must_read" and missed.proposed == "should_read"
+    for goal_matched in (True, False):
+        assert propose.propose_verdict(
+            _digest(read_decision="skim", grade="A"), _quality(band="neutral"),
+            goal_summaries=_goals(matched=goal_matched),
+        ).proposed == "should_read"
 
 
 # --- 2. the dont_read-conservatism (asymmetry) -------------------------------------
@@ -193,8 +196,8 @@ def test_unknown_read_decision_degrades_to_could_read(bogus):
 def test_read_decision_is_case_and_whitespace_normalized():
     out = propose.propose_verdict(
         _digest(read_decision="  Read ", grade="a"),
-        _quality(band="ok"),
-        goal_summaries=_goals(matched=False),
+        _quality(band="highlight"),
+        goal_summaries=_goals(matched=True),
     )
     assert out.proposed == "must_read"  # 'Read'+'A' both normalized
     assert out.digest_read_decision == "read"
@@ -209,7 +212,7 @@ def test_uncertain_band_lowers_confidence_and_flags():
     foregrounds. Compared against the same call with a clean band."""
     clean = propose.propose_verdict(
         _digest(read_decision="read", grade="A"),
-        _quality(band="ok"),
+        _quality(band="highlight"),
         goal_summaries=_goals(matched=True),
     )
     shaky = propose.propose_verdict(
@@ -218,7 +221,6 @@ def test_uncertain_band_lowers_confidence_and_flags():
         goal_summaries=_goals(matched=True),
     )
     assert "quality_uncertain" in shaky.flags
-    assert shaky.confidence == pytest.approx(round(clean.confidence - 0.2, 2))
     assert shaky.confidence < clean.confidence
 
 
@@ -226,23 +228,24 @@ def test_overstatements_lower_confidence_and_flag():
     """A non-empty overstatements list is shaky even with a confident band."""
     clean = propose.propose_verdict(
         _digest(read_decision="read", grade="A"),
-        _quality(band="ok", overstatements=[]),
+        _quality(band="highlight", overstatements=[]),
         goal_summaries=_goals(matched=True),
     )
     shaky = propose.propose_verdict(
         _digest(read_decision="read", grade="A"),
-        _quality(band="ok", overstatements=["abstract claims X, body shows only Y"]),
+        _quality(band="highlight", overstatements=["abstract claims X, body shows only Y"]),
         goal_summaries=_goals(matched=True),
     )
     assert "overstatements" in shaky.flags
-    assert shaky.confidence == pytest.approx(round(clean.confidence - 0.2, 2))
+    assert "weak_evidence" in shaky.flags and shaky.proposed == "should_read"
+    assert shaky.confidence < clean.confidence
 
 
 def test_blank_overstatements_are_ignored():
     """Whitespace-only overstatement entries are stripped -> not shaky, no flag."""
     out = propose.propose_verdict(
         _digest(read_decision="read", grade="A"),
-        _quality(band="ok", overstatements=["", "   ", "\t\n"]),
+        _quality(band="highlight", overstatements=["", "   ", "\t\n"]),
         goal_summaries=_goals(matched=True),
     )
     assert "overstatements" not in out.flags
@@ -258,9 +261,7 @@ def test_shaky_rationale_carries_the_double_check_hint():
     assert "worth a check" in out.rationale
 
 
-def test_flag_band_and_red_flags_surface_without_cutting_confidence():
-    """``quality_band == 'flag'`` and ``red_flags`` raise flags for the UI but are
-    NOT part of the 'shaky' confidence cut (only uncertain/overstatements are)."""
+def test_flag_band_caps_read_to_skim_priority():
     flagged = propose.propose_verdict(
         _digest(read_decision="read", grade="A"),
         _quality(band="flag", red_flags=["n=3 underpowered"]),
@@ -268,11 +269,31 @@ def test_flag_band_and_red_flags_surface_without_cutting_confidence():
     )
     clean = propose.propose_verdict(
         _digest(read_decision="read", grade="A"),
-        _quality(band="ok"),
+        _quality(band="highlight"),
         goal_summaries=_goals(matched=True),
     )
     assert "quality_flag" in flagged.flags and "red_flags" in flagged.flags
-    assert flagged.confidence == clean.confidence  # not a shaky cut
+    assert "weak_evidence" in flagged.flags
+    assert flagged.proposed == "should_read" and flagged.confidence < clean.confidence
+
+
+def test_high_writing_friction_caps_read_but_preserves_it_as_provenance():
+    out = propose.propose_verdict(
+        _digest(read_decision="read", grade="A", writing_friction="high"),
+        _quality(band="neutral"), goal_summaries=_goals(matched=True),
+    )
+    assert out.proposed == "should_read" and out.digest_read_decision == "read"
+    assert "writing_friction" in out.flags
+
+
+def test_low_idea_value_and_unassessed_evidence_cannot_be_full_read():
+    out = propose.propose_verdict(
+        _digest(read_decision="read", grade="A", novelty=2, significance=3),
+        _quality(band="neutral"), goal_summaries=_goals(matched=True),
+    )
+    assert out.proposed == "should_read"
+    assert "idea_value_not_high" in out.flags
+    assert "strong_evidence_not_confirmed" in out.flags
 
 
 def test_missing_grade_with_a_decision_takes_a_small_confidence_penalty():
@@ -294,7 +315,7 @@ def test_grade_falls_back_to_quality_eval_when_digest_lacks_it():
     """The grade is read from the digest first, then the quality_eval echo."""
     out = propose.propose_verdict(
         _digest(read_decision="read"),  # no grade in the digest
-        _quality(band="ok", grade="B"),  # quality_eval carries it
+        _quality(band="highlight", grade="B"),  # quality_eval carries it
         goal_summaries=_goals(matched=True),
     )
     assert out.grade == "B"

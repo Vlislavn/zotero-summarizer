@@ -1,6 +1,6 @@
 """Versioned snapshots of the trained gate — rollback safety for ``--force``.
 
-``train-classifier --force`` overwrites ``{name}.joblib`` + ``{name}.json`` in place.
+``train-classifier --force`` replaces ``{name}.zip`` in place.
 The atomic write (``_common.atomic_write``) already prevents a *crashed* write from
 bricking the gate, but a *successful* overwrite still destroys the prior model with no
 recovery — a measured-better retrain that later looks wrong has no rollback target.
@@ -8,13 +8,13 @@ recovery — a measured-better retrain that later looks wrong has no rollback ta
 This module snapshots the CURRENT model into a versioned history dir BEFORE
 ``save_trained`` overwrites it:
 
-    ~/.cache/zotero-summarizer/models/history/{name}/{ts}__{sha8}__oof{rho}/
-        {name}.joblib
-        {name}.json
+    data/models/history/{name}/{ts}__{sha8}__oof{rho}/
+        {name}.zip
 
-Each snapshot is self-contained (joblib + json), so ``restore_snapshot`` is a plain
-copy back via ``atomic_write``. A rolling cap (default ``DEFAULT_KEEP``) prunes the
-oldest snapshots beyond N so the history is bounded.
+Snapshot directories have a unique suffix so equal timestamps/metadata cannot
+overwrite history. Restore publishes model and metadata together with one atomic
+replace, then prunes to ``DEFAULT_KEEP``. A failed restore retains all backups.
+Legacy joblib snapshots are converted on restore, ignoring their JSON twins.
 
 INVARIANT (fail-fast): a snapshot that cannot be written RAISES — ``save_trained``
 then aborts, so the live model is NEVER overwritten without a successful backup.
@@ -24,13 +24,16 @@ or a full disk is a signal the operator must see, not a silent skip.
 """
 from __future__ import annotations
 
-import json
 import logging
 import shutil
 from pathlib import Path
+from tempfile import mkdtemp
 from typing import Any
 
-from zotero_summarizer.services._common import atomic_write, now_iso_z, read_json_or_empty
+from zotero_summarizer.services._common import atomic_write, now_iso_z
+from zotero_summarizer.services.model.classifier_store import (
+    load_trained, model_path, read_metadata, write_archive,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -60,26 +63,24 @@ def snapshot_current(
     keep: int = DEFAULT_KEEP,
     ts: str | None = None,
 ) -> Path | None:
-    """Snapshot the current ``{name}.joblib``+``.json`` before an overwrite.
+    """Snapshot the current model artifact before an overwrite.
 
     Returns the snapshot dir, or ``None`` when there is no current model to back up
     (first train / clean slate). Any I/O error RAISES — by the module invariant the
     caller (``save_trained``) must abort the overwrite rather than destroy the prior
     model without a backup. Prunes to ``keep`` newest after the copy succeeds.
     """
-    joblib_path = model_dir / f"{classifier_name}.joblib"
-    json_path = model_dir / f"{classifier_name}.json"
-    if not joblib_path.exists():
+    source = model_path(model_dir, classifier_name)
+    if not source.exists():
         return None
     ts = ts or now_iso_z().replace(":", "").replace("-", "")
-    meta = read_json_or_empty(json_path)
-    snap_dir = _history_dir(model_dir, classifier_name) / _snapshot_name(meta, ts)
-    snap_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(joblib_path, snap_dir / joblib_path.name)
-    if json_path.exists():
-        shutil.copy2(json_path, snap_dir / json_path.name)
-    _prune(_history_dir(model_dir, classifier_name), keep=keep)
-    LOGGER.info("snapshot: backed up %s -> %s", joblib_path.name, snap_dir.name)
+    meta = read_metadata(source)
+    hdir = _history_dir(model_dir, classifier_name)
+    hdir.mkdir(parents=True, exist_ok=True)
+    snap_dir = Path(mkdtemp(prefix=_snapshot_name(meta, ts) + _SEP, dir=hdir))
+    atomic_write(snap_dir / source.name, lambda target: shutil.copy2(source, target))
+    _prune(hdir, keep=keep)
+    LOGGER.info("snapshot: backed up %s -> %s", source.name, snap_dir.name)
     return snap_dir
 
 
@@ -99,13 +100,16 @@ def _prune(hdir: Path, *, keep: int) -> None:
 
 def list_snapshots(model_dir: Path, classifier_name: str) -> list[dict[str, Any]]:
     """Newest-first snapshot inventory: ``{name, trained_at, git_commit, oof_spearman,
-    temporal_spearman, n_train, path}``. Reads the per-snapshot json (no joblib load)."""
+    temporal_spearman, n_train, path}``. ZIP metadata needs no joblib load."""
     hdir = _history_dir(model_dir, classifier_name)
     if not hdir.exists():
         return []
     out: list[dict[str, Any]] = []
     for snap in sorted(p.name for p in hdir.iterdir() if p.is_dir()):
-        meta = read_json_or_empty(hdir / snap / f"{classifier_name}.json")
+        source = model_path(hdir / snap, classifier_name)
+        if not source.is_file():
+            continue  # Snapshot publication has not completed.
+        meta = read_metadata(source)
         out.append({
             "name": snap,
             "trained_at": meta.get("trained_at"),
@@ -122,30 +126,30 @@ def list_snapshots(model_dir: Path, classifier_name: str) -> list[dict[str, Any]
 def restore_snapshot(
     model_dir: Path, classifier_name: str, snapshot_name: str
 ) -> Path:
-    """Restore a snapshot as the live model (atomic).
+    """Restore a snapshot as one atomically replaced live archive.
 
-    Raises ``FileNotFoundError`` if the snapshot dir or its joblib is missing. The
+    Validates the source before any write. The
     current live model is snapshotted first (so a restore is reversible too); that
     snapshot RAISES on failure per the invariant — refuse to clobber the live model
     if it can't be backed up.
     """
     hdir = _history_dir(model_dir, classifier_name)
     snap_dir = hdir / snapshot_name
-    src_joblib = snap_dir / f"{classifier_name}.joblib"
-    src_json = snap_dir / f"{classifier_name}.json"
-    if not src_joblib.exists():
-        raise FileNotFoundError(f"snapshot has no joblib: {snap_dir}")
-    snapshot_current(model_dir, classifier_name)  # back up live first (reversible)
-    joblib_path = model_dir / f"{classifier_name}.joblib"
-    json_path = model_dir / f"{classifier_name}.json"
-    atomic_write(joblib_path, lambda target: shutil.copy2(src_joblib, target))
-    atomic_write(json_path, lambda target: shutil.copy2(src_json, target))
-    LOGGER.info("restore: %s -> live %s", snapshot_name, joblib_path.name)
-    return joblib_path
+    source = model_path(snap_dir, classifier_name)
+    trained = load_trained(source)
+    # Retain the restore source until publication succeeds; failure keeps all backups.
+    snapshot_current(model_dir, classifier_name, keep=0)
+    destination = model_dir / f"{classifier_name}.zip"
+    if source.suffix == ".joblib":
+        write_archive(trained, destination)
+    else:
+        atomic_write(destination, lambda target: shutil.copy2(source, target))
+    _prune(hdir, keep=DEFAULT_KEEP)
+    LOGGER.info("restore: %s -> live %s", snapshot_name, destination.name)
+    return destination
 
 
 __all__ = [
-    "DEFAULT_KEEP",
     "DEFAULT_KEEP",
     "snapshot_current",
     "list_snapshots",

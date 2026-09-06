@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from dotenv import dotenv_values
+
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models.setup import UpdatePathsResponse, UpdatePathsValidation
 from zotero_summarizer.services._common import atomic_write
@@ -102,7 +104,7 @@ def write_env_paths(env_path: Path, updates: dict[str, str]) -> UpdatePathsRespo
         # currently-configured values so the caller has a consistent shape.
         return UpdatePathsResponse(
             written=[],
-            validated=_validation_snapshot(updates),
+            validated=_validation_snapshot(dotenv_values(env_path)),
         )
     _validate_paths_exist(updates)
 
@@ -117,17 +119,12 @@ def write_env_paths(env_path: Path, updates: dict[str, str]) -> UpdatePathsRespo
 
     return UpdatePathsResponse(
         written=list(updates.keys()),
-        validated=_validation_snapshot(updates),
+        validated=_validation_snapshot(dotenv_values(env_path)),
     )
 
 
-def _validation_snapshot(updates: dict[str, str]) -> UpdatePathsValidation:
-    """Re-derive the path-validity flags from the values just written.
-
-    ``pdf_root_exists`` and ``zotero_db_found`` reflect the SUBMITTED values (the
-    new ones), not the still-old live ``Settings`` — the change needs a restart to
-    take effect, so the UI should preview the new state, not the stale one.
-    """
+def _validation_snapshot(updates: dict[str, str | None]) -> UpdatePathsValidation:
+    """Validate the persisted paths; live Settings may still need a restart."""
     pdf_raw = updates.get("PDF_ROOT")
     zotero_raw = updates.get("ZOTERO_DATA_DIR")
     pdf_exists = bool(pdf_raw) and Path(pdf_raw).expanduser().exists()

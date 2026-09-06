@@ -34,12 +34,9 @@ triage state (see storage/repositories.py).
 """
 from __future__ import annotations
 
-import logging
 import sqlite3
-from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 # Re-export the decision/outcome taxonomy and table DDL so existing
 # `from zotero_summarizer.storage import feeds as fs; fs.DECISION_*` callers
@@ -73,19 +70,7 @@ from zotero_summarizer.storage.feeds_constants import (  # noqa: F401  (re-expor
     OUTCOME_WEIGHT,
     relevance_from_signal_weight,
 )
-from zotero_summarizer.storage.feeds_schema import (
-    CREATE_TABLE as _CREATE_TABLE,
-    CREATE_FEED_KEY_ALIAS_AMBIGUITIES_TABLE as _CREATE_FEED_KEY_ALIAS_AMBIGUITIES_TABLE,
-    CREATE_FEED_KEY_ALIASES_TABLE as _CREATE_FEED_KEY_ALIASES_TABLE,
-    CREATE_RSS_FEEDS_TABLE as _CREATE_RSS_FEEDS_TABLE,
-    CREATE_RSS_ITEMS_TABLE as _CREATE_RSS_ITEMS_TABLE,
-    INDEX_STATEMENTS as _INDEX_STATEMENTS,
-    MIGRATION_COLUMNS as _MIGRATION_COLUMNS,
-)
-from zotero_summarizer.storage.feed_identity import (
-    legacy_feed_key,
-    stable_feed_key_from_item,
-)
+from zotero_summarizer.storage.feed_identity import stable_feed_key_from_item
 from zotero_summarizer.storage.feeds_lookup import (  # noqa: F401  (re-exported)
     _col,
     fetch_processed_content_pairs,
@@ -95,206 +80,12 @@ from zotero_summarizer.storage.feeds_lookup import (  # noqa: F401  (re-exported
     get_processed_feed_item_by_pk,
     get_processed_feed_item_by_stable_key,
 )
-
-LOGGER = logging.getLogger("zotero_summarizer.storage.feeds")
+from zotero_summarizer.storage.feeds_schema import init_feeds_schema, open_triage_conn  # noqa: F401
 
 
 def _parse_pub_year(date_str: Any) -> int | None:
     s = str(date_str or "").strip()
     return int(s[:4]) if len(s) >= 4 and s[:4].isdigit() else None
-
-
-def init_feeds_schema(conn: sqlite3.Connection) -> None:
-    """Create the processed_feed_items table + indexes; migrate Phase 1 DBs.
-
-    Idempotent. Safe to call on every app start. The narrow
-    ``except sqlite3.OperationalError`` branch is a deliberate carry-over
-    from Phase 1.5: concurrent daemon starts race PRAGMA + ALTER and the
-    second loser must NOT abort startup. Tightening this to a specific
-    error message is queued for the fail-fast pass; until then, the
-    warning log preserves visibility.
-    """
-    conn.execute(_CREATE_TABLE)
-    conn.execute(_CREATE_RSS_FEEDS_TABLE)
-    conn.execute(_CREATE_RSS_ITEMS_TABLE)
-    conn.execute(_CREATE_FEED_KEY_ALIASES_TABLE)
-    conn.execute(_CREATE_FEED_KEY_ALIAS_AMBIGUITIES_TABLE)
-    existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(processed_feed_items)").fetchall()}
-    for col_name, col_def in _MIGRATION_COLUMNS:
-        if col_name not in existing_cols:
-            try:
-                conn.execute(f"ALTER TABLE processed_feed_items ADD COLUMN {col_name} {col_def}")
-            except sqlite3.OperationalError as exc:
-                LOGGER.warning("Failed to add column %s: %s", col_name, exc)
-    for stmt in _INDEX_STATEMENTS:
-        conn.execute(stmt)
-    _backfill_stable_feed_keys(conn)
-    _backfill_feed_key_aliases(conn)
-    _copy_legacy_label_verdicts_to_stable_keys(conn)
-
-
-@contextmanager
-def open_triage_conn(db_path: Path) -> Iterator[sqlite3.Connection]:
-    """Open a schema-initialized, ``sqlite3.Row``-backed connection to a triage DB.
-
-    Shared by the app RSS reader, review-mode service, feed daemon, and RSS API
-    routes — every one of them opened the triage DB with this exact
-    ``connect(timeout=10) + row_factory=Row + init_feeds_schema`` idiom.
-    """
-    db_path = Path(db_path)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path), timeout=10)
-    conn.row_factory = sqlite3.Row
-    try:
-        init_feeds_schema(conn)
-        yield conn
-    finally:
-        conn.close()
-
-
-def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-        (table_name,),
-    ).fetchone()
-    return row is not None
-
-
-def _backfill_stable_feed_keys(conn: sqlite3.Connection) -> int:
-    """Populate ``processed_feed_items.stable_feed_key`` for existing rows."""
-    rows = conn.execute(
-        """
-        SELECT id, guid, doi, arxiv_id
-        FROM processed_feed_items
-        WHERE stable_feed_key IS NULL OR stable_feed_key = ''
-        """
-    ).fetchall()
-    updated = 0
-    for row in rows:
-        row_id = int(_col(row, 0, "id"))
-        item = {
-            "guid": _col(row, 1, "guid"),
-            "doi": _col(row, 2, "doi"),
-            "arxiv_id": _col(row, 3, "arxiv_id"),
-        }
-        stable = stable_feed_key_from_item(item)
-        if not stable:
-            continue
-        conn.execute(
-            "UPDATE processed_feed_items SET stable_feed_key = ? WHERE id = ?",
-            (stable, row_id),
-        )
-        updated += 1
-    return updated
-
-
-def _backfill_feed_key_aliases(conn: sqlite3.Connection) -> dict[str, int]:
-    """Map unambiguous legacy ``feed:<feed_item_id>`` keys to stable keys.
-
-    Ambiguous legacy ids are written to ``feed_key_alias_ambiguities`` so callers
-    can report them instead of silently picking the newest row.
-    """
-    import json as _json
-
-    rows = conn.execute(
-        """
-        SELECT feed_item_id, stable_feed_key
-        FROM processed_feed_items
-        WHERE feed_item_id > 0
-          AND stable_feed_key IS NOT NULL
-          AND stable_feed_key != ''
-        """
-    ).fetchall()
-    grouped: dict[str, set[str]] = {}
-    row_counts: dict[str, int] = {}
-    for row in rows:
-        old_key = legacy_feed_key(_col(row, 0, "feed_item_id"))
-        if not old_key:
-            continue
-        grouped.setdefault(old_key, set()).add(str(_col(row, 1, "stable_feed_key")))
-        row_counts[old_key] = row_counts.get(old_key, 0) + 1
-
-    inserted = 0
-    ambiguous = 0
-    for old_key, stable_keys in grouped.items():
-        if len(stable_keys) == 1:
-            stable = next(iter(stable_keys))
-            conn.execute(
-                """
-                INSERT INTO feed_key_aliases (old_key, stable_feed_key)
-                VALUES (?, ?)
-                ON CONFLICT(old_key) DO UPDATE SET stable_feed_key = excluded.stable_feed_key
-                """,
-                (old_key, stable),
-            )
-            conn.execute("DELETE FROM feed_key_alias_ambiguities WHERE old_key = ?", (old_key,))
-            inserted += 1
-            continue
-        ambiguous += 1
-        conn.execute("DELETE FROM feed_key_aliases WHERE old_key = ?", (old_key,))
-        conn.execute(
-            """
-            INSERT INTO feed_key_alias_ambiguities (old_key, stable_feed_keys_json, row_count)
-            VALUES (?, ?, ?)
-            ON CONFLICT(old_key) DO UPDATE SET
-                stable_feed_keys_json = excluded.stable_feed_keys_json,
-                row_count = excluded.row_count,
-                created_at = datetime('now')
-            """,
-            (old_key, _json.dumps(sorted(stable_keys)), row_counts[old_key]),
-        )
-    return {"aliases": inserted, "ambiguous": ambiguous}
-
-
-def _copy_legacy_label_verdicts_to_stable_keys(conn: sqlite3.Connection) -> int:
-    """Duplicate old ``feed:<id>`` verdict rows onto their stable keys.
-
-    Legacy rows remain in place for compatibility. Stable rows win for new
-    readers; existing stable rows are never overwritten.
-    """
-    if not _table_exists(conn, "label_verdicts"):
-        return 0
-    verdict_cols = {row[1] for row in conn.execute("PRAGMA table_info(label_verdicts)").fetchall()}
-    if "source" not in verdict_cols:
-        return 0
-    cursor = conn.execute(
-        """
-        WITH candidates AS (
-            SELECT
-                a.stable_feed_key,
-                lv.original_derived_priority,
-                lv.user_priority,
-                lv.comment,
-                lv.created_at,
-                lv.source
-            FROM label_verdicts lv
-            JOIN feed_key_aliases a ON a.old_key = lv.item_key
-        ),
-        copyable AS (
-            SELECT stable_feed_key
-            FROM candidates
-            GROUP BY stable_feed_key
-            HAVING COUNT(*) = 1
-        )
-        INSERT INTO label_verdicts (
-            item_key, original_derived_priority, user_priority, comment, created_at, source
-        )
-        SELECT
-            c.stable_feed_key,
-            c.original_derived_priority,
-            c.user_priority,
-            c.comment,
-            c.created_at,
-            c.source
-        FROM candidates c
-        JOIN copyable cp ON cp.stable_feed_key = c.stable_feed_key
-        WHERE NOT EXISTS (
-            SELECT 1 FROM label_verdicts existing
-            WHERE existing.item_key = c.stable_feed_key
-        )
-        """
-    )
-    return int(cursor.rowcount or 0)
 
 
 def new_run_id(prefix: str = "feeds") -> str:
@@ -529,7 +320,6 @@ def update_to_decision(
     decision: str,
     decision_reason: str = "",
     is_black_swan: bool | None = None,
-    planned_zotero_key: str | None = None,
 ) -> bool:
     """Transition an existing row's decision (e.g. triaged_pending -> selected).
 
@@ -541,9 +331,6 @@ def update_to_decision(
     if is_black_swan is not None:
         assignments.append("is_black_swan = ?")
         params.append(1 if is_black_swan else 0)
-    if planned_zotero_key is not None:
-        assignments.append("planned_zotero_key = ?")
-        params.append(planned_zotero_key)
     params.extend([feed_library_id, feed_item_id])
     cursor = conn.execute(
         f"""
@@ -621,6 +408,7 @@ def record_materialization(
             final_outcome = ?,
             updated_at = datetime('now')
         WHERE feed_library_id = ? AND feed_item_id = ?
+          AND materialized_zotero_key IS NULL
         """,
         (materialized_zotero_key, eligible_at, OUTCOME_PENDING, feed_library_id, feed_item_id),
     )
@@ -697,6 +485,7 @@ def record_read_marked(
 from zotero_summarizer.storage.feeds_history import (  # noqa: F401,E402
     due_outcome_checks,
     record_outcome,
+    reserve_materialization_key,
     select_by_decisions,
     select_pending_triaged,
 )

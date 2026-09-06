@@ -1,10 +1,4 @@
-"""Deep review (Stage-2 Read-next): per-item DIGEST, per-item job registry, cache,
-detail surfacing, and route registration. (Concurrency — remote-parallel /
-local-queue / per-item single-flight — lives in ``test_deep_review_concurrency.py``.)
-
-The full reader + Zotero-DB endpoint behavior is covered by the live smoke
-(see the plan); these tests pin the novel wiring with stubs.
-"""
+"""Per-item deep-review digest, cache, status, and route checks."""
 from __future__ import annotations
 
 import types
@@ -13,12 +7,12 @@ import pytest
 
 from zotero_summarizer.services.library import _map_reduce, _review_cache, deep_review
 from zotero_summarizer.services.zotero import zotero as zotero_svc
-from zotero_summarizer.services._common import read_config, settings as _settings
+from zotero_summarizer.services.setup.bootstrap import _default_goals_config
 
 
 @pytest.fixture(scope="module")
 def config():
-    return read_config(_settings().config_path)
+    return _default_goals_config()
 
 
 @pytest.fixture(autouse=True)
@@ -48,10 +42,12 @@ class _StubLLM:
             raise RuntimeError("LLM blew up on this one")
         return pydantic_model(
             tldr="What it is.", read_decision="read", read_why="useful",
-            read_parts=["Methods"], relevance="fits goals", controversies="c",
+            read_parts=["Methods"], skip_parts=[], estimated_read_minutes=15,
+            original_value="The detailed evidence.", relevance="fits goals", controversies="c",
             impact="i", unknown_unknowns="u", implementation=["step1"],
             grade="A", soundness=5, novelty=4, significance=4,
             reproducibility=3, clarity=4, key_strength="s", key_weakness="w", confidence=0.9,
+            writing_friction="low", writing_reasons=[],
         )
 
 
@@ -77,11 +73,8 @@ def _fake_state(config, *, extractor, reader):
         pdf_extractor=extractor,
         unpaywall_client=None,
         zotero_reader=reader,
-        # The deep_review stage now resolves its client via the runtime state.
-        resolve_stage_client=lambda stage, **_k: _StubLLM(),
-        # Provider drives concurrency (is_local → serial) AND the deep-review tier
-        # (lean_deep_review → cheap tier). A local+lean stub keeps the job
-        # single-threaded, deterministic, and on the lean tier in tests.
+    resolve_stage_client=lambda stage, **_k: _StubLLM(),
+    # Local+lean keeps the job serial and deterministic on the cheap tier.
         resolve_stage_provider=lambda stage: types.SimpleNamespace(is_local=True, lean_deep_review=True, thinking_on=True),
     )
 
@@ -96,7 +89,6 @@ def _detail(*, title="T", pdf_path="/x/p.pdf", doi="10.1/x", url="", abstract="a
 
 def _wire(monkeypatch, config, *, reader, extractor, note_fn=None):
     monkeypatch.setattr(deep_review, "get_state", lambda: _fake_state(config, extractor=extractor, reader=reader))
-    # The digest is upserted to Zotero inside _review_one; stub it (no real lib).
     monkeypatch.setattr(zotero_svc, "zotero_upsert_digest_note", note_fn or (lambda _ik, _d: None))
     # Keep ORCHESTRATION tests hermetic: stub the heavy enrichment layers (real
     # quality-eval + goal-summaries pull a local LLM + a 1.3GB embedder and have
@@ -135,8 +127,11 @@ def test_run_job_writes_digest_entry(config, monkeypatch):
     entry = deep_review.get_cached_review("K1")
     assert entry is not None
     assert entry["digest"]["grade"] == "A" and entry["digest"]["basis"] == "full_text"
-    assert entry["digest"]["read_decision"] == "read"
+    assert entry["model_read_decision"] == "read"
+    assert entry["digest"]["read_decision"] == "skim"
+    assert "strong_evidence_not_confirmed" in entry["reading_policy_flags"]
     assert entry["digest"]["tldr"] == "What it is."
+    assert entry["review_contract_version"] == deep_review.REVIEW_CONTRACT_VERSION
     assert entry["gate_relevance"] == 3.0
     assert entry["needs_pdf"] is False
     assert entry["zotero_note_written"] is True and entry["zotero_note_error"] is None
@@ -198,7 +193,7 @@ def test_acquire_missing_fetches_pdf_then_reviews(config, monkeypatch):
     extractor = types.SimpleNamespace(extract_text=_capture)
     entry = _run_acquiring(monkeypatch, config, extractor=extractor, acquired_path=Path("/cache/acquired.pdf"))
     assert entry["needs_pdf"] is False and entry["digest"]["grade"] == "A"
-    assert seen["p"] == "/cache/acquired.pdf"  # reviewed from the ACQUIRED PDF
+    assert seen["p"] == entry["acquired_pdf"]["path"] == "/cache/acquired.pdf"  # durable handoff
 
 
 def test_acquire_missing_unfetchable_surfaces_needs_login(config, monkeypatch):
@@ -381,7 +376,10 @@ def test_assess_digest_maps_fields_and_injects_goals(config):
     class LLM:
         def pydantic_prompt(self, *, prompt, pydantic_model):
             captured["prompt"] = prompt
-            return pydantic_model(tldr="t", read_decision="SKIM", grade="b")
+            return pydantic_model(tldr="t", read_decision="SKIM", read_why="Inspect the evidence.",
+                                  read_parts=["§3.2"], skip_parts=[], estimated_read_minutes=10,
+                                  original_value="The complete method.", grade="b",
+                                  writing_friction="low", writing_reasons=[])
 
     from zotero_summarizer.services.library import quality_review
 
@@ -408,7 +406,7 @@ def test_assess_digest_salvages_raw_json_string_and_fails_loud_on_empty(config):
             return self.out  # a STR, exactly as onprem returns on a parse failure
 
     # Markdown-fenced JSON (onprem's parser fails; extract_json_blob recovers it).
-    raw = '```json\n{"read_decision": "read", "grade": "A", "tldr": "ok"}\n```'
+    raw = '```json\n{"read_decision":"read","read_why":"Inspect the evidence.","read_parts":["§4"],"skip_parts":[],"estimated_read_minutes":10,"original_value":"The full evidence.","grade":"A","tldr":"ok","writing_friction":"low","writing_reasons":[]}\n```'
     d = quality_review.assess_digest(title="T", full_text="BODY", config=config, llm=_StrLLM(raw))
     assert d.read_decision == "read" and d.grade == "A" and d.basis == "full_text"
 
@@ -421,11 +419,13 @@ def test_build_digest_note_html_marked_and_escaped():
     from zotero_summarizer.models import PaperDigest
     from zotero_summarizer.services.zotero.pending import DIGEST_NOTE_MARKER, build_digest_note_html
 
-    d = PaperDigest(read_decision="read", grade="A", tldr="About <x> & y")
+    d = PaperDigest(read_decision="skim", read_parts=["§2"], grade="A", tldr="About <x> & y",
+                    writing_friction="moderate", writing_reasons=["Term <T> appears before definition."])
     h = build_digest_note_html(d)
     assert DIGEST_NOTE_MARKER in h
     assert "&lt;x&gt;" in h and "&amp;" in h          # HTML-escaped
-    assert "Quality A" in h and "read" in h
+    assert "Quality A" in h and "Read parts" in h
+    assert "Writing · moderate" in h and "&lt;T&gt;" in h
 
 
 def test_start_accepts_concurrently_no_single_flight(monkeypatch):

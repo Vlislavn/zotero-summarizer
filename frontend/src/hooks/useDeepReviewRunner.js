@@ -101,7 +101,7 @@ export default function useDeepReviewRunner(itemKey, { deep, onDone, autoRun = f
     if (reviewed) return;
     if (status.status === 'running') return;
     if (deep && deep.needs_pdf) return;          // honest "no full text" — nothing to run
-    if (llm && llm.reachable === false) return;  // model down — the banner explains
+    if (llm && (llm.enabled === false || llm.reachable === false)) return;
     if (autoRunFiredFor.current === itemKey) return;
     autoRunFiredFor.current = itemKey;
     run();

@@ -12,15 +12,16 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from zotero_summarizer.services.search import federate as fed
 from zotero_summarizer.services.search._models import QueryPlan, SearchIntent
 from zotero_summarizer.services.search.intent import _variants, build_query_plan
 
-# NOTE: the three `federate` tests below are the first tests to exercise `federate()` (it
-# had no prior coverage). Under `pytest --forked` on macOS they SIGSEGV at fork time once
-# the suite has loaded torch in the parent (via `rank`'s CrossEncoder) — the documented
-# native fork-crash (`forked_test_baseline`); they pass in-process and in isolation. This
-# is the known baseline, not a logic failure — verify these with `pytest tests/test_search_recall.py`.
+@pytest.fixture(autouse=True)
+def _mock_other_sources(monkeypatch):
+    monkeypatch.setattr(fed, "search_crossref", lambda *args, **kwargs: [])
+    monkeypatch.setattr(fed, "search_semantic_scholar", lambda *args, **kwargs: [])
 
 _CONCEPTS = [
     "llm-based agents", "evaluation methods", "benchmarks",

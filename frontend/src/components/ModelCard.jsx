@@ -1,14 +1,13 @@
 // Settings → Model card.
 //
-// Reads `GET /api/admin/model` and renders a compact AUDIT TRAIL of the freshest
-// trained classifier — enough to answer "is my gate fresh and trained on my
+// Reads `GET /api/admin/model` and renders the currently loaded
+// classifier — enough to answer "is my gate fresh and trained on my
 // data": classifier, training size, when it was trained, the honest reading-
 // decision ρ. Not a model-engineering dashboard;
 // the raw run-log, per-class CV table and inflated all-rows metrics were removed
 // (Miller's Law / Pareto — a clinician's config page, not a debug surface).
 //
-// Empty state when no model is on disk yet — the user clicks
-// "Retrain model" in AdminSection to populate it.
+// A saved artifact alone does not mean a model is loaded in this process.
 import { useQuery } from '@tanstack/react-query';
 import { fetchModelCard } from '../api/settingsApi.js';
 
@@ -59,8 +58,8 @@ export default function ModelCard() {
 
       {q.data && q.data.model === null && (
         <p className="text-xs text-slate-600 mt-2">
-          No trained model on disk yet. Click <b>Retrain model</b> below to
-          fit one against your current labels.
+          No classifier is loaded. Enable the classifier gate and click
+          {' '}<b>Retrain model</b> below, or restart to load a saved model.
         </p>
       )}
 

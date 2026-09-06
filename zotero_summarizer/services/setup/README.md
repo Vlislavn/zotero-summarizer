@@ -1,92 +1,52 @@
-# services/setup — first-run setup + onboarding
+# services/setup — one setup domain, two front-ends
 
-The primitives behind the config-UX simplification: one readiness probe, a
-read-only Zotero-dir detector, an allowlisted `.env` path writer, a dry-run
-config validator, and the Phase-0 boot bootstrap. Both the HTTP layer
-(`api/routes/setup.py`) and the `zotero-summarizer setup` CLI call THESE — no
-logic is duplicated between the two front-ends.
+Web and CLI share profile, validation, and Doctor services. State lives under
+`Settings.data_dir`; secrets stay in the keyring or legacy environment.
 
-```
-                   ┌──────────────── api/routes/setup.py ────────────────┐
-                   │ GET  /api/setup/status         → status.get_setup_status
-                   │ GET  /api/setup/detect-zotero  → detect.detect_zotero_data_dirs
-                   │ PUT  /api/setup/paths          → env_writer.write_env_paths
-                   │ POST /api/setup/validate-config→ validate.validate_config_draft
-                   └──────────────────────┬──────────────────────────────┘
-                                          │ (same fns)
-   cli/_setup.py  zotero-summarizer setup ┘
-
- status.py   ─ read_config + check_reachability(default) + key-PRESENCE bool
-              + paths.exists() + zotero_status_payload + feed count + model_card
-              + readiness.all_statuses() → SetupStatusResponse.subsystems[]
-              → SetupStatusResponse; `ready` = config.valid & goals>0 &
-                api_key_present  (Zotero/reachable/classifier/subsystems advisory)
- detect.py   ─ per-OS probe dirs + current settings().zotero_data_dir(source=env)
-              → DetectedZoteroDir[], db_exists first. READ-ONLY (Path.exists only).
- env_writer.py ─ _ALLOWED_ENV_KEYS=(PDF_ROOT,ZOTERO_DATA_DIR); reject others (422);
-                 path-must-exist (422); byte-for-byte read-modify-write via
-                 atomic_write (secrets/comments preserved, NOT dotenv-dumped).
- validate.py ─ GoalsConfig.model_validate(draft) → field_errors; optional probe of
-               the default stage (probe_provider + model_list). Persists NOTHING.
- bootstrap.py─ bootstrap_phase0(settings): goals.yaml (if absent) + .env skeleton
-               (if absent, COMMENTED secret placeholder — never a real key) +
-               migrate DB (if absent, reuses storage.migrations.migrate_existing).
-               Idempotent; never overwrites an existing file. Called from serve.
- calibration.py ─ per-user calibration → data/calibration.json (precedence between
-               goals.yaml and ZS_* env; applied by config_overrides.apply_calibration).
-               TIER 1: tier1_env_calibrate — one bounded completion measures the
-               deep-review endpoint throughput → picks the lean/full text+consistency
-               profile (auto-detecting the manual lean_deep_review flag; a REMOTE
-               endpoint is always 'full'). Idempotent on the `tier1` stamp.
-               TIER 2: tier2_calibrate / run_full_calibration ("Calibrate to my setup",
-               via the `calibrate` CLI + POST /api/setup/calibrate) — sweeps the
-               deep-review text budget on the user's endpoint, scoring deterministic
-               digest completeness (no judge) and picking the FASTEST budget at equal
-               completeness (latency-as-cost). Foreground + memory-pre-flighted for a
-               local provider; remotes load no local model. ``run_full_calibration``
-               takes an optional ``progress`` callback ({phase, completed, total}) so the
-               UI can show live "reviewed N of M" (total = budgets × papers).
-               upsert_calibration_entries is the shared writer for every tier.
- calibration_job.py ─ background-thread wrapper for "Calibrate to my setup" so the card
-               POLLS live progress instead of blocking: start() kicks the sweep off on a
-               daemon thread (single-flight) + threads a progress callback into the module
-               job dict; status() returns {status, completed, total, phase, result, error}
-               (same run+poll shape deep_review uses). Backs POST /api/setup/calibrate +
-               GET /api/setup/calibrate/status. The "no built briefs" precondition surfaces
-               as a status `error` the card turns into "open a paper's deep review first".
- profiles.py ─ DEPLOYMENT profiles (fully-local vs hybrid local+API) + stage-cost
-               measurement. PROFILES presets → apply_profile rewrites llm_routing (which
-               stage local vs API) + sets lean_deep_review (superficial local / deep API).
-               set_profile / detect_profile back the `profile` CLI + /api/setup/profile[s].
-               measure_stage_costs (real tokens+secs per stage×provider) → summarize_costs
-               + recommend_profile (pure, tested) back `profile --measure`. Remote-only by
-               default — a local gen loads a multi-GB model (swap spike); --include-local opts in.
+```text
+web /api/setup/* ─┐
+                  ├─ bootstrap → profiles → doctor → verified
+CLI setup/doctor ─┘                    ├─ per-stage inference
+                                      ├─ cache-only ML loads
+                                      └─ no-write triage
 ```
 
-## Security invariants (load-bearing)
+| file | responsibility |
+|---|---|
+| `bootstrap.py` | Idempotently create absent files and migrate DBs; never overwrite user files. |
+| `detect.py` / `env_writer.py` | Find Zotero paths; atomically write validated `PDF_ROOT`/`ZOTERO_DATA_DIR`. |
+| `validate.py` | Validate drafts and optionally reuse the provider probe; write nothing. |
+| `status.py` | Cheap state: `configured` means personalized goals plus either an AI credential or an explicit ML-only choice; `ready` also needs Doctor, and reachability only when AI is enabled. |
+| `profiles.py` | Resolve hardware-gated Ollama profiles into the existing routing schema; never download. |
+| `assets.py` | Shared prefetch targets and fresh-process cache-only load checks. |
+| `doctor.py` | Persisted web/CLI checklist with stable IDs, recovery actions, single-flight execution, interrupted-run recovery, redaction, and real inference gating. Recovery distinguishes absent/stopped Ollama; browser readiness checks the actual `patchright` runtime; the RSS probe is read-only so it cannot collide with daemon schema work. |
+| `doctor_environment.py` | Host/config/Zotero/database Doctor checks and the shared row contract; split from orchestration so both modules fit the code-size gate. |
+| `calibration*.py` | Existing endpoint calibration and its single-flight job. |
 
-- **API-key SECRETS never appear in any response, are never written by these
-  endpoints, and are never read AS A VALUE.** `api_key_env` is only ever an
-  env-var NAME. `status` reports `api_key_present` as a BOOL
-  (`bool(os.getenv(name))`); `env_writer` refuses every key outside
-  `_ALLOWED_ENV_KEYS` (the two PATH keys), so it can never touch a secret line.
-- **`validate.py` and `status.py` mutate NO app state** — no persist, no
-  hot-swap. The only writers here are `env_writer` (the two path keys) and
-  `bootstrap` (absent files only).
+`light` uses `qwen3:8b` (12 GB memory / 8 GB disk floor); `balanced` uses
+`qwen3:30b` (32 GB / 22 GB). `existing` accepts an explicit model and compatible
+endpoint. Add runtimes only with install and verification paths.
 
-## SANCTIONED EXCEPTION to "all app state lives under `data/`"
+Doctor state is `data/setup_doctor.json`; stale `running` rows become Needs
+action. It is current state, not an audit log. Recovery strings are displayed,
+never executed. `--fix` only runs idempotent bootstrap/migrations.
+Bootstrap owns migration; Doctor does not repeat it. Path validation snapshots
+read the resulting `.env`, including unchanged paths and empty update requests.
+Calibration accepts 1–10 papers, checks item paths (including symlinks) remain
+inside `Settings.paper_render_dir`, and loads input before contacting a model.
+ML-only mode marks model/inference/dry-run checks as intentionally skipped and
+keeps classifier triage available; it can be changed later in Settings.
 
-`env_writer.write_env_paths` and `bootstrap._bootstrap_env` write `PDF_ROOT` /
-`ZOTERO_DATA_DIR` into `.env` at the project root — NOT under `data/`. This is
-deliberate and the only carve-out the setup domain makes: those two keys are
-filesystem locations the app must read *before* `Settings` is constructed (see
-`settings.py::Settings.load`, which `load_dotenv`s `.env` and then reads
-`os.getenv("PDF_ROOT"/"ZOTERO_DATA_DIR")`). They cannot live under `data/`
-because `data/` itself is derived from the resolved project root. This mirrors
-the existing `.env` config carve-out documented in the root `CLAUDE.md`
-("Data & config") and `docs/architecture.md`. Secrets are likewise `.env`-only
-and are never written here.
+The advisory classifier panel uses the same loaded-gate card as Settings. A
+saved but unloaded artifact is not reported as the active classifier; no model
+file or run-log parsing is needed for this panel.
 
-**Boundaries:** standard services rules — may import `storage/`,
-`integrations/`, `models`, `api.errors`, and other `services/` domains
-(`llm`, `model`, `zotero`). Never imports `api.app` / `api.routes`.
+The `.env` writer/bootstrap exception exists because paths must resolve before
+`Settings.data_dir`. Setup may import models, storage, integrations,
+`api.errors`, and services; never API routes. Lower layers never import setup.
+
+Gate asset targets carry the same immutable base/adapter revisions as the
+classifier loader. The cheap cache report checks that revision, not merely any
+bytes under the repository; an old snapshot cannot satisfy a new pin. Prefetch
+uses the actual pinned loader. Snapshot presence remains a cheap inventory
+check, while Doctor's fresh-process offline load verifies loadability.

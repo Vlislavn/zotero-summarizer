@@ -37,3 +37,13 @@ def test_cached_review_keys_reports_all():
     _review_cache._write_one("A", {"x": 1})
     _review_cache._write_one("B", {"x": 2})
     assert _review_cache.cached_review_keys() == {"A", "B"}
+
+
+def test_current_review_filters_legacy_contracts():
+    current = {"review_contract_version": _review_cache.REVIEW_CONTRACT_VERSION, "digest": {}}
+    _review_cache._write_one("CURRENT", current)
+    _review_cache._write_one("LEGACY", {"digest": {}})
+
+    assert _review_cache.get_current_review("CURRENT") == current
+    assert _review_cache.get_current_review("LEGACY") is None
+    assert _review_cache.current_review_keys() == {"CURRENT"}

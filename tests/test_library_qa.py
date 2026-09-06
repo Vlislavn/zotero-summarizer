@@ -58,12 +58,10 @@ def _fake_state(tmp_path, pdf, extractor, llm, monkeypatch):
         resolve_stage_client=lambda stage: llm,
     )
     monkeypatch.setattr(qa, "state", lambda: app)
-    monkeypatch.setattr(qa, "settings", lambda: types.SimpleNamespace(pdf_root=tmp_path))
     monkeypatch.setattr(
         qa, "resolve_stage",
         lambda routing, stage: types.SimpleNamespace(model="local-35b"),
     )
-    qa._TEXT_CACHE.clear()
     def _artifact(item_key):
         if item_key == "GONE":
             raise APIError(error="not_found", message="gone", status_code=404)
@@ -79,7 +77,7 @@ def _fake_state(tmp_path, pdf, extractor, llm, monkeypatch):
             "full_text": PAPER_TEXT,
         }
 
-    monkeypatch.setattr(qa.paper_render, "ensure_artifact", _artifact)
+    monkeypatch.setattr(qa.paper_render, "build_paper_read", _artifact)
     monkeypatch.setattr(qa.paper_render, "artifact_text", lambda artifact, max_chars: PAPER_TEXT[:max_chars])
     return app
 
@@ -94,10 +92,14 @@ def test_ask_paper_comprehensive_answers_from_artifact(tmp_path, monkeypatch):
     assert out["answer"] == "ImageNet" and out["abstained"] is False
     assert out["mode"] == "comprehensive" and out["chunks_used"] == 0
     assert out["model"] == "local-35b" and out["latency_seconds"] >= 0
+    assert out["citation"] == {
+        "claimed": True, "quote_verified": True, "location_verified": True,
+        "evidence_handle": out["evidence_handle"],
+    }
     assert "ImageNet" in llm.prompts[0]
 
     qa.ask_paper("KEY1", "How many epochs?", mode="retrieval")
-    assert extractor.calls == 1  # memoized per (pdf, mtime)
+    assert extractor.calls == 0  # retrieval reuses the same versioned artifact body
 
 
 def test_ask_paper_answers_counts_without_llm(tmp_path, monkeypatch):
@@ -125,11 +127,8 @@ def test_ask_paper_abstention_passes_through(tmp_path, monkeypatch):
     assert out["abstained"] is True and out["answer"] is None
 
 
-def test_ask_paper_empty_llm_output_abstains_not_500(tmp_path, monkeypatch):
-    """A1 regression: an empty / unparseable LLM completion (0 output tokens, or a
-    reasoning model emptying `content`) must ABSTAIN at the qa boundary, not raise
-    an unhandled ValueError → 500. answer_with_retry re-feeds the empty body and
-    raises; ask_paper must catch it and return the abstain payload."""
+def test_ask_paper_empty_llm_output_is_an_error_not_an_abstention(tmp_path, monkeypatch):
+    """Malformed model output is a parser failure, not evidence of an absent fact."""
     pdf = tmp_path / "p.pdf"
     pdf.write_bytes(b"%PDF-fake")
 
@@ -138,8 +137,8 @@ def test_ask_paper_empty_llm_output_abstains_not_500(tmp_path, monkeypatch):
             return ""  # no JSON recoverable
 
     _fake_state(tmp_path, pdf, _Extractor(), _EmptyLLM(), monkeypatch)
-    out = qa.ask_paper("KEY1", "What was the cohort size?")
-    assert out["abstained"] is True and out["answer"] is None and out["quote"] is None
+    with pytest.raises(ValueError):
+        qa.ask_paper("KEY1", "What was the cohort size?")
 
 
 def test_ask_paper_full_text_mode_sends_whole_capped_text(tmp_path, monkeypatch):
@@ -195,6 +194,27 @@ def test_comprehensive_and_full_text_contexts_differ(tmp_path, monkeypatch):
     comp_prompt, full_prompt = llm.prompts[0], llm.prompts[1]
     assert "NOTES_AND_METADATA" in comp_prompt
     assert "NOTES_AND_METADATA" not in full_prompt  # raw body only, no notes wrapper
+
+
+def test_multi_turn_history_compacts_to_current_extraction_handles(tmp_path, monkeypatch):
+    pdf = tmp_path / "p.pdf"
+    pdf.write_bytes(b"%PDF-fake")
+    llm = _LLM()
+    _fake_state(tmp_path, pdf, _Extractor(), llm, monkeypatch)
+    first = qa.ask_paper("KEY1", "Which dataset was used?")
+    history = [
+        {"question": f"old question {index}", "answer": "long answer " * 30,
+         "quote": first["quote"], "evidence_handle": first["evidence_handle"]}
+        for index in range(6)
+    ]
+
+    out = qa.ask_paper("KEY1", "And how many epochs?", history=history)
+
+    assert out["history_compacted"] is True
+    assert out["history_evidence_handles"] == 2
+    assert "Earlier evidence checkpoint" in llm.prompts[-1]
+    assert "old question 0" not in llm.prompts[-1]
+    assert "old question 5" in llm.prompts[-1]
 
 
 def test_scoped_count_question_falls_through_to_llm(tmp_path, monkeypatch):

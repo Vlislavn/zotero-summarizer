@@ -1,54 +1,17 @@
 """Pure helpers for the golden routes (no HTTP). Re-imported by golden.py."""
+
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from zotero_summarizer.services import interaction_log
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.golden import label_provenance
-from zotero_summarizer.services.library import review_detail as review_detail_svc
-from zotero_summarizer.services.zotero.zotero import (
-    get_library_reader,
-    get_zotero_reader_or_raise,
+from zotero_summarizer.services.golden.verdict_effects import (
+    add_feed_verdict_to_library,
+    source_payload as _build_source_payload,
 )
-
-LOGGER = logging.getLogger(__name__)
-
-# A fine positive verdict is a confident "I want to read this" — it now
-# materializes a Today feed paper into the library. dont_read is a rejection and
-# never adds.
-_POSITIVE_PRIORITIES = ("must_read", "should_read", "could_read")
-
-
-def add_feed_verdict_to_library(item_key: str, user_priority: str) -> dict[str, Any]:
-    """A positive verdict on a Today-feed paper materializes it into the Zotero
-    "Inbox". Users expect setting a verdict in the Today deep-review to add the
-    paper (the separate "Add to library" click used to be required, and papers
-    silently never reached Zotero). No-op for non-feed sources and for dont_read.
-
-    Returns the response-ready keys ``added_to_library`` / ``add_status`` /
-    ``add_error``. Never raises: the verdict is ALREADY durable at the call site,
-    so a Zotero failure is reported (surfaced in the API response + logged), not
-    propagated — the user authorized "the verdict should add it to the library"."""
-    from zotero_summarizer.services.triage import daily_actions
-
-    source = review_detail_svc.classify_item_key(item_key)
-    if source != review_detail_svc.SOURCE_FEED or user_priority not in _POSITIVE_PRIORITIES:
-        return {"added_to_library": False, "add_status": "not_applicable", "add_error": None}
-    try:
-        result = daily_actions.materialize_feed_verdict(item_key, user_priority)
-    except Exception as exc:  # noqa: BLE001 — verdict already durable; auto-add reported, not raised
-        LOGGER.warning("verdict auto-add to library for %s failed: %s", item_key, exc)
-        return {
-            "added_to_library": False, "add_status": "error",
-            "add_error": f"{type(exc).__name__}: {exc}",
-        }
-    return {
-        "added_to_library": bool(result.get("added")),
-        "add_status": str(result.get("status") or ""),
-        "add_error": None,
-    }
+from zotero_summarizer.services.zotero.zotero import get_library_reader
 
 
 def _golden_csv_path():
@@ -83,66 +46,14 @@ def _zotero_candidate_keys(*, collection: str, tag: str, search: str) -> set[str
             search=search or None,
             include_abstract=False,
         )
-    return {str(it["item_key"]) for it in (page.get("items") or []) if it.get("item_key")}
+    return {
+        str(it["item_key"]) for it in (page.get("items") or []) if it.get("item_key")
+    }
 
 
-def _build_source_payload(item_key: str) -> dict[str, Any] | None:
-    """Dispatch by ``item_key`` prefix and return the source-specific
-    payload, or ``None`` when the underlying data row is gone.
-
-    Each branch is a thin wrapper that resolves dependencies (DB path,
-    Zotero reader) before delegating to ``services.review_detail``.
-    """
-    settings_ = get_settings()
-    source = review_detail_svc.classify_item_key(item_key)
-
-    if source == review_detail_svc.SOURCE_FEED:
-        feed_key = review_detail_svc.parse_feed_item_key(item_key)
-        return review_detail_svc.build_feed_detail_by_key(
-            triage_db_path=settings_.triage_db_path,
-            zotero_data_dir=settings_.zotero_data_dir,
-            feed_key=feed_key,
-        )
-
-    if source == review_detail_svc.SOURCE_NOTE:
-        parent_key, note_id = review_detail_svc.parse_note_key(item_key)
-        reader = get_zotero_reader_or_raise()
-        return review_detail_svc.build_note_detail(reader, parent_key, note_id)
-
-    reader = get_library_reader()
-    return review_detail_svc.build_library_detail(reader, item_key)
-
-
-def _append_verdict_golden(item_key: str, priority: str, comment: str) -> None:
-    """Write a golden training row for a user verdict on any item_key.
-
-    Without this, a verdict on a materialized-but-unread library item never
-    reaches the classifier: the engagement-only export produced no row for it,
-    and the hybrid overlay only overrides existing rows. ``append_verdict_to_golden``
-    is idempotent — when a row already exists the overlay covers it. No-op when
-    the live source is gone (no metadata to build a trainable row)."""
-    from zotero_summarizer.services.library import review
-
-    payload = _build_source_payload(item_key)
-    if payload is None:
-        return
-    authors = "; ".join(
-        str(a.get("name") or "") for a in (payload.get("authors") or []) if a.get("name")
-    )
-    review.append_verdict_to_golden(
-        item_key,
-        title=str(payload.get("title") or ""),
-        abstract=str(payload.get("abstract") or ""),
-        priority=priority,
-        authors=authors,
-        venue=str(payload.get("venue") or ""),
-        year=str(payload.get("year") or ""),
-        doi=str(payload.get("doi") or ""),
-        comment=comment,
-    )
-
-
-def log_verdict_event(item_key: str, original: str, user_priority: str, comment: str) -> None:
+def log_verdict_event(
+    item_key: str, original: str, user_priority: str, comment: str
+) -> None:
     """Append the annotate-verdict human-feedback event (model's derived priority
     + the human's label) to the agentic interaction log."""
     interaction_log.log_human_feedback(
@@ -195,7 +106,6 @@ def _compute_border_into_cache(golden_sha: str, top_k: int) -> None:
     from zotero_summarizer.services.model import active_learning
     from zotero_summarizer.services.library import border_cache
     from zotero_summarizer.services._common import read_config
-    from zotero_summarizer.services.model.classifier_persistence import DEFAULT_MODEL_DIR
 
     try:
         settings = get_settings()
@@ -212,7 +122,8 @@ def _compute_border_into_cache(golden_sha: str, top_k: int) -> None:
             db_path=settings.triage_db_path,  # anchor disagreement to label:* truth
         )
         border_cache.write_cache(
-            DEFAULT_MODEL_DIR, golden_sha,
+            settings.model_dir,
+            golden_sha,
             [_suggestion_to_dict(s) for s in suggestions],
         )
     except Exception as exc:  # noqa: BLE001 — background worker boundary

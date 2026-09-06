@@ -1,221 +1,146 @@
-# Zotero Summarizer — Frontend (`/annotate`)
+# Zotero Summarizer frontend
 
-React 18 + Vite 5 + Tailwind 3 single-page tool served by FastAPI. The Library
-surface owns the paper-read controls that build generated notes, figures, HTML
-presentations, and paper Q&A through `/api/library/*`.
-
-## Setup
+React 18 + Vite 5 + Tailwind 3, served by FastAPI at the app root.
 
 ```bash
 cd frontend
 npm install
-```
-
-First install takes ~30s. Subsequent installs are cached.
-
-## Development
-
-```bash
 npm run dev
 ```
 
-- Dev server runs at <http://localhost:5173>.
-- Vite proxies `/api/*` to <http://localhost:8000> (the FastAPI backend) so
-  the React app can hit the real endpoints without CORS gymnastics.
-- Start the backend separately (`uvicorn zotero_summarizer.api:app --reload`
-  or your usual command) before opening the dev server.
+Vite proxies `/api/*` to `http://localhost:8000`; `npm run build` writes
+`dist/` for FastAPI.
 
-## Production build
+## Product surfaces
 
-```bash
-npm run build
+- **Library** — Read next, labels, reviews, figures, paper Q&A, and acquisition.
+- **Search** — query-driven discovery and review.
+- **Today** — feed triage and Zotero filing. Author h-index badges render only for positive OpenAlex evidence; unresolved author metadata is not shown as `h=0`.
+- **Settings** — AI, research profile, Zotero, sources, and advanced controls.
+- **Ops** — feeds, jobs, pending writes, diagnostics, and retraining.
+
+Legacy `/annotate`, `/review`, `/triage`, and `/pending` links redirect without
+dropping query parameters.
+
+Library and Today share `todayHelpers.fulltextMessage` for unavailable-PDF
+accounting from per-item outcomes. The full-text API no longer exposes partial
+per-reason counters; deploy frontend and backend together. Library reports a
+missing/failed result explicitly. A failed status request stops local polling
+and reports that the server job may still be running; it never implies success
+or silently retries forever.
+
+Ops' Triage Monitor lists every `active_items` entry from the job API, rather
+than displaying the last completed paper as current. Polling continues through
+`cancelling` until workers drain; only the terminal transition refreshes
+calibration. The singular current-item fields are removed from the shared
+API/MCP/UI contract, so server and client must be updated together.
+
+The monitor's **Triage feedback** panel reports observed agreement/recall and
+false-negative counts against saved at-decision triage predictions. It shows
+matched-prediction / feedback coverage and explicitly limits the claim to
+reviewed items; the former “Gate recall” / counterfactual-audit labels are removed.
+Unknown ratios render `n/a`, distinct from measured `0%`. This does not turn
+ordinary approve/reject feedback into an unbiased ML-gate audit.
+
+Settings' Current model card describes the loaded gate, not the newest artifact
+or evaluation run. Its API exposes only the four displayed fields; no gate loaded
+is an explicit empty state even if trained artifacts exist on disk.
+
+Search coverage hits reuse their existing Zotero key: the card says In library
+and the server command cannot create a duplicate even if called directly.
+
+## Setup and AI
+
+`/setup` is a skippable Zotero → AI-assisted/ML-only → research wizard. Saving immediately
+unlocks Today; verification is optional and explicit. The wizard and Settings
+share the compact server-side Doctor checklist. The gate uses backend
+`configured`; stricter operational `ready` remains diagnostic.
+
+The shared AI editor supports hosted presets, Local, and Custom. Secrets go to
+the OS credential store; the UI receives only presence/source metadata. Local
+profiles are hardware-gated and show an explicit pull command—the app never
+starts a download. Advanced routing and unsurfaced config round-trip through
+`utils/configForm.js`. Provider/model saves hot-swap; path changes need restart.
+ML-only mode is a first-class completed setup state: readiness and paper review
+show AI off rather than reporting an unreachable model, and Settings can re-enable it.
+
+## Paper review
+
+Library keeps Rescore available after a queue-read error, including when the
+display retains a previously scored list. Rescore can rebuild a corrupt score
+cache; the existing status poll reloads the new snapshot after completion.
+The progress notice promises a complete result, not streaming partial scores.
+
+Library band filters and the automatic review work list share one effective-band
+calculation, matching the server's demote-one-band prestige policy. Only known
+citation prestige below the supplied floor demotes top bands; missing evidence
+does not. The displayed count uses the current queue's floor, and each fleet
+round uses its freshly fetched snapshot's floor. A cross-language matrix checks
+the client filters/work list against the server rule without new API fields.
+
+Provenance shows the explicit `label:*` source when it determines the exported
+priority, replacing the inapplicable additive table. A separately edited final
+priority remains visible as a manual override.
+
+Library rows share `PaperDetailView`; `/paper/:key` adds located findings,
+Paper map, figures, actions, and grounded Q&A. Independent Idea/Evidence/Writing
+signals cap recommendations while provenance retains raw output. HTML briefs and
+figures live beside source PDFs for Zotero compatibility.
+
+The paper reader's stale notice covers changes to the PDF source, parser setting
+or renderer; the existing one-shot rebuild uses the backend's extraction identity.
+Blocking or unverified audits arrive as errors: the reader shows the failure and
+rebuild action without exposing old figures or artifact links. Build notices
+describe audited HTML/figures, not Markdown notes (which are no longer generated).
+
+Missing-full-text recovery is one shared notice on every review surface. A missing
+optional browser package links to Settings; an attempted authenticated fetch links
+to the University access control that opens the app's persistent browser profile.
+Opening the publisher in an unrelated default profile is never presented as recovery.
+
+Fleet suggestions are proposals only: Confirm/Override writes them, and
+low-confidence or flagged proposals offer Override only.
+
+Feed Review bulk confirmation sends only the visible, not-yet-actioned row IDs,
+shows the saved-verdict count and removes acknowledged rows from the queue.
+Individual Review actions acknowledge the saved decision without claiming a CSV
+append or pending-change enqueue; the server stores training metadata atomically
+with the verdict and returns only the processed ID and state.
+Pending treats a partially failed HTTP-200 batch as an error and points to the Failed tab.
+
+## Offline boundary
+
+The installable local-first PWA caches only its shell. IndexedDB holds compact
+snapshots, a sync cursor, and a UUID mutation outbox. Verdicts/notes queue only
+on network failure; conflicts require Keep mine / Use server. PDFs, AI,
+annotation, acquisition, and rescoring remain server-only.
+
+After reconnect, the server gives queued verdicts and notes the same training,
+feed-materialization, and Zotero-mirror effects as online saves. This is a
+same-machine loopback PWA boundary; remote mobile needs a future authenticated
+HTTPS deployment rather than exposing `/api/sync` directly.
+
+Sequence allocation, mutation insert, optimistic paper state, and cached-detail
+update share one IndexedDB transaction; pulls refresh both the compact paper and
+any cached review detail. A 15-second sync deadline releases a stuck focus sync,
+and protocol incompatibility explicitly asks for an app refresh. The IndexedDB
+test kills/reimports the client module and proves cached context
+plus ordered concurrent mutations survive while the server is absent. Ask Paper sends a
+bounded session history; the backend compacts older evidence to verified
+extraction handles, and the UI labels verified quotes without inventing pages.
+
+## Structure and conventions
+
+```text
+src/
+  api/          thin fetch wrappers
+  components/   shared UI and workflows
+  hooks/        server state
+  pages/        route orchestration
+  utils/        config and presentation helpers
+  offlineStore.js / syncClient.js
 ```
 
-Output lands in `frontend/dist/` with `base: '/annotate/'` baked in, so the
-asset URLs resolve when FastAPI serves the bundle.
-
-### FastAPI integration
-
-The parallel backend session wires this up; for reference it should:
-
-1. Mount `frontend/dist/assets` as static at `/annotate/assets`.
-2. Serve `frontend/dist/index.html` at `GET /annotate` (and `/annotate/`).
-
-`vite preview` (`npm run preview`) gives a local sanity check of the built
-bundle, but the canonical path is through FastAPI.
-
-## Project structure
-
-```
-frontend/
-  index.html                    Vite HTML entry
-  vite.config.js                React plugin + /api proxy + base '/annotate/'
-  tailwind.config.js            Tailwind content globs
-  postcss.config.js             Tailwind + autoprefixer
-  package.json                  Dependencies + scripts
-  src/
-    main.jsx                    createRoot + QueryClientProvider
-    App.jsx                     Routes for Library / Today / Settings / Ops (+ legacy redirects)
-    index.css                   Tailwind directives + .glass / .mono helpers
-    api/
-      goldenApi.js              fetch wrappers for /api/golden/*
-      libraryApi.js             reading queue, paper-read build/status, Q&A, deep-review + review-fleet runs
-      settingsApi.js            /api/config + /api/admin/* (exports request())
-      setupApi.js               /api/setup/* (status, detect-zotero, paths, validate)
-    hooks/
-      useSetupStatus.js         single seam → setup-status + isConfigured + pillars (Zotero is advisory)
-    utils/
-      configForm.js             shared config<->form transforms (Settings + wizard)
-    pages/
-      Library.jsx               tab wrapper: Read next (default) + Batch label (?mode=batch)
-      LibraryReadNext.jsx       Read-next queue and inline paper actions (the "Read next" mode)
-      AnnotationVerdict.jsx     Batch-label body — two-column list+detail, 1–4 / j-k keyboard flow
-      Ops.jsx                   tab wrapper: Feed review / Triage jobs / Pending changes
-      Review.jsx                Feed-gate review queue (Ops "Feed review" tab)
-      Triage.jsx                Triage job monitor + calibration (Ops "Triage jobs" tab)
-      Pending.jsx               Pending Zotero changes (Ops "Pending changes" tab)
-      Audit.jsx                 Re-label audit — de-linked from nav, still routable at /audit-page
-      Settings.jsx              thin orchestrator: Essentials + Advanced + save bar
-      SetupFlow.jsx             3-step first-run wizard orchestrator
-    components/
-      PaperListItem.jsx
-      VerdictPanel.jsx            full verdict editor (comment + edit/delete); exports PRIORITIES
-      VerdictPicker.jsx           one-click 4-priority row reusing PRIORITIES (Review + Audit relabel)
-      ProvenanceBreakdown.jsx
-      AnnotationsList.jsx
-      NotesList.jsx
-      TagsRow.jsx
-      form/Fields.jsx              SectionCard/Field/CheckboxField/Banner primitives
-      settings/                    ReadinessStrip, EssentialsSection, AdvancedSection,
-                                   DefaultProviderField, ClassifierGateFields
-      setup/                       SetupGate, StepProgress, Step{ConnectZotero,
-                                   ConnectLlm,DescribeResearch,Done}, NotConfiguredCard
-      library/PaperReaderPane.jsx  paper-read build/status controls + figure grid (inline card)
-      library/PaperFigures.jsx     always-visible figure grid + lightbox (story page)
-      library/AskPaperBox.jsx      correctness-first paper Q&A (disclosure | rail variant)
-      paper/DeepReviewSection.jsx  run deep review + live phase progress (inline card)
-      paper/review/{StoryToc,SectionMap,ActionRail}.jsx  story-page rails + paper map
-      pages/PaperReviewPage.jsx    /paper/:key — single-scroll "story" page (3-zone)
-      hooks/{useDeepReviewRunner,useScrollSpy}.js  auto-run review + TOC scroll-spy
-```
-
-## First-run setup & simplified Settings
-
-`/setup` is a 3-step wizard (Connect Zotero → Connect LLM → Describe research)
-that is **skippable and resumable** — `SetupGate` only redirects an
-unconfigured first-run user from the default landing (`/` or `/library`), never
-traps a returning one, and "Skip for now" persists `zs:setupDismissed=1`.
-`useSetupStatus` (key `['setup-status']`) is the single readiness seam: it
-derives `isConfigured` and the `{zotero,llm,goals,model}` pillars consumed by the
-Settings `ReadinessStrip` and the `NotConfiguredCard` empty states on Today /
-Library.
-
-Settings is re-chunked into always-visible **Essentials** + one collapsible
-**Advanced** `<details>`. The legacy `llm.draft_model/refine_model/api_base/
-api_key_env` text inputs were removed (they duplicated the `llm_routing` editor);
-the backend round-trips the nested `llm` block untouched. The API secret is
-**name-only** everywhere — the UI collects the env-var NAME, never the raw value
-(the always-on "secret set?" indicator was removed: it never gated Next and
-alarmed before the user acted). `university_access` is mapped by `configForm.js`
-too, so the single sticky **Save changes** commits it — its panel keeps only the
-one-time browser-login action.
-
-## Navigation (Increment 3 — 3 daily surfaces + Ops)
-
-The nav collapsed from 8 top-level routes to **Library / Today / Settings / Ops**
-(Hick's/Miller's Law — flat, no "More" disclosure):
-
-```
-NavBar:  [Library]            [Today] [Settings] [Ops]
-            │                                       │
-   ┌────────┴─────────┐                  ┌──────────┴───────────┐
-   Read next (default)                   Feed review  ← Review
-   Batch label  ← Annotate               Triage jobs  ← Triage
-                                         Pending      ← Pending
-```
-
-- **Library** (`pages/Library.jsx`) is a tab wrapper. *Read next* (default) is the
-  ranked queue (`LibraryReadNext.jsx`); *Batch label* (`?mode=batch`) is the former
-  Annotate page (`AnnotationVerdict.jsx`) with its VerdictPicker + 1–4 / j-k flow.
-- **Ops** (`pages/Ops.jsx`) is a tab wrapper over the three former power-tool pages,
-  rendered unmodified — each still owns its own data + deep-link params. The tab is
-  picked from `?tab=` (or a `#hash`).
-- **Legacy redirects** (App.jsx `RedirectTo`, query string preserved):
-  `/annotate → /library?mode=batch`, `/review → /ops?tab=review`,
-  `/triage → /ops?tab=triage`, `/pending → /ops?tab=pending`,
-  `/audit → /library` (the audit page is de-linked but still routable at
-  `/audit-page`). No old bookmark 404s.
-
-## Deep review + paper brief (inline card vs the full story page)
-
-`DeepReviewSection` (run + live progress), `PaperReaderPane` (build controls +
-native figure thumbnails — **not** an iframe; the digest renders natively in
-`PaperReview`), and `AskPaperBox` (grounded Q&A) render on Library's Read-next mode
-(via `library/InlineAnnotate.jsx`, expand a row) and Batch-label mode
-(`pages/AnnotationVerdict.jsx`), gated on `detail.has_pdf` — all through the shared
-`PaperDetailView` (`compact`) assembly.
-
-`/paper/:key` (`pages/PaperReviewPage.jsx`) is the **full single-scroll "story"
-page** — a different surface, NOT the row-card un-compacted. A 3-zone layout
-(sticky TOC · reading column · sticky action + chat rail) renders everything up
-front: `<PaperReview flat sectionOverlay>` (verdict + relevance + quality + full
-digest inline, with each red-flag / goal annotated by a located `§ title · p.N`
-chip from `deep_review.section_overlay`), `<PaperFigures>` (auto-built figure grid
-+ lightbox), `<SectionMap>` (the collapsed Paper map — section titles, pages, and
-the Phase-C "what it covers" one-liners, the scroll target for the located-finding
-chips), the abstract, and `<ActionRail>` (verdict / +Read Next / tags / the
-grounded Ask chat in its `variant="rail"`). `useDeepReviewRunner` auto-generates
-the review on open for a paper with a PDF (ref-guarded once-per-key; the user opted
-into the Zotero-note side effect); below `lg` it collapses to one column + a sticky
-bottom verdict bar.
-
-Story-page refinements grounded in the deep-research on reading/triage UX (Scim,
-CiteRead, Paper Plain, Traceable Text — see the cited report): the full **digest
-folds** behind one disclosure with **Key findings surfaced** above it (decision-first;
-the long reference tail is one click, not a wall); **red flags / overstatements are
-framed as "model judgment"** and demoted to "low confidence, verify" when the
-self-consistency runs disagreed (`critiqueIsTentative`, named floors) — the brittle
-critique signal is never asserted as fact; a **located chip degrades to `≈ § Section`
-(muted)** when only the coarse section fallback matched (overlay `match: "approx"`),
-and the Paper-map `⚑` only marks a section on a confident (exact/fuzzy) location;
-and the rail chat offers **standing clinician starter questions** (Paper Plain's
-key-question pattern) that run the same grounded/abstaining QA and vanish after the
-first question.
-
-## Confirm/Override card (review fleet, Phase 2)
-
-The "Pre-decide top picks" button in the Library header (`LibraryReadNext.jsx`) kicks
-off the review fleet (`runReviewFleet` → `POST /api/library/review-fleet/run`),
-polling `fetchReviewFleetStatus` every 3s (the deep-review status pattern) and
-reloading the queue once it finishes. The fleet folds each top pick's CACHED
-deep-review signals into a `proposed_verdict` — no new LLM call — which the queue
-attaches to the row.
-
-`library/ProposedVerdictCard.jsx` renders that proposal on the row (mounted by
-`ReadNextView.jsx` when `it.proposed_verdict` exists) as a Von-Restorff-distinct
-indigo chip (rose for a Remove proposal) with the rationale + flags and exactly TWO
-primary actions: **Confirm** (one-tap `submitVerdict`; a `dont_read` also queues the
-❌ tag, the same reject path as `InlineAnnotate`) and **Override** (expands the row so
-the existing `InlineAnnotate` → `VerdictPanel` shows, with the proposal passed as
-`derivedPriorityOverride`). The one-tap Confirm is WITHHELD (Override only) when the
-proposal is low-confidence or carries any quality flag — ambiguity goes to the human.
-Nothing is written until an explicit Confirm/Override click.
-
-## Conventions
-
-- Plain `.jsx` (no TypeScript yet). `.tsx` migration can happen per-file
-  later — Vite is already configured to allow it via `@vitejs/plugin-react`.
-- Server state goes through `@tanstack/react-query`; transient UI state
-  uses `useState`. No Redux / Zustand.
-- Styling stays in Tailwind utility classes. The two custom helpers
-  (`.glass` and `.mono`) match the Alpine UI in `web/ui.html`.
-- **One tone vocabulary.** The canonical pill palette is `CHIP_TONE`
-  (`components/paper/review/tones.js`); `ui/Badge.jsx` re-imports it instead of
-  keeping a second copy, so a `dont_read` / B-grade / error reads the same shade
-  in a Badge as in a Chip (Law of Similarity). New status pills reuse
-  `CHIP_TONE` / `Chip` / `ActionBadge` — don't hand-roll `bg-*-100` classes.
-
-## Out of scope for this scaffold
-
-- Component-level browser tests are still out of scope; API wrapper tests live
-  next to the wrappers and run with Vitest.
+Use React Query for server state and component state for transient UI. Reuse
+`Button`, form primitives, and `CHIP_TONE`; avoid ad-hoc status colors. Keep API
+tests beside wrappers and run `npm run build` for every UI change.

@@ -15,6 +15,7 @@ from zotero_summarizer.services.model.classifier_temporal import (
     _temporal_holdout_metrics,
 )
 from zotero_summarizer.services.model.classifier_training import _TrainMatrix
+from zotero_summarizer.services.model.classifier_const import FEATURE_DIM
 
 
 def _rows(days: list[float | None]) -> list[dict]:
@@ -71,7 +72,7 @@ def test_holdout_fraction_is_relative_to_dated_pool() -> None:
 
 def _synthetic(n: int, *, constant_y: bool = False, seed: int = 7):
     rng = np.random.default_rng(seed)
-    X = rng.normal(size=(n, 5)).astype(np.float32)
+    X = rng.normal(size=(n, FEATURE_DIM)).astype(np.float32)
     if constant_y:
         y = np.full(n, 3.0)
     else:

@@ -91,17 +91,20 @@ def test_no_full_text_keeps_verdict(monkeypatch):
 
 
 def test_max_per_tick_caps_rescues(monkeypatch):
-    """Two eligible candidates, cap=1 → one rescued, one deferred (verdict stands)."""
+    """A failed fetch consumes the cap; later candidates keep their verdict."""
     _patch_state(monkeypatch, _cfg(max_per_tick=1))
-    monkeypatch.setattr(_rescue_l1, "_rescue_one", lambda item, *, tick_id: _rescued_cand(4))
+    calls = []
+    monkeypatch.setattr(
+        _rescue_l1, "_rescue_one",
+        lambda item, *, tick_id: calls.append(item["item_key"]),
+    )
 
     a = _cand(score=2, abstract="")
     b = _cand(score=1, abstract="")
     out, n = _rescue_l1.recover_abstractless_l1_candidates([a, b], tick_id="t", llm_floor=2)
 
-    assert n == 1
-    scores = [c.summary.relevance_score for _, c in out]
-    assert 4 in scores and (2 in scores or 1 in scores)  # one re-scored, one left
+    assert calls == [a[0]["item_key"]]
+    assert n == 0 and [c.summary.relevance_score for _, c in out] == [2, 1]
 
 
 def test_disabled_is_noop(monkeypatch):

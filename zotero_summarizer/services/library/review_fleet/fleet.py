@@ -24,12 +24,12 @@ Zotero is open.
 
 ``status()`` mirrors ``deep_review``'s poll shape and adds a per-outcome tally:
 ``{status, total, completed, proposed, no_fetchable_source, needs_library_login,
-failed, error, started_at, progress}``. ``completed`` counts rows PROCESSED;
+browser_extra_unavailable, failed, error, started_at, progress}``. ``completed`` counts rows PROCESSED;
 ``proposed`` counts verdicts actually WRITTEN — so a run that proposed nothing is
 ``completed>0, proposed==0`` and surfaces as ``status="done_empty"`` (the honest
 "decided nothing"), never a false ``ready``. ``no_fetchable_source`` = no PDF source
 at all; ``needs_library_login`` = a proxied source exists but the browser isn't
-logged in (actionable). A per-item failure is logged and the job moves on
+logged in (actionable); ``browser_extra_unavailable`` = setup is incomplete. A per-item failure is logged and the job moves on
 (background-worker boundary); a job-level failure (no queue / no reader, surfaced by
 the deep-review job) sets the status ``error``.
 """
@@ -40,7 +40,7 @@ import time
 from typing import Any
 
 from zotero_summarizer.services._common import LOGGER, now_iso_z
-from zotero_summarizer.services.library import _flight, deep_review, reading_queue
+from zotero_summarizer.services.library import _flight, deep_review, paper_render, reading_queue
 from zotero_summarizer.services.library.review_fleet import propose, verdict_store
 
 _DEFAULT_TOP_K = 5
@@ -70,6 +70,8 @@ _STATE: dict[str, Any] = {
     # A proxied/paywalled source EXISTS but the browser couldn't fetch it because the
     # session for that publisher is stale/absent — actionable.
     "needs_library_login": 0,
+    # Browser automation is configured but its optional runtime package is absent.
+    "browser_extra_unavailable": 0,
     # The gated picks as ``[{item_key, title, url}]`` — the UI surfaces each as a
     # clickable link the user opens to sign in (refreshing the session), then re-Predicts.
     "needs_login_items": [],
@@ -89,6 +91,7 @@ def try_start() -> bool:
         _STATE["proposed"] = 0
         _STATE["no_fetchable_source"] = 0
         _STATE["needs_library_login"] = 0
+        _STATE["browser_extra_unavailable"] = 0
         _STATE["needs_login_items"] = []
         _STATE["failed"] = 0
         _STATE["started_at"] = now_iso_z()
@@ -119,6 +122,7 @@ def status() -> dict[str, Any]:
         proposed = int(_STATE["proposed"])
         no_fetchable_source = int(_STATE["no_fetchable_source"])
         needs_library_login = int(_STATE["needs_library_login"])
+        browser_extra_unavailable = int(_STATE["browser_extra_unavailable"])
         needs_login_items = list(_STATE["needs_login_items"])
         failed = int(_STATE["failed"])
         started_at = _STATE["started_at"]
@@ -140,6 +144,7 @@ def status() -> dict[str, Any]:
         "proposed": proposed,
         "no_fetchable_source": no_fetchable_source,
         "needs_library_login": needs_library_login,
+        "browser_extra_unavailable": browser_extra_unavailable,
         "needs_login_items": needs_login_items,
         "failed": failed,
         "error": error,
@@ -153,12 +158,17 @@ def _set_progress(progress: dict[str, Any]) -> None:
         _STATE["progress"] = progress
 
 
+def _current_cache(item_key: str) -> dict[str, Any] | None:
+    cached = deep_review.get_cached_review(item_key)
+    return cached if deep_review.review_is_current(cached) else None
+
+
 def _usable_cache(item_key: str) -> dict[str, Any] | None:
     """The cached deep review for ``item_key`` IF it's usable — a real digest, or an
     honest ``needs_pdf`` (a re-review without a PDF is futile). A digest-less,
     has-PDF entry is a STALE FAILURE → ``None`` so it's recomputed (deep review works
     now). ``None`` when absent or stale."""
-    cached = deep_review.get_cached_review(item_key)
+    cached = _current_cache(item_key)
     if cached is not None and (cached.get("digest") is not None or cached.get("needs_pdf")):
         return cached
     return None
@@ -167,11 +177,11 @@ def _usable_cache(item_key: str) -> dict[str, Any] | None:
 def _has_digest(item_key: str) -> bool:
     """True once ``item_key`` carries a real digest — the terminal state a re-review
     aims for, so a re-acquired batch stops asking for it."""
-    cached = deep_review.get_cached_review(item_key)
+    cached = _current_cache(item_key)
     return cached is not None and cached.get("digest") is not None
 
 
-def _run_batched_review(item_keys: list[str], *, overrides: dict[str, str] | None = None, force: bool = False) -> None:
+def _run_batched_review(item_keys: list[str], *, overrides: dict[str, Any] | None = None, force: bool = False) -> None:
     """Review a BATCH of items in ONE ``deep_review.start`` call, polled until OUR
     accepted job settles. ``deep_review`` fans the batch out provider-aware — parallel
     for a remote provider, serial (one model load at a time) for a local one — so this
@@ -225,7 +235,7 @@ def _run_batched_review(item_keys: list[str], *, overrides: dict[str, str] | Non
         foreign_waited += _POLL_INTERVAL_SECS
 
 
-def _acquire_missing_pdfs(keys: list[str], outcomes: dict[str, str]) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+def _acquire_missing_pdfs(keys: list[str], outcomes: dict[str, str]) -> tuple[dict[str, Any], dict[str, dict[str, str]]]:
     """SEQUENTIALLY acquire a PDF for each pick still without usable full text (no
     local Zotero attachment), returning ``({key: local_path}, {key: {title, url}})``.
     The second map is the GATED picks — a real PDF exists but the session for that
@@ -237,12 +247,12 @@ def _acquire_missing_pdfs(keys: list[str], outcomes: dict[str, str]) -> tuple[di
     from zotero_summarizer.services.library import _pdf_acquire
     from zotero_summarizer.services.zotero.zotero import get_library_reader
 
-    overrides: dict[str, str] = {}
+    overrides: dict[str, Any] = {}
     login: dict[str, dict[str, str]] = {}
     for item_key in keys:
         if item_key in outcomes:
             continue
-        review = deep_review.get_cached_review(item_key)
+        review = _current_cache(item_key)
         if not (review is None or review.get("needs_pdf") or review.get("digest") is None):
             continue  # already has a digest — nothing to acquire
         try:
@@ -251,7 +261,10 @@ def _acquire_missing_pdfs(keys: list[str], outcomes: dict[str, str]) -> tuple[di
                 continue  # has a local PDF but no digest → extraction failure, not a missing source
             result = _pdf_acquire.acquire_pdf_for(item_key, detail)
             if result.path is not None:
-                overrides[item_key] = str(result.path)
+                overrides[item_key] = {
+                    "path": str(result.path), "source": getattr(result, "source", ""),
+                    "source_url": getattr(result, "source_url", ""),
+                }
             elif result.needs_login:
                 doi = str(detail.get("doi") or "")
                 login[item_key] = {
@@ -259,6 +272,8 @@ def _acquire_missing_pdfs(keys: list[str], outcomes: dict[str, str]) -> tuple[di
                     # the page to open + sign into (refreshing the session the fetch reuses)
                     "url": str(detail.get("url") or (f"https://doi.org/{doi}" if doi else "")),
                 }
+            elif result.outcome == "browser_extra_unavailable":
+                outcomes[item_key] = "browser_extra_unavailable"
         except Exception as exc:  # noqa: BLE001 — per-item background boundary
             LOGGER.warning("review_fleet acquire failed item=%s: %s", item_key, exc)
             outcomes[item_key] = "failed"
@@ -272,11 +287,12 @@ def _propose_for_item(item_key: str, *, login: dict[str, dict[str, str]]) -> str
       - ``"no_fetchable_source"``  — no usable full text and no fetchable PDF source
         (web article / no arXiv / no OA copy / download failed);
       - ``"needs_library_login"``  — a proxied/paywalled source exists but the browser
-        couldn't fetch it (university profile not logged in / `browser` extra missing);
+        couldn't fetch it with the configured university session;
+      - ``"browser_extra_unavailable"`` — browser automation is not installed;
       - ``"failed"``               — the review never materialized (no review dict).
 
     Pure read of the cache the review/acquire passes populated — no LLM, no model load."""
-    review = deep_review.get_cached_review(item_key)
+    review = _current_cache(item_key)
     if review is None or review.get("needs_pdf") or review.get("digest") is None:
         if item_key in login:
             return "needs_library_login"
@@ -394,9 +410,11 @@ def start(top_k: int = _DEFAULT_TOP_K, *, item_keys: list[str] | None = None) ->
     run's status. The client relies on ``accepted`` (not a started_at timestamp) to tell
     "my pinned keys are running" from "a foreign run holds the latch — wait it out", which
     is robust to a prewarm that fires AFTER the click."""
+    keys = list(item_keys) if item_keys else None
+    for key in keys or []:
+        paper_render._state_path(key)
     if not try_start():
         return {**status(), "accepted": False}
-    keys = [str(k) for k in item_keys] if item_keys else None
     _flight.run_in_background(lambda: _run_job(max(1, top_k), item_keys=keys))
     return {**status(), "accepted": True}
 

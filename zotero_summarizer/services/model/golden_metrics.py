@@ -1,6 +1,6 @@
-"""Classification metrics for golden-set evaluation.
+"""Classification and ranking metrics for golden-set evaluation.
 
-Pure functions over parallel ``gold`` / ``pred`` label lists. No I/O, no
+Pure functions over parallel ``gold`` / ``pred`` labels or numeric vectors. No I/O, no
 state — callers are responsible for loading rows and persisting reports.
 
 The four expected class labels match
@@ -12,9 +12,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
+
 
 CLASSES: tuple[str, ...] = ("must_read", "should_read", "could_read", "dont_read")
 POSITIVE_CLASSES: frozenset[str] = frozenset({"must_read", "should_read"})
+
+
+def spearman_correlation(gold: np.ndarray, pred: np.ndarray) -> float | None:
+    """Ranking diagnostic: unavailable below three rows or for constant vectors.
+
+    Invalid shapes/nonfinite values are errors, not unavailable measurements.
+    """
+    from scipy.stats import spearmanr
+
+    gold, pred = np.asarray(gold, dtype=float), np.asarray(pred, dtype=float)
+    if gold.ndim != 1 or pred.ndim != 1 or gold.shape != pred.shape:
+        raise ValueError("Spearman requires parallel one-dimensional vectors")
+    if not np.isfinite(gold).all() or not np.isfinite(pred).all():
+        raise ValueError("Spearman requires finite labels and predictions")
+    if len(gold) < 3 or np.all(gold == gold[0]) or np.all(pred == pred[0]):
+        return None
+    return float(spearmanr(gold, pred).statistic)
 
 
 @dataclass(frozen=True)

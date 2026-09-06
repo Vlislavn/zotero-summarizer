@@ -1,10 +1,17 @@
-"""Tests for the redesigned concise Zotero note template."""
+"""Tests for the self-sufficient Zotero note template."""
 from __future__ import annotations
 
+import json
 import re
 
+import pytest
+
 from zotero_summarizer.models import SummarizeResponse, TriageDimensions
-from zotero_summarizer.services.zotero.pending import build_triage_note_html
+from zotero_summarizer.services.triage.feeds._daily_materialize import (
+    _materialize_summary,
+    _PendingScoredRow,
+)
+from zotero_summarizer.services.zotero.pending import build_provenance_comment, build_triage_note_html
 
 
 def _summary(**overrides) -> SummarizeResponse:
@@ -13,17 +20,17 @@ def _summary(**overrides) -> SummarizeResponse:
         "should_deep_read": "Yes.",
         "key_sections_to_read": ["Section 3", "Table 4"],
         "relevance_to_research": "Directly maps to multiagent goals.",
-        "controversial_points": "Should not appear in note.",
-        "industry_academy_impact": "Should not appear in note.",
-        "unknown_unknowns": "Should not appear in note.",
-        "implementation_quickstart": "Should not appear in note.",
+        "controversial_points": "The comparison baseline may be weak.",
+        "industry_academy_impact": "Could reduce inference cost.",
+        "unknown_unknowns": "External validity remains unknown.",
+        "implementation_quickstart": "Start from the released checkpoint.",
         "key_findings": [
             "Reaches 87% F1 on benchmark B.",
             "5x speedup over baseline.",
             "Releases dataset of 10k items.",
         ],
-        "methods": "Should not appear in note.",
-        "limitations": "Should not appear in note.",
+        "methods": "A blinded benchmark comparison.",
+        "limitations": "Single-centre evaluation.",
         "relevance_score": 4,
         "composite_relevance_score": 4.2,
         "reading_priority": "should_read",
@@ -49,28 +56,26 @@ def test_note_uses_only_zotero_safe_tags():
         assert tag not in html.lower(), f"forbidden HTML: {tag} found in: {html[:300]}"
 
 
-def test_note_renders_three_sections_plus_footer():
+def test_note_provenance_is_v3_and_comment_safe():
+    comment = build_provenance_comment(run_id="bad-->run<!--")
+    assert comment.count("-->") == 1 and "zs:note_type=triage;version=3" in comment
+    assert build_triage_note_html("T", _summary()).startswith("<!--")
+    assert not build_triage_note_html("T", _summary(), include_provenance=False).startswith("<!--")
+
+
+def test_note_renders_available_decision_sections():
     html = build_triage_note_html("Test paper", _summary())
     section_headers = re.findall(r"<h2>([^<]+)</h2>", html)
-    assert len(section_headers) == 3
     assert any("Should read" in h or "Read" in h for h in section_headers)
     assert any("Key findings" in h for h in section_headers)
-    assert any("Relevance" in h for h in section_headers)
+    for expected in ("What this paper", "Approach", "Why it matters", "Limitations", "What to read"):
+        assert any(expected in heading for heading in section_headers)
 
 
-def test_note_drops_unused_llm_fields():
-    """The 8 noisy fields the user complained about must NOT appear in rendered HTML."""
+def test_note_preserves_core_decision_artifact():
     html = build_triage_note_html("Title", _summary())
-    # Field-value text from the noisy fields shouldn't appear in the note
-    forbidden_phrases = [
-        "Should not appear in note.",  # appears in 5 fields we don't render
-        "controversial",
-        "industry_academy",
-        "unknown_unknowns",
-        "implementation_quickstart",
-    ]
-    for phrase in forbidden_phrases:
-        assert phrase not in html.lower(), f"unexpected: {phrase}"
+    for expected in ("blinded benchmark", "Single-centre", "multiagent goals"):
+        assert expected in html
 
 
 def test_note_includes_score_matched_goal_tags_in_footer():
@@ -112,16 +117,46 @@ def test_note_escapes_html_in_user_supplied_strings():
     html = build_triage_note_html("<b>Title</b>", s)
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
-    # Title also escaped
-    assert "<b>Title</b>" not in html.replace("<b>", "##").replace("</b>", "##") or True
+    fallback = build_triage_note_html("<b>Title</b>", _summary(triage_rationale="", should_deep_read="", executive_summary=""))
+    assert "<b>Title</b>" not in fallback and "&lt;b&gt;Title&lt;/b&gt;" in fallback
 
 
-def test_note_caps_findings_at_three():
+def test_note_caps_findings_at_six():
     s = _summary(
-        key_findings=["one", "two", "three", "four", "five"],
+        key_findings=["one", "two", "three", "four", "five", "six", "seven"],
     )
     html = build_triage_note_html("T", s)
     li_count = html.count("<li>")
-    assert li_count == 3
-    assert "four" not in html
-    assert "five" not in html
+    assert li_count == 8  # six findings + two reading sections
+    assert "six" in html
+    assert "seven" not in html
+
+
+def test_delayed_materialization_restores_summary_and_marks_legacy_fallback():
+    summary = _summary(methods="Persisted method after restart.")
+    row = {"shap_contribs_json": json.dumps({"summary": summary.model_dump()})}
+    pick = _PendingScoredRow(4.2, 0.0, False, row, "paper")
+    restored, source = _materialize_summary(pick)
+    assert source == "persisted_summary"
+    assert restored.methods == "Persisted method after restart."
+
+    pick.row = {"title": "Legacy", "reading_priority": "could_read", "composite_score": 1}
+    restored, source = _materialize_summary(pick)
+    assert source == "legacy_sparse"
+    assert restored.executive_summary == ""
+
+
+def test_stored_summary_versions_accept_legacy_and_reject_future():
+    from zotero_summarizer.services.library.review_summary import pick_stored_summary
+
+    summary = _summary()
+    legacy = {"shap_contribs_json": json.dumps({"summary": summary.model_dump()})}
+    current = {"shap_contribs_json": json.dumps({
+        "summary_schema_version": 1, "summary": summary.model_dump(),
+    })}
+    assert pick_stored_summary(legacy) == summary
+    assert pick_stored_summary(current) == summary
+    with pytest.raises(ValueError, match="unsupported stored summary"):
+        pick_stored_summary({"shap_contribs_json": json.dumps({
+            "summary_schema_version": 2, "summary": summary.model_dump(),
+        })})

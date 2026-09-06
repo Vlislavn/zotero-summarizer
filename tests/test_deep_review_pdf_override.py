@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import types
 
+from zotero_summarizer.models import PaperDigest
 from zotero_summarizer.services.library import deep_review
 
 
@@ -25,10 +26,16 @@ def _wire(monkeypatch, *, detail):
     extractor = types.SimpleNamespace(
         extract_text=lambda path: (seen["extracted"].append(path), "BODY TEXT")[1]
     )
-    digest = types.SimpleNamespace(model_dump=lambda: {"grade": "A", "read_decision": "read"})
+    digest = PaperDigest(
+        grade="A", read_decision="read", read_why="The original evidence matters.",
+        read_parts=["Methods"], skip_parts=[], estimated_read_minutes=15,
+        original_value="The complete method.", novelty=4, significance=4,
+        writing_friction="low", writing_reasons=[],
+    )
     monkeypatch.setattr(deep_review.quality_review, "assess_digest", lambda **_k: digest)
     monkeypatch.setattr(deep_review._deep_review_layers, "extra_layers",
-                        lambda ctx: ({"quality_band": "ok"}, [], {"type": "x"}, None, None))
+                        lambda ctx: ({"quality_band": "highlight"}, [{"relevant": True}],
+                                     {"type": "x"}, None, None))
     # The note write is a local import inside _review_one — patch the source symbol.
     from zotero_summarizer.services.zotero import zotero as zsvc
     monkeypatch.setattr(zsvc, "zotero_upsert_digest_note", lambda *_a, **_k: None)
@@ -45,7 +52,7 @@ def test_injected_pdf_path_overrides_missing_zotero_attachment(monkeypatch):
         reader=reader, config=_config(), extractor=extractor, llm=object(), quality_enabled=True,
     )
     assert entry["needs_pdf"] is False
-    assert entry["digest"] == {"grade": "A", "read_decision": "read"}
+    assert entry["digest"]["grade"] == "A" and entry["digest"]["read_decision"] == "read"
     assert seen["extracted"] == ["/tmp/cache/k1.pdf"]  # extracted from the INJECTED path
 
 
