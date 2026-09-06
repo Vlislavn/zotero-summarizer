@@ -15,9 +15,9 @@ function stateLine(fleetStatus, proposedCount, coolCount, autoActive, stopping) 
   const {
     status, total = 0, completed = 0, proposed = 0,
     no_fetchable_source: noSource = 0, needs_library_login: needsLogin = 0,
-    failed = 0, error, progress = {},
+    browser_extra_unavailable: noBrowser = 0, failed = 0, error, progress = {},
   } = fleetStatus || {};
-  const skipped = noSource + needsLogin;
+  const skipped = noSource + needsLogin + noBrowser;
 
   if (stopping) {
     return { tone: 'text-amber-700', text: 'Stopping — finishing the reviews already in progress (they’re kept); no new papers will start.' };
@@ -39,7 +39,9 @@ function stateLine(fleetStatus, proposedCount, coolCount, autoActive, stopping) 
     return { tone: 'text-rose-700', text: `Review failed: ${error || 'unknown error'}` };
   }
   if (status === 'done_empty') {
-    const detail = failed > 0
+    const detail = noBrowser > 0
+      ? 'browser support is not installed; open Settings → University access.'
+      : failed > 0
       ? `${failed} couldn’t be reviewed — the deep-review step errored (check the server log).`
       : 'none yielded a fetchable digest (a web article, a paywall, or no open-access / arXiv source).';
     return {

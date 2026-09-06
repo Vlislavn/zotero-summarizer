@@ -38,6 +38,14 @@ def test_build_llm_with_extra_body_forwards_it():
     assert kwargs["extra_body"] == extra
 
 
+def test_build_llm_threads_request_timeout():
+    """The configured deadline must reach OnPrem's OpenAI-compatible transport."""
+    fake_llm_class = MagicMock()
+    with patch.object(_adapters, "_load_onprem", return_value=(fake_llm_class, None)):
+        _adapters.build_llm("https://different.example/v1", "other-model", "k", request_timeout_seconds=17)
+    assert fake_llm_class.call_args.kwargs["timeout"] == 17
+
+
 def test_build_llm_defaults_temperature_to_zero():
     """No temperature passed → deterministic triage (the previously-hardcoded 0)."""
     fake_llm_class = MagicMock()

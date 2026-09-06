@@ -164,13 +164,10 @@ export default function Review() {
 
   const handleAction = useCallback(async (id, action, label = null) => {
     try {
-      const result = await reviewAction(id, action, label);
+      await reviewAction(id, action, label);
       const wentApproved = action === 'approve' || (action === 'relabel' && label !== 'dont_read');
       setItemState((prev) => ({ ...prev, [id]: wentApproved ? 'approved' : 'rejected' }));
-      const parts = [`Item ${id}: ${action}${label ? ` (${pretty(label)})` : ''} OK`];
-      if (result?.queued_pending_changes) parts.push(`queued ${result.queued_pending_changes} pending change(s)`);
-      if (result?.golden_csv_row_added) parts.push('appended to golden CSV');
-      setMessage(parts.join(' — '));
+      setMessage(`Item ${id}: ${action}${label ? ` (${pretty(label)})` : ''} OK`);
       setIsError(false);
     } catch (err) {
       setMessage(`Item ${id}: ${action} failed — ${humanizeError(err)}`);
@@ -204,18 +201,22 @@ export default function Review() {
   }, [load, state]);
 
   const handleConfirmGateRejected = useCallback(async () => {
+    const processedIds = items.filter((item) => !itemState[item.id]).map((item) => item.id);
+    if (processedIds.length === 0) return;
     if (!window.confirm(
-      `Confirm all ${items.length} unaltered gate-rejected items as ${pretty('dont_read')}?\n\n`
-      + 'This appends them to zotero-summarizer-golden.csv as negative training rows. '
-      + 'Already-relabelled items are skipped automatically. The next feeds run will retrain.',
+      `Confirm all ${processedIds.length} unaltered gate-rejected items as ${pretty('dont_read')}?\n\n`
+      + 'This saves your verdicts for training and removes these items from the review queue. '
+      + 'Already-relabelled items are skipped automatically.',
     )) return;
     setConfirming(true);
     setMessage('');
     try {
-      const result = await reviewConfirmAllGateRejected();
+      const result = await reviewConfirmAllGateRejected(processedIds);
+      const submitted = new Set(processedIds);
+      setItems((current) => current.filter((item) => !submitted.has(item.id)));
       setMessage(
-        `Appended ${result?.appended || 0} dont_read row(s) to golden CSV; `
-        + `${result?.skipped_duplicate || 0} already there.`,
+        `Confirmed ${result.confirmed} item(s) as ${pretty('dont_read')}; `
+        + `${result.skipped} already changed.`,
       );
       setIsError(false);
     } catch (err) {
@@ -224,7 +225,7 @@ export default function Review() {
     } finally {
       setConfirming(false);
     }
-  }, [items.length]);
+  }, [items, itemState]);
 
   return (
     <div className="glass rounded-2xl border border-slate-200 p-4">
@@ -281,7 +282,7 @@ export default function Review() {
             <button
               type="button"
               onClick={handleConfirmGateRejected}
-              disabled={confirming}
+              disabled={confirming || loading || items.every((item) => itemState[item.id])}
               className="px-3 py-1 rounded-lg text-xs font-semibold bg-rose-700 text-white hover:bg-rose-800 disabled:bg-slate-300"
             >
               {confirming ? 'Writing…' : `Confirm remaining as ${pretty('dont_read')}`}

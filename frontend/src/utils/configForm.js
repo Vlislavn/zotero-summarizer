@@ -46,6 +46,7 @@ export function configToFormState(cfg) {
   if (!cfg) return null;
   const ua = cfg.university_access || {};
   return {
+    llm_enabled: cfg.llm_enabled !== false,
     research_goals_text: joinLines(cfg.research_goals),
     triage_criteria_text: joinLines(cfg.triage_criteria),
     output_language: cfg.output_language || 'English',
@@ -79,6 +80,7 @@ export function formStateToConfig(form, baseConfig) {
   next.research_goals = splitLines(form.research_goals_text);
   next.triage_criteria = splitLines(form.triage_criteria_text);
   next.output_language = form.output_language || 'English';
+  next.llm_enabled = form.llm_enabled !== false;
   // NOTE: deliberately NO `next.llm`, `next.corpus`, or `next.classifier_gate`
   // write — those are system-owned knobs (validated code defaults, ZS_* env, and
   // per-user calibration). Like `prestige`, they round-trip from baseConfig

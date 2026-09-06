@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, Literal
+from urllib.parse import quote
 
 from zotero_summarizer.domain import READING_PRIORITY_SORT_RANK
 
@@ -28,8 +29,8 @@ from zotero_summarizer.mcp.parsers import (
 from zotero_summarizer.mcp.server import mcp
 
 
-SEARCH_SOURCE_MULTIPLIER = 4
 SEARCH_SOURCE_MAX_FETCH = 500
+SEARCH_TOTAL_MAX = 10000
 SEARCH_ENRICH_CONCURRENCY = 8
 SEED_QUERY_TITLE_WORD_LIMIT = 8
 
@@ -104,23 +105,37 @@ def _matches_search_filters(
     return True
 
 
-def _next_search_cursor(
-    *,
-    source_offset: int,
-    filtered_offset: int,
-    safe_limit: int,
-    filtered_count: int,
-    source_count: int,
-    source_total: int,
-) -> str | None:
-    next_filtered_offset = filtered_offset + safe_limit
-    if next_filtered_offset < filtered_count:
-        return _encode_search_cursor(source_offset, next_filtered_offset)
-
-    if source_offset + source_count < source_total:
-        return _encode_search_cursor(source_offset + source_count, 0)
-
-    return None
+async def _fetch_search_items(params: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    # ponytail: complete scan up to 10k matches; move the join/sort into the API if latency matters.
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    total: int | None = None
+    while total is None or len(items) < total:
+        result = await _api_request("GET", "/api/zotero/items", params={
+            **params, "limit": SEARCH_SOURCE_MAX_FETCH, "offset": len(items),
+        })
+        data, error = _extract_data_or_error(result)
+        if error is not None:
+            return [], error
+        reported = data.get("total")
+        page = data.get("items")
+        if type(reported) is not int or reported < 0 or not isinstance(page, list):
+            return [], _error("backend_contract_error", "Invalid search page/count")
+        if reported > SEARCH_TOTAL_MAX:
+            return [], _error("search_too_large", "Narrow the query, collection or tag before sorting", details={
+                "source_total": reported, "max_items": SEARCH_TOTAL_MAX,
+            })
+        if total is not None and reported != total:
+            return [], _error("search_changed", "Library changed during search; restart")
+        total = reported
+        keys = [row.get("item_key") for row in page]
+        if (any(not isinstance(key, str) or not key for key in keys)
+                or len(set(keys)) != len(keys) or seen.intersection(keys)
+                or len(items) + len(page) > total or (not page and len(items) < total)):
+            return [], _error("search_incomplete", "Backend search pages are incomplete or inconsistent")
+        items.extend(page)
+        seen.update(keys)
+    return items, None
 
 
 @mcp.tool()
@@ -136,11 +151,12 @@ async def search_papers(
     limit: int = DEFAULT_PAGE_LIMIT,
     cursor: str | None = None,
 ) -> dict[str, Any]:
-    """Search papers and optionally filter by triage metadata."""
+    """Globally sort/filter up to 10k matches, then paginate. Cursors require unchanged inputs."""
     safe_limit = max(1, min(int(limit), MAX_PAGE_LIMIT))
-    # Cursor encodes source_offset and intra-source filtered_offset as `source:filtered`.
-    source_offset, filtered_offset = _decode_search_cursor(cursor)
-    source_limit = min(SEARCH_SOURCE_MAX_FETCH, max(safe_limit * SEARCH_SOURCE_MULTIPLIER, safe_limit))
+    try:
+        offset = _decode_search_cursor(cursor)
+    except ValueError as exc:
+        return _error("validation_error", str(exc))
     normalized_priority = [
         value.lower()
         for value in _normalize_unique_strings(priority)
@@ -148,22 +164,9 @@ async def search_papers(
     ]
     safe_score_min, safe_score_max = _clamp_score_bounds(score_min, score_max)
 
-    source_result = await _api_request(
-        "GET",
-        "/api/zotero/items",
-        params={
-            "collection": collection,
-            "search": query,
-            "tag": tag,
-            "limit": source_limit,
-            "offset": source_offset,
-        },
-    )
-    source_data, source_error = _extract_data_or_error(source_result)
+    source_items, source_error = await _fetch_search_items({"collection": collection, "search": query, "tag": tag})
     if source_error is not None:
         return source_error
-    source_items = list((source_data or {}).get("items") or [])
-    source_total = _as_int((source_data or {}).get("total"), 0)
 
     semaphore = asyncio.Semaphore(SEARCH_ENRICH_CONCURRENCY)
     triage_warnings: list[dict[str, Any]] = []
@@ -171,6 +174,9 @@ async def search_papers(
     cards = await asyncio.gather(
         *[_enrich_paper_card(item, semaphore, triage_warnings) for item in source_items]
     )
+    if triage_warnings:
+        return _error("search_incomplete", "Triage metadata could not be loaded; no ranked result is available",
+                      details={"errors": triage_warnings})
 
     filtered = [
         card
@@ -185,28 +191,17 @@ async def search_papers(
     ]
 
     sorted_cards = _sort_paper_cards(filtered, sort_by)
-    page_items = sorted_cards[filtered_offset : filtered_offset + safe_limit]
-
-    next_cursor = _next_search_cursor(
-        source_offset=source_offset,
-        filtered_offset=filtered_offset,
-        safe_limit=safe_limit,
-        filtered_count=len(sorted_cards),
-        source_count=len(source_items),
-        source_total=source_total,
-    )
+    page_items = sorted_cards[offset : offset + safe_limit]
+    next_cursor = _encode_search_cursor(offset + safe_limit) if offset + safe_limit < len(sorted_cards) else None
 
     response_payload = {
         "items": page_items,
         "limit": safe_limit,
-        "cursor": _encode_search_cursor(source_offset, filtered_offset),
+        "cursor": _encode_search_cursor(offset),
         "next_cursor": next_cursor,
-        "source_total": source_total,
+        "source_total": len(source_items),
         "filtered_count": len(sorted_cards),
     }
-    if triage_warnings:
-        response_payload["warnings"] = triage_warnings
-
     return _ok(**response_payload)
 
 
@@ -217,7 +212,7 @@ async def get_paper(item_key: str) -> dict[str, Any]:
     if validation_error is not None:
         return validation_error
 
-    detail_result = await _api_request("GET", f"/api/zotero/items/{safe_item_key}")
+    detail_result = await _api_request("GET", f"/api/zotero/items/{quote(safe_item_key, safe='')}")
     detail, detail_error = _extract_data_or_error(detail_result)
     if detail_error is not None:
         return detail_error
@@ -282,7 +277,10 @@ async def find_similar_papers(
 
     seed: dict[str, Any] | None = None
     if safe_item_key:
-        seed_result = await _api_request("GET", f"/api/zotero/items/{safe_item_key}")
+        safe_item_key, validation_error = _require_non_empty_text(safe_item_key, "item_key")
+        if validation_error is not None:
+            return validation_error
+        seed_result = await _api_request("GET", f"/api/zotero/items/{quote(safe_item_key, safe='')}")
         seed, seed_error = _extract_data_or_error(seed_result)
         if seed_error is not None:
             return seed_error

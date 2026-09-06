@@ -1,36 +1,38 @@
-"""Train a classifier on the golden set and persist it (joblib + JSON twin)."""
+"""Train a classifier on the golden set and persist it (one ZIP: joblib + metadata)."""
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, NamedTuple
 
-import joblib
 import numpy as np
 
 from zotero_summarizer.services.model import classifier
-from zotero_summarizer.services.model.classifier_artifact import DEFAULT_MODEL_DIR, TrainedClassifier
+from zotero_summarizer.services.model.classifier_artifact import TrainedClassifier
 from zotero_summarizer.services.model.classifier_temporal import (
     _NO_DATE_SENTINEL,
     _row_days,
     _temporal_holdout_metrics,
 )
 from zotero_summarizer.services import run_log
-from zotero_summarizer.services._common import atomic_write, now_iso_z
+from zotero_summarizer.services._common import now_iso_z, settings
+from zotero_summarizer.services.model.classifier_store import write_archive
+from zotero_summarizer.services.model.classifier_inputs import load_training_inputs
+from zotero_summarizer.services.model.golden_metrics import spearman_correlation
+from zotero_summarizer.storage.corpus_types import CorpusAffinity
 
 LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, eq=False)
 class _TrainMatrix:
-    """The three per-row training arrays that always travel together: feature
-    matrix ``X``, continuous target ``y``, and ``sample_weight`` (all length n)."""
+    """Aligned training arrays and the transient corpus context used by folds."""
 
     X: "np.ndarray"
     y: "np.ndarray"
     sample_weight: "np.ndarray"
+    corpus_affinity: CorpusAffinity | None = None
 
     @property
     def n(self) -> int:
@@ -44,15 +46,18 @@ def _featurize_training_matrix(
     corpus_db_path: Path,
     goals_config: Any,
     progress_cb: Callable[[int, int], None] | None = None,
-) -> "np.ndarray":
+    reference_year: int | None = None,
+) -> _TrainMatrix:
     """Batched-embedding feature matrix for the labelled training set."""
     from zotero_summarizer.services.model.library_features import compute_library_features
+    from zotero_summarizer.services.model.label_weights import compute_row_weights
 
-    keys, titles, abstracts, _y_cont, train_rows = data
+    keys, titles, abstracts, y_cont, train_rows = data
     embed_cache, openalex_client, cold_start_policy = classifier._build_aux_providers(
         corpus_db_path, goals_config
     )
     n_train = len(keys)
+    corpus = embed_cache.corpus_affinity(train_rows) if embed_cache is not None else None
     X_train = np.zeros((n_train, classifier.FEATURE_DIM), dtype=np.float32)
     # Embed the whole training set in batched (GPU) passes, not one-at-a-time.
     embeddings = classifier.get_or_compute_embeddings_batch(
@@ -66,16 +71,16 @@ def _featurize_training_matrix(
         year_i = int(year_str[:4]) if year_str[:4].isdigit() else None
         doi = (train_rows[i].get("doi") or "").strip()
         affinity, prestige = classifier._compute_aux(
-            embed_cache, openalex_client,
+            None, openalex_client,
             title=t, abstract=a, doi=doi, year=year_i,
             cold_start_policy=cold_start_policy,
         )
-        authors_str = (train_rows[i].get("authors") or "").strip()
         nearest, centroid, recent, drift, authors_overlap = compute_library_features(
-            emb, library, candidate_authors=authors_str, exclude_item_key=k,
+            emb, library, candidate_row=train_rows[i],
         )
         X_train[i, classifier.EMBEDDING_DIM:] = classifier._extra_features(
             train_rows[i], t, a,
+            reference_year=reference_year,
             corpus_affinity=affinity, prestige_score=prestige,
             nearest_kept_cosine=nearest, positive_centroid_cosine=centroid,
             recent_centroid_cosine=recent, topic_drift=drift,
@@ -83,7 +88,9 @@ def _featurize_training_matrix(
         )
         if progress_cb is not None and (i + 1) % 50 == 0:
             progress_cb(i + 1, n_train)
-    return X_train
+    if corpus is not None:
+        X_train[:, classifier.EMBEDDING_DIM + 5] = corpus.scores()
+    return _TrainMatrix(X_train, np.asarray(y_cont, dtype=np.float64), compute_row_weights(train_rows), corpus)
 
 
 def _oof_quality_metrics(train_rows: list[dict], preds_oof: "np.ndarray") -> dict[str, Any]:
@@ -109,7 +116,8 @@ def _fit_final_model(
     sw_all: "np.ndarray",
     *,
     pca_dim: int,
-    n_train: int,
+    lgbm_params: dict[str, Any] | None = None,
+    pca_specter_dim: int | None = None,
 ) -> tuple[Any, Any]:
     """Fit the production regressor on the full training set; return (model, pca)."""
     pca_object = None
@@ -117,30 +125,19 @@ def _fit_final_model(
     if classifier_name == "tabpfn":
         from sklearn.decomposition import PCA
 
-        actual_dim = min(pca_dim, n_train, classifier.EMBEDDING_DIM)
+        actual_dim = min(pca_dim, X_train.shape[0], classifier.EMBEDDING_DIM)
         pca_object = PCA(n_components=actual_dim, random_state=42)
         pca_object.fit(X_train[:, :classifier.EMBEDDING_DIM])
         # No persistent fitted_model — TabPFN re-fits per predict (in-context).
     elif classifier_name == "lightgbm":
-        import lightgbm as lgb
-        from zotero_summarizer.services.model.tune import load_tuned_params
+        from zotero_summarizer.services.model.classifier_fit import _fit_lightgbm_regressor
 
-        # Sprint-3c: pick up Optuna-tuned params if present; missing file ⇒
-        # empty overrides ⇒ Sprint-1/2 default hyperparameters apply.
-        tuned_params, tuned_pca = load_tuned_params()
-        defaults = {
-            "objective": "regression",
-            "n_estimators": 200, "num_leaves": 15, "max_depth": 4,
-            "learning_rate": 0.05, "min_child_samples": 10, "reg_lambda": 1.0,
-            "verbose": -1, "random_state": 42, "n_jobs": 1, "num_threads": 1,
-        }
-        defaults.update(tuned_params)
-        if tuned_pca is not None and tuned_pca > 0:
+        if pca_specter_dim is not None:
             # Sprint-3b: PCA reduction baked into the production model; store the
             # PCA object so predict-time transforms new items the same way.
             from sklearn.decomposition import PCA
 
-            actual_dim = min(tuned_pca, X_train.shape[0], classifier.EMBEDDING_DIM)
+            actual_dim = min(pca_specter_dim, X_train.shape[0], classifier.EMBEDDING_DIM)
             pca_object = PCA(n_components=actual_dim, random_state=42)
             pca_object.fit(X_train[:, :classifier.EMBEDDING_DIM])
             emb_red = pca_object.transform(X_train[:, :classifier.EMBEDDING_DIM])
@@ -150,8 +147,9 @@ def _fit_final_model(
         else:
             X_train_used = X_train
 
-        fitted_model = lgb.LGBMRegressor(**defaults)
-        fitted_model.fit(X_train_used, y_train, sample_weight=sw_all)
+        fitted_model = _fit_lightgbm_regressor(
+            X_train_used, y_train, lgbm_params=lgbm_params, sample_weight=sw_all,
+        )
     elif classifier_name == "logreg":
         from sklearn.linear_model import Ridge
 
@@ -165,28 +163,32 @@ def _fit_final_model(
 def _oof_predictions(
     classifier_name: str,
     matrix: _TrainMatrix,
-    groups: list[str],
+    train_rows: list[dict[str, str]],
     *,
     n_folds: int,
     pca_dim: int,
-) -> tuple["np.ndarray", float]:
-    """K-fold out-of-fold predictions + diagnostic Spearman ρ (honest: every
-    row is scored by a fold that never trained on it)."""
-    from scipy.stats import spearmanr
+    lgbm_params: dict[str, Any] | None = None,
+    pca_specter_dim: int | None = None,
+) -> tuple["np.ndarray", float | None]:
+    """Group OOF predictions with a train-fold positive library, plus Spearman."""
     from sklearn.model_selection import GroupKFold
+    from zotero_summarizer.domain import paper_group_id
+    from zotero_summarizer.services.model.library_features import recompute_engagement_columns
 
     preds_oof = np.zeros(matrix.n, dtype=np.float64)
+    groups = [paper_group_id(row) for row in train_rows]
     kf = GroupKFold(n_splits=n_folds)
     for fold_idx, (tr, vl) in enumerate(kf.split(matrix.X, groups=groups), start=1):
+        X_fold = recompute_engagement_columns(matrix.X, train_rows, tr, matrix.corpus_affinity)
         _, p_vl = classifier._fit_predict(
-            classifier_name, matrix.X[tr], matrix.y[tr], matrix.X[vl],
+            classifier_name, X_fold[tr], matrix.y[tr], X_fold[vl],
             pca_dim=pca_dim, return_train_probs=False,
             objective="regression", sample_weight=matrix.sample_weight[tr],
+            lgbm_params=lgbm_params, pca_specter_dim=pca_specter_dim,
         )
         preds_oof[vl] = p_vl
         LOGGER.info("train_and_save: fold %d/%d done", fold_idx, n_folds)
-    oof_rho = float(spearmanr(matrix.y, preds_oof).statistic) if matrix.n > 2 else 0.0
-    return preds_oof, oof_rho
+    return preds_oof, spearman_correlation(matrix.y, preds_oof)
 
 
 def _dated_oof_spearman(
@@ -200,22 +202,18 @@ def _dated_oof_spearman(
     predictions to genuinely-dated Zotero-engagement rows — the reading decisions
     the gate is actually weak at ranking — so the card can report both honestly.
     Returns ``(rho | None, n_dated)``; ``None`` when the dated subset is too small
-    or has a constant label.
+    or has constant labels or predictions.
     """
-    from scipy.stats import spearmanr
-
-    dated = np.asarray([_row_days(r) < _NO_DATE_SENTINEL for r in train_rows])
+    dated = np.asarray([_row_days(r) < _NO_DATE_SENTINEL for r in train_rows], dtype=bool)
     n_dated = int(dated.sum())
-    if n_dated <= 2 or len(set(y_train[dated].tolist())) < 2:
-        return None, n_dated
-    return float(spearmanr(y_train[dated], preds_oof[dated]).statistic), n_dated
+    return spearman_correlation(y_train[dated], preds_oof[dated]), n_dated
 
 
 class _OofDiag(NamedTuple):
     """The four out-of-fold diagnostics that travel together into ``training_metadata``:
     aggregate Spearman ρ, the dated-subset ρ (+ its row count), and per-class metrics."""
 
-    rho: float
+    rho: float | None
     rho_verified: float | None
     n_verified: int
     metrics: dict[str, Any]
@@ -234,14 +232,14 @@ def _training_metadata(
         "n_train": n_train,
         "n_positive_library": library.n_rows,
         "objective": "regression",
-        "oof_spearman": round(oof.rho, 4),
+        "oof_spearman": None if oof.rho is None else round(oof.rho, 4),
         # Honest split: oof_spearman above is the aggregate (inflated by ~72%
         # undated feed:* rows the gate trivially rejects); this is the SAME OOF
         # restricted to dated reading-decisions — the gate's real ranking ability.
-        # None = subset too small / constant label (tiny fixtures).
+        # None = subset too small / constant labels or predictions.
         "oof_spearman_verified": None if oof.rho_verified is None else round(oof.rho_verified, 4),
         "n_verified": oof.n_verified,
-        # None = holdout too small / constant labels (tiny fixtures) —
+        # None = holdout too small / constant labels or predictions —
         # the ModelCard renders an em-dash then, never a fake number.
         "temporal_spearman": None if temporal is None else temporal["temporal_spearman"],
         "temporal_holdout_n": 0 if temporal is None else temporal["temporal_holdout_n"],
@@ -278,10 +276,7 @@ def _build_artifact(
         t_keep=0.0,
         t_must=0.0,
         t_could=0.0,
-        library_embeddings=library.embeddings if library.n_rows > 0 else None,
-        library_centroid=library.centroid if library.n_rows > 0 else None,
-        library_recent_centroid=library.recent_centroid if library.n_rows > 0 else None,
-        library_authors_lower=library.authors_lower if library.n_rows > 0 else None,
+        positive_library=library,
         training_metadata=metadata,
     )
 
@@ -309,7 +304,7 @@ def train_and_save(
     (``must_read`` recall) without touching the scores used for ranking, and is
     kept only when it improves OOF must+should F1.
 
-    Writes ``{output_dir}/{classifier_name}.joblib`` + ``.json`` (FAIR
+    Writes ``{output_dir}/{classifier_name}.zip`` (FAIR
     persistence).
 
     Phase 1.18 Step 2: when ``triage_db_path`` is provided, user verdicts
@@ -317,17 +312,17 @@ def train_and_save(
     before training. This is the closed loop — labels typed in the
     Annotate UI become ground truth for the next retrain.
     """
-    import csv as _csv
-    from zotero_summarizer.services.golden import hybrid_gt
-
     if classifier_name not in ("tabpfn", "lightgbm", "logreg"):
         raise ValueError(f"unsupported classifier_name {classifier_name!r}")
 
     # 1. Load + filter training rows.
-    with golden_csv.open("r", encoding="utf-8", newline="") as f:
-        all_rows = list(_csv.DictReader(f))
-    if triage_db_path is not None:
-        all_rows = hybrid_gt.apply_hybrid(all_rows, triage_db_path)
+    inputs = load_training_inputs(
+        golden_csv, classifier_name=classifier_name, corpus_db_path=corpus_db_path,
+        goals_config=goals_config, n_folds=n_folds, pca_dim=pca_dim,
+        triage_db_path=triage_db_path,
+    )
+    all_rows = inputs.rows
+    fit_options = {"lgbm_params": inputs.lgbm_params, "pca_specter_dim": inputs.pca_specter_dim}
 
     # Hygiene cut: F5 (in_trash) + Sprint-1 tier filter (first_glance, meta).
     from zotero_summarizer.domain import paper_group_id
@@ -339,21 +334,19 @@ def train_and_save(
     # 2. Featurise (reuses classifier helpers — no authors/venue now).
     library = load_positive_library_from_rows(all_rows, corpus_db_path)
     n_train = len(y_cont)
-    X_train = _featurize_training_matrix(
+    matrix = _featurize_training_matrix(
         data, library,
         corpus_db_path=corpus_db_path, goals_config=goals_config, progress_cb=progress_cb,
+        reference_year=inputs.feature_reference_year,
     )
-    y_train = np.asarray(y_cont, dtype=np.float64)
+    X_train, y_train, sw_all = matrix.X, matrix.y, matrix.sample_weight
 
     # 3. K-fold OOF predictions → diagnostic Spearman ρ. No held-out
     #    threshold-tuning step any more (no thresholds to tune).
-    from zotero_summarizer.services.model.label_weights import compute_row_weights
-    sw_all = compute_row_weights(train_rows)
     gold_labels = [(r.get("gold_priority_final") or "").strip() for r in train_rows]
     groups = [paper_group_id(r) for r in train_rows]
-    matrix = _TrainMatrix(X_train, y_train, sw_all)
     preds_oof, oof_rho = _oof_predictions(
-        classifier_name, matrix, groups, n_folds=n_folds, pca_dim=pca_dim,
+        classifier_name, matrix, train_rows, n_folds=n_folds, pca_dim=pca_dim, **fit_options,
     )
     oof_rho_verified, n_verified = _dated_oof_spearman(train_rows, y_train, preds_oof)
 
@@ -371,31 +364,30 @@ def train_and_save(
     # Out-of-fold per-class quality (honest — predictions never saw their own
     # fold), on the EFFECTIVE (post-calibration) bins the shipped gate will assign.
     oof_metrics = _oof_quality_metrics(train_rows, eff_oof)
-    # Label-drift visibility: the golden CSV is re-exported from live Zotero each
-    # train, so labels shift silently. Surface the distribution + n_train delta vs
-    # the prior run (read-only; logged + carried into the run-log entry).
+    # Compare with the predecessor artifact before save_trained replaces it.
     from zotero_summarizer.services.model.classifier_drift import log_label_drift
 
     gold_labels = [r.get("gold_priority_final") or "" for r in train_rows]
+    output_dir = output_dir or settings().model_dir
     label_drift = log_label_drift(
         gold_labels, n_train, classifier_name=classifier_name,
-        runs_log_path=runs_log_path,
+        model_dir=output_dir,
     )
 
     # 3c. Forward-looking Spearman: train on the oldest 80%, score the newest
     # 20% — the number production actually delivers (the shuffled OOF above
     # overstates it; see the module comment on _temporal_holdout_metrics).
     temporal = _temporal_holdout_metrics(
-        classifier_name, matrix, train_rows, groups, pca_dim=pca_dim,
+        classifier_name, matrix, train_rows, groups, pca_dim=pca_dim, **fit_options,
     )
 
     # 4. Final fit on FULL training set.
     fitted_model, pca_object = _fit_final_model(
-        classifier_name, X_train, y_train, sw_all, pca_dim=pca_dim, n_train=n_train,
+        classifier_name, X_train, y_train, sw_all, pca_dim=pca_dim, **fit_options,
     )
 
     # 5. Build the artefact.
-    sha256 = run_log.file_sha256(golden_csv, prefix_len=64)
+    sha256 = inputs.csv_sha256
     trained = _build_artifact(
         matrix, library, fitted_model, pca_object, calibrator,
         classifier_name=classifier_name, sha256=sha256, pca_dim=pca_dim,
@@ -407,13 +399,12 @@ def train_and_save(
         ),
     )
 
+    trained.training_metadata["training_input_sha256"] = inputs.sha256
+    trained.training_metadata["feature_reference_year"] = inputs.feature_reference_year
+    trained.training_metadata["fit_options"] = fit_options
     # 6. Persist artefacts.
-    output_dir = output_dir or DEFAULT_MODEL_DIR
-    output_dir.mkdir(parents=True, exist_ok=True)
     save_trained(trained, output_dir)
-    # FAIR run-log entry so the Settings ModelCard renders the OOF per-class
-    # table after a retrain (it reads runlog.cv.metrics_vs_gold.per_class). The
-    # path is provided by the API retrain worker; CLI/gate callers pass None.
+    # Retain typed training metrics for historical drift and offline audits.
     if runs_log_path is not None:
         run_log.append_run(runs_log_path, {
             "run_id": run_log.make_run_id(classifier_name),
@@ -426,15 +417,15 @@ def train_and_save(
             "input_csv_sha256_prefix": sha256[:12],
         })
     LOGGER.info(
-        "trained regressor %s saved to %s (n_train=%d, OOF Spearman ρ=%.3f, forward ρ=%s)",
-        classifier_name, output_dir, n_train, oof_rho,
+        "trained regressor %s saved to %s (n_train=%d, OOF Spearman ρ=%s, forward ρ=%s)",
+        classifier_name, output_dir, n_train, "n/a" if oof_rho is None else f"{oof_rho:.3f}",
         "n/a" if temporal is None else f"{temporal['temporal_spearman']:.3f}",
     )
     return trained
 
 
-def save_trained(trained: TrainedClassifier, output_dir: Path) -> tuple[Path, Path]:
-    """Write the joblib payload + JSON metadata mirror (atomically).
+def save_trained(trained: TrainedClassifier, output_dir: Path) -> Path:
+    """Publish one ZIP containing both the model and its metadata atomically.
 
     Before overwriting, the prior model is snapshotted to a versioned history dir
     (``classifier_backup.snapshot_current``) so a retrain that later looks wrong has
@@ -444,34 +435,7 @@ def save_trained(trained: TrainedClassifier, output_dir: Path) -> tuple[Path, Pa
     from zotero_summarizer.services.model.classifier_backup import snapshot_current
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    joblib_path = output_dir / f"{trained.classifier_name}.joblib"
-    json_path = output_dir / f"{trained.classifier_name}.json"
+    path = output_dir / f"{trained.classifier_name}.zip"
     snapshot_current(output_dir, trained.classifier_name)
-    # tmp + os.replace: a crash mid-dump must not leave a truncated .joblib that
-    # then fails to unpickle and bricks the gate on the next startup.
-    atomic_write(joblib_path, lambda target: joblib.dump(trained, target))
-    atomic_write(
-        json_path,
-        lambda target: target.write_text(
-            json.dumps(_serialisable_metadata(trained), indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        ),
-    )
-    return joblib_path, json_path
-
-
-def _serialisable_metadata(trained: TrainedClassifier) -> dict[str, Any]:
-    """Plain-JSON projection of the artefact for inspection without joblib."""
-    return {
-        "classifier_name": trained.classifier_name,
-        "golden_csv_sha256": trained.golden_csv_sha256,
-        "feature_dim": trained.feature_dim,
-        "pca_dim": trained.pca_dim,
-        "thresholds": {
-            "keep": round(trained.t_keep, 4),
-            "must": round(trained.t_must, 4),
-            "could": round(trained.t_could, 4),
-        },
-        **trained.training_metadata,
-    }
-
+    write_archive(trained, path)
+    return path

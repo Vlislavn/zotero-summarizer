@@ -76,8 +76,6 @@ from zotero_summarizer.services.triage.feeds._daily_materialize import (  # noqa
 )
 from zotero_summarizer.services.triage.feeds._outcomes import (  # noqa: F401
     _compute_outcome_from_membership,
-    _feedback_type_from_outcome,
-    _relevance_from_weight,
     _resolve_due_outcomes,
 )
 from zotero_summarizer.services.triage.feeds._tick import run_daemon_tick  # noqa: F401

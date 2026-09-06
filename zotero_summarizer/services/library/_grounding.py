@@ -68,3 +68,12 @@ def quote_is_grounded(quote: Any, context: str, *, fuzzy: bool = False) -> bool:
                                       autojunk=False)
     matched = sum(block.size for block in matcher.get_matching_blocks())
     return matched / len(quote_tokens) >= FUZZY_MATCH_RATIO
+
+
+def answer_is_supported_by_quote(answer: Any, quote: Any) -> bool:
+    """Strict extractive-answer contract: the answer must occur in its quote."""
+    answer_tokens, quote_tokens = _content_tokens(str(answer or "")), _content_tokens(str(quote or ""))
+    if not answer_tokens or len(answer_tokens) > len(quote_tokens):
+        return False
+    width = len(answer_tokens)
+    return any(quote_tokens[i:i + width] == answer_tokens for i in range(len(quote_tokens) - width + 1))

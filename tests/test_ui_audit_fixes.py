@@ -79,6 +79,11 @@ def test_list_label_verdict_priorities_returns_latest_priority_per_key(tmp_path)
 
 # --- llm-check: a slow probe times out per-stage instead of hanging ----------
 
+def test_hosted_probe_budget_covers_observed_provider_latency():
+    """Kather's healthy `sota` response takes ~13s; 8s was a false failure."""
+    assert oc._PROBE_TIMEOUT_SECS >= 20.0
+
+
 def test_probe_stage_bounded_times_out(monkeypatch):
     monkeypatch.setattr(oc, "_PROBE_TIMEOUT_SECS", 0.05)
     monkeypatch.setattr(
@@ -99,6 +104,10 @@ def test_probe_stage_bounded_times_out(monkeypatch):
 
 def test_probe_stage_bounded_passes_through_fast_result(monkeypatch):
     monkeypatch.setattr(oc, "_PROBE_TIMEOUT_SECS", 1.0)
+    monkeypatch.setattr(
+        oc, "_stage_skeleton",
+        lambda routing, stage: (None, {"stage": stage}),
+    )
     monkeypatch.setattr(
         oc, "_probe_stage",
         lambda routing, stage: {"stage": stage, "status": "operational", "detail": ""},

@@ -7,6 +7,7 @@ They live here so the orchestrator stays a thin, readable sequence.
 from __future__ import annotations
 
 import random
+from itertools import chain, islice, zip_longest
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any
@@ -19,7 +20,6 @@ from zotero_summarizer.storage import rss as rss_storage
 from zotero_summarizer.services.triage.feeds._common import (
     LOGGER,
     TriagedCandidate,
-    _has_usable_abstract,
     _triage_conn,
     get_state,
 )
@@ -81,55 +81,22 @@ def _pick_unread_batch_round_robin(
     if not feed_library_ids:
         return []
 
-    # Unlimited mode: return everything unread from all specified feeds.
+    if batch_size is not None and batch_size <= 0:
+        raise ValueError("batch_size must be positive or None")
+    feed_order = list(dict.fromkeys(feed_library_ids))
+    if batch_size is not None:
+        random.shuffle(feed_order)
+    pools = [
+        reader.get_feed_items(
+            feed_library_id=int(lib_id), unread_only=True, order="oldest_first",
+            limit=None if batch_size is None else batch_size * 2,
+        )
+        for lib_id in feed_order
+    ]
     if batch_size is None:
-        all_items: list[dict[str, Any]] = []
-        for lib_id in feed_library_ids:
-            try:
-                items = reader.get_feed_items(
-                    feed_library_id=int(lib_id),
-                    unread_only=True,
-                    order="oldest_first",
-                )
-            except Exception as exc:
-                LOGGER.warning("get_feed_items failed for feed_library_id=%s: %s", lib_id, exc)
-                items = []
-            all_items.extend(items)
-        return all_items
-
-    # Bounded mode: probe each feed; tile round-robin until batch_size.
-    per_feed_pool: dict[int, list[dict[str, Any]]] = {}
-    for lib_id in feed_library_ids:
-        try:
-            items = reader.get_feed_items(
-                feed_library_id=int(lib_id),
-                unread_only=True,
-                order="oldest_first",
-                limit=batch_size * 2,  # small headroom for dedup losses
-            )
-        except Exception as exc:
-            LOGGER.warning("get_feed_items failed for feed_library_id=%s: %s", lib_id, exc)
-            items = []
-        per_feed_pool[int(lib_id)] = items
-
-    selected: list[dict[str, Any]] = []
-    feed_order = list(feed_library_ids)
-    random.shuffle(feed_order)  # avoid feed_id ordering bias across ticks
-    cursor = 0
-    while len(selected) < batch_size:
-        progressed_this_round = False
-        for _ in range(len(feed_order)):
-            lib_id = feed_order[cursor % len(feed_order)]
-            cursor += 1
-            pool = per_feed_pool.get(lib_id, [])
-            if pool:
-                selected.append(pool.pop(0))
-                progressed_this_round = True
-                if len(selected) >= batch_size:
-                    break
-        if not progressed_this_round:
-            break
-    return selected
+        return list(chain.from_iterable(pools))
+    round_robin = (item for row in zip_longest(*pools) for item in row if item is not None)
+    return list(islice(round_robin, batch_size))
 
 
 def pick_and_log(
@@ -157,7 +124,7 @@ def pick_and_log(
 
 
 def prepare_unprocessed(
-    raw: list[dict[str, Any]], *, tick_id: str
+    raw: list[dict[str, Any]], *, tick_id: str, dry_run: bool = False
 ) -> tuple[list[dict[str, Any]], int, list[tuple[int, int, str]]]:
     """Dedup against processed rows; collect stale-unread + clear retryable errors.
 
@@ -178,7 +145,7 @@ def prepare_unprocessed(
             (fl, fi, source_by_pair.get((fl, fi), "zotero"))
             for fl, fi in stale_pairs
         ]
-        cleared = feeds_storage.clear_error_rows(conn, unprocessed)
+        cleared = 0 if dry_run else feeds_storage.clear_error_rows(conn, unprocessed)
         if cleared:
             conn.commit()
             LOGGER.info("[%s] cleared %d stale error row(s) for retry", tick_id, cleared)
@@ -222,133 +189,6 @@ def run_triage_stage(
             to_triage, tick_id=tick_id, triage_llm=triage_llm, provider=provider,
         )
     return triaged_results, fast_rejected_results, errors_results, fatal_seen
-
-
-def _max_goal_sim(pred: Any) -> float:
-    """Strongest research-goal cosine the gate computed for this item (0.0 if none).
-
-    The gate already embeds the candidate against every research-goal text and
-    stashes the result on ``pred.aux_context['goal_sims']`` — so the rescue reads
-    the title-driven goal signal for free, without recomputing anything.
-    """
-    aux = getattr(pred, "aux_context", None) or {}
-    goal_sims = aux.get("goal_sims") or {}
-    vals = [float(v) for v in goal_sims.values() if v is not None]
-    return max(vals) if vals else 0.0
-
-
-def _rescue_one(item: dict[str, Any], *, tick_id: str) -> TriagedCandidate | None:
-    """Fetch full text for one abstract-less item and score it on the PDF.
-
-    Returns a finished :class:`TriagedCandidate`, or ``None`` when no full text is
-    fetchable (the gate verdict then legitimately stands — this is the
-    user-approved "acquire-before-score" contract, mirroring
-    ``_daily._maybe_full_text_refine``). The two ``try`` blocks are scoped tightly
-    to the I/O boundaries (browser/network fetch, then the LLM re-score); a failure
-    there must not crash the tick, but orchestration bugs outside them still raise.
-    """
-    from zotero_summarizer.models import SummarizeRequest
-    from zotero_summarizer.services.library._pdf_acquire import acquire_pdf_for
-    from zotero_summarizer.services.triage.summarization import run_pipeline
-    from zotero_summarizer.services.triage.feeds._triage import _apply_prestige
-
-    item_key = str(item.get("item_key") or item.get("item_id") or "")
-    title = str(item.get("title") or "").strip()
-    detail = {"url": item.get("url") or "", "doi": item.get("doi") or "", "has_pdf": False}
-    try:
-        acquired = acquire_pdf_for(item_key, detail)
-    except Exception as exc:  # noqa: BLE001 — I/O boundary; logged, verdict stands
-        LOGGER.warning("[%s] recover-abstract: fetch error for %r: %s", tick_id, title[:60], exc)
-        return None
-    if acquired.path is None:
-        LOGGER.info(
-            "[%s] recover-abstract: no fetchable full text for %r (needs_login=%s) — gate verdict stands",
-            tick_id, title[:60], acquired.needs_login,
-        )
-        return None
-    try:
-        req = SummarizeRequest(
-            title=title or "Untitled",
-            doi=(item.get("doi") or "").strip() or None,
-            abstract=str(item.get("abstract") or ""),
-            pdf_path=str(acquired.path),
-        )
-        summary = run_pipeline(req, log_prefix=tick_id)
-        _apply_prestige(summary, item, log_prefix=tick_id)
-    except Exception as exc:  # noqa: BLE001 — I/O boundary (LLM); logged, verdict stands
-        LOGGER.warning("[%s] recover-abstract: re-score error for %r: %s", tick_id, title[:60], exc)
-        return None
-    composite = float(summary.composite_relevance_score)
-    LOGGER.info(
-        "[%s] recover-abstract: rescued %r → composite=%.2f priority=%s",
-        tick_id, title[:60], composite, summary.reading_priority,
-    )
-    return TriagedCandidate(
-        feed_item=item, summary=summary, composite_score=composite, surprise_score=0.0,
-    )
-
-
-def recover_abstractless_rescues(
-    gate_rejected: list[tuple[dict[str, Any], Any]],
-    *,
-    tick_id: str,
-) -> tuple[
-    list[tuple[dict[str, Any], TriagedCandidate]],
-    list[tuple[dict[str, Any], Any]],
-]:
-    """Acquire-before-score: rescue gate-rejected, abstract-less, high-goal items.
-
-    Prestige-journal RSS delivers no real abstract, so the gate scores those
-    papers on boilerplate and drops them (see ``services/triage/README.md``). For
-    a dropped item that (a) lacks a usable abstract and (b) whose strongest
-    research-goal cosine clears ``recover_abstract.goal_sim_threshold``, fetch its
-    full text and re-score it on the PDF. Returns ``(rescued, still_rejected)``:
-    rescued items are finished :class:`TriagedCandidate`s ready to merge into the
-    triaged bucket; everything else keeps its gate verdict. Capped at
-    ``max_per_tick`` so the browser/paywall fetch never runs across a whole
-    journal backlog (the cap is logged, never silent).
-    """
-    # No-work early-exit FIRST, before dereferencing app_state — an empty
-    # gate_rejected has nothing to rescue regardless of config (and lets the unit
-    # tick tests run without bootstrapping app_state).
-    if not gate_rejected:
-        return [], gate_rejected
-    cfg = getattr(get_state().app_state.config, "recover_abstract", None)
-    if cfg is None or not cfg.enabled:
-        return [], gate_rejected
-
-    rescued: list[tuple[dict[str, Any], TriagedCandidate]] = []
-    still_rejected: list[tuple[dict[str, Any], Any]] = []
-    deferred = 0
-    for item, pred in gate_rejected:
-        eligible = (
-            pred is not None
-            and not _has_usable_abstract(item, min_chars=cfg.min_abstract_chars)
-            and _max_goal_sim(pred) >= cfg.goal_sim_threshold
-        )
-        if not eligible:
-            still_rejected.append((item, pred))
-            continue
-        if len(rescued) >= cfg.max_per_tick:
-            deferred += 1
-            still_rejected.append((item, pred))
-            continue
-        cand = _rescue_one(item, tick_id=tick_id)
-        if cand is None:
-            still_rejected.append((item, pred))
-        else:
-            rescued.append((item, cand))
-    if deferred:
-        LOGGER.info(
-            "[%s] recover-abstract: %d eligible item(s) deferred — hit max_per_tick=%d",
-            tick_id, deferred, cfg.max_per_tick,
-        )
-    if rescued:
-        LOGGER.info(
-            "[%s] recover-abstract: rescued %d abstract-less high-goal item(s)",
-            tick_id, len(rescued),
-        )
-    return rescued, still_rejected
 
 
 def record_tick_decisions(results: _TickResults, *, tick_id: str, review_mode: bool) -> None:

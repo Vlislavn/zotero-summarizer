@@ -41,34 +41,34 @@ async def file_not_found_handler(_, exc: FileNotFoundError) -> JSONResponse:
     payload = ErrorResponse(
         error="file_not_found",
         message="PDF file not found",
-        details={"pdf_path": str(exc)},
     )
     return JSONResponse(status_code=404, content=payload.model_dump())
 
 
 async def extraction_error_handler(_, exc: ExtractionError) -> JSONResponse:
-    payload = ErrorResponse(error="extraction_failed", message=str(exc))
+    payload = ErrorResponse(error="extraction_failed", message="PDF extraction failed")
     return JSONResponse(status_code=422, content=payload.model_dump())
 
 
 async def timeout_error_handler(_, exc: LLMTimeoutError) -> JSONResponse:
-    payload = ErrorResponse(error="llm_timeout", message=str(exc))
+    payload = ErrorResponse(error="llm_timeout", message="Model request timed out")
     return JSONResponse(status_code=504, content=payload.model_dump())
 
 
 async def zotero_read_error_handler(_, exc: ZoteroReadError) -> JSONResponse:
-    payload = ErrorResponse(error="zotero_unavailable", message=str(exc))
+    payload = ErrorResponse(error="zotero_unavailable", message="Zotero is unavailable")
     return JSONResponse(status_code=503, content=payload.model_dump())
 
 
 async def zotero_write_error_handler(_, exc: ZoteroWriteError) -> JSONResponse:
-    payload = ErrorResponse(error="zotero_write_failed", message=str(exc))
+    payload = ErrorResponse(error="zotero_write_failed", message="Zotero write failed")
     return JSONResponse(status_code=503, content=payload.model_dump())
 
 
 async def validation_error_handler(_, exc: RequestValidationError) -> JSONResponse:
-    LOGGER.warning("Request validation failed: %s", exc.errors())
-    payload = ErrorResponse(error="validation_error", message="Invalid request payload", details={"errors": exc.errors()})
+    errors = [{"loc": error["loc"], "type": error["type"]} for error in exc.errors()]
+    LOGGER.warning("Request validation failed: %s", errors)
+    payload = ErrorResponse(error="validation_error", message="Invalid request payload", details={"errors": errors})
     return JSONResponse(status_code=422, content=payload.model_dump())
 
 

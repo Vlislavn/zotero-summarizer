@@ -77,7 +77,7 @@ class ZoteroFeedsMixin:
         self,
         feed_library_id: int | None = None,
         since: str | None = None,
-        limit: int = 1000,
+        limit: int | None = 1000,
         unread_only: bool = False,
         order: str = "newest_first",
     ) -> list[dict[str, Any]]:
@@ -93,13 +93,13 @@ class ZoteroFeedsMixin:
             since: optional ISO timestamp (inclusive) — items with `dateAdded >= since`.
                 Phase 1.5 daemon ignores --since by default and uses unread_only=True
                 instead; this kwarg remains for the one-shot CLI / preview.
-            limit: maximum rows returned (capped at 5000).
+            limit: maximum rows returned (capped at 5000), or None for all rows.
             unread_only: when True, only return items where `feedItems.readTime IS NULL`.
                 This is the Phase 1.5 daemon's canonical work queue.
             order: "newest_first" (default, dateAdded DESC) or "oldest_first"
                 (dateAdded ASC, useful for round-robin oldest-unread scan).
         """
-        safe_limit = max(1, min(int(limit), 5000))
+        safe_limit = -1 if limit is None else max(1, min(int(limit), 5000))
         where = ["l.type = 'feed'"]
         params: list[Any] = []
         if feed_library_id is not None:

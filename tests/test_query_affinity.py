@@ -14,9 +14,9 @@ def _cache_with_items(tmp_path, items: dict[str, list[float]]) -> EmbeddingCache
     try:
         for iid, vec in items.items():
             conn.execute(
-                "INSERT INTO corpus_embeddings (item_id, title, abstract, content_hash, embedding_json) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (iid, f"T{iid}", "abs", "h", json.dumps(vec)),
+                "INSERT INTO corpus_embeddings (item_id, title, abstract, content_hash, embedding_json, encoder_id) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (iid, f"T{iid}", "abs", "h", json.dumps(vec), cache._encoder_id),
             )
         conn.commit()
     finally:
@@ -54,8 +54,8 @@ def test_goal_affinity_unchanged_after_refactor(tmp_path):
     conn = cache._conn()
     try:
         conn.execute(
-            "INSERT INTO goal_embeddings (goal, embedding_json) VALUES (?, ?)",
-            ("g", json.dumps([1.0, 0.0])),
+            "INSERT INTO goal_embeddings (goal, embedding_json, encoder_id) VALUES (?, ?, ?)",
+            ("g", json.dumps([1.0, 0.0]), cache._encoder_id),
         )
         conn.commit()
     finally:
@@ -80,8 +80,8 @@ def test_normalized_corpus_matrix_cached_until_corpus_changes(tmp_path):
     conn = cache._conn()
     try:
         conn.execute(
-            "INSERT INTO corpus_embeddings (item_id, title, content_hash, embedding_json) VALUES (?,?,?,?)",
-            ("C", "C", "h", json.dumps([1.0, 1.0])),
+            "INSERT INTO corpus_embeddings (item_id, title, content_hash, embedding_json, encoder_id) VALUES (?,?,?,?,?)",
+            ("C", "C", "h", json.dumps([1.0, 1.0]), cache._encoder_id),
         )
         conn.commit()
     finally:

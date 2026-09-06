@@ -178,13 +178,13 @@ export default function Triage() {
     if (activeJobId) loadJob(activeJobId);
   }, [activeJobId, loadJob]);
 
-  // Poll while running.
+  // Poll until in-flight work has drained, including cancellation.
   useEffect(() => {
     if (pollRef.current) {
       clearInterval(pollRef.current);
       pollRef.current = null;
     }
-    if (activeJob?.status === 'running') {
+    if (['running', 'cancelling'].includes(activeJob?.status)) {
       pollRef.current = setInterval(() => {
         loadJob(activeJobId);
         loadJobs();
@@ -204,8 +204,8 @@ export default function Triage() {
   // same `loadCalibration` fetch — no new endpoint or data flow.
   useEffect(() => {
     const status = activeJob?.status;
-    const wasRunning = prevStatusRef.current === 'running';
-    if (wasRunning && status && status !== 'running' && isTerminalStatus(status)) {
+    const wasRunning = ['running', 'cancelling'].includes(prevStatusRef.current);
+    if (wasRunning && isTerminalStatus(status)) {
       loadCalibration();
     }
     prevStatusRef.current = status;
@@ -292,7 +292,7 @@ export default function Triage() {
         <div>
           <h2 className="font-display text-xl font-light text-slate-900">Triage Monitor</h2>
           <p className="text-sm text-slate-600">
-            Watch active triage jobs and review calibration metrics. Start new jobs from the
+            Watch active triage jobs and review feedback metrics. Start new jobs from the
             Library tab.
           </p>
         </div>
@@ -353,9 +353,11 @@ export default function Triage() {
               style={{ width: `${progressPercent(activeJob)}%` }}
             />
           </div>
-          <div className="text-xs text-slate-500 mt-1">
-            {activeJob.current_title || activeJob.current_item_key || ''}
-          </div>
+          {activeJob.active_items.length > 0 && (
+            <ul aria-label="Active papers" className="text-xs text-slate-500 mt-1">
+              {activeJob.active_items.map((item) => <li key={item.item_key}>{item.title || item.item_key}</li>)}
+            </ul>
+          )}
 
           <div className="grid md:grid-cols-2 gap-3 mt-4">
             <div>
@@ -380,7 +382,7 @@ export default function Triage() {
               </div>
               <p className="text-xs text-slate-500 mb-2">
                 Approve or reject each verdict — feedback queues a Zotero tag change and
-                updates calibration.
+                updates feedback metrics.
               </p>
               <div className="max-h-72 overflow-auto space-y-2 pr-1">
                 {visibleResults.length === 0 && (
@@ -483,29 +485,31 @@ export default function Triage() {
       <div className="mt-4 border border-slate-200 rounded-xl p-3 bg-white">
         {/* No panel-local Refresh — calibration auto-reloads on the active job's
             terminal transition and after every feedback submission. */}
-        <h3 className="font-semibold text-slate-700">Calibration</h3>
+        <h3 className="font-semibold text-slate-700">Triage feedback</h3>
+        <p className="mt-1 text-xs text-slate-500">
+          Compared with the triage prediction saved when you gave feedback.
+          Only reviewed items are included; these are not unbiased ML-gate metrics.
+        </p>
         <Async
           loading={calibrationLoading}
           error={calibrationError}
           empty={!calibration}
-          loadingText="Loading calibration metrics…"
-          emptyMessage="No calibration data yet. Approve/reject triaged items to start learning."
+          loadingText="Loading feedback metrics…"
+          emptyMessage="No feedback data yet. Approve/reject triaged items to start learning."
         >
           <div className="mt-3 grid md:grid-cols-3 gap-3 text-xs">
             {periodKeys.map((periodKey) => {
               const p = calibration?.periods?.[periodKey] || {};
               return (
                 <div key={periodKey} className="border border-slate-200 rounded-lg p-2 bg-slate-50">
-                  {/* The 3 trust signals the operator acts on — raw counts the
-                      rates derive from were dropped (glanceable readout, not a
-                      spreadsheet). */}
                   <div className="font-semibold text-slate-700">{periodLabels[periodKey]}</div>
+                  <div>Predictions available: {p.with_prediction_count ?? 0} / {p.total_feedback ?? 0}</div>
                   <div className="mt-1">Agreement: <span className="mono">{formatPercent(p.agreement_rate)}</span></div>
-                  <div title="Counterfactual-audit estimate of how often the ML gate keeps the papers you'd actually want — the gate's online trust signal.">
-                    Gate recall: <span className="mono">{formatPercent(p.recall)}</span>
+                  <div title="Among approved items with a saved prediction, the fraction predicted should_read or must_read.">
+                    Observed recall: <span className="mono">{formatPercent(p.recall)}</span>
                   </div>
-                  <div title="Papers the ML gate dropped but you approved on audit (🎲) — the gate's miss rate. Lower is better.">
-                    Gate misses (audit FN): <span className="mono">{p.false_negative_count ?? 0}</span>
+                  <div title="Approved items whose saved triage prediction was could_read or dont_read.">
+                    False negatives: <span className="mono">{p.false_negative_count ?? 0}</span>
                   </div>
                 </div>
               );

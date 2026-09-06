@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -36,11 +36,23 @@ def _install_spa(app: FastAPI) -> None:
 
     index_html = _FRONTEND_DIST / "index.html"
 
-    app.mount(
-        "/assets",
-        StaticFiles(directory=str(_FRONTEND_DIST / "assets")),
-        name="spa-assets",
-    )
+    if (_FRONTEND_DIST / "assets").is_dir():
+        app.mount(
+            "/assets",
+            StaticFiles(directory=str(_FRONTEND_DIST / "assets")),
+            name="spa-assets",
+        )
+
+    def public_file(name: str):
+        async def endpoint() -> FileResponse:
+            path = _FRONTEND_DIST / name
+            if not path.is_file():
+                raise APIError(error="not_found", message="Build artifact not found", status_code=404)
+            return FileResponse(str(path))
+        return endpoint
+
+    for name in ("sw.js", "manifest.webmanifest", "app-icon.svg"):
+        app.add_api_route(f"/{name}", public_file(name), methods=["GET"], include_in_schema=False)
 
     async def spa_index() -> FileResponse:
         return FileResponse(str(index_html))
@@ -51,12 +63,12 @@ def _install_spa(app: FastAPI) -> None:
     app.add_api_route("/", spa_index, methods=["GET"], include_in_schema=False)
 
     @app.get("/{full_path:path}", include_in_schema=False)
-    async def spa_catch_all(request: Request, full_path: str) -> FileResponse:
+    async def spa_catch_all(full_path: str) -> FileResponse:
         # Anything under /api/ or /assets/ must NOT be SPA-shadowed;
         # FastAPI's router prioritises explicit routes, so this only
         # fires for unknown paths. The check is a belt-and-suspenders
         # guard against future route shapes accidentally falling through.
-        if full_path.startswith(("api/", "assets/")):
+        if full_path.split("/", 1)[0] in {"api", "assets"}:
             raise APIError(error="not_found", message=f"/{full_path}", status_code=404)
         return FileResponse(str(index_html))
 

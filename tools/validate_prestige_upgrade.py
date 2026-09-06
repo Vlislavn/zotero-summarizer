@@ -23,7 +23,7 @@ def main() -> None:
     settings = Settings.load()
     config = read_config(settings.config_path)
     gate = classifier_persistence.load_trained(
-        classifier_persistence.DEFAULT_MODEL_DIR / f"{config.classifier_gate.model_name}.joblib"
+        classifier_persistence.model_path(settings.model_dir, config.classifier_gate.model_name)
     )
     reader = ZoteroReader(settings.zotero_data_dir)
 

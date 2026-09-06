@@ -34,7 +34,7 @@ async def border_suggestions(top_k: int = 20, refresh: bool = False) -> dict[str
     """
     from zotero_summarizer.services.library import border_cache
     from zotero_summarizer.services import run_log
-    from zotero_summarizer.services.model.classifier_persistence import DEFAULT_MODEL_DIR
+    from zotero_summarizer.services._common import settings
 
     if not (1 <= int(top_k) <= 2000):
         raise APIError(
@@ -52,7 +52,7 @@ async def border_suggestions(top_k: int = 20, refresh: bool = False) -> dict[str
         )
 
     golden_sha = run_log.file_sha256(csv_path, prefix_len=64)
-    cached = None if refresh else border_cache.read_cache(DEFAULT_MODEL_DIR, golden_sha)
+    cached = None if refresh else border_cache.read_cache(settings().model_dir, golden_sha)
     if cached is not None:
         items = cached["items"][: int(top_k)]
         return {

@@ -29,12 +29,8 @@ from pydantic import BaseModel, Field
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services.golden import goldenset
-from zotero_summarizer.services.model.model_card import (  # noqa: F401  (re-exported for route registration + tests)
-    _load_latest_runlog_entry,
-    _model_dir,
-    model_card,
-)
-from zotero_summarizer.services._common import LOGGER, now_iso, read_config, settings as get_settings
+from zotero_summarizer.services.model.model_card import model_card
+from zotero_summarizer.services._common import now_iso, read_config, settings as get_settings
 
 
 router = APIRouter()
@@ -129,58 +125,40 @@ class RetrainRequest(BaseModel):
 
 
 def _retrain_worker(job_id: str, *, classifier_name: str, n_folds: int) -> None:
-    """Run training off the event loop. Records progress + outcome.
+    """Train, install and rescore; record every failure before re-raising.
 
-    Catches the broad-Exception envelope so any failure inside training
-    gets surfaced in the job record instead of leaving the user with a
-    silent "running forever" job. This is the documented exception to
-    the fail-fast rule: a background worker MUST capture its own
-    exceptions, since there is no caller to receive them.
+    The route claims the lock before spawning; this worker always releases it.
+    A failed job can still have saved/installed its model before rescoring failed.
     """
-    from zotero_summarizer.services.model import classifier_persistence
-
-    # `_RETRAIN_LOCK` was acquired SYNCHRONOUSLY by `retrain()` before this worker
-    # was spawned (closing the locked()-precheck race that let two POSTs double-
-    # train + double-hot-swap). This worker owns the lock for the whole job
-    # (train + hot-swap) and MUST release it on EVERY exit path.
     try:
+        from zotero_summarizer.services.model import classifier_persistence
+        from zotero_summarizer.services.triage import feeds
+
         settings = get_settings()
         golden_csv = settings.golden_csv_path
         if not golden_csv.exists():
-            _finish_job(
-                job_id,
-                result=None,
-                error=f"golden CSV not found at {golden_csv}; click 'Refresh labels' first",
+            raise FileNotFoundError(
+                f"golden CSV not found at {golden_csv}; click 'Refresh labels' first"
             )
-            return
         config = read_config(settings.config_path)
 
         def progress(done: int, total: int) -> None:
             _set_progress(job_id, done, total)
 
-        try:
-            trained = classifier_persistence.train_and_save(
-                golden_csv,
-                classifier_name=classifier_name,
-                corpus_db_path=settings.corpus_db_path,
-                goals_config=config,
-                n_folds=n_folds,
-                progress_cb=progress,
-                triage_db_path=settings.triage_db_path,
-                # Write the FAIR run-log so ModelCard shows OOF per-class metrics.
-                runs_log_path=settings.data_dir / "classifier-runs.jsonl",
-            )
-        except Exception as exc:  # pylint: disable=broad-except
-            _finish_job(job_id, result=None, error=f"{type(exc).__name__}: {exc}")
-            return
-
-        # Hot-swap the freshly-trained gate into the live runtime + re-score the
-        # Today slate, so "Retrain" takes effect WITHOUT a server restart (the
-        # previous behaviour left the running gate on the old artifact until the
-        # next restart). Guarded on the gate being enabled — a disabled gate has no
-        # live slot to swap into, so we only persist to disk (loads on next start).
-        hot_swap = _hot_swap_after_retrain(trained) if config.classifier_gate.enabled else None
-
+        trained = classifier_persistence.train_and_save(
+            golden_csv,
+            classifier_name=classifier_name,
+            corpus_db_path=settings.corpus_db_path,
+            goals_config=config,
+            n_folds=n_folds,
+            progress_cb=progress,
+            triage_db_path=settings.triage_db_path,
+            runs_log_path=settings.data_dir / "classifier-runs.jsonl",
+        )
+        rescore = (
+            feeds.install_gate(trained, reason="ui-retrain")
+            if config.classifier_gate.enabled else None
+        )
         _finish_job(
             job_id,
             result={
@@ -192,39 +170,16 @@ def _retrain_worker(job_id: str, *, classifier_name: str, n_folds: int) -> None:
                     "must": round(trained.t_must, 4),
                     "could": round(trained.t_could, 4),
                 },
-                # Surface that the live gate + slate were refreshed (vs. disk-only),
-                # so the Settings UI can tell the user Today is already re-ranked.
-                "hot_swapped": bool(hot_swap and hot_swap.get("installed")),
-                "rescored": (hot_swap or {}).get("rescored"),
+                "hot_swapped": config.classifier_gate.enabled,
+                "rescored": rescore["rescored"] if rescore is not None else None,
             },
             error=None,
         )
+    except BaseException as exc:
+        _finish_job(job_id, result=None, error=f"{type(exc).__name__}: {exc}")
+        raise
     finally:
         _RETRAIN_LOCK.release()
-
-
-def _hot_swap_after_retrain(trained: Any) -> dict[str, Any]:
-    """Install the just-trained gate live (atomic swap + slate rescore) via the
-    single shared ``feeds.install_gate`` path — the same call the daemon's
-    background retrain uses, so both retrain paths converge on one mechanism.
-
-    Installs the in-memory ``trained`` object directly (identical to the joblib
-    just written; this also matches the daemon worker, which installs its fresh
-    object without a reload — and avoids guessing the artifact filename when the
-    retrained classifier differs from the configured gate model_name).
-
-    Best-effort: the model is already trained + saved, so a swap/rescore failure
-    is reported in the job result, never raised — it must not turn a successful
-    retrain into a failed job.
-    """
-    from zotero_summarizer.services.triage import feeds
-
-    try:
-        result = feeds.install_gate(trained, reason="ui-retrain")
-        return {"installed": True, "rescored": (result or {}).get("rescored")}
-    except Exception as exc:  # noqa: BLE001 — best-effort; retrain already succeeded
-        LOGGER.exception("hot-swap after UI retrain failed (model saved to disk)")
-        return {"installed": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
 async def retrain(req: RetrainRequest) -> dict[str, Any]:
@@ -250,6 +205,7 @@ async def retrain(req: RetrainRequest) -> dict[str, Any]:
             status_code=409,
         )
 
+    job = None
     try:
         job = _new_job("retrain")
         thread = threading.Thread(
@@ -262,8 +218,12 @@ async def retrain(req: RetrainRequest) -> dict[str, Any]:
             daemon=True,
         )
         thread.start()
-    except BaseException:  # spawn failed → release the slot we just claimed, then re-raise
-        _RETRAIN_LOCK.release()
+    except BaseException as exc:
+        try:
+            if job is not None:
+                _finish_job(job["job_id"], result=None, error=f"{type(exc).__name__}: {exc}")
+        finally:
+            _RETRAIN_LOCK.release()
         raise
     return {"job_id": job["job_id"], "status": "running"}
 
@@ -296,7 +256,7 @@ async def list_jobs() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Model card — surface the trained classifier's metadata in Settings.
 # Lifted to ``services/model/model_card.py`` (layering: no api→api import); the
-# names are re-exported above so route registration + tests are unchanged.
+# handler is imported above for route registration.
 # ---------------------------------------------------------------------------
 
 

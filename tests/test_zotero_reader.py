@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+import pytest
 
 from fastapi.responses import JSONResponse
 
@@ -20,7 +21,7 @@ def test_zotero_reader_construction_rejects_missing_db(tmp_path):
         assert "data directory not found" in str(exc).lower()
 
 
-def test_zotero_reader_uses_snapshot_fallback_when_live_db_is_busy(monkeypatch, tmp_path):
+def test_zotero_reader_retries_then_reports_a_persistent_lock(monkeypatch, tmp_path):
     zotero_dir = tmp_path / "Zotero"
     zotero_dir.mkdir()
     (zotero_dir / "zotero.sqlite").touch()
@@ -33,39 +34,31 @@ def test_zotero_reader_uses_snapshot_fallback_when_live_db_is_busy(monkeypatch, 
         attempts["count"] += 1
         raise sqlite3.OperationalError("database is locked")
 
-    def fake_snapshot_read(fn):
-        return {"source": "snapshot"}
-
     monkeypatch.setattr(reader, "_connect", fake_connect)
-    monkeypatch.setattr(reader, "_execute_snapshot_read", fake_snapshot_read)
-
-    result = reader._execute_read(lambda conn: {"source": "live"})
-
-    assert result == {"source": "snapshot"}
+    with pytest.raises(ZoteroReadError, match="busy"):
+        reader._execute_read(lambda conn: {"source": "live"})
     assert attempts["count"] == 2
 
 
-def test_zotero_reader_busy_error_when_snapshot_fallback_fails(monkeypatch, tmp_path):
+def test_zotero_reader_recovers_from_a_transient_lock(monkeypatch, tmp_path):
     zotero_dir = tmp_path / "Zotero"
     zotero_dir.mkdir()
     (zotero_dir / "zotero.sqlite").touch()
     (zotero_dir / "storage").mkdir()
     reader = ZoteroReader(zotero_dir)
 
-    def fake_connect():
-        raise sqlite3.OperationalError("database is locked")
+    connect = reader._connect
+    calls = []
 
-    def fake_snapshot_read(fn):
-        raise ZoteroReadError("snapshot failed")
+    def once_locked():
+        calls.append(1)
+        if len(calls) == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return connect()
 
-    monkeypatch.setattr(reader, "_connect", fake_connect)
-    monkeypatch.setattr(reader, "_execute_snapshot_read", fake_snapshot_read)
-
-    try:
-        reader._execute_read(lambda conn: None)
-        raise AssertionError("Expected ZoteroReadError")
-    except ZoteroReadError as exc:
-        assert "busy" in str(exc).lower()
+    monkeypatch.setattr(reader, "_connect", once_locked)
+    assert reader._execute_read(lambda conn: conn.execute("SELECT 42").fetchone()[0]) == 42
+    assert len(calls) == 2
 
 
 def test_zotero_error_handlers_return_503():

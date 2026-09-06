@@ -7,12 +7,14 @@
 // `open` is controlled by the parent so the summary rows — and the readiness
 // strip's LLM pill — can expand the editor and scroll it into view.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ActiveModelsSummary from './ActiveModelsSummary.jsx';
 import LlmRoutingSection from '../LlmRoutingSection.jsx';
+import StepConnectLlm from '../setup/StepConnectLlm.jsx';
 
-export default function AiModelsSection({ routing, onChange, isDirty, open, onToggle }) {
+export default function AiModelsSection({ status, enabled, routing, onEnabledChange, onChange, isDirty, open, onToggle }) {
   const ref = useRef(null);
+  const [testedOk, setTestedOk] = useState(false);
 
   useEffect(() => {
     if (open && ref.current) {
@@ -22,17 +24,23 @@ export default function AiModelsSection({ routing, onChange, isDirty, open, onTo
 
   return (
     <section id="ai-models" className="glass rounded-2xl border border-slate-200 p-4 space-y-4 scroll-mt-20">
-      <div>
-        <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-500">AI models</h3>
-        <p className="text-xs text-slate-500 mt-1">
-          Which LLM scores your feed, drains the backlog, and writes deep reviews —
-          and how hard each one thinks.
-        </p>
-      </div>
+      <label className="flex items-start gap-2 text-sm text-slate-700">
+        <input type="checkbox" className="mt-0.5" checked={enabled}
+          onChange={(event) => onEnabledChange(event.target.checked)} />
+        <span><span className="font-semibold">Enable AI-assisted features</span>
+          <span className="block text-xs text-slate-500">Turn off for ML-only feed and backlog triage.</span></span>
+      </label>
 
-      <ActiveModelsSummary routing={routing} onEdit={() => onToggle?.(true)} />
+      {enabled ? (
+        <StepConnectLlm status={status} routing={routing} onPatchRouting={onChange}
+          testedOk={testedOk} onTested={setTestedOk} />
+      ) : (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          AI reviews, Ask Paper, and model-written summaries are off. Feed scoring and classifier triage still work.
+        </div>
+      )}
 
-      <details
+      {enabled && <details
         ref={ref}
         open={open}
         onToggle={(e) => onToggle?.(e.currentTarget.open)}
@@ -45,15 +53,13 @@ export default function AiModelsSection({ routing, onChange, isDirty, open, onTo
           >
             ▸
           </span>
-          <span className="text-sm font-semibold text-slate-700">Edit providers &amp; routing</span>
-          <span className="text-xs text-slate-400 font-normal">
-            register endpoints · route each stage · temperature · thinking
-          </span>
+          <span className="text-sm font-semibold text-slate-700">Advanced AI configuration</span>
         </summary>
         <div className="mt-4">
+          <ActiveModelsSummary routing={routing} onEdit={() => {}} />
           <LlmRoutingSection value={routing} onChange={onChange} isDirty={isDirty} />
         </div>
-      </details>
+      </details>}
     </section>
   );
 }

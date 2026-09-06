@@ -103,10 +103,10 @@ export default function EssentialsSection({ form, onUpdate, pathForm, onUpdatePa
   return (
     <div className="space-y-4">
       <SectionCard
-        title="Research goals"
-        description="Free-text descriptions of what you're researching. The triage prompt uses these for goal_alignment scoring — one goal per line."
+        title="Research profile"
+        description="What you research, what makes a paper useful, and the language AI should use."
       >
-        <div id="essentials-goals" className="scroll-mt-20">
+        <div id="essentials-goals" className="scroll-mt-20 space-y-4">
           <Field
             kind="textarea"
             label="Goals (one per line)"
@@ -114,14 +114,6 @@ export default function EssentialsSection({ form, onUpdate, pathForm, onUpdatePa
             onChange={(v) => onUpdate('research_goals_text', v)}
             rows={6}
           />
-        </div>
-      </SectionCard>
-
-      <SectionCard
-        title="Triage criteria & output"
-        description="Per-paper acceptance criteria the LLM weighs, plus the language generated text comes back in."
-      >
-        <div className="space-y-4">
           <Field
             kind="textarea"
             label="Triage criteria (one per line)"

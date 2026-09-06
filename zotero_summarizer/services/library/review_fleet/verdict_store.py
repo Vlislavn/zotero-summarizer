@@ -7,8 +7,7 @@ attach ``proposed_verdict`` to each row.
 
 It mirrors ``deep_review``'s cache idiom exactly — same ``{updated_at, ...}``
 envelope, same ``tmp.replace(path)`` atomic write — and resolves its path via
-``classifier_persistence.DEFAULT_MODEL_DIR`` (the app's model dir, per CLAUDE.md
-rule 4 — never a hardcoded ``project_root / "..."``).
+``Settings.model_dir`` in the selected project's ``data/`` directory.
 
 This store holds SUGGESTIONS only. It is distinct from ``label_verdicts`` (the
 user's confirmed labels in the triage DB); a proposal here NEVER writes a label or
@@ -19,15 +18,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from zotero_summarizer.services._common import now_iso_z, write_json_atomic
+from zotero_summarizer.services._common import now_iso_z, settings, write_json_atomic
 
 _CACHE_FILENAME = "proposed_verdicts.json"
 
 
 def _cache_path():
-    from zotero_summarizer.services.model.classifier_persistence import DEFAULT_MODEL_DIR
-
-    return DEFAULT_MODEL_DIR / _CACHE_FILENAME
+    return settings().model_dir / _CACHE_FILENAME
 
 
 def read_all() -> dict[str, Any]:

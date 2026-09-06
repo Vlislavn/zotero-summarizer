@@ -7,10 +7,9 @@ every false positive is killed by a shape-level GUARD, AST is preferred over tex
 a detector never silently no-ops. Subcommands: ``slop-check [PATHS]`` (file hook, BLOCK
 new unambiguous slop), ``slop-sweep`` (whole-tree, ADVISE), ``dump`` (seed the allowlist).
 
-SOUNDNESS is the prime directive. Only ONE rule BLOCKs — a committed ``breakpoint()`` /
-``pdb.set_trace()`` (runtime has zero). Everything heuristic is ADVISE and all current
-findings are grandfathered in ``slop_allowlist.txt`` so only NEW slop surfaces. Per-rule
-severity is config-overridable via ``slop_severity.txt`` (``rule=off|advise|block``).
+SOUNDNESS is the prime directive. Debugger leftovers block by default; heuristic rules
+advise unless ``slop_severity.txt`` promotes an objective project limit. Current findings
+are frozen in ``slop_allowlist.txt`` so only NEW slop surfaces.
 """
 from __future__ import annotations
 
@@ -428,7 +427,7 @@ def _print(diags: list[Diagnostic]) -> None:
 
 
 def _slop_check(paths: list[str]) -> int:
-    """Block new unambiguous slop (debug-leftover) in staged runtime files."""
+    """Block configured findings in staged runtime files."""
     runtime = [
         p for p in paths
         if p.endswith(".py") and Path(p).as_posix().startswith(f"{RUNTIME_ROOT}/") and (REPO_ROOT / p).exists()

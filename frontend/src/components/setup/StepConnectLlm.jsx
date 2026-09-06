@@ -1,164 +1,229 @@
-// Wizard step 2 — Connect LLM. Edits the FIRST provider in llm_routing.providers
-// and the default stage. Collects provider type / base_url / api_key_env (the
-// env-var NAME, never the secret) + the default model. A [Test connection]
-// button probes the live endpoint via listModels — on success it fills the
-// model datalist and shows a success pill. The test is ADVISORY: it does not
-// gate Next (the secret lives in .env, outside the app, so a first-run user must
-// be able to finish setup before the endpoint is reachable). Next gates on
-// structural validity, computed in SetupFlow.
-//
-// API SECRET = NAME ONLY: the api_key_env field collects the env-var NAME; the
-// "set in environment?" indicator comes from the setup-status payload
-// (llm.api_key_present). The UI never has a field for the raw secret value.
-
 import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { listModels } from '../../api/settingsApi.js';
+import { fetchAiPresets, saveAiCredential } from '../../api/setupApi.js';
 import { humanizeError } from '../../utils/humanizeError.js';
 import { Banner, Field } from '../form/Fields.jsx';
-import { StatusPill } from '../LlmRoutingSection.jsx';
 import Button from '../ui/Button.jsx';
 
-const PROVIDER_TYPES = ['openai', 'anthropic'];
-const DEFAULT_MAX_TOKENS = 4096;
+const INPUT = 'w-full mt-1 p-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500';
 
-// Read the single provider the wizard manages (index 0). Returns a normalized
-// provider object so the controls never touch undefined.
-function firstProvider(routing) {
-  const p = (routing?.providers || [])[0];
-  return {
-    name: p?.name || 'default',
-    type: p?.type || 'openai',
-    base_url: p?.base_url ?? '',
-    api_key_env: p?.api_key_env ?? '',
-    extra_body: p?.extra_body ?? null,
-    max_tokens: p?.max_tokens ?? DEFAULT_MAX_TOKENS,
-  };
+function activeProvider(routing) {
+  const name = routing?.default?.provider;
+  return (routing?.providers || []).find((provider) => provider.name === name)
+    || (routing?.providers || [])[0];
 }
 
-export default function StepConnectLlm({ routing, onPatchRouting, testedOk, onTested }) {
-  const provider = firstProvider(routing);
-  const isOpenai = provider.type === 'openai';
-  const defaultModel = routing?.default?.model || '';
+function presetFor(provider, presets) {
+  if (!provider) return 'openrouter';
+  return presets.find((preset) => (
+    preset.provider?.type === provider.type
+    && (preset.provider?.base_url || '') === (provider.base_url || '')
+  ))?.id || 'custom';
+}
+
+export default function StepConnectLlm({ status, routing, onPatchRouting, testedOk, onTested }) {
+  const presetsQuery = useQuery({ queryKey: ['ai-presets'], queryFn: fetchAiPresets });
+  const presets = presetsQuery.data?.presets || [];
+  const localCatalog = presetsQuery.data?.local_profiles;
+  const current = activeProvider(routing);
+  const [choice, setChoice] = useState(null);
+  const [localProfile, setLocalProfile] = useState(null);
+  const [apiKey, setApiKey] = useState('');
   const [models, setModels] = useState([]);
+  const selectedId = choice || presetFor(current, presets);
+  const selected = presets.find((preset) => preset.id === selectedId);
+  const selectedLocal = localCatalog?.profiles.find((profile) => profile.id === localProfile);
+  const provider = selectedId === 'custom' ? current : selectedLocal?.provider || selected?.provider;
+  const defaultModel = routing?.default?.model || '';
 
-  const testMutation = useMutation({
-    mutationFn: () => listModels(provider),
-    onSuccess: (data) => {
-      setModels(data?.models || []);
-      // Mark the CURRENT provider fields as tested-OK. Any later edit to the
-      // provider clears this (see patchProvider), so Next re-gates correctly.
-      onTested?.(true);
-    },
-    onError: () => onTested?.(false),
-  });
-
-  // Patch the single provider, keeping providers[0] in place. Editing provider
-  // fields invalidates a prior successful test.
-  function patchProvider(fields) {
-    const providers = Array.isArray(routing?.providers) ? [...routing.providers] : [];
-    const next = { ...firstProvider(routing), ...fields };
-    providers[0] = next;
+  function patchProvider(next, clearModel = false) {
+    const old = routing?.default?.provider;
+    const oldIsRouted = ['feed', 'backlog', 'deep_review'].some((key) => routing?.[key]?.provider === old);
+    const providers = (routing?.providers || []).filter((item) =>
+      item.name !== next.name && (item.name !== old || oldIsRouted));
+    providers.push(next);
     onPatchRouting({
       ...routing,
       providers,
-      // Keep the default stage pointed at this provider by name.
-      default: { ...(routing?.default || {}), provider: next.name },
+      default: { ...(routing?.default || {}), provider: next.name,
+        model: clearModel ? null : routing?.default?.model },
     });
     onTested?.(false);
     setModels([]);
   }
 
-  function patchDefaultModel(model) {
+  function choosePreset(id) {
+    setChoice(id);
+    setLocalProfile(null);
+    setApiKey('');
+    const preset = presets.find((item) => item.id === id);
+    if (preset?.provider) patchProvider(preset.provider, true);
+  }
+
+  function chooseLocalProfile(profile) {
+    const local = profile.provider;
+    if (!local || !profile.compatible) return;
+    const providers = (routing?.providers || []).filter((item) => item.name !== local.name);
+    providers.push(local);
+    const model = profile.model || null;
+    setLocalProfile(profile.id);
     onPatchRouting({
-      ...routing,
-      default: { ...(routing?.default || {}), provider: provider.name, model: model || null },
+      ...routing, providers,
+      default: { provider: local.name, model },
+      feed: { provider: local.name, model },
+      backlog: { provider: local.name, model },
+      deep_review: { provider: local.name, model },
+    });
+    onTested?.(false);
+    setModels([]);
+  }
+
+  function patchCustom(fields) {
+    patchProvider({
+      name: current?.name || 'custom', type: current?.type || 'openai',
+      base_url: current?.base_url ?? '', api_key_env: current?.api_key_env ?? '',
+      max_tokens: current?.max_tokens || 4096, ...fields,
     });
   }
+
+  function patchModel(model) {
+    const next = { ...routing,
+      default: { ...(routing?.default || {}), provider: provider?.name, model: model || null } };
+    if (selectedId === 'local') {
+      ['feed', 'backlog', 'deep_review'].forEach((stage) => {
+        next[stage] = { provider: provider?.name, model: model || null };
+      });
+    }
+    onPatchRouting(next);
+  }
+
+  const connectMutation = useMutation({
+    mutationFn: async () => {
+      if (requiresKey && apiKey) {
+        await saveAiCredential(provider.api_key_env, apiKey);
+      }
+      return listModels(provider);
+    },
+    onSuccess: (data) => {
+      setModels(data.models || []);
+      setApiKey('');
+      onTested?.(true);
+    },
+    onError: () => onTested?.(false),
+  });
+
+  const requiresKey = selectedId !== 'local';
+  const legacyStored = status?.llm?.api_key_env === provider?.api_key_env
+    && status?.llm?.api_key_present;
+  const stored = Boolean(selected?.credential?.present || legacyStored);
+  const canConnect = Boolean(provider && (selectedId !== 'local' || localProfile)
+    && (!requiresKey || apiKey || stored));
+  const connected = Boolean(testedOk && connectMutation.isSuccess && models.includes(defaultModel));
+  const cardClass = (id) => `text-left rounded-xl border px-3 py-2 transition-colors ${
+    selectedId === id ? 'border-forest-800 bg-forest-800/5' : 'border-slate-200 hover:bg-slate-50'
+  }`;
 
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-base font-semibold text-slate-900">Connect an LLM</h3>
-        <p className="text-sm text-slate-500 mt-1">
-          Register one OpenAI-compatible or Anthropic endpoint. You can add more
-          providers and per-stage routing later in Settings → Advanced.
-        </p>
+        <h3 className="text-base font-semibold text-slate-900">Connect AI</h3>
+        <p className="text-sm text-slate-500 mt-1">Choose a service, paste its key, then pick one model.</p>
       </div>
 
-      <div className="grid sm:grid-cols-2 gap-4">
-        <Field
-          kind="select"
-          label="Provider type"
-          value={provider.type}
-          onChange={(v) => patchProvider({ type: v })}
-          options={PROVIDER_TYPES}
-          hint="openai = any OpenAI-compatible server (Ollama, vLLM, …). anthropic = Claude."
-        />
-        <Field
-          label="Base URL"
-          value={provider.base_url || ''}
-          onChange={(v) => patchProvider({ base_url: v === '' ? null : v })}
-          placeholder={isOpenai ? 'http://localhost:11434/v1' : 'leave blank for default'}
-          hint={isOpenai ? 'Required for openai-type providers.' : 'Optional for anthropic.'}
-        />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2" aria-label="AI services">
+        {presets.map((preset) => (
+          <button key={preset.id} type="button" className={cardClass(preset.id)} onClick={() => choosePreset(preset.id)}>
+            <span className="block text-sm font-semibold text-slate-800">{preset.label}</span>
+            {preset.recommended && <span className="text-[11px] text-forest-800">Recommended</span>}
+          </button>
+        ))}
       </div>
 
-      <Field
-        label="API key env var"
-        value={provider.api_key_env || ''}
-        onChange={(v) => patchProvider({ api_key_env: v })}
-        placeholder="OPENAI_API_KEY"
-        hint="This is the env var NAME — set the secret value in .env / your shell, not here."
-      />
+      {presetsQuery.isError && <Banner kind="error">Could not load AI services.</Banner>}
 
-      {/* Default model — a native combobox so the test's models become
-          type-ahead suggestions (Field has no `list` prop), while still
-          accepting any id you'll pull later (Postel's Law). */}
-      <label className="block">
-        <span className="text-sm font-semibold text-slate-700">Default model</span>
-        <input
-          type="text"
-          list={models.length ? 'setup-llm-models' : undefined}
-          value={defaultModel}
-          placeholder="e.g. gpt-oss:20b"
-          onChange={(e) => patchDefaultModel(e.target.value)}
-          className="w-full mt-1 p-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-        />
-        {models.length > 0 && (
-          <datalist id="setup-llm-models">
-            {models.map((m) => (
-              <option key={m} value={m} />
+      {selectedId === 'local' && localCatalog && (
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-semibold text-slate-700">Choose a local profile</legend>
+          <p className="text-xs text-slate-500">
+            Detected {localCatalog.hardware.memory_gb} GB memory and {localCatalog.hardware.disk_free_gb} GB free disk.
+          </p>
+          <div className="grid sm:grid-cols-3 gap-2">
+            {localCatalog.profiles.map((profile) => (
+              <button key={profile.id} type="button" disabled={!profile.compatible}
+                aria-pressed={localProfile === profile.id}
+                className={`text-left rounded-xl border px-3 py-2 ${
+                  localProfile === profile.id ? 'border-forest-800 bg-forest-800/5' : 'border-slate-200'
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+                onClick={() => chooseLocalProfile(profile)}>
+                <span className="block text-sm font-semibold text-slate-800">{profile.label}</span>
+                <span className="block text-xs text-slate-500 mt-1">
+                  {profile.model || 'Your model'}{profile.size_gb ? ` · ${profile.size_gb} GB` : ''}
+                </span>
+                <span className="block text-[11px] text-slate-500 mt-1">{profile.compatibility_detail}</span>
+              </button>
             ))}
-          </datalist>
-        )}
-        <span className="text-xs text-slate-500 mt-1 block">
-          Used for every stage unless overridden in Advanced. Test below to populate suggestions.
-        </span>
-      </label>
+          </div>
+          {selectedLocal && (
+            <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600">
+              <p>{selectedLocal.runtime} · {selectedLocal.features.join(', ')}</p>
+              <p className="mt-1">{selectedLocal.tradeoff}</p>
+              {selectedLocal.source && <a className="underline" href={selectedLocal.source}
+                target="_blank" rel="noreferrer">Official model source</a>}
+              {selectedLocal.pull_command && <>
+                <p className="mt-2">Download starts only when you run this explicit command:</p>
+                <code className="block my-1 select-all text-slate-900">{selectedLocal.pull_command}</code>
+                <Button type="button" variant="secondary"
+                  onClick={() => navigator.clipboard?.writeText(selectedLocal.pull_command)}>
+                  Copy command
+                </Button>
+              </>}
+            </div>
+          )}
+        </fieldset>
+      )}
+
+      {selectedId === 'custom' && (
+        <div className="grid sm:grid-cols-2 gap-3 rounded-xl border border-slate-200 p-3">
+          <Field kind="select" label="Protocol" value={current?.type || 'openai'}
+            onChange={(type) => patchCustom({ type })} options={['openai', 'anthropic']} />
+          <Field label="Endpoint URL" value={current?.base_url || ''}
+            onChange={(base_url) => patchCustom({ base_url })} />
+          <Field label="Credential name" value={current?.api_key_env || ''}
+            onChange={(api_key_env) => patchCustom({ api_key_env })} />
+        </div>
+      )}
+
+      {selectedId !== 'local' && (
+        <label className="block">
+          <span className="text-sm font-semibold text-slate-700">API key</span>
+          <input type="password" value={apiKey} autoComplete="off"
+            placeholder={stored ? 'Stored securely — paste to replace' : 'Paste API key'}
+            onChange={(event) => { setApiKey(event.target.value); onTested?.(false); }} className={INPUT} />
+          <span className="block text-xs text-slate-500 mt-1">Saved in your operating-system credential store.</span>
+        </label>
+      )}
 
       <div className="flex items-center gap-3 flex-wrap">
-        <Button
-          variant="secondary"
-          onClick={() => testMutation.mutate()}
-          disabled={testMutation.isPending || (isOpenai && !provider.base_url)}
-        >
-          {testMutation.isPending ? 'Testing…' : 'Test connection'}
+        <Button variant="secondary" onClick={() => connectMutation.mutate()}
+          disabled={!canConnect || connectMutation.isPending}>
+          {connectMutation.isPending ? 'Connecting…' : 'Connect & load models'}
         </Button>
-        {testedOk && testMutation.isSuccess && <StatusPill status="operational" />}
-        {testMutation.isSuccess && (
-          <span className="text-xs text-slate-500">
-            {models.length} model{models.length === 1 ? '' : 's'} found.
-          </span>
-        )}
+        {connected && <span className="text-sm font-semibold text-emerald-700">✓ Connected</span>}
       </div>
 
-      {testMutation.isError && (
-        <Banner kind="error">
-          {humanizeError(testMutation.error)}
-          {' '}You can still continue and fix this later in Settings.
-        </Banner>
+      {models.length > 0 && (
+        <label className="block">
+          <span className="text-sm font-semibold text-slate-700">Model</span>
+          <select value={defaultModel} onChange={(event) => patchModel(event.target.value)} className={`${INPUT} bg-white`}>
+            <option value="">Choose a model</option>
+            {models.map((model) => <option key={model} value={model}>{model}</option>)}
+          </select>
+          <span className="block text-xs text-slate-500 mt-1">Used for feed triage, backlog, and deep reviews.</span>
+        </label>
       )}
+
+      {connectMutation.isError && <Banner kind="error">{humanizeError(connectMutation.error)}</Banner>}
     </div>
   );
 }

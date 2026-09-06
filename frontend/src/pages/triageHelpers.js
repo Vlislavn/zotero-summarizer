@@ -15,6 +15,7 @@ export function progressPercent(job) {
 // Format a 0..1 ratio as a whole-percent string; non-finite input reads "n/a"
 // so an absent calibration field never renders as "NaN%".
 export function formatPercent(value) {
+  if (value == null) return 'n/a';
   const n = Number(value);
   if (!Number.isFinite(n)) return 'n/a';
   return `${Math.round(n * 100)}%`;

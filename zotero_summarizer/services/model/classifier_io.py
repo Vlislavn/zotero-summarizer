@@ -1,17 +1,11 @@
 """Classifier io functions (split from classifier.py)."""
 from __future__ import annotations
 
-import hashlib  # noqa: F401
-import json  # noqa: F401
-import logging  # noqa: F401
-import sqlite3  # noqa: F401
-import time  # noqa: F401
-from pathlib import Path  # noqa: F401
-from typing import Any, Callable  # noqa: F401
+from pathlib import Path
+from typing import Any
 
-import numpy as np  # noqa: F401
-
-from zotero_summarizer.services.model.classifier_const import *  # noqa: F401,F403
+from zotero_summarizer.services.model.classifier_const import ClassifierReport, FeedPrediction
+from zotero_summarizer.services.golden.csv_store import edit_csv
 
 
 def write_feed_predictions_csv(
@@ -35,7 +29,7 @@ def write_feed_predictions_csv(
 
 def format_feed_predictions_markdown(
     predictions: list[FeedPrediction],
-    thresholds: dict[str, float],
+    thresholds: dict[str, float | None],
 ) -> str:
     """Compact human-readable summary suitable for terminal review.
 
@@ -55,9 +49,10 @@ def format_feed_predictions_markdown(
         f"score → priority: must≥{PRIORITY_MUST_READ_THRESHOLD} · "
         f"should≥{PRIORITY_SHOULD_READ_THRESHOLD} · could≥{PRIORITY_COULD_READ_THRESHOLD}"
     )
-    rho = thresholds.get("oof_spearman", 0.0)
+    rho = thresholds.get("oof_spearman")
+    rho_label = "n/a" if rho is None else f"{rho:.3f}"
     n_train = int(thresholds.get("n_train", 0))
-    lines.append(f"OOF Spearman ρ on training set (n={n_train}): {rho:.3f}")
+    lines.append(f"OOF Spearman ρ on training set (n={n_train}): {rho_label}")
     lines.append("")
     lines.append("| # | priority | score (1-5) | title (~80 chars) | venue | authors (1st) |")
     lines.append("|---|---|---|---|---|---|")
@@ -88,113 +83,76 @@ def write_predictions_to_csv(
     Rows that didn't get a prediction (skipped during CV) get blank values.
     Returns the number of updated rows.
     """
-    import csv
-
     if not classifier_name or "/" in classifier_name or " " in classifier_name:
         raise ValueError(
             f"invalid classifier_name {classifier_name!r}; must be a short slug like "
             "'logreg' / 'tabpfn' / 'lightgbm' / 'llm_custom'."
         )
 
-    rows: list[dict[str, str]] = []
-    with input_csv.open("r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f)
-        fieldnames = list(reader.fieldnames or [])
-        rows = list(reader)
+    with edit_csv(input_csv) as (fieldnames, rows):
+        score_col = f"cls_{classifier_name}_score"
+        priority_col = f"cls_{classifier_name}_priority"
+        split_col = f"cls_{classifier_name}_split"
+        for col in (score_col, priority_col, split_col):
+            if col not in fieldnames:
+                fieldnames.append(col)
 
-    score_col = f"cls_{classifier_name}_score"
-    priority_col = f"cls_{classifier_name}_priority"
-    split_col = f"cls_{classifier_name}_split"
-    for col in (score_col, priority_col, split_col):
-        if col not in fieldnames:
-            fieldnames.append(col)
-
-    cv_by_key = {
-        key: (p, pri) for key, p, pri in zip(
-            report.item_keys, report.cv_probabilities, report.cv_predictions,
-        )
-    }
-    ho_by_key = {
-        key: (p, pri) for key, p, pri in zip(
-            report.holdout_item_keys, report.holdout_probabilities, report.holdout_predictions,
-        )
-    }
-    updated = 0
-    for row in rows:
-        key = row.get("item_key", "")
-        if key in cv_by_key:
-            p, pri = cv_by_key[key]
-            row[score_col] = f"{p:.4f}"
-            row[priority_col] = pri
-            row[split_col] = "cv"
-            updated += 1
-        elif key in ho_by_key:
-            p, pri = ho_by_key[key]
-            row[score_col] = f"{p:.4f}"
-            row[priority_col] = pri
-            row[split_col] = "holdout"
-            updated += 1
-        else:
-            row.setdefault(score_col, "")
-            row.setdefault(priority_col, "")
-            row.setdefault(split_col, "")
-
-    tmp = input_csv.with_suffix(input_csv.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
+        cv_by_key = {
+            key: (p, pri) for key, p, pri in zip(
+                report.item_keys, report.cv_probabilities, report.cv_predictions,
+            )
+        }
+        ho_by_key = {
+            key: (p, pri) for key, p, pri in zip(
+                report.holdout_item_keys, report.holdout_probabilities, report.holdout_predictions,
+            )
+        }
+        updated = 0
         for row in rows:
-            writer.writerow(row)
-    tmp.replace(input_csv)
+            key = row.get("item_key", "")
+            if key in cv_by_key:
+                p, pri = cv_by_key[key]
+                row[score_col] = f"{p:.4f}"
+                row[priority_col] = pri
+                row[split_col] = "cv"
+                updated += 1
+            elif key in ho_by_key:
+                p, pri = ho_by_key[key]
+                row[score_col] = f"{p:.4f}"
+                row[priority_col] = pri
+                row[split_col] = "holdout"
+                updated += 1
+            else:
+                row.setdefault(score_col, "")
+                row.setdefault(priority_col, "")
+                row.setdefault(split_col, "")
     return updated
 
 
 def compute_metrics_against_gold(
-    input_csv: Path,
+    rows: list[dict[str, Any]],
+    predictions: dict[str, str],
     *,
     strength_filter: set[str] | None = None,
-    split: str | None = None,
-    priority_column: str = "cls_priority",
-    split_column: str | None = None,
 ) -> dict[str, Any]:
-    """Read predictions vs ``gold_priority_final`` and compute P/R/F1.
+    """Score this run's keyed predictions against its effective input snapshot.
 
-    ``priority_column`` selects which prediction column to score (e.g.
-    ``cls_tabpfn_priority``, ``cls_llm_custom_priority``).
-
-    ``split`` ∈ {"cv", "holdout", None}. When set, filters by
-    ``split_column`` (defaults to ``cls_{name}_split`` derived from
-    ``priority_column`` when not provided). LLM-classifier columns don't have
-    a split — pass ``split=None``.
+    The caller selects CV/holdout keys or current LLM results. No reread of CSV
+    labels, later verdicts, or predictions retained from an earlier run.
     """
-    import csv
-
     from zotero_summarizer.services.model import golden_metrics as gm
-
-    if split is not None and split_column is None:
-        # Auto-derive split column name from the priority column. Strips the
-        # trailing "_priority" and appends "_split".
-        if priority_column.endswith("_priority"):
-            split_column = priority_column[: -len("_priority")] + "_split"
-        else:
-            split_column = "cls_split"
 
     gold: list[str] = []
     pred: list[str] = []
-    with input_csv.open("r", encoding="utf-8", newline="") as f:
-        for row in csv.DictReader(f):
-            if strength_filter:
-                if (row.get("gold_signal_strength") or "").strip() not in strength_filter:
-                    continue
-            if split is not None and split_column:
-                if (row.get(split_column) or "").strip() != split:
-                    continue
-            g = (row.get("gold_priority_final") or "").strip()
-            p = (row.get(priority_column) or "").strip()
-            if not g or not p:
-                continue
-            gold.append(g)
-            pred.append(p)
+    for row in rows:
+        if strength_filter and (row.get("gold_signal_strength") or "").strip() not in strength_filter:
+            continue
+        g = (row.get("gold_priority_final") or "").strip()
+        p = predictions.get((row.get("item_key") or "").strip(), "").strip()
+        if not g or not p:
+            continue
+        gold.append(g)
+        pred.append(p)
 
     return {
         "total": len(gold),

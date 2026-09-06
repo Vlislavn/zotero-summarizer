@@ -144,6 +144,7 @@ class ZoteroItemsMixin:
                     FROM itemAttachments ia
                     JOIN items ai ON ai.itemID = ia.itemID
                     WHERE ia.parentItemID = i.itemID
+                      AND ai.itemID NOT IN (SELECT itemID FROM deletedItems)
                       AND lower(COALESCE(ia.contentType, '')) = 'application/pdf'
                     ORDER BY ai.dateAdded DESC
                     LIMIT 1
@@ -153,6 +154,7 @@ class ZoteroItemsMixin:
                     FROM itemAttachments ia
                     JOIN items ai ON ai.itemID = ia.itemID
                     WHERE ia.parentItemID = i.itemID
+                      AND ai.itemID NOT IN (SELECT itemID FROM deletedItems)
                       AND lower(COALESCE(ia.contentType, '')) = 'application/pdf'
                     ORDER BY ai.dateAdded DESC
                     LIMIT 1
@@ -228,9 +230,7 @@ class ZoteroItemsMixin:
         tag: str | None = None,
         include_abstract: bool = True,
     ) -> dict[str, Any]:
-        """Every matching top-level item in a SINGLE un-paged query — one
-        connection, so at most ONE snapshot copy under contention (the old paged
-        loop paid the whole-DB snapshot fallback once PER 500-item page). Same row
+        """Every matching top-level item in a SINGLE un-paged query. Same row
         shape as ``get_items``; returns ``{items, total}``. Use for whole-library
         passes (full-library scoring, the Zotero rank/tag writes). Deterministic
         order (dateModified DESC, itemID DESC); one row per item (no pagination →
@@ -252,33 +252,33 @@ class ZoteroItemsMixin:
         def _read(conn: sqlite3.Connection) -> list[dict[str, Any]]:
             parent = conn.execute(
                 f"SELECT itemID FROM items "
-                f"WHERE key = ? AND libraryID = ({_USER_LIBRARY_ID_SELECT})",
+                f"WHERE key = ? AND libraryID = ({_USER_LIBRARY_ID_SELECT}) "
+                "AND itemID NOT IN (SELECT itemID FROM deletedItems)",
                 (item_key,),
             ).fetchone()
             if not parent:
                 return []
-            parent_item_id = int(parent["itemID"])
-            rows = conn.execute(
-                """
-                SELECT child.key AS note_key, child.dateAdded, child.dateModified, n.note
-                FROM itemNotes n
-                JOIN items child ON child.itemID = n.itemID
-                WHERE n.parentItemID = ?
-                ORDER BY child.dateModified DESC
-                """,
-                (parent_item_id,),
-            ).fetchall()
-            return [
-                {
-                    "note_key": str(row["note_key"]),
-                    "note": str(row["note"] or ""),
-                    "date_added": str(row["dateAdded"] or ""),
-                    "date_modified": str(row["dateModified"] or ""),
-                }
-                for row in rows
-            ]
+            return self._read_item_notes(conn, int(parent["itemID"]))
 
         return self._execute_read(_read)
+
+    @staticmethod
+    def _read_item_notes(conn: sqlite3.Connection, item_id: int) -> list[dict[str, Any]]:
+        rows = conn.execute(
+            """
+            SELECT child.key AS note_key, child.dateAdded, child.dateModified, n.note
+            FROM itemNotes n JOIN items child ON child.itemID = n.itemID
+            WHERE n.parentItemID = ?
+              AND child.itemID NOT IN (SELECT itemID FROM deletedItems)
+            ORDER BY child.dateModified DESC
+            """,
+            (item_id,),
+        ).fetchall()
+        return [
+            {"note_key": str(row["note_key"]), "note": str(row["note"] or ""),
+             "date_added": str(row["dateAdded"] or ""), "date_modified": str(row["dateModified"] or "")}
+            for row in rows
+        ]
 
     @staticmethod
     def _read_item_authors(conn: sqlite3.Connection, item_id: int) -> list[str]:
@@ -324,6 +324,7 @@ class ZoteroItemsMixin:
             FROM itemAttachments ia
             JOIN items ai ON ai.itemID = ia.itemID
             WHERE ia.parentItemID = ?
+              AND ai.itemID NOT IN (SELECT itemID FROM deletedItems)
             ORDER BY ai.dateAdded ASC
             """,
             (item_id,),
@@ -402,25 +403,7 @@ class ZoteroItemsMixin:
 
             attachments, pdf_path = self._read_attachments(conn, item_id)
 
-            note_rows = conn.execute(
-                """
-                SELECT child.key AS note_key, child.dateAdded, child.dateModified, n.note
-                FROM itemNotes n
-                JOIN items child ON child.itemID = n.itemID
-                WHERE n.parentItemID = ?
-                ORDER BY child.dateModified DESC
-                """,
-                (item_id,),
-            ).fetchall()
-            notes = [
-                {
-                    "note_key": str(row["note_key"]),
-                    "note": str(row["note"] or ""),
-                    "date_added": str(row["dateAdded"] or ""),
-                    "date_modified": str(row["dateModified"] or ""),
-                }
-                for row in note_rows
-            ]
+            notes = self._read_item_notes(conn, item_id)
 
             # PDF annotations live in itemAnnotations, keyed by attachment.itemID.
             # The dateAdded column is on items, not itemAnnotations — join items.
@@ -432,6 +415,8 @@ class ZoteroItemsMixin:
                 JOIN items ann ON ann.itemID = a.itemID
                 JOIN itemAttachments att ON att.itemID = a.parentItemID
                 WHERE att.parentItemID = ?
+                  AND ann.itemID NOT IN (SELECT itemID FROM deletedItems)
+                  AND att.itemID NOT IN (SELECT itemID FROM deletedItems)
                 ORDER BY ann.dateAdded ASC
                 """,
                 (item_id,),

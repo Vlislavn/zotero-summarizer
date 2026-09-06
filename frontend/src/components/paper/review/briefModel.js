@@ -94,35 +94,6 @@ function shortGoal(goal, words = 4) {  // matches server _short_goal (words=4)
   return parts.slice(0, words).join(' ') + (parts.length > words ? '…' : '');
 }
 
-// goal_summaries → the fired set + the loudest scores driving the verdict.
-export function summarizeGoals(goals = []) {
-  const fired = goals.filter((g) => g?.retrieval_state === 'hit' && g?.relevant);
-  const maxScore = goals.reduce((m, g) => Math.max(m, Number(g?.score) || 0), 0);
-  return { fired, nFired: fired.length, maxScore };
-}
-
-// (key, label, reason) for the read decision — ported from _read_verdict, with
-// the flagged-but-relevant red-flag inlined (the brief_html override).
-export function readVerdict({ nFired, band, redFlags = [] }) {
-  if (!nFired) return { key: 'skip', label: 'SKIP', reason: 'none of your research goals are addressed' };
-  if (band === 'flag') {
-    const rf = redFlags.map((x) => String(x || '').trim()).filter(Boolean);
-    const reason = rf.length
-      ? `relevant, but rigor is FLAGGED — ${rf[0]}. Read critically.`
-      : 'relevant to your goals but rigor is flagged — read critically';
-    return { key: 'skim', label: 'SKIM', reason };
-  }
-  if (band === 'highlight') return { key: 'deep', label: 'DEEP-READ', reason: 'relevant to your goals and rigorous' };
-  return { key: 'deep', label: 'DEEP-READ', reason: 'relevant to your goals; quality is acceptable' };
-}
-
-export function relevanceVerdict({ nFired, maxScore }) {
-  if (nFired && maxScore >= 2.3) return 'MUST READ';
-  if (nFired && maxScore >= 1.5) return 'SHOULD READ';
-  if (nFired) return 'COULD READ';
-  return 'SKIP';
-}
-
 // The 2-3 rubric items that moved the band, in plain English (ported from
 // _decisive_rows). Returns { heading, rows:[{ok,label}], caption }.
 export function decisiveRows(rubric = {}, band = '') {

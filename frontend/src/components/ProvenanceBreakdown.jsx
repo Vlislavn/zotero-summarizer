@@ -30,6 +30,7 @@ export default function ProvenanceBreakdown({ provenance = null }) {
     ? shortCircuits.hard_veto_emojis
     : [];
   const inTrash = Boolean(shortCircuits.in_trash_override);
+  const explicitLabel = shortCircuits.explicit_label;
 
   const emojiContribs = Array.isArray(additive.emoji_contributions)
     ? additive.emoji_contributions
@@ -103,6 +104,13 @@ export default function ProvenanceBreakdown({ provenance = null }) {
         ))}
       </div>
 
+      {explicitLabel ? (
+        <p className="text-xs text-slate-700">
+          Explicit Zotero tag <code>label:{explicitLabel}</code> takes precedence over trash,
+          emoji signals, annotations, notes and age decay. No additive scoring applies.
+        </p>
+      ) : (
+      <>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
@@ -205,6 +213,8 @@ export default function ProvenanceBreakdown({ provenance = null }) {
         {fmt(thresholds.could_read_upper)} ≤ should&lt;
         {fmt(thresholds.should_read_upper)} ≤ must
       </div>
+      </>
+      )}
     </div>
   );
 }

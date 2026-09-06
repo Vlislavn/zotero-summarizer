@@ -73,7 +73,9 @@ class RuntimeState:
     # on first use so startup never depends on a provider being reachable.
     _stage_clients: dict[Any, Any] = field(default_factory=dict)
 
-    def resolve_stage_client(self, stage: str, *, enable_thinking: bool | None = None) -> Any:
+    def resolve_stage_client(
+        self, stage: str, *, enable_thinking: bool | None = None
+    ) -> Any:
         """Return the LLM client for ``stage`` ('feed'|'backlog'|'deep_review'),
         building + caching it on first use from ``app_state.config.llm_routing``.
 
@@ -86,6 +88,14 @@ class RuntimeState:
         startup. Callers run inside their own worker boundaries, so a missing
         key or unreachable endpoint degrades that stage without crashing the app.
         """
+        if not self.app_state.config.llm_enabled:
+            from zotero_summarizer.api.errors import APIError
+
+            raise APIError(
+                "llm_disabled",
+                "AI features are disabled; enable AI in Settings to run this action",
+                status_code=409,
+            )
         cache_key = (stage, enable_thinking)
         cached = self._stage_clients.get(cache_key)
         if cached is not None:

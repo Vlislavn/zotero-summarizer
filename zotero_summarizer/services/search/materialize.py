@@ -8,13 +8,15 @@ The ONE place the Targeted Search domain writes to Zotero — an EXPLICIT user a
   2. builds a create-item payload FROM the Candidate (not ``to_scoring_dict`` — that
      shape is for the ranker: it drops authors to a comma string and emits ``year``,
      but the writer wants a list + ``publication_date``),
-  3. writes atomically via ``apply_feed_materialization`` (bypasses the pending queue
-     for a new item; retries on a locked DB — no force handshake needed),
+  3. reuses a coverage hit's existing Zotero key, otherwise writes atomically via
+     ``apply_feed_materialization`` (bypasses the pending queue for a new item;
+     retries on a locked DB — no force handshake needed),
   4. stamps ``materialized_zotero_key`` back on the session under its lock, so a
      concurrent auto-review can't lose the stamp.
 """
 from __future__ import annotations
 
+from html import escape
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
@@ -50,13 +52,10 @@ def _note_html(cand: Candidate, query: str) -> str:
 
     brief = (cand.review or {}).get("brief") or {}
     summary = brief.get("tldr") or (cand.abstract or "")[:400]
-    return pending_service.build_triage_note_html(
-        title=cand.title or "",
-        summary=f"Added from Targeted Search — query: {query}\n\n{summary}",
-        is_black_swan=False,
-        surprise_score=None,
-        run_id=f"targeted_search:{cand.candidate_id}",
-    )
+    marker = pending_service.build_provenance_comment(run_id=f"targeted_search:{cand.candidate_id}",
+                                                       source="targeted-search")
+    return (f"{marker}<h2>{escape(cand.title or 'Untitled')}</h2>"
+            f"<p>Added from Targeted Search — query: {escape(query)}</p><p>{escape(summary)}</p>")
 
 
 def _resolve_collection_name(collection_key: str | None) -> str:
@@ -83,8 +82,13 @@ def materialize_candidate(
     from zotero_summarizer.services.triage.feeds import _generate_zotero_key
 
     collection_name = _resolve_collection_name(collection_key)  # validate → fast 400, before the lock
+    reused_existing = False
 
     def _do_write(cand: Candidate, sess: ResearchSession) -> str:
+        nonlocal reused_existing
+        if cand.existing_zotero_key:
+            reused_existing = True
+            return cand.existing_zotero_key
         try:
             writer = ZoteroWriter(settings().zotero_data_dir)
         except Exception as exc:  # noqa: BLE001 — Zotero-write is optional; surface as 503, don't 500.
@@ -119,7 +123,7 @@ def materialize_candidate(
             error="not_found", message=f"no such candidate: {candidate_id}", status_code=404
         )
     added, key = result
-    if not added:
+    if not added or reused_existing:
         return {"status": "already_added", "zotero_key": key}
     return {"status": "added", "zotero_key": key, "collection": collection_name}
 

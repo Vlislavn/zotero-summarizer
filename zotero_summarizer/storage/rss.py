@@ -201,10 +201,10 @@ def list_rss_items(
     *,
     rss_feed_id: int | None = None,
     unread_only: bool = False,
-    limit: int = 1000,
+    limit: int | None = 1000,
     order: str = "newest_first",
 ) -> list[dict[str, Any]]:
-    safe_limit = max(1, min(int(limit), 5000))
+    safe_limit = -1 if limit is None else max(1, min(int(limit), 5000))
     where = ["1=1"]
     params: list[Any] = []
     if rss_feed_id is not None:

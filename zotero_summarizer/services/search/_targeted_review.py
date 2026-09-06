@@ -42,7 +42,6 @@ def targeted_review(
     cand: Candidate,
     *,
     full_text: str,
-    sections: list[dict[str, Any]],
     query: str,
     questions: list[str],
     config: GoalsConfig,
@@ -62,7 +61,7 @@ def targeted_review(
 
     goals = [query] + [q for q in (questions or []) if str(q).strip()]
     summaries = summarize_for_goals(
-        goals=goals, sections=sections or [], full_text=full_text, llm=llm,
+        goals=goals, sections=[], full_text=full_text, llm=llm,
     )
     lens = _summary_row(summaries[0]) if summaries else {}
     answers = [

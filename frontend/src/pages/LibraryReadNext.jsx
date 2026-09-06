@@ -26,6 +26,7 @@ import {
   DEFAULT_SORT, sortQueue, serializeSort, hydrateSort,
 } from '../utils/relevanceBands.js';
 import { isMachineTag } from '../utils/tags.js';
+import { fulltextMessage } from './todayHelpers.js';
 
 // Library page — a single "Read next" surface (Stage 2). The former Browse tab
 // and Triage monitor are merged in: the sidebar collection/tag filters + a
@@ -50,8 +51,8 @@ function flattenCollections(nodes, depth = 0) {
 
 export default function LibraryReadNext() {
   const navigate = useNavigate();
-  const { status } = useSetupStatus();
-  const setupStatusKnown = Boolean(status);
+  const { status, isError: setupStatusError } = useSetupStatus();
+  const setupStatusKnown = Boolean(status) || setupStatusError;
   const zoteroConnected = status?.zotero?.db_found === true;
   const [searchParams, setSearchParams] = useSearchParams();
   // Client-side smart filters (Phase 1) — hydrated from the URL on mount so a
@@ -150,6 +151,11 @@ export default function LibraryReadNext() {
   const displayedQueue = useMemo(
     () => sortQueue(queueMeta.model_ready ? filteredQueue : queue, sort),
     [queueMeta.model_ready, filteredQueue, queue, sort],
+  );
+  const visibleSelected = useMemo(
+    () => new Set((queueLoading || queueErr ? [] : displayedQueue)
+      .filter((row) => selected.has(row.item_key)).map((row) => row.item_key)),
+    [displayedQueue, selected, queueLoading, queueErr],
   );
   const whyOptions = useMemo(
     () => [...new Set(queue.map((i) => i.why_reason).filter(Boolean))].sort(),
@@ -328,20 +334,20 @@ export default function LibraryReadNext() {
   // one force-confirm covers the whole batch. Fails loud on the first error
   // (reports how many landed), never silently skips.
   async function handleAddToCollection(collectionKey, force = false) {
-    if (!selected.size || !collectionKey) return;
+    if (!visibleSelected.size || !collectionKey) return;
     const name = flatCollections.find((c) => c.key === collectionKey)?.name || collectionKey;
     setAddingToCollection(true);
     setMessage('');
     let added = 0;
     try {
-      for (const key of selected) {
+      for (const key of visibleSelected) {
         const data = await addItemToCollection(key, { collectionKey, force });
         if (data?.requires_force) {
           setAddingToCollection(false);
           if (window.confirm('Zotero appears to be running. Add anyway? (a backup is taken first)')) {
             return await handleAddToCollection(collectionKey, true);
           }
-          setMessage(`Cancelled — ${added} of ${selected.size} added to “${name}”. Close Zotero, then retry.`);
+          setMessage(`Cancelled — ${added} of ${visibleSelected.size} added to “${name}”. Close Zotero, then retry.`);
           setIsError(false);
           return;
         }
@@ -353,7 +359,7 @@ export default function LibraryReadNext() {
       setSelected(new Set());
       setSelectMode(false);
     } catch (err) {
-      setMessage(`Add to “${name}” failed after ${added} of ${selected.size}: ${err.message || err}`);
+      setMessage(`Add to “${name}” failed after ${added} of ${visibleSelected.size}: ${err.message || err}`);
       setIsError(true);
     } finally {
       setAddingToCollection(false);
@@ -361,11 +367,11 @@ export default function LibraryReadNext() {
   }
 
   async function handleRunTriage() {
-    if (!selected.size) return;
+    if (!visibleSelected.size) return;
     setStarting(true);
     setMessage('');
     try {
-      const data = await startTriage([...selected], { queueChanges: true });
+      const data = await startTriage([...visibleSelected], { queueChanges: true });
       setMessage(`Triage job ${data?.job_id || 'started'}. Opening Triage Monitor…`);
       setIsError(false);
       navigate('/ops?tab=triage');
@@ -377,27 +383,37 @@ export default function LibraryReadNext() {
     }
   }
 
-  // ------ Bulk: fetch arXiv full-text PDFs → Zotero (background job) ------
+  // ------ Bulk: acquire OA full-text PDFs → Zotero (background job) ------
   function pollFulltext() {
     if (ftPollRef.current) { clearTimeout(ftPollRef.current); ftPollRef.current = null; }
     fetchFulltextStatus().then((s) => {
       const p = s?.progress || {};
       if (s?.running) {
-        setMessage(`Fetching arXiv full text… ${p.done || 0}/${p.total || 0} downloaded (this can take several minutes).`);
+        setMessage(`Fetching full text… ${p.done || 0}/${p.total || 0} checked (this can take several minutes).`);
         ftPollRef.current = setTimeout(pollFulltext, 4000);
         return;
       }
       const r = s?.result || {};
       setFetchingFulltext(false);
       if (r.error) { setMessage(`Full-text fetch failed: ${r.error}`); setIsError(true); return; }
+      const pdf = fulltextMessage(r);
+      if (!pdf) {
+        setMessage('Full-text fetch failed: Full-text result is missing outcomes');
+        setIsError(true);
+        return;
+      }
       setMessage(
-        `Attached ${r.attached || 0} arXiv PDF(s) to Zotero`
-        + ` (skipped ${r.skipped_has_pdf || 0} that already had a PDF, ${r.no_arxiv || 0} without an arXiv link, ${r.failed_count || 0} failed).`
+        `Attached ${r.attached || 0} full-text PDF(s) to Zotero`
+        + ` (skipped ${r.skipped_has_pdf || 0} already attached; ${pdf.unavailable} unavailable).`
         + (r.attached ? ' They upload to zotero.org on the next sync.' : '')
         + (r.backup_path ? ` Backup: ${r.backup_path}.` : ''),
       );
       setIsError(false);
-    }).catch(() => { ftPollRef.current = setTimeout(pollFulltext, 6000); });  // transient — keep polling
+    }).catch((err) => {
+      setFetchingFulltext(false);
+      setMessage(`Full-text status unavailable: ${err.message || err}. The server job may still be running.`);
+      setIsError(true);
+    });
   }
 
   // ------ "Review cool papers" auto-review loop ------
@@ -408,6 +424,7 @@ export default function LibraryReadNext() {
     fleetStatus, autoReview, coolUndecided, handleReviewCool, stopReviewCool,
   } = useReviewCoolLoop({
     queue, queueArgs, applyQueueData, loadQueue, zoteroConnected, setMessage, setIsError,
+    prestigeFloor: filterCtx.prestigeFloor,
   });
 
   // One-click Zotero export chain (Tesler: the system owns the rescore→tags→
@@ -423,7 +440,7 @@ export default function LibraryReadNext() {
     try {
       const meta = await fetchReadingQueue({ limit: 1, refresh: false });
       if (meta?.scores_stale || !meta?.computed_at) {
-        setMessage('Step 1/3 — rescoring the library against the current model (a few minutes; progress streams in)…');
+        setMessage('Step 1/3 — rescoring the library against the current model; scores update when the full pass completes…');
         await fetchReadingQueue({ limit: 1, refresh: true });
         let running = true;
         for (let i = 0; running && i < 120; i += 1) {  // bail after ~16 min
@@ -490,7 +507,7 @@ export default function LibraryReadNext() {
         return;
       }
       // 'started' or 'running' → poll the cheap status endpoint for progress.
-      setMessage('Fetching arXiv full text… scanning the library.');
+      setMessage('Fetching full text… scanning the library.');
       setIsError(false);
       pollFulltext();
     } catch (err) {
@@ -687,7 +704,7 @@ export default function LibraryReadNext() {
           onSaved={() => loadQueue()}
           selectMode={selectMode}
           onToggleSelectMode={() => { setSelectMode((v) => !v); setSelected(new Set()); }}
-          selected={selected}
+          selected={visibleSelected}
           onToggleItem={toggleItem}
           onRunTriage={handleRunTriage}
           starting={starting}

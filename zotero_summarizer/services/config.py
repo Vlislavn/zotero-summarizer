@@ -46,7 +46,8 @@ async def update_runtime_config(new_config: GoalsConfig) -> dict:
 
     def prepare_embedding_cache() -> EmbeddingCache:
         cache = EmbeddingCache(current_settings.corpus_db_path, new_config.corpus.embedding_model)
-        cache.upsert_goals(new_config.research_goals)
+        if new_config.corpus.enabled:
+            cache.upsert_goals(new_config.research_goals)
         return cache
 
     new_embedding_cache = await asyncio.to_thread(prepare_embedding_cache)

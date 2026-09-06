@@ -11,8 +11,7 @@ from typing import Any
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.services import interaction_log
 from zotero_summarizer.storage import feeds as feeds_storage
-from zotero_summarizer.storage import repositories as triage_db
-from zotero_summarizer.services.triage.feeds._common import LOGGER, _triage_conn
+from zotero_summarizer.services.triage.feeds._common import _triage_conn
 
 
 def _resolve_due_outcomes(
@@ -31,47 +30,21 @@ def _resolve_due_outcomes(
     """
     with _triage_conn() as conn:
         due = feeds_storage.due_outcome_checks(conn, limit=limit)
-    if not due:
-        return 0
-
     resolved = 0
     for row in due:
-        item_key = str(row.get("materialized_zotero_key") or "").strip()
-        if not item_key:
-            continue
-        try:
-            membership = reader.get_item_membership(item_key)
-        except Exception as exc:
-            LOGGER.warning("get_item_membership failed for %s: %s", item_key, exc)
-            continue
+        item_key = row["materialized_zotero_key"]
+        membership = reader.get_item_membership(item_key)
         outcome = _compute_outcome_from_membership(membership)
-        weight = feeds_storage.OUTCOME_WEIGHT.get(outcome, 0.0)
+        weight = feeds_storage.OUTCOME_WEIGHT[outcome]
         with _triage_conn() as conn:
-            feeds_storage.record_outcome(
+            if not feeds_storage.record_outcome(
                 conn,
-                feed_library_id=int(row.get("feed_library_id") or 0),
-                feed_item_id=int(row.get("feed_item_id") or 0),
+                feed_library_id=int(row["feed_library_id"]),
+                feed_item_id=int(row["feed_item_id"]),
                 final_outcome=outcome,
-                signal_weight=weight,
-            )
+            ):
+                continue
             conn.commit()
-        # Push to user_feedback so corpus.py's engagement weighting can pick
-        # it up on the next refresh. (Done outside the feeds-storage conn
-        # because insert_feedback_events uses its own connection via _get_conn.)
-        try:
-            triage_db.insert_feedback_events(
-                [
-                    {
-                        "item_id": item_key,
-                        "feedback_type": _feedback_type_from_outcome(outcome),
-                        "signal": f"feed_outcome:{outcome}",
-                        "original_priority": str(row.get("reading_priority") or ""),
-                        "inferred_relevance": _relevance_from_weight(weight),
-                    }
-                ]
-            )
-        except Exception:
-            LOGGER.exception("insert_feedback_events failed for %s", item_key)
         # Close the trajectory in the unified event stream: the daemon-resolved
         # behavioural outcome, joined to the at-triage verdict via feed_item_id.
         fid = int(row.get("feed_item_id") or 0)
@@ -120,21 +93,3 @@ def _compute_outcome_from_membership(membership: dict[str, Any]) -> str:
     if membership.get("is_in_inbox") and len(collection_keys) == 1:
         return feeds_storage.OUTCOME_KEPT_INBOX
     return feeds_storage.OUTCOME_MOVED_COLLECTION
-
-
-def _feedback_type_from_outcome(outcome: str) -> str:
-    """Map outcome -> existing user_feedback type vocabulary."""
-    if outcome in (feeds_storage.OUTCOME_ENGAGED, feeds_storage.OUTCOME_MOVED_COLLECTION):
-        return "implicit_engagement"
-    if outcome in (feeds_storage.OUTCOME_DELETED_ALL, feeds_storage.OUTCOME_TRASHED, feeds_storage.OUTCOME_UNKNOWN):
-        return "implicit_negative_strong"
-    return "implicit_weak_negative"
-
-
-def _relevance_from_weight(weight: float) -> float:
-    """Map signal_weight (-3..+3) to inferred_relevance scale (1..5).
-
-    Delegates to the single shared definition next to ``OUTCOME_WEIGHT`` so the
-    feedback emitter and the training-label outcome correction can't drift.
-    """
-    return feeds_storage.relevance_from_signal_weight(weight)

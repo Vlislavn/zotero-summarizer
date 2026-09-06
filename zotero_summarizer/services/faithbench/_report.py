@@ -14,12 +14,66 @@ from zotero_summarizer.services import run_log
 from zotero_summarizer.services._common import now_iso_z
 from zotero_summarizer.services.faithbench._dataset import (
     BenchmarkItem,
+    BenchmarkMeta,
     QAItem,
+    load_benchmark,
+    _validate_item,
+    _benchmark_sha,
 )
-from zotero_summarizer.services.faithbench._runner import RunPaths, latest_by_key, load_jsonl
+from zotero_summarizer.services.faithbench._build_claims import _claim_rows
+from zotero_summarizer.services.faithbench._corpus import load_frozen_text
+from zotero_summarizer.services.faithbench._runner import (
+    RunOptions, RunPaths, latest_by_key, load_jsonl, trial_key, _load_manifest, _response_sha,
+)
 from zotero_summarizer.services.faithbench._stats import calculate_statistics
 
 MASTER_LOG_NAME = "faithbench-runs.jsonl"
+
+
+def _checked_judgments(manifest: dict, meta: BenchmarkMeta, items: list[BenchmarkItem],
+                       responses: list[dict], judgments: list[dict]) -> list[dict]:
+    options = RunOptions(conditions=tuple(manifest["conditions"]), tracks=tuple(manifest["tracks"]),
+                         runs=manifest["runs"], limit=manifest.get("limit"))
+    expected = {
+        ("qa", item.item_id, condition, run) for item in items[:options.limit]
+        for condition in options.conditions for run in range(1, options.runs + 1)
+    } if "qa" in options.tracks else set()
+    if "claims" in options.tracks:
+        expected.update(("claims", f"claims:{p.item_key}", "digest", run)
+                        for p in meta.papers for run in range(1, options.runs + 1))
+    for row in responses + judgments:
+        if row.get("run_id") != manifest["run_id"] or type(row.get("run_number")) is not int:
+            raise ValueError("Trial identity does not match the run manifest")
+    current = {(row["track"], *trial_key(row)): row for row in responses}
+    if not expected or set(current) != expected:
+        raise ValueError("Incomplete or unexpected response coverage; finish the configured run before reporting")
+    expected_judgments = set()
+    for key, row in current.items():
+        indices = [None]
+        if row["track"] == "claims" and row.get("status") == "ok":
+            parsed = row.get("parsed")
+            try:
+                indices = list(range(len(_claim_rows(parsed.get("claims") if isinstance(parsed, dict) else None))))
+            except ValueError:
+                indices = [None]  # Malformed output has one explicit failed-trial judgment, not zero rows.
+        expected_judgments.update((key, index) for index in indices)
+    latest = {}
+    for row in judgments:
+        key = (row["track"], *trial_key(row))
+        if key not in current or row.get("response_sha256") != _response_sha(current[key]):
+            continue  # Earlier attempts remain history, not evidence for the current response.
+        index = row.get("claim_idx")
+        if index is not None and type(index) is not int:
+            raise ValueError("Claim index must be an integer or null")
+        latest[(key, index)] = row
+    if set(latest) != expected_judgments:
+        raise ValueError("Incomplete or stale judgments; run faithbench judge before reporting")
+    context = next(iter(latest.values())).get("judge_context")
+    if (not isinstance(context, dict) or context.get("benchmark_sha256") != _benchmark_sha(meta, items)
+            or context.get("paper_faults") or context.get("item_faults")
+            or any(row.get("judge_context") != context for row in latest.values())):
+        raise ValueError("Mixed or stale judging context; finish re-judging the intact benchmark")
+    return list(latest.values())
 
 
 def items_meta(items: list[BenchmarkItem]) -> dict[str, dict[str, str]]:
@@ -35,18 +89,23 @@ def items_meta(items: list[BenchmarkItem]) -> dict[str, dict[str, str]]:
 def build_report(
     *,
     paths: RunPaths,
-    items: list[BenchmarkItem],
-    manifest: dict[str, Any],
-    benchmark_path: Path,
     faithbench_dir: Path,
 ) -> dict[str, Any]:
     """Assemble + persist report.json / report.md; returns the report dict."""
+    manifest = _load_manifest(paths)
+    benchmark_path = Path(manifest["benchmark_path"])
+    meta, items = load_benchmark(benchmark_path, expected_sha256=manifest["benchmark_sha256"])
+    texts = {paper.item_key: load_frozen_text(faithbench_dir / "papers", paper.item_key,
+                                             expected_sha256=paper.text_sha256) for paper in meta.papers}
+    for item in items:
+        _validate_item(item, meta, texts)
     responses = list(latest_by_key(load_jsonl(paths.responses)).values())
     judgments = load_jsonl(paths.judgments)
     if not judgments:
         raise RuntimeError(
             f"no judgments in {paths.judgments}; run `faithbench judge` before `report`"
         )
+    judgments = _checked_judgments(manifest, meta, items, responses, judgments)
     stats = calculate_statistics(responses, judgments, items_meta(items))
 
     judge_models = sorted({str(j["judge_model"]) for j in judgments if j.get("judge_model")})
@@ -61,7 +120,7 @@ def build_report(
             "provider": manifest.get("provider_name"),
             "base_url": manifest.get("base_url"),
         },
-        "judge": {"models_used": judge_models},
+        "judge": {"models_used": judge_models, "context": judgments[0]["judge_context"]},
         "num_runs": manifest.get("runs"),
         "conditions": manifest.get("conditions"),
         "tracks": manifest.get("tracks"),
@@ -99,8 +158,8 @@ def build_report(
 # ---------------------------------------------------------------------------
 
 
-def _fmt_pct(x: float) -> str:
-    return f"{100.0 * float(x):.1f}%"
+def _fmt_pct(x: float | None) -> str:
+    return "N/A (unmeasured)" if x is None else f"{100.0 * x:.1f}%"
 
 
 def _qa_section(condition: str, block: dict[str, Any]) -> list[str]:

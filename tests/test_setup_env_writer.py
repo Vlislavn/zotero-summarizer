@@ -113,3 +113,16 @@ def test_validation_snapshot_reflects_submitted_values(tmp_path: Path):
     assert result.validated.pdf_root_exists is True
     assert result.validated.zotero_db_found is True
     assert result.restart_required is True
+
+
+def test_snapshot_includes_existing_paths_without_rewriting(tmp_path):
+    env = tmp_path / ".env"
+    (tmp_path / "zotero.sqlite").touch()
+    original = f'PDF_ROOT="{tmp_path}"\nZOTERO_DATA_DIR={tmp_path}\n# preserved'
+    env.write_text(original)
+    result = write_env_paths(env, {})
+    assert result.written == []
+    assert result.validated.pdf_root_exists and result.validated.zotero_db_found
+    assert env.read_text() == original
+    result = write_env_paths(env, {"PDF_ROOT": str(tmp_path)})
+    assert result.validated.zotero_db_found

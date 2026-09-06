@@ -28,6 +28,7 @@ import {
 } from '../api/dailyApi.js';
 import { fetchReview } from '../api/reviewApi.js';
 import { reviewPaperUrl } from './reviewHelpers.js';
+import { fulltextMessage } from './todayHelpers.js';
 
 // ---------------------------------------------------------------------------
 // Spot-check — a capped, clearly-labeled sample of papers the filter rejected,
@@ -97,11 +98,12 @@ function SpotCheck({ onNavigate }) {
   const busy = addMut.isPending || trashMut.isPending;
 
   const act = useCallback(
-    (mutation, id, verb, note = '') => {
+    (mutation, id, verb) => {
       mutation.mutate([id], {
-        onSuccess: () => {
+        onSuccess: (res) => {
           setDismissed((prev) => new Set(prev).add(id));
-          setMsg(`${verb} 1 paper${note}.`);
+          const pdf = fulltextMessage(res?.fulltext);
+          setMsg(`${verb} 1 paper${pdf ? ` — ${pdf.text}` : ''}.`);
           queryClient.invalidateQueries({ queryKey: ['daily-pipeline'] });
         },
       });
@@ -138,7 +140,7 @@ function SpotCheck({ onNavigate }) {
             key={item.id}
             item={item}
             busy={busy}
-            onAdd={(id) => act(addMut, id, 'Added', ' — saved to Zotero')}
+            onAdd={(id) => act(addMut, id, 'Added')}
             onTrash={(id) => act(trashMut, id, 'Trashed')}
           />
         ))}
@@ -211,6 +213,10 @@ export default function Today() {
     () => (feedFilter ? papers.filter((p) => p.feed_name === feedFilter) : papers),
     [papers, feedFilter],
   );
+  const visibleSelectedIds = useMemo(
+    () => visiblePapers.filter((paper) => selectedIds.has(paper.item_id)).map((paper) => paper.item_id),
+    [visiblePapers, selectedIds],
+  );
 
   // Store the visible slate order so the full review page's j/k Prev/Next pages
   // through Today's list — the card links to /paper/:stable_feed_key, the same key
@@ -248,7 +254,7 @@ export default function Today() {
 
   const commit = useCallback(
     (mutation, verb) => {
-      const ids = [...selectedIds];
+      const ids = visibleSelectedIds;
       if (ids.length === 0) return;
       mutation.mutate(ids, {
         onSuccess: (res) => {
@@ -276,6 +282,11 @@ export default function Today() {
             bits.push(`${res.failed_count} failed`);
             warn = true;
           }
+          const pdf = fulltextMessage(res?.fulltext);
+          if (pdf) {
+            bits.push(pdf.text);
+            warn ||= pdf.unavailable > 0;
+          }
           const text = `${verb} ${n} paper${n === 1 ? '' : 's'}${bits.length ? ` — ${bits.join(', ')}` : ''}.`;
           setActionMsg({ text, tone: warn ? 'warn' : 'success' });
           setSelectedIds(new Set());
@@ -283,7 +294,7 @@ export default function Today() {
         },
       });
     },
-    [selectedIds, queryClient],
+    [visibleSelectedIds, queryClient],
   );
 
   // Backlog triage is now an explicit user action (the "Triage backlog"
@@ -301,7 +312,7 @@ export default function Today() {
   }, [triageStatus?.running, queryClient]);
 
   const actionError = addMutation.error || trashMutation.error;
-  const selectedCount = selectedIds.size;
+  const selectedCount = visibleSelectedIds.length;
 
   return (
     <section className="glass rounded-2xl border border-slate-200 p-4">

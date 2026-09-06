@@ -9,12 +9,22 @@ NEVER a fabricated guess.
 """
 from __future__ import annotations
 
+import pytest
+
 from zotero_summarizer.models import PaperDigest, PaperParameters
 from zotero_summarizer.services.library.quality_review import (
     _DEFAULT_DIGEST_PROMPT,
     assess_digest,
 )
+from zotero_summarizer.services.library._paper_read_html import _digest_section_html
+from zotero_summarizer.services.zotero._notes import build_digest_note_html
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
+
+
+@pytest.fixture(autouse=True)
+def _isolate_digest_generation(monkeypatch):
+    from zotero_summarizer.services.library import _digest_verification
+    monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
 
 
 class _FakeLLM:
@@ -30,10 +40,18 @@ class _FakeLLM:
         return response
 
 
+def _digest(**updates):
+    return PaperDigest(
+        read_decision="skip", read_why="The digest is sufficient.", read_parts=[],
+        skip_parts=[], estimated_read_minutes=0, original_value="No extra value.",
+        writing_friction="low", writing_reasons=[], **updates,
+    )
+
+
 def test_digest_with_no_parameters_yields_none_not_a_guess():
     """A non-empirical / parameter-less paper → parameters=None (abstention,
     not a fabricated parameters object)."""
-    digest = PaperDigest()  # all defaults — a valid, parameter-less digest
+    digest = _digest()
     llm = _FakeLLM([digest])
     out = assess_digest(title="T", full_text="position paper body",
                         config=_default_goals_config(), llm=llm)
@@ -50,7 +68,7 @@ def test_digest_with_parameters_parses_verbatim():
         architecture="encoder-decoder transformer",
         external_validation=True,
     )
-    digest = PaperDigest(parameters=params)
+    digest = _digest(parameters=params)
     llm = _FakeLLM([digest])
     out = assess_digest(title="T", full_text="empirical paper body",
                         config=_default_goals_config(), llm=llm)
@@ -58,6 +76,8 @@ def test_digest_with_parameters_parses_verbatim():
     assert out.parameters.dataset == "MIMIC-IV (n=12000)"
     assert out.parameters.baselines == ["GPT-4", "Llama-3"]
     assert out.parameters.external_validation is True
+    assert "MIMIC-IV" in _digest_section_html(out.model_dump())
+    assert "Technical parameters" in build_digest_note_html(out)
 
 
 def test_default_digest_prompt_instructs_parameter_extraction():

@@ -24,8 +24,9 @@ from typing import Any
 from zotero_summarizer.models import GoalsConfig
 from zotero_summarizer.services._common import settings, state
 from zotero_summarizer.services.search import session as session_store
+from zotero_summarizer.services.search import require_online
 from zotero_summarizer.services.search._fulltext import acquire_full_text
-from zotero_summarizer.services.search._models import Candidate, ResearchSession
+from zotero_summarizer.services.search._models import Candidate, ResearchSession, ScreenRequest
 from zotero_summarizer.services.search._relevance import attach_relevance
 from zotero_summarizer.services.search._targeted_review import targeted_review
 from zotero_summarizer.services.search.federate import LibraryFinder, federate
@@ -84,6 +85,7 @@ def _search_openalex_client(app: Any, config: GoalsConfig) -> Any:
 
 def default_deps() -> SearchDeps:
     """Wire dependencies from the running app (mirrors ``deep_review._build_ctx``)."""
+    require_online()
     app = state()
     config = app.app_state.config
     # ponytail: library channel deferred — federate() already supports a
@@ -109,6 +111,9 @@ def default_deps() -> SearchDeps:
 def run_screen(raw_query: str, questions: list[str], *, deps: SearchDeps) -> ResearchSession:
     """Phase 1: intent → plan → federate → score → rank → persist. Returns a saved
     ``ResearchSession`` with candidates ordered by the constrained contract."""
+    request = ScreenRequest(query=raw_query, questions=questions)
+    raw_query, questions = request.query, request.questions
+    require_online()
     intent = parse_intent(raw_query, questions, llm=deps.llm)
     plan = build_query_plan(intent)
     candidates = federate(
@@ -167,7 +172,9 @@ def run_review(session_id: str, *, deps: SearchDeps, top_n: int = LIGHT_REVIEW_N
     """Phase 2: light-review the top band, re-rank on quality, select + deep-read the
     set. Serial by design — each step downloads a PDF and calls the LLM, and stacking
     heavy local-model calls is unsafe on a unified-memory box (memory-safety rule)."""
+    require_online()
     sess = session_store.load(session_id)
+    request = ScreenRequest(query=sess.raw_query, questions=sess.questions)
     fulltext: dict[str, str] = {}
     for cand in sess.candidates[:top_n]:
         text = acquire_full_text(cand, extractor=deps.extractor, unpaywall=deps.unpaywall_client)
@@ -183,8 +190,8 @@ def run_review(session_id: str, *, deps: SearchDeps, top_n: int = LIGHT_REVIEW_N
     deep_set = select_deep_set(sess.candidates, k=k)
     for cand in deep_set:
         targeted_review(
-            cand, full_text=fulltext.get(cand.candidate_id, ""), sections=[],
-            query=sess.raw_query, questions=sess.questions, config=deps.config, llm=deps.llm,
+            cand, full_text=fulltext.get(cand.candidate_id, ""),
+            query=request.query, questions=request.questions, config=deps.config, llm=deps.llm,
         )
         session_store.save_merge(sess)  # incremental: each deep review appears as it lands
 

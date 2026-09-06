@@ -53,12 +53,43 @@ def test_pending_changes_status_updates(monkeypatch, tmp_path):
     assert updated == 1
     assert triage_db.get_pending_change_count("pending") == 1
 
-    failed_update = triage_db.set_pending_changes_status([ids[1]], "failed", "test failure")
+    failed_update = triage_db.set_pending_changes_status(
+        [ids[1]], "failed", "test failure"
+    )
 
     assert failed_update == 1
     failed_rows = triage_db.get_pending_changes(status="failed", limit=10)
     assert len(failed_rows) == 1
     assert failed_rows[0]["error_message"] == "test failure"
+
+    retried = triage_db.set_pending_changes_status(
+        [ids[1]],
+        "applied",
+        "",
+        expected_status="failed",
+    )
+    assert retried == 1
+    assert triage_db.get_pending_change_count("failed") == 0
+
+
+def test_item_remains_open_until_all_sibling_changes_finish(monkeypatch, tmp_path):
+    monkeypatch.setattr(triage_db, "DB_PATH", tmp_path / "triage_history.db")
+    triage_db.init_db()
+    triage_db.insert_pending_changes(
+        "PAPER1",
+        "Paper",
+        [
+            {"change_type": "tag_changes", "payload": {}},
+            {"change_type": "add_note", "payload": {}},
+        ],
+    )
+    rows = triage_db.get_pending_changes("pending", 10)
+
+    triage_db.set_pending_changes_status([rows[0]["id"]], "applied", "")
+    assert triage_db.item_keys_without_open_changes(["PAPER1"]) == []
+
+    triage_db.set_pending_changes_status([rows[1]["id"]], "applied", "")
+    assert triage_db.item_keys_without_open_changes(["PAPER1"]) == ["PAPER1"]
 
 
 def test_pending_changes_reject_does_not_override_applied(monkeypatch, tmp_path):
@@ -80,7 +111,9 @@ def test_pending_changes_reject_does_not_override_applied(monkeypatch, tmp_path)
     applied = triage_db.set_pending_changes_status([change_id], "applied", "")
     assert applied == 1
 
-    rejected_after_apply = triage_db.set_pending_changes_status([change_id], "rejected", "should not mutate")
+    rejected_after_apply = triage_db.set_pending_changes_status(
+        [change_id], "rejected", "should not mutate"
+    )
     assert rejected_after_apply == 0
 
     rows = triage_db.get_pending_changes_by_ids([change_id])

@@ -3,6 +3,7 @@ NO secret VALUE ever appears in the response (only the api_key_env NAME + a bool
 
 GET /api/setup/status is the onboarding readiness probe.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -15,6 +16,7 @@ import yaml
 from zotero_summarizer.models import AppState
 from zotero_summarizer.runtime import AppContext, RuntimeState, set_context
 from zotero_summarizer.services._common import read_config
+from zotero_summarizer.services._common import write_user_config
 from zotero_summarizer.services.setup import status as status_mod
 from zotero_summarizer.services.setup import get_setup_status
 from zotero_summarizer.settings import Settings
@@ -36,14 +38,19 @@ def _write_valid_goals(config_path: Path) -> None:
         raw = yaml.safe_load(fh)
     raw["llm"]["api_base"] = "http://localhost:11434/v1"
     raw["llm"]["api_key_env"] = "ZS_TEST_KEY"
+    raw["research_goals"] = ["Reliable multimodal evidence synthesis"]
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
 
-def _seed(tmp_path: Path, *, key_value: str | None, db_found: bool, feeds: int) -> Settings:
+def _seed(
+    tmp_path: Path, *, key_value: str | None, db_found: bool, feeds: int
+) -> Settings:
     """Build a hermetic context: tmp project root, a valid goals.yaml, a stubbed
     Zotero reader + status payload, and a stubbed classifier card."""
     settings = Settings.load(project_root=tmp_path)
     _write_valid_goals(settings.config_path)
+    settings.data_dir.mkdir()
+    (settings.data_dir / "setup_doctor.json").write_text('{"ready": true}')
 
     state = RuntimeState()
     state.app_state = AppState(config=read_config(settings.config_path))
@@ -60,9 +67,12 @@ def _patch_externals(monkeypatch, *, key_value: str | None, db_found: bool, feed
 
     # Reachability + classifier are advisory; stub them so the test is offline.
     async def _reach():
-        return {"status": "ok", "stages": [
-            {"stage": "deep_review", "reachable": True, "detail": ""},
-        ]}
+        return {
+            "status": "ok",
+            "stages": [
+                {"stage": "deep_review", "reachable": True, "detail": ""},
+            ],
+        }
 
     monkeypatch.setattr(status_mod.operational_check, "check_reachability", _reach)
 
@@ -111,8 +121,8 @@ def test_no_secret_value_anywhere_in_response(tmp_path, monkeypatch):
     resp = _run(get_setup_status())
 
     blob = json.dumps(resp.model_dump())
-    assert _SECRET not in blob          # the secret value never appears
-    assert "ZS_TEST_KEY" in blob        # the env-var NAME does
+    assert _SECRET not in blob  # the secret value never appears
+    assert "ZS_TEST_KEY" in blob  # the env-var NAME does
     assert '"api_key_present": true' in blob
 
 
@@ -124,13 +134,56 @@ def test_ready_false_when_api_key_absent(tmp_path, monkeypatch):
     assert resp.ready is False  # key presence gates ready
 
 
+def test_ml_only_mode_is_ready_without_a_key_or_probe(tmp_path, monkeypatch):
+    settings = _seed(tmp_path, key_value=None, db_found=False, feeds=0)
+    config = read_config(settings.config_path)
+    write_user_config(
+        settings.config_path,
+        config.model_copy(update={"llm_enabled": False}),
+    )
+    _patch_externals(monkeypatch, key_value=None, db_found=False, feeds=0)
+    monkeypatch.setattr(
+        status_mod.operational_check,
+        "check_reachability",
+        lambda: (_ for _ in ()).throw(AssertionError("disabled AI must not be probed")),
+    )
+
+    resp = _run(get_setup_status())
+
+    assert resp.llm.enabled is False
+    assert resp.configured is True
+    assert resp.ready is True
+
+
+def test_ready_false_when_model_is_unreachable(tmp_path, monkeypatch):
+    _seed(tmp_path, key_value=_SECRET, db_found=True, feeds=1)
+    _patch_externals(monkeypatch, key_value=_SECRET, db_found=True, feeds=1)
+
+    async def _down():
+        return {"stages": [{"stage": "deep_review", "reachable": False}]}
+
+    monkeypatch.setattr(status_mod.operational_check, "check_reachability", _down)
+    status = _run(get_setup_status())
+    assert status.configured is True
+    assert status.ready is False
+
+
+def test_ready_false_until_doctor_verifies_the_real_pipeline(tmp_path, monkeypatch):
+    settings = _seed(tmp_path, key_value=_SECRET, db_found=True, feeds=1)
+    (settings.data_dir / "setup_doctor.json").unlink()
+    _patch_externals(monkeypatch, key_value=_SECRET, db_found=True, feeds=1)
+    status = _run(get_setup_status())
+    assert status.configured is True
+    assert status.ready is False
+
+
 def test_ready_true_without_zotero_db(tmp_path, monkeypatch):
     """Zotero is advisory: app is ready (Today + feed ingest) without a Zotero DB."""
     _seed(tmp_path, key_value=_SECRET, db_found=False, feeds=0)
     _patch_externals(monkeypatch, key_value=_SECRET, db_found=False, feeds=0)
     resp = _run(get_setup_status())
     assert resp.zotero.db_found is False  # still surfaced as advisory
-    assert resp.ready is True             # but does not block ready
+    assert resp.ready is True  # but does not block ready
 
 
 def test_ready_false_when_config_invalid(tmp_path, monkeypatch):

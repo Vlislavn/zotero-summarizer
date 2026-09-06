@@ -5,6 +5,23 @@ The only road back into Zotero. Triage never writes directly: it queues
 first. Also holds read helpers for the Zotero routes, note interpretation, and
 the `get_library_reader()` resolver used by read-only Library flows.
 
+Verdict notes, user notes, digest notes and label tags share `_apply_mirror_change`:
+connector check, backup, apply and explicit failure propagation. Queue retries
+deliver an identical visible note only once, including after a failed local
+pending-status commit; a trashed note is replaced with a visible note.
+
+`zotero_set_label_tag(key, None)` clears recognized human-label tags through
+that same guarded, backup-first path. The shared tag builder handles absence;
+there is no separate clear-label endpoint or writer. Unrelated namespaces and
+unrecognized custom labels remain untouched. Invalid non-null priorities still
+raise. Golden's online/offline retraction command uses this primitive with
+revision-based delivery receipts; reconciliation guards and retries those intents.
+
+`plan_changes_for_item` only builds repository rows: the triage worker saves
+them atomically with its result. A planning failure therefore cannot leave a
+result without the requested review queue. Standalone queue callers retain
+`insert_pending_changes`; none of these planning/queueing paths writes Zotero.
+
 ```
 triage/library ─queue→ pending_changes (SQLite)  ──UI review──> apply
                                                       └─ ZoteroWriter (backup → tags/notes/collections)
@@ -14,9 +31,9 @@ note_analyzer  : interpret user-written Zotero notes as golden labels
 
 | file | responsibility |
 |---|---|
-| `pending.py` | `PendingChangePlanner` builds, `queue_changes_for_item` queues, `apply_pending_changes` applies pending tag/note/collection changes (`req.retry=True` re-applies FAILED rows instead of PENDING — re-attempt a failed Zotero write via the same writer path, no re-queue); tag builders — `build_label_tag_change` (`label:<band>`, the human ground truth) and `build_rel_tag_change` (`zs:rel/<band>` ML-relevance, distinct namespace). Triage no longer auto-writes a machine `zs:<priority>` tag (retired — `label:*` is the single priority namespace). The post-apply Inbox removal stays best-effort (a WARNING, never fails the apply) but its failure is now also surfaced additively in the response as `inbox_removed_error` (`str | None`, next to `inbox_removed`) so a caller isn't left guessing why the count stayed 0 |
-| `_notes.py` | Zotero-safe note HTML builders (triage/verdict/digest/**user-note**) — re-exported by `pending`. `build_user_note_html` + `USER_NOTE_MARKER` render the user's free-text "My notes" jot (blank line → paragraph, HTML-escaped), mirrored from the app's `review_notes` table |
-| `zotero.py` | read-side helpers + the reader/writer accessors for routes. `get_zotero_reader_or_raise` / `get_zotero_writer_or_raise` stay strict for Zotero routes and writes. `get_library_reader()` is the read-path resolver: live Zotero reader when configured, else `services.library.app_library_reader.AppLibraryReader` over kept RSS papers, so the Library queue, paper brief, ask-paper, and deep review still work without Zotero. `resolve_reader_for_key(item_key)` resolves by the KEY's shape instead: a `stable_feed_key` (`feed:<ns>:<sha>`, an un-materialized Today paper) → `AppLibraryReader` EVEN with a live Zotero reader present (only the app library resolves it, decision-independent), anything else → `get_library_reader()` — this is what lets render/detail serve an in-place-reviewed feed paper that has no Zotero item yet. `zotero_set_label_tag` (direct, instant `label:<priority>` write mirroring the verdict-note write); `zotero_upsert_user_note` (direct upsert of the free-text "My notes" review note under `USER_NOTE_MARKER`, mirroring `zotero_upsert_verdict_note` — refuses while Zotero is open); `zotero_set_item_priority` route writes the `label:*` tag |
+| `pending.py` | `PendingChangePlanner` and `plan_changes_for_item` build plans, `apply_pending_changes` applies pending tag/note/collection changes (`req.retry=True` re-applies FAILED rows instead of PENDING — a successful retry transitions `failed → applied`, while another failure refreshes the failed error); tag builders — `build_label_tag_change` (`label:<band>`, the human ground truth) and `build_rel_tag_change` (`zs:rel/<band>` ML-relevance, distinct namespace). Triage no longer auto-writes a machine `zs:<priority>` tag. Post-apply Inbox removal is best-effort, waits until the paper has no pending/failed sibling changes, and surfaces `inbox_removed_error` on failure |
+| `_notes.py` | Zotero-safe triage/verdict/digest/user-note HTML; triage notes retain versioned delayed summaries and optional exact-URL Method & code, while digests include selective-reading action, supported technical parameters and writing-friction reasons; empty sections vanish and distinct markers keep note types idempotent |
+| `zotero.py` | read-side helpers + the reader/writer accessors for routes. `get_zotero_reader_or_raise` / `get_zotero_writer_or_raise` stay strict for Zotero routes and writes. `get_library_reader()` is the read-path resolver: live Zotero reader when configured, else `services.library.app_library_reader.AppLibraryReader` over kept RSS papers, so the Library queue, paper brief, ask-paper, and deep review still work without Zotero. `resolve_reader_for_key(item_key)` resolves by the KEY's shape instead: a `stable_feed_key` (`feed:<ns>:<sha>`, an un-materialized Today paper) → `AppLibraryReader` EVEN with a live Zotero reader present (only the app library resolves it, decision-independent), anything else → `get_library_reader()` — this is what lets render/detail serve an in-place-reviewed feed paper that has no Zotero item yet. `zotero_set_label_tag` mirrors the app's committed current verdict to the portable `label:<priority>` tag; a direct Zotero/iPad edit reconciles back later, while the app owns decision state/history. `zotero_upsert_user_note` directly upserts the free-text "My notes" review note under `USER_NOTE_MARKER` (refuses while Zotero is open); `zotero_set_item_priority` route writes the `label:*` tag |
 | `note_analyzer.py` | classify user notes into priorities for the golden set |
 
 **Boundaries:** imports `integrations.zotero_write/read`, `corpus`; standard

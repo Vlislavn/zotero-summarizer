@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any, Callable, Literal
+from urllib.parse import quote
 
 import httpx
 
@@ -16,6 +17,7 @@ from zotero_summarizer.mcp.helpers import (
     _is_retryable,
     _now_iso,
     _ok,
+    _require_non_empty_text,
 )
 
 
@@ -171,7 +173,10 @@ def _snapshot_data_or_warn(
 
 
 async def _fetch_triage_row(item_key: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    result = await _api_request("GET", f"/api/results/{item_key}")
+    safe_key, validation_error = _require_non_empty_text(item_key, "item_key")
+    if validation_error is not None:
+        return None, validation_error["error"]
+    result = await _api_request("GET", f"/api/results/{quote(safe_key, safe='')}")
     if result.get("ok"):
         data = result.get("data")
         if isinstance(data, dict):

@@ -33,30 +33,15 @@ def test_normalize_collection_suggestions_deduplicates_and_trims():
     assert normalized == ["Research > Agents", "Benchmarks"]
 
 
-def test_pending_queue_includes_collection_changes(monkeypatch):
-    captured: dict[str, object] = {}
-
-    def fake_insert_pending_changes(item_key: str, item_title: str, changes: list[dict[str, object]]) -> int:
-        captured["item_key"] = item_key
-        captured["item_title"] = item_title
-        captured["changes"] = changes
-        return len(changes)
-
-    monkeypatch.setattr(pending_service.triage_db, "insert_pending_changes", fake_insert_pending_changes)
-
+def test_pending_plan_includes_collection_changes():
     summary = _build_summary(
         reading_priority="must_read",
         suggested_collections=["Research > Agents", "Research > Agents", "Top Papers"],
     )
 
-    queued = pending_service.queue_changes_for_item("ABCD1234", "Example Paper", summary)
+    changes = pending_service.plan_changes_for_item("ABCD1234", "Example Paper", summary)
 
-    assert queued == 4
-    assert captured["item_key"] == "ABCD1234"
-    assert captured["item_title"] == "Example Paper"
-
-    changes = captured["changes"]
-    assert isinstance(changes, list)
+    assert len(changes) == 4
     assert [change["change_type"] for change in changes] == [
         "tag_changes",
         "add_note",

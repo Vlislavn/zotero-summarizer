@@ -3,31 +3,25 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import Review from './Review.jsx';
 import Triage from './Triage.jsx';
 import Pending from './Pending.jsx';
+import AdminSection from '../components/AdminSection.jsx';
+import ModelCard from '../components/ModelCard.jsx';
 
-// Ops surface — the former Feed Review / Triage Monitor / Pending Changes power
-// tools folded into ONE page with three tabs (Hick's/Miller's Law: three rarely-
-// used operator screens collapse to a single nav entry + a 3-choice tab strip,
-// not three top-level links). Each tab renders the existing, unmodified page body
-// (Review.jsx / Triage.jsx / Pending.jsx) so behavior is identical — those
-// components still own their own data + deep-link params (e.g. Review reads
-// ?state=gate_rejected from the URL).
-//
-// Tab selection comes from EITHER ?tab=<id> or the URL hash (#review etc.) so
-// the old per-page bookmarks keep working after App.jsx redirects:
-//   /review  -> /ops?tab=review   (+ any ?state passthrough)
-//   /triage  -> /ops?tab=triage
-//   /pending -> /ops?tab=pending
+function SystemOps() {
+  return <div className="space-y-4"><ModelCard /><AdminSection /></div>;
+}
+
+// Operator-only workflows share one tabbed surface; legacy deep links still work.
 
 const TABS = [
   { id: 'review', label: 'Feed review', Body: Review },
   { id: 'triage', label: 'Triage jobs', Body: Triage },
   { id: 'pending', label: 'Pending changes', Body: Pending },
+  { id: 'system', label: 'System', Body: SystemOps },
 ];
 
 const VALID_TABS = new Set(TABS.map((t) => t.id));
 const DEFAULT_TAB = 'review';
 
-// Read the desired tab from ?tab= first, then the #hash, defaulting to review.
 function readInitialTab(searchParams, hash) {
   const fromQuery = searchParams.get('tab');
   if (fromQuery && VALID_TABS.has(fromQuery)) return fromQuery;
@@ -42,15 +36,10 @@ export default function Ops() {
   const navigate = useNavigate();
   const [tab, setTab] = useState(() => readInitialTab(searchParams, hash));
 
-  // Keep the active tab in sync when the URL changes underneath us (e.g. a
-  // redirect from /review lands on /ops?tab=review, or a deep link with a hash).
   useEffect(() => {
     setTab(readInitialTab(searchParams, hash));
   }, [searchParams, hash]);
 
-  // On click, write ?tab= into the URL (replace — tab switches aren't history
-  // steps) while preserving any other params a body reads (e.g. ?state=). Drop a
-  // stale #hash so the canonical form is the query param.
   function selectTab(id) {
     setTab(id);
     const next = new URLSearchParams(searchParams);

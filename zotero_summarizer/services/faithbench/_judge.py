@@ -18,9 +18,11 @@ import json
 import logging
 import re
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, Callable
 
 from zotero_summarizer.services._common import extract_json_blob, now_iso_z, to_text
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.faithbench._constants import (
     CLAIM_JUDGE_TOP_K,
     MAX_CONTAINMENT_ANSWER_CHARS,
@@ -28,6 +30,8 @@ from zotero_summarizer.services.faithbench._constants import (
 )
 from zotero_summarizer.services.faithbench._corpus import (
     PaperSubstrate,
+    _CONTEXT_SEPARATOR,
+    _clip_chunks,
     load_frozen_text,
     normalize_text,
 )
@@ -36,7 +40,10 @@ from zotero_summarizer.services.faithbench._dataset import (
     QAItem,
     TrapItem,
     items_by_id,
+    _validate_item,
+    _benchmark_sha,
 )
+from zotero_summarizer.services.faithbench._build_claims import _claim_rows
 from zotero_summarizer.services.faithbench._judgment import (
     FailureReason,
     JudgeMethod,
@@ -44,15 +51,20 @@ from zotero_summarizer.services.faithbench._judgment import (
 )
 from zotero_summarizer.services.faithbench._runner import (
     RunInputs,
+    _repair_jsonl_tail,
     latest_by_key,
     load_jsonl,
+    trial_key,
+    _response_sha,
 )
+from zotero_summarizer.services.library._grounding import answer_is_supported_by_quote, quote_is_grounded
 
 LOGGER = logging.getLogger(__name__)
 
-_NUMBER_RE = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
+_NUMBER_RE = re.compile(r"[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?")
 
 _EQUIV_PROMPT = (
+    UNTRUSTED_INPUT_RULE + "\n\n"
     "You judge whether a candidate answer is factually equivalent to the gold "
     "answer for a question about an academic paper.\n"
     "- The gold answer is a VERBATIM span from the paper; the evidence sentence "
@@ -66,6 +78,7 @@ _EQUIV_PROMPT = (
 )
 
 _CLAIM_PROMPT = (
+    UNTRUSTED_INPUT_RULE + "\n\n"
     "You judge whether a claim about an academic paper is supported by the "
     "paper's text below.\n"
     '- "supported": the text states or directly entails the claim.\n'
@@ -84,6 +97,7 @@ _CLAIM_PROMPT = (
 # facts: a paper that never engages with a goal topic stays unsupported (that
 # is goal-projection hallucination, the failure this track must keep catching).
 _RELEVANCE_CLAIM_PROMPT = (
+    UNTRUSTED_INPUT_RULE + "\n\n"
     "You judge a claim taken from a recommendation that explains why an "
     "academic paper matters to a reader with these research goals:\n{goals}\n\n"
     "Such claims may rephrase the paper's content in the reader's goal "
@@ -106,15 +120,16 @@ _RELEVANCE_CLAIM_PROMPT = (
 # ---------------------------------------------------------------------------
 
 
-def parse_number(text: str) -> float | None:
-    match = _NUMBER_RE.search(text or "")
+def parse_number(text: str) -> Decimal | None:
+    """Only an entire scalar is numeric evidence; units/ranges need semantics."""
+    match = _NUMBER_RE.fullmatch((text or "").strip())
     if not match:
         return None
-    return float(match.group(0).replace(",", ""))
+    return Decimal(match.group(0).replace(",", ""))
 
 
 def hard_qa_judgment(
-    item: BenchmarkItem, response_row: dict[str, Any]
+    item: BenchmarkItem, response_row: dict[str, Any], paper_text: str = "",
 ) -> Judgment | None:
     """Rungs 1-7 of the ladder. ``None`` means undecided → escalate to the LLM."""
     if response_row.get("status") != "ok":
@@ -148,30 +163,36 @@ def hard_qa_judgment(
         )
 
     answer = str(parsed.get("answer") or "")
-    norm_gold, norm_answer = normalize_text(item.gold_answer), normalize_text(answer)
-
-    if norm_gold and norm_gold == norm_answer:  # rung: normalized exact
-        return Judgment(success=True, method=JudgeMethod.EXACT)
-
+    quote = str(parsed.get("quote") or "")
+    if paper_text and (
+        not quote_is_grounded(quote, paper_text)
+        or not answer_is_supported_by_quote(item.gold_answer, quote)
+    ):
+        return Judgment(
+            success=False, failure_reason=FailureReason.WRONG_ANSWER,
+            details="answer is not supported by a grounded response quote",
+        )
     if item.answer_type == "number":  # rung: numeric tolerance
+        if answer.strip() and answer.strip() == item.gold_answer.strip():
+            return Judgment(success=True, method=JudgeMethod.EXACT)
         gold_num, ans_num = parse_number(item.gold_answer), parse_number(answer)
-        if gold_num is not None and ans_num is not None:
-            if gold_num == ans_num:
-                return Judgment(success=True, method=JudgeMethod.NUMERIC)
-            if gold_num.is_integer() and ans_num.is_integer():
-                return Judgment(
-                    success=False, method=JudgeMethod.NUMERIC,
-                    failure_reason=FailureReason.WRONG_ANSWER,
-                    details=f"integer mismatch: gold {gold_num:g} vs answer {ans_num:g}",
-                )
-            denom = max(abs(gold_num), 1e-12)
-            if abs(gold_num - ans_num) / denom <= NUMERIC_REL_TOL:
-                return Judgment(success=True, method=JudgeMethod.NUMERIC)
-            return Judgment(
-                success=False, method=JudgeMethod.NUMERIC,
-                failure_reason=FailureReason.WRONG_ANSWER,
-                details=f"numeric mismatch: gold {gold_num:g} vs answer {ans_num:g}",
-            )
+        if gold_num is None or ans_num is None:
+            return None  # Do not normalize away signs/units or pass a contained prefix.
+        if gold_num == ans_num:
+            return Judgment(success=True, method=JudgeMethod.NUMERIC)
+        integers = gold_num == gold_num.to_integral_value() and ans_num == ans_num.to_integral_value()
+        denom = max(abs(gold_num), Decimal("1e-12"))
+        if not integers and abs(gold_num - ans_num) / denom <= Decimal(str(NUMERIC_REL_TOL)):
+            return Judgment(success=True, method=JudgeMethod.NUMERIC)
+        return Judgment(
+            success=False, method=JudgeMethod.NUMERIC,
+            failure_reason=FailureReason.WRONG_ANSWER,
+            details=f"numeric mismatch: gold {gold_num:g} vs answer {ans_num:g}",
+        )
+
+    norm_gold, norm_answer = normalize_text(item.gold_answer), normalize_text(answer)
+    if norm_gold and norm_gold == norm_answer:  # rung: normalized exact (non-numeric)
+        return Judgment(success=True, method=JudgeMethod.EXACT)
 
     # rung: span containment, capped to block answer-dumping
     if (
@@ -207,19 +228,23 @@ def judge_equivalence(
     judge_llm: Any, *, item: QAItem, answer: str, judge_model: str
 ) -> Judgment:
     prompt = _EQUIV_PROMPT.format(
-        question=item.question, gold=item.gold_answer,
-        evidence=item.evidence_sentence or "(none recorded)", candidate=answer,
+        question=untrusted_input(item.question), gold=untrusted_input(item.gold_answer),
+        evidence=untrusted_input(item.evidence_sentence or "(none recorded)"),
+        candidate=untrusted_input(answer),
     )
     try:
         payload = _judge_json(judge_llm, prompt)
+        equivalent = payload.get("equivalent")
+        if not isinstance(equivalent, bool):
+            raise ValueError("equivalent must be a JSON boolean")
     except Exception as exc:  # tri-state contract: judge failure ≠ model failure
         return Judgment(
             success=None, failure_reason=FailureReason.JUDGE_ERROR,
-            details=f"judge call failed after retry: {type(exc).__name__}: {exc}",
+            details=f"equivalence judge failed: {type(exc).__name__}: {exc}",
             judge_model=judge_model,
         )
     raw = json.dumps(payload, ensure_ascii=False)
-    if bool(payload.get("equivalent")):
+    if equivalent:
         return Judgment(
             success=True, method=JudgeMethod.LLM_JUDGE,
             judge_model=judge_model, judge_raw=raw,
@@ -247,12 +272,14 @@ def judge_claim(
     def render(context: str) -> str:
         if relevance:
             return _RELEVANCE_CLAIM_PROMPT.format(
-                goals=research_goals, claim=claim, context=context
+                goals=untrusted_input(research_goals), claim=untrusted_input(claim),
+                context=untrusted_input(context),
             )
-        return _CLAIM_PROMPT.format(claim=claim, context=context)
+        return _CLAIM_PROMPT.format(
+            claim=untrusted_input(claim), context=untrusted_input(context))
 
-    chunks = substrate.index.top_chunks(claim, CLAIM_JUDGE_TOP_K)
-    context = "\n\n[...]\n\n".join(chunks) if chunks else substrate.text[:max_chars]
+    chunks = _clip_chunks(substrate.index.top_chunks(claim, CLAIM_JUDGE_TOP_K), max_chars)
+    context = _CONTEXT_SEPARATOR.join(chunks) if chunks else substrate.text[:max_chars]
     try:
         payload = _judge_json(judge_llm, render(context))
         verdict = str(payload.get("verdict") or "").strip().lower()
@@ -285,10 +312,11 @@ def judge_claim(
 # ---------------------------------------------------------------------------
 
 
-def _judged_keys(rows: list[dict[str, Any]]) -> set[tuple[str, str, int, int | None]]:
+def _judged_keys(rows: list[dict[str, Any]], *, context: dict, response_hashes: dict) -> set[tuple[str, str, int, int | None]]:
     return {
         (str(r["item_id"]), str(r["condition"]), int(r["run_number"]), r.get("claim_idx"))
         for r in rows
+        if r.get("judge_context") == context and r.get("response_sha256") == response_hashes.get(trial_key(r))
     }
 
 
@@ -302,6 +330,7 @@ class _JudgeContext:
 
     by_id: dict[str, BenchmarkItem]
     harness_faults: dict[str, str]
+    item_faults: dict[str, str]
     substrates: dict[str, PaperSubstrate]
     already: set[_JudgedKey]
     judge_llm: Any
@@ -313,21 +342,21 @@ class _JudgeContext:
 
 
 def _judge_qa_row(row: dict[str, Any], *, item_id: str, ctx: _JudgeContext) -> None:
-    paper_key = item_id.split(":", 2)[1] if ":" in item_id else ""
     key = (item_id, str(row["condition"]), int(row["run_number"]), None)
     if key in ctx.already:
         ctx.counts["skipped"] += 1
         return
-    if paper_key in ctx.harness_faults:
+    if item_id in ctx.item_faults:
         ctx.emit(row, Judgment(success=None, failure_reason=FailureReason.HARNESS_FAULT,
-                               details=ctx.harness_faults[paper_key]), None)
+                               details=ctx.item_faults[item_id]), None)
         return
     item = ctx.by_id.get(item_id)
     if item is None:
         ctx.emit(row, Judgment(success=None, failure_reason=FailureReason.HARNESS_FAULT,
                                details=f"{item_id} not in benchmark file"), None)
         return
-    verdict = hard_qa_judgment(item, row)
+    verdict = hard_qa_judgment(
+        item, row, ctx.substrates[item.paper_item_key].text)
     if verdict is None:
         ctx.counts["escalated"] += 1
         assert isinstance(item, QAItem)
@@ -340,27 +369,31 @@ def _judge_qa_row(row: dict[str, Any], *, item_id: str, ctx: _JudgeContext) -> N
 
 
 def _judge_claims_row(row: dict[str, Any], *, item_id: str, paper_key: str, ctx: _JudgeContext) -> None:
+    key = (item_id, str(row["condition"]), int(row["run_number"]), None)
+    if key in ctx.already:
+        ctx.counts["skipped"] += 1
+        return
     if row.get("status") != "ok":
-        key = (item_id, str(row["condition"]), int(row["run_number"]), None)
-        if key not in ctx.already:
-            ctx.emit(row, Judgment(success=False, failure_reason=FailureReason.MODEL_ERROR,
-                                   details=str(row.get("error") or "trial raised")), None)
+        ctx.emit(row, Judgment(success=False, failure_reason=FailureReason.MODEL_ERROR,
+                               details=str(row.get("error") or "trial raised")), None)
         return
     if paper_key in ctx.harness_faults:
-        key = (item_id, str(row["condition"]), int(row["run_number"]), None)
-        if key not in ctx.already:
-            ctx.emit(row, Judgment(success=None, failure_reason=FailureReason.HARNESS_FAULT,
-                                   details=ctx.harness_faults[paper_key]), None)
+        ctx.emit(row, Judgment(success=None, failure_reason=FailureReason.HARNESS_FAULT,
+                               details=ctx.harness_faults[paper_key]), None)
         return
     # Mirror the QA track: an unknown/empty paper (rebuilt/edited benchmark)
     # is a harness fault, not an uncaught KeyError on substrates[paper_key].
     if not paper_key or paper_key not in ctx.substrates:
-        key = (item_id, str(row["condition"]), int(row["run_number"]), None)
-        if key not in ctx.already:
-            ctx.emit(row, Judgment(success=None, failure_reason=FailureReason.HARNESS_FAULT,
-                                   details=f"paper {paper_key!r} not in benchmark file"), None)
+        ctx.emit(row, Judgment(success=None, failure_reason=FailureReason.HARNESS_FAULT,
+                               details=f"paper {paper_key!r} not in benchmark file"), None)
         return
-    claims = list(((row.get("parsed") or {}).get("claims")) or [])
+    parsed = row.get("parsed")
+    try:
+        claims = _claim_rows(parsed.get("claims") if isinstance(parsed, dict) else None)
+    except ValueError as exc:
+        ctx.emit(row, Judgment(success=False, failure_reason=FailureReason.MALFORMED_RESPONSE,
+                               details=str(exc)), None)
+        return
     for claim_idx, entry in enumerate(claims):
         key = (item_id, str(row["condition"]), int(row["run_number"]), claim_idx)
         if key in ctx.already:
@@ -389,16 +422,17 @@ def judge_run(
 ) -> dict[str, int]:
     """Judge every response trial (latest row per trial key). Independently
     resumable; ``force=True`` discards prior judgments and re-judges all —
-    responses are never touched, so judge-model ablations are free.
+    Complete responses are unchanged; interrupted EOF recovery archives the original.
 
     ``research_goals`` (the run's snapshot, "; "-joined) switches read_why
     claims to the goal-aware support standard; empty → paper-only for all."""
     meta, items, papers_dir, paths = inputs.meta, inputs.items, inputs.papers_dir, inputs.paths
     by_id = items_by_id(items)
+    _repair_jsonl_tail(paths.responses)
     responses = list(latest_by_key(load_jsonl(paths.responses)).values())
     if force and paths.judgments.exists():
         paths.judgments.unlink()
-    already = _judged_keys(load_jsonl(paths.judgments))
+    _repair_jsonl_tail(paths.judgments)
 
     substrates: dict[str, PaperSubstrate] = {}
     harness_faults: dict[str, str] = {}
@@ -414,7 +448,24 @@ def judge_run(
             continue
         substrates[paper.item_key] = PaperSubstrate.from_text(text)
 
+    item_faults: dict[str, str] = {}
+    texts = {key: substrate.text for key, substrate in substrates.items()}
+    for item in items:
+        if item.paper_item_key in harness_faults:
+            item_faults[item.item_id] = harness_faults[item.paper_item_key]
+            continue
+        try:
+            _validate_item(item, meta, texts)
+        except ValueError as exc:
+            # Ground-truth defects are explicit harness faults, never model failures.
+            item_faults[item.item_id] = str(exc)
+
     counts = {"judged": 0, "skipped": 0, "escalated": 0}
+    context = {"benchmark_sha256": _benchmark_sha(meta, items), "model": judge_model,
+               "max_text_chars": max_text_chars, "research_goals": research_goals,
+               "paper_faults": harness_faults, "item_faults": item_faults}
+    already = _judged_keys(load_jsonl(paths.judgments), context=context,
+                           response_hashes={trial_key(row): _response_sha(row) for row in responses})
 
     def emit(row_id: dict[str, Any], judgment: Judgment, claim_idx: int | None = None) -> None:
         record = {
@@ -422,13 +473,14 @@ def judge_run(
             "track": row_id.get("track"), "condition": row_id["condition"],
             "run_number": row_id["run_number"], "claim_idx": claim_idx,
             "judged_at": now_iso_z(), **judgment.to_row(),
+            "response_sha256": _response_sha(row_id), "judge_context": context,
         }
         with paths.judgments.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
         counts["judged"] += 1
 
     ctx = _JudgeContext(
-        by_id=by_id, harness_faults=harness_faults, substrates=substrates,
+        by_id=by_id, harness_faults=harness_faults, item_faults=item_faults, substrates=substrates,
         already=already, judge_llm=judge_llm, judge_model=judge_model,
         max_text_chars=max_text_chars, research_goals=research_goals,
         emit=emit, counts=counts,

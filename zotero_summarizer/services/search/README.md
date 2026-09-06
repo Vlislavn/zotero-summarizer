@@ -5,6 +5,9 @@ This domain is *pull*: you give a research topic, and it federates the open
 literature + (later) your library, ranks by real relevance, and deep-reads a few —
 a query-scoped research session, not a standing feed.
 
+Intent parsing and agentic refinement wrap user queries, questions and retrieved
+metadata with the shared escaped untrusted-input boundary before any LLM call.
+
 ```
 topic + questions
    │  intent.parse_intent (1 LLM call; raw-query fallback if garbled — spec §7)
@@ -99,7 +102,8 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
   never a junk auto-create), builds a create-item payload FROM the Candidate (a LIST
   of authors + `publication_date`, NOT the ranker's `to_scoring_dict` shape), writes
   atomically via `apply_feed_materialization` (a locked DB after retries → 503, no
-  fake success), then stamps `materialized_zotero_key` back. The whole
+  fake success). A coverage hit reuses `existing_zotero_key` instead of creating a
+  duplicate; either path then stamps `materialized_zotero_key` back. The whole
   check-write-stamp runs under the session lock (`session.materialize_once`), so a
   concurrent auto-review can't lose the key AND two simultaneous Add clicks on one
   candidate write exactly once. Idempotent (re-add returns the existing key).
@@ -115,14 +119,58 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
 | `rank.py` | cross-encoder `query_score` + the constrained re-rank contract |
 | `_relevance.py` | pool-relative `relevance_band` (strong/on_topic/weak — cohort terciles of `query_score` + an absolute floor so an all-bad pool gets no "strong") + ≤3 `why` chips (relevance, cross-source agreement, quality grade/band, version standing). Mirrors `daily_select/_relevance`; attached in `run_screen` and re-derived after the review re-rank |
 | `review.py` | `light_review` (quality tier) + `select_deep_set` |
-| `_targeted_review.py` | query-lensed deep read (composes library read-only layers) |
+| `_targeted_review.py` | query-lensed deep read (composes library read-only layers; sections are currently empty, so that unused parameter is not exposed) |
 | `_fulltext.py` | OA full-text acquisition for a federated (non-Zotero) candidate: PMC → Europe PMC `fullTextXML` (a PMCID hit), else identifier → OA PDF |
-| `pipeline.py` | `run_screen` (fast) + `run_review` (slow) + `SearchDeps`/`default_deps` |
-| `materialize.py` | the one Search→Zotero write: `materialize_candidate(session_id, candidate_id, collection_key)` — resolve+validate collection (pre-lock 400), Candidate→feed_payload adapter, then check-write-stamp under the session lock via `session.materialize_once` (concurrent Adds write once) |
-| `refine.py` | agentic PRF rounds (Phase E, off by default `ZS_SEARCH_AGENTIC`): one LLM call reads the top results → a concept delta (add under-covered facets, drop off-topic drift) → federate ONLY the delta → union into the existing families → re-score/rank/band → record a per-round summary. Bounded rounds; stops when the LLM proposes no additions or the strong band stabilizes. Runs BEFORE auto-review so the deep set comes from the refined pool |
+| `pipeline.py` | `run_screen` (fast) + `run_review` (slow) + dependencies; strict offline rejects before external search |
+| `materialize.py` | the one Search→Zotero write: `materialize_candidate(session_id, candidate_id, collection_key)` — resolve+validate collection (pre-lock 400), reuse a coverage hit or adapt Candidate→feed_payload, then check-write-stamp under the session lock via `session.materialize_once` (concurrent Adds write once) |
+| `refine.py` | bounded opt-in agentic PRF before auto-review; no-ops under strict offline |
 | `session.py` | one-JSON-per-session persistence under `settings().search_dir` + per-session lock: `claim` (status CAS, single-flights the worker), `save_merge` (whole-session save that preserves a concurrent Add's `materialized_zotero_key`), `update` (read-modify-write), `materialize_once` (Add's check-write-stamp under the lock, single-write). Malformed id → `APIError(400)` |
 
+## Execution and identity boundaries
+
+Screening accepts a nonblank topic of at most 4,000 characters and up to ten
+nonblank questions of at most 1,000 characters each. The existing `ScreenRequest`
+now lives in `_models`; HTTP, direct screening and persisted review/claim reuse
+it. Surrounding whitespace is trimmed; invalid entries are rejected, not dropped.
+These are interactive work ceilings, not estimates of model capacity.
+
+Strict offline rejects screening, review claims, dependency construction and
+full-text acquisition with `strict_offline` before model/source work. A saved
+online session cannot bypass the rule by being reviewed after restart offline.
+Reading saved results and explicitly filing a result locally remain available.
+
+Every candidate carries a persisted `candidate_id`, included in HTTP JSON.
+Unidentified observations get UUIDs, never title hashes; metadata enrichment
+keeps the existing family's first address while selecting the richest metadata.
+Legacy unidentified rows derive stable session/slot addresses on read, persisted
+by the next ordinary save. Duplicate/invalid persisted addresses fail before
+targeting or publication. Previously misattributed historical Zotero keys cannot
+be inferred or repaired automatically; existing saved values are preserved.
+
+`QueryPlan.display()` is now the server's actual wire projection: React renders
+its ordered `{source, query}` rows, including repeated source variants and
+OpenReview. It is recomputed from the raw plan when loaded; a saved display copy
+is not authoritative. The unused taxonomy constant, scoring adapter and
+`version_family_id` field are removed (old extra JSON fields remain ignored).
+Search notes reuse the existing provenance marker plus escaped title/query/text;
+they no longer pass a string to the structured triage-summary renderer.
+
 ## Deferred (ponytail seams, known ceilings)
+
+Parsed include/exclude terms and study types are executable QueryPlan fields.
+After source union/dedup, every channel (including semantic/library hits) obeys
+the same title/abstract gate: every required phrase, no excluded phrase, and any
+requested study-type phrase. Matching is case-insensitive and whole-token, with
+punctuation normalized; missing metadata cannot establish a required match.
+This is literal filtering, not semantic confirmation of a study's methodology.
+The plan panel exposes these local constraints. OpenAlex lexical/Europe PMC use
+Boolean constraints and synonym alternatives; semantic channels receive explicit
+constraints in prose. arXiv retains its precision/recall queries and relies on
+the local gate, as does Crossref's broad metadata retrieval. Refinement drop terms
+constrain subsequent fetches but cannot override an explicit required term.
+
+OA PDF acquisition explicitly passes the selected `Settings.pdf_cache_dir`
+(`data/pdfs/`), shared with Library acquisition only within the same project.
 
 - **Library channel**: `federate` already accepts a `LibraryFinder`; wiring it needs
   DOI/arXiv identifier columns on `corpus_embeddings` so a library hit can

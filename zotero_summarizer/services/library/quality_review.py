@@ -12,10 +12,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import ValidationError
-
 from zotero_summarizer.models import GoalsConfig, PaperDigest
 from zotero_summarizer.services._common import extract_json_blob, to_text
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.library._review_text import select_review_text
 
 # Reinforced-retry suffix: a reasoning model (e.g. a remote endpoint) occasionally
@@ -24,7 +23,10 @@ from zotero_summarizer.services.library._review_text import select_review_text
 _STRICT_RETRY_SUFFIX = (
     "\n\nIMPORTANT: your previous reply was not valid. Return ONE JSON object only "
     "(no prose, no code fences). Every score field (soundness/novelty/significance/"
-    "reproducibility/clarity) MUST be an integer from 1 to 5 — never 0."
+    "reproducibility/clarity) MUST be an integer from 1 to 5 — never 0. Include "
+    "all reading-action and writing fields explicitly. Reading action MUST be read, skim or skip. "
+    "Read/skim need a concrete "
+    "reason, exact target, positive minute estimate, and original-only value."
 )
 
 
@@ -50,9 +52,36 @@ def build_response_format(model: type) -> dict[str, Any]:
 def _coerce_digest(raw: Any) -> PaperDigest:
     """Build a ``PaperDigest`` from an LLM reply, salvaging prose-embedded/fenced JSON.
     Raises ``ValidationError``/``ValueError`` when the reply can't yield a valid digest."""
-    if isinstance(raw, PaperDigest):
-        return raw
-    return PaperDigest.model_validate(extract_json_blob(to_text(raw)))
+    digest = raw if isinstance(raw, PaperDigest) else PaperDigest.model_validate(extract_json_blob(to_text(raw)))
+    required = {
+        "read_decision", "read_why", "read_parts", "skip_parts",
+        "estimated_read_minutes", "original_value", "writing_friction", "writing_reasons",
+    }
+    if not required <= digest.model_fields_set:
+        raise ValueError("digest omitted required reading or writing assessment")
+    if digest.read_decision not in {"read", "skim", "skip"}:
+        raise ValueError("digest reading action must be read, skim or skip")
+    if digest.read_decision in {"read", "skim"}:
+        if not digest.read_why.strip() or not any(part.strip() for part in digest.read_parts):
+            raise ValueError("read/skim requires a reason and exact target")
+        if not digest.original_value.strip() or not (digest.estimated_read_minutes or 0) > 0:
+            raise ValueError("read/skim requires original-only value and positive minutes")
+    return digest
+
+
+def _verify_generated_digest(
+    digest: PaperDigest, text: str, verifier: Any, generator: Any, goals: str,
+) -> None:
+    from zotero_summarizer.services.library._digest_verification import (
+        DigestVerifierUnavailable, verify_digest,
+    )
+
+    try:
+        verify_digest(digest, text, verifier, research_goals=goals)
+    except DigestVerifierUnavailable:
+        if verifier is generator:
+            raise
+        verify_digest(digest, text, generator, research_goals=goals)
 
 # Fallback when goals.yaml has no `prompts.paper_digest`. A referee-grade digest
 # (NeurIPS/ICLR rubric) condensed into scannable fields, personalised to the
@@ -82,14 +111,26 @@ _DEFAULT_DIGEST_PROMPT = (
     "object with these fields:\n"
     '- "tldr": the paper\'s main contribution in one sentence.\n'
     '- "verdict": a one-line referee summary judgement (what it does + how convincingly).\n'
+    "Start at `skip`. Use `read` ONLY if all hold: direct active-goal support; the "
+    "original may change a current decision; compression loses important nuance; evidence "
+    "is strong; avoidable writing friction is not high; and the contribution is not redundant. Otherwise skim/skip.\n"
     '- "read_decision": exactly one of "read", "skim", "skip".\n'
-    '- "read_why": one short clause justifying the decision.\n'
-    '- "read_parts": sections/figures worth reading (<=3 short items; [] if skip).\n'
+    '- "read_why": a concrete reason; for skip, say the original adds little value now.\n'
+    '- "read_parts": 1-4 exact section/figure/table/appendix/code locators for skim/read; [] for skip.\n'
+    '- "skip_parts": low-value parts safe to ignore ([] if none).\n'
+    '- "estimated_read_minutes": total minutes for the recommended action (null if unknown).\n'
+    '- "original_value": what opening the original adds beyond this digest ("" for skip).\n'
+    "Audit writing independently BEFORE choosing the reading action. Actively seek recurring counterexamples to: "
+    "central terms before use; one stated axis per taxonomy; signposted abstraction shifts; explicit claim/evidence "
+    "links. Ignore isolated typos, technical depth, study validity, weak evidence, and sophistication. MUST return both "
+    "writing fields: zero counterexamples = low, one = moderate, two or more or a reconstructed central argument = high.\n"
+    '- "writing_friction": exactly "low", "moderate", or "high" from the counterexample count.\n'
+    '- "writing_reasons": each concrete counterexample (1-3 for moderate/high; [] for low).\n'
     '- "relevance": how it connects to the reader\'s research goals above (one sentence; "" if none).\n'
     '- "controversies": the most debatable claim and why it is contestable (one sentence; "" if none).\n'
     '- "impact": likely effect on the field if the claims hold (one sentence).\n'
     '- "unknown_unknowns": a useful implication the reader likely did not consider (one sentence).\n'
-    '- "implementation": concrete steps to apply or reproduce the method (<=3 bullets; [] if n/a).\n'
+    '- "implementation": concrete reusable steps/artifacts only (<=3 bullets; [] if unsupported).\n'
     '- "executive_summary": 3-5 sentence neutral overview — what the paper is, its contribution, the headline result.\n'
     '- "key_findings": up to 5 concrete findings, each with its metric/number when stated (list of short strings).\n'
     '- "methods": dataset provenance, preprocessing, architecture and training setup, in one sentence.\n'
@@ -119,6 +160,7 @@ _DEFAULT_DIGEST_PROMPT = (
 def assess_digest(
     *, title: str, full_text: str, config: GoalsConfig, llm: Any, focus_prompt: str = "",
     max_chars: int | None = None, prefix: bool = False, response_format: dict[str, Any] | None = None,
+    verifier_llm: Any = None,
 ) -> PaperDigest:
     """Condensed paper digest (quality + the user's 7-point investigation) from
     the full text (must be non-empty). Personalised to ``config.research_goals``.
@@ -142,10 +184,13 @@ def assess_digest(
     # ``prefix`` bypasses ranking for the naive-truncate A/B baseline.
     text = full_text[:cap] if prefix else select_review_text([], full_text, budget=cap)
     goals = "; ".join(g for g in (config.research_goals or []) if str(g).strip()) or "(not specified)"
-    prompt = template.format(title=title or "Untitled", full_text=text, research_goals=goals)
+    prompt = UNTRUSTED_INPUT_RULE + "\n\n" + template.format(
+        title=untrusted_input(title or "Untitled"), full_text=untrusted_input(text),
+        research_goals=untrusted_input(goals),
+    )
     if focus_prompt:
         prompt += (
-            f"\n\nReader's focus note: {focus_prompt}\n"
+            f"\n\nReader's focus note: {untrusted_input(focus_prompt)}\n"
             "Please adjust your review emphasis to highlight or downplay aspects matching this focus."
         )
     # onprem/remote returns the raw (often empty or out-of-range) string when its own
@@ -158,7 +203,22 @@ def assess_digest(
     extra = {"response_format": response_format} if response_format else {}
     try:
         digest = _coerce_digest(llm.pydantic_prompt(prompt=prompt, pydantic_model=PaperDigest, **extra))
-    except (ValidationError, ValueError):
+    except ValueError:
         retry = llm.pydantic_prompt(prompt=prompt + _STRICT_RETRY_SUFFIX, pydantic_model=PaperDigest, **extra)
         digest = _coerce_digest(retry)
-    return digest.model_copy(update={"basis": "full_text"})
+    digest = digest.model_copy(update={"basis": "full_text"})
+    verifier = verifier_llm or llm
+    try:
+        _verify_generated_digest(digest, text, verifier, llm, goals)
+    except ValueError as exc:
+        correction = llm.pydantic_prompt(
+            prompt=(
+                prompt + "\n\nThe previous digest failed source verification: "
+                + str(exc) + "\nReturn a corrected, fully source-grounded JSON digest only."
+            ),
+            pydantic_model=PaperDigest,
+            **extra,
+        )
+        digest = _coerce_digest(correction).model_copy(update={"basis": "full_text"})
+        _verify_generated_digest(digest, text, verifier, llm, goals)
+    return digest

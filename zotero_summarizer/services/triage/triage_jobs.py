@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from threading import Event
 import uuid
 from typing import Any
 
@@ -11,6 +12,7 @@ from zotero_summarizer.domain import EXPLICIT_FEEDBACK_SIGNALS, feedback_verdict
 from zotero_summarizer.models import SummarizeRequest, TriageRunRequest, TriageRunResponse
 from zotero_summarizer.services.zotero import pending
 from zotero_summarizer.services.triage import summarization
+from zotero_summarizer.services.triage._execution import JobStopped, check_cancelled, run_blocking
 from zotero_summarizer.services._common import (
     LOGGER, build_log_prefix, effective_llm_concurrency, now_iso, settings, state,
     unique_non_empty_strings,
@@ -21,6 +23,12 @@ from zotero_summarizer.storage import repositories as triage_db
 
 TRIAGE_START_LOCK = asyncio.Lock()
 TRIAGE_JOB_CONCURRENCY: int | None = None
+_ACTIVE: dict[str, tuple[asyncio.Task, Event]] = {}
+
+
+async def _persist_job(job: dict[str, Any]) -> None:
+    async with TRIAGE_START_LOCK:
+        await run_blocking(triage_db.upsert_triage_job, _job_snapshot(job))
 
 
 def new_job(item_keys: list[str], queue_changes: bool = True) -> dict[str, Any]:
@@ -35,8 +43,7 @@ def new_job(item_keys: list[str], queue_changes: bool = True) -> dict[str, Any]:
         "updated_at": current_time,
         "total": len(normalized),
         "completed": 0,
-        "current_item_key": "",
-        "current_title": "",
+        "active_items": {},
         "queue_changes": bool(queue_changes),
         "item_keys": normalized,
         "results": [],
@@ -59,11 +66,12 @@ def _job_snapshot(job: dict[str, Any]) -> dict[str, Any]:
     """Shallow copy with the mutable lists copied.
 
     The job dict is mutated on the event loop (worker is a coroutine), but
-    ``upsert_triage_job`` runs in a worker thread via ``to_thread`` and
+    ``upsert_triage_job`` runs in a worker thread and
     serialises those lists. Handing it a snapshot guarantees the thread never
     iterates a list the event loop could mutate at an await boundary.
     """
     snap = dict(job)
+    snap.pop("active_items", None)  # Live work is not resumable progress.
     snap["results"] = list(job.get("results") or [])
     snap["errors"] = list(job.get("errors") or [])
     snap["item_keys"] = list(job.get("item_keys") or [])
@@ -74,7 +82,7 @@ def trim_job_cache(jobs: dict[str, dict[str, Any]], keep: int = 20) -> None:
     if len(jobs) <= keep:
         return
     ordered = sorted(jobs.values(), key=lambda row: str(row.get("started_at", "")), reverse=True)
-    keep_ids = {str(job.get("job_id")) for job in ordered[:keep]}
+    keep_ids = {str(job.get("job_id")) for job in ordered[:keep]} | _ACTIVE.keys()
     for job_id in list(jobs.keys()):
         if job_id not in keep_ids:
             jobs.pop(job_id, None)
@@ -88,51 +96,40 @@ def public_triage_job(job: dict[str, Any]) -> dict[str, Any]:
         "updated_at": str(job.get("updated_at") or ""),
         "total": int(job.get("total") or 0),
         "completed": int(job.get("completed") or 0),
-        "current_item_key": str(job.get("current_item_key") or ""),
-        "current_title": str(job.get("current_title") or ""),
+        "active_items": [{"item_key": key, "title": title} for key, title in job.get("active_items", {}).items()],
         "results": list(job.get("results") or []),
         "errors": list(job.get("errors") or []),
     }
 
 
-def _collect_processed_keys(existing_results: list, existing_errors: list) -> set[str]:
-    """Item keys already handled (from prior results/errors), so a resume skips them."""
-    processed: set[str] = set()
-    for row in existing_results:
-        key = str((row or {}).get("item_key") or "").strip()
-        if key:
-            processed.add(key)
-    for row in existing_errors:
-        key = str((row or {}).get("item_key") or "").strip()
-        if key and key != "job":
-            processed.add(key)
-    return processed
-
-
 @dataclass
 class _TriageJobCtx:
-    job: dict[str, Any]
     reader: Any
     job_id: str
     item_positions: dict[str, int]
     total: int
     queue_changes: bool
+    active_items: dict[str, str]
+    stop: Event = field(default_factory=Event)
 
 
 async def _summarize_job_item(item_key: str, ctx: _TriageJobCtx) -> dict[str, Any]:
-    """Summarize one item for a triage job; returns its outcome dict (never raises)."""
-    if str(ctx.job.get("status") or "") == "cancelled":
+    """Return an explicit success/error/stop outcome; task cancellation propagates."""
+    if ctx.stop.is_set():
         return {"item_key": item_key, "cancelled": True}
     if ctx.reader is None:
         raise APIError(error="zotero_unavailable", message="Zotero reader is unavailable", status_code=503)
 
     title = f"Item {item_key}"
+    ctx.active_items[item_key] = title
     try:
-        detail = await asyncio.to_thread(ctx.reader.get_item_detail, item_key)
+        detail = await run_blocking(ctx.reader.get_item_detail, item_key, stop=ctx.stop)
+        check_cancelled(ctx.stop)
         if not detail:
             raise APIError(error="not_found", message=f"Item {item_key} not found", status_code=404)
 
         title = str(detail.get("title") or title)
+        ctx.active_items[item_key] = title
         pdf_path = str(detail.get("pdf_path") or "")
         if not pdf_path:
             raise ExtractionError("No local PDF attachment available for this item")
@@ -147,18 +144,19 @@ async def _summarize_job_item(item_key: str, ctx: _TriageJobCtx) -> dict[str, An
             request, item_id=item_key, batch_id=ctx.job_id,
             index=ctx.item_positions.get(item_key), total=ctx.total,
         )
-        summary = await asyncio.wait_for(
-            asyncio.to_thread(summarization.run_pipeline, request, prefix),
-            timeout=settings().summary_timeout_seconds,
+        summary = await run_blocking(
+            summarization.run_pipeline, request, prefix, cancel_event=ctx.stop,
+            stop=ctx.stop, timeout=settings().summary_timeout_seconds,
         )
-        await asyncio.to_thread(
-            triage_db.insert_result, item_key, title, summary.model_dump(),
-            None, None, None, None, None, pdf_path,
-        )
-
-        queued_change_count = 0
+        check_cancelled(ctx.stop)
+        changes = []
         if ctx.queue_changes:
-            queued_change_count = await asyncio.to_thread(pending.queue_changes_for_item, item_key, title, summary)
+            changes = await run_blocking(pending.plan_changes_for_item, item_key, title, summary, stop=ctx.stop)
+        queued_change_count = await run_blocking(
+            triage_db.insert_result, item_key, title, summary.model_dump(),
+            pdf_path=pdf_path, pending_changes=changes, stop=ctx.stop,
+        )
+        check_cancelled(ctx.stop)
 
         return {
             "item_key": item_key,
@@ -169,24 +167,39 @@ async def _summarize_job_item(item_key: str, ctx: _TriageJobCtx) -> dict[str, An
             "composite_relevance_score": summary.composite_relevance_score,
             "queued_change_count": queued_change_count,
         }
+    except JobStopped:
+        return {"item_key": item_key, "cancelled": True}
     except Exception as exc:
         LOGGER.warning("Job %s failed item=%s", ctx.job_id, item_key, exc_info=True)
-        return {"item_key": item_key, "title": title, "ok": False, "error": str(exc)}
+        return {"item_key": item_key, "title": title, "ok": False, "error": str(exc) or type(exc).__name__}
+    finally:
+        del ctx.active_items[item_key]
 
 
 async def run_triage_job_worker(job_id: str, item_keys: list[str], queue_changes: bool) -> None:
+    stop = Event()
+    _ACTIVE[job_id] = (asyncio.current_task(), stop)
+    try:
+        await _run_job(job_id, item_keys, queue_changes, stop)
+    finally:
+        _ACTIVE.pop(job_id, None)
+
+
+async def _run_job(job_id: str, item_keys: list[str], queue_changes: bool, stop: Event) -> None:
     app_state = state()
     jobs: dict[str, dict[str, Any]] = app_state.triage_jobs
     job = jobs.get(job_id)
     if job is None:
         return
+    if job["status"] in {"cancelled", "cancelling"}:
+        job["status"] = "cancelled"
+        await _persist_job(job)
+        return
 
     normalized_item_keys = unique_non_empty_strings(item_keys)
     item_positions = {item_key: idx + 1 for idx, item_key in enumerate(normalized_item_keys)}
 
-    processed_keys = _collect_processed_keys(
-        list(job.get("results") or []), list(job.get("errors") or []),
-    )
+    processed_keys = {row["item_key"] for row in job["results"]}
 
     remaining_keys = [item_key for item_key in normalized_item_keys if item_key not in processed_keys]
     effective_concurrency = _effective_concurrency(len(remaining_keys))
@@ -195,77 +208,67 @@ async def run_triage_job_worker(job_id: str, item_keys: list[str], queue_changes
     job["queue_changes"] = bool(queue_changes)
     job["total"] = len(normalized_item_keys)
     job["completed"] = min(len(normalized_item_keys), len(processed_keys))
-    if str(job.get("status") or "") != "cancelled":
-        job["status"] = "running"
+    job["status"] = "running"
+    job["errors"] = []  # Errors describe this attempt; only successes survive resume.
+    job["active_items"] = {}
     job["updated_at"] = now_iso()
-    await asyncio.to_thread(triage_db.upsert_triage_job, _job_snapshot(job))
-
     try:
+        await _persist_job(job)
         reader = get_zotero_reader_or_raise()
         ctx = _TriageJobCtx(
-            job=job, reader=reader, job_id=job_id, item_positions=item_positions,
-            total=len(normalized_item_keys), queue_changes=queue_changes,
+            reader=reader, job_id=job_id, item_positions=item_positions,
+            total=len(normalized_item_keys), queue_changes=queue_changes, stop=stop,
+            active_items=job["active_items"],
         )
         cursor = 0
         while cursor < len(remaining_keys):
-            if str(job.get("status") or "") == "cancelled":
+            if stop.is_set():
                 break
 
             batch = remaining_keys[cursor : cursor + effective_concurrency]
             cursor += len(batch)
-            tasks = [asyncio.create_task(_summarize_job_item(item_key, ctx)) for item_key in batch]
-            for completed_task in asyncio.as_completed(tasks):
-                outcome = await completed_task
-                item_key = str(outcome.get("item_key") or "").strip()
-                if not item_key or item_key in processed_keys:
-                    continue
-                if bool(outcome.get("cancelled")):
-                    continue
-
-                processed_keys.add(item_key)
-                if bool(outcome.get("ok")):
-                    job["results"].append(
-                        {
-                            "item_key": item_key,
-                            "title": str(outcome.get("title") or f"Item {item_key}"),
-                            "reading_priority": str(outcome.get("reading_priority") or ""),
-                            "relevance_score": float(outcome.get("relevance_score") or 0),
-                            "composite_relevance_score": float(outcome.get("composite_relevance_score") or 0),
-                            "queued_change_count": int(outcome.get("queued_change_count") or 0),
-                        }
-                    )
-                else:
-                    job["errors"].append(
-                        {
-                            "item_key": item_key,
-                            "error": str(outcome.get("error") or "Unknown error"),
-                        }
-                    )
-
-                job["completed"] = min(len(normalized_item_keys), len(processed_keys))
-                job["current_item_key"] = item_key
-                job["current_title"] = str(outcome.get("title") or "")
-                job["updated_at"] = now_iso()
-                await asyncio.to_thread(triage_db.upsert_triage_job, _job_snapshot(job))
+            async with asyncio.TaskGroup() as group:
+                tasks = [group.create_task(_summarize_job_item(item_key, ctx)) for item_key in batch]
+                for completed_task in asyncio.as_completed(tasks):
+                    outcome = await completed_task
+                    if job["status"] != "cancelling":
+                        _record_outcome(job, outcome, processed_keys)
+                    await _persist_job(job)
 
         if str(job.get("status") or "") == "running":
             job["status"] = "failed" if job.get("errors") else "completed"
-        elif str(job.get("status") or "") == "cancelled":
+        elif str(job.get("status") or "") == "cancelling":
+            job["status"] = "cancelled"
             LOGGER.info(
                 "Triage job %s cancelled by user after %s/%s items",
                 job_id,
                 int(job.get("completed") or 0),
                 len(normalized_item_keys),
             )
-    except Exception as exc:  # pragma: no cover - defensive guard for async background execution
+    except asyncio.CancelledError:
+        stop.set()
+        job["status"] = "cancelled" if job["status"] == "cancelling" else "interrupted"
+        raise
+    except Exception as exc:  # background job failure is exposed through persisted status
         LOGGER.exception("Triage job %s crashed", job_id)
         job["status"] = "failed"
         job["errors"].append({"item_key": "job", "error": str(exc)})
     finally:
-        job["current_item_key"] = ""
-        job["current_title"] = ""
         job["updated_at"] = now_iso()
-        await asyncio.to_thread(triage_db.upsert_triage_job, _job_snapshot(job))
+        await _persist_job(job)
+
+
+def _record_outcome(job: dict[str, Any], outcome: dict[str, Any], processed_keys: set[str]) -> None:
+    item_key = outcome["item_key"]
+    if outcome.get("cancelled") or item_key in processed_keys:
+        return
+    processed_keys.add(item_key)
+    if outcome["ok"]:
+        job["results"].append({key: value for key, value in outcome.items() if key != "ok"})
+    else:
+        job["errors"].append({"item_key": item_key, "error": outcome["error"]})
+    job["completed"] = min(job["total"], len(processed_keys))
+    job["updated_at"] = now_iso()
 
 
 async def run_triage_job(req: TriageRunRequest) -> TriageRunResponse:
@@ -274,7 +277,7 @@ async def run_triage_job(req: TriageRunRequest) -> TriageRunResponse:
     async with TRIAGE_START_LOCK:
         app_state = state()
         jobs: dict[str, dict[str, Any]] = getattr(app_state, "triage_jobs", {})
-        running_in_memory = next((job for job in jobs.values() if str(job.get("status") or "") == "running"), None)
+        running_in_memory = next((job for job in jobs.values() if job["status"] in {"running", "cancelling"}), None)
         if running_in_memory is not None:
             running_job_id = str(running_in_memory.get("job_id") or "")
             raise APIError(
@@ -284,7 +287,7 @@ async def run_triage_job(req: TriageRunRequest) -> TriageRunResponse:
                 details={"job_id": running_job_id},
             )
 
-        running_persisted = await asyncio.to_thread(triage_db.list_triage_jobs, 1, ["running"])
+        running_persisted = await run_blocking(triage_db.list_triage_jobs, 1, ["running", "cancelling"])
         if running_persisted:
             running_job_id = str(running_persisted[0].get("job_id") or "")
             raise APIError(
@@ -298,7 +301,7 @@ async def run_triage_job(req: TriageRunRequest) -> TriageRunResponse:
         job_id = str(job["job_id"])
         app_state.triage_jobs[job_id] = job
         trim_job_cache(app_state.triage_jobs)
-        await asyncio.to_thread(triage_db.upsert_triage_job, _job_snapshot(job))
+        await run_blocking(triage_db.upsert_triage_job, _job_snapshot(job))
         asyncio.create_task(run_triage_job_worker(job_id, req.item_keys, req.queue_changes))
         return TriageRunResponse(job_id=job_id, status="running", total=len(req.item_keys))
 
@@ -306,7 +309,8 @@ async def run_triage_job(req: TriageRunRequest) -> TriageRunResponse:
 async def list_triage_jobs(limit: int = 20) -> dict[str, Any]:
     safe_limit = max(1, min(limit, 100))
     persisted = await asyncio.to_thread(triage_db.list_triage_jobs, safe_limit)
-    return {"items": [public_triage_job(job) for job in persisted]}
+    live_jobs = state().triage_jobs
+    return {"items": [public_triage_job(live_jobs.get(job["job_id"], job)) for job in persisted]}
 
 
 async def get_triage_job(job_id: str) -> dict[str, Any]:
@@ -350,28 +354,27 @@ async def get_latest_triage_feedback(item_keys: str = "") -> dict[str, Any]:
 
 
 async def cancel_triage_job(job_id: str) -> dict[str, Any]:
-    app_state = state()
-    jobs: dict[str, dict[str, Any]] = getattr(app_state, "triage_jobs", {})
-    job = jobs.get(job_id)
-    if job is None:
-        persisted = await asyncio.to_thread(triage_db.get_triage_job, job_id)
-        if not persisted:
-            raise APIError(error="not_found", message="Job not found", status_code=404)
-        job = persisted
-        jobs[job_id] = job
-        trim_job_cache(jobs)
+    async with TRIAGE_START_LOCK:
+        jobs = state().triage_jobs
+        job = jobs.get(job_id)
+        if job is None:
+            job = await run_blocking(triage_db.get_triage_job, job_id)
+            if job is None:
+                raise APIError(error="not_found", message="Job not found", status_code=404)
+            jobs[job_id] = job
+            trim_job_cache(jobs)
 
-    current_status = str(job.get("status") or "")
-    if current_status not in {"running", "interrupted"}:
-        return {"job_id": job_id, "status": current_status, "cancelled": False, "already_done": True}
+        current_status = job["status"]
+        if current_status not in {"running", "interrupted", "cancelling"}:
+            return {"job_id": job_id, "status": current_status, "cancelled": False, "already_done": True}
 
-    job["status"] = "cancelled"
-    job["updated_at"] = now_iso()
-    await asyncio.to_thread(triage_db.upsert_triage_job, _job_snapshot(job))
-    LOGGER.info(
-        "Cancel requested for triage job %s at %s/%s",
-        job_id,
-        int(job.get("completed") or 0),
-        int(job.get("total") or 0),
-    )
-    return {"job_id": job_id, "status": "cancelled", "cancelled": True, "already_done": False}
+        active = _ACTIVE.get(job_id)
+        if active is not None and not active[0].done():
+            active[1].set()
+            job["status"] = "cancelling"
+        else:
+            job["status"] = "cancelled"
+        job["updated_at"] = now_iso()
+        await run_blocking(triage_db.upsert_triage_job, _job_snapshot(job))
+        LOGGER.info("Cancel requested for triage job %s at %s/%s", job_id, job["completed"], job["total"])
+        return {"job_id": job_id, "status": job["status"], "cancelled": job["status"] == "cancelled", "already_done": False}

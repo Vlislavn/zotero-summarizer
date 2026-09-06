@@ -10,8 +10,10 @@ from unittest.mock import patch
 
 import pytest
 
-from zotero_summarizer.services.library import review, review_summary
+from zotero_summarizer.services.library import review, review_materialize, review_summary
+from zotero_summarizer.services.golden.hybrid_gt import apply_hybrid
 from zotero_summarizer.storage import feeds as fs
+from zotero_summarizer.storage import repositories
 
 
 # ---------------------------------------------------------------------------
@@ -23,7 +25,8 @@ def _init_triage_db(tmp_path: Path) -> sqlite3.Connection:
     db = tmp_path / "triage.db"
     conn = sqlite3.connect(str(db))
     conn.row_factory = sqlite3.Row
-    fs.init_feeds_schema(conn)
+    repositories.apply_schema(conn)
+    conn.commit()
     return conn
 
 
@@ -90,6 +93,7 @@ def patched_settings(tmp_path: Path, monkeypatch):
         zotero_data_dir=tmp_path / "zotero",   # _fetch_feed_metadata reads this
     )
     monkeypatch.setattr(review, "get_settings", lambda: fake_settings)
+    monkeypatch.setattr(review_materialize, "get_settings", lambda: fake_settings)
     # The golden-append + summary helpers now live in review_summary.
     monkeypatch.setattr(review_summary, "get_settings", lambda: fake_settings)
     # Stub _fetch_feed_metadata so tests don't need a real Zotero install.
@@ -198,7 +202,7 @@ def test_reject_appends_dont_read_to_golden(patched_settings):
     db.close()
 
     result = review.reject(row_id, write_to_golden=True)
-    assert result["golden_csv_row_added"] is True
+    assert result == {"processed_id": row_id, "state": "user_rejected"}
 
     # State flipped.
     db = sqlite3.connect(str(patched_settings / "triage.db"))
@@ -206,9 +210,9 @@ def test_reject_appends_dont_read_to_golden(patched_settings):
     row = db.execute("SELECT decision FROM processed_feed_items WHERE id = ?", (row_id,)).fetchone()
     assert row["decision"] == fs.DECISION_USER_REJECTED
 
-    # Golden CSV grew by one row with dont_read.
+    # Training includes the durable review sample; CSV is no longer the write target.
     with (patched_settings / "zotero-summarizer-golden.csv").open() as f:
-        rows = list(_csv.DictReader(f))
+        rows = apply_hybrid(list(_csv.DictReader(f)), patched_settings / "triage.db")
     assert len(rows) == 1
     assert rows[0]["gold_priority_final"] == "dont_read"
     assert rows[0]["title"] == "Reject me"
@@ -223,11 +227,12 @@ def test_reject_without_golden_write_does_not_touch_csv(patched_settings):
     db.close()
 
     result = review.reject(row_id, write_to_golden=False)
-    assert result["golden_csv_row_added"] is False
+    assert result == {"processed_id": row_id, "state": "user_rejected"}
 
     with (patched_settings / "zotero-summarizer-golden.csv").open() as f:
         rows = list(_csv.DictReader(f))
     assert rows == []
+    assert apply_hybrid(rows, patched_settings / "triage.db") == []
 
 
 def test_relabel_to_dont_read_routes_through_reject(patched_settings):
@@ -238,7 +243,7 @@ def test_relabel_to_dont_read_routes_through_reject(patched_settings):
     db.close()
 
     result = review.relabel(row_id, "dont_read")
-    assert result["golden_csv_row_added"] is True
+    assert result == {"processed_id": row_id, "state": "user_rejected"}
 
     db = sqlite3.connect(str(patched_settings / "triage.db"))
     db.row_factory = sqlite3.Row
@@ -258,7 +263,7 @@ def test_relabel_to_must_read_approves_and_appends(patched_settings):
 
     result = review.relabel(row_id, "must_read")
     assert result["state"] == fs.DECISION_USER_APPROVED
-    assert result["golden_csv_row_added"] is True
+    assert result == {"processed_id": row_id, "state": "user_approved"}
 
     db = sqlite3.connect(str(patched_settings / "triage.db"))
     db.row_factory = sqlite3.Row
@@ -266,7 +271,7 @@ def test_relabel_to_must_read_approves_and_appends(patched_settings):
     assert row["decision"] == fs.DECISION_USER_APPROVED
 
     with (patched_settings / "zotero-summarizer-golden.csv").open() as f:
-        rows = list(_csv.DictReader(f))
+        rows = apply_hybrid(list(_csv.DictReader(f)), patched_settings / "triage.db")
     assert len(rows) == 1
     assert rows[0]["gold_priority_final"] == "must_read"
 
@@ -299,7 +304,7 @@ def test_apply_all_approved_without_zotero_marks_pending_sync(patched_settings, 
 
     class _UnavailableWriter:
         def __init__(self, *a, **k):
-            raise RuntimeError("zotero unavailable")
+            raise zotero_write.ZoteroWriteError("zotero unavailable")
 
     monkeypatch.setattr(zotero_write, "ZoteroWriter", _UnavailableWriter)
     res = review.apply_all_approved()
@@ -357,7 +362,7 @@ def test_apply_all_approved_ignores_created_at_window(patched_settings, monkeypa
 
     class _UnavailableWriter:
         def __init__(self, *a, **k):
-            raise RuntimeError("zotero unavailable")
+            raise zotero_write.ZoteroWriteError("zotero unavailable")
 
     monkeypatch.setattr(zotero_write, "ZoteroWriter", _UnavailableWriter)
     res = review.apply_all_approved()
@@ -431,6 +436,27 @@ def test_append_to_golden_is_idempotent_on_duplicate_key(patched_settings):
         rows = list(_csv.DictReader(f))
     assert len(rows) == 1
     assert rows[0]["item_key"] == "feed:42"
+
+
+def test_bulk_confirm_mutates_only_explicit_visible_ids(patched_settings):
+    db = sqlite3.connect(str(patched_settings / "triage.db"))
+    db.row_factory = sqlite3.Row
+    first = _insert_awaiting(db, feed_item_id=51, title="Visible")
+    second = _insert_awaiting(db, feed_item_id=52, title="Not visible")
+    db.execute(
+        "UPDATE processed_feed_items SET decision = ? WHERE id IN (?, ?)",
+        (fs.DECISION_GATE_REJECTED, first, second),
+    )
+    db.commit()
+    db.close()
+
+    result = review.confirm_remaining_gate_rejected([first])
+
+    assert result == {"confirmed": 1, "skipped": 0}
+    with (patched_settings / "zotero-summarizer-golden.csv").open() as handle:
+        rows = apply_hybrid(list(_csv.DictReader(handle)), patched_settings / "triage.db")
+    assert len(rows) == 1
+    assert rows[0]["title"] == "Visible"
 
 
 # ---------------------------------------------------------------------------

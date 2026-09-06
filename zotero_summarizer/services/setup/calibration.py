@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from zotero_summarizer.models import GoalsConfig
+from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services._common import LOGGER, now_iso_z, read_json_or_empty, to_text, write_json_atomic
 
 # Throughput (approx tokens/sec) below which the endpoint is "lean" — a slow local
@@ -135,6 +136,9 @@ def run_full_calibration(
     from zotero_summarizer.services.library import quality_review
     from zotero_summarizer.services.llm.factory import build_client_for_provider
 
+    papers = load_review_papers(settings, item_keys=item_keys, limit=papers_limit)
+    if not papers:
+        raise RuntimeError("No built paper briefs to calibrate on; build a paper brief first")
     config = read_config(settings.config_path, settings.calibration_path)
     resolved = resolve_stage(config.llm_routing, "deep_review")
     provider, model = resolved.provider, resolved.model
@@ -148,13 +152,6 @@ def run_full_calibration(
     tier1 = tier1_env_calibrate(config, settings.calibration_path, llm=probe_llm, is_local=provider.is_local)
     if provider.is_local:
         memory_preflight()  # remote endpoints skip this — they load no local model
-    papers = load_review_papers(settings, item_keys=item_keys, limit=papers_limit)
-    if not papers:
-        raise RuntimeError(
-            "no built paper briefs to calibrate on — open a paper's deep review first so "
-            "data/paper_render/<key>/paper_read.json exists, or pass explicit --item-keys."
-        )
-
     digest_llm = build_client_for_provider(provider, model, enable_thinking=provider.thinking_on)
 
     def run_digest(title: str, text: str, budget: int) -> tuple[Any, float]:
@@ -218,11 +215,22 @@ def load_review_papers(
     """Source (title, full_text) from already-built paper briefs
     (``data/paper_render/<key>/paper_read.json``). Calibration is LABEL-FREE — it only
     needs real paper text, not user verdicts."""
-    render_dir = settings.paper_render_dir
-    keys = item_keys or sorted(p.name for p in render_dir.iterdir() if p.is_dir()) if render_dir.exists() else []
+    if not 1 <= limit <= 10:
+        raise APIError("validation_error", "Calibration requires 1 to 10 papers", 422)
+    render_dir = settings.paper_render_dir.resolve()
+    keys = item_keys
+    if keys is None:
+        keys = sorted(p.name for p in render_dir.iterdir() if p.is_dir()) if render_dir.exists() else []
+    paths = []
+    for key in dict.fromkeys(keys):
+        if not key.strip() or key in {".", ".."} or any(c in key for c in "/\\\0"):
+            raise APIError("validation_error", "Invalid calibration item key", 422)
+        path = (render_dir / key / "paper_read.json").resolve()
+        if not path.is_relative_to(render_dir):
+            raise APIError("validation_error", "Calibration path escapes paper storage", 422)
+        paths.append((key, path))
     papers: list[tuple[str, str]] = []
-    for key in keys:
-        state_path = render_dir / key / "paper_read.json"
+    for key, state_path in paths:
         if not state_path.exists():
             continue
         state = json.loads(state_path.read_text(encoding="utf-8"))

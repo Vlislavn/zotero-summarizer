@@ -2,6 +2,7 @@
 ids (OpenAI-compatible /models or the Anthropic list), with transport failures
 mapped to clean API errors. Split out of test_provider_routing.py to keep each
 file's single responsibility (and under the 500-LOC limit)."""
+
 from __future__ import annotations
 
 import asyncio
@@ -9,6 +10,71 @@ import asyncio
 import pytest
 
 from zotero_summarizer.models.providers import ProviderConfig, ProviderType
+
+
+def test_provider_presets_compile_without_exposing_secrets(monkeypatch):
+    from zotero_summarizer.services.llm import credentials, presets
+
+    monkeypatch.setattr(
+        credentials.keyring, "get_password", lambda _service, _name: None
+    )
+    provider = presets._compile_preset("openrouter")
+    assert provider.base_url == "https://openrouter.ai/api/v1"
+    assert provider.api_key_env == "OPENROUTER_API_KEY"
+    rows = presets.list_presets()
+    assert [row["label"] for row in rows] == [
+        "OpenRouter",
+        "OpenAI",
+        "Anthropic",
+        "Gemini",
+        "Groq",
+        "Together",
+        "Local model",
+        "Custom",
+    ]
+    assert all(
+        set(row)
+        == {
+            "id",
+            "label",
+            "recommended",
+            "requires_key",
+            "provider",
+            "credential",
+        }
+        for row in rows
+    )
+
+
+def test_credential_resolution_prefers_keyring_then_legacy_env(monkeypatch):
+    from zotero_summarizer.services.llm import credentials
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "legacy")
+    monkeypatch.setattr(
+        credentials.keyring, "get_password", lambda _service, _name: "saved"
+    )
+    assert credentials.get_api_key("OPENROUTER_API_KEY") == ("saved", "keyring")
+    monkeypatch.setattr(
+        credentials.keyring, "get_password", lambda _service, _name: None
+    )
+    assert credentials.get_api_key("OPENROUTER_API_KEY") == ("legacy", "environment")
+
+
+def test_credential_write_response_is_redacted(monkeypatch):
+    from zotero_summarizer.services.llm import credentials
+
+    seen = {}
+    monkeypatch.setattr(
+        credentials.keyring,
+        "set_password",
+        lambda service, name, secret: seen.update(
+            service=service, name=name, secret=secret
+        ),
+    )
+    status = credentials.store_api_key("K", "sk-private")
+    assert seen["secret"] == "sk-private"
+    assert status == {"name": "K", "present": True, "source": "keyring"}
+    assert "sk-private" not in str(status)
 
 
 def test_list_openai_models_parses_data_ids(monkeypatch):
@@ -37,19 +103,26 @@ def test_list_openai_models_parses_data_ids(monkeypatch):
 
 
 def test_list_models_for_provider_openai_sorts_and_dedupes(monkeypatch):
-    from zotero_summarizer.services.llm import model_list
     from zotero_summarizer.integrations import llm_models
+    from zotero_summarizer.services.llm import credentials, model_list
 
-    monkeypatch.setenv("LOCAL_KEY", "secret")
+    monkeypatch.setattr(
+        credentials.keyring, "get_password", lambda _service, _name: "secret"
+    )
     seen = {}
     monkeypatch.setattr(
-        llm_models, "list_openai_models",
-        lambda base_url, api_key: seen.update(base_url=base_url, api_key=api_key) or ["b", "a", "a"],
+        llm_models,
+        "list_openai_models",
+        lambda base_url, api_key: (
+            seen.update(base_url=base_url, api_key=api_key) or ["b", "a", "a"]
+        ),
     )
-    provider = ProviderConfig(name="local", base_url="http://h/v1", api_key_env="LOCAL_KEY")
+    provider = ProviderConfig(
+        name="local", base_url="http://localhost:11434/v1", api_key_env="LOCAL_KEY"
+    )
     out = model_list.list_models_for_provider(provider)
     assert out == ["a", "b"]  # sorted + de-duplicated
-    assert seen == {"base_url": "http://h/v1", "api_key": "secret"}
+    assert seen == {"base_url": "http://localhost:11434/v1", "api_key": "local"}
 
 
 def test_list_openai_models_raises_model_list_error_on_transport_failure(monkeypatch):
@@ -74,10 +147,14 @@ def test_list_models_for_provider_maps_unreachable_to_502(monkeypatch):
     monkeypatch.setenv("LOCAL_KEY", "secret")
 
     def _boom(base_url, api_key):
-        raise llm_models.ModelListError("could not list models from http://h/v1/models: refused")
+        raise llm_models.ModelListError(
+            "could not list models from http://h/v1/models: refused"
+        )
 
     monkeypatch.setattr(llm_models, "list_openai_models", _boom)
-    provider = ProviderConfig(name="local", base_url="http://h/v1", api_key_env="LOCAL_KEY")
+    provider = ProviderConfig(
+        name="local", base_url="http://localhost:11434/v1", api_key_env="LOCAL_KEY"
+    )
     with pytest.raises(APIError) as ei:
         model_list.list_models_for_provider(provider)
     # A bad URL/down endpoint surfaces as a clean 502 with the reason, not a 500.
@@ -86,17 +163,22 @@ def test_list_models_for_provider_maps_unreachable_to_502(monkeypatch):
 
 
 def test_list_models_for_provider_anthropic_dispatch(monkeypatch):
-    from zotero_summarizer.services.llm import model_list
     from zotero_summarizer.integrations import llm_models
+    from zotero_summarizer.services.llm import model_list
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     seen = {}
     monkeypatch.setattr(
-        llm_models, "list_anthropic_models",
-        lambda api_key, base_url: seen.update(api_key=api_key, base_url=base_url)
-        or ["claude-opus-4-8", "claude-haiku-4-5"],
+        llm_models,
+        "list_anthropic_models",
+        lambda api_key, base_url: (
+            seen.update(api_key=api_key, base_url=base_url)
+            or ["claude-opus-4-8", "claude-haiku-4-5"]
+        ),
     )
-    provider = ProviderConfig(name="claude", type=ProviderType.anthropic, api_key_env="ANTHROPIC_API_KEY")
+    provider = ProviderConfig(
+        name="claude", type=ProviderType.anthropic, api_key_env="ANTHROPIC_API_KEY"
+    )
     out = model_list.list_models_for_provider(provider)
     assert out == ["claude-haiku-4-5", "claude-opus-4-8"]
     assert seen == {"api_key": "sk-test", "base_url": None}
@@ -106,18 +188,48 @@ def test_list_models_for_provider_missing_key_raises_apierror(monkeypatch):
     from zotero_summarizer.api.errors import APIError
     from zotero_summarizer.services.llm import model_list
 
-    monkeypatch.delenv("LOCAL_KEY", raising=False)
-    provider = ProviderConfig(name="local", base_url="http://h/v1", api_key_env="LOCAL_KEY")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(
+        "zotero_summarizer.services.llm.credentials.keyring.get_password",
+        lambda _service, _name: None,
+    )
+    provider = ProviderConfig(
+        name="openrouter", base_url="https://openrouter.ai/api/v1",
+        api_key_env="OPENROUTER_API_KEY",
+    )
     with pytest.raises(APIError) as ei:
         model_list.list_models_for_provider(provider)
     assert ei.value.error == "missing_api_key" and ei.value.status_code == 400
+
+
+def test_model_discovery_rejects_arbitrary_remote_secret_destination(monkeypatch):
+    from zotero_summarizer.api.errors import APIError
+    from zotero_summarizer.services.llm import model_list
+
+    monkeypatch.setattr(
+        model_list, "resolve_api_key",
+        lambda _provider: pytest.fail("credential must not be resolved"),
+    )
+    provider = ProviderConfig(
+        name="attacker", base_url="https://example.invalid/v1",
+        api_key_env="OPENROUTER_API_KEY",
+    )
+
+    with pytest.raises(APIError) as exc:
+        model_list.list_models_for_provider(provider)
+
+    assert exc.value.error == "unsafe_provider_discovery"
 
 
 def test_llm_models_route_returns_provider_shape(monkeypatch):
     from zotero_summarizer.api.routes import llm as llm_route
     from zotero_summarizer.services.llm import model_list
 
-    monkeypatch.setattr(model_list, "list_models_for_provider", lambda provider: ["a", "b"])
-    provider = ProviderConfig(name="claude", type=ProviderType.anthropic, api_key_env="ANTHROPIC_API_KEY")
+    monkeypatch.setattr(
+        model_list, "list_models_for_provider", lambda provider: ["a", "b"]
+    )
+    provider = ProviderConfig(
+        name="claude", type=ProviderType.anthropic, api_key_env="ANTHROPIC_API_KEY"
+    )
     result = asyncio.run(llm_route.list_provider_models(provider))
     assert result == {"provider": "claude", "type": "anthropic", "models": ["a", "b"]}

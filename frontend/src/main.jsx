@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App.jsx';
 import './index.css';
+import { startSync } from './syncClient.js';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -24,3 +25,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     </QueryClientProvider>
   </React.StrictMode>,
 );
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
+if ('indexedDB' in window) startSync();

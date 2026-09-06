@@ -25,17 +25,21 @@ neutral module both import (follow-up, not required now).
 
 ## Hard rules (pre-commit enforces these)
 
-1. **≤500 LOC per `.py`.** Legacy files are grandfathered in
-   `tools/precommit/loc_allowlist.txt` (frozen — may shrink, never grow). Split.
-2. **Layering:** `api → services → storage/integrations → models`. `mcp/` is an
+1. **Use the `code-that-fits-in-your-head` skill for every code change.** Trace
+   callers and search for existing code first; prefer deletion/reuse; finish by
+   explicitly assessing whether the touched code can be simplified further.
+2. **≤500 LOC per `.py`, with no exceptions or allowlist.** Touched production
+   functions also block above 88 body lines, 6 required parameters, or 5
+   control-flow levels. Split by responsibility, not metrics.
+3. **Layering:** `api → services → storage/integrations → models`. `mcp/` is an
    HTTP client (imports none of those). `integrations/`/`storage/` never import
    `services/`/`api/`; `services/` may import only `api.errors`. New service
    modules live in a domain subpackage.
-3. **Touch a package's code → update its `README.md` in the same commit.**
-4. **All app state lives under `data/`** (gitignored). Paths come from
+4. **Touch a package's code → update its `README.md` in the same commit.**
+5. **All app state lives under `data/`** (gitignored). Paths come from
    `Settings` — never hardcode `project_root / "..."`. *Sanctioned exception:*
-   the paper-read artifacts (`{name}_notes.md` / `_presentation.html` /
-   `figures/`) are written next to the Zotero PDF for upstream compatibility;
+   the paper-read presentation/audit (`_presentation.html` / `_audit.json`),
+   `figures/`, and explicit-consent source are written next to the Zotero PDF;
    only their `paper_read.json` state lives under `data/paper_render/`. See
    `services/library/README.md`.
 

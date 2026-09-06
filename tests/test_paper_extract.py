@@ -6,12 +6,20 @@ download, so it's a manual script, not a unit test). Here we lock the GATING onl
 """
 from __future__ import annotations
 
-from pathlib import Path
+import fitz
 
 from zotero_summarizer.services.library import _paper_docling, _paper_read_pdf
 
 
-def test_extract_dispatches_to_docling_when_enabled(monkeypatch):
+def _pdf(tmp_path):
+    path = tmp_path / "x.pdf"
+    with fitz.open() as doc:
+        doc.new_page().insert_text((72, 72), "Real PDF text")
+        doc.save(path)
+    return path
+
+
+def test_extract_dispatches_to_docling_when_enabled(tmp_path, monkeypatch):
     called = {}
 
     def _stub(p, **_kw):
@@ -19,21 +27,19 @@ def test_extract_dispatches_to_docling_when_enabled(monkeypatch):
         return {"full_text": "md", "sections": [], "tables": ["| a | b |"], "figures": ["Figure 1."]}
 
     monkeypatch.setattr(_paper_docling, "extract", _stub)
-    # A non-existent path: if this fell through to fitz it would raise on open — so a
-    # clean return proves the Docling branch was taken instead.
-    out = _paper_read_pdf.extract_pdf_content(Path("/nonexistent/x.pdf"), use_docling=True)
+    # Both parsers now share real PDF metadata; distinct bodies prove dispatch.
+    out = _paper_read_pdf.extract_pdf_content(_pdf(tmp_path), use_docling=True)
     assert called["path"].endswith("x.pdf")
     assert out["tables"] == ["| a | b |"] and out["figures"] == ["Figure 1."]
+    assert out["full_text"] == "md"
+    assert out["n_pages"] == 1
 
 
-def test_extract_defaults_to_fitz(monkeypatch):
+def test_extract_defaults_to_fitz(tmp_path, monkeypatch):
     # use_docling defaults False → Docling must NOT be called (we'd see the stub fire).
     def _boom(*_a, **_k):
         raise AssertionError("docling must not run when use_docling is False")
 
     monkeypatch.setattr(_paper_docling, "extract", _boom)
-    # fitz will raise on the missing file — that's fine; we only assert docling is skipped.
-    import pytest
-
-    with pytest.raises(Exception):  # noqa: B017 — any fitz open error; the point is _boom did NOT fire
-        _paper_read_pdf.extract_pdf_content(Path("/nonexistent/x.pdf"))
+    content = _paper_read_pdf.extract_pdf_content(_pdf(tmp_path))
+    assert "Real PDF text" in content["full_text"]

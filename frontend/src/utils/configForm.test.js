@@ -3,6 +3,7 @@ import { configToFormState, formStateToConfig, resolveStage } from './configForm
 
 describe('configForm transforms', () => {
   const baseConfig = {
+    llm_enabled: true,
     research_goals: ['goal a', 'goal b'],
     triage_criteria: ['crit a'],
     output_language: 'English',
@@ -43,9 +44,17 @@ describe('configForm transforms', () => {
     expect(out.research_goals).toEqual(baseConfig.research_goals);
     expect(out.triage_criteria).toEqual(baseConfig.triage_criteria);
     expect(out.output_language).toBe('English');
+    expect(out.llm_enabled).toBe(true);
     expect(out.llm_routing).toEqual(baseConfig.llm_routing);
     // Unknown branch survives.
     expect(out.prestige).toEqual({ weight: 0.15 });
+  });
+
+  it('round-trips an intentional ML-only mode', () => {
+    const cfg = { ...baseConfig, llm_enabled: false };
+    const form = configToFormState(cfg);
+    expect(form.llm_enabled).toBe(false);
+    expect(formStateToConfig(form, cfg).llm_enabled).toBe(false);
   });
 
   it('preserves per-provider temperature + thinking_effort on a round-trip', () => {

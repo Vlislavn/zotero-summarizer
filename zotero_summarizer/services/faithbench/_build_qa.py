@@ -16,6 +16,7 @@ import re
 from typing import Any, Callable
 
 from zotero_summarizer.services._common import extract_json_blob, to_text
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.faithbench._constants import (
     DEFAULT_QA_PER_PAPER,
     DEFAULT_TRAPS_PER_PAPER,
@@ -28,12 +29,13 @@ from zotero_summarizer.services.faithbench._corpus import (
     normalize_text,
     sentence_at,
 )
-from zotero_summarizer.services.faithbench._dataset import QAItem, TrapItem
+from zotero_summarizer.services.faithbench._dataset import QAItem, TrapItem, _require_qa_cohort
 from zotero_summarizer.storage.corpus_bm25 import tokenize
 
 LOGGER = logging.getLogger(__name__)
 
 _QA_GENERATION_PROMPT = (
+    UNTRUSTED_INPUT_RULE + "\n\n"
     "You write extractive QA pairs from an excerpt of an academic paper.\n"
     "Rules:\n"
     "- The answer MUST be a short contiguous span copied VERBATIM from the excerpt "
@@ -58,14 +60,13 @@ _QA_GENERATION_PROMPT = (
 
 
 def _windows(text: str) -> list[str]:
-    """Up to QA_MAX_WINDOWS evenly-spaced windows covering the paper."""
+    """Cover short papers; sample longer ones evenly, including both ends."""
     if len(text) <= QA_WINDOW_CHARS:
         return [text]
-    count = min(QA_MAX_WINDOWS, max(1, len(text) // QA_WINDOW_CHARS))
-    if count == 1:
-        return [text[:QA_WINDOW_CHARS]]
-    step = (len(text) - QA_WINDOW_CHARS) // (count - 1)
-    return [text[i * step: i * step + QA_WINDOW_CHARS] for i in range(count)]
+    # ponytail: three bounded windows; increase the explicit budget for denser long-paper sampling.
+    count = min(QA_MAX_WINDOWS, (len(text) + QA_WINDOW_CHARS - 1) // QA_WINDOW_CHARS)
+    starts = ((len(text) - QA_WINDOW_CHARS) * i // (count - 1) for i in range(count))
+    return [text[start: start + QA_WINDOW_CHARS] for start in starts]
 
 
 def generate_candidates(
@@ -79,7 +80,8 @@ def generate_candidates(
     """
     candidates: list[dict[str, Any]] = []
     for window in _windows(text):
-        prompt = _QA_GENERATION_PROMPT.format(title=title, window=window, n=per_window)
+        prompt = _QA_GENERATION_PROMPT.format(
+            title=untrusted_input(title), window=untrusted_input(window), n=per_window)
         raw = to_text(llm.prompt(prompt))
         try:
             payload = extract_json_blob(raw)
@@ -244,6 +246,12 @@ def build_items(
 ) -> list[QAItem | TrapItem]:
     """Generate + gate QA for every paper, then add traps. Pure orchestration —
     paper selection/freezing lives in ``_corpus.select_papers``."""
+    keys = {paper.item_key for paper in papers}
+    if len(keys) < 2 or len(keys) != len(papers):
+        raise ValueError("Benchmark build requires at least two distinct papers, without duplicate keys")
+    for name, value in (("qa_per_paper", qa_per_paper), ("traps_per_paper", traps_per_paper)):
+        if type(value) is not int or value < 1:
+            raise ValueError(f"{name} must be a positive integer")
     qa_by_paper: dict[str, list[QAItem]] = {}
     for paper in papers:
         candidates = generate_candidates(
@@ -267,4 +275,5 @@ def build_items(
             "faithbench build: no QA pair survived span verification across all papers"
         )
     items.extend(build_traps(papers, qa_by_paper, traps_per_paper=traps_per_paper))
+    _require_qa_cohort(items)
     return items

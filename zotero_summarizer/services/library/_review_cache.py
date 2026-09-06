@@ -12,15 +12,15 @@ import json
 import threading
 from typing import Any
 
-from zotero_summarizer.services._common import now_iso_z, write_json_atomic
+from zotero_summarizer.services._common import now_iso_z, settings, write_json_atomic
 
 _CACHE_FILENAME = "deep_reviews.json"
 _CACHE_LOCK = threading.Lock()    # guards the read-merge-write of deep_reviews.json
+REVIEW_CONTRACT_VERSION = 3
 
 
 def _cache_path():
-    from zotero_summarizer.services.model.classifier_persistence import DEFAULT_MODEL_DIR
-    return DEFAULT_MODEL_DIR / _CACHE_FILENAME
+    return settings().model_dir / _CACHE_FILENAME
 
 
 def _read_all() -> dict[str, Any]:
@@ -45,16 +45,50 @@ def _write_one(item_key: str, entry: dict[str, Any]) -> None:
 
 
 def get_cached_review(item_key: str) -> dict[str, Any] | None:
-    """The stored deep-review entry for an item (for ``review_detail``), or None."""
+    """Project stored review through current reading policy; never rewrite the cache."""
     if not item_key:
         return None
-    return _read_all().get(item_key)
+    entry = _read_all().get(item_key)
+    if not entry or not entry.get("digest"):
+        return entry
+    from zotero_summarizer.services.library.review_fleet.propose import apply_reading_policy
+    digest, raw, flags = apply_reading_policy(entry["digest"], entry.get("quality"), entry.get("goal_summaries"))
+    if digest == entry["digest"] and not flags:
+        return entry
+    return {**entry, "digest": digest, "model_read_decision": entry.get("model_read_decision", raw),
+            "reading_policy_flags": list(dict.fromkeys([*entry.get("reading_policy_flags", []), *flags]))}
+
+
+def review_is_current(entry: dict[str, Any] | None, item_key: str = "") -> bool:
+    if not entry or entry.get("review_contract_version") != REVIEW_CONTRACT_VERSION:
+        return False
+    stored = entry.get("review_identity")
+    if not item_key or not isinstance(stored, dict):
+        return False
+    try:
+        from zotero_summarizer.services.library._review_identity import current_review_identity
+        return current_review_identity(item_key, stored) == stored
+    except (AttributeError, OSError, RuntimeError, ValueError):
+        return False
+
+
+def get_current_review(item_key: str) -> dict[str, Any] | None:
+    entry = get_cached_review(item_key)
+    return entry if review_is_current(entry, item_key) else None
 
 
 def cached_review_keys() -> set[str]:
     """All item_keys with a stored deep review — one cache read (prewarm reuses this
     instead of calling ``get_cached_review`` per row, which re-reads the whole file)."""
     return set(_read_all())
+
+
+def current_review_keys() -> set[str]:
+    return {key for key, entry in _read_all().items() if review_is_current(entry, key)}
+
+
+def current_reviews() -> dict[str, Any]:
+    return {key: entry for key, entry in _read_all().items() if review_is_current(entry, key)}
 
 
 def copy_review(src_key: str, dst_key: str) -> bool:
@@ -73,5 +107,6 @@ def copy_review(src_key: str, dst_key: str) -> bool:
 
 __all__ = [
     "_cache_path", "_read_all", "_write_all", "_write_one",
-    "get_cached_review", "cached_review_keys", "copy_review",
+    "REVIEW_CONTRACT_VERSION", "get_cached_review", "get_current_review",
+    "review_is_current", "cached_review_keys", "current_review_keys", "current_reviews", "copy_review",
 ]

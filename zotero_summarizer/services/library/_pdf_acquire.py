@@ -1,25 +1,7 @@
-"""Acquire a reviewable PDF for a library item, returning a LOCAL cache path.
+"""Acquire a reviewable PDF into the local cache, never writing Zotero.
 
-The review fleet calls this for a pick with no Zotero attachment. It resolves the
-best source and downloads to ``pdf_fetch``'s cache (NO Zotero write — so a verdict
-works while Zotero is open), in this order:
-
-    1. arXiv direct  ─┐
-    2. Unpaywall OA   ├─ headless (``pdf_fetch``) — fast, no browser
-    3. OpenAlex oa_url┘  (+ PMC for no-DOI PubMed papers)
-    4. EZproxy / publisher ── browser (``browser_fetch``) using the university
-       persistent profile / Chrome session — for SCHOLARLY paywalled papers.
-    5. web-article render ── for a NON-scholarly web page (blog/Substack/news with
-       HTML full text but no PDF), ``browser_fetch.render_article_pdf`` renders it to a
-       PDF the PDF-only review pipeline can digest (gated on ``review_web_articles``).
-
-Returns ``AcquireResult(path, needs_login)``: ``needs_login`` is True when a
-proxied/publisher source WAS available but the browser couldn't fetch it because the
-``browser`` extra is missing or the profile isn't logged in — the fleet surfaces
-that as the actionable ``needs_library_login`` outcome (vs ``no_fetchable_source``).
-
-Layering: a ``services`` module — it reads app state via ``get_state()`` and calls
-the ``integrations`` leaves (``pdf_fetch``/``browser_fetch``). It never writes Zotero.
+Order: arXiv → Unpaywall → PMC → OpenAlex → optional university browser/web render.
+The returned path carries source provenance and a typed failure outcome.
 """
 from __future__ import annotations
 
@@ -29,20 +11,20 @@ from typing import Any
 
 from zotero_summarizer.integrations import browser_fetch, pdf_fetch, pubmed
 from zotero_summarizer.integrations._zotero_read_common import _arxiv_id_from_url_or_doi
-from zotero_summarizer.services._common import LOGGER, state as get_state
+from zotero_summarizer.services._common import LOGGER, settings, state as get_state
 from zotero_summarizer.services.library.university_access import profile_dir as _profile_dir
+from zotero_summarizer.settings import offline_requested
 
 
 @dataclass(slots=True)
 class AcquireResult:
     path: Path | None
     needs_login: bool = False
-    # The publisher landing the user can open to sign in (surfaced as a click-to-open
-    # link). Set only on a ``needs_login`` result; empty otherwise.
     login_url: str = ""
-    # True when ``path`` is a web page RENDERED to PDF (blog/news), not a paper PDF —
-    # the review then treats it as a NON_PAPER (relevance-only, no scientific grade).
     web_article: bool = False
+    source: str = ""
+    source_url: str = ""
+    outcome: str = "no_oa_source"
 
 
 def _proxied_url(ua: Any, url: str, doi: str) -> str:
@@ -67,13 +49,89 @@ def acquire_for_item(item_key: str, reader: Any = None) -> AcquireResult:
     detail = (reader or get_library_reader()).get_item_detail(item_key) or {}
     if detail.get("has_pdf"):
         return AcquireResult(path=None)
-    # Interactive path: a visible (headed) browser may pass a Cloudflare/SSO challenge a
-    # headless one can't. The background fleet keeps the default (headless-only) so no
-    # window pops up during prewarm/batch runs.
     return acquire_pdf_for(item_key, detail, allow_headed_fallback=True)
 
 
-def acquire_pdf_for(item_key: str, detail: dict[str, Any], *, allow_headed_fallback: bool = False) -> AcquireResult:
+def _headless_sources(app: Any, config: Any, url: str, doi: str, arxiv_id: str) -> list[tuple[str, str]]:
+    """Ordered OA candidates with the resolver rung that produced each URL."""
+    sources: list[tuple[str, str]] = []
+    direct = pdf_fetch.resolve_pdf_url(
+        doi=doi, arxiv_id=arxiv_id, url=url,
+        unpaywall=None if offline_requested() else app.unpaywall_client,
+    )
+    if direct:
+        source = "arxiv" if arxiv_id else ("direct" if direct == url else "unpaywall")
+        sources.append((source, direct))
+    cache = None if offline_requested() else getattr(app, "openalex_cache", None)
+    if cache is not None:
+        pmc_url = pubmed.resolve_pmc_pdf_url(
+            cache=cache, pmid=pubmed._pmid_from_url(url), doi=doi,
+            email=str(getattr(config.prestige, "user_agent_email", "") or ""),
+        )
+        if pmc_url:
+            sources.append(("pmc", pmc_url))
+    openalex = None if offline_requested() else getattr(app, "openalex_client", None)
+    if openalex is not None and doi:
+        work = openalex.fetch_work_by_doi(doi)
+        if work is not None and work.oa_url:
+            sources.append(("openalex", work.oa_url))
+    return _dedupe_sources(sources)
+
+
+def _browser_acquire(
+    item_key: str, sources: list[tuple[str, str]], url: str, doi: str,
+    scholarly: bool, allow_headed_fallback: bool,
+) -> AcquireResult:
+    """Browser/paywall and web-article rungs for an explicit review action."""
+    config = get_state().app_state.config
+    qr, ua = config.quality_review, config.university_access
+    proxied = _proxied_url(ua, url, doi)
+    web_articles = bool(getattr(qr, "review_web_articles", False))
+    if ua.enabled and scholarly and proxied:
+        profile = _profile_dir(ua)
+        cb = str(getattr(ua, "cookie_browser", "") or "")
+        channel = str(getattr(ua, "browser_channel", "") or "")
+        for source, candidate in _dedupe_sources([*sources, ("browser", proxied)]):
+            path = browser_fetch.fetch_pdf_via_browser(
+                candidate, profile_dir=profile, cache_dir=settings().pdf_cache_dir,
+                timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes, headless=ua.headless,
+                cookie_browser=cb, channel=channel,
+                render_fallback=(web_articles and candidate == proxied),
+            )
+            if path is not None:
+                return AcquireResult(
+                    path=path, source=source, source_url=candidate,
+                    outcome=f"acquired_{source}",
+                )
+        if allow_headed_fallback and ua.headless:
+            path = browser_fetch.fetch_pdf_via_browser(
+                proxied, profile_dir=profile, cache_dir=settings().pdf_cache_dir,
+                timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes, headless=False,
+                cookie_browser=cb, channel=channel, render_fallback=web_articles,
+            )
+            if path is not None:
+                return AcquireResult(
+                    path=path, source="browser", source_url=proxied,
+                    outcome="acquired_browser",
+                )
+        LOGGER.info("browser PDF fetch yielded nothing for %s → needs_library_login", item_key)
+        return AcquireResult(path=None, needs_login=True, login_url=proxied, outcome="needs_login")
+    if web_articles and not scholarly and _is_web_article(url):
+        rendered = browser_fetch.render_article_pdf(
+            url, cache_dir=settings().pdf_cache_dir, timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes
+        )
+        if rendered is not None:
+            return AcquireResult(
+                path=rendered, web_article=True, source="web_article",
+                source_url=url, outcome="acquired_web_article",
+            )
+    return AcquireResult(path=None, outcome="fetch_failed" if sources else "no_oa_source")
+
+
+def acquire_pdf_for(
+    item_key: str, detail: dict[str, Any], *, allow_headed_fallback: bool = False,
+    allow_browser: bool = True,
+) -> AcquireResult:
     """Resolve + download a PDF for ``item_key`` to the local cache. ``detail`` is the
     Zotero item detail (``url``/``doi``/``has_pdf``). ``allow_headed_fallback`` lets the
     interactive per-paper path retry the publisher landing once with a VISIBLE browser
@@ -86,97 +144,39 @@ def acquire_pdf_for(item_key: str, detail: dict[str, Any], *, allow_headed_fallb
     doi = str(detail.get("doi") or "")
     arxiv_id = _arxiv_id_from_url_or_doi(url, doi)
 
-    # --- headless rungs: arXiv → Unpaywall → PMC → OpenAlex oa_url -----------
-    headless_urls: list[str] = []
-    direct = pdf_fetch.resolve_pdf_url(doi=doi, arxiv_id=arxiv_id, url=url, unpaywall=app.unpaywall_client)
-    if direct:
-        headless_urls.append(direct)
-    # PMC full text — recovers PubMed papers that are in PMC but carry NO DOI (e.g.
-    # AMIA proceedings, where clinical agentic-AI work clusters); the DOI-keyed
-    # Unpaywall/OpenAlex rungs can't resolve those, leaving no PDF URL to try. Fresh
-    # PMC has no reliable HEADLESS route (bot-wall interstitial), so this URL is really
-    # for the browser rung below — the headless attempt falls through. Reuses the cache.
-    cache = getattr(app, "openalex_cache", None)
-    if cache is not None:
-        pmc_url = pubmed.resolve_pmc_pdf_url(
-            cache=cache,
-            pmid=pubmed._pmid_from_url(url),
-            doi=doi,
-            email=str(getattr(config.prestige, "user_agent_email", "") or ""),
+    sources = _headless_sources(app, config, url, doi, arxiv_id)
+    for source, candidate in sources:
+        path = pdf_fetch.fetch_pdf(
+            candidate, cache_dir=settings().pdf_cache_dir,
+            max_bytes=qr.max_pdf_bytes, timeout=qr.fetch_timeout_secs,
         )
-        if pmc_url:
-            headless_urls.append(pmc_url)
-    openalex = getattr(app, "openalex_client", None)
-    if openalex is not None and doi:
-        work = openalex.fetch_work_by_doi(doi)
-        if work is not None and work.oa_url:
-            headless_urls.append(work.oa_url)
-
-    for candidate in _dedupe(headless_urls):
-        path = pdf_fetch.fetch_pdf(candidate, max_bytes=qr.max_pdf_bytes, timeout=qr.fetch_timeout_secs)
         if path is not None:
-            return AcquireResult(path=path)
+            return AcquireResult(
+                path=path, source=source, source_url=candidate, outcome=f"acquired_{source}"
+            )
+
+    if offline_requested():
+        return AcquireResult(path=None, outcome="offline_uncached")
 
     # A SCHOLARLY item (arXiv id or DOI) is an academic paper → the browser proxied /
     # cookie rung (paywalled access). A pure web page (no scholarly id) → the
     # web-article render rung below. Splitting on this keeps a blog out of the
     # paywall/needs_login path, and a paywalled paper out of the HTML renderer.
     scholarly = bool(arxiv_id or doi)
+    proxied = _proxied_url(ua, url, doi)
+    browser_needed = bool(
+        (ua.enabled and scholarly and proxied)
+        or (getattr(qr, "review_web_articles", False) and not scholarly and _is_web_article(url))
+    )
+    if not allow_browser:
+        if browser_needed:
+            return AcquireResult(path=None, outcome="browser_not_attempted")
+        return AcquireResult(path=None, outcome="fetch_failed" if sources else "no_oa_source")
+    if browser_needed and not browser_fetch.is_available():
+        LOGGER.info("browser PDF fetch unavailable for %s: optional browser extra missing", item_key)
+        return AcquireResult(path=None, outcome="browser_extra_unavailable")
 
-    # --- browser rung: proxied / publisher (Cloudflare / SSO paywall) -------
-    web_articles = bool(getattr(qr, "review_web_articles", False))
-    if ua.enabled and scholarly:
-        proxied = _proxied_url(ua, url, doi)
-        if proxied:
-            profile = _profile_dir(ua)
-            cb = str(getattr(ua, "cookie_browser", "") or "")
-            # Drive the REAL Chrome binary (channel) so its fingerprint matches the
-            # injected cf_clearance — bundled chromium gets re-challenged by Cloudflare.
-            channel = str(getattr(ua, "browser_channel", "") or "")
-            # Retry the OA links via the real browser too (they may sit behind a
-            # Cloudflare landing the headless client couldn't pass), then the proxied URL.
-            for candidate in _dedupe([*headless_urls, proxied]):
-                # render-fallback only on the LANDING page (proxied) — a scholarly item
-                # whose landing declares NO PDF is actually web content (e.g. a Nature
-                # news/comment d41586 piece), so render it instead of failing. A direct
-                # PDF URL never renders. A landing that DOES declare a gated PDF returns
-                # None → honest needs_login (don't review a paywall stub).
-                path = browser_fetch.fetch_pdf_via_browser(
-                    candidate, profile_dir=profile, cache_dir=None,
-                    timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes, headless=ua.headless,
-                    cookie_browser=cb, channel=channel, render_fallback=(web_articles and candidate == proxied),
-                )
-                if path is not None:
-                    return AcquireResult(path=path)
-            # Headed fallback (interactive path only): a VISIBLE browser passes managed
-            # Cloudflare/SSO challenges a headless one can't. Retry only the proxied
-            # landing, once. No-op when already headed or for the background fleet.
-            if allow_headed_fallback and ua.headless:
-                path = browser_fetch.fetch_pdf_via_browser(
-                    proxied, profile_dir=profile, cache_dir=None,
-                    timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes, headless=False,
-                    cookie_browser=cb, channel=channel, render_fallback=web_articles,
-                )
-                if path is not None:
-                    return AcquireResult(path=path)
-            # A real, DECLARED PDF existed but the browser couldn't fetch it — the
-            # session for THIS publisher is missing in the cookie-source browser (or
-            # the `browser` extra is absent). Actionable: log into that publisher; the
-            # ``login_url`` (the landing) is surfaced as a click-to-open sign-in link.
-            LOGGER.info("browser PDF fetch yielded nothing for %s → needs_library_login", item_key)
-            return AcquireResult(path=None, needs_login=True, login_url=proxied)
-
-    # --- web-article rung: a blog/Substack/news page has HTML full text but NO PDF.
-    # Render the page to a PDF so the PDF-only review pipeline can digest it. Last
-    # resort, only for non-scholarly web pages, gated by `review_web_articles`.
-    if web_articles and not scholarly and _is_web_article(url):
-        rendered = browser_fetch.render_article_pdf(
-            url, cache_dir=None, timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes
-        )
-        if rendered is not None:
-            return AcquireResult(path=rendered, web_article=True)
-
-    return AcquireResult(path=None)
+    return _browser_acquire(item_key, sources, url, doi, scholarly, allow_headed_fallback)
 
 
 def _is_web_article(url: str) -> bool:
@@ -186,14 +186,14 @@ def _is_web_article(url: str) -> bool:
     return low.startswith(("http://", "https://")) and not low.endswith(".pdf")
 
 
-def _dedupe(urls: list[str]) -> list[str]:
+def _dedupe_sources(sources: list[tuple[str, str]]) -> list[tuple[str, str]]:
     seen: set[str] = set()
-    out: list[str] = []
-    for u in urls:
-        if u and u not in seen:
-            seen.add(u)
-            out.append(u)
-    return out
+    unique: list[tuple[str, str]] = []
+    for source, url in sources:
+        if url and url not in seen:
+            seen.add(url)
+            unique.append((source, url))
+    return unique
 
 
 __all__ = ["AcquireResult", "acquire_pdf_for", "acquire_for_item"]

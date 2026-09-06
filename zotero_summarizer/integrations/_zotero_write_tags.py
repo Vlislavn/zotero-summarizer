@@ -37,12 +37,10 @@ class ZoteroTagMixin:
             self._ensure_item_tag(conn, item_id, tag_id, item_tag_columns, tag_type=link_type)
 
         for tag_name in remove_tags:
-            tag_id = self._find_tag_id(conn, tag_name)
-            if tag_id is None:
-                continue
             conn.execute(
-                "DELETE FROM itemTags WHERE itemID = ? AND tagID = ?",
-                (item_id, tag_id),
+                "DELETE FROM itemTags WHERE itemID = ? AND tagID IN "
+                "(SELECT tagID FROM tags WHERE lower(name) = lower(?))",
+                (item_id, tag_name),
             )
 
         self._touch_item(conn, item_id, item_columns)
@@ -68,6 +66,13 @@ class ZoteroTagMixin:
         note_html = str(payload.get("note_html") or "").strip()
         if not note_html:
             raise ZoteroWriteError("Note payload is empty")
+        existing = conn.execute(
+            "SELECT itemID FROM itemNotes WHERE parentItemID = ? AND note = ? "
+            "AND itemID NOT IN (SELECT itemID FROM deletedItems) LIMIT 1",
+            (parent_item_id, note_html),
+        ).fetchone()
+        if existing is not None:
+            return  # Replaying the same visible note has already delivered its content.
         note_title = str(payload.get("note_title") or "").strip()
         if not note_title:
             note_title = self._note_title_from_html(note_html)
@@ -140,23 +145,22 @@ class ZoteroTagMixin:
     ) -> None:
         """Insert OR update a single marked note on an item.
 
-        Finds the item's child note whose HTML contains ``payload['marker']`` and
-        replaces its content (so re-saving a verdict never duplicates the note);
-        with no marker or no existing match, falls back to a plain insert.
+        The marker must be present in the new HTML so later saves can find it.
         """
         marker = str(payload.get("marker") or "").strip()
         note_html = str(payload.get("note_html") or "").strip()
         if not note_html:
             raise ZoteroWriteError("Note payload is empty")
+        if not marker or marker not in note_html:
+            raise ZoteroWriteError("Upsert note requires a marker present in its HTML")
 
         parent_item_id = resolve_user_library_item_id(conn, item_key)
 
-        existing = None
-        if marker:
-            existing = conn.execute(
-                "SELECT itemID FROM itemNotes WHERE parentItemID = ? AND note LIKE ? LIMIT 1",
-                (parent_item_id, f"%{marker}%"),
-            ).fetchone()
+        existing = conn.execute(
+            "SELECT itemID FROM itemNotes WHERE parentItemID = ? AND instr(note, ?) > 0 "
+            "AND itemID NOT IN (SELECT itemID FROM deletedItems) LIMIT 1",
+            (parent_item_id, marker),
+        ).fetchone()
         if existing is None:
             self._apply_note_change(
                 conn,
@@ -286,82 +290,6 @@ class ZoteroTagMixin:
             conn, "SELECT tagID FROM tags WHERE lower(name) = lower(?) LIMIT 1", tag_name, "tagID"
         )
 
-    def _find_collection_id(
-        self,
-        conn: sqlite3.Connection,
-        collection_key: str,
-        collection_path: str,
-        collection_columns: set[str],
-    ) -> int | None:
-        if collection_key:
-            row = conn.execute(
-                "SELECT collectionID FROM collections WHERE key = ? LIMIT 1",
-                (collection_key,),
-            ).fetchone()
-            if row:
-                return int(row["collectionID"])
-
-        if collection_path:
-            by_path = self._find_collection_id_by_path(conn, collection_path, collection_columns)
-            if by_path is not None:
-                return by_path
-
-            row = conn.execute(
-                "SELECT collectionID FROM collections WHERE lower(collectionName) = lower(?) LIMIT 1",
-                (collection_path,),
-            ).fetchone()
-            if row:
-                return int(row["collectionID"])
-
-        return None
-
-    @staticmethod
-    def _find_collection_id_by_path(
-        conn: sqlite3.Connection,
-        collection_path: str,
-        collection_columns: set[str],
-    ) -> int | None:
-        parts = [part.strip() for part in collection_path.split(">") if part.strip()]
-        if not parts:
-            return None
-
-        if "parentCollectionID" not in collection_columns:
-            return None
-
-        current_parent: int | None = None
-        current_collection_id: int | None = None
-
-        for part in parts:
-            if current_parent is None:
-                row = conn.execute(
-                    """
-                    SELECT collectionID
-                    FROM collections
-                    WHERE parentCollectionID IS NULL AND lower(collectionName) = lower(?)
-                    ORDER BY collectionID ASC
-                    LIMIT 1
-                    """,
-                    (part,),
-                ).fetchone()
-            else:
-                row = conn.execute(
-                    """
-                    SELECT collectionID
-                    FROM collections
-                    WHERE parentCollectionID = ? AND lower(collectionName) = lower(?)
-                    ORDER BY collectionID ASC
-                    LIMIT 1
-                    """,
-                    (current_parent, part),
-                ).fetchone()
-
-            if not row:
-                return None
-
-            current_collection_id = int(row["collectionID"])
-            current_parent = current_collection_id
-
-        return current_collection_id
 
     @staticmethod
     def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:

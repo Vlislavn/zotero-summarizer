@@ -19,3 +19,11 @@ golden rows ─_sampling→ stratified blind sample ─_session→ JSON (data/re
 | `_metrics.py` | κ / ICC / Pearson / Spearman over paired responses |
 | `_trickle.py` | daily-trickle picker with the 24h rate-limit gate |
 | `__init__.py` | public surface (re-exports the helpers above) |
+
+Session creation, response recording and trickle timestamps all use the shared
+`write_json_atomic` writer. Failed writes/replacements preserve the previous
+session, clean their unique staging file and propagate the error. JSON is compact
+UTF-8; its schema is unchanged. Publication is atomic, not a transaction spanning
+read–modify–write: concurrent updates can still overwrite an earlier snapshot.
+Add serialization if concurrent audit mutation must be supported; this does not
+promise power-loss durability (`fsync`).

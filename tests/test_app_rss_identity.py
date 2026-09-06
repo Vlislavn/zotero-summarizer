@@ -6,7 +6,11 @@ import httpx
 import pytest
 
 from zotero_summarizer.integrations import app_rss
-from zotero_summarizer.integrations.app_rss import AppRssReader, RssUrlRejected, validate_rss_url
+from zotero_summarizer.integrations.app_rss import (
+    AppRssReader,
+    RssUrlRejected,
+    validate_rss_url,
+)
 from zotero_summarizer.services.library.app_library_reader import AppLibraryReader
 from zotero_summarizer.storage import feeds as fs
 from zotero_summarizer.storage import repositories as repo
@@ -25,7 +29,9 @@ def _open() -> sqlite3.Connection:
     return conn
 
 
-def _item(feed_library_id: int, item_id: int, guid: str, **extra: object) -> dict[str, object]:
+def _item(
+    feed_library_id: int, item_id: int, guid: str, **extra: object
+) -> dict[str, object]:
     base: dict[str, object] = {
         "feed_library_id": feed_library_id,
         "item_id": item_id,
@@ -149,7 +155,9 @@ def test_ambiguous_legacy_alias_is_reported_not_resolved() -> None:
     assert fs.get_processed_feed_item_by_id(conn, 42) is None
 
 
-def test_app_rss_reader_refresh_stores_items_without_scoring(tmp_path, monkeypatch) -> None:
+def test_app_rss_reader_refresh_stores_items_without_scoring(
+    tmp_path, monkeypatch
+) -> None:
     db_path = tmp_path / "triage.db"
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
@@ -194,6 +202,26 @@ def test_app_rss_reader_refresh_stores_items_without_scoring(tmp_path, monkeypat
     assert items[0]["source_type"] == "app_rss"
     assert items[0]["title"] == "Stored from RSS"
     assert is_stable_feed_key(items[0]["stable_feed_key"])
+
+
+def test_overlapping_tag_feeds_reuse_one_guid_row() -> None:
+    conn = _open()
+    a = rss_storage.upsert_rss_feed(conn, name="AI agents", url="https://example.com/a")
+    b = rss_storage.upsert_rss_feed(
+        conn, name="Agentic AI", url="https://example.com/b"
+    )
+    first, inserted = rss_storage.upsert_rss_item(
+        conn,
+        rss_feed_id=a,
+        item={"guid": "shared-story", "title": "Concrete agent post"},
+    )
+    second, inserted_again = rss_storage.upsert_rss_item(
+        conn,
+        rss_feed_id=b,
+        item={"guid": "shared-story", "title": "Concrete agent post"},
+    )
+    assert first == second and inserted is True and inserted_again is False
+    assert conn.execute("SELECT COUNT(*) FROM rss_items").fetchone()[0] == 1
 
 
 def test_app_library_reader_lists_kept_rss_rows(tmp_path) -> None:
@@ -273,8 +301,14 @@ def test_delete_rss_feed_removes_owned_items() -> None:
     assert rss_storage.delete_rss_feed(conn, feed_id) is True
     conn.commit()
 
-    assert conn.execute("SELECT 1 FROM rss_feeds WHERE id = ?", (feed_id,)).fetchone() is None
-    assert conn.execute("SELECT 1 FROM rss_items WHERE id = ?", (item_id,)).fetchone() is None
+    assert (
+        conn.execute("SELECT 1 FROM rss_feeds WHERE id = ?", (feed_id,)).fetchone()
+        is None
+    )
+    assert (
+        conn.execute("SELECT 1 FROM rss_items WHERE id = ?", (item_id,)).fetchone()
+        is None
+    )
 
 
 def test_validate_rss_url_rejects_local_and_private_urls(monkeypatch) -> None:

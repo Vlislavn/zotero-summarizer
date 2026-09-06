@@ -13,10 +13,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from zotero_summarizer.domain import PRIORITY_COULD_READ_THRESHOLD
+from zotero_summarizer.domain import PRIORITY_COULD_READ_THRESHOLD, score_to_priority
 from zotero_summarizer.services._common import band_primary_enabled
 from zotero_summarizer.services.triage.daily_select._dataclasses import SlatePaper
-from zotero_summarizer.services.model.rank_blend import quality_bonus
+from zotero_summarizer.services.model.rank_blend import order_within_bands, quality_bonus
 from zotero_summarizer.services.model.surprise import DEFAULT_BLACK_SWAN_MIN_SCORE
 
 ROLE_ORDER: tuple[str, ...] = ("model", "surprise", "diversity")
@@ -66,15 +66,8 @@ def _to_slate_paper(cand: dict[str, Any], *, role: str) -> SlatePaper:
     )
 
 
-def _model_score(cand: dict[str, Any], *, use_band: bool, quality_first: bool) -> float:
-    """The model-role sort key. In quality-first mode ``rank_score`` IS the
-    quality-led key (``rank_blend_quality``), so the additive quality_bonus is
-    dropped — grade already leads the key, and re-adding the ±0.06 bonus would
-    double-count it. In the default mode it's ``rank_score`` + the capped
-    deep-review quality lift, applied ONLY here in the FLOORED model role (never
-    the un-floored surprise/diversity discovery pickers)."""
-    if quality_first:
-        return cand["rank_score"]
+def _model_score(cand: dict[str, Any], *, use_band: bool) -> float:
+    """Quality-adjusted key, restricted to raw-band slots by _pick_model."""
     q = cand.get("quality") or {}
     return cand["rank_score"] + quality_bonus(
         q.get("quality_band"), q.get("grade"), use_band=use_band
@@ -103,18 +96,25 @@ def _pick_model(
     the system's current best recommendation. Default: the relevance×goal×prestige
     blend floated by deep-review quality, ``dont_read``-band papers excluded.
     Quality-first: the quality-led ``rank_score`` with a ``relevance_score`` floor
-    (see ``_model_score`` / ``_passes_model_floor``). Falls back to pure composite
+    (see ``_passes_model_floor``), without the default category-slot restriction
+    or double-counting its quality signal. Falls back to pure composite
     order automatically when the blend/quality signals are absent."""
-    use_band = band_primary_enabled()
     ordered = sorted(
         (
             c for c in pool
             if c["id"] not in chosen_ids
             and _passes_model_floor(c, quality_first=quality_first, min_composite=min_composite)
         ),
-        key=lambda c: _model_score(c, use_band=use_band, quality_first=quality_first),
+        key=lambda c: c["rank_score"],
         reverse=True,
     )
+    if not quality_first:
+        use_band = band_primary_enabled()
+        order = order_within_bands(
+            [score_to_priority(c["composite_score"]) for c in ordered],
+            [(_model_score(c, use_band=use_band), "") for c in ordered],
+        )
+        ordered = [ordered[i] for i in order]
     return ordered[:n]
 
 

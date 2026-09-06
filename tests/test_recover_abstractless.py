@@ -13,8 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 
-from zotero_summarizer.services.triage.feeds import _tick_phases
 from zotero_summarizer.services.triage.feeds._common import _has_usable_abstract
+from zotero_summarizer.services.triage.feeds import _rescue
 
 # The exact boilerplate the Nature feed delivered (processed_feed_items id 11972).
 _NATURE_TITLE = "Towards Conversational AI for Disease Management"
@@ -74,7 +74,7 @@ def _cfg(**over):
 
 def _patch_state(monkeypatch, cfg):
     state = SimpleNamespace(app_state=SimpleNamespace(config=SimpleNamespace(recover_abstract=cfg)))
-    monkeypatch.setattr(_tick_phases, "get_state", lambda: state)
+    monkeypatch.setattr(_rescue, "get_state", lambda: state)
 
 
 def _patch_fetch_and_score(monkeypatch, *, path, score=3.8):
@@ -110,7 +110,7 @@ def test_rescues_abstractless_high_goal_item(monkeypatch):
     lowgoal = _item("K3", _NATURE_BOILERPLATE)  # abstract-less but goal too low
     gate_rejected = [(boiler, _pred(0.556)), (real, _pred(0.9)), (lowgoal, _pred(0.1))]
 
-    rescued, still_rejected = _tick_phases.recover_abstractless_rescues(
+    rescued, still_rejected = _rescue.recover_abstractless_rescues(
         gate_rejected, tick_id="tick",
     )
 
@@ -125,7 +125,7 @@ def test_no_fetchable_full_text_keeps_gate_verdict(monkeypatch):
     _patch_fetch_and_score(monkeypatch, path=None)
 
     boiler = _item("K1", _NATURE_BOILERPLATE)
-    rescued, still_rejected = _tick_phases.recover_abstractless_rescues(
+    rescued, still_rejected = _rescue.recover_abstractless_rescues(
         [(boiler, _pred(0.556))], tick_id="tick",
     )
     assert rescued == []
@@ -133,23 +133,27 @@ def test_no_fetchable_full_text_keeps_gate_verdict(monkeypatch):
 
 
 def test_max_per_tick_caps_browser_fetches(monkeypatch):
-    """Two eligible items but cap=1 → one rescued, one deferred to still_rejected."""
+    """Failed acquisition still consumes the cap; the backlog is not probed."""
     _patch_state(monkeypatch, _cfg(max_per_tick=1))
-    _patch_fetch_and_score(monkeypatch, path=Path("/tmp/paper.pdf"))
+    calls = []
+    monkeypatch.setattr(
+        _rescue, "_rescue_one",
+        lambda item, *, tick_id: calls.append(item["item_key"]),
+    )
 
     a = _item("K1", _NATURE_BOILERPLATE)
     b = _item("K2", _NATURE_BOILERPLATE)
-    rescued, still_rejected = _tick_phases.recover_abstractless_rescues(
+    rescued, still_rejected = _rescue.recover_abstractless_rescues(
         [(a, _pred(0.7)), (b, _pred(0.7))], tick_id="tick",
     )
-    assert len(rescued) == 1
-    assert len(still_rejected) == 1
+    assert calls == ["K1"]
+    assert rescued == [] and len(still_rejected) == 2
 
 
 def test_disabled_returns_everything_unchanged(monkeypatch):
     _patch_state(monkeypatch, _cfg(enabled=False))
     gate_rejected = [(_item("K1", _NATURE_BOILERPLATE), _pred(0.9))]
-    rescued, still_rejected = _tick_phases.recover_abstractless_rescues(
+    rescued, still_rejected = _rescue.recover_abstractless_rescues(
         gate_rejected, tick_id="tick",
     )
     assert rescued == []
@@ -160,7 +164,7 @@ def test_unscorable_pred_none_is_never_rescued(monkeypatch):
     """A gate item with no prediction (pred=None) can't be re-scored — stays rejected."""
     _patch_state(monkeypatch, _cfg())
     gate_rejected = [(_item("K1", _NATURE_BOILERPLATE), None)]
-    rescued, still_rejected = _tick_phases.recover_abstractless_rescues(
+    rescued, still_rejected = _rescue.recover_abstractless_rescues(
         gate_rejected, tick_id="tick",
     )
     assert rescued == []

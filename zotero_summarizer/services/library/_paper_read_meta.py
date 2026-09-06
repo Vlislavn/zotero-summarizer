@@ -7,8 +7,8 @@ text. See ``services/library/README.md``.
 """
 from __future__ import annotations
 
+import json
 import re
-from pathlib import Path
 from typing import Any
 
 # TeX-extracted authors are often garbage (Author 1, Author 2… or bare \cmd residue).
@@ -83,17 +83,23 @@ def qa_body_text(artifact: dict[str, Any]) -> str:
     return str(artifact.get("qa_text") or artifact.get("full_text") or "")
 
 
-def artifact_text(artifact: dict[str, Any], *, max_chars: int) -> str:
-    """Comprehensive Q&A context: metadata, generated notes, then paper body."""
+def artifact_text(
+    artifact: dict[str, Any], *, max_chars: int, review: dict[str, Any] | None = None,
+) -> str:
+    """Comprehensive Q&A context: metadata, structured review, then paper body."""
     parts = [
         f"Title: {artifact.get('title') or ''}",
         f"Pages: {artifact.get('n_pages') or 0}",
         f"Figures: {artifact.get('figures_count') or 0}",
         f"References: {artifact.get('references_count') or 0}",
     ]
-    notes_path = Path(str((artifact.get("outputs") or {}).get("notes") or ""))
-    if notes_path.is_file():
-        parts.append(notes_path.read_text(encoding="utf-8"))
+    structured = {
+        key: review.get(key)
+        for key in ("digest", "quality", "goal_summaries")
+        if review and review.get(key)
+    }
+    if structured:
+        parts.append("Structured review:\n" + json.dumps(structured, ensure_ascii=False, default=str))
     body = qa_body_text(artifact)
     if body:
         parts.append(body)

@@ -36,7 +36,7 @@ def test_early_long_section_does_not_starve_the_critical_tail():
     out = rt.select_review_text(secs, full, budget=6_000)
     assert "LIMIT_MARK" in out and "CONCL_MARK" in out  # tail survives
     assert "method detail" in out                        # methods survive
-    assert len(out) <= 6_100                              # respects budget (+ join slack)
+    assert len(out) <= 6_000                              # separators are inside the cap
 
 
 def test_references_section_is_skipped():
@@ -53,7 +53,7 @@ def test_no_sections_falls_back_to_ranked_chunks_within_budget():
     # No parsed sections → chunk-ranking over the whole text, never exceeding budget.
     long = ("Methodology and evaluation. " * 4000) + ("Limitations and conclusion. " * 1000)
     out = rt.select_review_text([], long, budget=4_000)
-    assert 0 < len(out) <= 4_300
+    assert 0 < len(out) <= 4_000
     assert len(out) < len(long)  # genuinely selected a subset
 
 

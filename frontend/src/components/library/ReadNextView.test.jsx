@@ -83,6 +83,18 @@ afterEach(() => {
 });
 
 describe('ReadNextView mobile expansion', () => {
+  it('offers Rescore after a queue read fails even if the retained rows were fully scored', () => {
+    const onRescore = vi.fn();
+    const err = Object.assign(new Error('Reading cache is corrupt'), { status: 500 });
+    renderView({ computedAt: '2026-09-06T12:00:00Z', err, onRescore });
+
+    expect(screen.getByText(/Failed to load queue:/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Rescore' }));
+
+    expect(onRescore).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('First paper')).toBeTruthy();
+  });
+
   it('renders the expanded detail inside the tapped row on mobile', () => {
     renderView();
 
@@ -109,6 +121,8 @@ describe('ProposedVerdictCard wiring', () => {
     renderView({ items: [{ ...items[0], proposed_verdict: proposal }, items[1]] });
 
     // Card renders under the K1 row with both actions.
+    expect(screen.getByText(/Review suggests: Should read/i)).toBeTruthy();
+    expect(screen.getByText(/not used for rank/i)).toBeTruthy();
     expect(screen.getByRole('button', { name: /Confirm — Should read/i })).toBeTruthy();
     const override = screen.getByRole('button', { name: 'Override' });
 

@@ -57,9 +57,7 @@ def test_get_all_items_excludes_annotations(zotero_dir: Path):
 
 
 def test_get_all_items_runs_a_single_execute_read(zotero_dir: Path, monkeypatch):
-    """A whole-library pass must be ONE connection — so under Zotero-open
-    contention it copies the 176 MB DB snapshot at most ONCE, not once per
-    500-item page (the regression this fix removes). Counts ``_execute_read``."""
+    """A whole-library pass uses one read instead of reconnecting per page."""
     db = zotero_dir / "zotero.sqlite"
     for i in range(3):
         add_library_item(db, item_key=f"P{i}", title=f"paper {i}", abstract="a")

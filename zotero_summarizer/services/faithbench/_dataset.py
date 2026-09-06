@@ -9,12 +9,15 @@ spot-checking auto-generated ground truth.
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import re
 from pathlib import Path
 from typing import Any, Iterable, Literal, Union
 
 from pydantic import BaseModel, Field
+
+from zotero_summarizer.services.faithbench._corpus import sentence_at, sha256_text
 
 _BENCHMARK_RE = re.compile(r"^benchmark_v(\d+)\.jsonl$")
 
@@ -77,6 +80,11 @@ class TrapItem(BaseModel):
 BenchmarkItem = Union[QAItem, TrapItem]
 
 
+def _require_qa_cohort(items: list[BenchmarkItem]) -> None:
+    if {item.kind for item in items} != {"qa", "trap"}:
+        raise ValueError("QA benchmark requires both answerable questions and unanswerable traps")
+
+
 # ---------------------------------------------------------------------------
 # Versioned persistence
 # ---------------------------------------------------------------------------
@@ -125,33 +133,76 @@ def save_benchmark(path: Path, meta: BenchmarkMeta, items: Iterable[BenchmarkIte
     return count
 
 
-def load_benchmark(path: Path) -> tuple[BenchmarkMeta, list[BenchmarkItem]]:
+def load_benchmark(path: Path, *, expected_sha256: str | None = None) -> tuple[BenchmarkMeta, list[BenchmarkItem]]:
     """Parse a benchmark file. Malformed lines are an error — the benchmark is
     a frozen artifact this code wrote; corruption must surface, not be skipped."""
     meta: BenchmarkMeta | None = None
     items: list[BenchmarkItem] = []
-    with path.open("r", encoding="utf-8") as f:
-        for line_no, line in enumerate(f, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            payload = json.loads(line)
-            kind = payload.get("kind")
-            if kind == "meta":
-                meta = BenchmarkMeta.model_validate(payload)
-            elif kind == "qa":
-                items.append(QAItem.model_validate(payload))
-            elif kind == "trap":
-                items.append(TrapItem.model_validate(payload))
-            else:
-                raise ValueError(f"{path}:{line_no}: unknown benchmark row kind {kind!r}")
+    raw = path.read_bytes()
+    if expected_sha256 is not None and hashlib.sha256(raw).hexdigest() != expected_sha256:
+        raise ValueError(f"Benchmark SHA-256 mismatch: {path}")
+    for line_no, line in enumerate(raw.decode("utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        payload = json.loads(line)
+        if not isinstance(payload, dict):
+            raise ValueError(f"{path}:{line_no}: benchmark row must be a JSON object")
+        kind = payload.get("kind")
+        if kind == "meta" and meta is None and not items:
+            meta = BenchmarkMeta.model_validate(payload)
+        elif kind == "qa" and meta is not None:
+            items.append(QAItem.model_validate(payload))
+        elif kind == "trap" and meta is not None:
+            items.append(TrapItem.model_validate(payload))
+        else:
+            raise ValueError(f"{path}:{line_no}: invalid benchmark row order or kind {kind!r}")
     if meta is None:
         raise ValueError(f"{path}: missing meta header line")
+    _validate_identity(meta, items)
     return meta, items
 
 
 def items_by_id(items: list[BenchmarkItem]) -> dict[str, BenchmarkItem]:
-    return {item.item_id: item for item in items}
+    indexed = {item.item_id: item for item in items}
+    if len(indexed) != len(items):
+        raise ValueError("Duplicate benchmark item IDs")
+    return indexed
+
+
+def _validate_identity(meta: BenchmarkMeta, items: list[BenchmarkItem]) -> None:
+    keys = [paper.item_key for paper in meta.papers]
+    if not keys or len(set(keys)) != len(keys):
+        raise ValueError("Benchmark requires nonempty, unique paper identities")
+    items_by_id(items)
+
+
+def _benchmark_sha(meta: BenchmarkMeta, items: list[BenchmarkItem]) -> str:
+    return sha256_text(json.dumps([meta.model_dump(), [item.model_dump() for item in items]], sort_keys=True))
+
+
+def _validate_item(item: BenchmarkItem, meta: BenchmarkMeta, texts: dict[str, str]) -> None:
+    """Bind one item to verified frozen text; callers choose abort vs HARNESS_FAULT."""
+    try:
+        paper = meta.paper_by_key(item.paper_item_key)
+    except KeyError as exc:
+        raise ValueError(f"{item.item_id}: unknown target paper") from exc
+    if item.paper_text_sha256 != paper.text_sha256:
+        raise ValueError(f"{item.item_id}: paper SHA-256 does not match the manifest")
+    text = texts.get(item.paper_item_key)
+    if text is None or len(text) != paper.n_chars:
+        raise ValueError(f"{item.item_id}: frozen target text is unavailable or has the wrong length")
+    if isinstance(item, QAItem):
+        if not (type(item.span_start) is int and type(item.span_end) is int
+                and 0 <= item.span_start < item.span_end <= len(text)
+                and text[item.span_start:item.span_end] == item.gold_answer):
+            raise ValueError(f"{item.item_id}: gold answer is not anchored at its recorded span")
+        if item.evidence_sentence and item.evidence_sentence != sentence_at(text, item.span_start):
+            raise ValueError(f"{item.item_id}: evidence sentence is not the recorded span's source sentence")
+    else:
+        source = texts.get(item.source_paper_item_key)
+        if (item.source_paper_item_key == item.paper_item_key or source is None
+                or not item.source_gold_answer.strip() or item.source_gold_answer not in source):
+            raise ValueError(f"{item.item_id}: trap provenance does not bind to a different frozen paper")
 
 
 # ---------------------------------------------------------------------------
@@ -159,9 +210,39 @@ def items_by_id(items: list[BenchmarkItem]) -> dict[str, BenchmarkItem]:
 # ---------------------------------------------------------------------------
 
 _REVIEW_FIELDS = [
-    "item_id", "kind", "paper_title", "question", "gold_answer", "answer_type",
+    "approved", "item_id", "kind", "paper_title", "question", "gold_answer", "answer_type",
     "occurrences_in_paper", "span_context", "source_paper_item_key",
 ]
+
+
+def review_path(benchmark: Path) -> Path:
+    return benchmark.with_name(f"{benchmark.stem}.review.csv")
+
+
+def require_review_approval(benchmark: Path, items: list[BenchmarkItem]) -> str:
+    """Require an exact, explicitly approved human-review row for every QA/trap."""
+    path = review_path(benchmark)
+    if not path.exists():
+        raise ValueError(f"Benchmark review is missing: {path}")
+    with path.open(encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames != _REVIEW_FIELDS:
+            raise ValueError(f"Benchmark review has an invalid header: {path}")
+        rows = list(reader)
+    by_id = {row.get("item_id", ""): row for row in rows}
+    if len(by_id) != len(rows) or set(by_id) != {item.item_id for item in items}:
+        raise ValueError("Benchmark review must contain every item exactly once")
+    for item in items:
+        row = by_id[item.item_id]
+        expected_gold = item.gold_answer if isinstance(item, QAItem) else item.source_gold_answer
+        if any(row.get(field, "") != value for field, value in {
+            "kind": item.kind, "paper_title": item.paper_title,
+            "question": item.question, "gold_answer": expected_gold,
+        }.items()):
+            raise ValueError(f"Benchmark review row does not match frozen item: {item.item_id}")
+        if row.get("approved", "").strip().casefold() not in {"yes", "true"}:
+            raise ValueError(f"Benchmark item is not human-approved: {item.item_id}")
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def export_review_csv(
@@ -173,6 +254,7 @@ def export_review_csv(
         writer.writeheader()
         for item in items:
             row: dict[str, Any] = {
+                "approved": "",
                 "item_id": item.item_id,
                 "kind": item.kind,
                 "paper_title": item.paper_title,

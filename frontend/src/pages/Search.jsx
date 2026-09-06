@@ -32,22 +32,14 @@ const REL_BAND = {
 };
 
 function QueryPlan({ plan }) {
-  const rows = [
-    ['library', plan.library_expanded || plan.library_raw],
-    ['openalex (lexical)', plan.openalex_lexical],
-    ['openalex (semantic)', plan.openalex_semantic],
-    ['europepmc', plan.europepmc],
-    ['arxiv', plan.arxiv],
-    ['crossref', plan.crossref],
-    ['semantic scholar', plan.semantic_scholar],
-  ].filter(([, q]) => q);
+  const rows = plan.display || [];
   if (!rows.length) return null;
   return (
     <details className="mb-4 text-[12px]">
       <summary className="cursor-pointer text-slate-600 font-semibold">Query plan (per source)</summary>
       <div className="mt-2 grid gap-1">
-        {rows.map(([src, q]) => (
-          <div key={src} className="flex gap-2">
+        {rows.map(({ source: src, query: q }, index) => (
+          <div key={index} className="flex gap-2">
             <span className="text-slate-500 w-40 shrink-0">{src}</span>
             <span className="mono text-slate-800">{q}</span>
           </div>
@@ -116,7 +108,7 @@ function CandidateCard({ cand, onAdd }) {
   const sources = [...new Set((cand.provenance || []).map((p) => p.source))];
   const band = (cand.quality?.quality_band || '').toLowerCase();
   const meta = [cand.venue, cand.year].filter(Boolean).join(' · ');
-  const added = Boolean(cand.materialized_zotero_key);
+  const added = Boolean(cand.materialized_zotero_key || cand.existing_zotero_key);
   const rel = REL_BAND[cand.relevance_band];
   const why = Array.isArray(cand.why) ? cand.why : [];
   const [adding, setAdding] = useState(false);
@@ -342,7 +334,7 @@ export default function Search() {
             return (
               <>
                 <div className="grid gap-3">
-                  {strong.map((c) => <CandidateCard key={c.candidate_id || c.title} cand={c} onAdd={materializeCard} />)}
+                  {strong.map((c) => <CandidateCard key={c.candidate_id} cand={c} onAdd={materializeCard} />)}
                 </div>
                 {weak.length > 0 && (
                   <details className="mt-3">
@@ -350,7 +342,7 @@ export default function Search() {
                       {weak.length} weaker match{weak.length === 1 ? '' : 'es'} ▾
                     </summary>
                     <div className="grid gap-3 mt-2">
-                      {weak.map((c) => <CandidateCard key={c.candidate_id || c.title} cand={c} onAdd={materializeCard} />)}
+                      {weak.map((c) => <CandidateCard key={c.candidate_id} cand={c} onAdd={materializeCard} />)}
                     </div>
                   </details>
                 )}

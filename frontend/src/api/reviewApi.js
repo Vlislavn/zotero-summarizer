@@ -77,6 +77,11 @@ export async function reviewApplyAll() {
 }
 
 /** POST /api/feeds/review/confirm-gate-rejected — bulk-confirm unaltered rows as dont_read. */
-export async function reviewConfirmAllGateRejected() {
-  return request('/confirm-gate-rejected', { method: 'POST', body: '{}' });
+export async function reviewConfirmAllGateRejected(processedIds) {
+  if (!Array.isArray(processedIds) || processedIds.length === 0) {
+    throw new Error('reviewConfirmAllGateRejected: processedIds are required');
+  }
+  return request('/confirm-gate-rejected', {
+    method: 'POST', body: JSON.stringify({ processed_ids: processedIds }),
+  });
 }

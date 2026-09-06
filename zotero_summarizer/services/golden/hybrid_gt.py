@@ -73,32 +73,66 @@ _UNCHECKED_ADD_RELEVANCE = float(_PRIORITY_TO_RELEVANCE[_UNCHECKED_ADD_PRIORITY]
 
 
 def load_user_verdicts(db_path: Path) -> dict[str, dict[str, Any]]:
-    """Return ``{item_key: verdict_row}`` for EVERY recorded user verdict.
+    """Return all active verdicts, including their legacy feed aliases."""
+    return {key: row for key, row in _load_label_state(db_path).items() if row is not None}
 
-    Uses the uncapped reader: the paged ``list_label_verdicts`` default cap
-    silently dropped the oldest verdicts from training once the table
-    outgrew it (found June 2026 with 946 rows vs the 500 cap).
-    """
-    rows = repositories.list_all_label_verdicts(db_path)
-    out = {row["item_key"]: row for row in rows}
+
+def _load_label_state(db_path: Path) -> dict[str, dict[str, Any] | None]:
+    """Active verdicts plus durable deletion markers; None means retracted."""
+    # ponytail: whole label/revision snapshots; batch storage reads if history outgrows memory.
+    rows = repositories.list_all_label_verdicts(db_path, include_training=True)
+    out: dict[str, dict[str, Any] | None] = {row["item_key"]: row for row in rows}
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     try:
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        # Legacy stores can predate sync/alias migrations; SQL failures still propagate.
+        if "sync_changes" in tables:
+            for (key, field), state in repositories.sync_current_fields(db_path).items():
+                if field == "verdict" and state["value"] is None:
+                    out.setdefault(key, None)
         alias_rows = conn.execute(
             "SELECT old_key, stable_feed_key FROM feed_key_aliases"
-        ).fetchall()
-    except sqlite3.Error:
-        alias_rows = []
+        ).fetchall() if "feed_key_aliases" in tables else []
     finally:
         conn.close()
     for alias in alias_rows:
         old_key = str(alias["old_key"])
         stable_key = str(alias["stable_feed_key"])
-        if old_key not in out and stable_key in out:
-            copied = dict(out[stable_key])
-            copied["item_key"] = old_key
-            out[old_key] = copied
+        if out.get(old_key) is None and stable_key in out:
+            verdict = out[stable_key]
+            out[old_key] = {**verdict, "item_key": old_key} if verdict is not None else None
     return out
+
+
+def _active_rows(
+    rows: Iterable[dict[str, Any]], state: dict[str, dict[str, Any] | None],
+) -> Iterable[dict[str, Any]]:
+    """A historical verdict is not independent derived evidence after retraction."""
+    for row in rows:
+        key = (row.get("item_key") or "").strip()
+        tier = (row.get("gold_signal_tier") or "").strip().partition("|")[0]
+        if key in state and state[key] is None and tier in {"feed_user_label", "user_label", "feed_interest"}:
+            continue
+        yield row
+
+
+def _with_training_samples(
+    rows: Iterable[dict[str, Any]], state: dict[str, dict[str, Any] | None],
+) -> Iterable[dict[str, Any]]:
+    """Union durable review metadata with CSV rows, without duplicating aliases."""
+    seen = set()
+    for row in rows:
+        key = (row.get("item_key") or "").strip()
+        verdict = state.get(key)
+        sample = verdict.get("training_sample") if verdict is not None else None
+        seen.add(sample["item_key"] if sample is not None else key)
+        yield row
+    for verdict in state.values():
+        sample = verdict.get("training_sample") if verdict is not None else None
+        if sample is not None and sample["item_key"] not in seen:
+            seen.add(sample["item_key"])
+            yield sample
 
 
 def load_resolved_outcomes(db_path: Path) -> dict[str, str]:
@@ -166,7 +200,7 @@ def load_hybrid_labels(
 ) -> dict[str, dict[str, Any]]:
     """Merge derived (CSV) + user (DB) labels into one dict.
 
-    Every row that appears in either source gets an entry. Keys with both
+    Every active row that appears in either source gets an entry. Keys with both
     sources resolve via the precedence ladder (module docstring). Missing CSV
     entries are valid: a user verdict can exist before the next
     ``goldenset export`` runs.
@@ -174,7 +208,7 @@ def load_hybrid_labels(
     if not csv_path.exists():
         raise FileNotFoundError(f"golden CSV not found at {csv_path}")
 
-    user = load_user_verdicts(db_path)
+    user = _load_label_state(db_path)
     outcomes = load_resolved_outcomes(db_path)
     out: dict[str, dict[str, Any]] = {}
 
@@ -198,7 +232,7 @@ def load_hybrid_labels(
 
     with csv_path.open("r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
-        for row in reader:
+        for row in _active_rows(reader, user):
             key = (row.get("item_key") or "").strip()
             if not key:
                 continue
@@ -208,8 +242,8 @@ def load_hybrid_labels(
     # User verdicts on rows the CSV has not seen yet (e.g. fresh feed:* row
     # marked before the next goldenset export). Keep them — the gate
     # retrainer should still see the user's signal.
-    for key in user:
-        if key not in out:
+    for key, verdict in user.items():
+        if verdict is not None and key not in out:
             out[key] = _entry(key, None)
     return out
 
@@ -227,14 +261,17 @@ def apply_hybrid(
     downstream code can audit which rows came from user input vs. outcome
     correction vs. derivation.
 
+    A deletion marker suppresses verdict-derived CSV rows until reassignment;
+    independent engagement derivations remain eligible after a verdict is removed.
+
     Outcome-corrected rows additionally get an ``outcome_<name>`` segment
     appended to ``gold_signal_tier`` — ``services.model.label_weights`` keys
     the "resolved observation" confidence weight on that segment.
     """
-    user = load_user_verdicts(db_path)
+    user = _load_label_state(db_path)
     outcomes = load_resolved_outcomes(db_path)
     out: list[dict[str, Any]] = []
-    for row in rows:
+    for row in _active_rows(_with_training_samples(rows, user), user):
         key = (row.get("item_key") or "").strip()
         new = dict(row)
         v = user.get(key) if key else None

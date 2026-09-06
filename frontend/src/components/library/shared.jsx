@@ -64,6 +64,40 @@ export function StatusBanner({ message, isError, tone }) {
   );
 }
 
+// One mutually-exclusive explanation for a review that could not get full text.
+// Shared by the full paper page and the compact review section so recovery copy
+// cannot drift between surfaces.
+export function FullTextAccessNotice({ deep }) {
+  if (!deep?.needs_pdf) return null;
+  const cls = "rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] leading-relaxed text-amber-800";
+  if (deep.acquire_outcome === 'browser_extra_unavailable') {
+    return (
+      <div className={cls} role="status">
+        <span className="font-semibold">Library access is unavailable in this installation.</span>{' '}
+        <a href="/settings" className="font-medium text-indigo-700 hover:underline">Open Settings</a>{' '}
+        to install browser support, then generate again.
+      </div>
+    );
+  }
+  if (deep.needs_login && deep.login_url) {
+    return (
+      <div className={cls} role="status">
+        <span className="font-semibold">Your library session could not access this paper.</span>{' '}
+        <a href="/settings#university-access" className="font-medium text-indigo-700 hover:underline">
+          Open University access
+        </a>{' '}
+        and sign in through the app&apos;s saved browser profile, then generate again.
+      </div>
+    );
+  }
+  return (
+    <div className={cls} role="status">
+      <span className="font-semibold">No readable full text found.</span>{' '}
+      Open access and the configured acquisition methods did not return a usable copy.
+    </div>
+  );
+}
+
 // Canonical error banner. Runs the value through humanizeError so any thrown
 // shape (Error, {message|detail}, string) renders as a friendly sentence —
 // never "[object Object]". Pages import this instead of re-defining it.

@@ -11,8 +11,8 @@ queues suggested Zotero changes for you to approve.
   cli.py ──>│ api/      FastAPI app + thin routes (HTTP)      │<── frontend/ (React)
             ├────────────────────────────────────────────────┤
             │ services/ business logic, grouped by domain:    │
-            │   model · golden · triage · library · zotero    │
-            │   faithbench (grounding eval, validates library.qa) │
+            │   model · golden · triage · library · zotero · setup │
+            │   sync · faithbench (grounding eval for library.qa) │
             ├────────────────────────────────────────────────┤
             │ storage/        integrations/                   │
             │ (SQLite)        (Zotero, PDF, LLM, OpenAlex)     │
@@ -31,10 +31,16 @@ queues suggested Zotero changes for you to approve.
 | `domain.py` | Pure constants/helpers — the single source for priority thresholds, `score_to_priority`/`PRIORITY_TO_RELEVANCE` (derivation == prediction), `apply_prestige_floor` (demote-one-band quality floor on the top bands; unknown prestige → keep; raw score untouched), the `label:<priority>` ground-truth tag helpers (`LABEL_TAG_PREFIX`, `label_tag_for_priority`, `priority_from_label_tag` — shared by the golden read path and the zotero write path), `normalize_doi`/`normalize_arxiv_id` (bare, version-stripped, lower-cased ids — the single source of truth for DOI/arXiv dedup comparison), and the `label_verdicts` provenance tags `VERDICT_SOURCE_USER`/`VERDICT_SOURCE_MACHINE_ADD` (single source shared by the triage write path and the golden/storage read path — only `machine_add` PROVISIONAL verdicts may be superseded by an observed materialization outcome at training time; explicit user verdicts always win) |
 | `contracts.py` | Small shared dataclasses (e.g. `PendingChange`) |
 | `settings.py` | `Settings.load()` — every path (incl. `data_dir`) derives from here, e.g. `browser_profile_dir` (`data/browser_profile`) for the review fleet's university-access browser session, `interaction_log_path` (`data/interaction-events.jsonl`) for the append-only agentic interaction log (`services.interaction_log`), and `search_dir` (`data/search`) for Targeted Search research sessions (`services.search`) |
-| `runtime.py` | `AppContext` + typed `RuntimeState` — how services reach runtime deps without FastAPI globals. `RuntimeState.classifier_gate_error` mirrors `zotero_error` so the readiness probe can report WHY the gate is `None` (e.g. `ModuleNotFoundError: lightgbm`) instead of a silent `None`. Optional metadata clients: `openalex_client` (prestige) / `unpaywall_client` (OA full-text) / `openreview_client` (authenticated peer-review Search source — creds read from env inside the client, never here) |
+| `runtime.py` | `AppContext` + typed `RuntimeState` — how services reach runtime deps without FastAPI globals. AI actions fail with a typed 409 when `llm_enabled=false`; ML-only services remain available. `RuntimeState.classifier_gate_error` mirrors `zotero_error` so readiness reports why the gate is unavailable. Optional metadata clients: `openalex_client` / `unpaywall_client` / `openreview_client` |
 | `models/config.py` | `QualityReviewConfig` carries tier-aware deep-review cost knobs: `self_consistency_runs`/`lean_self_consistency_runs`/`lean_max_text_chars`/`batch_goal_summaries` — a provider flagged `lean_deep_review` (ollama) uses the cheaper caps + a batched goal-summary call; every other provider (incl. MLX) uses the full settings. Keyed on the provider flag, not `is_local` |
 
 ## More
+
+`Settings.model_dir`, `tuned_params_path`, and `pdf_cache_dir` select
+`data/models/`, `data/optuna-best-params.json`, and `data/pdfs/` below the active
+project. Model/library caches never resolve an application cache from HOME.
+Existing home-global artifacts are left untouched and are not auto-imported;
+retrain/recompute in the selected project or explicitly copy trusted artifacts.
 
 Subpackages each have their own README. Start with
 [docs/architecture.md](../docs/architecture.md) for the end-to-end mental model,

@@ -9,20 +9,20 @@ append. No HTTP concerns (those live in the route module).
 from __future__ import annotations
 
 import json as _json
-import logging
 import sqlite3
+from dataclasses import asdict
 from typing import Any
 
-from zotero_summarizer.domain import label_tag_for_priority
+from zotero_summarizer.domain import VERDICT_SOURCE_USER
 from zotero_summarizer.services import interaction_log
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services.golden.goldenset import _PRIORITY_TO_RELEVANCE
+from zotero_summarizer.services.golden import label_verdicts
+from zotero_summarizer.services.library.review_summary import prepare_training_sample
+from zotero_summarizer.services.triage.daily_select._candidate import parse_payload
 from zotero_summarizer.storage import feeds as feeds_storage
-from zotero_summarizer.storage.feed_identity import row_feed_keys
 from zotero_summarizer.storage import repositories
-
-LOGGER = logging.getLogger(__name__)
-
+from zotero_summarizer.storage.feed_identity import row_feed_keys
 
 # ---------------------------------------------------------------------------
 # Connection helper (mirrors feeds.py)
@@ -38,8 +38,10 @@ def _conn():
 # ---------------------------------------------------------------------------
 
 
-def list_by_state(state: str, since_hours: int = 720, limit: int = 1000) -> list[dict[str, Any]]:
-    """Return every row with ``decision == state`` enriched with parsed payload.
+def list_by_state(
+    state: str, since_hours: int = 720, limit: int = 1000, *, sort: str = "recent",
+) -> list[dict[str, Any]]:
+    """Return ranked, limited rows with ``decision == state`` and parsed payload.
 
     The review UI uses this for both ``awaiting_review`` (the LLM-or-gate-only
     triage queue) and ``gate_rejected`` (items the classifier dropped before
@@ -54,6 +56,7 @@ def list_by_state(state: str, since_hours: int = 720, limit: int = 1000) -> list
             decisions=[state],
             since_hours=since_hours,
             limit=limit,
+            sort=sort,
         )
         rows = _drop_trashed_rearrivals(conn, rows)
     return [_decorate_row(r) for r in rows]
@@ -62,10 +65,7 @@ def list_by_state(state: str, since_hours: int = 720, limit: int = 1000) -> list
 def _decorate_row(row: dict[str, Any]) -> dict[str, Any]:
     """Parse the JSON payload column into structured fields for the UI."""
     out = dict(row)
-    blob = (row.get("shap_contribs_json") or "").strip()
-    payload: dict[str, Any] = {}
-    if blob:
-        payload = _json.loads(blob)
+    payload = parse_payload(row)
     out["shap"] = payload.get("shap")
     out["aux_context"] = payload.get("aux_context")
     out["summary"] = payload.get("summary")
@@ -102,418 +102,102 @@ def _priority_for_positive_review(row: dict[str, Any]) -> str:
     return "should_read"
 
 
-def _record_label_verdict(row: dict[str, Any], priority: str, comment: str) -> None:
-    """Persist a review decision into ``label_verdicts`` when the table exists."""
-    try:
-        repositories.insert_or_update_label_verdict(
-            get_settings().triage_db_path,
-            item_key=row_feed_keys(row)[0],
-            original_derived_priority=str(row.get("reading_priority") or "").strip() or "unknown",
-            user_priority=priority,
-            comment=comment,
-        )
-    except sqlite3.Error as exc:
-        LOGGER.warning("review label verdict could not be saved: %s", exc)
-
-
-# ---------------------------------------------------------------------------
-# User actions
-# ---------------------------------------------------------------------------
-
-
 def approve(processed_id: int) -> dict[str, Any]:
-    """Flip awaiting_review → user_approved.
-
-    Does NOT queue pending_changes — feed items don't exist in the user's
-    Zotero library yet, so the library-centric pending-changes pipeline
-    (which expects an existing item_key) would fail with "Item not found".
-    The actual Zotero write happens later in :func:`apply_all_approved`,
-    which calls ``writer.apply_feed_materialization`` (the daemon's
-    direct-create path).
-    """
+    """Approve and prepare a trainable row; Zotero writes remain in Apply-all."""
     with _conn() as conn:
         row = _fetch_row(conn, processed_id)
-        _require_state(row, feeds_storage.DECISION_AWAITING_REVIEW)
-        # _unpack_summary is a sanity check — fails fast if the row predates
-        # Phase 1.14 and has no stored LLM summary.
-        _unpack_summary(row)
-        feeds_storage.update_to_decision(
-            conn,
-            feed_library_id=int(row["feed_library_id"]),
-            feed_item_id=int(row["feed_item_id"]),
-            decision=feeds_storage.DECISION_USER_APPROVED,
-            decision_reason="user_approved_in_review_ui",
-        )
-        conn.commit()
-    priority = _priority_for_positive_review(row)
-    _record_label_verdict(row, priority, "approved in review UI")
-    return {"processed_id": processed_id, "state": feeds_storage.DECISION_USER_APPROVED}
+    _require_state(row, feeds_storage.DECISION_AWAITING_REVIEW)
+    _unpack_summary(row)
+    return _commit_review(row, _priority_for_positive_review(row), surface="review_approve")
 
 
 def reject(processed_id: int, *, write_to_golden: bool = True) -> dict[str, Any]:
-    """Flip awaiting_review → user_rejected; optionally append dont_read to golden CSV."""
-    return _label_and_terminate(
-        processed_id,
-        new_state=feeds_storage.DECISION_USER_REJECTED,
-        label="dont_read",
-        write_to_golden=write_to_golden,
-        reason="user_rejected_in_review_ui",
-    )
+    """Reject an awaiting row, optionally without adding a training example."""
+    with _conn() as conn:
+        row = _fetch_row(conn, processed_id)
+    _require_state(row, feeds_storage.DECISION_AWAITING_REVIEW)
+    return _commit_review(row, "dont_read", surface="review_reject", write_to_golden=write_to_golden)
 
 
 def relabel(processed_id: int, new_priority: str) -> dict[str, Any]:
-    """Override priority + append to golden CSV.
-
-    ``new_priority`` must be one of must_read / should_read / could_read /
-    dont_read.
-
-    Accepts rows in either ``awaiting_review`` (the LLM/gate-only triage
-    queue) or ``gate_rejected`` (items the gate dropped pre-LLM). The latter
-    lets the user correct false negatives — they have no stored LLM summary,
-    so a minimal SummarizeResponse is synthesised on the fly when needed.
-
-    Outcomes:
-      * ``new_priority == "dont_read"``: row moves to ``user_rejected``;
-        golden CSV gets a dont_read row (positive confirmation if the
-        original was gate_rejected, terminal rejection if awaiting_review).
-      * other priorities: row moves to ``user_approved``, pending_changes
-        queued for Zotero materialisation, golden CSV gets the new label.
-    """
+    """Override an awaiting or gate-rejected row with a deliberate label."""
     if new_priority not in _PRIORITY_TO_RELEVANCE:
         raise ValueError(
             f"new_priority must be one of {sorted(_PRIORITY_TO_RELEVANCE)}; got {new_priority!r}"
         )
-    if new_priority == "dont_read":
-        return _confirm_or_reject_to_dont_read(processed_id)
-    # Approve-track relabel: flip state to user_approved, persist the chosen
-    # priority into the row's payload so `apply_all_approved` can build the
-    # right note, append golden CSV. NO pending_changes queueing — feed items
-    # don't exist in Zotero yet; materialization happens in apply_all_approved.
     with _conn() as conn:
         row = _fetch_row(conn, processed_id)
-        _require_actionable(row)
-        _store_relabel_priority(conn, row, new_priority)
-        feeds_storage.update_to_decision(
-            conn,
-            feed_library_id=int(row["feed_library_id"]),
-            feed_item_id=int(row["feed_item_id"]),
-            decision=feeds_storage.DECISION_USER_APPROVED,
-            decision_reason=f"user_relabel:{new_priority}:from_{row.get('decision')}",
-        )
-        conn.commit()
-    appended = append_to_golden(
-        row,
-        label=new_priority,
-        note=f"relabel via review UI ({new_priority}; from {row.get('decision')})",
-    )
-    _record_label_verdict(
-        row,
-        new_priority,
-        f"relabel via review UI ({new_priority}; from {row.get('decision')})",
-    )
-    _log_review(row, "review_relabel", new_priority)
-    return {
-        "processed_id": processed_id,
-        "state": feeds_storage.DECISION_USER_APPROVED,
-        "golden_csv_row_added": appended,
-    }
+    _require_actionable(row)
+    return _commit_review(row, new_priority, surface="review_relabel")
 
 
-def _store_relabel_priority(
-    conn: sqlite3.Connection,
-    row: dict[str, Any],
-    new_priority: str,
-) -> None:
-    """Persist the relabel target back into shap_contribs_json so that
-    :func:`apply_all_approved` can synthesise the correct note later.
-
-    For awaiting_review items: overrides ``summary.reading_priority``.
-    For gate_rejected items: synthesises a minimal summary if absent.
-    """
-    summary = _build_summary_for_queue(row, new_priority)
-    blob = (row.get("shap_contribs_json") or "").strip()
-    payload: dict[str, Any] = _json.loads(blob) if blob else {}
-    payload["summary"] = summary.model_dump()
-    conn.execute(
-        "UPDATE processed_feed_items SET shap_contribs_json = ?, "
-        "reading_priority = ?, updated_at = datetime('now') WHERE id = ?",
-        (_json.dumps(payload), new_priority, int(row["id"])),
-    )
-
-
-def _confirm_or_reject_to_dont_read(processed_id: int) -> dict[str, Any]:
-    """``relabel(dont_read)`` for both awaiting_review and gate_rejected.
-
-    Flips the row to ``user_rejected`` and appends a dont_read row to the
-    golden CSV. For gate_rejected items this means "user confirmed the gate"
-    — strong training signal that the model was right.
-    """
-    with _conn() as conn:
-        row = _fetch_row(conn, processed_id)
-        _require_actionable(row)
-        prior_state = row.get("decision")
-        feeds_storage.update_to_decision(
-            conn,
-            feed_library_id=int(row["feed_library_id"]),
-            feed_item_id=int(row["feed_item_id"]),
-            decision=feeds_storage.DECISION_USER_REJECTED,
-            decision_reason=f"user_relabel:dont_read:from_{prior_state}",
-        )
-        conn.commit()
-    appended = append_to_golden(
-        row,
-        label="dont_read",
-        note=f"relabel via review UI (dont_read; from {prior_state})",
-    )
-    _record_label_verdict(row, "dont_read", f"relabel via review UI (dont_read; from {prior_state})")
-    _log_review(row, "review_relabel", "dont_read")
-    return {"processed_id": processed_id, "golden_csv_row_added": appended}
-
-
-def confirm_remaining_gate_rejected(since_hours: int = 720) -> dict[str, Any]:
-    """Bulk-confirm: append a dont_read row to golden CSV for every
-    ``gate_rejected`` item the user hasn't already relabelled.
-
-    Semantics: "no click = confirmation" — the user has implicitly agreed
-    that the gate was correct for these items. Idempotent: rows whose
-    item_key is already in the golden CSV are skipped (append_to_golden
-    detects duplicates).
-
-    Decision in DB stays ``gate_rejected`` — the user didn't act, they just
-    confirmed the model's verdict. Subsequent retrain picks up the new
-    negative-class rows from the golden CSV.
-
-    Returns ``{"appended", "skipped_duplicate", "skipped_no_feed_id"}``.
-    """
-    with _conn() as conn:
-        rows = feeds_storage.select_by_decisions(
-            conn,
-            decisions=[feeds_storage.DECISION_GATE_REJECTED],
-            since_hours=since_hours,
-            limit=10000,
-        )
-    appended = 0
-    skipped_duplicate = 0
-    skipped_no_feed_id = 0
-    for row in rows:
-        if int(row.get("feed_item_id") or 0) <= 0:
-            skipped_no_feed_id += 1
-            continue
-        was_new = append_to_golden(
-            row,
-            label="dont_read",
-            note="implicit_confirm_gate_rejected (no user action in review UI)",
-        )
-        if was_new:
-            appended += 1
-        else:
-            skipped_duplicate += 1
-    return {
-        "appended": appended,
-        "skipped_duplicate": skipped_duplicate,
-        "skipped_no_feed_id": skipped_no_feed_id,
-        "total_considered": len(rows),
-    }
-
-
-def materialize_row(
-    row: dict[str, Any],
-    *,
-    writer: Any,
-    used_keys: set[str],
-    reason: str = "review_apply",
-    collection_name: str = "Inbox",
-    label_priority: str | None = None,
-) -> str:
-    """Materialize ONE feed row into Zotero and return the new item key.
-
-    Creates the item in ``collection_name`` (default "Inbox") plus any matched
-    collections, flips the row to ``DECISION_SELECTED``, stamps
-    ``materialized_zotero_key`` and schedules the 7-day outcome window. Raises on
-    failure — callers running a batch wrap each call (one locked row must not
-    strand the rest).
-
-    ``label_priority`` (a reading priority like ``"must_read"``) stamps the user's
-    ground-truth ``label:<priority>`` tag on the new item IN THE SAME lock-tolerant
-    write — used when a deliberate verdict is what triggered the materialization
-    (Today deep-review). The daemon/Add paths leave it ``None`` (a machine decision
-    must never write the human label — see ``_tags_from_row``).
-
-    Shared by :func:`apply_all_approved` (review UI, keeps the "Inbox" default) and
-    ``services.daily_actions.add_to_library`` (Today's add-to-library, which passes a
-    user-chosen collection).
-    """
-    from zotero_summarizer.services.zotero import pending as pending_service
-    from zotero_summarizer.services.triage.feeds import (
-        _feed_payload_from_row, _generate_zotero_key, _matched_collections_from_row,
-        _summary_from_row, _tags_from_row,
-    )
-
-    row_id = int(row["id"])
-    new_key = _generate_zotero_key(used_keys)
-    stored = pick_stored_summary(row)
-    summary = stored if stored is not None else _summary_from_row(row)
-    feed_payload = _feed_payload_from_row(row)
-    tags = _tags_from_row(is_black_swan=False, black_swan_tag="")
-    if label_priority:
-        # The user's deliberate verdict → its ground-truth label:<priority> tag,
-        # written atomically with the item (the lock-tolerant materialization path,
-        # unlike zotero_set_label_tag which refuses while Zotero is open).
-        tags = [*tags, label_tag_for_priority(label_priority)]
-    note_html = pending_service.build_triage_note_html(
-        title=str(row.get("title") or ""),
-        summary=summary,
-        is_black_swan=False,
-        surprise_score=None,
-        run_id=f"{reason}:{row_id}",
-    )
-    writer.apply_feed_materialization(
-        new_item_key=new_key,
-        feed_payload=feed_payload,
-        inbox_collection_name=collection_name,   # default "Inbox" (daemon parity)
-        matched_collections=_matched_collections_from_row(row),
-        tags=tags,
-        note_title=f"Triage: {str(row.get('title') or '')[:80]}",
-        note_html=note_html,
-        provenance_tag=pending_service.SYSTEM_TAG_FEEDS_V3,
-    )
-    with _conn() as conn:
-        feeds_storage.update_to_decision(
-            conn,
-            feed_library_id=int(row["feed_library_id"]),
-            feed_item_id=int(row["feed_item_id"]),
-            decision=feeds_storage.DECISION_SELECTED,
-            decision_reason=f"materialized_via_{reason}",
-            planned_zotero_key=new_key,
-        )
-        feeds_storage.record_materialization(
-            conn,
-            feed_library_id=int(row["feed_library_id"]),
-            feed_item_id=int(row["feed_item_id"]),
-            materialized_zotero_key=new_key,
-            outcome_window_days=7,
-        )
-        conn.commit()
-    return new_key
-
-
-def apply_all_approved(since_hours: int | None = None) -> dict[str, Any]:
-    """Materialize every ``user_approved`` row into Zotero (unbounded by default — never expires).
-
-    Bypasses the pending_changes pipeline (which is designed for existing
-    library items) and calls :meth:`ZoteroWriter.apply_feed_materialization`
-    — the same daemon-direct path used by ``run_daily_selection``. Per-row
-    failures are caught + logged + reported in the response (batch contract:
-    one bad row must not block the rest of the user's queue).
-
-    On success: row → ``DECISION_SELECTED`` + ``materialized_zotero_key``
-    stamped + 7-day outcome window scheduled.
-
-    Returns ``{"applied", "failed_count", "failed": [{"id", "title", "error"}, ...]}``.
-    """
-    from zotero_summarizer.integrations.zotero_write import ZoteroWriter
-
-    with _conn() as conn:
-        rows = feeds_storage.select_by_decisions(
-            conn,
-            decisions=[feeds_storage.DECISION_USER_APPROVED],
-            since_hours=since_hours,
-            limit=5000,
-        )
-
-    if not rows:
-        return {
-            "applied": 0,
-            "pending_sync": 0,
-            "zotero_sync_error": None,
-            "failed_count": 0,
-            "failed": [],
-        }
-
-    settings_ = get_settings()
-    try:
-        writer = ZoteroWriter(settings_.zotero_data_dir)
-    except Exception as exc:  # noqa: BLE001 - Zotero is optional for approved feed rows.
-        LOGGER.warning("apply_all_approved: Zotero writer unavailable; rows remain pending sync: %s", exc)
-        with _conn() as conn:
-            for row in rows:
-                feeds_storage.record_zotero_sync_status(
-                    conn,
-                    feed_library_id=int(row["feed_library_id"]),
-                    feed_item_id=int(row["feed_item_id"]),
-                    status="pending",
-                )
-                feeds_storage.record_app_outcome(
-                    conn,
-                    feed_library_id=int(row["feed_library_id"]),
-                    feed_item_id=int(row["feed_item_id"]),
-                    final_outcome=feeds_storage.OUTCOME_KEPT_UNREAD_APP,
-                    signal_weight=feeds_storage.OUTCOME_WEIGHT[feeds_storage.OUTCOME_KEPT_UNREAD_APP],
-                )
-            conn.commit()
-        return {
-            "applied": 0,
-            "pending_sync": len(rows),
-            "zotero_sync_error": str(exc),
-            "failed_count": 0,
-            "failed": [],
-        }
-
-    applied = 0
-    failed: list[dict[str, Any]] = []
-    used_keys: set[str] = set()
-    for row in rows:
-        row_id = int(row["id"])
-        try:
-            materialize_row(row, writer=writer, used_keys=used_keys, reason="review_apply")
-            applied += 1
-        except Exception as exc:
-            # Batch-apply contract: log and continue so one Zotero-locked row
-            # doesn't strand the rest of the user's approvals. Per-row error
-            # is surfaced in the response.
-            LOGGER.exception("apply_all_approved failed for row id=%s", row_id)
-            failed.append({
-                "id": row_id,
-                "title": str(row.get("title") or ""),
-                "error": str(exc),
-            })
-
-    return {
-        "applied": applied,
-        "pending_sync": 0,
-        "zotero_sync_error": None,
-        "failed_count": len(failed),
-        "failed": failed[:20],
-    }
-
-
-def _label_and_terminate(
-    processed_id: int,
-    *,
-    new_state: str,
-    label: str,
-    write_to_golden: bool,
-    reason: str,
+def _commit_review(
+    row: dict[str, Any], priority: str, *, surface: str, write_to_golden: bool = True,
 ) -> dict[str, Any]:
-    """Reject/terminal-relabel path: flip state, optionally update golden CSV."""
-    with _conn() as conn:
-        row = _fetch_row(conn, processed_id)
-        _require_state(row, feeds_storage.DECISION_AWAITING_REVIEW)
-        feeds_storage.update_to_decision(
-            conn,
-            feed_library_id=int(row["feed_library_id"]),
-            feed_item_id=int(row["feed_item_id"]),
-            decision=new_state,
-            decision_reason=reason,
+    """Commit the decision, label and training metadata in one SQLite transaction."""
+    payload = None
+    if priority != "dont_read":
+        summary = _build_summary_for_queue(row, priority)
+        payload = parse_payload(row)
+        payload["summary"] = summary.model_dump()
+    comment = f"{surface}: {priority}; from {row['decision']}"
+    sample = (
+        {key: str(value) for key, value in asdict(
+            prepare_training_sample(row, label=priority, note=comment),
+        ).items()} if write_to_golden else None
+    )
+    item_key = row_feed_keys(row)[0]
+    new_state = (
+        feeds_storage.DECISION_USER_REJECTED if priority == "dont_read"
+        else feeds_storage.DECISION_USER_APPROVED
+    )
+    reason = (
+        f"user_relabel:{priority}:from_{row['decision']}" if surface == "review_relabel"
+        else f"{new_state}_in_review_ui"
+    )
+    original = str(row.get("reading_priority") or "").strip() or "unknown"
+    with _conn() as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        current = _fetch_row(conn, int(row["id"]))
+        _require_state(current, row["decision"])
+        _, previous = repositories.upsert_label_verdict(
+            conn, item_key=item_key, original_derived_priority=original,
+            user_priority=priority, comment=comment,
+            training_sample=sample,
         )
-        conn.commit()
-    appended = False
-    if write_to_golden:
-        appended = append_to_golden(row, label=label, note=f"{reason} via review UI")
-    _record_label_verdict(row, label, f"{reason} via review UI")
-    _log_review(row, "review_reject", label)
-    return {"processed_id": processed_id, "golden_csv_row_added": appended}
+        if payload is not None:
+            conn.execute(
+                "UPDATE processed_feed_items SET shap_contribs_json = ?, reading_priority = ? WHERE id = ?",
+                (_json.dumps(payload), priority, int(row["id"])),
+            )
+        feeds_storage.update_to_decision(
+            conn, feed_library_id=int(row["feed_library_id"]), feed_item_id=int(row["feed_item_id"]),
+            decision=new_state, decision_reason=reason,
+        )
+    label_verdicts.log_committed_transition(
+        item_key=item_key, previous=previous or {}, new_user_priority=priority,
+        model_priority=original, surface="review_label", source=VERDICT_SOURCE_USER, comment=comment,
+    )
+    _log_review(row, surface, priority)
+    return {"processed_id": int(row["id"]), "state": new_state}
 
+
+def confirm_remaining_gate_rejected(processed_ids: list[int]) -> dict[str, int]:
+    """Confirm the requested gate rejects; skip rows already acted on.
+
+    Each row uses the same durable decision/label command as individual review.
+    A partial failure propagates; retry skips completed rows. CSV duplicates
+    still receive the explicit verdict used by the training overlay.
+    """
+    with _conn() as conn:
+        rows = [_fetch_row(conn, pk) for pk in dict.fromkeys(processed_ids)]
+    confirmed = 0
+    for row in rows:
+        if row["decision"] != feeds_storage.DECISION_GATE_REJECTED:
+            continue
+        _commit_review(row, "dont_read", surface="review_confirm_gate_rejected")
+        confirmed += 1
+    return {"confirmed": confirmed, "skipped": len(rows) - confirmed}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -543,10 +227,6 @@ def _require_actionable(row: dict[str, Any]) -> None:
         )
 
 
-# Integer relevance scores for the SummarizeResponse synthesised at relabel
-# time. Matches `SummarizeResponse.relevance_score: int = Field(..., ge=1, le=5)`.
-
-
 from zotero_summarizer.services.library.review_summary import (  # noqa: E402,F401  (re-export)
     _build_summary_for_queue,
     _drop_trashed_rearrivals,
@@ -556,4 +236,8 @@ from zotero_summarizer.services.library.review_summary import (  # noqa: E402,F4
     append_to_golden,
     append_verdict_to_golden,
     pick_stored_summary,
+)
+from zotero_summarizer.services.library.review_materialize import (  # noqa: E402,F401  (re-export)
+    apply_all_approved,
+    materialize_row,
 )

@@ -2,8 +2,9 @@
 
 Every deliberate human reading decision (and the 7-day behavioural outcome that
 closes it) is appended as ONE JSON line to ``data/interaction-events.jsonl``,
-paired with the model prediction the human reacted to and stamped with the code
-(``git_commit``) and model (``gate_sha``) version that produced it.
+paired with the supplied model prediction and stamped with the code
+(``git_commit``) and model (``gate_sha``) version. Unless explicitly supplied,
+``gate_sha`` identifies the gate loaded at event time, not historical inference.
 
 Why this exists: the live decision tables (``label_verdicts``,
 ``role_value_verdicts``, ``user_feedback``) are UPSERT / DELETE — re-rating or
@@ -13,10 +14,9 @@ model version, re-rating / retraction trajectories, and a future training
 distiller. It is an AUDIT/TRAJECTORY record, never the authoritative training
 label (that stays in ``label_verdicts`` / ``hybrid_gt``).
 
-Reuses the ``run_log`` NDJSON primitive. Writes are best-effort: a logging
-failure NEVER breaks the durable decision write that precedes it (the verdict is
-already committed before we get here) — it is caught and warned, never silently
-swallowed (mirrors the sanctioned ``api/routes/golden.py`` enrichment idiom).
+Reuses the ``run_log`` NDJSON primitive. Write and provenance errors propagate.
+The durable decision may already be committed; propagation does not roll it back
+or make the log and verdict store a single transaction.
 
 Writer model: single-worker uvicorn, so human-feedback appends serialize on the
 event loop. The 7-day ``feed_outcome`` emitter runs on the in-process triage
@@ -28,8 +28,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from zotero_summarizer.domain import READING_PRIORITY_SORT_RANK
 from zotero_summarizer.services import run_log
-from zotero_summarizer.services._common import LOGGER, settings, state
+from zotero_summarizer.services._common import settings, state
 
 SCHEMA_VERSION = 1
 
@@ -58,32 +59,13 @@ def key_kind(item_key: str) -> str:
 
 
 def _current_gate_sha() -> str:
-    """Live gate identity (the canonical model fingerprint), best-effort.
-
-    Two human decisions at the same ``git_commit`` can come from different gates
-    (the gate hot-reloads on a new golden-CSV sha), so the gate sha — not the
-    code commit — is what attributes drift to a model version. Mirrors
-    ``run_log.short_git_commit``: a best-effort provenance probe that returns ""
-    rather than raising when the gate is not loaded (e.g. unit tests, pre-boot).
-    """
-    try:
-        gate = getattr(state(), "classifier_gate", None)
-        return str(getattr(gate, "golden_csv_sha256", "") or "")[:12]
-    except Exception:  # noqa: BLE001 — gate identity is best-effort provenance
-        return ""
+    """Exact loaded artifact identity; empty only when no gate is loaded."""
+    gate = state().classifier_gate
+    return gate.model_sha256 if gate is not None else ""
 
 
-def _append(event: dict[str, Any]) -> None:
-    """Fail-loud append (unit-tested in isolation); the public fns wrap this."""
-    run_log.append_run(settings().interaction_log_path, event)
-
-
-def _emit(event_kind: str, fields: dict[str, Any], *, item_key: str, surface: str) -> None:
-    """Stamp the common envelope, then append best-effort.
-
-    Best-effort boundary: the durable verdict/outcome write already committed
-    upstream, so a log failure must warn-and-continue, never raise out.
-    """
+def _emit(event_kind: str, fields: dict[str, Any]) -> None:
+    """Stamp the common envelope and append; I/O errors propagate."""
     event = {
         "ts": _utc_now_iso(),
         "event": event_kind,
@@ -91,10 +73,7 @@ def _emit(event_kind: str, fields: dict[str, Any], *, item_key: str, surface: st
         "git_commit": run_log.short_git_commit(),
         **fields,
     }
-    try:
-        _append(event)
-    except Exception as exc:  # noqa: BLE001 — interaction-log must not block the durable write
-        LOGGER.warning("interaction_log %s for %s failed: %s", surface, item_key, exc)
+    run_log.append_run(settings().interaction_log_path, event)
 
 
 def log_human_feedback(
@@ -131,8 +110,54 @@ def log_human_feedback(
             "human": human,
             "comment": comment,
         },
-        item_key=item_key,
-        surface=surface,
+    )
+
+
+def _log_label_transition(
+    *,
+    item_key: str,
+    previous_user_priority: str | None,
+    new_user_priority: str | None,
+    model_priority: str | None,
+    surface: str,
+    previous_source: str | None = None,
+    source: str = "user",
+    comment: str = "",
+    history_known: bool = True,
+) -> None:
+    """Append an explicit user-label assignment, change, or retraction.
+
+    ``None`` means no prior label was recorded locally; ``history_known=False``
+    keeps a label first observed from another device from fabricating history.
+    Model/provenance sentinels are normalized to ``None`` rather than conflated
+    with either user label.
+    """
+    if previous_user_priority == new_user_priority:
+        return
+    if previous_user_priority is None:
+        transition = "assigned"
+    elif new_user_priority is None:
+        transition = "retracted"
+    else:
+        transition = "changed"
+    _emit(
+        "label_transition",
+        {
+            "item_key": item_key,
+            "item_key_kind": key_kind(item_key),
+            "surface": surface,
+            "source": source,
+            "previous_source": previous_source,
+            "gate_sha": _current_gate_sha(),
+            "transition": transition,
+            "previous_user_priority": previous_user_priority,
+            "new_user_priority": new_user_priority,
+            "model_priority": (
+                model_priority if model_priority in READING_PRIORITY_SORT_RANK else None
+            ),
+            "history_known": history_known,
+            "comment": comment,
+        },
     )
 
 
@@ -217,6 +242,4 @@ def log_behavioural_outcome(
                 "elapsed_days": elapsed_days,
             },
         },
-        item_key=item_key,
-        surface=surface,
     )

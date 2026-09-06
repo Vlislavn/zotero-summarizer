@@ -21,4 +21,3 @@
 
 zotero_summarizer/services/config_overrides.py:render_overrides_doc  # consumed by tools/gen_overrides_doc.py; drift-tested (tests/test_config_overrides.py)
 zotero_summarizer/services/triage/feeds/_triage.py:prestige_venue    # SummarizeResponse field set here, read later via dict
-zotero_summarizer/storage/repositories.py:with_db_path               # test-infrastructure API (test_modular_services + _gate_db/_verdict_db helpers, ~17 tests)

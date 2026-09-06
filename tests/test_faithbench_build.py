@@ -27,6 +27,8 @@ from zotero_summarizer.services.faithbench._dataset import (
     export_review_csv,
     load_benchmark,
     next_benchmark_version,
+    require_review_approval,
+    review_path,
     save_benchmark,
 )
 
@@ -213,10 +215,15 @@ def test_review_csv_contains_span_context(tmp_path):
     items = verify_candidates(
         [_cand("Which dataset was used?", "ImageNet")], paper=paper, max_keep=5
     )
-    csv_path = tmp_path / "review.csv"
+    benchmark = tmp_path / "review.jsonl"
+    csv_path = review_path(benchmark)
     export_review_csv(csv_path, items, {"A": TEXT_A})
     content = csv_path.read_text()
     assert "ImageNet" in content and "Which dataset was used?" in content
+    with pytest.raises(ValueError, match="not human-approved"):
+        require_review_approval(benchmark, items)
+    csv_path.write_text(content.replace("\n,qa", "\nyes,qa"))
+    assert len(require_review_approval(benchmark, items)) == 64
 
 
 # ---------------------------------------------------------------------------

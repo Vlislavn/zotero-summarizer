@@ -1,10 +1,18 @@
-"""``browser_fetch`` degrades gracefully (authorized best-effort contract) when the
-optional browser dep is missing, and validates %PDF magic / size before caching. No
-real browser is ever launched — we mock at the ``_load_playwright`` boundary.
+"""Optional-browser absence, filename cache admission and native PDF discovery.
+No real browser is launched — mock at the ``_load_playwright`` boundary.
 """
 from __future__ import annotations
 
+import socket
+import base64
+import pytest
+
 from zotero_summarizer.integrations import browser_fetch
+
+
+@pytest.fixture(autouse=True)
+def _public_dns(monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 443))])
 
 
 def _no_browser(monkeypatch):
@@ -109,10 +117,7 @@ def test_is_logged_in_tracks_login_marker_not_cookies(tmp_path):
     assert browser_fetch.is_logged_in(prof) is True
 
 
-# --- strategy-3 navigation (Cloudflare pass) ---------------------------------------
-# Minimal fakes driving _drive_browser. No real browser. The point: when the cheap
-# `ctx.request.get(pdf_url)` is bot-walled (non-PDF), navigating to the PDF as a REAL
-# page fires the application/pdf response interceptor, and those bytes are returned.
+# Minimal protocol fakes for browser navigation, link discovery and streaming.
 _PDF = b"%PDF-1.7\nbody"
 
 
@@ -120,44 +125,28 @@ class _Resp:
     def __init__(self, body, *, ok=True, ctype="text/html"):
         self._body, self.ok, self.headers = body, ok, {"content-type": ctype}
 
-    def body(self):
-        return self._body
-
-
 class _Req:
     def __init__(self, table):
         self._table = table  # url -> _Resp
 
-    def get(self, url, **_kw):
-        return self._table.get(url, _Resp(b"", ok=False))
-
-
 class _Page:
     def __init__(self, *, meta_url=None, nav_pdf_url=None, nav_pdf_bytes=b"", dl_hrefs=None):
-        self._cb = None
         self._meta_url = meta_url          # citation_pdf_url meta value (may be a redirect trap)
         self._nav_pdf_url = nav_pdf_url    # the URL whose page.goto streams application/pdf
         self._nav_pdf_bytes = nav_pdf_bytes
         self._dl_hrefs = dl_hrefs or []    # on-page "Download PDF" anchors
-
-    def on(self, _event, cb):
-        self._cb = cb
+        self._cdp = None
+        self._print_body = b""
 
     def goto(self, url, **_kw):
-        # A real navigation to nav_pdf_url streams an application/pdf response (what a page
-        # nav gets but ctx.request can't); the landing / redirect-trap navs stream nothing.
-        if url == self._nav_pdf_url and self._cb:
-            self._cb(_Resp(self._nav_pdf_bytes, ok=True, ctype="application/pdf"))
+        if self._cdp:
+            return self._cdp.navigate(url)
 
     def query_selector(self, sel):
         return _Meta(self._meta_url) if ("citation_pdf_url" in sel and self._meta_url) else None
 
     def eval_on_selector_all(self, _sel, _js):
         return list(self._dl_hrefs)
-
-    def pdf(self, **_kw):
-        return b""
-
 
 class _Meta:
     def __init__(self, content):
@@ -177,8 +166,58 @@ class _Ctx:
     def new_page(self):
         return self._page
 
+    def new_cdp_session(self, page):
+        page._cdp = _CDP(self.request, page)
+        return page._cdp
+
     def close(self):
         pass
+
+
+class _CDP:
+    def __init__(self, request, page):
+        self.request, self.page = request, page
+        self.calls, self.stream, self.offset = [], b"", 0
+        self.callback = None
+        self.aborted = False
+
+    def on(self, event, callback):
+        assert event in {"Fetch.requestPaused", "Fetch.authRequired", "error"}
+        if event == "Fetch.requestPaused":
+            self.callback = callback
+
+    def send(self, method, params=None):
+        self.calls.append((method, params))
+        if method == "Page.getFrameTree":
+            return {"frameTree": {"frame": {"id": "main"}}}
+        if method == "Page.printToPDF":
+            self.stream, self.offset = self.page._print_body, 0
+            if isinstance(self.stream, Exception):
+                raise self.stream
+            return {"stream": "body"}
+        if method == "Fetch.takeResponseBodyAsStream":
+            if isinstance(self.stream, Exception):
+                raise self.stream
+            return {"stream": "body"}
+        if method == "IO.read":
+            chunk = self.stream[self.offset:self.offset + params["size"]]
+            self.offset += len(chunk)
+            return {"data": base64.b64encode(chunk).decode(), "base64Encoded": True,
+                    "eof": self.offset == len(self.stream)}
+        if method == "Fetch.failRequest":
+            self.aborted = True
+        return {}
+
+    def navigate(self, url):
+        response = self.request._table.get(url, _Resp(b"<html>page</html>"))
+        if url == self.page._nav_pdf_url:
+            response = _Resp(self.page._nav_pdf_bytes, ctype="application/pdf")
+        self.stream, self.offset, self.aborted = response._body, 0, False
+        self.callback({"requestId": url, "frameId": "main", "resourceType": "Document",
+                       "responseStatusCode": 200 if response.ok else 403,
+                       "responseHeaders": [{"name": k, "value": v} for k, v in response.headers.items()]})
+        if self.aborted:
+            raise RuntimeError("net::ERR_ABORTED")
 
 
 class _PW:
@@ -199,13 +238,11 @@ class _PW:
         return False
 
 
-def test_strategy3_navigates_when_api_request_is_blocked(tmp_path):
-    """The declared citation_pdf_url is served behind Cloudflare: ctx.request.get returns
-    a non-PDF (challenge HTML), but page.goto(pdf_url) fires the application/pdf response
-    → _drive_browser returns the real PDF bytes (the navigation fix)."""
+def test_declared_pdf_is_captured_by_browser_navigation(tmp_path):
+    """The landing declares a PDF; navigating to it returns the actual PDF body."""
     landing = "https://www.nature.com/articles/s41746-x"
     pdf_url = "https://www.nature.com/articles/s41746-x.pdf"
-    req = _Req({landing: _Resp(b"<html>landing</html>"), pdf_url: _Resp(b"<html>cf challenge</html>")})
+    req = _Req({landing: _Resp(b"<html>landing</html>")})
     pw = _PW(_Ctx(req, _Page(meta_url=pdf_url, nav_pdf_url=pdf_url, nav_pdf_bytes=_PDF)))
     body = browser_fetch._drive_browser(
         browser_fetch._BrowserLib(lambda: pw, RuntimeError), landing, tmp_path / "prof",
@@ -217,7 +254,7 @@ def test_strategy3_navigates_when_api_request_is_blocked(tmp_path):
 def test_download_pdf_link_used_when_citation_meta_redirects(tmp_path):
     """CAPA(npj DM): the citation_pdf_url meta is a REDIRECT TRAP (Nature serves
     <article>.pdf as HTML). The page's real 'Download PDF' control → _reference.pdf,
-    which the cookie'd request fetches. _drive_browser must follow that, not give up."""
+    which browser navigation fetches. _drive_browser must follow that, not give up."""
     landing = "https://www.nature.com/articles/s41746-026-02674-7"
     trap = landing + ".pdf"                 # citation_pdf_url → 30x to HTML
     real = landing + "_reference.pdf"       # on-page "Download PDF" → the actual file

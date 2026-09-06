@@ -172,46 +172,10 @@ export async function fetchCalibrateStatus() {
 }
 
 /**
- * GET /api/setup/profiles → { profiles: {local, hybrid}, current: 'local'|'hybrid'|'custom' }
- * The deployment presets (fully-local vs hybrid local+API) + which one is active now.
- */
-export async function fetchProfiles() {
-  return request('/api/setup/profiles');
-}
-
-/**
- * POST /api/setup/profile  body { profile, local_depth? }
- * Applies a preset — rewrites llm_routing (which stage runs local vs API + review depth).
- */
-export async function setProfile(profile, localDepth = null) {
-  return request('/api/setup/profile', {
-    method: 'POST',
-    body: JSON.stringify({ profile, local_depth: localDepth }),
-  });
-}
-
-/**
- * POST /api/setup/profile/measure  body { include_local }
- * Measures which stages are token/compute-heavy per provider → recommendation. Remote-only
- * by default (a local gen loads a multi-GB model); slow (real LLM calls). Resolves to
- *   { summary: { heaviest_by_tokens, heaviest_by_secs, rows[] }, recommendation, providers }.
- */
-export async function measureProfile({ includeLocal = false } = {}) {
-  return request('/api/setup/profile/measure', {
-    method: 'POST',
-    body: JSON.stringify({ include_local: includeLocal }),
-  });
-}
-
-/**
  * GET /api/admin/model
- * Returns the freshest-on-disk trained classifier's metadata for the
- * Settings model card. Resolves to ``{model: null}`` when no model has
- * been trained yet, or
- *   { model: { classifier_name, trained_at, git_commit, n_train,
- *              n_positive_library, feature_dim, objective, oof_spearman,
- *              golden_csv_sha256_prefix, thresholds, joblib_path,
- *              joblib_size_bytes, joblib_mtime, runlog } }.
+ * Returns the loaded gate, not an offline artifact or evaluation run:
+ *   { model: { classifier_name, trained_at, n_train, oof_spearman_verified } }.
+ * Resolves to {model: null} when this process has no loaded gate.
  */
 export async function fetchModelCard() {
   return request(`${ADMIN_BASE}/model`);

@@ -16,6 +16,7 @@ import numpy as np
 
 from zotero_summarizer.services._common import load_golden_rows
 from zotero_summarizer.services.model import classifier
+from zotero_summarizer.storage.corpus_types import CorpusAffinity
 
 
 @dataclass
@@ -32,6 +33,7 @@ class FeaturizedGolden:
     # The eligible rows aligned with X — kept so per-fold CV can rebuild the
     # positive-set P from train rows only (leakage-free) and group by paper id.
     selected_rows: list[dict[str, str]] | None = None
+    corpus_affinity: CorpusAffinity | None = None
 
 
 def featurize_golden(
@@ -95,6 +97,7 @@ def featurize_golden(
         load_positive_library_from_rows,
     )
     library = load_positive_library_from_rows(rows, corpus_db_path)
+    corpus = embed_cache.corpus_affinity(selected) if embed_cache is not None else None
     X = np.zeros((n, classifier.FEATURE_DIM), dtype=np.float32)
     for i, (k, t, a) in enumerate(zip(keys, titles, abstracts)):
         emb = classifier.get_or_compute_embedding(corpus_db_path, k, t, a)
@@ -103,13 +106,12 @@ def featurize_golden(
         year_i = int(year_str[:4]) if year_str[:4].isdigit() else None
         doi = (selected[i].get("doi") or "").strip()
         affinity, prestige = classifier._compute_aux(
-            embed_cache, openalex_client,
+            None, openalex_client,
             title=t, abstract=a, doi=doi, year=year_i,
             cold_start_policy=cold_start_policy,
         )
-        authors_str = (selected[i].get("authors") or "").strip()
         nearest, centroid, recent, drift, authors_overlap = compute_library_features(
-            emb, library, candidate_authors=authors_str, exclude_item_key=k,
+            emb, library, candidate_row=selected[i],
         )
         X[i, classifier.EMBEDDING_DIM:] = classifier._extra_features(
             selected[i], t, a,
@@ -123,6 +125,8 @@ def featurize_golden(
     from zotero_summarizer.services.model.label_weights import compute_row_weights
 
     weights = compute_row_weights(selected)
+    if corpus is not None:
+        X[:, classifier.EMBEDDING_DIM + 5] = corpus.scores()
     return FeaturizedGolden(
         X=X,
         y_binary=np.asarray(y_binary, dtype=np.int32),
@@ -132,4 +136,5 @@ def featurize_golden(
         n_features=classifier.FEATURE_DIM,
         sample_weights=weights,
         selected_rows=selected,
+        corpus_affinity=corpus,
     )

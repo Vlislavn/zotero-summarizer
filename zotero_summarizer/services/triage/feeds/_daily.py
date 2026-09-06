@@ -129,6 +129,7 @@ def _refine_with_full_text(
             continue
         pdf_path = fetch_pdf(
             pdf_url,
+            cache_dir=get_settings().pdf_cache_dir,
             max_bytes=int(ftr.max_pdf_bytes),
             timeout=float(ftr.fetch_timeout_secs),
         )
@@ -314,9 +315,7 @@ def run_daily_selection(
     final_inbox.sort(key=lambda p: p.composite_score, reverse=True)
 
     # 4. Materialize selected items directly.
-    materialized_count = 0
     materialized_keys: list[str] = []
-    errors: list[dict[str, Any]] = []
     used_keys: set[str] = set()
     if not dry_run:
         mat_ctx = _MaterializeCtx(
@@ -326,19 +325,9 @@ def run_daily_selection(
             decision_reason=selection.reason,
         )
         for pick in final_inbox:
-            err = materialize_pick(
+            materialized_keys.append(materialize_pick(
                 pick, writer=writer, run_id=run_id, used_keys=used_keys, ctx=mat_ctx,
-            )
-            if err is None:
-                materialized_count += 1
-                # The Zotero library key materialize_pick generated + wrote to
-                # processed_feed_items.materialized_zotero_key — what the deep
-                # review job + the ranking cache both key on.
-                new_key = str(pick.row.get("planned_zotero_key") or "").strip()
-                if new_key:
-                    materialized_keys.append(new_key)
-            else:
-                errors.append(err)
+            ))
 
     # 5. Flip all the rest to rejected_daily_cutoff.
     rejected_count = 0
@@ -349,11 +338,11 @@ def run_daily_selection(
 
     return {
         "run_id": run_id,
-        "materialized": materialized_count,
+        "materialized": len(materialized_keys),
         "materialized_keys": materialized_keys,
         "rejected": rejected_count,
         "black_swans": len(bs_picks),
-        "errors": errors,
+        "errors": [],
         "cutoff": selection.cutoff,
         "cutoff_reason": selection.reason,
     }

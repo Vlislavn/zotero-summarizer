@@ -197,7 +197,8 @@ def test_add_to_library_runs_real_materialize_row(tmp_path, monkeypatch):
 
     monkeypatch.setattr(daily_actions, "get_settings", lambda: fake)
     monkeypatch.setattr(daily_actions, "ZoteroWriter", _MatWriter)
-    monkeypatch.setattr(review, "get_settings", lambda: fake)            # materialize_row._conn
+    from zotero_summarizer.services.library import review_materialize
+    monkeypatch.setattr(review_materialize, "get_settings", lambda: fake)
     monkeypatch.setattr(review, "append_to_golden", lambda *a, **k: True)
     monkeypatch.setattr(daily_actions, "_attach_fulltext_best_effort", lambda keys: {"attached": 0})
 
@@ -410,7 +411,8 @@ def test_verdict_materialize_writes_label_tag(tmp_path, monkeypatch):
 
     monkeypatch.setattr(daily_actions, "get_settings", lambda: fake)
     monkeypatch.setattr(daily_actions, "ZoteroWriter", _CapWriter)
-    monkeypatch.setattr(review, "get_settings", lambda: fake)  # materialize_row._conn
+    from zotero_summarizer.services.library import review_materialize
+    monkeypatch.setattr(review_materialize, "get_settings", lambda: fake)
     monkeypatch.setattr(daily_actions.deep_review, "copy_review", lambda *a, **k: None)
     monkeypatch.setattr(daily_actions, "_attach_fulltext_best_effort", lambda keys: {"attached": 0})
     monkeypatch.setattr(daily_actions, "_carry_renders_best_effort", lambda pairs: None)
@@ -426,17 +428,46 @@ def test_add_feed_verdict_to_library_routing(monkeypatch):
     materialize path; dont_read and non-feed (library) keys are no-ops."""
     from zotero_summarizer.api.routes import _golden_helpers as h
 
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple[str, str, dict]] = []
+
+    def _materialize(item_key, user_priority, **kw):
+        calls.append((item_key, user_priority, kw))
+        if not kw["create_if_missing"]:
+            return {"added": False, "status": "not_applicable", "zotero_key": None}
+        return {"added": True, "status": "added", "zotero_key": "ZOTERO01"}
+
     monkeypatch.setattr(
         "zotero_summarizer.services.triage.daily_actions.materialize_feed_verdict",
-        lambda item_key, user_priority: calls.append((item_key, user_priority))
-        or {"added": True, "status": "added"},
+        _materialize,
     )
     # non-feed (library) key → no-op
     assert h.add_feed_verdict_to_library("ABCD1234", "must_read")["add_status"] == "not_applicable"
-    # feed + dont_read → no-op
+    # feed + dont_read resolves an existing target but never creates a missing one.
     assert h.add_feed_verdict_to_library("feed:g:xyz", "dont_read")["add_status"] == "not_applicable"
     # feed + positive → delegates once, carrying the verdict for the label tag
     out = h.add_feed_verdict_to_library("feed:g:xyz", "must_read")
     assert out["added_to_library"] is True and out["add_status"] == "added"
-    assert calls == [("feed:g:xyz", "must_read")]
+    assert out["_zotero_key"] == "ZOTERO01"
+    assert calls == [
+        ("feed:g:xyz", "dont_read", {"create_if_missing": False}),
+        ("feed:g:xyz", "must_read", {"create_if_missing": True}),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("existing", "status", "target"),
+    [("REAL0003", "already_in_library", "REAL0003"), (None, "not_applicable", None)],
+)
+def test_nonpositive_feed_resolves_existing_target_without_creating(
+    monkeypatch, existing, status, target,
+):
+    monkeypatch.setattr(daily_actions, "_load_feed_row", lambda _key: {"id": 7})
+    monkeypatch.setattr(daily_actions, "_materialized_key_for", lambda _row: existing)
+    monkeypatch.setattr(
+        daily_actions, "_open_optional_writer",
+        lambda: (_ for _ in ()).throw(AssertionError("must not create a Zotero item")),
+    )
+    result = daily_actions.materialize_feed_verdict(
+        "feed:77", "dont_read", create_if_missing=False,
+    )
+    assert result == {"added": False, "zotero_key": target, "status": status}

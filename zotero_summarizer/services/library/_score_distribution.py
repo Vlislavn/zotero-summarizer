@@ -14,6 +14,7 @@ the public seam for ``score_tags`` and the tests.
 from __future__ import annotations
 
 from typing import Any
+from statistics import median
 
 from zotero_summarizer.domain import apply_prestige_floor, score_to_priority
 
@@ -42,9 +43,12 @@ def entry_prestige_evidence(entry: dict[str, Any] | None) -> tuple[float | None,
     :func:`_entry_prestige`, so a young paper is never demoted for lacking citations."""
     sc = (entry or {}).get("scoring") or {}
     inp = sc.get("prestige_inputs") or {}
-    h_index = inp.get("max_author_h_index")
+    raw_h_index = inp.get("max_author_h_index")
+    h_index = float(raw_h_index) if raw_h_index is not None else None
+    if h_index is not None and h_index <= 0:
+        h_index = None
     evidence = inp.get("citation_percentile") is not None or h_index is not None
-    return (float(h_index) if h_index is not None else None), bool(evidence)
+    return h_index, bool(evidence)
 
 
 def prestige_floor(pairs: list[tuple[float | None, bool]]) -> float | None:
@@ -52,10 +56,10 @@ def prestige_floor(pairs: list[tuple[float | None, bool]]) -> float | None:
     scores — a parameter-free "at least typical quality" bar (no tuned quantile).
     Returns None when nothing has known prestige, so the floor is inert on a
     library with no OpenAlex coverage. ``pairs`` are ``(prestige_score, known)``."""
-    vals = sorted(p for p, known in pairs if known and p is not None)
+    vals = [p for p, known in pairs if known and p is not None]
     if not vals:
         return None
-    return float(vals[len(vals) // 2])
+    return float(median(vals))
 
 
 def score_distribution(records: list[dict[str, Any]], floor: float | None = None) -> dict[str, Any]:

@@ -32,21 +32,11 @@ from typing import Any
 
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.services._common import state as get_state
+from zotero_summarizer.services.triage.daily_select import _fetch_primary_unhandled
 from zotero_summarizer.services.triage.daily_select._candidate import row_prestige
-from zotero_summarizer.services.triage.daily_select._querying import (
-    fetch_handled_keys,
-    fetch_recent_rows_by_decisions,
-    fetch_rows_by_decisions,
-)
 from zotero_summarizer.storage import feeds as feeds_storage
-from zotero_summarizer.storage.feed_identity import row_feed_keys
 
 LOGGER = logging.getLogger(__name__)
-
-_PRIMARY_DECISIONS = [
-    feeds_storage.DECISION_AWAITING_REVIEW,
-    feeds_storage.DECISION_TRIAGED_PENDING,
-]
 
 
 def _venue_from_payload(payload: dict[str, Any]) -> str:
@@ -87,21 +77,6 @@ def _repack_payload(old_payload: dict[str, Any], pred: Any) -> str:
     return json.dumps(payload)
 
 
-def _unhandled(rows: list[dict[str, Any]], conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    """Drop rows the user already acted on (rated/labeled) — same rule the slate
-    uses — so a re-score never resurfaces a handled paper."""
-    handled_guids, handled_label_keys = fetch_handled_keys(conn)
-    out: list[dict[str, Any]] = []
-    for row in rows:
-        guid = str(row.get("guid") or "").strip()
-        if guid and guid in handled_guids:
-            continue
-        if any(key in handled_label_keys for key in row_feed_keys(row)):
-            continue
-        out.append(row)
-    return out
-
-
 def _priority_hist(rows: list[dict[str, Any]]) -> dict[str, int]:
     hist: dict[str, int] = {}
     for r in rows:
@@ -123,14 +98,9 @@ def rescore_slate(*, lookback_hours: int = 168, backlog_cap: int = 25) -> dict[s
     conn = sqlite3.connect(str(settings_.triage_db_path))
     conn.row_factory = sqlite3.Row
     try:
-        rows = [dict(r) for r in fetch_rows_by_decisions(
-            conn, decisions=_PRIMARY_DECISIONS, lookback_hours=lookback_hours, now=now,
-        )]
-        if not rows:  # never-empty fallback, mirrors the slate
-            rows = [dict(r) for r in fetch_recent_rows_by_decisions(
-                conn, decisions=_PRIMARY_DECISIONS, limit=backlog_cap,
-            )]
-        rows = _unhandled(rows, conn)
+        rows, _fellback = _fetch_primary_unhandled(
+            conn, lookback_hours=lookback_hours, backlog_cap=backlog_cap, now=now,
+        )
         scorable = [r for r in rows if (r.get("abstract") or "").strip()]
         if not scorable:
             return {"rescored": 0, "message": "No scorable slate rows in window.", "candidates": len(rows)}
@@ -173,7 +143,7 @@ def rescore_slate(*, lookback_hours: int = 168, backlog_cap: int = 25) -> dict[s
         conn.close()
 
     after_prestige = [row_prestige({}, ar["_payload"]) for ar in after_rows]
-    gate_sha = getattr(gate, "golden_csv_sha256", "")
+    gate_sha = gate.model_sha256
     LOGGER.info("rescore_slate: rescored=%d skipped=%d gate=%s", rescored, skipped, gate_sha[:12])
     return {
         "rescored": rescored,

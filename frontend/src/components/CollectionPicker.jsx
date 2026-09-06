@@ -11,7 +11,7 @@ export default function CollectionPicker({ value, onChange, disabled = false, cl
   useEffect(() => {
     let alive = true;
     fetchCollections()
-      .then((tree) => { if (alive) setFlat(flattenCollections(tree)); })
+      .then((data) => { if (alive) setFlat(flattenCollections(data.items)); })
       // Degrade to Inbox-only if the tree can't load — the picker still adds to the
       // default. Logged, not swallowed.
       .catch((err) => console.error('CollectionPicker: failed to load collections', err));

@@ -76,7 +76,7 @@ function WhyRow({ why }) {
 
 export default function PaperCard({ paper, selected, onToggleSelect }) {
   const authors = parseAuthorsString(paper.authors);
-  if (authors.length > 0 && typeof paper.max_author_h_index === 'number') {
+  if (authors.length > 0 && typeof paper.max_author_h_index === 'number' && paper.max_author_h_index > 0) {
     authors[0] = { ...authors[0], h_index: paper.max_author_h_index };
   }
   const band = scoreToBand(paper.composite_score);

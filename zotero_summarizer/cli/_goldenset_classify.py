@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from zotero_summarizer.settings import Settings
+from zotero_summarizer.services.golden.csv_store import read_snapshot
 from zotero_summarizer.cli._helpers import (
     _persist_run_log,
     _slugify_model,
@@ -20,8 +21,6 @@ def _goldenset_classify(args: argparse.Namespace) -> int:
     classifier's data) and appends a JSONL line to ``classifier-runs.jsonl``
     with the full config + metrics snapshot.
     """
-    import csv as _csv
-
     from zotero_summarizer.services.model import classifier
     from zotero_summarizer.services.golden import hybrid_gt
     from zotero_summarizer.services import run_log
@@ -29,15 +28,7 @@ def _goldenset_classify(args: argparse.Namespace) -> int:
 
     settings = Settings.load(project_root=args.project_root)
     input_csv = Path(args.input or settings.golden_csv_path)
-    if not input_csv.exists():
-        raise FileNotFoundError(f"Golden CSV not found at {input_csv}; run `goldenset export` first.")
-
-    with input_csv.open("r", encoding="utf-8", newline="") as f:
-        rows = list(_csv.DictReader(f))
-
-    # Phase 1.18 Step 2: overlay user verdicts from label_verdicts. This
-    # closes the loop on the Annotate UI — labels typed in the React tool
-    # now act as ground truth for the next train.
+    rows, input_sha = read_snapshot(input_csv)
     rows = hybrid_gt.apply_hybrid(rows, settings.triage_db_path)
     n_user = sum(1 for r in rows if r.get("_hybrid_source") == hybrid_gt.SOURCE_USER)
     if n_user:
@@ -65,14 +56,13 @@ def _goldenset_classify(args: argparse.Namespace) -> int:
         if args.strength
         else None
     )
-    priority_col = f"cls_{args.classifier}_priority"
     metrics_cv = classifier.compute_metrics_against_gold(
-        input_csv, strength_filter=strength_filter, split="cv",
-        priority_column=priority_col,
+        rows, dict(zip(report.item_keys, report.cv_predictions, strict=True)),
+        strength_filter=strength_filter,
     )
     metrics_holdout = classifier.compute_metrics_against_gold(
-        input_csv, strength_filter=strength_filter, split="holdout",
-        priority_column=priority_col,
+        rows, dict(zip(report.holdout_item_keys, report.holdout_predictions, strict=True)),
+        strength_filter=strength_filter,
     )
 
     output = {
@@ -110,7 +100,7 @@ def _goldenset_classify(args: argparse.Namespace) -> int:
         "elapsed_seconds": round(report.elapsed_seconds, 1),
         "csv_updated_rows": updated,
         "input_csv": str(input_csv),
-        "input_csv_sha256_prefix": run_log.file_sha256(input_csv),
+        "input_csv_sha256_prefix": input_sha[:12],
     }
     _persist_run_log(settings, output)
     print(json.dumps(output, indent=2, ensure_ascii=False))
@@ -119,11 +109,11 @@ def _goldenset_classify(args: argparse.Namespace) -> int:
 
 def _setup_classify_llm(args: argparse.Namespace, settings: Settings):
     """Build the LLM client + load the (optionally strength/limit-filtered) golden rows."""
-    import csv as _csv
     import os
 
     from zotero_summarizer.services._adapters import build_llm
     from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.golden.hybrid_gt import apply_hybrid
 
     config = read_config(settings.config_path)
     api_base = (args.api_base or config.llm.api_base).rstrip()
@@ -141,16 +131,14 @@ def _setup_classify_llm(args: argparse.Namespace, settings: Settings):
     llm = build_llm(api_base, model_name, api_key, max_tokens=2048, extra_body=extra_body)
 
     input_csv = Path(args.input or settings.golden_csv_path)
-    if not input_csv.exists():
-        raise FileNotFoundError(f"golden CSV not found at {input_csv}")
-    with input_csv.open("r", encoding="utf-8", newline="") as f:
-        rows = list(_csv.DictReader(f))
+    rows, input_sha = read_snapshot(input_csv)
+    rows = apply_hybrid(rows, settings.triage_db_path)
     if args.strength:
         wanted = {s.strip() for s in args.strength.split(",") if s.strip()}
         rows = [r for r in rows if (r.get("gold_signal_strength") or "").strip() in wanted]
-    if args.limit is not None and args.limit > 0:
+    if args.limit is not None:
         rows = rows[: args.limit]
-    return config, llm, model_name, api_base, input_csv, rows
+    return config, llm, model_name, api_base, input_csv, rows, input_sha
 
 
 def _goldenset_classify_llm(args: argparse.Namespace) -> int:
@@ -162,7 +150,7 @@ def _goldenset_classify_llm(args: argparse.Namespace) -> int:
 
     settings = Settings.load(project_root=args.project_root)
     setup_logging()
-    config, llm, model_name, api_base, input_csv, rows = _setup_classify_llm(args, settings)
+    config, llm, model_name, api_base, input_csv, rows, input_sha = _setup_classify_llm(args, settings)
 
     print(
         f"classifying {len(rows)} rows via {model_name!r} at {api_base} "
@@ -189,11 +177,9 @@ def _goldenset_classify_llm(args: argparse.Namespace) -> int:
         if args.strength
         else None
     )
-    priority_col = f"cls_{classifier_slug}_priority"
     metrics = classifier.compute_metrics_against_gold(
-        input_csv,
+        rows, {c.item_key: c.priority for c in classifications},
         strength_filter=strength_filter,
-        priority_column=priority_col,
     )
 
     from zotero_summarizer.services import run_log
@@ -212,7 +198,7 @@ def _goldenset_classify_llm(args: argparse.Namespace) -> int:
         },
         "rows_processed": len(rows),
         "rows_with_priority": sum(1 for c in classifications if c.priority),
-        "rows_failed": sum(1 for c in classifications if c.error),
+        "rows_skipped": sum(1 for c in classifications if c.skip_reason),
         "csv_updated_rows": updated,
         "elapsed_seconds": round(elapsed, 1),
         "cv": {
@@ -223,7 +209,7 @@ def _goldenset_classify_llm(args: argparse.Namespace) -> int:
         },
         "holdout": {},
         "input_csv": str(input_csv),
-        "input_csv_sha256_prefix": run_log.file_sha256(input_csv),
+        "input_csv_sha256_prefix": input_sha[:12],
     }
     _persist_run_log(settings, summary)
     print(json.dumps(summary, indent=2, ensure_ascii=False))
@@ -358,11 +344,10 @@ def register_goldenset_classify(gs_sub) -> None:
     )
     gs_cls_llm.add_argument(
         "--api-key-env",
-        default="CUSTOM_API_KEY",
+        default=None,
         help=(
-            "Env var holding the API key. Default: 'CUSTOM_API_KEY' "
-            "(add it to .env first). Use 'OPENROUTER_API_KEY' for OpenRouter, "
-            "or 'OPENAI_API_KEY' for the default goals.yaml provider."
+            "Env var holding the API key. Default: goals.yaml llm.api_key_env. "
+            "Override explicitly when selecting a different provider."
         ),
     )
     gs_cls_llm.add_argument(
@@ -375,4 +360,3 @@ def register_goldenset_classify(gs_sub) -> None:
     )
     gs_cls_llm.add_argument("--project-root", default=None)
     gs_cls_llm.set_defaults(func=_goldenset_classify_llm)
-

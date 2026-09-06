@@ -8,14 +8,14 @@ from pathlib import Path
 import pytest
 
 from zotero_summarizer.services.triage.feeds import _compute_outcome_from_membership
-from zotero_summarizer.storage import feeds as fs
+from zotero_summarizer.storage import feeds as fs, repositories
 
 
 def _fresh_db() -> sqlite3.Connection:
-    """Return a fresh in-memory triage_history-style DB with the feeds schema."""
+    """Return a fresh in-memory triage DB, including outcome feedback."""
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
-    fs.init_feeds_schema(conn)
+    repositories.apply_schema(conn)
     return conn
 
 
@@ -138,7 +138,6 @@ def test_record_outcome_writes_final_outcome_and_weight():
     fs.record_outcome(
         conn, feed_library_id=2, feed_item_id=100,
         final_outcome=fs.OUTCOME_DELETED_ALL,
-        signal_weight=fs.OUTCOME_WEIGHT[fs.OUTCOME_DELETED_ALL],
     )
     row = conn.execute(
         "SELECT final_outcome, outcome_signal_weight, outcome_detected_at FROM processed_feed_items WHERE feed_item_id=?",
