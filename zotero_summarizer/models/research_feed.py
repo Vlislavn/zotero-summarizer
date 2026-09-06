@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, TypeAdapter, field_validator
 
 
 TOPIC_TAXONOMY = frozenset({
@@ -16,12 +16,25 @@ TOPIC_TAXONOMY = frozenset({
 })
 
 
+_ShortlistBudget = Annotated[int, Field(strict=True, ge=1, le=100)]
+_CardBudget = Annotated[int, Field(strict=True, ge=1, le=20)]
+
+
+def parse_run_budgets(shortlist, cards, source_limit, timeout) -> tuple[int | None, int | None, int, int]:
+    # ponytail: bounded one-shot work; larger jobs need explicit chunked scheduling.
+    return TypeAdapter(tuple[
+        _ShortlistBudget | None, _CardBudget | None,
+        Annotated[int, Field(strict=True, ge=1, le=5000)],
+        Annotated[int, Field(strict=True, ge=1, le=86400)],
+    ]).validate_python((shortlist, cards, source_limit, timeout))
+
+
 class ResearchProfile(BaseModel):
-    schema_version: int = 1
+    schema_version: Literal[1] = 1
     themes: list[str]
     projects: list[str]
-    shortlist_budget: int = Field(default=20, ge=1, le=100)
-    card_budget: int = Field(default=10, ge=1, le=20)
+    shortlist_budget: _ShortlistBudget = 20
+    card_budget: _CardBudget = 10
     topic_taxonomy: list[str] = Field(default_factory=lambda: sorted(TOPIC_TAXONOMY))
 
     @field_validator("topic_taxonomy")
@@ -95,7 +108,7 @@ class ResearchEngineeringCard(BaseModel):
     research_impact: int = Field(ge=0, le=5)
     production_impact: int = Field(ge=0, le=5)
     personal_novelty: int = Field(ge=0, le=5)
-    worth_reading: Literal["read", "skim", "skip"]
+    worth_reading: Literal["read", "skim", "skip", "unknown"]
     research_ideas: list[ResearchIdea] = Field(default_factory=list)
     evidence_gaps: list[str] = Field(default_factory=list)
 
@@ -112,4 +125,5 @@ class ResearchEngineeringCard(BaseModel):
 __all__ = [
     "TOPIC_TAXONOMY", "ResearchCandidate", "ResearchEngineeringCard",
     "ResearchFeedTriage", "ResearchIdea", "ResearchProfile",
+    "parse_run_budgets",
 ]

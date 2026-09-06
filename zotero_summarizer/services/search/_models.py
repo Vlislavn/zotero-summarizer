@@ -8,21 +8,20 @@ pipeline), and a status. All are plain dataclasses with explicit ``to_dict`` /
 """
 from __future__ import annotations
 
-import hashlib
+import uuid
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from zotero_summarizer.domain import normalize_arxiv_id, normalize_doi
 
-# Version-family taxonomy (spec §11). A preprint and its journal article are ONE
-# family with a preferred version — never destructively merged.
-VERSION_TYPES = (
-    "preprint",
-    "version_of_record",
-    "correction",
-    "retraction",
-    "unknown",
-)
+class ScreenRequest(BaseModel):
+    """Bounded user input shared by HTTP, screening and persisted review entry points."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, strict=True)
+    query: str = Field(min_length=1, max_length=4000, description="Natural-language research topic")
+    questions: list[Annotated[str, Field(min_length=1, max_length=1000)]] = Field(default_factory=list, max_length=10)
 
 
 @dataclass(slots=True)
@@ -57,7 +56,6 @@ class Candidate:
     is_open_access: bool = False
     is_retracted: bool = False
     version_type: str = "unknown"
-    version_family_id: str = ""
     provenance: list[Provenance] = field(default_factory=list)
     # Derived downstream:
     query_score: float | None = None   # master key — OUR cross-encoder vs the query
@@ -77,22 +75,16 @@ class Candidate:
     # absent, None=unknown (no supported id, or the lookup couldn't run).
     in_library: bool | None = None
     existing_zotero_key: str | None = None  # the found item's key when in_library is True
+    candidate_id: str = ""             # persisted address, independent of later metadata enrichment
 
     def __post_init__(self) -> None:
         self.doi = normalize_doi(self.doi) if self.doi else ""
         self.arxiv_id = normalize_arxiv_id(self.arxiv_id) if self.arxiv_id else ""
         self.pmid = (self.pmid or "").strip()
         self.pmcid = (self.pmcid or "").strip()
-
-    @property
-    def candidate_id(self) -> str:
-        """Stable identity for dedup / session keys: first available normalized
-        identifier, else a title hash (never title-alone for MERGING — see
-        ``dedup.py`` — only as a last-resort self-id)."""
-        for ident in (self.doi, self.arxiv_id, self.pmid, self.pmcid, self.openalex_id):
-            if ident:
-                return ident
-        return "title:" + hashlib.sha1(self.title.lower().encode("utf-8")).hexdigest()[:16]
+        if not self.candidate_id:
+            self.candidate_id = next((ident for ident in (self.doi, self.arxiv_id, self.pmid, self.pmcid,
+                                                          self.openalex_id) if ident), "") or f"local:{uuid.uuid4().hex}"
 
     def identifier_keys(self) -> list[str]:
         """Namespaced identifier tokens for the dedup graph (empty ones dropped)."""
@@ -102,26 +94,14 @@ class Candidate:
         )
         return [f"{ns}:{val}" for ns, val in pairs if val]
 
-    def to_scoring_dict(self) -> dict[str, Any]:
-        """The canonical dict the gate/reranker consume (reading_queue.live_scoring)."""
-        return {
-            "item_key": self.candidate_id,
-            "title": self.title,
-            "abstract": self.abstract,
-            "doi": self.doi,
-            "arxiv_id": self.arxiv_id,
-            "authors": ", ".join(self.authors),
-            "year": self.year,
-            "publication_title": self.venue,
-            "url": self.url,
-        }
-
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Candidate":
         data = dict(data)
+        if "candidate_id" in data and (not isinstance(data["candidate_id"], str) or not data["candidate_id"].strip()):
+            raise ValueError("Persisted candidate address must be a nonempty string")
         prov = [Provenance(**p) for p in data.pop("provenance", []) or []]
         known = {f for f in cls.__dataclass_fields__ if f != "provenance"}
         cand = cls(**{k: v for k, v in data.items() if k in known})
@@ -175,9 +155,12 @@ class QueryPlan:
     openalex_lexical_variants: list[str] = field(default_factory=list)
     europepmc_variants: list[str] = field(default_factory=list)
     arxiv_variants: list[str] = field(default_factory=list)
+    must_include: list[str] = field(default_factory=list)
+    must_not_include: list[str] = field(default_factory=list)
+    study_types: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {**asdict(self), "display": self.display()}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "QueryPlan":
@@ -198,7 +181,16 @@ class QueryPlan:
         rows.append(("crossref", self.crossref))
         rows.append(("semantic scholar", self.semantic_scholar))
         rows.append(("openreview", self.openreview))
+        for name in ("must_include", "must_not_include", "study_types"):
+            if values := getattr(self, name):
+                rows.append((f"local {name} (title/abstract)", "; ".join(values)))
         return [{"source": s, "query": q} for s, q in rows if q]
+
+
+def _require_unique_addresses(candidates: list[Candidate]) -> None:
+    ids = [candidate.candidate_id for candidate in candidates]
+    if any(not isinstance(key, str) or not key.strip() for key in ids) or len(set(ids)) != len(ids):
+        raise ValueError("Search candidates must have nonempty, unique addresses")
 
 
 @dataclass(slots=True)
@@ -216,7 +208,11 @@ class ResearchSession:
     screened_count: int = 0
     refinements: list[dict[str, Any]] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        _require_unique_addresses(self.candidates)
+
     def to_dict(self) -> dict[str, Any]:
+        _require_unique_addresses(self.candidates)
         return {
             "id": self.id,
             "created_at": self.created_at,
@@ -232,6 +228,15 @@ class ResearchSession:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ResearchSession":
+        candidates = []
+        for index, row in enumerate(data.get("candidates") or []):
+            candidate = Candidate.from_dict(row)
+            if "candidate_id" not in row and not candidate.identifier_keys():
+                # Legacy rows have no durable address. Derive once from session/slot;
+                # the next ordinary save persists it, so later reordering is harmless.
+                legacy_address = uuid.uuid5(uuid.NAMESPACE_URL, f"{data['id']}:{index}")
+                candidate.candidate_id = f"local:{legacy_address.hex}"
+            candidates.append(candidate)
         return cls(
             id=data["id"],
             created_at=data["created_at"],
@@ -239,7 +244,7 @@ class ResearchSession:
             intent=SearchIntent.from_dict(data.get("intent") or {"raw_query": data["raw_query"]}),
             plan=QueryPlan.from_dict(data.get("plan") or {}),
             questions=list(data.get("questions") or []),
-            candidates=[Candidate.from_dict(c) for c in data.get("candidates") or []],
+            candidates=candidates,
             status=data.get("status", "created"),
             screened_count=int(data.get("screened_count") or 0),
             refinements=[dict(r) for r in data.get("refinements") or []],

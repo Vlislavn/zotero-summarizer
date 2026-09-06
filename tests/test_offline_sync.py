@@ -131,7 +131,7 @@ def test_applied_and_replayed_mutations_run_idempotent_domain_effects(
         (db, "P1", "could_read", "offline"),
         (db, "P1", "could_read", "offline"),
     ]
-    assert note_calls == [("P1", "my note"), ("P1", "my note")]
+    assert note_calls == [(db, "P1"), (db, "P1")]
 
 
 def test_same_field_conflict_and_resolution_are_explicit_and_audited(

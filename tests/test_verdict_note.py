@@ -8,6 +8,8 @@ import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from tests._zotero_fixtures import add_library_item, build_zotero_db
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.api.routes import golden as golden_routes
@@ -94,6 +96,8 @@ def test_upsert_note_inserts_then_updates_in_place(tmp_path: Path):
 # submit_verdict wiring
 # --------------------------------------------------------------------------- #
 def _patch_verdict_basics(monkeypatch, *, note_fn):
+    monkeypatch.setattr(golden_routes.verdict_effects, "get_zotero_reader_or_raise",
+                        lambda: SimpleNamespace(get_item_notes=lambda key: []))
     monkeypatch.setattr(golden_routes, "_load_all", lambda: [])
     monkeypatch.setattr(
         golden_routes.verdict_effects, "append_training_row", lambda *a, **k: None
@@ -152,16 +156,15 @@ def test_submit_verdict_note_failure_does_not_block_verdict(monkeypatch):
         raise RuntimeError("Zotero is open")
 
     _patch_verdict_basics(monkeypatch, note_fn=boom)
-    out = asyncio.run(
-        golden_routes.submit_verdict(
-            golden_routes.VerdictRequest(
-                item_key="K1", user_priority="must_read", comment="x"
+    with pytest.raises(RuntimeError, match="Zotero is open"):
+        asyncio.run(
+            golden_routes.submit_verdict(
+                golden_routes.VerdictRequest(
+                    item_key="K1", user_priority="must_read", comment="x"
+                )
             )
         )
-    )
-    assert out["id"] == 1  # verdict still durably saved
-    assert out["note_written"] is False
-    assert "Zotero is open" in out["note_error"]
+    assert repositories.get_label_verdict(golden_routes._db_path(), "K1")["comment"] == "x"
 
 
 def test_submit_verdict_swallows_optional_zotero_unavailable(monkeypatch):
@@ -313,12 +316,14 @@ def _patch_note_basics(monkeypatch, *, mirror_fn):
     proves the durable save actually happened with the right (item_key, note) —
     not just that the Zotero mirror spy fired."""
     saves: list[tuple] = []
-    monkeypatch.setattr(golden_routes, "_db_path", lambda: Path("/unused"))
-    monkeypatch.setattr(
-        repositories,
-        "upsert_review_note",
-        lambda _db, ik, note: saves.append((ik, note)),
-    )
+    _init_triage_db(golden_routes._db_path())
+    upsert = repositories.upsert_review_note
+
+    def save(path, ik, note):
+        upsert(path, ik, note)
+        saves.append((ik, note))
+
+    monkeypatch.setattr(repositories, "upsert_review_note", save)
     monkeypatch.setattr(
         golden_routes.verdict_effects, "zotero_upsert_user_note", mirror_fn
     )
@@ -345,14 +350,14 @@ def test_save_review_note_mirror_failure_still_saves(monkeypatch):
         raise RuntimeError("Zotero is open")
 
     saves = _patch_note_basics(monkeypatch, mirror_fn=boom)
-    out = asyncio.run(
-        golden_routes.save_review_note(
-            golden_routes.ReviewNoteRequest(item_key="K1", note="jot")
+    with pytest.raises(RuntimeError, match="Zotero is open"):
+        asyncio.run(
+            golden_routes.save_review_note(
+                golden_routes.ReviewNoteRequest(item_key="K1", note="jot")
+            )
         )
-    )
-    assert out["saved"] is True and out["note_written"] is False
-    assert "Zotero is open" in out["note_error"]
     assert saves == [("K1", "jot")]  # local save happened DESPITE the mirror failing
+    assert repositories.get_review_note(golden_routes._db_path(), "K1") == "jot"
 
 
 def test_save_review_note_swallows_optional_zotero_unavailable(monkeypatch):

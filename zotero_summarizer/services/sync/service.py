@@ -119,27 +119,23 @@ def _log_applied_verdict(mutation: dict[str, Any], result: dict[str, Any]) -> No
 def _run_post_commit_effects(db_path: Path, mutation: dict[str, Any], result: dict[str, Any]) -> None:
     if result["status"] not in {"applied", "already_applied"}:
         return
-    if mutation["operation"] != "set":
-        if mutation["field"] == "verdict":
-            verdict_effects.mirror_current_verdict(db_path, mutation["item_key"])
+    if mutation["field"] == "review_note":
+        verdict_effects.mirror_review_note(db_path, mutation["item_key"])
         return
-    if mutation["field"] == "verdict":
-        verdict_effects.apply_verdict_effects(
-            db_path,
-            mutation["item_key"],
-            mutation["value"],
-            mutation.get("comment") or "",
-        )
-    else:
-        verdict_effects.mirror_review_note(
-            mutation["item_key"],
-            mutation.get("value") or "",
-        )
+    if mutation["operation"] != "set":
+        verdict_effects.mirror_current_verdict(db_path, mutation["item_key"])
+        return
+    verdict_effects.apply_verdict_effects(
+        db_path,
+        mutation["item_key"],
+        mutation["value"],
+        mutation.get("comment") or "",
+    )
 
 
-def push(db_path: Path, mutations: list[dict[str, Any]]) -> dict[str, Any]:
+def push(db_path: Path, mutations: list[dict[str, Any]], predecessors: list[str] | None = None) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
-    last_applied: dict[tuple[str, str, str], int] = {}
+    last_applied = repositories.sync_applied_revisions(db_path, predecessors or [])
     for mutation in mutations:
         key = (mutation["device_id"], mutation["item_key"], mutation["field"])
         effective = dict(mutation)

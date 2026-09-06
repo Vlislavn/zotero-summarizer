@@ -177,6 +177,31 @@ def apply_sync_mutation(db_path: Path, request: dict[str, Any]) -> dict[str, Any
         conn.close()
 
 
+def sync_applied_revisions(db_path: Path, mutation_ids: list[str]) -> dict[tuple[str, str, str], int]:
+    """Read immutable acknowledgements; never replay their domain effects."""
+    if not mutation_ids:
+        return {}
+    conn = _connect_to(db_path)
+    try:
+        placeholders = ",".join("?" for _ in mutation_ids)
+        rows = conn.execute(
+            "SELECT device_id, item_key, field, result_json FROM sync_mutations "
+            f"WHERE mutation_id IN ({placeholders})", mutation_ids,
+        ).fetchall()
+    finally:
+        conn.close()
+    if len(rows) != len(set(mutation_ids)):
+        raise ValueError("predecessors must name acknowledged mutations")
+    revisions: dict[tuple[str, str, str], int] = {}
+    for row in rows:
+        result = json.loads(row["result_json"])
+        if result["status"] != "applied":
+            raise ValueError("predecessors must name applied mutations, not conflicts")
+        key = (row["device_id"], row["item_key"], row["field"])
+        revisions[key] = max(revisions.get(key, 0), result["applied_revision"])
+    return revisions
+
+
 def pull_sync_changes(db_path: Path, since: int) -> dict[str, Any]:
     conn = _connect_to(db_path)
     try:
@@ -238,4 +263,4 @@ def sync_status(db_path: Path) -> dict[str, int]:
 
 
 __all__ = ["apply_sync_schema", "apply_sync_mutation", "pull_sync_changes",
-           "sync_current_fields", "sync_status"]
+           "sync_current_fields", "sync_status", "sync_applied_revisions"]

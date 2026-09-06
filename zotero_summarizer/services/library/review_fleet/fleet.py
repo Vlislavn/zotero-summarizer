@@ -17,10 +17,9 @@ inference and thrash host RAM). The fleet runs three passes:
        ``ProposedVerdict`` via the pure ``propose.propose_verdict`` (no LLM here)
        and ``verdict_store.upsert`` it.
 
-It writes ONLY the proposed-verdict sidecar — never ``label_verdicts``, never
-Zotero. The proposals are suggestions the human Confirms/Overrides later. The
-acquired PDF goes to a local cache, never a Zotero write, so a verdict works while
-Zotero is open.
+It stores suggestions, never confirmed labels. Shared deep review also writes
+its cache, may mirror a digest note to Zotero and rebuild an existing paper brief.
+Acquired PDFs stay in the local cache, not Zotero attachments.
 
 ``status()`` mirrors ``deep_review``'s poll shape and adds a per-outcome tally:
 ``{status, total, completed, proposed, no_fetchable_source, needs_library_login,
@@ -39,8 +38,9 @@ import threading
 import time
 from typing import Any
 
+from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services._common import LOGGER, now_iso_z
-from zotero_summarizer.services.library import _flight, deep_review, paper_render, reading_queue
+from zotero_summarizer.services.library import _flight, deep_review, paper_render, reading_queue, review_detail
 from zotero_summarizer.services.library.review_fleet import propose, verdict_store
 
 _DEFAULT_TOP_K = 5
@@ -160,7 +160,7 @@ def _set_progress(progress: dict[str, Any]) -> None:
 
 def _current_cache(item_key: str) -> dict[str, Any] | None:
     cached = deep_review.get_cached_review(item_key)
-    return cached if deep_review.review_is_current(cached) else None
+    return cached if deep_review.review_is_current(cached, item_key) else None
 
 
 def _usable_cache(item_key: str) -> dict[str, Any] | None:
@@ -336,9 +336,9 @@ def _run_job(top_k: int, item_keys: list[str] | None = None) -> None:
     which fans them out parallel for a remote provider / serial for a local one; PDF
     acquisition between them stays sequential."""
     try:
-        if item_keys:
+        if item_keys is not None:
             # Client-pinned cool set: review exactly these (no queue scan / selector).
-            keys = [str(k) for k in item_keys]
+            keys = item_keys
         else:
             # Scan the WHOLE ranked library, not a fixed prefix: the queue PINS the
             # user's already-labeled papers to its top, so on a heavily-labeled library
@@ -397,23 +397,19 @@ def _run_job(top_k: int, item_keys: list[str] | None = None) -> None:
 
 
 def start(top_k: int = _DEFAULT_TOP_K, *, item_keys: list[str] | None = None) -> dict[str, Any]:
-    """Kick off a review-fleet run (single-flight). With ``item_keys`` it pre-decides
-    EXACTLY those picks (the client's "Review cool papers" passes its cool — must/
-    should-read — set so the fleet reviews the SAME rows the UI counts, not the
-    band-agnostic top-of-undecided ``_select_keys`` slice); without it, the next
-    ``top_k`` undecided picks (the startup prewarm path). Deep review is batched
-    parallel-for-remote / serial-for-local.
+    """Review unique explicit picks, or select top-K undecided picks when keys is None.
 
-    Returns ``status()`` plus an ``accepted`` flag: ``True`` when THIS call claimed the
-    single-flight slot (our picks are now running), ``False`` when a run was already in
-    flight (a prewarm / another click) so this call is a no-op returning the FOREIGN
-    run's status. The client relies on ``accepted`` (not a started_at timestamp) to tell
-    "my pinned keys are running" from "a foreign run holds the latch — wait it out", which
-    is robust to a prewarm that fires AFTER the click."""
-    keys = list(item_keys) if item_keys else None
+    Snapshot and validate the scope before scheduling. An empty list or an occupied
+    single-flight slot returns unchanged status with accepted=False. Otherwise this
+    call owns the slot (accepted=True), which the client's polling loop relies on.
+    """
+    keys = list(dict.fromkeys(item_keys)) if item_keys is not None else None
     for key in keys or []:
         paper_render._state_path(key)
-    if not try_start():
+        if review_detail.classify_item_key(key) != review_detail.SOURCE_LIBRARY:
+            raise APIError(error="validation_error", status_code=422,
+                           message=f"review-fleet only accepts library keys: {key!r}")
+    if keys == [] or not try_start():
         return {**status(), "accepted": False}
     _flight.run_in_background(lambda: _run_job(max(1, top_k), item_keys=keys))
     return {**status(), "accepted": True}

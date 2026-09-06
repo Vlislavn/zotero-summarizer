@@ -16,7 +16,7 @@ __init__.build_parser()
           └─ register_goldenset_setup_tag_colors(gs_sub)  # _goldenset_setup_colors.py: setup-tag-colors
    ├─ register_faithbench(subparsers)  # _faithbench.py: faithbench build/run/judge/report
    └─ register_research_feed(...)      # _research_feed.py: research-feed run
-main() = parse args → validate goldenset budgets → install Settings → dispatch
+main() = parse args → validate command budgets → install Settings → dispatch
 ```
 
 | file | responsibility |
@@ -31,10 +31,28 @@ main() = parse args → validate goldenset budgets → install Settings → disp
 | `_goldenset_classify.py` · `_goldenset_predict.py` | the heavier classify/predict/analyze commands (`classify-llm` runs any OpenAI-compatible model) |
 | `_goldenset_migrate.py` | `migrate-verdicts-to-zotero` — one-time transfer of in-app verdicts (`label_verdicts`) into Zotero `label:<priority>` tags (`--dry-run`, idempotent, library items only, single batch backup) |
 | `_goldenset_setup_colors.py` | `setup-tag-colors` — prints the one-time Zotero setup (colors + number keys 1-4 for the four `label:<priority>` tags) for native keypress labeling. Non-destructive (prints the plan; writes nothing into your synced Zotero settings); `--json` for machine output |
-| `_faithbench.py` | `faithbench build/run/judge/report` — faithfulness mini-benchmark of the deep_review-stage model (span-verified QA + traps + review-claim grounding). `run` is resumable via `--run-id` and takes `--provider/--model` to sweep a model for THIS run only (no goals.yaml edit; recorded in the manifest); `judge` uses the pinned remote judge (`CUSTOM_BASE_URL`/`CUSTOM_API_KEY`). See `services/faithbench/README.md` |
+| `_faithbench.py` | `faithbench build/run/judge/report` — faithfulness mini-benchmark of the deep_review-stage model (span-verified QA + traps + review-claim grounding). QA runs require explicit approval of every generated review-CSV row and bind that CSV hash into the manifest. `run` is resumable via `--run-id` and takes `--provider/--model` to sweep a model for THIS run only (no goals.yaml edit; recorded in the manifest); `judge` uses the pinned remote judge (`CUSTOM_BASE_URL`/`CUSTOM_API_KEY`). See `services/faithbench/README.md` |
 | `_research_feed.py` | `research-feed run --from … --to … [--venue …]`: bounded weekly JSON+Markdown; generates missing cards through existing deep review unless `--cached-only`; Zotero stays dry-run unless `--queue-zotero` is explicit. |
 
 Handlers use lazy imports inside the function bodies to keep CLI startup fast.
+
+Faithbench run IDs are single ASCII alphanumeric/underscore/hyphen names, not
+paths. The common run/judge/report path resolver rejects traversal and symlink
+escapes outside the selected project's `data/faithbench/runs/` directory.
+Faithbench validates numeric and comma-separated options before Settings/handler
+I/O. Builds need at least two papers and positive QA/trap counts; runs need positive
+repetitions and optional QA limits, nonempty duplicate-free conditions/tracks from
+the supported names. `--limit` requires the QA track. Parsed `RunOptions` are reused
+by the handler with only provider concurrency applied afterward; invalid input
+exits with argparse status 2, not a successful zero-work run.
+Run records its QA limit and binds the benchmark hash to the exact parsed bytes;
+resume refuses a changed limit. Judge/report reject a missing/malformed or changed
+benchmark SHA before judging/publication. Report owns artifact loading, not a second
+CLI-supplied copy of the items/manifest/path. Run identity additionally binds
+resolved model/decomposer profiles, full config, prompt/schema/source hashes,
+timeout, semantic benchmark content and execution options before any provider
+client is built. The runner independently repeats the guard before journal repair
+or model work. Legacy unidentified runs remain intact but require a new run ID.
 
 `goldenset classify` and `classify-llm` snapshot hybrid ground truth before model
 work and evaluate current results against that same snapshot. The shared CSV
@@ -76,6 +94,17 @@ exits with argparse status 2; no source/output mutation or model/provider work.
 Raw `build_parser().parse_args()` remains syntactic parsing; semantic command
 validation belongs to the sole production dispatcher. Other command groups keep
 their own contracts.
+
+Research-feed uses the same pre-Settings validation point: shortlist 1–100,
+cards 1–20 and review timeout 1–86,400 seconds, sharing the model's budget types
+with direct service calls. Zero/negative/oversized overrides exit 2 before startup.
+The handler reuses the dispatcher's Settings instead of loading it a second time.
+`research-feed --cached-only` skips app startup: existing RSS/review data can be
+projected without a goals file, classifier, provider setup or background work.
+Generation uses existing `startup(background=False)`, so it does not prewarm,
+recover server jobs, retrain or rescore unrelated papers. Normal configured model
+prerequisites still apply to generation: an enabled classifier with an existing
+golden dataset needs a compatible cached artifact, prepared explicitly beforehand.
 
 `predict-feed` no longer accepts unused `--calibration`/`--threshold-strategy`;
 its regressor has no such tuning step. `classify` retains its used options.

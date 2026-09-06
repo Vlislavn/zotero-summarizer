@@ -236,15 +236,6 @@ async def run_review_fleet(req: ReviewFleetRunRequest) -> dict[str, Any]:
     SUGGESTIONS surfaced on the queue as ``proposed_verdict`` — never auto-applied
     labels. Single-flight: returns the in-flight status when a run is already going.
     Poll ``GET /api/library/review-fleet/status``."""
-    if req.item_keys:
-        bad = [k for k in req.item_keys if is_stable_feed_key(k)]
-        if bad:
-            raise APIError(
-                error="validation_error",
-                message="review-fleet only accepts library (Zotero) keys; feed: keys are not supported",
-                status_code=422,
-                details={"feed_keys": bad},
-            )
     return await asyncio.to_thread(review_fleet.start, req.top_k, item_keys=req.item_keys)
 
 

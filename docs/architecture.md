@@ -152,6 +152,8 @@ Install once: `pre-commit install`. CI runs the same checks plus the test suites
    There is no grandfather list; split by responsibility.
 2. **Layering / structure policy** (`check_import_policy.py`) — the rules above; new
    service modules must live in a domain subpackage, not at `services/` top level.
+   AST checks include relative, aliased, multi-name and nested static imports;
+   this gate does not analyze dynamic imports or indirect runtime effects.
 3. **Module READMEs** (`check_module_readme.py`) — every package has one, and editing
    a package's code requires staging its `README.md` in the same commit.
 4. **Redundancy** (`check_redundancy.py`) — new *provably* redundant transforms

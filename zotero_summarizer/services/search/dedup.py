@@ -53,6 +53,7 @@ def _richness(cand: Candidate) -> tuple[int, int, int, int]:
 
 def _merge_family(members: list[Candidate]) -> Candidate:
     preferred = max(members, key=_richness)
+    preferred.candidate_id = members[0].candidate_id  # Metadata enrichment must not change a displayed address.
     # Fill missing identifiers + flags from the other members (one work, many ids).
     for m in members:
         preferred.doi = preferred.doi or m.doi
@@ -90,7 +91,6 @@ def _merge_family(members: list[Candidate]) -> Candidate:
         if m is not preferred:
             preferred.provenance.extend(m.provenance)
     preferred.version_type = _version_type(preferred)
-    preferred.version_family_id = preferred.candidate_id
     return preferred
 
 

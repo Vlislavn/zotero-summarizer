@@ -1,6 +1,7 @@
 """HTTP key normalization and ownership of explicit app verdicts."""
 
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -10,9 +11,14 @@ from fastapi.testclient import TestClient
 from tests.test_verdict_mirror_retraction import _setup
 from zotero_summarizer.api.errors import install_error_handlers
 from zotero_summarizer.api.routes import golden
+from zotero_summarizer.api.routes import _golden_helpers
+from zotero_summarizer.integrations.zotero_write import ZoteroWriteError
 from zotero_summarizer.services.golden import label_verdicts, user_labels, verdict_effects
 from zotero_summarizer.services.zotero import zotero
 from zotero_summarizer.storage import repositories as db
+from zotero_summarizer.runtime import AppContext, set_context
+from zotero_summarizer.services.setup.bootstrap import bootstrap_phase0
+from zotero_summarizer.settings import Settings
 
 
 def _app():
@@ -20,6 +26,34 @@ def _app():
     app.include_router(golden.router)
     install_error_handlers(app)
     return app
+
+
+def test_first_verdict_and_detail_need_no_prior_golden_export(tmp_path):
+    settings = replace(Settings.load(project_root=tmp_path), zotero_data_dir=tmp_path / "missing-zotero")
+    set_context(AppContext(settings=settings))
+    bootstrap_phase0(settings)
+    assert not settings.golden_csv_path.exists()
+    with db.with_db_path(settings.triage_db_path), TestClient(_app()) as client:
+        listing = client.get('/api/golden/provenance/list')
+        assert listing.status_code == 200, listing.text
+        assert listing.json()['items'] == []
+        saved = client.post('/api/golden/verdict', json={
+            'item_key': 'PAPER001', 'user_priority': 'must_read', 'comment': 'first rationale',
+        })
+        assert saved.status_code == 200, saved.text
+        detail = client.get('/api/golden/review-detail?item_key=PAPER001')
+        assert detail.status_code == 200, detail.text
+        assert detail.json()['verdict']['comment'] == 'first rationale'
+        assert detail.json()['provenance'] is None
+    stored = db.get_label_verdict(settings.triage_db_path, 'PAPER001')
+    assert stored['original_derived_priority'] == 'unknown'
+    assert stored['comment'] == 'first rationale'
+
+
+def test_existing_unreadable_provenance_is_not_an_empty_library(tmp_path, monkeypatch):
+    monkeypatch.setattr(_golden_helpers, '_golden_csv_path', lambda: tmp_path)
+    with pytest.raises(IsADirectoryError):
+        _golden_helpers._load_all()
 
 
 @pytest.mark.parametrize("key", ["", "   ", "\t\n", None, 12, True, [], {}])
@@ -77,9 +111,9 @@ def test_online_confirmation_without_csv_provenance_takes_app_ownership(tmp_path
     events = []
     monkeypatch.setattr(golden, "log_verdict_event", lambda *args: events.append(args))
 
-    result = asyncio.run(golden.submit_verdict(golden.VerdictRequest(item_key="PARENT", user_priority="must_read")))
+    with pytest.raises(ZoteroWriteError):
+        asyncio.run(golden.submit_verdict(golden.VerdictRequest(item_key="PARENT", user_priority="must_read")))
 
-    assert result["label_error"]  # No Zotero write can hide an ownership error.
     assert user_labels.reconcile_label_verdicts([], zdb, path).removed == 0
     stored = db.get_label_verdict(path, "PARENT")
     expected = "unknown" if original == "zotero_label" else original

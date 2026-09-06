@@ -25,6 +25,7 @@ from zotero_summarizer.services.faithbench import (
     answer_with_retry,
 )
 from zotero_summarizer.services.faithbench._constants import RETRIEVAL_TOP_K
+from zotero_summarizer.services.faithbench._corpus import _CONTEXT_SEPARATOR, _clip_chunks
 from zotero_summarizer.services.library import paper_render, qa_context
 from zotero_summarizer.services.library._grounding import quote_is_grounded as _quote_is_grounded
 
@@ -76,8 +77,8 @@ def ask_paper(
         raise APIError(error="extraction_empty", message="Extracted PDF text is empty", status_code=422)
     if mode == "retrieval":
         # ponytail: build this lexical index per question; cache by artifact key only if profiling warrants it.
-        chunks = PaperChunkIndex(text).top_chunks(question, RETRIEVAL_TOP_K)
-        context = "\n\n[...]\n\n".join(chunks) if chunks else text[:max_chars]
+        chunks = _clip_chunks(PaperChunkIndex(text).top_chunks(question, RETRIEVAL_TOP_K), max_chars)
+        context = _CONTEXT_SEPARATOR.join(chunks) if chunks else text[:max_chars]
     elif mode == "full_text":
         context = text[:max_chars]
     else:
@@ -95,7 +96,9 @@ def ask_paper(
     latency = round(perf_counter() - t0, 2)
     LOGGER.info("qa: item=%s mode=%s latency=%.1fs abstained=%s",
                 item_key, mode, latency, parsed["abstained"])
-    if parsed["answer"] is not None and not _quote_is_grounded(parsed["quote"], context):
+    if parsed["answer"] is not None and not (
+        _quote_is_grounded(parsed["quote"], context) and _quote_is_grounded(parsed["quote"], text)
+    ):
         parsed = {"answer": None, "abstained": True, "quote": None}
     return _with_evidence({
         "item_key": item_key,

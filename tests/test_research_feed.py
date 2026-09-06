@@ -52,7 +52,8 @@ def _seed(settings: Settings, key: str, title: str, *, materialized: str = "") -
 
 def _review(key: str) -> dict:
     return {
-        "review_contract_version": 2, "reviewed_at": "2026-08-26T00:00:00Z",
+        "review_contract_version": 3, "reviewed_at": "2026-08-26T00:00:00Z",
+        "review_identity": {"fixture": key},
         "provenance": {"provider": "local", "model": "model", "prompt_schema_version": 2},
         "digest": {
             "tldr": f"Review {key}", "key_strength": "Reliable benchmark",
@@ -81,7 +82,7 @@ def test_schema_and_dedupe_reject_unknown_or_fabricated_values() -> None:
         )
     first = ResearchCandidate(source_id="a", source="rss", title="Same Paper", doi="10.1/x")
     duplicate = ResearchCandidate(source_id="b", source="rss", title="Same Paper", doi="10.1/x")
-    assert deduplicate([first, duplicate]) == [first]
+    assert list(deduplicate([first, duplicate])) == [first]
 
 
 def test_weekly_run_enforces_budget_isolates_failure_and_is_idempotent(tmp_path) -> None:

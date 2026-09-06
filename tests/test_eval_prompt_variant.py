@@ -104,3 +104,12 @@ def test_margin_and_tolerance_are_configurable():
     # default margin 0.01 → inconclusive; a looser margin makes it a win
     assert ev.compare_variants(baseline, candidate)["verdict"] == "inconclusive"
     assert ev.compare_variants(baseline, candidate, support_margin=0.001)["verdict"] == "candidate_better"
+
+
+@pytest.mark.parametrize("has_measured_condition", [False, True])
+def test_unmeasured_trap_rate_cannot_produce_a_comparison_verdict(has_measured_condition):
+    baseline, candidate = _report(.9, .05), _report(.99, None)
+    if has_measured_condition:
+        candidate["tracks"]["qa"]["full_text"] = {"trap": {"hallucination_rate": 0.0}}
+    with pytest.raises(ValueError, match="unmeasured"):
+        ev.compare_variants(baseline, candidate)

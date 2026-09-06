@@ -86,10 +86,11 @@ def test_digest_action_overrides_relevance_without_hiding_relevance():
     assert "HIGH RELEVANCE" in html and "DEEP-READ" not in html
 
 
-def test_no_fired_goal_is_skip():
+def test_missing_digest_does_not_invent_skip_even_for_assessed_misses():
     misses = [{"goal": g["goal"], "retrieval_state": "miss", "relevant": False, "score": 0.1} for g in GOALS]
     html = brief.brief_html(CONTENT, quality=QUALITY, goal_summaries=misses)
-    assert "SKIP" in html
+    assert "REVIEW" in html
+    assert ">SKIP<" not in html
 
 
 def test_quality_panel_is_self_explaining():

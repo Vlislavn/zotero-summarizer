@@ -1,5 +1,8 @@
 """One current note across known feed/library aliases, without copying note bodies."""
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
+
+from zotero_summarizer.storage import repositories
 
 
 def _keys(conn, item_key):
@@ -49,6 +52,16 @@ def current(conn, item_key):
     """Current value/revision; a deletion remains authoritative across aliases."""
     row = _current(conn, _keys(conn, item_key))
     return row if row is not None else {"item_key": item_key, "value": None, "revision": 0}
+
+
+@contextmanager
+def current_for_mirror(db_path, item_key):
+    """Hold current note intent stable until the caller finishes external delivery."""
+    with closing(repositories._connect_to(db_path)) as conn:
+        # ponytail: serialize app writers during delivery; use a dedicated delivery
+        # worker if backup latency starts blocking local edits.
+        conn.execute("BEGIN IMMEDIATE")
+        yield current(conn, item_key)["value"]
 
 
 def write(conn, item_key, note):

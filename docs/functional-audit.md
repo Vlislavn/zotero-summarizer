@@ -6,6 +6,92 @@ test is never mistaken for a working user flow.
 
 Snapshot date: 2026-09-05.
 
+## Current user scope (2026-09-06)
+
+Close every high finding before declaring the high-priority repair complete.
+The remaining 42 medium findings are tracked in
+[GitHub #25](https://github.com/Vlislavn/zotero-summarizer/issues/25); the five low
+findings in [GitHub #26](https://github.com/Vlislavn/zotero-summarizer/issues/26).
+Each has its audit ID, observed failure, current qualification and acceptance
+criteria. They are deferred, not resolved. No high finding is deferred there.
+A008 still needs confirmation that the previously exposed credential was revoked;
+the test isolation fix alone does not establish that operational action.
+
+Accepted checkpoint: A220, A181, A146, A158, A182, A163 and A179. Remaining: **52 findings — five high,
+42 medium, five low**.
+
+- A220: review-note checkpoint completed with 3553 passed, 14 skipped and exactly
+  the same nine signal-11 baseline crashes; all 853 source hashes matched.
+  Verdict comments now share the alias-aware current-label snapshot and writer
+  lock. Replays, empty comments, deletions, feed aliases and actual backup-first
+  Zotero SQLite writes are covered. A failed mirror raises after the local commit,
+  rather than returning a successful response with an error string. The existing
+  note/label-failure tests were explicitly updated to this fail-fast contract;
+  their durable-write and ownership assertions remain. Label deletion receipts
+  retain their separate meaning, including later deliberate Zotero edits.
+- A181: all 21 claim-bearing PaperDigest fields enter decomposition, including
+  nested technical parameters; the schema policy test detects newly omitted
+  fields. v2 decomposition caches are preserved but not reused by v3. This is
+  field coverage, not proof that an LLM decomposer finds every atomic claim.
+- A146: the plan carries include/exclude/study-type constraints through storage;
+  a post-dedup title/abstract phrase gate applies to every source. Supported
+  lexical sources also receive Boolean queries and synonym alternatives. Other
+  channels remain candidate generators subject to the same local gate. Agentic
+  exclusions cannot erase an explicit required term and survive subsequent rounds.
+  The tight-query test now expects the same quoted phrase plus its required-term
+  conjunct, not an unconstrained query. Literal study-type matching is not semantic
+  validation of study design.
+
+Evidence under `data/functional-audit/`: `verdict-comment-replay-red.log` (four
+behavioral failures), `claims-field-coverage-red.log` (three),
+`search-constraints-red.log` (three); focused checkpoint 28 passed; claim/neighbour
+checkpoint 90 passed; Search checkpoint 74 passed. All nine pre-commit gates pass.
+Frontend: 172 tests pass, lint has no errors/12 existing warnings, production build
+passes. Opt-in built React → real ASGI/SQLite browser journeys: three passed
+(`high-priority-checkpoint-browser.log`), with external sources, AI, training and
+background recovery explicitly disabled. The complete backend run is recorded in
+`high-priority-checkpoint-backend.log`; its source snapshot is
+`high-priority-checkpoint-source.sha256`. The frozen full run finished with
+**3566 passed, 14 skipped and the same nine signal-11 baseline crashes** in
+946.28 seconds. Exact failure-list comparison and every source hash passed.
+The in-memory BEGIN IMMEDIATE → BEGIN mutation fails the concurrent rationale
+delivery test (`verdict-comment-lock-mutation.log`); production source was untouched.
+
+A158 is fixed. Push continuation
+uses at most 100 immutable mutations plus applied predecessor UUIDs from the
+existing server receipts. IndexedDB acknowledges/retire rows atomically; an abort
+rolls back both, and restart after a timed-out second batch preserves its one-row
+tail. Another device's receipt or an intervening canonical edit cannot grant an
+overwrite. Unknown/conflict receipts reject before writes. Bounds are checked
+before optimistic state changes; invalid legacy drafts remain copyable in the UI
+and cannot block healthy rows. Unexpected acknowledgement IDs/status/revisions
+do not delete drafts. No migration, queue worker or new endpoint is added.
+Red evidence: `sync-batch-red.log` (2 behavioral failures, 2 passed),
+`sync-outbox-red.log` (3 failures). Current evidence: 64 backend neighbours passed,
+179 frontend tests passed, lint 0 errors/12 existing warnings, production build
+passed, all nine pre-commit gates passed, and three built-app browser journeys
+passed (`sync-batch-*` logs). The existing offline-store test now supplies real
+server `applied_revision` fields; its restart/order assertions remain unchanged.
+The frozen full checkpoint completed with 3588 passed, 14 skipped and exactly the
+same nine baseline signal-11 crashes; all source hashes matched.
+
+A182 is fixed. Manifest guards now bind
+provider/endpoint, resolved under-test and decomposer profiles, full config,
+timeout, actual prompt/schema and selected generation-source hashes, research
+goals, semantic benchmark content and execution options. CLI guards before
+client construction; the direct runner requires a real manifest and repeats
+identity/benchmark-byte validation before repairing or appending journals.
+Legacy missing identities cannot be silently upgraded. This is conservative
+invalidation, not a pinned checksum of remotely mutable model weights.
+`resume-identity-red.log` records six reproduced false-acceptance failures;
+17 new direct/CLI identity tests pass. Existing test fixtures now explicitly
+prepare manifests with real GoalsConfig objects and resolved model profiles;
+invalid-ground-truth fixtures bind their deliberately bad builder output to
+a valid identity so the original span/provenance assertions still execute.
+The complexity guard rejected the expanded run body; artifact-identity admission
+is now a separate private step and every pre-commit gate passes. No new manifest
+schema fallback, client-introspection abstraction or dependency was introduced.
+
 ## Inventory boundary
 
 The current executable surface contains:
@@ -3219,6 +3305,1200 @@ working memory. No browser acquisition behavior was changed in this batch.
   is separate and retained on later render failure. A111's native memory
   remainder, A121 parser wiring and the other four A215 surfaces remain open.
 
+### 2026-09-06 — A121/A123: parser identity and valid model reading actions
+
+- A121: the effective `quality_review.use_docling` flag selects one PDF content
+  parse for both PDF and TeX builds. The shared dispatcher adds PDF metadata,
+  page count and annotation links to either parser's body/sections; Docling
+  tables survive. Parser choice participates in the artifact key, and adapter
+  source participates in the renderer revision. Status and all Q&A modes
+  therefore rebuild changed extraction identities. Configured parser errors
+  propagate, with no fitz-on-error branch. Uninitialized standalone use retains
+  the documented lightweight default; image crops still use the existing fitz path.
+- A123: `_coerce_digest` validates the normalized action, not merely field
+  presence, for JSON and parsed models. The existing one-shot correction validates
+  again; a second invalid action propagates. Legacy DTO defaults remain separate.
+  The redundant `ValidationError` catch/import is removed after verifying that
+  the installed exception subclasses `ValueError`. No new external API,
+  dependency or production module; body extraction and common metadata stay
+  separate responsibilities in the existing PDF module.
+- Receipts under `data/functional-audit/`: `paper-parser-config-red.log`
+  **10 failed / 2 passed**; `paper-parser-config-focused-final.log`
+  **152 passed** (54.82s); `digest-action-red.log` **10 failed / 10 passed**;
+  `parser-digest-focused-final.log` **35 passed** (18.60s).
+  An intermediate env-config test constructed an invalid bare `GoalsConfig`;
+  it was corrected to reuse the existing valid bootstrap config, not weaken the
+  assertion. Its initial focused/mutation runs are not acceptance evidence.
+- Process-local mutations: `paper-parser-config-disabled-mutation-final.log`
+  **9 failed / 2 passed**; `paper-parser-config-identity-mutation.log`
+  **5 failed**; `paper-parser-config-metadata-mutation.log` **1 failed**;
+  `paper-parser-config-revision-mutation.log` **1 failed**;
+  `digest-action-mutation.log` **10 failed**. No production files were mutated.
+- `parser-digest-final-precommit.log`: all nine guards pass.
+  `parser-digest-backend.log`: **3123 passed, 9 failed, 11 skipped**
+  (692.94s), exactly the previous `paper-audit-gate-backend.log` failure IDs,
+  all nine `CRASHED with signal 11`. No Python changes followed that run.
+  `parser-digest-frontend-tests.log`: **138 passed**, 28 files (6.27s);
+  matching frontend build succeeds, lint has **0 errors / 12 existing warnings**.
+- Scope: synthetic PDFs exercise real PDF metadata/serving/build/Q&A paths with
+  a controlled Docling adapter. No native Docling models, provider or live Zotero
+  were loaded; this proves dispatch/identity/contracts, not native extraction
+  quality. A123 is action validation, not factual grounding (A122 remains open).
+
+### 2026-09-06 — A212: executable static-import boundary
+
+- Replaced the line regex with stdlib AST parsing and `resolve_name`. Relative,
+  root-package member, aliased, parenthesized, multi-name and nested imports are
+  checked without executing imported modules. Absolute file arguments use the
+  same repo-relative policy. Invalid syntax/resolution fails rather than yielding
+  an empty import list. Comments and docstring examples are not imports.
+- Services now enforce the documented `api.errors` exception against the whole
+  API namespace, rather than denylisting only `api.app` and `api.routes`.
+  The existing top-level service-module rule is retained. No new dependency,
+  public API, configuration flag or allowlist was added.
+- `tests/test_import_policy.py` exercises the real gate, with subprocess CLI
+  checks and permitted near-misses. `import-policy-red.log`: **31 failed,
+  7 passed** (112.03s). `import-policy-green.log`: **38 passed** (119.75s).
+  Process-local restoration of the old regex and disabling the layer rules each
+  fail the first forbidden-import test: `import-policy-regex-mutation.log`
+  and `import-policy-disabled-mutation.log` (7.01s / 6.98s, exit 1).
+- `import-policy-precommit.log`: all nine guards pass. A direct whole-production
+  import scan also exits 0. `import-policy-backend.log`: **3163 passed, 27 failed,
+  11 skipped** (757.56s), terminal exit 1. Its exact failure-ID set equals the
+  union of `parser-digest-backend.log` and `context-budgets-red.log`: nine known
+  signal-11 native failures plus 18 existing A125/A137 budget regressions.
+  Those budget defects remain open; no tests were skipped or weakened to pass.
+- This proves the static syntax boundary, not transitive effect analysis,
+  dynamic-import safety or protection of the verifier against editing. Those
+  distinctions are explicit in the package README. CI permissions and GitHub
+  protections were not changed; frontend code was untouched.
+
+### 2026-09-06 — A125/A137: one separator-aware context cap
+
+- Review selection reserves section separators before allocation. A sorted
+  shortest-first pass replaces the mutable nested water-fill loop, redistributing
+  short-section slack and integer remainders. Remaining context space is measured
+  from the assembled text; the arbitrary 200-character filler threshold is gone.
+- One private `_corpus._clip_chunks` function clips ranked nonempty fragments and
+  includes separator cost. Production Q&A, benchmark Q&A and both claim-judge
+  templates use it; review filler reuses it before restoring document order.
+  Oversized relevant chunks contribute a prefix instead of being skipped for an
+  unrelated document prefix. Repeated chunk occurrences remain distinct by index.
+  `chunks_used` counts only included fragments. No new API/config/dependency.
+- Short-paper identity, existing no-hit behavior and the claim judge's bounded
+  full-text second pass are retained. Index errors propagate. The bound covers
+  paper-context characters, not the full prompt/history, tokens or process memory.
+  Correction to A125's illustrative underfill claim: after eight characters at
+  cap ten, two separator characters leave no room for another source character.
+  This unavoidable slack is retained; no empty fragment or synthetic padding is
+  added. Caps 11–17 prove useful second-chunk prefix filling.
+- Existing tests' 6100/4300 allowances were tightened to the requested 6000/4000,
+  not relaxed. New bounded property checks compare 6528 clipping combinations
+  against an independent join/slice oracle and test 2250 small allocations.
+  Ranked-tail, document-order, repeated-chunk and actual prompt/count checks cover
+  the shared function's consumers. These are bounded tests, not a universal proof
+  or a model-output grounding evaluation (A122/A134/A135 remain open).
+- Receipts under `data/functional-audit/`: `context-budgets-red.log` **18 failed,
+  2 passed**; initial `context-budgets-green.log` **29 passed** (9.89s);
+  final expanded `context-budgets-focused.log` **113 passed** (30.44s).
+  Process-local mutations: bypass clipper **7 failed**, ignore separator cost
+  **1 failed**, drop allocation remainder **2 failed**, in respectively
+  `context-budgets-bypass-mutation.log`, `context-budgets-separator-mutation.log`
+  and `context-budgets-remainder-mutation.log`; all terminal exit 1.
+- `context-budgets-precommit.log`: all nine guards pass.
+  `context-budgets-backend.log`: **3186 passed, 9 failed, 11 skipped** (763.17s),
+  terminal exit 1; failure IDs exactly match `parser-digest-backend.log`, all
+  nine signal-11 native crashes. All 18 budget failures from the immediate
+  `import-policy-backend.log` baseline are resolved. No Python edits followed
+  the full run; frontend code, live models and Zotero were not changed or used.
+
+### 2026-09-06 — A139: review completion no longer applies labels
+
+- Removed the unconditional quality-gate call from the shared deep-review worker.
+  Direct review, fleet and weekly missing-review generation now save their review
+  without writing label verdicts. Explicit configured non-dry triage still runs
+  the full L1/L2 filter; newly asynchronous reviews may be consumed on a later tick.
+- Deleted `fire_for_keys`, its `_run_gate` wrapper, `only_keys`, the singleton
+  protected-source tuple and duplicate config resolution. The two production
+  files are 82 lines shorter; no new API, dependency, flag or wrapper was added.
+- Following the user's fail-fast instruction, malformed score JSON and cache/DB
+  errors propagate from the gate. The existing tick boundary logs failures;
+  the gate no longer returns a success-shaped zero on I/O failure. Each hide
+  still commits separately; this is not an all-pass or concurrent-user transaction.
+- Oracle changes are intentional: the old test that permitted global L1 writes
+  from a scoped review loses its API with the removed hook; its safety requirement
+  is replaced by real caller-to-SQLite invariants. The corrupt-row test now expects
+  the required error instead of endorsing silent skipping. Existing L1/L2, human
+  precedence and manual-restore tests remain.
+- One parameterized integration regression reuses the existing fake PDF/LLM
+  fixtures and runs real `deep_review.start`/worker/cache, fleet proposal storage,
+  and weekly `_ensure_reviews`, with scheduling made synchronous. It begins with
+  no review cache, proves a D-grade review and (for fleet) a proposal were saved,
+  and compares real label rows before/after. Disabled/dry triage preserves labels;
+  enabled non-dry triage hides both D-grade and unrelated low-relevance rows.
+  External reader/model/enrichment/Zotero-note effects are substituted, not the
+  label writer or review worker. This is not a full weekly CLI or live-model run.
+- Receipts under `data/functional-audit/`: `review-label-boundary-red.log`:
+  **3 failed** (9.04s), each due to unwanted selected/unrelated label writes;
+  `review-label-failfast-red.log`: **2 failed** (5.96s), missing expected errors;
+  initial `review-label-boundary-green.log`: **15 passed** (52.02s);
+  expanded `review-label-boundary-focused.log`: **96 passed** (24.76s), exit 0.
+  Process-local mutations in `review-label-boundary-mutation.log` (restore the
+  post-review write) and `review-label-triage-mutation.log` (disable triage filtering)
+  each yield **3 failed**, terminal exit 1 (3.10s / 4.63s). Production files were
+  not modified by mutations. `review-label-boundary-precommit.log`: all nine pass.
+- `review-label-boundary-backend.log`: **3189 passed, 9 failed, 11 skipped**
+  (760.82s), terminal exit 1. Failure IDs exactly match
+  `context-budgets-backend.log`; all nine are signal-11 native crashes. Checked
+  source/test hashes stayed unchanged throughout the run. Frontend code was not
+  touched, so its build was not rerun.
+  `review-label-boundary-final-precommit.log`: all nine checks pass, terminal exit 0.
+- Scope: the repaired invariant is label-write separation, not a capability
+  sandbox or a guarantee that review makes no writes. Cache/proposal files,
+  automatic Zotero digest notes and existing-brief rebuilds are separate effects;
+  no live Zotero, model, remote permissions or CI configuration was changed here.
+
+### 2026-09-06 — A143/A144 explicit review selection
+
+Implementation preserves the distinction between absent/null selection (automatic
+top-K) and an explicit empty list (no setup, queue scan, slot claim, or job-state
+change; `accepted=False`). The frontend wrapper preserves `[]` on the wire.
+Fleet snapshots/deduplicates explicit keys in first-seen order before scheduling;
+deep review also deduplicates its direct entry path. Explicit keys are not truncated
+by top-K. Namespace validation moves from the route's narrower stable-feed filter
+to the shared fleet entry: feed/note keys and unsafe state paths fail before work.
+This validates namespace/path safety, not record existence or an eight-character
+Zotero-key grammar. No new endpoint, response field, helper, or dependency.
+
+Regression tests exercise HTTP through real scheduling, workers and cache stores;
+the per-paper analysis is stubbed because this contract is selection, not grounding.
+Direct-call cases cover empty setup avoidance, duplicate resolution, invalid input
+and caller mutation after scheduling. Earlier red runs caught 6 backend failures
+and the client's empty-selection widening (`review-selection*-red.log`).
+
+Verification receipts under `data/functional-audit/`:
+
+- `review-selection-focused.log`: **165 passed**, 170 warnings, 44.31s, exit 0.
+- `review-selection-empty-mutation.log`: **1 failed**, 1 passed — restored empty
+  scope widening; `review-selection-duplicates-mutation.log`: **3 failed**, 4 passed
+  — removed both deduplications; `review-selection-namespace-mutation.log`:
+  **5 failed**, 10 passed — disabled namespace rejection. All terminal exit 1;
+  mutations were process-local and did not alter source files.
+- `review-selection-final-precommit.log`: all nine checks passed, exit 0.
+- `review-selection-frontend-tests.log`: **142 passed**, 28 files, 5.89s, exit 0.
+  Frontend lint exited 0 with 12 existing warnings and no errors; build exited 0
+  in 1.26s (`review-selection-frontend-{lint,build}.log`).
+- `review-selection-backend.log`: **3214 passed, 9 failed, 11 skipped**, 3239
+  warnings, 789.39s, terminal exit 1. All nine failures are `signal 11` native
+  crashes; sorted failure IDs match `review-label-boundary-backend.log` exactly
+  (standalone diff exit 0). Hashes of all six touched implementation/test files
+  matched their pre-run snapshot. No new backend failures.
+
+Root cause: truthiness erased a domain distinction at multiple boundaries, while
+list iteration treated a set-valued request as repeated work. The route already
+forwarded `[]` unchanged: its truthiness guarded namespace validation, not queue
+selection. Actual widening occurred in the client, fleet and deep-review resolver.
+Fixing the common
+entry points and testing exact effects avoids per-caller patches. Simplification
+removes route-only validation, redundant worker string coercion, and repeated
+explanatory comments. Fleet documentation now acknowledges the shared review's
+cache, digest-note and brief effects instead of claiming it has no Zotero writes.
+
+Read-only follow-up for A140: `unknown-reading-projections-probe.log` confirms a
+default `GoalSummary` (`not_retrieved`, `abstained=True`) yields fleet `dont_read`
+and weekly `skip`; HTML brief reconstructs "none of your research goals are
+addressed" even with an empty digest decision. A direct Node call also confirms
+the React helper `readVerdict({nFired: 0, band: 'neutral'})` returns `SKIP`.
+These remain unfixed and must be tested together, not just at proposal mapping.
+
+### 2026-09-06 — A140 in progress: unknown evidence and strict facet input
+
+Not accepted as fixed. The common reading policy now distinguishes confirmed
+hits, complete explicit misses, and unknown/degraded boards. Unknown skips lose
+their effective action, while raw model decisions and policy flags remain
+available. Stored reviews are projected without rewriting their source; weekly
+cards preserve `unknown`; HTML/React no longer infer SKIP from absent decisions.
+Four obsolete presentation decision helpers were removed in this worktree.
+
+The upstream facet schema also manufactured false assessments: `relevant`
+defaulted to false and coerced numbers/strings. It is now a required strict bool.
+The batch facet extends the existing single-facet schema instead of duplicating
+its three fields. Explicit false remains valid; retrieval misses may legitimately
+abstain from summary generation. These structural checks do not prove semantic
+grounding, source identity, or freshness of already-stored proposals (A128/A141).
+
+Verification receipts under `data/functional-audit/`:
+
+- `review-evidence-facet-red.log`: 6 failed, 2 passed, 17 deselected, 24.08s;
+  the run is terminal (no remaining process). Missing/0/"false" were admitted in
+  both response forms; explicit null was already rejected.
+- `review-evidence-facet-green.log`: **33 passed**, 38 warnings, 12.73s, exit 0.
+- `review-evidence-facet-mutation.log`: restoring default/coercion in process
+  produced **6 failed, 2 passed**, 17 deselected, 5.16s, terminal exit 1. No
+  production file was changed by the mutation.
+- `review-evidence-boundaries.log`: 150 passed, 4 failed, 39.16s, exit 1.
+  Three failures came from the fleet unit helper representing a confirmed hit
+  with only `relevant=true`; it now constructs explicit `GoalSummary` states.
+  Expected proposal values were retained. This is synthetic orchestration data,
+  not a modification of frozen human observations.
+- `review-evidence-boundaries-current.log`: **153 passed, 1 failed**, 159 warnings,
+  35.67s, terminal exit 1. Only the frozen reading-policy gate still fails.
+- `review-evidence-boundaries-precommit.log`: all nine checks passed, exit 0.
+- `review-evidence-backend.log`: full `pytest -q --forked` completed with
+  **3234 passed, 16 failed, 11 skipped**, 3266 warnings, 771.43s, terminal exit 1.
+  Nine failures match every baseline failure ID in `review-selection-backend.log`
+  and are `signal 11` native crashes. The seven additional failures are the frozen
+  reading-policy gate and six PDF-override/fleet tests using two more bare-hit
+  helpers. Those synthetic helpers were subsequently updated to explicit states,
+  preserving their expected outputs; their verification is recorded separately.
+  The five snapshotted schema/policy/cache/test source hashes matched after the
+  full run. This is not a claim of a clean complete-suite acceptance.
+- `review-evidence-fixtures-green.log`: after the two additional synthetic helper
+  updates, **96 passed**, 5 warnings, 286.61s, terminal exit 0. All six newly
+  identified PDF-override/fleet failures are covered; no assertions were relaxed.
+
+The unchanged 17-paper `reading_policy_fixture.json` contains only bare
+`relevant=true` goal cells, with no retrieval/abstention states. Strict policy
+therefore confirms no full reads: `review-evidence-frozen-eval.log` reports
+`read_precision=null`, action accuracy 0.529 and `passes=false` (exit 1).
+Do not invent missing source evidence, relax thresholds, or skip this failure.
+Resolve the benchmark input provenance and its acceptance contract separately;
+the related Research Intelligence oracle leakage remains open as A163.
+
+Root cause: permissive input defaults erased uncertainty before policy evaluation,
+and consumer fallbacks reconstructed confident negatives after it. Schema rejection
+plus one policy removes those mechanisms; mutation checks establish sensitivity,
+not an independently protected verifier. A140 remains open pending acceptance.
+
+Read-only A135 follow-up: `qa-review-evidence-probe.log` invokes `ask_paper` with
+the real context composer and cache projection, substituting only the artifact,
+stored fixture entry, application configuration and model. An invented SecretSet
+sentence present only in the review is returned with `abstained=false`,
+`quote_verified=true`, `location_verified=false` and `span=null` (the rejection
+assertion fails, terminal exit 1). The source is being confused with generated
+context. New regressions exercise each structured review field against a real
+isolated cache, plus source-positive controls and stale/unlocated handles;
+the first red run has 5 failed, 14 passed (`qa-source-evidence-red.log`, exit 1).
+
+### 2026-09-06 — A135: generated context is not source evidence
+
+Q&A now checks quote membership in both its supplied context and the PDF body.
+It reuses `_grounding.quote_is_grounded`; no judge, prompt-only safeguard, wrapper
+or new API field is introduced. `qa_context.citation` resolves the existing handle
+once and cannot mark stale/unlocated evidence as quote-verified. Prior conversation
+quotes are labelled prior, not verified. Deterministic count answers remain
+available but do not claim a PDF quote when their metadata string has no source span.
+Normalized source membership and precise location remain distinct: an accepted
+whitespace-normalized quote without an exact handle is not labelled verified.
+
+The expanded source-boundary red run (`qa-source-evidence-current-red.log`)
+has **6 failed, 14 passed**, 25 warnings, 8.25s, exit 1. Tests use the real context
+composer and isolated cache, inject an invented sentence separately into digest,
+quality and goal summaries, and retain positive controls with that same sentence
+in the PDF. Additional checks cover stale/unlocated handles and untrusted history.
+
+Post-fix verification:
+
+- `qa-source-evidence-green.log`: command error, nonexistent test filename,
+  exit 4; no tests ran. Superseded by the correctly resolved test paths below.
+- `qa-source-evidence-checked.log`: **45 passed**, 50 warnings, 15.24s, exit 0.
+- `qa-source-evidence-focused.log`: **60 passed**, 65 warnings, 18.97s, exit 0;
+  includes parser configuration, source freshness, grounding and metadata checks.
+- `qa-source-evidence-mutation.log`: disabling quote membership checks produces
+  **3 failed, 3 passed**, 11 deselected, 2.24s, terminal exit 1. All three review-only
+  source cases fail, while the PDF-positive controls remain valid. Process-local
+  mutation only; source files are unchanged by this test.
+- `qa-source-evidence-precommit.log`: all nine checks passed, terminal exit 0.
+- `qa-source-evidence-backend.log`: **3248 passed, 10 failed, 11 skipped**, 3274
+  warnings, 780.28s, terminal exit 1. Nine failures are the same baseline native
+  signal-11 cases; the only additional failure is the independently identified
+  incomplete reading-policy fixture (A140 acceptance), not Q&A. All 43 modified/
+  untracked implementation, test, frontend and tool file hashes match the snapshot
+  taken before this full run. No additional Q&A or other functional regression.
+
+Root cause: context assembled for model convenience was also treated as the
+verification authority; `isinstance(handle, dict)` then substituted for evidence
+verification. Reuse the source and handle checks already present in the codebase.
+This closes neither arbitrary answer entailment (A134) nor cache identity (A128).
+A135 is accepted for source-origin and citation verification; this does not claim
+all repository tests are green or that quote membership proves answer entailment.
+
+### 2026-09-06 — A140 acceptance input restored from real cached observations
+
+The missing input data was found by tracing the historical cache constant to
+`~/.cache/zotero-summarizer/models/deep_reviews.json`, not by inferring assessment
+states from human labels. All 17 original IDs are present. The file SHA-256 is
+`31e849771365a98e45f77d7be9b44d60ac10820048cc943c571202b1a04c3f54`, unchanged before
+and after read-only inspection; no legacy data was moved, rewritten or deleted.
+
+`tools/reading_policy_fixture_v2.json` preserves every original human annotation
+and paper ID/order, replacing the incomplete signals with a new frozen capture of
+all consumed fields from the matching real cache entries, including null/unknown
+states and every goal cell. It records cache/annotation hashes and review dates.
+This is a new source snapshot, not a claim to reconstruct v1's exact historical
+inputs or a rerun of any model. No cherry-picked row replacement, fabricated
+assessment, changed expected action, or relaxed threshold is involved.
+
+`reading-policy-restored-inputs-probe.log` evaluates the full real entries;
+`reading-policy-input-projection.log` confirms identical metrics, actions and flags
+for their compact projection (both terminal exit 0). The reading CLI now selects
+v2, and Research Intelligence's separately reported action agreement uses the same
+snapshot. V1 remains byte-identical (`c097645ef9494a0a08fd6a6609c5a9488093d0446471cdfb6575cec24ec6a928`)
+and is explicitly tested as insufficient evidence, not silently discarded.
+
+`reading-policy-capture-tests.log`: **4 passed**, 5 warnings, 11.83s, exit 0,
+including annotation/hash preservation and rejection of the incomplete v1 inputs.
+`reading-policy-capture-cli.log`: `--check` exits 0 at the unchanged thresholds:
+read precision 1.0 (one full-read prediction), idea rescue 0.923, full-read rate
+0.059 versus raw 0.824, no high-friction/weak-evidence full reads. Exact action
+accuracy is only 0.588: these are conservative-cap checks, not proof of overall
+recommendation quality. The distinct inclusion leakage/acceptance defect A163
+remains open. A140 awaits final complete-suite verification with the new snapshot.
+
+### 2026-09-06 — A178 in progress: strict equivalence-judge verdicts
+
+`judge_equivalence` now requires an explicit JSON boolean before interpreting
+the judge's verdict. Missing, null, string, numeric and container values raise
+at that boundary and use the existing `JUDGE_ERROR` / `success=None` contract;
+they are neither a model pass nor a model failure. Valid true/false behavior is
+unchanged. No new type, helper, dependency, retry or API is introduced.
+
+Root cause: `bool(payload.get("equivalent"))` applied Python truthiness to an
+untrusted JSON verdict. Existing tests covered only valid booleans and transport
+errors, not syntactically valid but semantically mistyped responses. New cases
+cover that boundary and the real judge-run persistence path, mocking only the
+external judge endpoint. This does not resolve other answer/claim scoring defects.
+
+Terminal receipts under `data/functional-audit/`:
+
+- `judge-boolean-red.log`: **9 failed, 20 passed**, 29 warnings, 11.46s, exit 1.
+- `judge-boolean-green.log`: **65 passed**, 70 warnings, 17.21s, exit 0; includes
+  judge/statistics tests, reading-policy fixtures and evidence-state contracts.
+- `judge-boolean-mutation.log`: bypassing only the boolean type guard in process
+  yields **9 failed, 1 passed**, 19 deselected, 10 warnings, 2.58s, exit 1.
+  The valid-verdict control survives; every new rejection/persistence case fails.
+
+`judge-boolean-precommit.log`: all nine checks passed, terminal exit 0.
+The complete `pytest -q --forked` comparison is running alongside A140 acceptance
+(`judge-boolean-backend.log`); no full-run result is claimed yet. Modified/untracked
+implementation and test inputs were hashed in
+`judge-boolean-source-snapshot.sha256` before the run. A178 remains unaccepted
+until the full comparison completes.
+
+### 2026-09-06 — A140/A178 acceptance: complete-suite comparison
+
+`judge-boolean-backend.log` completed with **3260 passed, 9 failed, 11 skipped**,
+3285 warnings, 773.76s, terminal exit 1. The nine failure IDs exactly match
+`review-selection-backend.log`; all are the known native signal-11 failures.
+There are no additional assertion failures. All 49 snapshotted modified/untracked
+implementation, test, frontend and tool input hashes match after the run.
+`judge-boolean-precommit.log` has all nine checks passing. The A140 UI changes
+also have the previously recorded 144-test frontend run, lint and production build.
+
+A140 and A178 are accepted for their stated evidence-state and strict-verdict
+contracts. The v1 reading fixture is retained and fails the gate as required;
+the real-captured v2 fixture passes unchanged conservative thresholds. This
+does not establish broad recommendation accuracy (A163), semantic answer
+entailment (A134), or review/proposal freshness (A128/A141). No live models or
+Zotero writes were used. The suite is baseline-equivalent, not wholly green.
+
+### 2026-09-06 — A203/A205/A208: UI write boundaries and built-app journeys
+
+The shared keyboard guard now leaves native controls, rich-text editors and ARIA
+widgets their own keys, including checkbox Space, IME composition and already
+claimed events. Pending's collection selector cannot invoke Apply/Reject; ordinary
+list shortcuts and explicit batch buttons remain functional. All four hook
+callers were traced. `keyboard-focus-red.log` reproduced 13 failures / 4 passes;
+`keyboard-focus-green.log` passed the original 17 cases. Enter/Space action maps
+were subsequently made explicit in the control matrix.
+
+Today, Library and Pending now derive the action IDs and displayed selection
+counts from their current filtered rows. Library/Pending block retained selections
+while loading or after a failed read; a started batch retains its captured IDs.
+`batch-scope-red.log` reproduced eight failures / one pass across source, title,
+quality, semantic-search and include-read filters. The tests use the actual pages,
+children, hooks and API clients, with only HTTP responses supplied at the boundary.
+
+Mobile Paper Review no longer has an independent immediate-write picker: its native
+anchor focuses/jumps to the existing verdict editor. Compact cards reuse that same
+editor instead of duplicating mutation and result-message wiring. Picking a priority
+edits a draft, Cancel restores the saved fields, and Update preserves the saved
+comment unless the user explicitly changes/clears it. `verdict-edit-red.log`
+reproduced both bypasses. `ui-safety-green.log`: **27 passed**, covering both
+assembled review surfaces and the batch/keyboard contracts.
+
+The page tests also uncovered **A216**: Today/Search's shared CollectionPicker
+passed the response envelope to the tree flattener. `collection-picker-red.log`
+failed both Today journeys because the requested target option was absent. The
+component now consumes `data.items`; the Today test selects Reading and verifies
+its exact collection key at the real API-client write boundary.
+
+Independent built-application checks use installed Chromium at 390×844, production
+Vite assets, actual FastAPI routing/startup and temporary SQLite. Browser traffic
+is transported through TestClient, not fake API replies. AI/training/background
+jobs are disabled; external requests and service workers are blocked. The only
+expected 503s are missing-Zotero collections/tags, checked against their explicit
+`zotero_unavailable` body. No user profile, live model or Zotero writer was used.
+
+- Mobile: saved comment → edit draft → mobile jump → Cancel without a POST →
+  change priority → Update → reload → the same rationale and new priority in SQLite.
+- Setup landing → Skip → Library, Today, Search, Settings → legacy Pending redirect.
+- Pending: select four → filter one → type `a` in collection selector without Apply
+  → explicit Reject → exactly one durable rejection and three untouched rows → reload.
+
+`ui-safety-browser-green.log`: **2 passed**, 7 warnings, 4.96s, terminal exit 0.
+`ui-safety-frontend.log`: **171 passed / 33 files**, 5.44s, terminal exit 0.
+`ui-safety-lint.log`: zero errors / 12 existing warnings, exit 0.
+`ui-safety-build.log`: production build 846ms, exit 0, existing chunk-size warning.
+`ui-safety-precommit.log`: all nine checks passed, terminal exit 0.
+A203/A205/A208 and A216 are accepted for these contracts, not for all application
+behavior. AI output quality, real Zotero delivery and service-worker/offline
+operation are outside these browser journeys. A204's partial-commit issue remains.
+
+### 2026-09-06 — A217: first verdict was blocked by an unexported CSV
+
+The built-app journey first failed before rendering its paper: a first verdict on
+a fresh initialized application returned HTTP 404 `file_not_found` / “PDF file not
+found”. No PDF was required; `_golden_helpers._load_all` unconditionally loaded an
+absent golden CSV before reaching the durable SQLite verdict command. The same
+dependency blocked review detail and provenance listing. Existing key-normalization
+tests mocked this loader, hiding the first-run dependency.
+
+The shared HTTP loader now treats an unexported library as having no derived
+provenance. Existing-file errors still propagate, and the explicit CSV-loading
+service retains its missing-file failure contract. No CSV is fabricated and no
+API/response field is added. `first-verdict-red.log` reproduces the fresh-install
+failure; `first-verdict-green.log` passes **39 tests**, 44 warnings, 40.26s, exit 0,
+including real HTTP → SQLite first save/detail, unreadable-existing-path rejection,
+the original explicit-file failure and startup-boundary checks. The built-browser
+save/reload journey also passes with this fix.
+
+The full `ui-safety-backend.log` comparison is running after all code/test changes;
+its input hashes are in `ui-safety-source-snapshot.sha256`. A217 remains pending
+that comparison; no full-suite result is claimed for this new backend change yet.
+The prior complete backend result is still 3260 passed / nine known native crashes
+/ 11 skipped. Simplification: two duplicate verdict writers were removed, the
+existing editor and native anchor reused, and batch scopes are local projections;
+no new production helper, state container, dependency or API was introduced.
+
+### 2026-09-06 — next MCP high batch: transport-level reproductions
+
+Read-only preparation while the full backend comparison runs; no MCP code changed.
+Both probes invoke the actual tool handlers and `_api_request`, replacing only
+httpx's network transport with a closed synthetic responder. Temporary app roots
+prevent checkout-state discovery; no live HTTP request or Zotero mutation occurs.
+
+- `mcp-write-boundary-probe.log`, exit 1: applying one row with backend
+  `applied=0, failed=1` returns `ok=true` (A195). `manage_tags('PAPER/../OTHER')`
+  sends its POST to `/api/zotero/items/OTHER/tags` and reports the other item (A192).
+- `mcp-global-order-probe.log`, exit 1: eight fixed candidates, one result/page,
+  produce scores `2, 1.5, 1, 0.5, 4, 3.5, 3, 2.5`; every page reports a filtered
+  count of four rather than eight (A193). The backing data never changes.
+
+The callers confirm the required seams: path values must remain data at every
+URL interpolation (including enrichment keys returned by the backend), pending
+application must interpret its mutation result rather than HTTP success alone,
+and sorting/filter counts must precede result pagination. The current Zotero list
+API is source-ordered and clamps each page at 500; changing a local sorting helper
+alone cannot establish globally ranked results.
+
+### 2026-09-06 — UI-safety / A217 acceptance: full comparison completed
+
+`ui-safety-backend.log` completed with **3262 passed, 9 failed, 13 skipped**,
+3289 warnings, 762.23s (12:42), terminal exit 1. The nine failure IDs exactly
+match `judge-boolean-backend.log`; all nine are signal-11 native crashes, with
+no new assertion failures. The two added opt-in Chromium tests account for the
+skip increase; they passed separately in the explicit browser run above.
+All 54 source/test/fixture hashes match after completion
+(`ui-safety-source-verification.log`, exit 0). A217 is accepted; existing-file
+failures remain errors and the real first-save/reload path succeeds.
+
+Remaining ledger: **81 findings — 27 high, 47 medium, 7 low**. This comparison
+does not close the reproduced MCP defects or establish complete application
+correctness. No commit/staging or live external writes were performed.
+
+### 2026-09-06 — MCP write/ranking checkpoint (full comparison running)
+
+Actual MCP tool handlers and their HTTP client now have executable boundary
+coverage (`tests/test_mcp_write_boundaries.py`, `test_mcp_search_contract.py`).
+No live Zotero/provider writes were used. Reproductions before their fixes:
+
+- `mcp-write-red.log`: 62 failed / 1 passed; path confusion, misleading mutation
+  outcomes, scope expansion, unreviewed write types, and missing requested IDs.
+- `mcp-search-red.log`: 14 failed; global ordering/counts, incomplete input,
+  and obsolete cursor handling.
+- `mcp-partial-red.log`: 2 failed / 1 passed; a later force/timeout response
+  discarded earlier backup receipts.
+- `mcp-protocol-red.log`: 3 failed; registered FastMCP argument validation
+  coerced bool/float/string IDs before the function's guard. Strict integer
+  annotations now reject these at the protocol boundary as well.
+
+The write/helper/isolation checkpoint passed 78 tests (`mcp-write-green.log`),
+global search passed 14 (`mcp-search-green.log`), later-chunk + real API/SQLite
+failure + Inbox-side-effect cases passed five (`mcp-application-green.log`),
+and protocol/malformed-receipt checks passed six (`mcp-protocol-green.log`).
+These are successive checkpoints, not one combined final-suite count.
+
+Implemented boundaries:
+
+- A192: validate one path identifier and percent-encode every interpolation,
+  including backend-returned enrichment keys. Keep raw identity in payloads and
+  query arguments. Eight read/write tools have adversarial HTTP regressions.
+- A195: HTTP success is not write success. Preserve failed IDs, backups and
+  completed counts across batches; expose unconfirmed IDs on transport failure,
+  reject malformed counts, and retain Inbox-removal errors. No automatic retry.
+  The MCP → real FastAPI pending route → real SQLite test agrees with the saved
+  failed status; only the external Zotero writer is substituted.
+- A193: collect the complete matching source set before enrichment/filter/sort
+  and global pagination. Explicit errors replace partial rankings when pages or
+  metadata are incomplete. A documented 10k-match ceiling requires narrowing;
+  no snapshot stability is promised across library/triage edits between pages.
+- A197: replace prefix denial with four reviewed write types; missing IDs block
+  the whole submission, explicit `[]` does not expand scope, and invalid IDs fail
+  both direct calls and the registered MCP argument boundary. Existing tests
+  expecting unknown types to be allowed were deliberately tightened.
+- A191/A200: correct README claims to single-attempt HTTP, immediate mutation
+  tools, and UI-only pending rejection. No new retry engine or reject API.
+
+`mcp-precommit.log`: all nine gates passed, terminal exit 0. The two built-app
+Chromium → FastAPI → SQLite journeys passed again (`mcp-browser.log`: 2 passed,
+7 warnings, 5.67s, exit 0). The full `mcp-backend.log` comparison is running
+against `ui-safety-backend.log`; 807 source/test/fixture hashes are captured in
+`mcp-source-snapshot.sha256`. Ledger closure awaits the terminal comparison.
+
+The independent `mcp-asgi-routing.log` probe also passed (exit 0): the real
+FastAPI/ASGI router received `A ?#%2Fé` unchanged after HTTP percent-decoding,
+and the traversal input generated no request/write. Its endpoint is a closed
+capture route, not a live Zotero writer. An interim verification matched all
+807 hashes; final verification will run after pytest terminates.
+
+Simplification: removed permissive ID normalization, prefix taxonomy, and the
+source-window cursor branch. Reused existing API routes, enrichment, sorting,
+Pydantic and stdlib encoding; no new dependency or endpoint was added.
+
+### 2026-09-06 — MCP acceptance: terminal backend comparison
+
+`mcp-backend.log` completed with **3350 passed, 9 failed, 13 skipped**,
+3377 warnings, 846.51s (14:06), terminal exit 1. All nine failure IDs exactly
+match `ui-safety-backend.log`, and all nine remain signal-11 native crashes;
+there are no new assertion failures. The 88 added MCP cases account for the
+pass-count increase. All **807** source/test/fixture hashes match after completion
+(`mcp-source-verification.log`, exit 0).
+
+A192/A193/A195 and related A191/A197/A200 are accepted. Remaining ledger:
+**75 findings — 24 high, 45 medium, 6 low**. A202's broader MCP coverage gap
+is not fully closed: these changes cover writes/search and the strict apply
+protocol boundary, not every status/resource/start/list contract.
+The built-app browser receipt above covers the two specified user journeys;
+it does not certify live provider output quality or writes to the user's Zotero
+database. No commits, staging, live provider calls or user-library writes occurred.
+
+Read-only preparation for the next batch traced faithbench corpus/dataset/run/
+judge/report persistence and Targeted Search's full-text/identity/request paths.
+No source in those domains was changed during this MCP checkpoint. The existing
+shared atomic writer can be reused for benchmark publication; frozen paper
+identity needs content addressing plus safe legacy reads, not another mutable
+key namespace. Those findings remain open pending implementation and tests.
+
+### 2026-09-06 — faithbench artifact/recovery/numeric checkpoint
+
+Four high findings have fixes and reproducing regressions; acceptance remains
+pending the terminal backend comparison below. No live provider or user-library
+write was used.
+
+- **A172:** the shared frozen-text path boundary validates keys, SHA names and
+  resolved containment. The sibling CLI run/judge/report directory boundary now
+  rejects traversal and escaping symlinks too. This closes both writers and
+  readers, not just the initially reproduced freeze call.
+- **A173:** frozen text is addressed by item key plus content SHA. Re-freezing
+  identical content verifies and reuses it; a new extraction cannot overwrite an
+  older benchmark's substrate. Publication uses the existing atomic writer.
+  Verified legacy key-only files remain readable without migration; a corrupt
+  hash-addressed file never falls back to the legacy file.
+- **A174:** run/judge resume repairs only an incomplete final JSONL record,
+  first archiving the original bytes. Complete EOF records missing a newline
+  are preserved. Interior corruption still fails before work or mutation.
+  Manifests publish atomically; existing trials without a manifest cannot be
+  relabelled with a new run identity. Recovery does not invent the identity of
+  an already corrupted legacy manifest. One writer per run remains the explicit
+  concurrency ceiling, not a multi-process locking guarantee.
+- **A177:** numeric matching accepts complete scalar numbers only, with Decimal
+  precision and sign preservation. Units, ranges and extra prose require the
+  existing semantic judge unless literally equal. This removes first-number
+  false passes without claiming to solve broader entailment finding A134.
+
+Evidence in `data/functional-audit/`: artifact/path reproductions failed
+9 + 1 + 1 cases before their fixes; resume reproductions failed 8 cases;
+numeric reproductions failed 9 cases. `faithbench-boundaries-green.log` passed
+**88 tests in 26.21s**. These include actual run/resume and judge orchestration,
+partial UTF-8/JSON, atomic-publication faults, original-byte preservation, and a
+numeric false-equivalence case that must invoke and persist semantic rejection.
+`faithbench-artifacts-precommit.log` passed all nine gates.
+`faithbench-boundaries-browser.log` passed both real Chromium → FastAPI → SQLite
+journeys in **5.81s**. The full forked backend run is in
+`faithbench-boundaries-backend.log`, compared with `mcp-backend.log`; its immutable
+source checkpoint covers **808 files** in `faithbench-source-snapshot.sha256`.
+
+`code-that-fits-in-your-head` and Ponytail assessment: reused the existing atomic
+writer and semantic-judge branch; no new dependency, storage framework, endpoint
+or generalized path abstraction. The private JSONL repair is deliberately
+separate from the strict read-only loader. A175's benchmark/review publication,
+benchmark identity/ground-truth validation and report coverage remain open.
+
+### 2026-09-06 — faithbench artifact/recovery/numeric acceptance
+
+`faithbench-boundaries-backend.log` finished with **3381 passed, 9 failed,
+13 skipped**, 3408 warnings, **800.20s (13:20)**, terminal exit 1. The failure
+IDs exactly match `mcp-backend.log`; all nine are the same signal-11 native
+crashes, with no new assertion failures. The 31 new cases account for the pass
+increase. Post-run SHA verification passed for all **808** source/test/fixture
+files (`faithbench-source-verification.log`, exit 0).
+
+**A172, A173, A174 and A177 are accepted.** Remaining ledger:
+**71 findings — 20 high, 45 medium, 6 low**. The 88-test focused suite,
+nine pre-commit gates and two built-application browser journeys are recorded
+above. This does not certify every application capability or live AI/Zotero
+integration; the broader goal remains active. No commits, staging, live provider
+calls or user-library writes occurred.
+
+### 2026-09-06 — faithbench input/cohort checkpoint (full comparison running)
+
+**A184 / A180** now have boundary and workflow fixes, pending full acceptance.
+CLI semantic validation runs before Settings or handler dispatch and constructs
+the existing immutable `RunOptions` once. That object rejects non-positive/non-int
+budgets and empty, unknown or duplicate conditions/tracks; a QA limit cannot be
+silently ignored by a claims-only run. Runner coercions (`max(1, workers)` and
+truthy slicing) were removed. Selection/build validate their own direct inputs;
+build requires distinct papers and both generated QA/trap cohorts. The runner
+also refuses a legacy single-cohort QA benchmark and an empty paper manifest.
+
+Positive smoke limits remain supported. Missing validated trap/answerable
+denominators are `null` / `N/A (unmeasured)` in JSON, Markdown and the headline,
+not a measured zero. Prompt A/B comparison explicitly refuses unmeasured trap
+rates, including when another condition is measured. Cohort presence is not
+proof of semantic unanswerability: **A179 remains open**.
+
+**A176 is partial, not closed:** ceiling division removes short-paper suffix
+omissions, and evenly spaced windows now include the exact final endpoint.
+Papers up to 18,000 characters have full coverage. The existing three-window
+budget still samples longer papers; their unsampled regions remain an open part
+of the finding. This checkpoint does not redefine sampling as full coverage.
+
+Evidence under `data/functional-audit/`:
+
+- `faithbench-input-red.log`: **54 failed, 1 passed** before fixes (15.02s).
+- `faithbench-cohort-report-red.log`: **1 failed** on `0.0 is None`, demonstrating
+  the misleading no-trap metric through actual run → judge → report.
+- `faithbench-unmeasured-comparison-red.log`: **2 failed** before explicit
+  refusal of unmeasured comparison inputs.
+- `faithbench-input-final-focused.log`: **214 passed** (52.68s), including
+  existing benchmark/corpus/run/judge/report and neighboring goldenset CLI tests.
+- Actual CLI build → run selected two of three available synthetic papers,
+  persisted four tasks, and produced exactly **12 calls / 12 distinct trials**
+  for `limit=3 × conditions=2 × runs=2`. Only Zotero/PDF/LLM integration boundaries
+  were substituted. `faithbench-cli-budget-mutation.log` deliberately ignored
+  repetitions in memory; the workflow test failed on **6 != 12**. No production
+  source was edited for that mutation.
+- `faithbench-input-precommit.log`: all nine gates passed (exit 0).
+- `faithbench-input-browser.log`: both built Chromium → FastAPI → SQLite
+  journeys passed (**5.77s**, 5 warnings); no live providers or user-library writes.
+
+The complete backend comparison is running in `faithbench-input-backend.log`
+against `faithbench-boundaries-backend.log`. Its source/test/fixture checkpoint
+contains **809 files** (`faithbench-input-source-snapshot.sha256`); sources remain
+unchanged during that run. No findings are accepted solely on the focused suite.
+
+Root cause: syntactic argparse conversion was mistaken for domain validation,
+execution silently coerced invalid budgets, and zero-denominator arithmetic
+invented a successful safety metric. Existing tests chiefly exercised helpers,
+not the public CLI's side-effect boundary or its actual work count. The fixes
+put the invariant in the existing execution object and one shared cohort check;
+the new regressions cover rejection before I/O and positive persisted work.
+`code-that-fits-in-your-head` / Ponytail assessment: no new option type, parser
+framework, dependency or endpoint; reuse the established CLI dispatch pattern
+and stdlib dataclass replacement, remove the invalid-input coercion branches.
+
+### Read-only follow-up evidence: A185 test-oracle gap
+
+The existing shared runner fixture in `tests/test_faithbench_runner.py::_benchmark`
+records `gold_answer="ImageNet"` at offsets **25:33**, but the literal source puts
+it at **29:37**; 25:33 is `the Imag`. It also references trap source P2 without
+including P2 in the paper manifest. The old runner/judge tests passed because
+they never enforced those ground-truth relations. This independently confirms
+why merely adding more success-path tests would miss A185: the fixtures themselves
+need valid source provenance, then deliberately corrupted variants that must fail.
+No fixture or production source was changed during the running full comparison.
+
+### 2026-09-06 — faithbench input/cohort acceptance
+
+`faithbench-input-backend.log` completed with **3442 passed, 9 failed,
+13 skipped**, 3469 warnings, **845.37s (14:05)**, terminal exit 1. The nine
+failure IDs exactly match `faithbench-boundaries-backend.log`; every failure
+is the same signal-11 native crash, with no new assertion failures. The
+61 added tests account for the pass-count increase. All **809** post-run hashes
+match (`faithbench-input-source-verification.log`, exit 0).
+
+**A180 and A184 are accepted. A176 remains partial/open.** Remaining ledger:
+**69 findings — 18 high, 45 medium, 6 low**. This acceptance also includes the
+214-test focused run, the 12-trial actual CLI workflow and its killed budget
+mutation, nine pre-commit gates, `git diff --check`, and the two built-app browser
+journeys described above. It does not establish semantic trap validity, faithful
+AI output, complete report coverage or the remaining application capabilities.
+No commits, staging, live provider calls or user-library writes occurred.
+
+### 2026-09-06 — faithbench artifact and report integrity checkpoint (pending acceptance)
+
+A185/A186/A187 changes are implemented but remain open until the complete
+backend comparison finishes. Benchmark CLI run hashes before loading, verifies
+the same bytes in the loader, and stores that full file identity. Judge/report
+require the manifest's SHA; report now owns artifact loading instead of accepting
+independently supplied items and manifest. The shared item validator checks
+paper identity, frozen length, literal gold offsets/evidence and cross-paper trap
+provenance. Judge represents per-item substrate faults as `HARNESS_FAULT`;
+report refuses publication against damaged ground truth.
+
+Every verdict binds to its exact response hash and judging context (canonical
+benchmark content, model, text budget, goals and detected substrate faults).
+Changed responses, changed context and legacy unbound verdicts require rejudging;
+append-only history is retained but excluded from current statistics. Report
+requires the complete configured response grid and all claim-level judgments,
+with one consistent current context, before writing any report or headline.
+The manifest also records/guards `limit`; the broader A182 generation identity
+gap remains open. An empty/malformed claims trial produces one explicit failed
+judgment instead of disappearing from the denominator; fresh decomposition and
+cached claims cannot return an empty list as successful work.
+
+Evidence under `data/functional-audit/`:
+
+- Initial integrity tests: **19 failed** before fixes, **19 passed** after.
+- Frozen-report/empty-claims tests: **6 failed** before fixes.
+- Current-coverage tests: **6 failed** before fixes.
+- Existing fixtures exposed **14 failures**: ImageNet offsets were wrong and
+  trap source P2 did not exist. Fixtures now contain actual anchored source text;
+  specialized claims tests explicitly select their single-paper scope.
+- Expanded regression set: **168 passed**, 42.20s
+  (`faithbench-integrity-expanded.log`), including mixed contexts, legacy upgrade,
+  frozen faults invalidating cached verdicts, malformed decomposition/cache and
+  missing individual claims. A final scalar-JSON-row rejection check was added
+  afterward and is being rerun before the complete comparison.
+- All nine pre-commit gates and `git diff --check` pass. No findings are accepted
+  solely from these focused checks.
+
+Root cause: independently loaded files were treated as one immutable experiment;
+resume identity meant only a trial key, and having any judgments was mistaken
+for completion. Invalid test fixtures passed because the invariants were never
+executed. The new hard boundaries bind inputs and outputs and check exact
+coverage before publication. They do not establish semantic trap validity
+(A179), exhaustive factual claim extraction (A181), full generation identity
+(A182), atomic cache/report publication (A175/A183/A189), or corrected Pass^k
+cohorts (A188).
+
+`code-that-fits-in-your-head` / Ponytail assessment: reuse the existing dataset,
+run options and hashes; remove two report inputs and CLI loading duplication;
+deduplicate claims skip branches. No new framework, dependency or public
+endpoint. Report completeness is a single boundary check, not another pipeline.
+
+### 2026-09-06 — faithbench artifact/report integrity acceptance
+
+**A185, A186 and A187 are accepted.** Remaining ledger: **66 findings —
+15 high, 45 medium, 6 low**. The checkpoint above records implementation scope
+and root cause; this acceptance supersedes its pending status, not the remaining
+limitations.
+
+`faithbench-integrity-backend.log` completed with **3483 passed, 9 failed,
+13 skipped**, 3510 warnings, **929.24s (15:29)**, terminal exit 1. All nine
+failure IDs exactly match `faithbench-input-backend.log`, and all nine are
+signal-11 native fork crashes; there are no new assertion failures. The 41 new
+integrity tests account for the entire pass-count increase. All **810** source,
+test and fixture hashes match after completion
+(`faithbench-integrity-source-verification.log`, exit 0).
+
+Additional terminal evidence under `data/functional-audit/`:
+
+- Final integrity set: **41 passed**, 12.44s
+  (`faithbench-integrity-final-focused.log`); expanded neighboring set previously
+  **168 passed**, 42.20s.
+- In-memory barrier-removal mutations: coverage **7 failed**, grounding
+  **13 failed**, claims **8 failed / 1 unaffected passed**. Coverage failures
+  are specifically `DID NOT RAISE ValueError`; grounding also detects improper
+  judge escalation. Sources were not edited for these probes.
+- Actual CLI judge → report over four persisted QA/trap trials produced exactly
+  **4 response trials / 4 judgments** (`faithbench-integrity-cli-workflow.log`,
+  exit 0). Isolated temporary offline project; model/config integration boundaries
+  substituted, actual CLI dispatch, artifact loading, judging and publication used.
+- Frontend: **171 tests / 33 files passed**, 17.04s; production build passed,
+  1.02s, with the existing >500kB chunk warning. Both newly built Chromium →
+  FastAPI → SQLite journeys passed again: **2 passed**, 5.41s, 5 warnings
+  (`faithbench-integrity-frontend.log`, `faithbench-integrity-build.log`,
+  `faithbench-integrity-browser.log`).
+- Nine pre-commit gates passed and `git diff --check` is clean.
+
+Read-only follow-up independently confirms A188 remains open: six rows covering
+two items × three runs, with outcomes A=(true, null, null) and
+B=(false, true, true), still report `Pass^3=0.5`; no fully judged item passes all
+three. Complete report coverage is not the same as a complete validated repeat
+cohort (`faithbench-integrity-pass-k-followup.log`). No commits, staging,
+live model calls or user-library writes occurred. These checks do not certify
+every application capability or close the remaining high findings.
+
+### 2026-09-06 — Search boundaries and identity checkpoint (pending acceptance)
+
+Implemented A148/A150/A152/A156/A215 and newly reproduced A218; none are
+accepted until `search-boundaries-backend.log` completes against
+`faithbench-integrity-backend.log`. With A218 recorded, the pending ledger has
+**67 open findings — 16 high, 45 medium, 6 low**.
+
+- A148: candidate addresses are persisted fields and therefore actually present
+  in HTTP JSON (the old property was omitted by `asdict`). Unidentified records
+  receive UUIDs; legacy unidentified rows derive stable session/slot addresses
+  before their next ordinary save. Metadata/version-family enrichment retains
+  the first existing address. Invalid or duplicate persisted addresses fail
+  before writes; same-title Add requests and stale reordered review snapshots
+  remain attached to the correct candidates. Already misattributed historical
+  Zotero keys cannot be inferred or repaired automatically.
+- A150: one shared Search online requirement covers HTTP kickoff, dependency
+  construction, direct screen/review and full-text acquisition. Offline review
+  cannot claim a saved online session or reach PMC/DOI-resolution leaves.
+  Saved-result reads and explicit local filing remain available offline.
+- A152: moved the existing `ScreenRequest` schema into the Search domain; HTTP,
+  direct screening and persisted review/claim share its bounds: topic 1–4,000
+  characters, at most ten questions, each 1–1,000 characters. Whitespace is
+  trimmed and blank questions rejected, not silently dropped. These fixed
+  interactive work ceilings bound a request; they are not model-capacity claims.
+- A156/A215: deleted the unused `VERSION_TYPES`, `to_scoring_dict` and
+  `version_family_id`; `QueryPlan.display()` now supplies the actual wire/UI
+  projection, including tight/broad variants and OpenReview. Removed the
+  independent React projection and title-key fallback. The derived display is
+  recomputed from raw plan fields on load, not trusted as persisted input.
+- A218: the actual HTTP Add path reached `_note_html` and returned 500 because
+  a string was passed to the structured `SummarizeResponse` triage renderer.
+  Replaced the invalid adapter with stdlib HTML escaping and the existing
+  provenance marker; no invented reading priority or synthetic summary object.
+
+Pre-acceptance evidence under `data/functional-audit/`:
+
+- The initial red run recorded six failing request-bound tests, then hung because
+  the test patched process-wide `threading.Thread`, preventing the HTTP client's
+  executor from starting. Both affected test processes were explicitly stopped
+  (exit 143); that evidence is not presented as a complete run. The test now
+  substitutes only Search's module reference, leaving the executor untouched.
+- First complete neighbor run: **1 failed, 83 passed** (21.98s), exposing A218's
+  actual 500; identity/persistence negatives: **5 failed, 3 passed** before their
+  fixes. HTTP plan projection and the React page each failed before wiring the
+  authoritative display.
+- Expanded set: **106 passed**, 26.47s; final new boundary set: **24 passed**,
+  10.62s. Positive tests exercise the maximum accepted prompt budget and actual
+  HTTP→session→writer-call flow for two same-title candidates, including escaping,
+  independent keys and stale-snapshot merge. Only external model/source/Zotero
+  boundaries are substituted.
+- In-memory mutations removed all Search offline checks (**4 failed**) or the
+  serialized candidate address (**1 failed**), without editing source files.
+- All nine pre-commit gates pass; `git diff --check` and frontend lint are clean.
+  Frontend: **172 tests / 34 files passed**, 16.20s; production build passed.
+  Three built Chromium→FastAPI journeys passed (**5.58s**, 5 warnings), including
+  real Search plan rendering and two independent Add operations persisted across
+  reload, with only the external writer substituted.
+- Full comparison runs on **812** hashed source/test/fixture files
+  (`search-boundaries-source-snapshot.sha256`); no source edits during that run.
+
+Root cause: display properties were mistaken for persisted identity, name-based
+identity contradicted identifier-only deduplication, offline policy guarded only
+the first phase, and wire types constrained syntax rather than work budgets.
+Helper-level tests never reached fresh Search filing, so the note-renderer type
+mismatch survived too. `code-that-fits-in-your-head` / Ponytail assessment:
+replace the computed address with one durable field, reuse one request schema
+and online policy, remove three dead representations and the duplicate UI plan,
+without new dependencies or endpoints. A146/A147/A149 and A153–A155/A157 remain
+separate work.
+
+### 2026-09-06 — Search boundaries and identity acceptance
+
+**A148, A150, A152, A156, A215 and A218 are accepted.** Remaining ledger:
+**61 findings — 12 high, 43 medium, 6 low**. This acceptance supersedes the
+pending checkpoint above; it does not certify the remaining application flows.
+
+- Complete backend: **3,507 passed, 9 failed, 14 skipped**, 3,535 warnings,
+  **885.85s (14:45)**, exit 1 (`search-boundaries-backend.log`). The exact nine
+  failed test IDs match `faithbench-integrity-backend.log`: six daily-selection
+  tests and three model-startup tests, all native **signal 11**. No new failing
+  test IDs; 24 additional passing boundary tests and one additional opt-in
+  browser skip. The full suite is baseline-equivalent, not all-green.
+- All **812** source/test/fixture hashes verified again after completion
+  (`search-boundaries-source-verification.log`). No files in the frozen set
+  changed during the run. `git diff --check` is clean.
+- The pre-acceptance checks above remain the final UI evidence: **172 frontend
+  tests**, lint/build and **three built Chromium→FastAPI→SQLite journeys** pass.
+  Search Add uses the actual HTTP/session path and substitutes only the external
+  Zotero writer; no live model/source calls or user-library writes were made.
+
+Read-only preparation found that A158 cannot safely be fixed by slicing pushes
+alone: `services/sync/service.py::push` tracks same-field acknowledged revisions
+only within one request. Crossing a batch boundary must preserve causality and
+retry identity, or a long queue will exchange its 422 deadlock for false
+conflicts. A155 likewise needs deletion under the existing session lock and a
+worker stop boundary, not just unlinking. Neither follow-up is implemented or
+counted closed here. No commits or staging occurred; the overall goal remains
+active.
+
+### 2026-09-06 — Research Intelligence budget/source checkpoint (pending acceptance)
+
+A164/A165/A168 are implemented but remain open until the complete backend
+comparison against `search-boundaries-backend.log`. Pending ledger remains
+**61 findings — 12 high, 43 medium, 6 low**.
+
+- A164: the existing profile shortlist/card constraints are shared strict integer
+  types. One tuple parser applies them to CLI and direct service inputs before
+  Settings/source/profile work at their respective boundaries. Shortlists admit
+  1–100, cards 1–20, source caps 1–5,000 and review waits 1–86,400 seconds. Only
+  omitted shortlist/card overrides use profile defaults; zero is not omission.
+  Waits below 30s are no longer silently raised. The source cap and 24-hour wait
+  ceiling are one-shot operational bounds, not performance/capacity measurements.
+- A165: source rows are streamed newest-first, venue-filtered and deduplicated
+  before the unique-result cap. The strengthened real-SQLite cases put a newer
+  unrelated row and duplicate rows ahead of an older distinct eligible paper.
+  Their expected paper IDs are explicit. Both `discovered` and `deduplicated`
+  now describe admitted unique matching candidates, not every raw window row.
+  Database sorting/scanning can still inspect the underlying window; the Python
+  cursor and candidate accumulation stop at the accepted-result cap.
+- A168: future profile schema versions fail admission without rewriting the
+  stored profile. Budget booleans/floats are rejected consistently in both saved
+  profile and direct run inputs.
+- Simplification: deleted the unconsumed `CandidateSource` protocol and the
+  state-only RSS class; the one runtime caller uses `load_candidates`. Existing
+  deduplication is a streaming iterator rather than a second materialized list.
+  Removed duplicate Settings loading/context installation from the CLI handler
+  and the redundant count value passed through `_assess`. Nonempty malformed
+  timestamps now raise rather than becoming silently absent metadata.
+
+Evidence under `data/functional-audit/`:
+
+- Initial boundary run: **26 failed, 1 passed**, 73.54s. Twenty-four failures
+  confirmed missing admission; two positive cases instead exposed a test-fixture
+  collision because the reused seed helper derives item IDs from key length.
+  Distinct-length keys correct the fixture without changing production storage.
+- Boundary plus existing neighbors then passed **32 tests**, 91.90s. The first
+  source-ordering negatives failed **2 tests**, 6.92s; the expanded set passed
+  **36 tests**, 101.84s. Later strengthened source cases plus the actual
+  CLI→service→SQLite→JSON/Markdown publication case passed **3 tests**, 8.32s.
+  CLI startup and cached-review inputs are substituted in that publication case;
+  parser, dispatch, source, budget, card and file-publication code are real.
+- In-memory mutations restoring a pre-dedup cap failed **2 tests** (5.40s), and
+  restoring the hidden 30s minimum failed **1 test** (6.70s). Both processes
+  exited 1; no source edits or weakened assertions were used for mutations.
+- All nine pre-commit checks passed and `git diff --check` is clean. The final
+  33-case boundary set and complete comparison are tracked in
+  `research-boundaries-final-focused.log` / `research-boundaries-backend.log`.
+
+Root cause: the configuration schema was treated as if it also constrained
+unvalidated command overrides; truthiness merged zero with omission. Source
+limiting operated on raw rows before the eligibility/identity contract. Small
+positive fixtures did not cross either boundary. `code-that-fits-in-your-head`
+and Ponytail drove shared types, early admission, streaming reuse and deletion
+of the unused interface/wrapper; no dependency or endpoint was added.
+
+Separate read-only A163 check still exits **0** with `passes=true` and reading
+agreement **0.588** (`research-eval-current.log`). The fixture also substitutes
+labelled project names for the abstract, in addition to supplying `decision` to
+the predictor. Independent pre-decision source/model inputs are needed before
+claiming recommendation accuracy. No labels, thresholds or evaluator assertions
+were changed to produce a green gate; A163 remains open and is not acceptance
+evidence for this checkpoint. Timeout outcome/cancellation (A170), artifact
+identity/publication (A166/A171), and other weekly findings likewise remain open.
+
+### 2026-09-06 — Research Intelligence budget/source acceptance
+
+**A164, A165 and A168 are accepted for their recorded input/source contracts.**
+The independent startup bypass below is newly recorded as **A219 (high)**, not
+hidden by that acceptance. Remaining ledger: **59 findings — 12 high, 42 medium,
+5 low**. The overall goal remains active.
+
+- Complete backend: **3,540 passed, 9 failed, 14 skipped**, 3,568 warnings,
+  **913.48s (15:13)**, exit 1 (`research-boundaries-backend.log`). Exact failed
+  test IDs match the accepted Search baseline; all nine are the same native
+  **signal 11** failures. There are 33 additional passing tests and no additional
+  failed IDs. This is baseline equivalence, not an all-green suite.
+- All **813** frozen source/test/fixture hashes verified after completion
+  (`research-boundaries-source-verification.log`). The final boundary set passed
+  **33 tests**, 91.14s, 5 warnings. All nine pre-commit gates pass and
+  `git diff --check` is clean. No frontend code changed in this checkpoint.
+- No live model calls, executed background workers, Zotero writes, commits or
+  staging occurred. The separate CLI publication test exercises real dispatch,
+  source selection, budgeting, cards and JSON/Markdown, with initialization and
+  cached-review inputs substituted; it is not proof of safe normal startup.
+
+Read-only follow-up changed the next action in two concrete ways:
+
+1. **A219:** real CLI and real `lifecycle.startup` scheduling under
+   `--cached-only --card-budget 1` schedules both `deep-review-prewarm` and
+   `review-fleet-prewarm` before calling the weekly runner with
+   `generate_reviews=false`. The probe substitutes initialization integrations
+   and intercepts worker dispatch, so no worker executes
+   (`research-cached-startup-repro.log`, exit 0). The initial probe used an
+   invalid bare `GoalsConfig`; the successful reproduction reuses bootstrap's
+   existing valid default. `background=False` exists, but its cached-classifier
+   requirement must be checked before using it for cached-only weekly reads;
+   do not trade unwanted background work for an unrelated model prerequisite.
+2. **A163:** all first 20 fixture papers were matched to actual feed rows,
+   including shortened/paraphrased titles. In one read-only SQLite snapshot,
+   the real triage function received actual title/abstract and stored
+   reading-priority/score/summary, never decision, project labels or expected
+   inclusion. It included all 20; nine have positive human labels (**0.45**
+   precision over included papers). With production's score/confidence/title
+   ordering, precision@10 is **0.70**, not the shipped evaluator's 1.0
+   (`research-eval-blinded-source-probe.log`,
+   `research-eval-blinded-source-ranking-probe.log`, both exit 0).
+   This is a 20/30 diagnostic using current stored model outputs, which may have
+   been rescored; it is not reconstruction of historical pre-decision state or
+   complete acceptance. The other ten inputs still need reconstruction.
+   The evaluator also takes the first ten included fixture rows without applying
+   production's ranking. The original fixture remains unchanged, SHA-256
+   `a746d79ebbdad95f7f33dd9716a210aaceb452e86aeaa00933665c7ad68a6d7c`.
+
+The next fixes must address startup ownership and independent, source-backed
+evaluation. No threshold, annotation or assertion was weakened to hide these
+findings. Simplification remains shared budget types, one streaming RSS function,
+and reuse of the existing Settings owner; no new endpoint or dependency.
+
+### 2026-09-06 — Research-feed startup ownership checkpoint (pending acceptance)
+
+A219 is implemented; complete backend comparison is still running. Cached-only
+CLI dispatch skips lifecycle initialization entirely and projects the existing
+SQLite/review cache using the dispatcher's Settings. This also works without a
+goals file or classifier and with explicit pending-tag queueing. Generation
+reuses `startup(background=False)`: no server-job recovery, prewarm, classifier
+training or slate rescoring. The existing enabled-classifier prerequisite is
+preserved; an existing golden dataset without a compatible cached model fails
+explicitly instead of launching hidden training. No new startup mode or helper.
+
+Root cause: the CLI reused the server lifecycle without declaring ownership of
+background work. Earlier budget/publication tests replaced startup wholesale,
+so runner-local limits looked sufficient while startup could dispatch unrelated
+work. The new tests exercise actual CLI dispatch, SQLite/cache/card publication,
+and the real lifecycle scheduler with integration initialization substituted.
+They prohibit recovery/prewarm dispatch and check the real cold-classifier guard;
+the generated-review provider boundary is substituted, not a live model test.
+
+Evidence under `data/functional-audit/`:
+
+- `research-startup-red.log`: **4 failed**, 3.75s, before the fix.
+- `research-startup-green.log`: **41 passed**, 46 warnings, 12.32s, including
+  the four new startup cases and existing weekly boundary/workflow tests.
+- `research-startup-precommit.log`: all nine gates passed.
+- Full backend: `research-startup-backend.log`, frozen against
+  `research-startup-source.sha256`; compare with `research-boundaries-backend.log`
+  before acceptance. Production/test sources remain unchanged during this run.
+- Frontend lint: zero errors, 12 warnings; **172 tests passed**, 5.81s;
+  production build passed, with the existing >500kB bundle warning. No frontend
+  source changes in this checkpoint.
+- `research-startup-browser.log`: **3 passed**, 5 warnings, 5.80s. Built mobile
+  React traverses real ASGI/SQLite for verdict cancel/save/reload, setup/routes
+  and filtered pending rejection, and two same-title Search additions/reload.
+  Only external writer/model/network boundaries are substituted or disabled.
+  This is bounded workflow evidence, not proof of every F-row or live AI quality.
+
+Read-only follow-up re-confirms A182: the current manifest checker accepts changes
+to provider, endpoint, goals, decomposition model, context cap and answer prompt,
+retaining the old manifest (`faithbench-resume-identity-current-probe.log`).
+Generation identity must be checked before client construction and journal repair
+or append; legacy missing identity must not be silently upgraded. A182 remains
+open; no benchmark labels, thresholds or historical artifacts were changed.
+
+`code-that-fits-in-your-head` and Ponytail led to the existing lifecycle flag and
+deletion of unnecessary cached-only initialization, not a second startup pipeline.
+Startup acceptance awaits the complete comparison. Independent sync follow-up
+adds A220 (high), so before startup acceptance the ledger is **60 findings —
+13 high, 42 medium, 5 low**.
+
+`sync-stale-note-replay-probe.log` uses real temporary SQLite, sync service and
+`mirror_review_note`, substituting only the external Zotero write call. Applying
+old/new note mutations then replaying the old UUID returns
+`applied/applied/already_applied` and leaves SQLite at `new note`, but dispatches
+`old note`, `new note`, **`old note`** to the external writer. No real Zotero
+write occurred. Local mutation idempotency does not make its post-commit effects
+safe against newer intent. A158 batching must not introduce extra stale replays;
+mirror delivery must recheck current state at its shared boundary first.
+
+### 2026-09-06 — Research-feed startup ownership acceptance
+
+**A219 is accepted.** Complete backend: **3,544 passed, 9 failed, 14 skipped**,
+3,572 warnings, **934.49s (15:34)**, exit 1 (`research-startup-backend.log`).
+The exact failed IDs match `research-boundaries-backend.log`; all nine retain
+their native signal-11 failure. Four new tests pass, with no additional failed
+IDs. This is baseline equivalence, not an all-green backend suite.
+
+All **852** source/test/fixture hashes verified after the terminal result
+(`research-startup-source-verification.log`). The focused, frontend and built
+browser evidence above applies to this same unchanged source checkpoint.
+No live providers, user-library writes, commits or staging were used.
+
+With newly reproduced A220 still open, the remaining ledger is **59 findings —
+12 high, 42 medium, 5 low**. Net count is unchanged from the previous accepted
+checkpoint because one high was fixed and one independently reproduced.
+The goal remains active. Next: current-state note-mirror delivery before outbox
+batching (A220/A158), and complete generation identity before expanding benchmark
+claim coverage (A182/A181). These are not claims of general AI correctness.
+
+### 2026-09-06 — Current review-note mirror checkpoint (pending acceptance)
+
+A220's review-note path is implemented; complete backend comparison is running.
+The verdict-comment counterpart below remains open. Online save and
+offline set/delete/replay call the same mirror with **database path + item key**,
+not a request body. `review_notes.current_for_mirror` reuses the alias/revision
+reader and holds SQLite's writer lock through delivery. A newer committed note
+or tombstone cannot be replaced by an old UUID's value. Deletion uses the existing
+clear-body renderer: the app-owned marked Zotero child remains with an empty body.
+No unrelated Zotero note is deleted, and no migration or delivery worker is added.
+
+Real connector/backup/writer errors propagate after the durable local commit;
+the same UUID can retry delivery. The existing local-first unconfigured-Zotero
+and feed/note namespace cases remain optional. The previous test expecting a
+successful response after a genuine mirror failure is intentionally strengthened
+to expect an exception **and** verify the durable local note, per the user's
+fail-fast requirement. Its former fake local save now uses actual isolated SQLite.
+The online response keeps its existing successful shape; failure is HTTP 503 for
+a Zotero write error, not a successful sync acknowledgment.
+
+Evidence under `data/functional-audit/`:
+
+- `review-note-mirror-red.log`: **7 failed**, 12 warnings, 4.55s, at the expected
+  stale-value/missing-clear/swallowed-error/unlocked-delivery assertions.
+- `review-note-mirror-green.log`: **7 passed**, 12 warnings, 4.47s.
+- `review-note-mirror-focused.log`: **105 passed**, 110 warnings, 34.23s,
+  including existing verdict, note-alias, HTTP and Zotero-write boundaries.
+- `review-note-mirror-final-focused.log`: **9 passed**, 14 warnings, 9.64s,
+  adding library replay against newer feed-alias edits and tombstones.
+- In-memory raw-key mutation: **2 failed**, 3.62s; removing the writer lock:
+  **1 failed**, 3.23s (`review-note-mirror-{alias,lock}-mutation.log`). No source
+  edits or assertion weakening were used for these negative controls.
+- All nine pre-commit gates passed; `git diff --check` is clean. Full comparison
+  is `review-note-mirror-backend.log` against `research-startup-backend.log`, with
+  `review-note-mirror-source.sha256` frozen before execution.
+
+Tests use actual temporary app and Zotero-shaped databases, normal note rendering,
+upsert and backup-first delivery. The actual writer's connector check is controlled
+for offline tests; no user library or live provider is touched. A second SQLite
+connection verifies that writes are excluded during external delivery and admitted
+after release. This is not a distributed transaction or protection from independent
+direct edits to Zotero; other verdict-comment/CSV enrichment contracts are separate.
+
+Root cause: UUID idempotency was assumed to make historical post-commit values
+safe to replay. It only protects the local mutation, not later external effects.
+The tests had replaced the mirror or the durable save, missing that distinction.
+`code-that-fits-in-your-head` and Ponytail remove the stale body argument and reuse
+the current-note reader and existing SQLite serialization pattern. The sync
+dispatcher loses its duplicated field branches; no generic delivery framework.
+Ledger acceptance awaits the complete comparison and the sibling correction.
+
+Read-only sibling probe (`sync-stale-verdict-note-replay-probe.log`, exit 0)
+uses actual temporary app/Zotero databases, label delivery, note rendering,
+backup and upsert; only training enrichment and external connector detection are
+substituted. Old `could_read`/`old rationale`, then new `dont_read`/`new rationale`,
+then old-UUID replay leaves SQLite and the Zotero label at `dont_read`, but the
+Zotero verdict note again contains `old rationale`. This extends the still-open
+A220 post-commit note-replay finding; it does not invalidate the accepted A060
+label-tag guard. Before accepting A220 or using acknowledgment replay for A158
+batching, verdict-comment delivery must also consult current intent.
+
 ## Findings ledger
 
 | Finding | Functional IDs | Severity | Evidence and consequence | Status |
@@ -3343,11 +4623,11 @@ working memory. No browser acquisition behavior was changed in this batch.
 | A118 | F19, F29 | high | Explicit arXiv-source acquisition ignores global offline mode. Under `ZS_OFFLINE=1`, `download_arxiv_source()` still invoked its network helper; this violates the repository-wide offline prohibition even though PDF acquisition correctly short-circuits network. | fixed — shared offline policy before downloader/filesystem calls; direct and real-build regressions plus full baseline verified |
 | A119 | F19 | medium | The optional arXiv source rung promises best-effort PDF fallback, but `_download_capped()` network/OS errors are not caught by `download_arxiv_source()` (only `tarfile.TarError` is handled). A simulated network failure escaped as `OSError` and failed the whole paper build instead of using the already-local PDF. | fixed (contract reassessed) — user's fail-fast instruction supersedes the legacy fallback promise; network/OS/HTTP/archive errors propagate, including tarfile ExtractError; regressions and full baseline verified |
 | A120 | F19 | medium | `download_arxiv_source()` creates `source/` before knowing the download/extraction succeeded, while `find_local_source()` treats any directory named `source` as valid without requiring a `.tex` file. A failed download left an empty directory that the next build selected as local TeX, preventing a later download retry and recording a false `local_tex` tier. | fixed — extract into staging, require nonempty TeX, publish with one rename; partial/error/retry/collision regressions and full baseline verified; existing nonempty sources preserved |
-| A121 | F19 | medium | `quality_review.use_docling` is documented as swapping the paper PDF parser, but both `paper_render` calls to `extract_pdf_content()` omit `use_docling` and the render facade never reads the config. Deep review honors the flag through a different caller, while the persisted paper artifact always uses fitz; the same named extraction option has surface-dependent behaviour. | confirmed caller/config divergence |
+| A121 | F19 | medium | `quality_review.use_docling` is documented as swapping the paper PDF parser, but both `paper_render` calls to `extract_pdf_content()` omit `use_docling` and the render facade never reads the config. Deep review honors the flag through a different caller, while the persisted paper artifact always uses fitz; the same named extraction option has surface-dependent behaviour. | fixed: configured parser shared by PDF/TeX artifacts and Q&A; metadata contract and cache identity verified |
 | A122 | F20, F23, F25 | high | The shared deep-review digest calls itself grounded and gives the model a strong anti-fabrication prompt, but performs no output-to-source verification. A fake model returned `99% accuracy on SecretSet` for a qualitative source containing neither token; `_coerce_digest()` accepted it. Cached deep review, Targeted Search's query-lensed brief, and Research Intelligence cards/ideas reuse this primitive, so every digest fact, finding, parameter, reading decision, and projected engineering change is prompt-trusted rather than evidence-checked. | reproduced ungrounded digest acceptance; Research Intelligence caller confirmed |
-| A123 | F20 | medium | `_coerce_digest()` requires that `read_decision` was supplied but does not require a valid resulting value. `PaperDigest` normalised the explicitly invalid value `banana` to `""`; because the field remained in `model_fields_set`, coercion accepted it. A malformed model action can therefore bypass the promised exact `read\|skim\|skip` contract and reach policy/UI as no decision. | reproduced semantic-validation gap |
+| A123 | F20 | medium | `_coerce_digest()` requires that `read_decision` was supplied but does not require a valid resulting value. `PaperDigest` normalised the explicitly invalid value `banana` to `""`; because the field remained in `model_fields_set`, coercion accepted it. A malformed model action can therefore bypass the promised exact `read\|skim\|skip` contract and reach policy/UI as no decision. | fixed: normalized action validation at the shared digest boundary; bounded correction and rejection regressions |
 | A124 | F20 | medium | Section summaries are described and rendered as grounded, yet `summarize_sections()` accepts arbitrary model prose without a supporting quote or source check. A section containing only “introduces a qualitative framework” accepted “Reports 99% accuracy on SecretSet.” The Paper map can attach invented findings directly to a source section. | reproduced ungrounded section annotation |
-| A125 | F20 | medium | `select_review_text()` promises at most `budget` characters and `_fill_from_chunks()` promises to fill that budget, but both invariants fail. Two allocated five-character sections at budget 10 emitted 12 characters after uncounted separators; two eight-character chunks at budget 10 emitted only one eight-character chunk although a safe prefix could fill the cap. Large papers can waste context, while multi-section inputs can overrun the configured bound. | reproduced budget-accounting defects |
+| A125 | F20 | medium | `select_review_text()` promises at most `budget` characters and `_fill_from_chunks()` promises to fill that budget, but both invariants fail. Two allocated five-character sections at budget 10 emitted 12 characters after uncounted separators; two eight-character chunks at budget 10 emitted only one eight-character chunk although a safe prefix could fill the cap. Large papers can waste context, while multi-section inputs can overrun the configured bound. | fixed: separator-aware section allocation and ranked-prefix clipping; bounded property, prompt and regression checks |
 | A126 | F20 | medium | The user `focus_prompt` is forwarded for `rank` and `prefix` reviews but silently dropped by the `map_reduce` branch: `digest_for_strategy()` never passes it to `map_reduce_digest()`, whose reduce call has no focus argument. A capture probe saw no `focus_prompt` key, so the same public review option changes meaning with an internal chunk strategy. | reproduced strategy-dependent option loss |
 | A127 | F20, F21, F24 | medium | The sole `deep_reviews.json` store is parsed with bare `json.loads()`. One truncated payload raised `JSONDecodeError` through `get_cached_review()`; detail, current-key/prewarm, copy, write-merge, comprehensive Q&A context, and every sync pull snapshot share that reader, so corruption can disable reading, replacement, Ask, and mobile synchronization until manual file repair. | reproduced cache-wide corruption failure; sync caller confirmed |
 | A128 | F20, F22, F25 | high | `review_is_current()` compares only `review_contract_version`. Entries generated from a different PDF, provider/model, prompt/config, research goals, quality rubric, or focus note remain “current”; two entries whose provenance models differed both returned true. Prewarm/fleet/detail and the weekly Research Intelligence projection can indefinitely reuse a review that no longer represents the paper or active policy, while presenting a fresh proposal/card without recomputation. | reproduced cache-identity omission; Research Intelligence caller confirmed |
@@ -3357,87 +4637,93 @@ working memory. No browser acquisition behavior was changed in this batch.
 | A132 | F20 | medium | The goal-summary degradation ladder catches only embedder import/model-load failure. If a loaded encoder raises during `encode()`, the exception escapes before the BM25 leg can run; the outer enrichment boundary drops the entire goal board. A simulated inference error reproduced this instead of the documented lexical-only/not-retrieved degradation. | reproduced incomplete degradation boundary |
 | A133 | F20, F21, F23, F25, F26, F29 | high | Digest, map, goal-summary, section-summary, paper-type, benchmark/shared Q&A, Search refinement, Research Intelligence's default missing-review path, and faithbench build/decomposition/judge prompts interpolate third-party paper text/metadata without the repository's established `<untrusted_input>` boundary or an explicit “embedded instructions are data” rule. The quality rubric and feed prompts already contain that defence, proving the shared threat is recognised, but deep/targeted/weekly/benchmark flows remain susceptible to instructions in a PDF/title/abstract or generated question. | confirmed inconsistent prompt-injection boundary |
 | A134 | F21, F26, F29 | high | Production Q&A verifies only that the model's quote occurs in the context; it never verifies that the answer follows from that quote. A fake model answered `CIFAR-10` while quoting the paper's exact ImageNet evaluation sentence; `ask_paper()` returned the answer with `abstained=false` and a location-verified citation. Faithbench is weaker still: `hard_qa_judgment()` ignores `quote` entirely, so a correct answer with a missing/fabricated/unrelated quote passes. The benchmark therefore cannot detect the production grounding defect it is meant to gate. | reproduced answer/evidence disconnect on both surfaces |
-| A135 | F20, F21 | high | Comprehensive Q&A treats cached generated review JSON as evidence on equal footing with the PDF body, and accepts a quote present only in that review. A fabricated SecretSet result absent from `qa_body_text` returned as a non-abstained answer with `evidence_handle.span=null`; `citation()` nevertheless set `quote_verified=true`, and the UI displays “verified quote” from that weaker flag while ignoring `location_verified=false`. Hallucinated review text is promoted into apparently verified paper evidence. | reproduced generated-evidence trust and false verification label |
+| A135 | F20, F21 | high | Comprehensive Q&A treats cached generated review JSON as evidence on equal footing with the PDF body, and accepts a quote present only in that review. A fabricated SecretSet result absent from `qa_body_text` returned as a non-abstained answer with `evidence_handle.span=null`; `citation()` nevertheless set `quote_verified=true`, and the UI displays “verified quote” from that weaker flag while ignoring `location_verified=false`. Hallucinated review text is promoted into apparently verified paper evidence. | fixed: quotes require PDF-source membership as well as supplied context; verified citations require current resolvable handles; real-cache regressions, positive controls, mutation and full-suite comparison |
 | A136 | F21 | medium | Deterministic count routing detects only scopes named as `figure\|table\|section + digit`. The question “How many references does the Introduction cite?” bypassed the scope guard and returned the paper-global `42 references` without consulting text or the model. Named sections and other natural scoped wording receive confident, wrong metadata answers. | reproduced count-scope misclassification |
-| A137 | F21, F26 | medium | Retrieval mode does not apply `quality_review.max_text_chars` when BM25 returns chunks; the cap is used only by the no-hit fallback. With a configured limit of 50 characters, two production Q&A hits produced a 169-character context. Faithbench's `_qa_context()` and claim judge have the same branch shape (top chunks are joined without the cap), so smaller model context/cost bounds are exceeded precisely on successful retrieval in both product and benchmark. | reproduced production bypass; benchmark callers confirmed |
+| A137 | F21, F26 | medium | Retrieval mode does not apply `quality_review.max_text_chars` when BM25 returns chunks; the cap is used only by the no-hit fallback. With a configured limit of 50 characters, two production Q&A hits produced a 169-character context. Faithbench's `_qa_context()` and claim judge have the same branch shape (top chunks are joined without the cap), so smaller model context/cost bounds are exceeded precisely on successful retrieval in both product and benchmark. | fixed: shared clipper caps successful retrieval in production Q&A, benchmark Q&A and claim judging; actual prompts and fragment counts verified |
 | A138 | F05, F21 | medium | `_paper_context_source()` uses presence-based `get_library_reader()` instead of the existing key-aware `resolve_reader_for_key()`. With Zotero available, a `stable_feed_key` was sent to the Zotero reader and returned `not_found`; comprehensive artifact Q&A can work for the same in-place Today paper, but exposed `retrieval`/`full_text` modes cannot resolve it. | fixed: removed bypassing reader/extractor; all modes use the key-aware artifact and existing acquired source without another fetch |
-| A139 | F13, F20, F22, F25 | high | Review Fleet repeatedly promises “suggestions only — nothing is written until Confirm”, but its deep-review pass calls `_review_worker()`, which unconditionally fires `quality_gate.fire_for_keys()` after persisting each review. That gate writes durable `auto_quality/dont_read` label verdicts; its scoped hook also applies L1 to every shown row. A temporary-DB probe reviewing key `REVIEWED` hid unrelated key `UNRELATED` and persisted source `auto_quality`. The default Research Intelligence CLI also generates missing reviews through this worker, so even its dry-run can write/hide labels independently of the opt-in Zotero tag queue. | reproduced hidden cross-item write; weekly caller confirmed |
-| A140 | F20, F22, F25 | high | `_goal_evidence()` treats any list containing a dict as an evaluated board, even when every cell explicitly says `retrieval_state="not_retrieved"`/`abstained=true`. A digest `skip` with that degraded board proposed `dont_read`, contradicting the load-bearing rule that infrastructure/retrieval failure is unknown and must never license a hide. Research Intelligence reuses the same effective decision as a confident `worth_reading=skip` card action. | reproduced degraded-evidence hide; weekly projection confirmed |
+| A139 | F13, F20, F22, F25 | high | Review Fleet repeatedly promises “suggestions only — nothing is written until Confirm”, but its deep-review pass calls `_review_worker()`, which unconditionally fires `quality_gate.fire_for_keys()` after persisting each review. That gate writes durable `auto_quality/dont_read` label verdicts; its scoped hook also applies L1 to every shown row. A temporary-DB probe reviewing key `REVIEWED` hid unrelated key `UNRELATED` and persisted source `auto_quality`. The default Research Intelligence CLI also generates missing reviews through this worker, so even its dry-run can write/hide labels independently of the opt-in Zotero tag queue. | fixed: shared review label hook and scoped API removed; real caller/storage regressions, two rejected mutations and full baseline comparison |
+| A140 | F20, F22, F25 | high | `_goal_evidence()` treats any list containing a dict as an evaluated board, even when every cell explicitly says `retrieval_state="not_retrieved"`/`abstained=true`. A digest `skip` with that degraded board proposed `dont_read`, contradicting the load-bearing rule that infrastructure/retrieval failure is unknown and must never license a hide. Research Intelligence reuses the same effective decision as a confident `worth_reading=skip` card action. | fixed: strict goal assessment input; shared unknown-preserving policy/cache/UI; real-input fixture, mutations and full baseline comparison |
 | A141 | F22 | medium | Stored `ProposedVerdict` values carry no PDF/review/model/config/goals fingerprint or proposal schema version, and `_select_keys()` skips a row for any truthy proposal forever. A proposal timestamped 2020 was treated as decided and bypassed without consulting current review identity. Model/prompt/goal changes cannot invalidate or regenerate already-visible suggestions. | reproduced proposal-identity omission |
 | A142 | F17, F22 | medium | `proposed_verdicts.json` is parsed with bare `json.loads()` and its envelope/value shapes are not validated. A truncated file raised `JSONDecodeError`; because `reading_queue` reads this sidecar unconditionally, the Library list, fleet selection/upsert, and calibration endpoint all fail together, and Rescore cannot repair the unrelated proposal cache. | reproduced proposal-cache-wide failure |
-| A143 | F22 | high | The API schema permits `item_keys=[]`, while both route and fleet use truthiness to distinguish explicit from implicit selection. A controlled `fleet.start(item_keys=[])` ignored the explicit empty set, scanned the queue, reviewed/proposed for `UNRELATED`, and reported success. A client asking to process no keys can trigger five unrelated deep reviews, acquisitions, and the auto-label side effect in A139. | reproduced empty-scope expansion |
-| A144 | F22 | low | Explicit fleet keys are neither shape-validated nor deduplicated. Duplicate keys are counted and proposed repeatedly, inflating `total/completed/proposed`; arbitrary values such as `..` pass the request model (feeding A112). This also contradicts “exactly those picks” as a set-valued batch contract. | confirmed input-normalization gap |
+| A143 | F22 | high | The API schema permits `item_keys=[]`, while both route and fleet use truthiness to distinguish explicit from implicit selection. A controlled `fleet.start(item_keys=[])` ignored the explicit empty set, scanned the queue, reviewed/proposed for `UNRELATED`, and reported success. A client asking to process no keys can trigger five unrelated deep reviews, acquisitions, and the auto-label side effect in A139. | fixed: explicit empty selection is a no-op across client/fleet/deep review; no setup, queue scan or job-state mutation; HTTP/worker regressions and mutation proof |
+| A144 | F22 | low | Explicit fleet keys are neither shape-validated nor deduplicated. Duplicate keys are counted and proposed repeatedly, inflating `total/completed/proposed`; arbitrary values such as `..` pass the request model (feeding A112). This also contradicts “exactly those picks” as a set-valued batch contract. | fixed: shared fleet preflight validates state paths and library namespace, snapshots and deduplicates explicit keys; direct deep-review dedup; unique-work/count regressions |
 | A145 | F22 | medium | The React action says it reviews “EVERY undecided high-relevance paper”, but `AUTO_REVIEW_MAX_ROUNDS=12` with chunks of five silently stops one click after at most 60 attempts, and its source queue is itself capped at 5,000. Larger cool sets remain undecided even without Stop/error; the UI returns to the same enabled button without saying the run hit a ceiling. | confirmed undisclosed client batch ceiling |
-| A146 | F23 | high | Intent parsing computes `synonyms`, `must_include`, `must_not_include`, and `study_types`, but `build_query_plan()` ignores every one of those fields and builds all source queries from only concepts/raw/canonical text. A plan requesting `human`, excluding `mouse`, and restricting to `randomized trial` contained none of those tokens. The visible structured planner therefore cannot enforce the constraints it claims to extract, and agentic `drop_terms` are recorded but have no effect on later federation. | reproduced dead intent constraints |
+| A146 | F23 | high | Intent parsing computes `synonyms`, `must_include`, `must_not_include`, and `study_types`, but `build_query_plan()` ignores every one of those fields and builds all source queries from only concepts/raw/canonical text. A plan requesting `human`, excluding `mouse`, and restricting to `randomized trial` contained none of those tokens. The visible structured planner therefore cannot enforce the constraints it claims to extract, and agentic `drop_terms` are recorded but have no effect on later federation. | **fixed**: persisted constraints and synonym-aware lexical plans, shared title/abstract phrase filtering across all sources, and persistent agentic exclusions that cannot erase required terms. Literal study-type matching is not semantic study-design verification; focused and frozen full baseline comparisons pass. |
 | A147 | F23 | medium | Federation claims a per-channel quota so sources with more query variants cannot dominate, but applies `quota` independently to every pass. One arXiv channel with tight+bag variants and `quota=2` returned four unique candidates; sources with two variants receive twice the pool budget of single-pass sources, changing cohort bands and the review candidate set. | reproduced pass-multiplied source quota |
-| A148 | F06, F23 | high | Identifier-less candidates use a hash of title alone as `candidate_id`, while dedup deliberately keeps identical-title/no-ID records separate. Two distinct papers with the same title consequently shared an ID: reranker scores alias, React keys collide, full-text maps overwrite, and `materialize_once()` targeted only the first. A second Add returned the first Zotero key without writing paper B; `save_merge()` then copied that key onto both candidates. | reproduced cross-paper identity collision |
+| A148 | F06, F23 | high | Identifier-less candidates use a hash of title alone as `candidate_id`, while dedup deliberately keeps identical-title/no-ID records separate. Two distinct papers with the same title consequently shared an ID: reranker scores alias, React keys collide, full-text maps overwrite, and `materialize_once()` targeted only the first. A second Add returned the first Zotero key without writing paper B; `save_merge()` then copied that key onto both candidates. | fixed: durable serialized candidate addresses, stable legacy admission and enrichment, invalid/duplicate address rejection; independent HTTP/browser Add and stale-merge regressions plus full baseline comparison |
 | A149 | F23, F29 | medium | Search rank epsilon is not range/finite validated. `ZS_SEARCH_RANK_EPSILON=0` (or an internal zero override) reaches `query_score // epsilon` and raises `ZeroDivisionError`; a negative value reverses/warps bucket semantics. The malformed-string fallback does not cover valid numeric but invalid-domain configuration. | reproduced ranking-config crash |
-| A150 | F18, F23, F29 | high | Strict offline is checked only at initial screen/refinement, not when a persisted session starts its review. `_fulltext.acquire_full_text()` calls Europe PMC `fullTextXML` before the guarded PDF fetch and has no offline check. Under `ZS_OFFLINE=1`, a PMCID candidate invoked the network leaf and returned its text; `POST /review` can therefore perform network I/O after offline mode is enabled. | reproduced offline-network violation |
+| A150 | F18, F23, F29 | high | Strict offline is checked only at initial screen/refinement, not when a persisted session starts its review. `_fulltext.acquire_full_text()` calls Europe PMC `fullTextXML` before the guarded PDF fetch and has no offline check. Under `ZS_OFFLINE=1`, a PMCID candidate invoked the network leaf and returned its text; `POST /review` can therefore perform network I/O after offline mode is enabled. | fixed: shared online admission before HTTP claim, dependency construction, direct review and full-text leaves; no-work/no-write regressions and barrier-removal mutation plus full baseline comparison |
 | A151 | F20, F23 | medium | Search request questions are not element-validated, while `targeted_review()` filters blank questions when building goal calls but zips returned summaries against the unfiltered original list. For `questions=["", "real question"]`, the real answer was attached to the blank question and the real question disappeared. | reproduced question/answer index drift |
-| A152 | F23, F29 | high | `ScreenRequest` has no maximum query length, question count, or per-question length; whitespace-only query and 10,000 blank questions both validated. Nonblank variants fan into intent/refinement prompts and one goal-summary call per question during auto-review, allowing a single request to create unbounded prompt size, CPU/model work, and persisted JSON. | reproduced unbounded public work input |
+| A152 | F23, F29 | high | `ScreenRequest` has no maximum query length, question count, or per-question length; whitespace-only query and 10,000 blank questions both validated. Nonblank variants fan into intent/refinement prompts and one goal-summary call per question during auto-review, allowing a single request to create unbounded prompt size, CPU/model work, and persisted JSON. | fixed: one strict domain request schema bounds HTTP/direct/persisted review work to 4,000 topic characters and ten 1,000-character nonblank questions; maximum-positive and no-work negatives plus full baseline comparison |
 | A153 | F18, F20, F23 | medium | `run_review()` has no per-candidate boundary around acquisition, extraction, light review, or targeted review. A simulated failure acquiring candidate A aborted immediately and candidate B was never attempted; the outer worker marks the entire session `error` and persists no error detail. One corrupt PDF/provider call prevents all otherwise reviewable results from completing or explaining which paper failed. | reproduced batch-isolation failure |
 | A154 | F23 | medium | Search session persistence uses bare `json.loads()` without per-file recovery. One truncated `bad.json` made `list_sessions()` raise before returning the valid session beside it; a single corrupt/incomplete legacy file takes down the whole saved-session sidebar rather than isolating that session. | reproduced session-list corruption failure |
 | A155 | F23 | medium | `delete()` neither takes the per-session lock nor marks an active worker cancelled. In a synchronized race, DELETE removed the file, then an already-running `save_merge()` recreated it. A reported-deleted session can reappear and its PDF/LLM work continues in the background. | reproduced delete/resurrection race |
-| A156 | F23 | medium | The backend's `QueryPlan.display()` exposes every executed tight+bag variant and OpenReview pass, but the React page reimplements the plan from scalar fields, omitting all `*_variants` and OpenReview. Users see the broad bag once while federation actually issues extra quoted searches, contradicting the advertised transparent “plan shown as the plan.” | confirmed backend/UI projection drift |
+| A156 | F23 | medium | The backend's `QueryPlan.display()` exposes every executed tight+bag variant and OpenReview pass, but the React page reimplements the plan from scalar fields, omitting all `*_variants` and OpenReview. Users see the broad bag once while federation actually issues extra quoted searches, contradicting the advertised transparent “plan shown as the plan.” | fixed: existing display projection is authoritative in HTTP and React; all variants and OpenReview verified through component and built-browser journeys plus full baseline comparison |
 | A157 | F23, F28 | medium | Search's interval poll awaits `getSession()` without a `try/catch`. Any transient poll rejection becomes an unhandled promise rejection and the interval keeps a stale `reviewing` session forever. Because `setInterval(async ...)` also starts a request without waiting for the prior one, slow responses can overlap; a late older `reviewing` response can overwrite a terminal response after the interval was cleared. Unlike the fleet poller, this path has neither an explicit last-good/error boundary nor a single-flight schedule, and there are no Search page behaviour tests. | confirmed polling error/race gap and UI coverage absence |
-| A158 | F24 | high | The client sends the entire pending outbox in one push, while `_PushRequest` rejects more than 100 mutations and the offline store imposes neither this count bound nor the server's value bounds. A 101-row request was rejected as `too_long`; the client leaves every row pending, retries the same oversized body forever, and maps the healthy server's 422 to “Server unavailable.” A long offline session (or a >50,000-character note) can therefore deadlock all later synchronization with no recovery action in the UI. | reproduced client/server boundary deadlock |
+| A158 | F24 | high | The client sends the entire pending outbox in one push, while `_PushRequest` rejects more than 100 mutations and the offline store imposes neither this count bound nor the server's value bounds. A 101-row request was rejected as `too_long`; the client leaves every row pending, retries the same oversized body forever, and maps the healthy server's 422 to “Server unavailable.” A long offline session (or a >50,000-character note) can therefore deadlock all later synchronization with no recovery action in the UI. | fixed: bounded continuation with immutable predecessor receipts, atomic acknowledgements, local validation/quarantine and recoverable rejected drafts |
 | A159 | F24 | medium | `applyPull()` only `put()`s snapshot papers; it never deletes local rows absent from the new server snapshot and paper removal has no tombstone in `changes`. After storing `REMOVED`, applying a later payload with `papers=[]` left `REMOVED` in `allPapers()`. A deleted/trashed or fallen-out-of-window paper can remain indefinitely in the generic offline Library fallback. | reproduced stale IndexedDB mirror |
 | A160 | F24, F29 | medium | Sync request identity fields use length-only validation and the storage sync writer bypasses the public repository's strip/non-empty validation. A mutation with whitespace-only `device_id` and `item_key` validated and returned `applied`, leaving `('   ', 'must_read')` in `label_verdicts`; `get_label_verdict()` then rejects that same key as empty. Pull exposes the phantom row, but ordinary readers cannot address it consistently. | reproduced trust-boundary/canonicalisation split |
 | A161 | F24 | medium | `pull_sync_changes()` returns every historical row after `since` with no page or byte bound, then the PWA ignores `payload.changes` and derives state solely from the full paper snapshot. A new/stale device therefore downloads an ever-growing verdict/note transition history—including up to 50,000 characters per note—for no functional use; enough history can make the 15-second whole-sync deadline self-perpetuating. | confirmed unbounded unused delta path |
 | A162 | F15, F24 | low | `/api/sync/status` labels a count `conflicts`, but counts every historical conflict row and never subtracts resolutions. A controlled conflict followed by a successful explicit resolution still returned `conflicts=1`; the endpoint cannot report whether actionable conflicts remain and monotonically overstates current sync trouble. | reproduced status/audit semantic mismatch |
-| A163 | F25 | high | The shipped Research Intelligence acceptance is false-green in two independent ways. Its inclusion fixture passes each prior `decision` into the function under test, while `selected` forces inclusion and `user_rejected`/`gate_rejected` force exclusion, making the advertised precision/recall largely a replay of the answer labels. Separately, `read_skim_skip_agreement` was only 0.588 in all three runs but is omitted from `passes`, so `--check` exited 0. A broken reading policy can therefore satisfy the named offline gate. | reproduced benchmark leakage and ignored failing metric |
-| A164 | F25, F29 | high | The profile bounds shortlists to 100 and cards to 20, but CLI overrides are unvalidated and passed straight to slicing/deep review. Zero silently means “use the default” (`budget or default`), negative values drop tail rows, and arbitrarily large positive values bypass the card cap and can launch up to the 1,000-row source window of PDF/model work in one command. The advertised bounded command therefore has a public cost boundary that neither validates nor means what its numeric values say. | reproduced zero semantics; positive/negative bypass confirmed |
-| A165 | F25 | medium | Source limiting happens before venue filtering and deduplication, and the SQL orders oldest-first. With an older non-NeurIPS row followed by an in-range NeurIPS row, `source_limit=1, venue='NeurIPS'` reported one discovered but zero eligible papers. Duplicates or unrelated early rows can consume the whole bound and make conference mode omit matching later work. | reproduced limit/filter ordering defect |
+| A163 | F25 | high | The shipped Research Intelligence acceptance is false-green in two independent ways. Its inclusion fixture passes each prior `decision` into the function under test, while `selected` forces inclusion and `user_rejected`/`gate_rejected` force exclusion, making the advertised precision/recall largely a replay of the answer labels. Separately, `read_skim_skip_agreement` was only 0.588 in all three runs but is omitted from `passes`, so `--check` exited 0. A broken reading policy can therefore satisfy the named offline gate. | fixed: evaluator withholds label-derived decision/project inputs and `passes` now requires reading-policy agreement; current fixture correctly fails `--check` |
+| A164 | F25, F29 | high | The profile bounds shortlists to 100 and cards to 20, but CLI overrides are unvalidated and passed straight to slicing/deep review. Zero silently means “use the default” (`budget or default`), negative values drop tail rows, and arbitrarily large positive values bypass the card cap and can launch up to the 1,000-row source window of PDF/model work in one command. The advertised bounded command therefore has a public cost boundary that neither validates nor means what its numeric values say. | fixed: shared strict profile/run budget types at CLI and direct service admission; exact None/zero and timeout semantics; actual maximum loader counts, CLI publication and full baseline checks. Independent startup work remains A219 |
+| A165 | F25 | medium | Source limiting happens before venue filtering and deduplication, and the SQL orders oldest-first. With an older non-NeurIPS row followed by an in-range NeurIPS row, `source_limit=1, venue='NeurIPS'` reported one discovered but zero eligible papers. Duplicates or unrelated early rows can consume the whole bound and make conference mode omit matching later work. | fixed: newest-first streamed venue filtering and identity deduplication precede the unique-result cap; real-SQLite paper-ID checks, cap-order mutation and full baseline comparison; unused source protocol/class removed |
 | A166 | F25 | medium | Output identity is only `weekly-{end-date}`; start time, venue, profile, and run mode are absent, and there is no `start <= end` validation. Two different windows/venue modes ending on the same date returned the same paths and the second atomically replaced the first JSON (then rewrote Markdown/state); even an invalid empty reversed window can overwrite a valid weekly report without warning. | reproduced cross-run artifact overwrite; date boundary confirmed |
 | A167 | F25 | medium | The promised per-paper failure isolation starts only after shortlist selection. `_assess()` triages every prior row in one list comprehension; malformed but parseable stored summary data—e.g. `triage_confidence=2.0`, a non-dict JSON envelope, or a nonnumeric score—raises before `_records()` and aborts the entire week. One corrupt historical row prevents every healthy paper and report from completing. | reproduced pre-isolation batch failure |
-| A168 | F25 | low | `ResearchProfile.schema_version` is an unconstrained integer that no loader branch inspects. A profile declaring future schema `999` validated and was silently interpreted as v1, so the “versioned user-editable profile” has neither compatibility rejection nor migration semantics. | reproduced inert version field |
+| A168 | F25 | low | `ResearchProfile.schema_version` is an unconstrained integer that no loader branch inspects. A profile declaring future schema `999` validated and was silently interpreted as v1, so the “versioned user-editable profile” has neither compatibility rejection nor migration semantics. | fixed: Literal version-1 admission; actual future-profile load fails without rewriting bytes; full baseline comparison |
 | A169 | F06, F25 | medium | Zotero tag writeback idempotency scans only the newest 5,000 pending-change rows. After placing the matching target signature just outside that window, `_queue_tags()` reported a fresh success and left two identical target changes. Long-lived histories therefore defeat the promised idempotent queue and can repeat external tag work. | reproduced capped-idempotency lookup |
 | A170 | F20, F25 | medium | Missing-review generation discards deep-review job outcomes. `_ensure_reviews()` silently returns on timeout/error, and `_records()` then classifies every absent digest as `manual_full_text_required`; it never reads the job's error or records a timeout. Provider/setup/extraction failures can leave work running past the report while metadata says `failed=0` and tells the user only that full text is needed. | confirmed outcome/accounting collapse |
 | A171 | F25 | low | JSON uses the shared atomic writer, but the paired canonical Markdown artifact is written directly with `Path.write_text`; `state.json` is a third later write. Interruption or disk failure can leave a new JSON beside truncated/old Markdown and stale state, with no manifest/checksum telling the reader which representation completed. | confirmed multi-artifact atomicity gap |
-| A172 | F26, F29 | high | Frozen-paper paths interpolate unvalidated `item_key` directly as `papers/{item_key}.txt`. `freeze_paper_text(papers, '../escape', 'escaped')` wrote `escape.txt` outside `papers/`; loaded/edited benchmark metadata reaches the same read helper. The benchmark's corpus boundary permits out-of-directory overwrite/read when a key is not a canonical Zotero key. | reproduced path traversal |
-| A173 | F26 | high | Benchmark versions share one mutable `papers/<item_key>.txt` namespace. Freezing a second extraction for `P1` overwrote the substrate referenced by v1; loading it with v1's recorded SHA then raised drift. A rebuild—or even a build that later fails—can therefore invalidate every earlier benchmark/run using the same paper, contradicting the frozen/immutable version contract. | reproduced cross-version substrate corruption |
-| A174 | F26 | high | Append-only response/judgment ledgers and `manifest.json` use ordinary direct writes with no recovery framing. Adding a truncated final JSONL row made `load_jsonl()` raise `JSONDecodeError`, so the documented crash-resume path cannot discover prior done keys, judge, or report until manual surgery; a partial manifest similarly blocks its own resume before the expensive work can continue. | reproduced interrupted-ledger resume failure |
+| A172 | F26, F29 | high | Frozen-paper paths interpolate unvalidated `item_key` directly as `papers/{item_key}.txt`. `freeze_paper_text(papers, '../escape', 'escaped')` wrote `escape.txt` outside `papers/`; loaded/edited benchmark metadata reaches the same read helper. The benchmark's corpus boundary permits out-of-directory overwrite/read when a key is not a canonical Zotero key. | fixed: shared key/hash/resolved-path admission for frozen reads/writes plus sibling CLI run-directory guard; traversal/symlink and full-baseline checks |
+| A173 | F26 | high | Benchmark versions share one mutable `papers/<item_key>.txt` namespace. Freezing a second extraction for `P1` overwrote the substrate referenced by v1; loading it with v1's recorded SHA then raised drift. A rebuild—or even a build that later fails—can therefore invalidate every earlier benchmark/run using the same paper, contradicting the frozen/immutable version contract. | fixed: hash-addressed atomic text versions; verified reuse and legacy reads without migration; corruption, interrupted publication and full-baseline checks |
+| A174 | F26 | high | Append-only response/judgment ledgers and `manifest.json` use ordinary direct writes with no recovery framing. Adding a truncated final JSONL row made `load_jsonl()` raise `JSONDecodeError`, so the documented crash-resume path cannot discover prior done keys, judge, or report until manual surgery; a partial manifest similarly blocks its own resume before the expensive work can continue. | fixed: resume-only interrupted-EOF repair with original-byte archive; strict interior reads; atomic manifest and refusal to relabel orphan trials; actual run/judge, publication-fault and full-baseline checks |
 | A175 | F26 | medium | `save_benchmark()` creates the supposedly immutable version in place. An iterator failure after one item left a readable-looking partial `benchmark_v1.jsonl`; `next_benchmark_version()` then returned 2, permanently consuming v1 and allowing `latest` to select the incomplete exam. Review CSV creation is a later non-transactional write as well. | reproduced partial immutable artifact |
-| A176 | F26 | medium | `_windows()` promises evenly spaced coverage, but a paper of 11,999 characters produced one 6,000-character window and silently ignored its final 5,999 characters (`count = len // window`). QA ground truth is systematically unavailable from that region for papers between one and two windows, and larger capped papers retain broad unexamined gaps. | reproduced corpus-coverage gap |
-| A177 | F26 | high | Numeric judging compares only the first parsed number and ignores the rest of the gold/candidate semantics. A gold span `10 mg drug A` with candidate `10 cats` passed; ranges/multi-number spans likewise collapse to one value. Because the builder controls `answer_type` and merely checks that the gold contains some digit, mislabeled spans can generate confidently false numeric passes. | reproduced false numeric equivalence |
-| A178 | F26 | high | The equivalence judge coerces `payload['equivalent']` with Python truthiness instead of validating a boolean. A syntactically valid response `{"equivalent":"false"}` was truthy and passed a rejected answer. One common schema deviation reverses the soft judge's verdict. | reproduced semantic type confusion |
-| A179 | F26 | high | Cross-paper traps prove only that the source answer string/tokens are absent, not that the question is unanswerable against the target. A source QA “Which dataset was used?”/`CIFAR-10` became a trap for a target explicitly saying it used ImageNet; a correct `ImageNet` response would be scored as hallucination. The review CSV is optional and no approved/reviewed state is enforced before run. | reproduced invalid abstention ground truth |
-| A180 | F26 | high | A one-paper build produced valid QA and zero traps yet succeeded; negative `--traps-per-paper` also disables traps without error. Such a benchmark has no unanswerable cases, reports a zero trap-hallucination rate, and cannot test the abstention behaviour named by the feature. | reproduced empty safety cohort |
-| A181 | F20, F26 | high | The claims track enumerates only six digest fields and omits primary factual outputs including `executive_summary`, `key_findings`, `methods`, `limitations`, `parameters`, impact, and unknown-unknowns. Hallucinations in the main rendered brief can therefore coexist with a perfect claim-support result; the gate does not measure most of the product contract it claims to validate. | confirmed model/schema coverage omission |
-| A182 | F26 | high | Resume guards only model name, benchmark SHA, conditions, tracks, and run count. A changed provider/base URL, decomposition model, prompt/config/max-text settings, and research goals were accepted under the same run ID. The runner then uses the new live config while the manifest/judge retain the old goals, mixing semantically different trials and judging goal-conditioned claims against the wrong snapshot. | reproduced incomplete run identity |
+| A176 | F26 | medium | `_windows()` promises evenly spaced coverage, but a paper of 11,999 characters produced one 6,000-character window and silently ignored its final 5,999 characters (`count = len // window`). QA ground truth is systematically unavailable from that region for papers between one and two windows, and larger capped papers retain broad unexamined gaps. | partial: full coverage through 18k characters and exact endpoints verified; three-window sampling still leaves gaps in longer papers, not claimed as full coverage |
+| A177 | F26 | high | Numeric judging compares only the first parsed number and ignores the rest of the gold/candidate semantics. A gold span `10 mg drug A` with candidate `10 cats` passed; ranges/multi-number spans likewise collapse to one value. Because the builder controls `answer_type` and merely checks that the gold contains some digit, mislabeled spans can generate confidently false numeric passes. | fixed: full scalar Decimal matching preserves sign/integer precision; complex answers require literal equality or semantic judging; false-pass, real judge persistence and full-baseline checks |
+| A178 | F26 | high | The equivalence judge coerces `payload['equivalent']` with Python truthiness instead of validating a boolean. A syntactically valid response `{"equivalent":"false"}` was truthy and passed a rejected answer. One common schema deviation reverses the soft judge's verdict. | fixed: explicit JSON boolean required; existing unjudgeable error boundary; real judge-run persistence, negative cases, mutation and full baseline comparison |
+| A179 | F26 | high | Cross-paper traps prove only that the source answer string/tokens are absent, not that the question is unanswerable against the target. A source QA “Which dataset was used?”/`CIFAR-10` became a trap for a target explicitly saying it used ImageNet; a correct `ImageNet` response would be scored as hallucination. The review CSV is optional and no approved/reviewed state is enforced before run. | fixed: generated rows start unapproved; QA runs require an exact explicit human approval for every item and bind the review CSV hash into the resume identity |
+| A180 | F26 | high | A one-paper build produced valid QA and zero traps yet succeeded; negative `--traps-per-paper` also disables traps without error. Such a benchmark has no unanswerable cases, reports a zero trap-hallucination rate, and cannot test the abstention behaviour named by the feature. | fixed: distinct-paper/positive build bounds; shared QA+trap cohort requirement at build/run; missing validated denominators are null/N/A and block A/B comparison; actual CLI/report and full-baseline checks |
+| A181 | F20, F26 | high | The claims track enumerates only six digest fields and omits primary factual outputs including `executive_summary`, `key_findings`, `methods`, `limitations`, `parameters`, impact, and unknown-unknowns. Hallucinations in the main rendered brief can therefore coexist with a perfect claim-support result; the gate does not measure most of the product contract it claims to validate. | **fixed**: all 21 claim-bearing digest fields enter decomposition, including nested parameter values; schema coverage guard and v3 cache namespace prevent omitted-field reuse. This guards field coverage, not exhaustive LLM decomposition; focused and frozen full baseline comparisons pass. |
+| A182 | F26 | high | Resume guards only model name, benchmark SHA, conditions, tracks, and run count. A changed provider/base URL, decomposition model, prompt/config/max-text settings, and research goals were accepted under the same run ID. The runner then uses the new live config while the manifest/judge retain the old goals, mixing semantically different trials and judging goal-conditioned claims against the wrong snapshot. | fixed: fail-closed full generation/content identity checked before clients, repair or append |
 | A183 | F26 | medium | Claim decomposition cache identity is only the digest SHA plus a hard-coded `v2`; decomposer model/endpoint and prompt code are absent. Model sweeps silently reuse old decompositions, while its direct non-atomic cache write can be corrupted by concurrent identical digest trials; a corrupt hit is reread forever and `--retry-errors` cannot repair it. | confirmed stale/fragile cache identity |
-| A184 | F26, F29 | high | Faithbench CLI numeric/enumerated inputs are not validated. Unknown conditions execute the retrieval branch under the typo label; an empty/unknown track or `runs=0` returns a successful zero-work run; zero limits mean unlimited, negatives slice from the tail; non-positive build counts also acquire one paper or disable traps. Invalid public input can create expensive, incomparable, or vacuously successful artifacts. | reproduced boundary/zero-work acceptance |
-| A185 | F26 | high | Judge/report trust `manifest['benchmark_path']` without recomputing and comparing its current file SHA to `manifest['benchmark_sha256']`. Dataset loading also ignores each QA/trap row's recorded paper SHA and does not re-anchor its gold span/offsets against frozen text. Edited/corrupt ground truth can silently change scoring while the report continues to claim the old benchmark hash instead of emitting `HARNESS_FAULT`. | confirmed artifact-integrity bypass |
-| A186 | F26 | high | A successful claims response with `claims=[]` generates zero judgments, no failure, and no denominator entry. A model/decomposer can emit an empty factual review and evade the claims metric entirely; an all-empty claims-only run cannot even report, while mixed runs simply present the surviving subset as support quality. | reproduced empty-output denominator escape |
-| A187 | F15, F26 | high | `build_report()` requires only one judgment and never checks expected coverage from the manifest/responses. Four response trials with one judgment produced a normal report/headline showing `n_response_trials=4, n_judgments=1`; accuracy and comparison tooling can treat an interrupted cherry-picked subset as a complete run. | reproduced partial-run publication |
+| A184 | F26, F29 | high | Faithbench CLI numeric/enumerated inputs are not validated. Unknown conditions execute the retrieval branch under the typo label; an empty/unknown track or `runs=0` returns a successful zero-work run; zero limits mean unlimited, negatives slice from the tail; non-positive build counts also acquire one paper or disable traps. Invalid public input can create expensive, incomparable, or vacuously successful artifacts. | fixed: CLI rejection before Settings/dispatch; validated immutable RunOptions reused by the handler; direct selection/build bounds and zero-work manifest guard; actual 12-trial CLI budget, killed mutation and full-baseline checks |
+| A185 | F26 | high | Judge/report trust `manifest['benchmark_path']` without recomputing and comparing its current file SHA to `manifest['benchmark_sha256']`. Dataset loading also ignores each QA/trap row's recorded paper SHA and does not re-anchor its gold span/offsets against frozen text. Edited/corrupt ground truth can silently change scoring while the report continues to claim the old benchmark hash instead of emitting `HARNESS_FAULT`. | fixed: exact-read full SHA, unique identities, shared frozen span/evidence/provenance validation; item harness faults and refusal to publish damaged ground truth; CLI, mutation and complete-baseline verification |
+| A186 | F26 | high | A successful claims response with `claims=[]` generates zero judgments, no failure, and no denominator entry. A model/decomposer can emit an empty factual review and evade the claims metric entirely; an all-empty claims-only run cannot even report, while mixed runs simply present the surviving subset as support quality. | fixed: empty/malformed claims produce one failed-trial judgment; decomposition/cache nonempty boundary and idempotent failed-trial resume; regression, mutation and complete-baseline verification |
+| A187 | F15, F26 | high | `build_report()` requires only one judgment and never checks expected coverage from the manifest/responses. Four response trials with one judgment produced a normal report/headline showing `n_response_trials=4, n_judgments=1`; accuracy and comparison tooling can treat an interrupted cherry-picked subset as a complete run. | fixed: exact configured response/claim-verdict coverage before publication; response/context-bound resume and current-history filtering; partial/mixed/stale/legacy regressions, killed coverage mutation and complete-baseline verification |
 | A188 | F26 | medium | Pass^k is computed from whatever validated rows remain, not from the configured expected run set. With three observed run numbers globally but one item having only a single successful validated run, that incomplete item counted as an all-three-runs success; unjudgeable/missing repeats inflate the advertised reliability metric. | reproduced incomplete-repeat inflation |
 | A189 | F15, F26 | medium | Reporting is not idempotent: calling `report` twice appends two master-log headlines for the same run ID. Downstream A/B history therefore double-counts rerendered runs, and a crash between report files and append has no exactly-once recovery key. | reproduced duplicate master history |
 | A190 | F15, F26 | low | Human and machine reports do not expose the same semantics promised by the README: Markdown omits both accuracy/support medians, and `total_wall_seconds` is the sum of per-call latencies (60s in the parallel-capable probe), not elapsed wall time. The JSON source dict is shared, but labels/presentation remain misleading. | reproduced missing statistic; confirmed mislabeled aggregate |
-| A191 | F27 | medium | `mcp/README.md` promises retry/backoff, and responses mark 408/429/5xx as retryable, but `_api_request()` performs exactly one HTTP call and contains no retry or delay. A mocked 503 returned `retryable=true` after one request. Transient local startup/lock failures are delegated to an agent despite the client claiming to absorb them. | reproduced missing retry implementation |
-| A192 | F27, F29 | high | Every MCP path parameter is concatenated into a URL without percent-encoding. `item_key='../../pending/apply'` normalized to `/api/pending/apply/tags`; `?` and `/` similarly changed query/path semantics. Untrusted tool input can route a GET/POST to a different local API path rather than addressing the requested Zotero item/job. | reproduced URL path traversal/confusion |
-| A193 | F15, F27 | high | `search_papers(sort_by='score'\|'priority'\|...)` fetches source-order windows, enriches/sorts only the current window, then paginates that local sort. Scores across five pages reproduced `4,3,2,1,8`; a later page can outrank the first, so top-K agent decisions and stated sorted search are globally false. `filtered_count` is likewise only the current source window, not the result set. | reproduced batch-local ordering |
+| A191 | F27 | medium | `mcp/README.md` promises retry/backoff, and responses mark 408/429/5xx as retryable, but `_api_request()` performs exactly one HTTP call and contains no retry or delay. A mocked 503 returned `retryable=true` after one request. Transient local startup/lock failures are delegated to an agent despite the client claiming to absorb them. | fixed: README now specifies single-attempt HTTP and caller-owned retry decisions; no automatic retry of ambiguous writes |
+| A192 | F27, F29 | high | Every MCP path parameter is concatenated into a URL without percent-encoding. `item_key='../../pending/apply'` normalized to `/api/pending/apply/tags`; `?` and `/` similarly changed query/path semantics. Untrusted tool input can route a GET/POST to a different local API path rather than addressing the requested Zotero item/job. | fixed: shared path-identifier validation plus percent-encoding at every interpolation; eight-tool HTTP regressions and independent real-ASGI routing check |
+| A193 | F15, F27 | high | `search_papers(sort_by='score'\|'priority'\|...)` fetches source-order windows, enriches/sorts only the current window, then paginates that local sort. Scores across five pages reproduced `4,3,2,1,8`; a later page can outrank the first, so top-K agent decisions and stated sorted search are globally false. `filtered_count` is likewise only the current source window, not the result set. | fixed: complete source collection and triage enrichment precede global filtering/sorting/pagination; full counts, versioned cursor, explicit incomplete/10k-ceiling errors |
 | A194 | F09, F27 | medium | `find_similar_papers(item_key=...)` does not call any corpus similarity primitive. It takes the seed title's first eight words and sends the whole phrase to a SQL `%phrase%` title/item-ID filter sorted by update time. The probe queried `A novel framework for reliable autonomous biomedical research` and returned only/excluded the seed, leaving zero “similar” papers; semantically related titles normally cannot contain that exact phrase. | reproduced non-similarity implementation |
-| A195 | F06, F27 | high | MCP pending application returns `ok=true` whenever the HTTP call itself succeeds, even when the backend reports item failures. A controlled response with `applied=0, failed=1` was exposed as successful. The React client treats this same HTTP-200 partial batch as an error; an autonomous MCP caller can advance after zero external writes unless it knows to reinterpret fields inside an `ok` envelope. | reproduced false-success mutation result |
+| A195 | F06, F27 | high | MCP pending application returns `ok=true` whenever the HTTP call itself succeeds, even when the backend reports item failures. A controlled response with `applied=0, failed=1` was exposed as successful. The React client treats this same HTTP-200 partial batch as an error; an autonomous MCP caller can advance after zero external writes unless it knows to reinterpret fields inside an `ok` envelope. | fixed: failed or malformed write receipts and Inbox side-effect errors return ok=false; cross-batch receipts/unconfirmed IDs retained; real MCP → FastAPI → SQLite failure verified |
 | A196 | F15, F27 | medium | `get_library_status()` always wraps the gathered snapshot in `_ok`, even if every backend subrequest failed. A snapshot containing only `warnings=[backend_unreachable]` returned `ok=true`; health automation cannot use the top-level contract to distinguish a valid degraded snapshot from total API absence. | reproduced false-positive status |
-| A197 | F06, F27, F29 | medium | The MCP write safety boundary is a prefix denylist, not an allowlist of reviewed safe operations. Current high-impact writer types `add_attachment`, `set_field`, and `upsert_note` all return unrestricted, as does every unknown future type; `apply_pending_changes()` defaults to all rows. A newly queued mutation outside four historical safe types can cross the agent boundary without an explicit policy decision. | confirmed fail-open mutation taxonomy |
+| A197 | F06, F27, F29 | medium | The MCP write safety boundary is a prefix denylist, not an allowlist of reviewed safe operations. Current high-impact writer types `add_attachment`, `set_field`, and `upsert_note` all return unrestricted, as does every unknown future type; `apply_pending_changes()` defaults to all rows. A newly queued mutation outside four historical safe types can cross the agent boundary without an explicit policy decision. | fixed: four-operation allowlist, strict registered MCP integer arguments, empty-selection no-op and fail-closed missing-ID lookup; transport/protocol regressions |
 | A198 | F06, F27 | medium | `get_paper()` fetches the newest 500 pending/history rows globally and only then filters by item key, with no truncation warning. A paper's older still-pending changes disappear from its detail whenever unrelated history fills that window, so an agent can plan a duplicate/conflicting mutation from an incomplete state. | confirmed filter-after-global-cap defect |
 | A199 | F27, F29 | medium | MCP environment knobs accept invalid numeric domains: `NaN` timeout reaches `httpx.Timeout` and raises an uncaught `TypeError`, a negative timeout makes every request immediately time out, and max-items/seconds values may be zero, negative, or exceed backend schema limits. Invalid but parseable environment values disable or desynchronise the entire tool server instead of failing configuration once. | reproduced timeout failures; integer-domain drift confirmed |
-| A200 | F27 | low | The tool README says pending tools “inspect + apply/reject” and mutation tools are “queued, not direct writes,” but no reject tool exists and all three mutation handlers call immediate `/api/zotero/items/*` writer endpoints. The advertised agent authority/review boundary does not match the registered 13-tool surface. | confirmed documentation/surface drift |
+| A200 | F27 | low | The tool README says pending tools “inspect + apply/reject” and mutation tools are “queued, not direct writes,” but no reject tool exists and all three mutation handlers call immediate `/api/zotero/items/*` writer endpoints. The advertised agent authority/review boundary does not match the registered 13-tool surface. | fixed: README matches immediate mutation endpoints and UI-only pending rejection; no extra tool/API introduced |
 | A201 | F10, F27 | medium | MCP status looks for a running job only inside `/api/triage/jobs?limit=25`. A long-running older job falls out of that newest-25 window as later jobs accumulate, so the status resource reports `active_job=null` while work/provider cost continues. | confirmed capped active-job discovery |
 | A202 | F27 | low | The entire focused MCP suite (15 tests) exercises parsing/cursors and restricted-type predicates but never invokes `_api_request()` or any of the 13 registered tool handlers/resources. HTTP envelope, pagination, retry, and mutation semantics therefore had no executable contract until the audit probes, explaining why A191-A201 remained green. | confirmed coverage gap |
-| A203 | F06, F11, F17, F28 | high | Batch selection is not reconciled with the currently visible scope. Today keeps selected IDs when the feed filter changes; Library keeps them across semantic search, include-read, and client-filter changes; Pending keeps them when its title filter changes. The action handlers submit the whole stale `Set`, so the visible count/list can hide papers or changes that Add, Trash, Triage, Apply, or Reject will still mutate. A three-ID/one-visible probe submitted the two hidden IDs as well. | reproduced hidden-selection mutation scope |
+| A203 | F06, F11, F17, F28 | high | Batch selection is not reconciled with the currently visible scope. Today keeps selected IDs when the feed filter changes; Library keeps them across semantic search, include-read, and client-filter changes; Pending keeps them when its title filter changes. The action handlers submit the whole stale `Set`, so the visible count/list can hide papers or changes that Add, Trash, Triage, Apply, or Reject will still mutate. A three-ID/one-visible probe submitted the two hidden IDs as well. | fixed: displayed counts and action IDs share filtered selection; actual-page HTTP regressions for all three pages plus Chromium/real-SQLite filtered rejection and reload |
 | A204 | F06, F13, F28 | medium | `usePaperReview` saves a `dont_read` verdict and queues the reject tag with `Promise.all`. If the durable verdict POST succeeds but the later tag request fails, the combined mutation rejects, skips detail invalidation, and renders “Save failed”; the backend already contains the new verdict. Retrying can duplicate side-effect attempts, while the UI presents a partial commit as no commit. | confirmed partial-success collapse in shared verdict path |
-| A205 | F13, F28 | high | The fixed mobile verdict bar always submits `{comment: ''}` and bypasses `VerdictPanel`'s edit/cancel context. On a paper whose saved verdict has a comment, tapping any priority (including the currently active one) upserts the row with an empty comment. The direct payload probe changed `"critical rationale"` to `""`; this is silent user-data loss from the primary mobile action. | reproduced mobile comment erasure |
+| A205 | F13, F28 | high | The fixed mobile verdict bar always submits `{comment: ''}` and bypasses `VerdictPanel`'s edit/cancel context. On a paper whose saved verdict has a comment, tapping any priority (including the currently active one) upserts the row with an empty comment. The direct payload probe changed `"critical rationale"` to `""`; this is silent user-data loss from the primary mobile action. | fixed: mobile anchor and compact card reuse the existing explicit editor; draft/cancel/preserve/clear HTTP tests and Chromium → SQLite save/reload |
 | A206 | F24, F28 | medium | Web Storage is treated inconsistently as optional. SetupGate/HintBanner guard it, but Today, Search, SetupFlow, LibraryReadNext, ReadNextView, and collection actions contain unguarded `localStorage`/`sessionStorage` reads or writes. A standards-compliant `SecurityError` reproduction escaped immediately; affected effects can tear down whole routes in privacy/restricted-storage contexts. Parsed `zs.reviewOrder` is also not shape-checked, so valid JSON such as `{}` crashes Paper Review at `.indexOf`. | reproduced storage exception; confirmed shape gap |
 | A207 | F10, F28 | medium | Triage persists explicit feedback and exposes `/api/triage/feedback/latest`, but the React page never calls it. `feedbackState` starts empty on every mount/job switch, so “Needs feedback only” re-shows already-reviewed results and the “Approved/Rejected by you” badge disappears after reload. The same historical result can be resubmitted because the UI forgets durable state. | confirmed backend/UI state projection gap |
-| A208 | F06, F10, F13, F28 | high | The shared global keyboard hook suppresses shortcuts only for `TEXTAREA` and non-checkbox `INPUT`; it does not suppress them for `SELECT`, contenteditable controls, or other interactive widgets. Paper Review can navigate away on `j/k` while a collection selector has focus, and Pending can fire `a`/`r` Apply/Reject while the user is typing to select a collection option (if another row remains selected). This violates the stated typing guard at an external-write boundary. | confirmed keyboard focus/mutation conflict |
+| A208 | F06, F10, F13, F28 | high | The shared global keyboard hook suppresses shortcuts only for `TEXTAREA` and non-checkbox `INPUT`; it does not suppress them for `SELECT`, contenteditable controls, or other interactive widgets. Paper Review can navigate away on `j/k` while a collection selector has focus, and Pending can fire `a`/`r` Apply/Reject while the user is typing to select a collection option (if another row remains selected). This violates the stated typing guard at an external-write boundary. | fixed: shared native/rich-text/ARIA focus guard, IME/defaultPrevented handling; active-key regression matrix, actual Pending HTTP flow and real Chromium selector check |
 | A209 | F16, F28 | medium | Feed Review reads `?state=` only into initial React state and its Awaiting/Gate-rejected buttons never update the URL. After following a preserved compatibility deep link, switching piles leaves the address pointing at the old pile; reload restores the wrong view, and a same-mounted query-string navigation is ignored. The advertised compatibility/query preservation is therefore not a stable UI state contract. | confirmed URL/view drift |
 | A210 | F17, F18, F28 | medium | Library full-text status polling has no terminal retry/error budget. Every rejected status request schedules another poll forever, without surfacing an error or offering Stop; a server that stays unavailable leaves `fetchingFulltext=true` and produces unbounded background requests until unmount. This differs from the otherwise bounded paper-render poll and can make an abandoned job look permanently active. | confirmed unbounded silent poll |
 | A211 | F28 | low | The full frontend suite covers helpers and 12 selected components/hooks/API wrappers, but no test imports `App`, `SetupFlow`, `Today`, `Library`, `Search`, `PaperReviewPage`, `Settings`, `Ops`, `VerdictPanel`, or `useKeyboardNav`. All 116 tests and all three builds passed while A157 and A203-A210 remained present; route compatibility, page-level loading/error state, and global keyboard/mutation behaviour have no executable UI contract. | confirmed page-level coverage gap |
-| A212 | F29 | medium | The layering pre-commit hook uses a regex that recognises only absolute `from/import zotero_summarizer.<submodule>` forms. Both `from ..services import config` and `from zotero_summarizer import services` produced an empty import list, so code in `integrations/`, `storage/`, or `mcp/` can import a forbidden higher layer while the named enforcement gate passes. The current scan found no such checked-in violation, but the claimed invariant is not actually enforced. | reproduced import-policy bypass |
+| A212 | F29 | medium | The layering pre-commit hook uses a regex that recognises only absolute `from/import zotero_summarizer.<submodule>` forms. Both `from ..services import config` and `from zotero_summarizer import services` produced an empty import list, so code in `integrations/`, `storage/`, or `mcp/` can import a forbidden higher layer while the named enforcement gate passes. The current scan found no such checked-in violation, but the claimed invariant is not actually enforced. | fixed: stdlib AST resolves static import forms; real-gate/CLI regressions and two rejected mutations; dynamic effects remain outside this gate's contract |
 | A213 | F04, F18, F29 | medium | The shared `FileNotFoundError` handler returns the exception text as `details.pdf_path`. A controlled missing PDF exposed `/Users/alice/private-library/secret-paper.pdf` verbatim in the 404 JSON. Other handlers likewise expose raw extraction/Zotero exception messages; at minimum the common missing-file path contradicts the API's secret/local-path non-disclosure boundary. | fixed: shared file/extraction/timeout/Zotero handlers use fixed public messages; disclosure regressions |
 | A214 | F18, F29 | medium | `UniversityAccessConfig.browser_profile_dir` accepts any string and `services.library.university_access.profile_dir()` returns that path directly instead of resolving/containing it through `Settings`. A config value `/tmp/outside-zs-data` resolved outside the isolated project's `data/`; browser launch then lets Chromium create mutable profile state there and `open_login_window()` writes `.zs_login_complete` beside it. This violates the repository-wide state-root rule and turns a config typo into writes outside app storage. | reproduced state-root escape |
-| A215 | abstraction pass, F23 | medium | The final vulture/caller pass found five production-dead surfaces: `_paper_read_html._render_notes` is retained only for an “eventual” export and a direct test; `VERSION_TYPES` is never read; `Candidate.to_scoring_dict()` is explicitly bypassed by production; `QueryPlan.display()` is test-only while the UI reimplements and drifts from it (A156); and `version_family_id` is assigned/persisted but never consumed. `render_overrides_doc()` and `prestige_venue` were the two false positives: the former is called by `tools/gen_overrides_doc.py`, while the latter is consumed after model serialization by daily selection/rescore. The five dead representations increase competing contracts and should be deleted or made authoritative before adding another adapter. | partial: unused Markdown formatter and its two exclusive helpers removed; four search surfaces remain; two false positives justified |
+| A215 | abstraction pass, F23 | medium | The final vulture/caller pass found five production-dead surfaces: `_paper_read_html._render_notes` is retained only for an “eventual” export and a direct test; `VERSION_TYPES` is never read; `Candidate.to_scoring_dict()` is explicitly bypassed by production; `QueryPlan.display()` is test-only while the UI reimplements and drifts from it (A156); and `version_family_id` is assigned/persisted but never consumed. `render_overrides_doc()` and `prestige_venue` were the two false positives: the former is called by `tools/gen_overrides_doc.py`, while the latter is consumed after model serialization by daily selection/rescore. The five dead representations increase competing contracts and should be deleted or made authoritative before adding another adapter. | fixed: unused formatter/helpers, VERSION_TYPES, to_scoring_dict and version_family_id removed; QueryPlan.display made authoritative and duplicate UI projection removed; caller checks and full baseline comparison; two false positives retained |
+
+| A216 | F06, F23, F28 | medium | Today/Search's CollectionPicker passes the full `/api/zotero/collections` response object into an array flattener. Its caught TypeError leaves only Inbox available even when named collections exist. Actual Today page/API-client tests reproduced the missing target option. | fixed: shared picker consumes `data.items`; actual page selects Reading and sends its exact key; full frontend suite/build/lint |
+| A217 | F13, F15, F28 | high | Fresh bootstrap does not create a golden CSV, but the shared HTTP provenance loader requires that file before verdict save, review detail and provenance listing. A first save returns misleading HTTP 404 `PDF file not found` before SQLite is reached, preventing first-run labeling. Existing HTTP tests mocked the loader. | fixed: unexported provenance is empty without hiding existing-file errors; real HTTP/SQLite first-save and Chromium reload tests, baseline-equivalent full backend comparison |
+| A218 | F06, F23 | high | Fresh Search Add reaches `_note_html`, which passes a plain string to `build_triage_note_html(summary: SummarizeResponse)`. The actual HTTP workflow returns 500 with `AttributeError: str has no attribute reading_priority` before the writer call, even after candidate IDs are made addressable. | fixed: escaped Search note plus existing provenance marker instead of the incompatible triage renderer; actual HTTP and built-browser Add regressions plus full baseline comparison |
+| A219 | F25, F29 | high | `research-feed run` calls ordinary `lifecycle.startup(background=True)` before its bounded weekly runner. An isolated real-CLI/startup probe using `--cached-only --card-budget 1` scheduled both deep-review and review-fleet prewarm workers even though the runner received `generate_reviews=false`. Startup can also schedule gate retraining/rescoring. Those unrelated jobs bypass weekly limits and the cached-only promise; the CLI budget tests had mocked startup entirely. | fixed: cached-only skips initialization; generation reuses background=False with the explicit cached-classifier prerequisite; actual CLI/lifecycle/cache/SQLite regressions and terminal baseline-equivalent full backend verification |
+| A220 | F06, F13, F24 | high | Replaying an old successful offline UUID preserves current SQLite state but replays obsolete post-commit note content. Old/new/old review-note replay dispatches the old body again; the same sequence for verdicts keeps the current label but replaces its Zotero note with the old rationale. Delayed online saves share the review-note path. Local UUID idempotency does not protect newer external note intent. | **fixed**: both review-note and verdict rationale mirrors read current alias-aware intent under the SQLite writer lock. Replay, empty comments, deletions, failure/retry, aliases and real backup-first temporary Zotero writes are covered; removing the lock fails the concurrency regression. Frozen full comparison matches the nine known native crashes; no user-library changes. |
 
 ## Completion rule
 

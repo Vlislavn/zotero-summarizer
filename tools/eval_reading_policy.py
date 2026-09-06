@@ -12,7 +12,7 @@ from typing import Any
 
 from zotero_summarizer.services.library.review_fleet.propose import effective_read_decision
 
-DEFAULT_FIXTURE = Path(__file__).with_name("reading_policy_fixture.json")
+DEFAULT_FIXTURE = Path(__file__).with_name("reading_policy_fixture_v2.json")
 
 
 def evaluate(rows: list[dict[str, Any]]) -> dict[str, Any]:

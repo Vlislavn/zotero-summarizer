@@ -147,10 +147,7 @@ export async function fetchDeepReviewStatus(itemKey = null) {
  * Resolves to { status, total, completed, proposed, error, started_at, progress }.
  */
 export async function runReviewFleet({ topK = 5, itemKeys = null } = {}) {
-  // With itemKeys the fleet reviews EXACTLY those (the "Review cool papers" loop
-  // pins its cool set so the fleet targets the same rows the UI counts); else the
-  // top-`topK` undecided picks. Mirrors runDeepReview's {item_key | top_k} shape.
-  const body = itemKeys && itemKeys.length ? { item_keys: itemKeys } : { top_k: topK };
+  const body = itemKeys !== null ? { item_keys: itemKeys } : { top_k: topK };
   return request('/api/library/review-fleet/run', {
     method: 'POST',
     body: JSON.stringify(body),

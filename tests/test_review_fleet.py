@@ -16,6 +16,7 @@ import types
 
 import pytest
 
+from zotero_summarizer.models import GoalSummary
 from zotero_summarizer.services.library.review_fleet import (
     fleet,
     verdict_store,
@@ -102,6 +103,11 @@ def _reset_fleet(tmp_path, monkeypatch):
     )
     # Run the "background" job inline so the test is deterministic.
     monkeypatch.setattr(fleet._flight, "run_in_background", lambda target: target())
+    monkeypatch.setattr(
+        fleet.deep_review, "review_is_current",
+        lambda entry, item_key="": bool(entry)
+        and entry.get("review_contract_version") == fleet.deep_review.REVIEW_CONTRACT_VERSION,
+    )
     yield
     fleet.finish(error=None)
 
@@ -122,7 +128,9 @@ def _cached_review(read_decision="read", grade="A"):
             "novelty": 4, "significance": 4,
         },
         "quality": {"quality_band": "highlight"},
-        "goal_summaries": [{"relevant": True}],
+        "goal_summaries": [GoalSummary(
+            goal="Fixture goal", relevant=True, retrieval_state="hit", abstained=False,
+        ).model_dump()],
     }
 
 

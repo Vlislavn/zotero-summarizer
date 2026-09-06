@@ -3,9 +3,9 @@ import { useEffect } from 'react';
 // Reusable list keyboard-nav, generalized verbatim from AnnotationVerdict's
 // inline handler (Jakob's Law: Gmail/Vim j/k to move, number keys to act).
 //
-// Behaviour (identical to the Annotate original):
-//   - disabled while the user is typing in a TEXTAREA or a non-checkbox INPUT,
-//     so the search box / comment field swallow their own keys
+// Behaviour:
+//   - native controls, rich-text editors and ARIA widgets keep their own keys
+//   - ignores composition and events already handled by another control
 //   - ignores any chord with meta / ctrl / alt held
 //   - 'j' → onNext(), 'k' → onPrev()  (preventDefault on both)
 //   - a key present in `actionKeys` → onAction(actionKeys[key], key) once the
@@ -31,10 +31,16 @@ export function useKeyboardNav({
   useEffect(() => {
     if (!enabled) return undefined;
     function onKey(e) {
-      const t = e.target;
-      const isTyping =
-        t && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && t.type !== 'checkbox'));
-      if (isTyping) return;
+      if (e.defaultPrevented || e.isComposing) return;
+      const control = e.target?.closest?.(
+        'input, textarea, select, button, a[href], summary, audio[controls], video[controls], '
+        + '[contenteditable]:not([contenteditable="false"]), '
+        + '[role="textbox"], [role="searchbox"], [role="combobox"], [role="listbox"], '
+        + '[role="slider"], [role="spinbutton"], [role="button"], [role="checkbox"], '
+        + '[role="radio"], [role="switch"], [role="tab"], [role="menu"], [role="menubar"], '
+        + '[role="menuitem"], [role="tree"], [role="treeitem"], [role="grid"]',
+      );
+      if (control) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
       if (e.key === 'j') {

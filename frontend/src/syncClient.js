@@ -1,6 +1,6 @@
 import { request } from './api/client.js';
 import {
-  applyPull, applyPushResults, getMeta, pendingMutations, publishStatus,
+  applyPull, applyPushResults, getMeta, mutationError, pendingMutations, publishStatus, pushPredecessors,
 } from './offlineStore.js';
 
 let running = null;
@@ -9,6 +9,8 @@ const SYNC_TIMEOUT_MS = 15_000;
 function failureMessage(error) {
   if (error?.message?.startsWith('Sync protocol changed')) return error.message;
   if (error?.name === 'AbortError') return 'Sync timed out';
+  if (error?.status) return `Sync request failed (HTTP ${error.status}): ${error.message}`;
+  if (error?.message?.startsWith('Invalid sync')) return error.message;
   return 'Server unavailable';
 }
 
@@ -22,13 +24,26 @@ export function syncNow() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), SYNC_TIMEOUT_MS);
     try {
-      const mutations = await pendingMutations();
-      if (mutations.length) {
+      const pending = await pendingMutations();
+      const invalid = pending.map((row) => ({ mutation_id: row.mutation_id, status: 'rejected', error: mutationError(row) }))
+        .filter((row) => row.error);
+      if (invalid.length) await applyPushResults(invalid);
+      const rejected = new Set(invalid.map((row) => row.mutation_id));
+      const valid = pending.filter((row) => !rejected.has(row.mutation_id));
+      for (let offset = 0; offset < valid.length; offset += 100) {
+        if (controller.signal.aborted) throw new DOMException('Sync deadline reached', 'AbortError');
+        const mutations = valid.slice(offset, offset + 100);
+        const predecessors = await pushPredecessors(mutations);
         const pushed = await request('/api/sync/push', {
-          method: 'POST', body: JSON.stringify({ protocol: 1, mutations }),
+          method: 'POST', body: JSON.stringify({ protocol: 1, mutations, predecessors }),
           signal: controller.signal,
         });
         if (pushed.protocol !== 1) throw new Error('Sync protocol changed; refresh the app');
+        const ids = new Set(pushed.results?.map((row) => row.mutation_id));
+        if (pushed.results?.length !== mutations.length || ids.size !== mutations.length
+            || mutations.some((row) => !ids.has(row.mutation_id))) {
+          throw new Error('Invalid sync acknowledgement IDs; device changes preserved');
+        }
         await applyPushResults(pushed.results);
       }
       const since = await getMeta('cursor', 0);

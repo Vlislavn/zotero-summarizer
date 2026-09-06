@@ -6,12 +6,12 @@ from pathlib import Path
 from zotero_summarizer.storage import feeds_lookup, repositories
 
 _CURRENT_CHANGES = """
-SELECT s.item_key, s.revision AS revision, s.value, r.revision AS mirrored
+SELECT s.item_key, s.revision AS revision, s.value, r.revision AS mirrored, s.comment
 FROM sync_changes s LEFT JOIN label_mirror_receipts r ON r.revision = s.revision
 WHERE s.field = 'verdict' AND s.revision =
   (SELECT MAX(n.revision) FROM sync_changes n WHERE n.item_key = s.item_key AND n.field = 'verdict')
 UNION ALL
-SELECT v.item_key, 0, v.user_priority, NULL FROM label_verdicts v
+SELECT v.item_key, 0, v.user_priority, NULL, v.comment FROM label_verdicts v
 WHERE NOT EXISTS (SELECT 1 FROM sync_changes s WHERE s.item_key = v.item_key AND s.field = 'verdict')
 """
 
@@ -56,7 +56,7 @@ def _current_change(conn, item_key: str):
 
 @contextmanager
 def current_label(db_path: Path, item_key: str, *, revision: int | None = None, redeliver: bool = False):
-    """Yield the current (Zotero key, priority), or None for a completed/no intent.
+    """Yield current verdict/comment intent with its resolved target, or None.
 
     A successful exit acknowledges a deletion; exceptions leave it pending.
     ``revision`` pins reconciliation's observed absence to that exact deletion.
@@ -69,11 +69,12 @@ def current_label(db_path: Path, item_key: str, *, revision: int | None = None, 
         row = _current_change(conn, item_key)
         if row is None or (revision is not None and row["revision"] != revision):
             yield None
-        elif row["value"] is None and row["mirrored"] is not None and not redeliver:
-            yield None
         else:
             target = _target_key(conn, row["item_key"])
-            yield (target, row["value"]) if target else None
+            yield {
+                **dict(row), "target_key": target,
+                "label_pending": row["value"] is not None or row["mirrored"] is None or redeliver,
+            } if target else None
             if target and row["value"] is None:
                 conn.execute("INSERT OR IGNORE INTO label_mirror_receipts(revision) VALUES (?)", (row["revision"],))
         conn.commit()

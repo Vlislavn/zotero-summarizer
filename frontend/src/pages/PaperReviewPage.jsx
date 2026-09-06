@@ -14,7 +14,6 @@ import PaperFigures from '../components/library/PaperFigures.jsx';
 import SectionMap from '../components/paper/review/SectionMap.jsx';
 import StoryToc from '../components/paper/review/StoryToc.jsx';
 import ActionRail from '../components/paper/review/ActionRail.jsx';
-import VerdictPicker from '../components/VerdictPicker.jsx';
 import { Chip } from '../components/paper/review/primitives.jsx';
 import { FullTextAccessNotice, StatusBanner, timeAgo, formatShortDate } from '../components/library/shared.jsx';
 import { gradeTone, bandTone, BAND_LABEL } from '../components/paper/review/tones.js';
@@ -301,7 +300,7 @@ export default function PaperReviewPage() {
           )}
         </main>
 
-        <aside className="mt-8 lg:sticky lg:top-4 lg:mt-0 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
+        <aside id="paper-actions" tabIndex={-1} className="mt-8 scroll-mt-20 lg:sticky lg:top-4 lg:mt-0 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
           <ActionRail
             itemKey={itemKey}
             detail={detail}
@@ -317,14 +316,11 @@ export default function PaperReviewPage() {
         </aside>
       </div>
 
-      {/* Mobile: the verdict stays one tap away (Fitts's Law / Serial Position). */}
+      {/* Mobile jumps to the same editor; it must not overwrite an unseen draft. */}
       <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 px-4 py-2 backdrop-blur lg:hidden">
-        <VerdictPicker
-          value={verdict.existing?.user_priority ?? null}
-          onPick={(p) => verdict.onSubmit({ user_priority: p, comment: '' })}
-          disabled={verdict.submitting}
-          size="sm"
-        />
+        <a href="#paper-actions" className="block rounded-lg bg-teal-700 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-teal-800">
+          Your verdict
+        </a>
       </div>
     </div>
   );

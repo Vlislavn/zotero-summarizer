@@ -52,7 +52,7 @@ _DEFAULT_GOAL_FACET_PROMPT = (
 
 
 class GoalFacetResponse(BaseModel):
-    relevant: bool = Field(default=False)
+    relevant: bool = Field(strict=True)
     summary: str = Field(default="")
     supporting_quotes: list[str] = Field(default_factory=list)
 
@@ -73,11 +73,8 @@ _BATCHED_GOAL_PROMPT = (
 )
 
 
-class _BatchedGoalFacet(BaseModel):
+class _BatchedGoalFacet(GoalFacetResponse):
     goal_index: int = Field(default=-1)
-    relevant: bool = Field(default=False)
-    summary: str = Field(default="")
-    supporting_quotes: list[str] = Field(default_factory=list)
 
 
 class BatchedGoalResponse(BaseModel):

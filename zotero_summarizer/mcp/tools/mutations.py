@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal
+from urllib.parse import quote
 
 from zotero_summarizer.mcp.api_client import _api_request, _base_item_update_payload
 from zotero_summarizer.mcp.helpers import (
@@ -32,7 +33,7 @@ async def manage_tags(
 
     update_result = await _api_request(
         "POST",
-        f"/api/zotero/items/{safe_item_key}/tags",
+        f"/api/zotero/items/{quote(safe_item_key, safe='')}/tags",
         payload={
             "add_tags": normalized_add,
             "remove_tags": normalized_remove,
@@ -79,7 +80,7 @@ async def manage_collections(
 
     update_result = await _api_request(
         "POST",
-        f"/api/zotero/items/{safe_item_key}/collections",
+        f"/api/zotero/items/{quote(safe_item_key, safe='')}/collections",
         payload=payload,
     )
     data, update_error = _extract_data_or_error(update_result)
@@ -110,7 +111,7 @@ async def set_reading_priority(
 
     update_result = await _api_request(
         "POST",
-        f"/api/zotero/items/{safe_item_key}/priority",
+        f"/api/zotero/items/{quote(safe_item_key, safe='')}/priority",
         payload={"priority": priority, "force": bool(force)},
     )
     data, update_error = _extract_data_or_error(update_result)

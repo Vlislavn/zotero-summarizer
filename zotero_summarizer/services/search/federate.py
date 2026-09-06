@@ -13,6 +13,7 @@ exception from a channel propagates (fail-fast), it is not swallowed here.
 from __future__ import annotations
 
 from collections.abc import Callable
+import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -142,6 +143,19 @@ def _variant_queries(variants: list[str], scalar: str, *, cap: int | None = None
     return queries[:cap] if cap else queries
 
 
+def _matches_constraints(candidate: Candidate, plan: Any) -> bool:
+    """Literal whole-token phrases, not a claim to classify study design semantically."""
+    text = " " + " ".join(re.findall(r"\w+", f"{candidate.title} {candidate.abstract}".casefold())) + " "
+
+    def contains(term: str) -> bool:
+        tokens = re.findall(r"\w+", term.casefold())
+        return bool(tokens) and (" " + " ".join(tokens) + " ") in text
+
+    return (all(contains(term) for term in plan.must_include)
+            and not any(contains(term) for term in plan.must_not_include)
+            and (not plan.study_types or any(contains(term) for term in plan.study_types)))
+
+
 def federate(
     plan: Any,
     *,
@@ -185,7 +199,7 @@ def federate(
         channel_results = [f.result() for f in [pool.submit(t) for t in tasks]]
 
     unioned = [cand for channel in channel_results for cand in channel]
-    return to_version_families(unioned)
+    return [candidate for candidate in to_version_families(unioned) if _matches_constraints(candidate, plan)]
 
 
 __all__ = ["federate", "LibraryFinder"]

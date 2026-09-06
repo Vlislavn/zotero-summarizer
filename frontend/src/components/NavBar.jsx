@@ -67,7 +67,20 @@ export default function NavBar() {
             {sync.conflicts.length > 1 && ` · ${sync.conflicts.length - 1} more`}
           </span>
         ) : rejected ? (
-          <span>Sync rejected for {rejected.item_key} ({rejected.field}): {rejected.error}. The device copy was preserved; refresh the app before retrying.</span>
+          <details>
+            <summary>{sync.rejected.length} rejected draft(s) preserved on this device. Other valid changes can still sync.</summary>
+            {sync.rejected.map((draft) => (
+              <div key={draft.mutation_id} className="mt-2">
+                <p>{draft.item_key} ({draft.field}): {draft.error}.</p>
+                <label>
+                  Saved draft — copy this text, correct it and save again on the paper page.
+                  <textarea readOnly rows={4} className="block w-full border p-2"
+                    value={`${draft.value ?? ''}${draft.comment ? `\n\nComment:\n${draft.comment}` : ''}`} />
+                </label>
+                <NavLink className="underline" to={`/paper/${encodeURIComponent(draft.item_key)}`}>Open paper</NavLink>
+              </div>
+            ))}
+          </details>
         ) : sync.online ? (
           <span>{sync.pending
             ? `${sync.pending} change${sync.pending === 1 ? '' : 's'} waiting to sync`

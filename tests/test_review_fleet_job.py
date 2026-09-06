@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import pytest
 
+from zotero_summarizer.models import GoalSummary
 from zotero_summarizer.models.triage import ProposedVerdict
 from zotero_summarizer.services.library.review_fleet import fleet
 from zotero_summarizer.storage import repositories
@@ -36,6 +37,11 @@ def _reset_latch_and_inline_threads(monkeypatch):
             needs_library_login=0, needs_login_items=[], failed=0, started_at=None, progress={},
         )
     monkeypatch.setattr(fleet._flight, "run_in_background", lambda target: target())
+    monkeypatch.setattr(
+        fleet.deep_review, "review_is_current",
+        lambda entry, item_key="": bool(entry)
+        and entry.get("review_contract_version") == fleet.deep_review.REVIEW_CONTRACT_VERSION,
+    )
     yield
     fleet._LATCH.finish(None)
 
@@ -64,7 +70,10 @@ def _review(read_decision="read", grade="A", *, relevant=True):
             "novelty": 4, "significance": 4,
         },
         "quality": {"quality_band": "highlight"},
-        "goal_summaries": [{"relevant": relevant}],
+        "goal_summaries": [GoalSummary(
+            goal="Fixture goal", relevant=relevant,
+            retrieval_state="hit" if relevant else "miss", abstained=not relevant,
+        ).model_dump()],
     }
 
 

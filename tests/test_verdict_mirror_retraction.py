@@ -30,6 +30,7 @@ def _setup(tmp_path, monkeypatch, lane):
     add_tag_to_item(zdb, item_id=item, tag_name="topic:x")
     reader, writer = ZoteroReader(zdb.parent), ZoteroWriter(zdb.parent)
     monkeypatch.setattr(zotero, "get_zotero_reader_or_raise", lambda: reader)
+    monkeypatch.setattr(verdict_effects, "get_zotero_reader_or_raise", lambda: reader)
     monkeypatch.setattr(zotero, "get_zotero_writer_or_raise", lambda: writer)
     monkeypatch.setattr(writer, "is_connector_running", lambda: False)
     monkeypatch.setattr(golden, "_db_path", lambda: path)

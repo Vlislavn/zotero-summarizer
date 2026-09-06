@@ -51,6 +51,7 @@ it('survives an app restart offline and preserves ordered verdicts until acknowl
 
   await reopened.applyPushResults(pending.map((row, index) => ({
     mutation_id: row.mutation_id, status: index ? 'already_applied' : 'applied',
+    applied_revision: 42 + index,
   })));
   expect(await reopened.pendingMutations()).toEqual([]);
 });

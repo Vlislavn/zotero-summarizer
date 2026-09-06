@@ -213,6 +213,10 @@ export default function Today() {
     () => (feedFilter ? papers.filter((p) => p.feed_name === feedFilter) : papers),
     [papers, feedFilter],
   );
+  const visibleSelectedIds = useMemo(
+    () => visiblePapers.filter((paper) => selectedIds.has(paper.item_id)).map((paper) => paper.item_id),
+    [visiblePapers, selectedIds],
+  );
 
   // Store the visible slate order so the full review page's j/k Prev/Next pages
   // through Today's list — the card links to /paper/:stable_feed_key, the same key
@@ -250,7 +254,7 @@ export default function Today() {
 
   const commit = useCallback(
     (mutation, verb) => {
-      const ids = [...selectedIds];
+      const ids = visibleSelectedIds;
       if (ids.length === 0) return;
       mutation.mutate(ids, {
         onSuccess: (res) => {
@@ -290,7 +294,7 @@ export default function Today() {
         },
       });
     },
-    [selectedIds, queryClient],
+    [visibleSelectedIds, queryClient],
   );
 
   // Backlog triage is now an explicit user action (the "Triage backlog"
@@ -308,7 +312,7 @@ export default function Today() {
   }, [triageStatus?.running, queryClient]);
 
   const actionError = addMutation.error || trashMutation.error;
-  const selectedCount = selectedIds.size;
+  const selectedCount = visibleSelectedIds.length;
 
   return (
     <section className="glass rounded-2xl border border-slate-200 p-4">

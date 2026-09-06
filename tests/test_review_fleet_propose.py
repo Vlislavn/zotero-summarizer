@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from zotero_summarizer.models.triage import ProposedVerdict
+from zotero_summarizer.models.triage import GoalSummary, ProposedVerdict
 from zotero_summarizer.services.library.review_fleet import propose
 
 
@@ -50,14 +50,15 @@ def _quality(*, band="", overstatements=None, red_flags=None, grade=None):
 
 
 def _goals(*, matched):
-    """A per-goal board where ANY ``relevant`` cell means goal-matched."""
-    return [{"relevant": True}, {"relevant": False}] if matched else [{"relevant": False}]
+    miss = GoalSummary(goal="Evaluation", retrieval_state="miss").model_dump()
+    hit = GoalSummary(goal="Agents", retrieval_state="hit", relevant=True, abstained=False,
+                      summary="Evaluates agents.", supporting_quotes=["We evaluate agents."]).model_dump()
+    return [hit, miss] if matched else [miss]
 
 
 # --- 1. the read/skim/skip × grade × goal-match truth table ------------------------
 #
-# Each row is (read_decision, grade, goal_matched, expected_proposed). Derived
-# straight from propose._base_verdict:
+# Each row expresses the reading-policy requirement for an assessed goal board:
 #   read  -> must (A/B) / should (C/D/?)
 #   skim  -> should (A/B) / could (C/D/?)
 #   skip  -> could (goal matched) / dont (goal miss)     <- the asymmetry
@@ -143,10 +144,9 @@ def test_goal_miss_skip_is_the_only_path_to_dont_read():
     assert out.proposed == "dont_read"
 
 
-@pytest.mark.parametrize("goal_summaries", [[{"relevant": False}], [{"relevant": False}, {}], [{}]])
+@pytest.mark.parametrize("goal_summaries", [_goals(matched=False), _goals(matched=False) * 2])
 def test_evaluated_goal_miss_allows_dont_read_on_skip(goal_summaries):
-    """A REAL goal board (dict cells present, none ``relevant``) was evaluated and
-    matched nothing — a true MISS, so a skip may propose the (only) hide."""
+    """Every cell explicitly records a retrieval miss; summary abstention is valid."""
     out = propose.propose_verdict(
         _digest(read_decision="skip", grade="C"),
         _quality(band="ok"),
@@ -155,7 +155,10 @@ def test_evaluated_goal_miss_allows_dont_read_on_skip(goal_summaries):
     assert out.proposed == "dont_read"
 
 
-@pytest.mark.parametrize("goal_summaries", [None, [], "not-a-list", ["junk", 3, None]])
+@pytest.mark.parametrize("goal_summaries", [
+    None, [], "not-a-list", ["junk", 3, None], [{}],
+    [{"relevant": False}], [{"relevant": False}, {}],
+])
 def test_unknown_goal_board_keeps_could_read_on_skip(goal_summaries):
     """REGRESSION (no-wrong-hide): an ABSENT / empty / malformed goal board — e.g.
     the ``_paper_goal_summaries`` LLM call raised and ``deep_review`` swallowed it

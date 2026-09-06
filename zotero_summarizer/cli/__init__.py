@@ -38,10 +38,10 @@ def apply_offline_env() -> bool:
 apply_offline_env()
 
 from zotero_summarizer.cli._app import register_app  # noqa: E402
-from zotero_summarizer.cli._faithbench import register_faithbench  # noqa: E402
+from zotero_summarizer.cli._faithbench import register_faithbench, _validate_faithbench_args  # noqa: E402
 from zotero_summarizer.cli._feeds import register_feeds  # noqa: E402
 from zotero_summarizer.cli._goldenset import register_goldenset, _validate_goldenset_args  # noqa: E402
-from zotero_summarizer.cli._research_feed import register_research_feed  # noqa: E402
+from zotero_summarizer.cli._research_feed import register_research_feed, _validate_research_feed_args  # noqa: E402
 from zotero_summarizer.cli._setup import register_setup  # noqa: E402
 from zotero_summarizer.cli._helpers import _resolve_feed_ids  # noqa: F401,E402  (re-export for tests)
 
@@ -66,6 +66,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "goldenset":
         _validate_goldenset_args(args, parser)
+    elif args.command == "faithbench":
+        _validate_faithbench_args(args, parser)
+    elif args.command == "research-feed":
+        _validate_research_feed_args(args, parser)
     set_context(AppContext(settings=Settings.load(project_root=getattr(args, "project_root", None))))
     return int(args.func(args))
 

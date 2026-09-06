@@ -312,10 +312,8 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
 
 
 async def save_review_note(req: ReviewNoteRequest) -> dict[str, Any]:
-    """Save the user's free-text review note. Local save always succeeds; the
-    Zotero mirror is best-effort (it refuses while Zotero is open — surfaced as a
-    soft status, exactly like the verdict note). Feed/note keys have no Zotero item
-    to mirror to and skip the write, matching the verdict route."""
+    """Commit the note, then deliver current intent. Mirror failures are retryable;
+    they do not undo the local save. Unconfigured Zotero/feed/note keys stay local."""
     safe_item_key = str(req.item_key or "").strip()
     if not safe_item_key:
         raise APIError(
@@ -329,8 +327,8 @@ async def save_review_note(req: ReviewNoteRequest) -> dict[str, Any]:
     )
     mirror = await asyncio.to_thread(
         verdict_effects.mirror_review_note,
+        _db_path(),
         safe_item_key,
-        req.note,
     )
     return {"saved": True, **mirror}
 

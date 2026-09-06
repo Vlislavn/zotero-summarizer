@@ -9,12 +9,13 @@ from pathlib import Path
 from typing import Any, Callable
 
 from zotero_summarizer.models import ResearchCandidate, ResearchFeedTriage
+from zotero_summarizer.models.research_feed import parse_run_budgets
 from zotero_summarizer.services._common import now_iso_z, write_json_atomic
 from zotero_summarizer.services.library import _review_cache
 from zotero_summarizer.services.research_feed.card import build_card
 from zotero_summarizer.services.research_feed.profile import load_profile
 from zotero_summarizer.services.research_feed.render import persist
-from zotero_summarizer.services.research_feed.source import RssCandidateSource, deduplicate
+from zotero_summarizer.services.research_feed.source import load_candidates
 from zotero_summarizer.settings import Settings
 
 
@@ -133,19 +134,15 @@ def _queue_tags(
 
 def _assess(
     settings: Settings, start: datetime, end: datetime, source_limit: int, venue: str,
-) -> tuple[Any, list[ResearchCandidate], dict[str, dict[str, Any]], list[tuple[Any, Any]], int]:
+) -> tuple[Any, list[ResearchCandidate], dict[str, dict[str, Any]], list[tuple[Any, Any]]]:
     profile = load_profile(settings.data_dir)
-    discovered = RssCandidateSource(settings.triage_db_path).load(
-        start=start, end=end, limit=source_limit,
+    candidates = load_candidates(
+        settings.triage_db_path, start=start, end=end, limit=source_limit, venue=venue,
     )
-    candidates = deduplicate(discovered)
-    if venue:
-        candidates = [candidate for candidate in candidates
-                      if venue.casefold() in str(candidate.venue or "").casefold()]
     rows = _latest_rows(settings.triage_db_path)
     assessed = [(candidate, triage_candidate(candidate, rows.get(candidate.source_id), profile))
                 for candidate in candidates]
-    return profile, candidates, rows, assessed, len(discovered)
+    return profile, candidates, rows, assessed
 
 
 def _ensure_reviews(settings: Settings, candidates: list[ResearchCandidate], timeout_seconds: int) -> None:
@@ -160,7 +157,7 @@ def _ensure_reviews(settings: Settings, candidates: list[ResearchCandidate], tim
     deep_review.start(
         item_keys=keys, reader=AppLibraryReader(settings.triage_db_path), acquire_missing=True,
     )
-    deadline = time.monotonic() + max(30, timeout_seconds)
+    deadline = time.monotonic() + timeout_seconds
     while any(deep_review.status(key)["status"] == "running" for key in keys):
         if time.monotonic() >= deadline:
             return
@@ -236,13 +233,16 @@ def run_weekly(
     review_timeout_seconds: int = 3600,
     review_loader: ReviewLoader = _review_cache.get_current_review,
 ) -> dict[str, Any]:
-    profile, candidates, rows, assessed, discovered = _assess(
+    shortlist_budget, card_budget, source_limit, review_timeout_seconds = parse_run_budgets(
+        shortlist_budget, card_budget, source_limit, review_timeout_seconds,
+    )
+    profile, candidates, rows, assessed = _assess(
         settings, start, end, source_limit, venue,
     )
     included = sorted((pair for pair in assessed if pair[1].include),
                       key=lambda pair: (pair[1].score, pair[1].confidence, pair[0].title), reverse=True)
-    shortlist = included[:shortlist_budget or profile.shortlist_budget]
-    reviewed = shortlist[:card_budget or profile.card_budget]
+    shortlist = included[:profile.shortlist_budget if shortlist_budget is None else shortlist_budget]
+    reviewed = shortlist[:profile.card_budget if card_budget is None else card_budget]
     if generate_reviews:
         _ensure_reviews(settings, [candidate for candidate, _triage in reviewed], review_timeout_seconds)
     records, missing, failed = _records(reviewed, review_loader, profile)
@@ -257,7 +257,7 @@ def run_weekly(
         "generated_at": now_iso_z(), "from": start.isoformat(), "to": end.isoformat(),
         "source": "app_rss", "venue": venue or None, "dry_run": dry_run,
         "counts": {
-            "discovered": discovered, "deduplicated": len(candidates),
+            "discovered": len(candidates), "deduplicated": len(candidates),
             "triaged": len(assessed), "shortlisted": len(shortlist),
             "full_text_available": len(records), "cards_generated": len(records),
             "failed": len(failed),

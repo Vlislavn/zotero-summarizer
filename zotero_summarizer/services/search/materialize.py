@@ -16,6 +16,7 @@ The ONE place the Targeted Search domain writes to Zotero — an EXPLICIT user a
 """
 from __future__ import annotations
 
+from html import escape
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
@@ -51,13 +52,10 @@ def _note_html(cand: Candidate, query: str) -> str:
 
     brief = (cand.review or {}).get("brief") or {}
     summary = brief.get("tldr") or (cand.abstract or "")[:400]
-    return pending_service.build_triage_note_html(
-        title=cand.title or "",
-        summary=f"Added from Targeted Search — query: {query}\n\n{summary}",
-        is_black_swan=False,
-        surprise_score=None,
-        run_id=f"targeted_search:{cand.candidate_id}",
-    )
+    marker = pending_service.build_provenance_comment(run_id=f"targeted_search:{cand.candidate_id}",
+                                                       source="targeted-search")
+    return (f"{marker}<h2>{escape(cand.title or 'Untitled')}</h2>"
+            f"<p>Added from Targeted Search — query: {escape(query)}</p><p>{escape(summary)}</p>")
 
 
 def _resolve_collection_name(collection_key: str | None) -> str:

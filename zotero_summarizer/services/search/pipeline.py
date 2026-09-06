@@ -24,15 +24,15 @@ from typing import Any
 from zotero_summarizer.models import GoalsConfig
 from zotero_summarizer.services._common import settings, state
 from zotero_summarizer.services.search import session as session_store
+from zotero_summarizer.services.search import require_online
 from zotero_summarizer.services.search._fulltext import acquire_full_text
-from zotero_summarizer.services.search._models import Candidate, ResearchSession
+from zotero_summarizer.services.search._models import Candidate, ResearchSession, ScreenRequest
 from zotero_summarizer.services.search._relevance import attach_relevance
 from zotero_summarizer.services.search._targeted_review import targeted_review
 from zotero_summarizer.services.search.federate import LibraryFinder, federate
 from zotero_summarizer.services.search.intent import build_query_plan, parse_intent
 from zotero_summarizer.services.search.rank import rank_candidates, score_query_relevance
 from zotero_summarizer.services.search.review import light_review, select_deep_set
-from zotero_summarizer.settings import offline_requested
 
 # Light-review the top band, then let quality reorder within it and the deep-set
 # selector pull 3-4 for the full read (spec §5 steps 7a-7b). Named constants — a
@@ -85,6 +85,7 @@ def _search_openalex_client(app: Any, config: GoalsConfig) -> Any:
 
 def default_deps() -> SearchDeps:
     """Wire dependencies from the running app (mirrors ``deep_review._build_ctx``)."""
+    require_online()
     app = state()
     config = app.app_state.config
     # ponytail: library channel deferred — federate() already supports a
@@ -110,10 +111,9 @@ def default_deps() -> SearchDeps:
 def run_screen(raw_query: str, questions: list[str], *, deps: SearchDeps) -> ResearchSession:
     """Phase 1: intent → plan → federate → score → rank → persist. Returns a saved
     ``ResearchSession`` with candidates ordered by the constrained contract."""
-    if offline_requested():
-        from zotero_summarizer.api.errors import APIError
-
-        raise APIError("strict_offline", "Targeted Search needs external literature sources", status_code=409)
+    request = ScreenRequest(query=raw_query, questions=questions)
+    raw_query, questions = request.query, request.questions
+    require_online()
     intent = parse_intent(raw_query, questions, llm=deps.llm)
     plan = build_query_plan(intent)
     candidates = federate(
@@ -172,7 +172,9 @@ def run_review(session_id: str, *, deps: SearchDeps, top_n: int = LIGHT_REVIEW_N
     """Phase 2: light-review the top band, re-rank on quality, select + deep-read the
     set. Serial by design — each step downloads a PDF and calls the LLM, and stacking
     heavy local-model calls is unsafe on a unified-memory box (memory-safety rule)."""
+    require_online()
     sess = session_store.load(session_id)
+    request = ScreenRequest(query=sess.raw_query, questions=sess.questions)
     fulltext: dict[str, str] = {}
     for cand in sess.candidates[:top_n]:
         text = acquire_full_text(cand, extractor=deps.extractor, unpaywall=deps.unpaywall_client)
@@ -189,7 +191,7 @@ def run_review(session_id: str, *, deps: SearchDeps, top_n: int = LIGHT_REVIEW_N
     for cand in deep_set:
         targeted_review(
             cand, full_text=fulltext.get(cand.candidate_id, ""),
-            query=sess.raw_query, questions=sess.questions, config=deps.config, llm=deps.llm,
+            query=request.query, questions=request.questions, config=deps.config, llm=deps.llm,
         )
         session_store.save_merge(sess)  # incremental: each deep review appears as it lands
 

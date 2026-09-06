@@ -66,11 +66,9 @@ from zotero_summarizer.services.library._review_cache import (  # noqa: F401
 from zotero_summarizer.services._common import state as get_state
 
 LOGGER = logging.getLogger(__name__)
-
 _DEFAULT_TOP_K = 5
 
 # Remote APIs still get a bounded default fan-out.
-# still impolite). Named constant, not a magic literal.
 _MAX_CONCURRENT = 8
 # Keep running jobs plus a bounded recent history.
 _MAX_FINISHED_JOBS = 12
@@ -224,6 +222,7 @@ def _review_one(
     # An injected cache path (fleet's university/OA acquisition) wins over the
     # Zotero attachment — the decouple that lets a verdict happen while Zotero is open.
     pdf_path = str(item.get("pdf_path") or detail.get("pdf_path") or "")
+    source_kind = "override" if item.get("pdf_path") else ("library" if pdf_path else "none")
 
     digest_dump = quality_dump = goal_dump = paper_type_dump = section_overlay = code_link_dump = None
     model_read_decision = ""
@@ -259,10 +258,10 @@ def _review_one(
                 web_article=bool(item.get("web_article")),
             ))  # noqa: E501
             from zotero_summarizer.services.library.review_fleet.propose import apply_reading_policy
-            digest, model_read_decision, reading_policy_flags = apply_reading_policy(
-                digest, quality_dump, goal_dump,
+            digest_dump, model_read_decision, reading_policy_flags = apply_reading_policy(
+                digest_dump, quality_dump, goal_dump,
             )
-            digest_dump = digest.model_dump()
+            digest = digest.model_copy(update=digest_dump)
             reporter.phase("note")
             from zotero_summarizer.services.library import review_detail
             if review_detail.classify_item_key(item_key) == review_detail.SOURCE_LIBRARY:
@@ -275,8 +274,11 @@ def _review_one(
                     LOGGER.warning("digest note write for %s failed: %s", item_key, exc)
             reporter.summary()
 
+    from zotero_summarizer.services.library._review_identity import build_review_identity
     return {
         "review_contract_version": REVIEW_CONTRACT_VERSION,
+        "review_identity": build_review_identity(
+            config=config, pdf_path=pdf_path, source_kind=source_kind, focus_prompt=focus_prompt),
         "provenance": provenance or {},
         "digest": digest_dump,
         "quality": quality_dump,
@@ -365,10 +367,10 @@ def _build_ctx(reader: Any = None) -> dict[str, Any]:
 def _resolve_items(top_k: int, item_keys: list[str] | None, overrides: dict[str, Any]) -> list[dict[str, Any]]:
     """Build the per-item dicts: the explicit ``item_keys`` (per-paper button / fleet,
     honoring ``pdf_overrides``) or the top-``top_k`` unread reading-queue picks."""
-    if item_keys:
+    if item_keys is not None:
         # Per-paper: title is re-read inside _review_one; gate_relevance is display-only.
         items = []
-        for key in item_keys:
+        for key in dict.fromkeys(item_keys):
             override = overrides.get(key, "")
             acquired = override if isinstance(override, dict) else None
             item = {
@@ -426,8 +428,6 @@ def _review_worker(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str)
                     entry["login_url"] = acquired.login_url
             _write_one(item_key, entry)
             _try_rebuild_render(item_key)
-            from zotero_summarizer.services.library import quality_gate  # grade landed → L2 hide D/flag
-            quality_gate.fire_for_keys({item_key})
         _set_job(item_key, status="ready", completed=1, progress={}, error=None)
     except Exception as exc:  # noqa: BLE001 — per-item background boundary
         LOGGER.warning("deep_review failed item=%s: %s", item_key, exc)
@@ -471,10 +471,12 @@ def start(
 
     Each paper runs as its own job on the shared provider-aware pool — concurrent for a
     remote provider, queued for a local one. Already-running papers are not re-submitted.
-    Returns the AGGREGATE ``status()`` + ``accepted: True`` (there's no single-flight to
-    reject; the field is kept for the review-fleet's poll contract). On a setup failure
+    Returns aggregate ``status()`` + ``accepted`` (False for an explicit empty list).
+    Duplicate keys are submitted once, in first-seen order. On a setup failure
     (no Zotero reader / queue build) the targeted papers are marked errored so their
     panels surface the cause."""
+    if item_keys == []:
+        return {**status(), "accepted": False}
     overrides = pdf_overrides or {}
     try:
         ctx = _build_ctx(reader=reader)

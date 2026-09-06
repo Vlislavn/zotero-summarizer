@@ -6,7 +6,6 @@ import PaperReaderPane from '../../library/PaperReaderPane.jsx';
 import AskPaperBox from '../../library/AskPaperBox.jsx';
 import OpenBriefButton from '../../library/OpenBriefButton.jsx';
 import VerdictPanel from '../../VerdictPanel.jsx';
-import VerdictPicker from '../../VerdictPicker.jsx';
 import AbstractBlock from './AbstractBlock.jsx';
 import { Section, Disclosure } from '../review/primitives.jsx';
 
@@ -120,31 +119,11 @@ export default function PaperDetailView({
 
           {/* Act zone, three salience tiers (Von Restorff: one loud accent):
               verdict (loud) → collection (quiet, Read Next default) → tags (long
-              tail). The compact card uses the one-tap VerdictPicker; the full
-              page uses the VerdictPanel (comment + delete live there — Tesler:
-              the rare op gets the larger surface). */}
+              tail). Both sizes share the explicit verdict editor, including
+              its saved comment and Cancel/Update boundary. */}
           <Section label={compact ? undefined : 'Act'}>
             <div className="space-y-4">
-              {showVerdict && (compact ? (
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900 mb-2">Your verdict</h3>
-                  <VerdictPicker
-                    value={verdict.existing?.user_priority ?? null}
-                    onPick={(p) => verdict.onSubmit({ user_priority: p, comment: '' })}
-                    disabled={verdict.submitting}
-                    size="md"
-                  />
-                  {verdict.submitError && (
-                    <div className="mt-1 text-[11px] text-rose-700">{verdict.submitError}</div>
-                  )}
-                  {!verdict.submitError && verdict.submitWarning && (
-                    <div className="mt-1 text-[11px] text-amber-700">{verdict.submitWarning}</div>
-                  )}
-                  {!verdict.submitError && !verdict.submitWarning && verdict.submitNotice && (
-                    <div className="mt-1 text-[11px] text-emerald-700">{verdict.submitNotice}</div>
-                  )}
-                </div>
-              ) : (
+              {showVerdict && (
                 <VerdictPanel
                   itemKey={itemKey}
                   existingVerdict={verdict.existing}
@@ -157,7 +136,7 @@ export default function PaperDetailView({
                   deleting={verdict.deleting}
                   deleteError={verdict.deleteError}
                 />
-              ))}
+              )}
               {/* Collection lifted OUT of the disclosure — filing into Read Next
                   is a daily primary action, not the long tail (Pareto / Serial
                   Position): one click, default preselected. */}

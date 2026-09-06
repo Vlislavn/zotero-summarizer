@@ -17,20 +17,15 @@ from zotero_summarizer.services.research_feed.runner import triage_candidate
 from zotero_summarizer.services.library.review_fleet.propose import effective_read_decision
 
 FIXTURE = Path(__file__).with_name("research_feed_fixture.json")
-READING_FIXTURE = Path(__file__).with_name("reading_policy_fixture.json")
+READING_FIXTURE = Path(__file__).with_name("reading_policy_fixture_v2.json")
 
 
 def _case(row, profile):
     candidate = ResearchCandidate(
         source_id=row["id"], source="fixture", title=row["title"],
-        abstract="; ".join(row["projects"]), url=f"https://example.test/{row['id']}",
+        abstract=str(row.get("abstract") or ""), url=f"https://example.test/{row['id']}",
     )
-    summary = {"executive_summary": candidate.abstract, "methods": "evaluation benchmark"}
-    prior = {
-        "decision": row["decision"], "reading_priority": "could_read",
-        "composite_score": 2.4, "shap_contribs_json": json.dumps({"summary": summary}),
-    }
-    triage = triage_candidate(candidate, prior, profile)
+    triage = triage_candidate(candidate, None, profile)
     artifact = row.get("verified_code_url")
     review = {
         "digest": {"tldr": row["title"], "methods": "evaluation benchmark",
@@ -66,7 +61,7 @@ def evaluate(payload):
         reading_matches += action == row["expected_read_decision"]
     metrics = {
         "papers": len(rows),
-        "shortlist_precision_at_10": sum(row["human_include"] for row in ranked) / len(ranked),
+        "shortlist_precision_at_10": sum(row["human_include"] for row in ranked) / len(ranked) if ranked else 0.0,
         "must_not_miss_recall": sum(row["predicted_include"] for row in must) / len(must),
         "read_skim_skip_agreement": round(reading_matches / len(reading_rows), 3),
         "artifact_availability_accuracy": sum(
@@ -84,6 +79,7 @@ def evaluate(payload):
     metrics["passes"] = bool(
         len(rows) >= 30 and metrics["shortlist_precision_at_10"] >= 0.8
         and metrics["must_not_miss_recall"] == 1
+        and metrics["read_skim_skip_agreement"] >= 0.8
         and metrics["reported_code_link_precision"] >= 0.9
         and not metrics["fabricated_urls"] and metrics["estimated_review_minutes"] <= 30
     )

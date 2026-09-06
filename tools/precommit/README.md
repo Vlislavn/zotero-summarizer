@@ -17,7 +17,7 @@ make scan-diff    # the same, scoped to the .py you changed vs the base branch (
 | script | enforces |
 |---|---|
 | `check_file_loc.py` | hard `.py` ≤ 500 LOC with no allowlist |
-| `check_import_policy.py` | the layered-import rules + "new service modules go in a domain subpackage" |
+| `check_import_policy.py` | AST-based static import rules (relative, aliased, multi-name and nested imports included); services may import only `api.errors` from the API layer; new service modules go in a domain subpackage |
 | `check_module_readme.py` | every package has a README; editing a package's code re-stages its README |
 | `check_dead_code.py` | dead-code identification (two tiers, below); existing findings grandfathered |
 | `check_redundancy.py` | redundant-transform + near-duplicate identification (Tier 6, below); existing findings grandfathered |
@@ -29,6 +29,14 @@ make scan-diff    # the same, scoped to the .py you changed vs the base branch (
 | `redundancy_allowlist.txt` | grandfathered redundancy findings (transforms + clone pairs) — shrink to empty |
 | `slop_allowlist.txt` | grandfathered slop findings (`<path>:<line>:<rule>`) — shrink to empty |
 | `slop_severity.txt` | optional per-rule severity overrides (`rule=off\|advise\|block`) — empty by default |
+
+The import gate parses Python with stdlib AST and resolves relative imports from
+the importing package without executing it. Syntax/relative-resolution errors
+fail the check; comments and example strings are not imports. Tests exercise the
+gate and its CLI with forbidden forms and permitted near-misses. This is a static
+import check, not a transitive dependency/effect analyzer or a sandbox: dynamic
+imports, callbacks and module objects passed through global state are outside its
+guarantee. It does not prevent a writer from being called through those paths.
 
 ## Dead-code identification (`check_dead_code.py`)
 

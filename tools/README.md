@@ -19,9 +19,22 @@ Prestige validation uses the shared ZIP/legacy-joblib artifact resolver.
 | `eval_slate_blend.py` | offline eval of the Today-slate ranking blend. |
 | `eval_temporal_objective.py` | offline eval of the temporal-split training objective; reuses production's aligned training matrix and train-only engagement-column rebuild for shuffled folds and both temporal objectives. |
 | `eval_quality_promote.py` | offline eval of the quality→must_read promotion (`rank_blend.promote_band`) against firewalled user verdicts — precision + flooding per (goal, relevance) floor. Gates the `quality_promote` flip. |
-| `eval_reading_policy.py` | offline 17-paper, user-labelled gate for the conservative `read|skim|skip` policy: before/after read rate, full-read precision, idea rescue, and zero high-friction/weak-evidence full reads. Uses `reading_policy_fixture.json`; `--check` fails when a gate regresses. |
+| `eval_reading_policy.py` | offline 17-paper, user-labelled gate for the conservative reading cap: before/after read rate, full-read precision, idea rescue, and zero high-friction/weak-evidence full reads. Uses `reading_policy_fixture_v2.json`, captured from matching real cache entries with unchanged human annotations; `--check` retains the original thresholds. This is not a full recommendation-accuracy gate. |
 | `eval_research_feed.py` | offline 30-real-paper Research Intelligence gate: precision@10, must-not-miss recall, artifact URL precision/fabrication, project-use coverage, review-time estimate, and read-action agreement from the separate 17-paper fixture. |
 | `validate_prestige_upgrade.py` | sanity-check the OpenAlex prestige enrichment. |
 | `precommit/` | the repo's custom pre-commit checks (LOC cap, layering, README freshness, dead-code, AI-slop). |
 
 **Benchmarking discipline + the memory-safety protocol live in `docs/benchmarking.md` (local-only, gitignored — not in the repo)** — read it before running any local sweep (this box has been thrashed by unsupervised local benchmarking).
+
+Reading-policy v1 remains unchanged as historical data and a negative regression:
+its bare `relevant=true` cells do not establish assessed goal evidence. V2 captures
+all policy-consumed inputs from all 17 matching legacy reviews, including unknowns,
+with source timestamps and cache/annotation SHA-256 hashes. It uses no new model
+calls and never derives input signals from expected labels. The compact projection
+was checked against full cache entries for identical actions, flags and metrics.
+Research-feed action agreement reads the same v2 snapshot; its separate inclusion
+oracle leakage and incomplete acceptance criteria remain tracked as A163.
+
+`eval_prompt_variant.py` compares existing faithbench reports without model work.
+An unmeasured (`null`) trap rate blocks comparison, even if another QA condition
+has a measured rate; missing safety evidence is never treated as zero or dropped.

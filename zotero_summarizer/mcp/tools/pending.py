@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict
 
+from pydantic import StrictInt
+
 from zotero_summarizer.mcp.api_client import _api_request, _fetch_pending_rows
 from zotero_summarizer.mcp.config import MAX_PENDING_FETCH
 from zotero_summarizer.mcp.helpers import _as_int, _decode_cursor, _encode_cursor, _error, _extract_data_or_error, _ok
@@ -16,21 +18,6 @@ APPLY_BATCH_SIZE = 1000
 class _PendingTotalResult(TypedDict):
     total: int | None
     error: dict[str, Any] | None
-
-
-def _normalize_change_ids(change_ids: list[int] | None) -> list[int]:
-    normalized_ids: list[int] = []
-    if not change_ids:
-        return normalized_ids
-
-    seen: set[int] = set()
-    for change_id in change_ids:
-        numeric = _as_int(change_id, 0)
-        if numeric <= 0 or numeric in seen:
-            continue
-        seen.add(numeric)
-        normalized_ids.append(numeric)
-    return normalized_ids
 
 
 async def _pending_total(status: str) -> _PendingTotalResult:
@@ -54,9 +41,10 @@ def _chunk_ids(change_ids: list[int], size: int) -> list[list[int]]:
 
 
 async def _collect_pending_ids_for_apply(change_ids: list[int] | None) -> tuple[list[int], dict[str, Any] | None]:
-    normalized_ids = _normalize_change_ids(change_ids)
-    if normalized_ids:
-        return normalized_ids, None
+    if change_ids is not None:
+        if any(type(value) is not int or value <= 0 for value in change_ids):
+            return [], _error("validation_error", "change_ids must contain positive integers")
+        return list(dict.fromkeys(change_ids)), None
 
     pending_total_result = await _pending_total("pending")
     pending_total = pending_total_result["total"]
@@ -73,7 +61,7 @@ async def _collect_pending_ids_for_apply(change_ids: list[int] | None) -> tuple[
     if fetch_error is not None:
         return [], fetch_error
 
-    normalized_ids = _normalize_change_ids([_as_int(row.get("id"), 0) for row in pending_rows])
+    normalized_ids = list(dict.fromkeys(row["id"] for row in pending_rows))
     if pending_total and len(normalized_ids) < pending_total:
         return [], _error(
             "pending_fetch_incomplete",
@@ -94,6 +82,7 @@ async def _apply_pending_chunks(change_ids: list[int], force: bool) -> tuple[dic
     total_inbox_removed = 0
     failed_items: list[Any] = []
     backup_paths: list[str] = []
+    inbox_errors: list[str] = []
     chunk_count = 0
 
     for chunk in _chunk_ids(change_ids, APPLY_BATCH_SIZE):
@@ -104,6 +93,8 @@ async def _apply_pending_chunks(change_ids: list[int], force: bool) -> tuple[dic
             payload={"change_ids": chunk, "force": bool(force)},
         )
         data, apply_error = _extract_data_or_error(apply_result)
+        if apply_error is None and any(type(data.get(key)) is not int or data[key] < 0 for key in ("applied", "failed")):
+            apply_error = _error("backend_contract_error", "Apply response must report non-negative applied/failed counts")
         if apply_error is not None:
             error_payload = apply_error.get("error")
             if isinstance(error_payload, dict):
@@ -113,15 +104,23 @@ async def _apply_pending_chunks(change_ids: list[int], force: bool) -> tuple[dic
                         "processed_chunks": chunk_count - 1,
                         "partial_applied": total_applied,
                         "partial_failed": total_failed,
+                        "failed_items": failed_items,
+                        "backup_paths": backup_paths,
+                        "inbox_removed": total_inbox_removed,
+                        "inbox_removed_errors": inbox_errors,
+                        "unconfirmed_change_ids": chunk,
                     }
                 )
                 error_payload["details"] = details
+                error_payload["retryable"] = False
             return None, apply_error
 
-        total_applied += _as_int(data.get("applied"), 0)
-        total_failed += _as_int(data.get("failed"), 0)
+        total_applied += data["applied"]
+        total_failed += data["failed"]
         total_inbox_removed += _as_int(data.get("inbox_removed"), 0)
         failed_items.extend(list(data.get("failed_items") or []))
+        if data.get("inbox_removed_error"):
+            inbox_errors.append(data["inbox_removed_error"])
 
         backup_path = data.get("backup_path")
         if isinstance(backup_path, str) and backup_path:
@@ -134,6 +133,7 @@ async def _apply_pending_chunks(change_ids: list[int], force: bool) -> tuple[dic
         "backup_paths": backup_paths,
         "failed_items": failed_items,
         "inbox_removed": total_inbox_removed,
+        "inbox_removed_errors": inbox_errors,
         "batches": chunk_count,
     }, None
 
@@ -233,23 +233,12 @@ async def list_pending_changes(
     return response
 
 
-# --- MCP safety boundary against indirect-prompt-injection-driven writes -----
-# Defense in depth: an injection in a paper abstract (already wrapped in
-# <untrusted_input> in goals.yaml) should never be able to trick the agent into
-# auto-creating Zotero items or auto-promoting from the Inbox via MCP. These
-# change types are reserved for the human-driven CLI/UI flow.
-#
-# Reference: Greshake et al., USENIX Security 2024 (arXiv:2302.12173v3);
-# Anthropic "Defending against indirect prompt injection" Dec 2024.
-MCP_RESTRICTED_CHANGE_TYPE_PREFIXES = ("create_", "inbox_", "promote_", "mark_feed_")
-MCP_RESTRICTED_CHANGE_TYPES_EXACT = frozenset({"mark_feed_item_read"})
+# Unreviewed operations stay human-only, including new writer types.
+MCP_ALLOWED_CHANGE_TYPES = frozenset({"tag_changes", "add_note", "add_to_collection", "remove_from_collection"})
 
 
 def _is_restricted_change_type(change_type: str) -> bool:
-    ct = str(change_type or "").strip().lower()
-    if ct in MCP_RESTRICTED_CHANGE_TYPES_EXACT:
-        return True
-    return any(ct.startswith(prefix) for prefix in MCP_RESTRICTED_CHANGE_TYPE_PREFIXES)
+    return str(change_type or "").strip().lower() not in MCP_ALLOWED_CHANGE_TYPES
 
 
 async def _filter_mcp_restricted_change_ids(
@@ -268,13 +257,18 @@ async def _filter_mcp_restricted_change_ids(
     pending_rows, fetch_error = await _fetch_pending_rows("all", BACKEND_PENDING_MAX_LIMIT)
     if fetch_error is not None:
         return [], [], fetch_error
-    ids_set = {int(i) for i in change_ids}
+    rows_by_id = {row["id"]: row for row in pending_rows}
+    missing = [rid for rid in change_ids if rid not in rows_by_id]
+    if missing:
+        return [], [], _error(
+            "pending_fetch_incomplete",
+            "Cannot verify every requested change; nothing was applied",
+            details={"missing_change_ids": missing, "max_limit": BACKEND_PENDING_MAX_LIMIT},
+        )
     allowed: list[int] = []
     blocked: list[dict[str, Any]] = []
-    for row in pending_rows:
-        rid = _as_int(row.get("id"), 0)
-        if rid not in ids_set:
-            continue
+    for rid in change_ids:
+        row = rows_by_id[rid]
         if _is_restricted_change_type(str(row.get("change_type") or "")):
             blocked.append({"id": rid, "change_type": row.get("change_type")})
         else:
@@ -284,14 +278,14 @@ async def _filter_mcp_restricted_change_ids(
 
 @mcp.tool()
 async def apply_pending_changes(
-    change_ids: list[int] | None = None,
+    change_ids: list[StrictInt] | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
-    """Apply queued changes to Zotero. If change_ids is empty, applies all pending.
+    """Apply queued changes to Zotero. Omitted IDs select all pending; [] writes nothing.
 
-    Restricted change types (`create_*`, `inbox_*`, `promote_*`) are NEVER applied
-    via this MCP entry point — they're reserved for the human-driven CLI flow to
-    defend against indirect-prompt-injection-driven auto-promotions.
+    Only tags, add_note, and collection membership are allowed. All other change
+    types require the human-driven CLI/UI flow. Failed writes return ok=false;
+    inspect the outcome before explicitly retrying failed IDs in the UI.
     """
     normalized_ids, collect_error = await _collect_pending_ids_for_apply(change_ids)
     if collect_error is not None:
@@ -307,18 +301,27 @@ async def apply_pending_changes(
     if not safe_ids:
         return _error(
             "mcp_restricted",
-            "All requested changes are restricted from MCP application (create_*/inbox_*/promote_*). "
+            "All requested changes are outside the MCP write allowlist. "
             "Use the CLI or web UI to apply.",
             details={"blocked": blocked},
         )
 
     apply_summary, apply_error = await _apply_pending_chunks(safe_ids, bool(force))
     if apply_error is not None:
+        apply_error["error"].setdefault("details", {}).update(
+            requested_change_ids=safe_ids, mcp_blocked_change_ids=blocked,
+        )
         return apply_error
 
-    summary = apply_summary or {}
+    summary = apply_summary
     response = _ok(requested_change_ids=safe_ids, **summary)
     if blocked:
         # Surface the skips so the user (or agent) knows why some IDs didn't apply.
         response["mcp_blocked_change_ids"] = blocked
+    if summary["failed"] or summary["inbox_removed_errors"]:
+        return _error(
+            "pending_apply_failed",
+            "Application was incomplete; inspect failed_items and inbox_removed_errors before retrying in the UI",
+            details={key: value for key, value in response.items() if key != "ok"},
+        )
     return response

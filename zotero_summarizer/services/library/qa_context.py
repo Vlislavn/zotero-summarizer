@@ -51,10 +51,11 @@ def verified_quote(item_key: str, artifact: dict[str, Any], handle: Any) -> str 
 
 
 def citation(item_key: str, artifact: dict[str, Any], handle: Any, *, answered: bool) -> dict[str, Any]:
+    located = verified_quote(item_key, artifact, handle) is not None
     return {
         "claimed": answered,
-        "quote_verified": answered and isinstance(handle, dict),
-        "location_verified": verified_quote(item_key, artifact, handle) is not None,
+        "quote_verified": answered and located,
+        "location_verified": located,
         "evidence_handle": handle,
     }
 
@@ -87,7 +88,7 @@ def _turn_text(turn: dict[str, Any]) -> str:
     question = str(turn.get("question") or "").strip()
     answer = str(turn.get("answer") or "[abstained]").strip()
     quote = str(turn.get("quote") or "").strip()
-    return f"User: {question}\nAssistant: {answer}" + (f"\nVerified quote: {quote}" if quote else "")
+    return f"User: {question}\nAssistant: {answer}" + (f"\nPrior quote: {quote}" if quote else "")
 
 
 __all__ = ["citation", "compact_history", "evidence_handle", "extraction_version", "verified_quote"]

@@ -21,6 +21,7 @@ from zotero_summarizer.services.search._models import (
     Candidate,
     QueryPlan,
     ResearchSession,
+    ScreenRequest,
     SearchIntent,
 )
 
@@ -142,6 +143,7 @@ def claim(session_id: str, *, expect: str, to: str) -> bool:
         sess = load(session_id)
         if sess.status != expect:
             return False
+        ScreenRequest(query=sess.raw_query, questions=sess.questions)
         sess.status = to
         save(sess)
     return True

@@ -97,10 +97,11 @@ def _delta_intent(base: SearchIntent, add_concepts: list[str], drop_terms: list[
     """A focused intent for the delta federation: fetch the NEW concepts (lexical
     channels), anchored to the original question + new facets (semantic channel).
 
-    ``drop_terms`` steer the delta AWAY (excluded from must-include, recorded in
-    must-not-include) — they do NOT retroactively remove already-fetched candidates;
+    ``drop_terms`` steer the delta AWAY (unless explicitly required) — they do
+    NOT retroactively remove already-fetched candidates;
     the constrained rank already sinks off-topic hits by low ``query_score``."""
-    drops = {d.lower() for d in drop_terms}
+    required = {term.casefold() for term in base.must_include}
+    drop_terms = [term for term in drop_terms if term.casefold() not in required]
     canonical = base.canonical_question or base.raw_query
     if add_concepts:
         canonical = (canonical + " " + " ".join(add_concepts)).strip()
@@ -109,7 +110,7 @@ def _delta_intent(base: SearchIntent, add_concepts: list[str], drop_terms: list[
         canonical_question=canonical,
         concepts=list(add_concepts),
         synonyms=base.synonyms,
-        must_include=[t for t in base.must_include if t.lower() not in drops],
+        must_include=list(base.must_include),
         must_not_include=list(dict.fromkeys(base.must_not_include + drop_terms)),
         study_types=base.study_types,
         questions=base.questions,
@@ -140,11 +141,12 @@ def run_agentic_rounds(session_id: str, *, deps: Any, max_rounds: int = 2) -> Re
         before = _top_band_signature(sess.candidates)
         delta = refine_once(sess, llm=deps.llm)
         add, drop = delta["add_concepts"], delta["drop_terms"]
-        if not add:
-            LOGGER.info("targeted_search.refine: round %d proposed no additions; converged", rnd)
+        if not add and not drop:
+            LOGGER.info("targeted_search.refine: round %d proposed no changes; converged", rnd)
             break
 
-        delta_plan = build_query_plan(_delta_intent(sess.intent, add, drop))
+        previous_drops = [term for row in sess.refinements for term in row["drop_terms"]]
+        delta_plan = build_query_plan(_delta_intent(sess.intent, add, previous_drops + drop))
         new_cands = federate(
             delta_plan, openalex_client=deps.openalex_client,
             library_finder=deps.library_finder, quota=deps.quota,

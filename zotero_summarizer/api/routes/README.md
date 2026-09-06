@@ -34,7 +34,19 @@ Ask Paper additionally accepts up to 20 typed prior turns. The library service
 keeps a recent tail, compacts older evidence to extraction-versioned handles,
 and returns separate claimed/quote-verified/location-verified citation state.
 
+Review-fleet forwards explicit selections unchanged, including `[]` (no job,
+`accepted=False`). Only absent/null keys enable automatic top-K selection. The
+shared fleet service validates paths and rejects feed/note namespaces before
+scheduling, and deduplicates keys in first-seen order for both HTTP and direct callers.
+The narrower route-only stable-feed filter is removed.
+
 **Boundaries:** import `services/` + `models`; never the reverse.
+
+Search's shared request schema enforces a nonblank topic up to 4,000 characters,
+at most ten nonblank questions, each up to 1,000 characters, before dependencies
+are constructed. Strict offline rejects both screen and review kickoff before
+claiming a session. Candidate IDs are persisted and included in all session
+responses; plan responses include the server's ordered `display` projection.
 
 `GET /api/calibration/metrics` is registered by `results.py` and delegates to
 the feedback reporting service, not corpus metadata. Its path/response fields
@@ -98,3 +110,24 @@ check. Provenance lookup, storage, events and effects therefore receive the same
 key; the comment is untouched. Missing CSV provenance delegates prior-model
 selection to the golden command instead of repeating its read/fallback in the
 route. The feedback event uses the stored original priority before effects run.
+
+Before the first golden export, an absent CSV means no derived provenance, not
+a missing paper/PDF. The shared HTTP provenance loader returns an empty set so
+first verdicts and their review details remain usable; current labels live in
+SQLite. Existing-file read/parse failures still propagate, and the explicit
+file-loading service retains its missing-file error contract.
+
+Review-note saves now deliver current committed intent, not the request's text,
+so an older delayed request cannot overwrite a newer mirror. Genuine delivery
+errors propagate as HTTP failures after the local save; retry is safe. Successful
+replies keep `saved/note_written/note_error` (the latter is null); unconfigured
+Zotero and feed/note keys keep their local-only success. This supersedes the
+review-note best-effort failure behavior above, not verdict-comment enrichment.
+
+Sync push accepts at most 100 mutations and 100 optional `predecessors` UUIDs.
+These reference applied receipts for cross-batch causality; they never alter a
+mutation's immutable UUID/body identity. Unknown/conflict receipts return 422
+before writes. Existing clients may omit this field for a single batch.
+Verdict rationale delivery now also uses current intent and propagates real
+mirror failures after the durable local save, superseding the old soft-error
+description above; the explicit unconfigured-Zotero boundary remains local-first.

@@ -4,7 +4,7 @@ import {
 } from './tones.js';
 import {
   bandGloss, METHOD_CLAUSE, LEGEND, rubricLabel, paperTypeLabel,
-  summarizeGoals, readVerdict, decisiveRows, fullChecklist, shortGoal,
+  decisiveRows, fullChecklist, shortGoal,
 } from './briefModel.js';
 import { formatShortDate, timeAgo } from '../../library/shared.jsx';
 
@@ -62,12 +62,10 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
   const isNonPaper = quality?.basis === 'non_paper';
   const band = isNonPaper ? '' : String(quality?.quality_band || '');
   const redFlags = isNonPaper ? [] : (quality?.red_flags || []).map((x) => String(x || '').trim()).filter(Boolean);
-  const { nFired } = summarizeGoals(goals);
-  const nHitGoals = goals.filter((g) => String(g?.retrieval_state || '') === 'hit').length;
-  const hasBrief = Boolean((quality && !isNonPaper) || goals.length);
+  const nHitGoals = goals.filter((g) => g?.retrieval_state === 'hit'
+    && g?.relevant === true && g?.abstained === false).length;
 
-  // Lead verdict: the synthesized goals×rigor call when we have those layers;
-  // otherwise fall back to the digest's own read decision.
+  // The API projects cached decisions through the current policy; absence stays unknown.
   let verdict;
   const rawDigestDecision = String(digest?.read_decision || '').toLowerCase();
   const weakEvidence = band === 'flag' || (quality?.overstatements || []).some(Boolean);
@@ -81,10 +79,8 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
         ? `${weakEvidence ? `Concept interesting; evidence weak${redFlags[0] ? ` — ${redFlags[0]}` : ''}.` : 'Idea preserved; writing friction is high.'} ${digest.read_why || ''}`
         : digest.read_why || '',
     };
-  } else if (hasBrief) {
-    verdict = readVerdict({ nFired, band, redFlags });
   } else {
-    verdict = { key: 'skip', label: 'REVIEW', reason: digest?.verdict || '' };
+    verdict = { key: 'skip', label: 'REVIEW', reason: digest?.read_why || 'Reading decision unavailable; review the evidence.' };
   }
   // Deterministic checklist grade FIRST: quality.grade comes from grounded
   // coverage (stable run-to-run); digest.grade is the LLM's holistic guess and can

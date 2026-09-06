@@ -23,8 +23,9 @@ def _db_path():
 
 
 def _load_all():
-    """Load every row's provenance. Fail-fast if the CSV is missing."""
-    return label_provenance.load_golden_provenance(_golden_csv_path())
+    """An unexported library has no derived provenance; user verdicts stay usable."""
+    path = _golden_csv_path()
+    return label_provenance.load_golden_provenance(path) if path.exists() else []
 
 
 def _zotero_candidate_keys(*, collection: str, tag: str, search: str) -> set[str]:

@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from zotero_summarizer.models.triage import PaperDigest, ProposedVerdict
+from zotero_summarizer.models.triage import ProposedVerdict
 from zotero_summarizer.services._common import now_iso_z
 
 # Grades that read as "this is a strong paper" for the verdict lift.
@@ -36,22 +36,22 @@ _HIGH_GRADES = frozenset({"A", "B"})
 
 
 def _goal_evidence(goal_summaries: Any) -> str:
-    """Tri-state goal signal: ``"match"`` (≥1 standing goal fired), ``"miss"``
-    (goals WERE evaluated and none fired), or ``"unknown"`` (no usable goal board).
+    """A confirmed hit keeps; only a complete, explicit miss board licenses hiding.
 
-    The distinction is load-bearing for the no-wrong-hide asymmetry: only a REAL
-    miss may license a ``dont_read`` proposal on a skip. An ``unknown`` board —
-    ``None``/empty/malformed, e.g. the goal-summary LLM call errored and
-    ``deep_review`` swallowed it to ``None`` — is NOT a miss: a swallowed infra
-    error must never nudge a paper toward a hide. A board "matched" when any of its
-    ``GoalSummary`` cells is ``relevant``; cells must be dicts to count as evaluated.
+    Abstention is about the generated summary: a retrieval miss can legitimately
+    abstain, but a hit with a withheld summary does not establish a confirmed match.
     """
-    if not isinstance(goal_summaries, list):
+    if not isinstance(goal_summaries, list) or not goal_summaries:
         return "unknown"
     cells = [g for g in goal_summaries if isinstance(g, dict)]
-    if not cells:
-        return "unknown"
-    return "match" if any(bool(g.get("relevant")) for g in cells) else "miss"
+    if any(g.get("retrieval_state") == "hit" and g.get("relevant") is True
+           and g.get("abstained") is False for g in cells):
+        return "match"
+    if len(cells) == len(goal_summaries) and all(
+        g.get("retrieval_state") == "miss" and g.get("relevant") is False for g in cells
+    ):
+        return "miss"
+    return "unknown"
 
 
 def _grade(digest: dict[str, Any] | None, quality: dict[str, Any] | None) -> str:
@@ -118,6 +118,8 @@ def effective_read_decision(
     """Reserve full reading for the intersection of idea, goal, evidence, and effort."""
     d, q = digest or {}, quality or {}
     decision = str(d.get("read_decision") or "").strip().lower()
+    if decision == "skip" and _goal_evidence(goal_summaries) == "unknown":
+        return "", ["goals_not_assessed"]
     if decision != "read":
         return decision if decision in {"skim", "skip"} else "", []
     flags: list[str] = []
@@ -140,20 +142,23 @@ def effective_read_decision(
 
 
 def apply_reading_policy(
-    digest: PaperDigest,
+    digest: dict[str, Any],
     quality: dict[str, Any] | None,
     goal_summaries: Any,
-) -> tuple[PaperDigest, str, list[str]]:
+) -> tuple[dict[str, Any], str, list[str]]:
     """Apply the glassbox reading cap while preserving the model's raw decision."""
-    raw = digest.read_decision
+    raw = str(digest.get("read_decision") or "")
     effective, flags = effective_read_decision(
-        digest.model_dump(), quality, goal_summaries=goal_summaries,
+        digest, quality, goal_summaries=goal_summaries,
     )
     if effective != raw:
-        digest = digest.model_copy(update={
+        reason = "Goals not assessed; reading decision withheld." if not effective else (
+            "Full reading threshold not met. " + str(digest.get("read_why") or "")
+        )
+        digest = {**digest,
             "read_decision": effective,
-            "read_why": "Full reading threshold not met. " + digest.read_why,
-        })
+            "read_why": reason,
+        }
     return digest, raw, flags
 
 
@@ -187,7 +192,7 @@ def _rationale(read_decision: str, grade: str, verdict: str, *, goal_evidence: s
         "read": "read the original",
         "skim": "skim targeted parts",
         "skip": "the digest is enough",
-        "": "no full-text digest yet",
+        "": "reading decision unavailable",
     }[read_decision]
     grade_txt = f"grade {grade}" if grade else "ungraded"
     goal_txt = {"match": "matched a goal", "miss": "no goal match", "unknown": "goals not assessed"}[goal_evidence]
@@ -208,8 +213,8 @@ def propose_verdict(
     Pure + deterministic — NO LLM call, NO I/O. ``digest`` is the cached
     ``PaperDigest`` dump (its ``read_decision``/``grade``), ``quality`` the cached
     ``QualityEval`` dump (``quality_band``/``overstatements``/``red_flags``), and
-    ``goal_summaries`` the cached per-goal board (any ``relevant`` cell = goal
-    match). Any of these may be ``None`` (a layer was skipped) — the mapping
+    ``goal_summaries`` the cached per-goal board (a non-abstained, relevant hit
+    confirms a match). Any of these may be ``None`` (a layer was skipped) — the mapping
     degrades to a safe ``could_read`` rather than guessing a hide.
     """
     read_decision = str((digest or {}).get("read_decision") or "").strip().lower()

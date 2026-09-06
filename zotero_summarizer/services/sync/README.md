@@ -30,9 +30,8 @@ mutation/conflict audit.
 
 This protocol is currently safe for the default same-machine/loopback PWA only.
 It has no remote-user authentication or HTTPS bootstrap; exposing it to a LAN or
-internet client is deferred until that transport boundary exists. Post-commit
-mirrors remain best-effort like the online route, and the JSONL transition log is
-not an exactly-once transactional outbox.
+internet client is deferred until that transport boundary exists. The JSONL
+transition log is not an exactly-once transactional outbox.
 
 Verdict `delete` effects now share the online retraction command, including UUID
 replay. SQLite deletion revisions remain pending until tag removal is confirmed;
@@ -43,4 +42,18 @@ retryable; only the explicit Zotero-unconfigured local-first boundary is optiona
 Only pre-commit validation/storage `ValueError`s become rejected mutations;
 post-commit effect errors propagate without misreporting the durable write.
 Set-label mirrors also read current state, including after materialization.
-Review-note deletion and older CSV/comment enrichment contracts are unchanged.
+Review-note set/delete and UUID replay now deliver the current body under the
+same writer lock, rather than the historical mutation value. A deletion clears
+the existing app-owned Zotero note body; the marked child note remains. Genuine
+mirror errors propagate after the local commit, so retrying the unchanged UUID
+can finish delivery without losing newer intent. Unconfigured Zotero and the
+existing feed/note namespace skip remain local-first. Verdict rationales now
+share the current-label writer lock too; older CSV enrichment remains separate.
+
+Pushes contain at most 100 mutations. The optional, bounded `predecessors` UUID
+list names already-applied server receipts: the next batch inherits only that
+device/item/field's acknowledged revision, without rewriting immutable request
+bodies or rerunning predecessor effects. Intervening writes still conflict.
+Unknown or conflict receipts reject the request before writes. IndexedDB commits
+these receipt IDs with acknowledgement retirement, so continuation survives a
+restart or the existing 15-second whole-sync deadline. No schema or worker is added.

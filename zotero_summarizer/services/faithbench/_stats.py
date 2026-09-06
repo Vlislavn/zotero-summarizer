@@ -141,14 +141,14 @@ def _qa_condition_stats(
         **pass_block,
         "answerable_accuracy": round(
             _mean([1.0 if j["success"] else 0.0 for j in answerable]), 4
-        ),
-        "wrong_abstain_rate": round(wrong_abstains / len(answerable), 4) if answerable else 0.0,
+        ) if answerable else None,
+        "wrong_abstain_rate": round(wrong_abstains / len(answerable), 4) if answerable else None,
         "trap": {
             "n_trap_trials": len(traps),
-            "hallucination_rate": round(hallucinated / len(traps), 4) if traps else 0.0,
-            "abstention_recall": round(trap_passes / len(traps), 4) if traps else 0.0,
+            "hallucination_rate": round(hallucinated / len(traps), 4) if traps else None,
+            "abstention_recall": round(trap_passes / len(traps), 4) if traps else None,
             "abstention_precision": (
-                round(trap_passes / all_abstentions, 4) if all_abstentions else 0.0
+                round(trap_passes / all_abstentions, 4) if all_abstentions else None
             ),
         },
         "by_answer_type": by_type,

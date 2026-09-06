@@ -88,17 +88,6 @@ def _relevance_verdict(n_fired: int, max_score: float) -> str:
     return "OFF GOAL"
 
 
-def _read_verdict(n_fired: int, band: str) -> tuple[str, str, str]:
-    """(css_key, label, one-clause reason)."""
-    if not n_fired:
-        return "skip", "SKIP", "none of your research goals are addressed"
-    if band == "flag":
-        return "skim", "SKIM", "relevant to your goals but rigor is flagged — read critically"
-    if band == "highlight":
-        return "deep", "DEEP-READ", "relevant to your goals and rigorous"
-    return "deep", "DEEP-READ", "relevant to your goals; quality is acceptable"
-
-
 def brief_html(
     content: dict[str, Any],
     *,
@@ -111,7 +100,8 @@ def brief_html(
     goals = goal_summaries or []
     if not goals and not quality and not digest:
         return ""
-    fired = [g for g in goals if g.get("retrieval_state") == "hit" and g.get("relevant")]
+    fired = [g for g in goals if g.get("retrieval_state") == "hit"
+             and g.get("relevant") is True and g.get("abstained") is False]
     n_fired = len(fired)
     max_score = max((float(g.get("score") or 0) for g in goals), default=0.0)
     band = str((quality or {}).get("quality_band") or "")
@@ -138,17 +128,14 @@ def brief_html(
             warning = f"Concept interesting; evidence weak{f' — {rf[0]}' if rf else ''}." if weak_evidence else "Idea preserved; writing friction is high."
             vreason = f"{warning} {vreason}"
     else:
-        vkey, vlabel, vreason = _read_verdict(n_fired, band)
-    if decision not in {"read", "skim", "skip"} and band == "flag" and n_fired:
-        rf = [str(x).strip() for x in ((quality or {}).get("red_flags") or []) if str(x).strip()]
-        if rf:
-            vreason = f"relevant, but rigor is FLAGGED — {rf[0]}. Read critically."
+        vkey, vlabel = "skip", "REVIEW"
+        vreason = str((digest or {}).get("read_why") or "Reading decision unavailable; review the evidence.")
     # Relevance folds INTO the diagnosis reason line (the separate chip is gone).
     rel_verdict = _relevance_verdict(n_fired, max_score)
     rel_line = (
         f'<div class="v-rel">{_h(rel_verdict)} · {n_fired} goal{"s" if n_fired != 1 else ""} '
         f'matched · {max_score:.1f}/3</div>'
-    ) if goals else ""
+    ) if fired else ""
     idea_score = max(int((digest or {}).get("novelty") or 0), int((digest or {}).get("significance") or 0))
     idea = "not assessed" if not idea_score else "high" if idea_score >= 4 else "low" if idea_score <= 2 else "moderate"
     axes = f'<div class="v-rel">Idea: {idea} · Evidence: {_h(_BAND_LABEL.get(band, "not assessed"))} · Writing: {_h((digest or {}).get("writing_friction") or "not assessed")}</div>'

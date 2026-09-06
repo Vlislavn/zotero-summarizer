@@ -26,7 +26,12 @@ LOGGER = logging.getLogger(__name__)
 # hallucination the product must not ship. Its claims are therefore judged
 # against paper text PLUS the run's research_goals (see _judge), matching the
 # generator's input, instead of being dropped or judged paper-only.
-CLAIM_FIELDS = ("tldr", "read_why", "controversies", "key_strength", "key_weakness", "implementation")
+CLAIM_FIELDS = (
+    "tldr", "read_why", "controversies", "key_strength", "key_weakness", "implementation",
+    "verdict", "read_parts", "skip_parts", "original_value", "writing_reasons", "relevance",
+    "impact", "unknown_unknowns", "executive_summary", "key_findings", "methods", "limitations",
+    "industry_impact", "academy_impact", "parameters",
+)
 
 _DECOMPOSE_PROMPT = (
     "Split the review snippets below into ATOMIC, self-contained factual claims "
@@ -56,7 +61,9 @@ def snippets_from_digest(digest_dump: dict[str, Any]) -> dict[str, str]:
     out: dict[str, str] = {}
     for field in CLAIM_FIELDS:
         value = digest_dump.get(field)
-        if isinstance(value, list):
+        if isinstance(value, dict):
+            text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        elif isinstance(value, list):
             text = "; ".join(str(v) for v in value if str(v).strip())
         else:
             text = str(value or "").strip()
@@ -74,6 +81,15 @@ def _attribute_by_overlap(claim: str, snippets: dict[str, str]) -> str:
     )
 
 
+def _claim_rows(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list) or not value or any(
+        not isinstance(entry, dict) or not isinstance(entry.get("field"), str)
+        or not isinstance(entry.get("claim"), str) or not entry["claim"].strip() for entry in value
+    ):
+        raise ValueError("Claims trial requires a nonempty list of tagged, nonempty claim objects")
+    return value
+
+
 def decompose_digest(
     *,
     digest_dump: dict[str, Any],
@@ -87,16 +103,14 @@ def decompose_digest(
     Raises on an unparseable decomposer response after one strict-JSON retry —
     without claims the claims track has nothing to judge, so this must surface.
     """
-    # v2: decomposer tags each claim with its source field (was: token-overlap
-    # attribution post-hoc) — keyed separately so a resumed run never mixes
-    # attributions from the two schemes.
-    cache_path = cache_dir / f"claims-v2-{digest_sha[:16]}.json"
+    # v3 covers every claim-bearing digest field; never reuse the six-field cache.
+    cache_path = cache_dir / f"claims-v3-{digest_sha[:16]}.json"
     if cache_path.exists():
-        return json.loads(cache_path.read_text(encoding="utf-8"))
+        return _claim_rows(json.loads(cache_path.read_text(encoding="utf-8")))
 
     snippets = snippets_from_digest(digest_dump)
     if not snippets:
-        return []
+        raise ValueError("Digest contains no claim-bearing text")
     rendered = "\n".join(f"- [{field}] {text}" for field, text in snippets.items())
     prompt = _DECOMPOSE_PROMPT.format(title=title, snippets=rendered)
     raw = to_text(decompose_llm.prompt(prompt))
@@ -129,6 +143,7 @@ def decompose_digest(
             field = _attribute_by_overlap(claim, snippets)
         rows.append({"field": field, "claim": claim})
 
+    _claim_rows(rows)
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
     return rows

@@ -14,14 +14,13 @@ def _date(value: str) -> datetime:
 
 
 def _run(args: argparse.Namespace) -> int:
-    from zotero_summarizer.runtime import AppContext, set_context
     from zotero_summarizer.services import lifecycle
+    from zotero_summarizer.services._common import settings as current_settings
     from zotero_summarizer.services.research_feed import run_weekly
-    from zotero_summarizer.settings import Settings
 
-    settings = Settings.load(project_root=args.project_root)
-    set_context(AppContext(settings=settings))
-    lifecycle.startup()
+    settings = current_settings()
+    if not args.cached_only:
+        lifecycle.startup(background=False)
     result = run_weekly(
         settings, start=args.start, end=args.end, venue=args.venue,
         shortlist_budget=args.shortlist_budget, card_budget=args.card_budget,
@@ -30,6 +29,17 @@ def _run(args: argparse.Namespace) -> int:
     )
     print(json.dumps(result, indent=2))
     return 0
+
+
+def _validate_research_feed_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    from zotero_summarizer.models.research_feed import parse_run_budgets
+
+    try:
+        args.shortlist_budget, args.card_budget, _, args.review_timeout = parse_run_budgets(
+            args.shortlist_budget, args.card_budget, 1000, args.review_timeout,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
 
 
 def register_research_feed(subparsers: argparse._SubParsersAction) -> None:

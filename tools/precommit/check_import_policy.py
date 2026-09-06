@@ -10,7 +10,7 @@ Rules, keyed by the directory a file lives in:
   - integrations/  must not import services or api      (low-level adapters)
   - mcp/           must not import services, api, storage (HTTP client only)
   - storage/       must not import services or api        (persistence only)
-  - services/      must not import api.app or api.routes  (api.errors is allowed)
+  - services/      may import api.errors only within the API layer
 
 Structure:
   - A new module directly under services/ must be one of the shared modules;
@@ -19,8 +19,9 @@ Structure:
 """
 from __future__ import annotations
 
+import ast
+from importlib.util import resolve_name
 import pathlib
-import re
 import sys
 
 # (dir prefix, list of forbidden import prefixes)
@@ -28,7 +29,7 @@ LAYER_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("zotero_summarizer/integrations/", ("zotero_summarizer.services", "zotero_summarizer.api")),
     ("zotero_summarizer/mcp/", ("zotero_summarizer.services", "zotero_summarizer.api", "zotero_summarizer.storage")),
     ("zotero_summarizer/storage/", ("zotero_summarizer.services", "zotero_summarizer.api")),
-    ("zotero_summarizer/services/", ("zotero_summarizer.api.app", "zotero_summarizer.api.routes")),
+    ("zotero_summarizer/services/", ("zotero_summarizer.api",)),
 ]
 
 SHARED_SERVICE_MODULES = {
@@ -38,13 +39,17 @@ SHARED_SERVICE_MODULES = {
 }
 SERVICE_DOMAINS = ("model", "golden", "triage", "library", "zotero")
 
-_IMPORT_RE = re.compile(
-    r"^\s*(?:from|import)\s+(zotero_summarizer\.[a-zA-Z0-9_.]+)", re.MULTILINE
-)
-
-
-def _imports(text: str) -> list[str]:
-    return _IMPORT_RE.findall(text)
+def _imports(text: str, path: pathlib.Path) -> list[str]:
+    """Resolve static imports without executing modules, including nested imports."""
+    package = ".".join(path.parent.parts)
+    imports: list[str] = []
+    for node in ast.walk(ast.parse(text, filename=str(path))):
+        if isinstance(node, ast.Import):
+            imports.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module = resolve_name("." * node.level + (node.module or ""), package)
+            imports.extend(f"{module}.{alias.name}" for alias in node.names)
+    return imports
 
 
 def main(paths: list[str]) -> int:
@@ -53,14 +58,26 @@ def main(paths: list[str]) -> int:
         path = pathlib.Path(raw)
         if path.suffix != ".py" or not path.exists():
             continue
+        path = path.resolve().relative_to(pathlib.Path.cwd())
         posix = path.as_posix()
+        if not posix.startswith("zotero_summarizer/"):
+            continue
 
         # Layering
         text = path.read_text()
+        try:
+            imports = _imports(text, path)
+        except (SyntaxError, ImportError) as exc:
+            failures.append(f"{posix}: cannot analyze imports: {exc}")
+            continue
         for prefix, forbidden in LAYER_RULES:
             if not posix.startswith(prefix):
                 continue
-            for imp in _imports(text):
+            for imp in imports:
+                if prefix == "zotero_summarizer/services/" and (
+                    imp == "zotero_summarizer.api.errors" or imp.startswith("zotero_summarizer.api.errors.")
+                ):
+                    continue
                 for bad in forbidden:
                     if imp == bad or imp.startswith(bad + "."):
                         failures.append(

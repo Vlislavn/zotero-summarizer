@@ -47,11 +47,11 @@ def test_build_query_plan_emits_tight_quoted_variant_first() -> None:
     tight, bag = variants
     # tight = the user's topic as ONE exact-match quoted phrase (their words, not the
     # LLM-paraphrased concepts), distinct from the bag
-    assert tight == '"evaluation of llm agents"'
+    assert tight == '("evaluation of llm agents") AND "agents"'
     assert tight != bag
     assert bag == plan.openalex_lexical  # bag is the unchanged scalar
     # arXiv + Europe PMC carry the same tight-first shape
-    assert plan.arxiv_variants[0] == tight
+    assert plan.arxiv_variants[0] == '"evaluation of llm agents"'
     assert plan.europepmc_variants[0] == tight
 
 

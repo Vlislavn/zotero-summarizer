@@ -32,6 +32,7 @@ class _Mutation(BaseModel):
 class _PushRequest(BaseModel):
     protocol: Literal[1]
     mutations: list[_Mutation] = Field(max_length=100)
+    predecessors: list[UUID] = Field(default_factory=list, max_length=100)
 
 
 def _db_path():
@@ -48,7 +49,7 @@ def pull(protocol: int = Query(ge=1, le=1), since: int = Query(default=0, ge=0))
 def push(req: _PushRequest):
     try:
         mutations = [row.model_dump(mode="json") for row in req.mutations]
-        return service.push(_db_path(), mutations)
+        return service.push(_db_path(), mutations, [str(value) for value in req.predecessors])
     except ValueError as exc:
         raise APIError("validation_error", str(exc), 422) from exc
 

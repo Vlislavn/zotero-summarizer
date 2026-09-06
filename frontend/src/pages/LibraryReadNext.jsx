@@ -152,6 +152,11 @@ export default function LibraryReadNext() {
     () => sortQueue(queueMeta.model_ready ? filteredQueue : queue, sort),
     [queueMeta.model_ready, filteredQueue, queue, sort],
   );
+  const visibleSelected = useMemo(
+    () => new Set((queueLoading || queueErr ? [] : displayedQueue)
+      .filter((row) => selected.has(row.item_key)).map((row) => row.item_key)),
+    [displayedQueue, selected, queueLoading, queueErr],
+  );
   const whyOptions = useMemo(
     () => [...new Set(queue.map((i) => i.why_reason).filter(Boolean))].sort(),
     [queue],
@@ -329,20 +334,20 @@ export default function LibraryReadNext() {
   // one force-confirm covers the whole batch. Fails loud on the first error
   // (reports how many landed), never silently skips.
   async function handleAddToCollection(collectionKey, force = false) {
-    if (!selected.size || !collectionKey) return;
+    if (!visibleSelected.size || !collectionKey) return;
     const name = flatCollections.find((c) => c.key === collectionKey)?.name || collectionKey;
     setAddingToCollection(true);
     setMessage('');
     let added = 0;
     try {
-      for (const key of selected) {
+      for (const key of visibleSelected) {
         const data = await addItemToCollection(key, { collectionKey, force });
         if (data?.requires_force) {
           setAddingToCollection(false);
           if (window.confirm('Zotero appears to be running. Add anyway? (a backup is taken first)')) {
             return await handleAddToCollection(collectionKey, true);
           }
-          setMessage(`Cancelled — ${added} of ${selected.size} added to “${name}”. Close Zotero, then retry.`);
+          setMessage(`Cancelled — ${added} of ${visibleSelected.size} added to “${name}”. Close Zotero, then retry.`);
           setIsError(false);
           return;
         }
@@ -354,7 +359,7 @@ export default function LibraryReadNext() {
       setSelected(new Set());
       setSelectMode(false);
     } catch (err) {
-      setMessage(`Add to “${name}” failed after ${added} of ${selected.size}: ${err.message || err}`);
+      setMessage(`Add to “${name}” failed after ${added} of ${visibleSelected.size}: ${err.message || err}`);
       setIsError(true);
     } finally {
       setAddingToCollection(false);
@@ -362,11 +367,11 @@ export default function LibraryReadNext() {
   }
 
   async function handleRunTriage() {
-    if (!selected.size) return;
+    if (!visibleSelected.size) return;
     setStarting(true);
     setMessage('');
     try {
-      const data = await startTriage([...selected], { queueChanges: true });
+      const data = await startTriage([...visibleSelected], { queueChanges: true });
       setMessage(`Triage job ${data?.job_id || 'started'}. Opening Triage Monitor…`);
       setIsError(false);
       navigate('/ops?tab=triage');
@@ -699,7 +704,7 @@ export default function LibraryReadNext() {
           onSaved={() => loadQueue()}
           selectMode={selectMode}
           onToggleSelectMode={() => { setSelectMode((v) => !v); setSelected(new Set()); }}
-          selected={selected}
+          selected={visibleSelected}
           onToggleItem={toggleItem}
           onRunTriage={handleRunTriage}
           starting={starting}

@@ -26,16 +26,13 @@ from pydantic import BaseModel, Field
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services.search import session as session_store
+from zotero_summarizer.services.search import require_online
+from zotero_summarizer.services.search._models import ScreenRequest
 from zotero_summarizer.services.search.pipeline import default_deps, run_review, run_screen
 from zotero_summarizer.services.search.refine import agentic_enabled, run_agentic_rounds
 
 LOGGER = logging.getLogger(__name__)
 router = APIRouter()
-
-
-class ScreenRequest(BaseModel):
-    query: str = Field(..., min_length=1, description="Natural-language research topic")
-    questions: list[str] = Field(default_factory=list, description="Optional specific questions to answer")
 
 
 class MaterializeRequest(BaseModel):
@@ -48,6 +45,7 @@ async def screen(req: ScreenRequest) -> dict[str, Any]:
     (user asked for the top papers deep-reviewed immediately). Returns the session
     reloaded so its status reflects ``reviewing``; the client polls GET to watch the
     reviews fill in."""
+    require_online()
     deps = await asyncio.to_thread(default_deps)
     sess = await asyncio.to_thread(run_screen, req.query, req.questions, deps=deps)
     await asyncio.to_thread(_kickoff_review, sess.id)
@@ -76,6 +74,7 @@ def _kickoff_review(session_id: str) -> bool:
     """Single-flight the review worker: atomically claim ``screened`` → ``reviewing``
     and spawn the thread. Returns False if another worker already owns it (or the
     session is terminal), so auto-start + a manual click can't stack workers."""
+    require_online()
     if not session_store.claim(session_id, expect="screened", to="reviewing"):
         return False
     threading.Thread(target=_review_worker, args=(session_id,), daemon=True).start()

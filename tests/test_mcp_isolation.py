@@ -1,23 +1,19 @@
 """Tests for the MCP isolation against indirect prompt-injection-driven writes.
 
 The defense lives in `zotero_summarizer.mcp.tools.pending`:
-- `_is_restricted_change_type` flags any change_type starting with create_/inbox_/promote_
+- `_is_restricted_change_type` rejects everything outside four reviewed operations
 - `apply_pending_changes` filters out flagged IDs before forwarding to the apply endpoint
 """
 from __future__ import annotations
 
 from zotero_summarizer.mcp.tools.pending import (
-    MCP_RESTRICTED_CHANGE_TYPE_PREFIXES,
+    MCP_ALLOWED_CHANGE_TYPES,
     _is_restricted_change_type,
 )
 
 
-def test_restricted_prefixes_cover_phase_1_change_types():
-    assert "create_" in MCP_RESTRICTED_CHANGE_TYPE_PREFIXES
-    assert "inbox_" in MCP_RESTRICTED_CHANGE_TYPE_PREFIXES
-    assert "promote_" in MCP_RESTRICTED_CHANGE_TYPE_PREFIXES
-    # Phase 1.5: daemon-only operations must NEVER be applied via MCP.
-    assert "mark_feed_" in MCP_RESTRICTED_CHANGE_TYPE_PREFIXES
+def test_allowlist_contains_only_reviewed_operations():
+    assert MCP_ALLOWED_CHANGE_TYPES == {"tag_changes", "add_note", "add_to_collection", "remove_from_collection"}
 
 
 def test_mark_feed_item_read_is_restricted():
@@ -43,10 +39,10 @@ def test_existing_phase_0_change_types_are_NOT_restricted():
         assert _is_restricted_change_type(safe) is False
 
 
-def test_empty_or_unknown_change_type_not_restricted():
-    assert _is_restricted_change_type("") is False
-    assert _is_restricted_change_type("something_random") is False
-    assert _is_restricted_change_type(None) is False  # type: ignore[arg-type]
+def test_empty_or_unknown_change_type_is_restricted():
+    assert _is_restricted_change_type("") is True
+    assert _is_restricted_change_type("something_random") is True
+    assert _is_restricted_change_type(None) is True  # type: ignore[arg-type]
 
 
 def test_inbox_anything_blocked():

@@ -9,6 +9,7 @@ from typing import Any
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services._common import settings
 from zotero_summarizer.services.library import review_detail
+from zotero_summarizer.services.zotero._notes import VERDICT_NOTE_MARKER
 from zotero_summarizer.services.zotero.zotero import (
     get_library_reader,
     get_zotero_reader_or_raise,
@@ -16,7 +17,7 @@ from zotero_summarizer.services.zotero.zotero import (
     zotero_upsert_user_note,
     zotero_upsert_verdict_note,
 )
-from zotero_summarizer.storage import label_mirrors
+from zotero_summarizer.storage import label_mirrors, review_notes
 
 LOGGER = logging.getLogger(__name__)
 _POSITIVE_PRIORITIES = ("must_read", "should_read", "could_read")
@@ -102,28 +103,36 @@ def _optional_zotero(exc: BaseException) -> bool:
     return isinstance(exc, APIError) and exc.error == "zotero_unavailable"
 
 
-def mirror_current_verdict(db_path: Path, item_key: str, *, redeliver: bool = False) -> bool:
-    """Mirror current state, never an obsolete request; acknowledge deletions."""
+def mirror_current_verdict(db_path: Path, item_key: str, *, redeliver: bool = False) -> dict | None:
+    """Mirror current label and rationale under one lock; acknowledge deletions."""
     try:
         with label_mirrors.current_label(db_path, item_key, redeliver=redeliver) as desired:
             if desired is None:
-                return False
-            zotero_set_label_tag(*desired)
-        return True
+                return None
+            key, priority = desired["target_key"], desired["value"]
+            comment = desired["comment"] if priority is not None else ""
+            note_written = bool(comment.strip()) or any(
+                VERDICT_NOTE_MARKER in note["note"]
+                for note in get_zotero_reader_or_raise().get_item_notes(key)
+            )
+            if note_written:
+                zotero_upsert_verdict_note(key, priority or "", comment)
+            if desired["label_pending"]:
+                zotero_set_label_tag(key, priority)
+        return {"label_written": desired["label_pending"], "note_written": note_written}
     except APIError as exc:
         # Local-first verdicts remain usable without configured Zotero. Leaving
         # the receipt absent keeps an explicit retraction retryable.
         if not _optional_zotero(exc):
             raise
-        return False
+        return None
 
 
 def apply_verdict_effects(db_path: Path, item_key: str, priority: str, comment: str) -> dict[str, Any]:
     """Run the online/offline training, materialization, and mirror effects.
 
-    Labels recheck current state; the other enrichments keep their best-effort
-    contract and use the submitted values. A stored sync mutation can retry
-    effects after a crash without creating a second library item or CSV row.
+    Both external mirrors read current state. A stored sync mutation can retry
+    a failed delivery without replacing newer labels or rationale.
     """
     try:
         append_training_row(item_key, priority, comment)
@@ -137,52 +146,32 @@ def apply_verdict_effects(db_path: Path, item_key: str, priority: str, comment: 
         if source == review_detail.SOURCE_LIBRARY
         else add_result.pop("_zotero_key", None)
     )
-    label_written = False
-    label_error = None
+    mirror = None
     if mirror_key:
-        try:
-            label_written = mirror_current_verdict(
-                db_path, item_key, redeliver=bool(add_result["added_to_library"]),
-            )
-        except Exception as exc:  # noqa: BLE001 - mirror is post-commit
-            if not _optional_zotero(exc):
-                label_error = f"{type(exc).__name__}: {exc}"
-                LOGGER.warning(
-                    "verdict label mirror for %s failed: %s", mirror_key, exc
-                )
-
-    note_written = False
-    note_error = None
-    if mirror_key and comment.strip():
-        try:
-            zotero_upsert_verdict_note(mirror_key, priority, comment)
-            note_written = True
-        except Exception as exc:  # noqa: BLE001 - mirror is post-commit
-            if not _optional_zotero(exc):
-                note_error = f"{type(exc).__name__}: {exc}"
-                LOGGER.warning("verdict note mirror for %s failed: %s", mirror_key, exc)
+        mirror = mirror_current_verdict(
+            db_path, item_key, redeliver=bool(add_result["added_to_library"]),
+        )
     return {
-        "label_written": label_written,
-        "label_error": label_error,
-        "note_written": note_written,
-        "note_error": note_error,
+        "label_written": mirror["label_written"] if mirror is not None else False,
+        "label_error": None,
+        "note_written": mirror["note_written"] if mirror is not None else False,
+        "note_error": None,
         **add_result,
     }
 
 
-def mirror_review_note(item_key: str, note: str) -> dict[str, Any]:
-    """Mirror an already-committed review note with online/offline parity."""
+def mirror_review_note(db_path: Path, item_key: str) -> dict[str, Any]:
+    """Deliver current committed note intent, never a historical request body."""
     source = review_detail.classify_item_key(item_key)
     if source in (review_detail.SOURCE_FEED, review_detail.SOURCE_NOTE):
         return {"note_written": False, "note_error": None}
     try:
-        zotero_upsert_user_note(item_key, note)
+        with review_notes.current_for_mirror(db_path, item_key) as note:
+            # The app's clear-body contract also applies to sync deletion tombstones.
+            zotero_upsert_user_note(item_key, "" if note is None else note)
         return {"note_written": True, "note_error": None}
-    except Exception as exc:  # noqa: BLE001 - local note is already committed
-        if _optional_zotero(exc):
-            return {"note_written": False, "note_error": None}
-        LOGGER.warning("review note mirror for %s failed: %s", item_key, exc)
-        return {
-            "note_written": False,
-            "note_error": f"{type(exc).__name__}: {exc}",
-        }
+    except APIError as exc:
+        # Unconfigured Zotero is optional for the existing local-first workflow.
+        if not _optional_zotero(exc):
+            raise
+        return {"note_written": False, "note_error": None}

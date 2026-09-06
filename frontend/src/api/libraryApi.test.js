@@ -5,6 +5,7 @@ import {
   fetchPaperRender,
   paperPresentationUrl,
   paperRenderPdfUrl,
+  runReviewFleet,
 } from './libraryApi.js';
 
 function mockFetch(body = {}) {
@@ -18,6 +19,22 @@ function mockFetch(body = {}) {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe('explicit fleet selection', () => {
+  it.each([
+    [{}, { top_k: 5 }],
+    [{ topK: 2, itemKeys: null }, { top_k: 2 }],
+    [{ topK: 2, itemKeys: [] }, { item_keys: [] }],
+    [{ itemKeys: ['B', 'A', 'B'] }, { item_keys: ['B', 'A', 'B'] }],
+  ])('preserves selection in %j', async (options, expected) => {
+    mockFetch({ accepted: false });
+    await runReviewFleet(options);
+    const [url, init] = global.fetch.mock.calls[0];
+    expect(url).toBe('/api/library/review-fleet/run');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual(expected);
+  });
 });
 
 describe('paper-render library API wrappers', () => {

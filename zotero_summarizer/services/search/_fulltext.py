@@ -18,6 +18,7 @@ from typing import Any
 
 from zotero_summarizer.integrations import europepmc, pdf_fetch
 from zotero_summarizer.services._common import settings
+from zotero_summarizer.services.search import require_online
 from zotero_summarizer.services.search._models import Candidate
 
 
@@ -25,6 +26,7 @@ def acquire_full_text(cand: Candidate, *, extractor: Any, unpaywall: Any = None)
     """Resolve + fetch + extract this candidate's OA full text. Returns the text,
     or ``""`` when no OA copy is resolvable / extractable (the spec §9 boundary the
     review tiers handle). ``extractor is None`` (quality disabled) → ``""``."""
+    require_online()
     if extractor is None:
         return ""
     # PMC open access: the reliable keyless full text is Europe PMC's fullTextXML

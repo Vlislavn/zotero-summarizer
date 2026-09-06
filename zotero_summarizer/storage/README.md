@@ -174,6 +174,11 @@ Offline verdict UPSERTs also replace that origin with the submitted reading prio
 instead of retaining Zotero ownership of an app decision.
 No new queue/worker or reviewed-pending-change behavior is involved.
 
+The same current-label snapshot includes the rationale. `current_label` yields
+the target and a separate `label_pending` flag: an acknowledged label deletion
+does not suppress clearing its old verdict note. Both mirrors run under the
+existing writer lock before the deletion receipt commits; no new receipt exists.
+
 `list_all_label_verdicts` is the sole full-row verdict-list reader: newest first,
 uncapped, shared by HTTP, training and the one-time Zotero transfer. The duplicate
 `list_label_verdicts` API and its implicit 500/5000-row caps were removed. Key-only
@@ -187,3 +192,16 @@ current winning row under the caller's writer transaction; materialization needs
 no body copy or migration, and reads do not rewrite historical data. Ambiguous
 legacy IDs are not guessed. This changes local note identity, not Zotero mirror
 delivery. Snapshot identity resolution is per note family, not one batched join.
+
+`review_notes.current_for_mirror` holds SQLite's writer lock over delivery of the
+current note body, reusing the same alias/revision reader. Closing the connection
+releases the lock on both success and failure; no note body or delivery receipt
+is written by this read transaction. As with label mirrors, this deliberately
+serializes app writers during backup/external delivery. It is not a distributed
+transaction or a guard against direct edits in an independently opened Zotero.
+
+`sync_applied_revisions` reads immutable applied receipts from `sync_mutations`
+for bounded push continuation. Revisions are keyed by device, item and field;
+unknown/conflict UUIDs cannot supply a base. Existing compare-and-write still
+checks the latest canonical revision inside its writer transaction. Receipt
+lookup never repeats Zotero/CSV effects and requires no new table.

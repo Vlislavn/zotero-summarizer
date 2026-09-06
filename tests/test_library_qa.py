@@ -8,7 +8,7 @@ import types
 import pytest
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services.library import qa
+from zotero_summarizer.services.library import _review_cache, qa
 
 PAPER_TEXT = (
     "We evaluated GlassNet on the ImageNet dataset. "
@@ -111,6 +111,7 @@ def test_ask_paper_answers_counts_without_llm(tmp_path, monkeypatch):
     out = qa.ask_paper("KEY1", "How many pages are in the paper?")
     assert out["answer"] == "12 pages"
     assert out["mode"] == "metadata"
+    assert out["citation"]["quote_verified"] is False
     assert not llm.prompts
 
 
@@ -162,6 +163,34 @@ def test_ask_paper_rejects_ungrounded_quotes(tmp_path, monkeypatch):
     _fake_state(tmp_path, pdf, _Extractor(), _BadQuoteLLM(), monkeypatch)
     out = qa.ask_paper("KEY1", "Which dataset was used?")
     assert out["abstained"] is True and out["answer"] is None
+
+
+@pytest.mark.parametrize("review_field", ["digest", "quality", "goal_summaries"])
+@pytest.mark.parametrize("in_pdf", [False, True])
+def test_generated_review_is_context_but_not_paper_evidence(tmp_path, monkeypatch, review_field, in_pdf):
+    quote = "We evaluated the invented benchmark SecretSet with perfect accuracy."
+    original_context = qa.paper_render.artifact_text
+
+    class _ReviewQuoteLLM:
+        def prompt(self, prompt, **kwargs):
+            assert quote in prompt
+            return json.dumps({"answer": "SecretSet", "quote": quote})
+
+    _fake_state(tmp_path, tmp_path / "p.pdf", _Extractor(), _ReviewQuoteLLM(), monkeypatch)
+    artifact = {"item_key": "KEY1", "pdf_key": "fixture-v1",
+                "full_text": PAPER_TEXT + (quote if in_pdf else "")}
+    monkeypatch.setattr(qa.paper_render, "build_paper_read", lambda key: artifact)
+    monkeypatch.setattr(qa.paper_render, "artifact_text", original_context)
+    review_value = {"digest": {"tldr": quote}, "quality": {"red_flags": [quote]},
+                    "goal_summaries": [{"summary": quote}]}[review_field]
+    _review_cache._write_one("KEY1", {review_field: review_value})
+
+    result = qa.ask_paper("KEY1", "Which benchmark was evaluated?")
+
+    assert result["abstained"] is (not in_pdf)
+    assert result["answer"] == ("SecretSet" if in_pdf else None)
+    assert result["citation"]["quote_verified"] is in_pdf
+    assert result["citation"]["location_verified"] is in_pdf
 
 
 def test_ask_paper_rejects_short_grounded_quote(tmp_path, monkeypatch):

@@ -71,7 +71,7 @@ def build_card(
         str(digest.get("methods") or ""), " ".join(digest.get("implementation") or []),
     ])
     topics = topic_tags(evidence_text, profile)
-    worth, _flags = effective_read_decision(
+    worth, flags = effective_read_decision(
         digest, quality, goal_summaries=review.get("goal_summaries"),
     )
     uses = [_project_use(project, topics) for project in triage.matched_projects]
@@ -99,8 +99,11 @@ def build_card(
         research_impact=max(0, min(5, int(digest.get("significance") or 0))),
         production_impact=min(5, 2 + int(bool(implementations)) + int(bool(code_urls))),
         personal_novelty=max(0, min(5, int(digest.get("novelty") or 0))),
-        worth_reading=worth or "skip", research_ideas=ideas,
-        evidence_gaps=[str(value) for value in (quality.get("red_flags") or []) if str(value).strip()],
+        worth_reading=worth or "unknown", research_ideas=ideas,
+        evidence_gaps=list(dict.fromkeys([
+            *review.get("reading_policy_flags", []), *flags,
+            *[str(value) for value in (quality.get("red_flags") or []) if str(value).strip()],
+        ])),
     )
 
 

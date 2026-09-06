@@ -123,7 +123,48 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
 | `refine.py` | bounded opt-in agentic PRF before auto-review; no-ops under strict offline |
 | `session.py` | one-JSON-per-session persistence under `settings().search_dir` + per-session lock: `claim` (status CAS, single-flights the worker), `save_merge` (whole-session save that preserves a concurrent Add's `materialized_zotero_key`), `update` (read-modify-write), `materialize_once` (Add's check-write-stamp under the lock, single-write). Malformed id → `APIError(400)` |
 
+## Execution and identity boundaries
+
+Screening accepts a nonblank topic of at most 4,000 characters and up to ten
+nonblank questions of at most 1,000 characters each. The existing `ScreenRequest`
+now lives in `_models`; HTTP, direct screening and persisted review/claim reuse
+it. Surrounding whitespace is trimmed; invalid entries are rejected, not dropped.
+These are interactive work ceilings, not estimates of model capacity.
+
+Strict offline rejects screening, review claims, dependency construction and
+full-text acquisition with `strict_offline` before model/source work. A saved
+online session cannot bypass the rule by being reviewed after restart offline.
+Reading saved results and explicitly filing a result locally remain available.
+
+Every candidate carries a persisted `candidate_id`, included in HTTP JSON.
+Unidentified observations get UUIDs, never title hashes; metadata enrichment
+keeps the existing family's first address while selecting the richest metadata.
+Legacy unidentified rows derive stable session/slot addresses on read, persisted
+by the next ordinary save. Duplicate/invalid persisted addresses fail before
+targeting or publication. Previously misattributed historical Zotero keys cannot
+be inferred or repaired automatically; existing saved values are preserved.
+
+`QueryPlan.display()` is now the server's actual wire projection: React renders
+its ordered `{source, query}` rows, including repeated source variants and
+OpenReview. It is recomputed from the raw plan when loaded; a saved display copy
+is not authoritative. The unused taxonomy constant, scoring adapter and
+`version_family_id` field are removed (old extra JSON fields remain ignored).
+Search notes reuse the existing provenance marker plus escaped title/query/text;
+they no longer pass a string to the structured triage-summary renderer.
+
 ## Deferred (ponytail seams, known ceilings)
+
+Parsed include/exclude terms and study types are executable QueryPlan fields.
+After source union/dedup, every channel (including semantic/library hits) obeys
+the same title/abstract gate: every required phrase, no excluded phrase, and any
+requested study-type phrase. Matching is case-insensitive and whole-token, with
+punctuation normalized; missing metadata cannot establish a required match.
+This is literal filtering, not semantic confirmation of a study's methodology.
+The plan panel exposes these local constraints. OpenAlex lexical/Europe PMC use
+Boolean constraints and synonym alternatives; semantic channels receive explicit
+constraints in prose. arXiv retains its precision/recall queries and relies on
+the local gate, as does Crossref's broad metadata retrieval. Refinement drop terms
+constrain subsequent fetches but cannot override an explicit required term.
 
 OA PDF acquisition explicitly passes the selected `Settings.pdf_cache_dir`
 (`data/pdfs/`), shared with Library acquisition only within the same project.

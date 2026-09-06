@@ -21,12 +21,11 @@ def test_decode_cursor_defaults_to_zero_for_invalid_values():
     assert _decode_cursor("12") == 12
 
 
-def test_search_cursor_roundtrip_supports_filtered_offset():
-    assert _decode_search_cursor(None) == (0, 0)
-    assert _decode_search_cursor("15") == (15, 0)
-    assert _decode_search_cursor("15:20") == (15, 20)
-    assert _encode_search_cursor(7, 0) == "7"
-    assert _encode_search_cursor(7, 3) == "7:3"
+def test_search_cursor_roundtrip_uses_global_offset():
+    assert _decode_search_cursor(None) == 0
+    assert _decode_search_cursor("g:15") == 15
+    assert _encode_search_cursor(7) == "g:7"
+    assert _decode_search_cursor(_encode_search_cursor(20)) == 20
 
 
 def test_parse_response_json_accepts_dict_and_json_string():

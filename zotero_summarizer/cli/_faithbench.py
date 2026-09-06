@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 
 from zotero_summarizer.settings import Settings
@@ -19,6 +20,25 @@ from zotero_summarizer.cli._helpers import _utc_iso_now
 
 def _print_progress(message: str) -> None:
     print(f"  {message}", flush=True)
+
+
+def _validate_faithbench_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """Parse valid execution options before Settings, files or provider construction."""
+    from zotero_summarizer.services.faithbench import RunOptions
+
+    if args.faithbench_command == "build":
+        for name, minimum in (("n_papers", 2), ("qa_per_paper", 1), ("traps_per_paper", 1)):
+            if getattr(args, name) < minimum:
+                parser.error(f"--{name.replace('_', '-')} must be at least {minimum}")
+    elif args.faithbench_command == "run":
+        try:
+            args.run_options = RunOptions(
+                conditions=tuple(c.strip() for c in args.conditions.split(",")),
+                tracks=tuple(t.strip() for t in args.tracks.split(",")),
+                runs=args.runs, limit=args.limit, retry_errors=args.retry_errors,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
 
 
 def _remote_llm(base_url_env: str, api_key_env: str, model: str):
@@ -42,15 +62,27 @@ def _remote_llm(base_url_env: str, api_key_env: str, model: str):
 def _run_paths(settings: Settings, run_id: str):
     from zotero_summarizer.services.faithbench import RunPaths
 
-    return RunPaths(run_dir=settings.faithbench_dir / "runs" / run_id)
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", run_id):
+        raise ValueError("Invalid faithbench run ID")
+    root = settings.faithbench_dir / "runs"
+    path = root / run_id
+    if path.resolve().parent != root.resolve():
+        raise ValueError("Faithbench run path escapes its directory")
+    return RunPaths(run_dir=path)
 
 
-def _load_manifest(paths) -> dict:
-    if not paths.manifest.exists():
-        raise FileNotFoundError(
-            f"no manifest at {paths.manifest}; is --run-id correct? (run `faithbench run` first)"
-        )
-    return json.loads(paths.manifest.read_text(encoding="utf-8"))
+def _decompose_stage(args):
+    from zotero_summarizer.models.providers import ProviderConfig, ResolvedStage
+    from zotero_summarizer.services.faithbench._constants import DEFAULT_JUDGE_MODEL, JUDGE_MAX_TOKENS
+
+    base_url = os.getenv(args.judge_base_url_env, "").strip()
+    if not base_url:
+        raise RuntimeError(f"environment variable {args.judge_base_url_env} is not set (decomposer endpoint URL)")
+    return ResolvedStage(
+        stage="faithbench_decomposer", model=args.judge_model or DEFAULT_JUDGE_MODEL,
+        provider=ProviderConfig(name="faithbench_decomposer", base_url=base_url,
+                                api_key_env=args.judge_api_key_env, max_tokens=JUDGE_MAX_TOKENS),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -143,15 +175,19 @@ def _resolve_benchmark(settings: Settings, spec: str) -> Path:
 
 
 def _faithbench_run(args: argparse.Namespace) -> int:
+    from dataclasses import replace
     from zotero_summarizer.models.providers import resolve_stage
     from zotero_summarizer.services import run_log
     from zotero_summarizer.services._common import read_config
-    from zotero_summarizer.services.faithbench import RunInputs, RunOptions, run_benchmark
+    from zotero_summarizer.services.faithbench import RunInputs, run_benchmark
     from zotero_summarizer.services.faithbench import _dataset
-    from zotero_summarizer.services.faithbench._runner import write_or_check_manifest
+    from zotero_summarizer.services.faithbench._runner import generation_identity, write_or_check_manifest
     from zotero_summarizer.services.llm.factory import build_client_for_stage
 
     settings = Settings.load(project_root=args.project_root)
+    bench_path = _resolve_benchmark(settings, args.benchmark)
+    benchmark_sha = run_log.file_sha256(bench_path, prefix_len=64)
+    meta, items = _dataset.load_benchmark(bench_path, expected_sha256=benchmark_sha)
     config = read_config(settings.config_path)
     resolved = resolve_stage(config.llm_routing, "deep_review")
     # Per-run model sweep: override the resolved stage (and thus the manifest's
@@ -169,25 +205,15 @@ def _faithbench_run(args: argparse.Namespace) -> int:
                 f"{[p.name for p in config.llm_routing.providers]}"
             )
         resolved = ResolvedStage(stage="deep_review", provider=provider, model=args.model or resolved.model)
-    llm = build_client_for_stage(resolved)
+    options = replace(args.run_options, serial=resolved.provider.is_local,
+                      max_workers=settings.triage_job_concurrency)
+    models = (resolved, _decompose_stage(args) if "claims" in options.tracks else None)
+    review_sha = _dataset.require_review_approval(bench_path, items) if "qa" in options.tracks else None
 
-    conditions = tuple(c.strip() for c in args.conditions.split(",") if c.strip())
-    tracks = tuple(t.strip() for t in args.tracks.split(",") if t.strip())
-    decompose_llm = None
-    if "claims" in tracks:
-        from zotero_summarizer.services.faithbench._constants import DEFAULT_JUDGE_MODEL
-
-        decompose_llm = _remote_llm(
-            args.judge_base_url_env, args.judge_api_key_env,
-            args.judge_model or DEFAULT_JUDGE_MODEL,
-        )
-
-    bench_path = _resolve_benchmark(settings, args.benchmark)
-    meta, items = _dataset.load_benchmark(bench_path)
     run_id = args.run_id or run_log.make_run_id("faithbench")
     paths = _run_paths(settings, run_id)
 
-    manifest = write_or_check_manifest(paths, {
+    write_or_check_manifest(paths, {
         "run_id": run_id,
         "started_at": _utc_iso_now(),
         "git_commit": run_log.short_git_commit(settings.project_root),
@@ -195,15 +221,24 @@ def _faithbench_run(args: argparse.Namespace) -> int:
         "provider_name": resolved.provider.name,
         "base_url": resolved.provider.base_url,
         "benchmark_path": str(bench_path),
-        "benchmark_sha256": run_log.file_sha256(bench_path, prefix_len=64),
-        "conditions": list(conditions),
-        "tracks": list(tracks),
-        "runs": args.runs,
+        "benchmark_sha256": benchmark_sha,
+        "benchmark_content_sha256": _dataset._benchmark_sha(meta, items),
+        "benchmark_review_sha256": review_sha,
+        "generation_sha256": generation_identity(config, models),
+        "conditions": list(options.conditions),
+        "tracks": list(options.tracks),
+        "runs": options.runs,
+        "limit": options.limit,
+        "serial": options.serial,
+        "max_workers": options.max_workers,
         # Snapshot: the digest prompt is conditioned on these goals, and the
         # judge applies the goal-aware read_why standard against the SAME text
-        # even if goals.yaml changes between run and judge. Not a guard field.
+        # even if goals.yaml changes between run and judge. Also a resume guard.
         "research_goals": [g for g in (config.research_goals or []) if str(g).strip()],
     })
+    llm = build_client_for_stage(resolved)
+    decompose_llm = (_remote_llm(args.judge_base_url_env, args.judge_api_key_env, models[1].model)
+                     if models[1] else None)
 
     print(
         f"run {run_id}: model={resolved.model!r} via {resolved.provider.base_url} "
@@ -213,13 +248,8 @@ def _faithbench_run(args: argparse.Namespace) -> int:
     counts = run_benchmark(
         run_id=run_id,
         inputs=RunInputs(meta=meta, items=items, papers_dir=settings.faithbench_dir / "papers", paths=paths),
-        llm=llm, config=config, decompose_llm=decompose_llm,
-        options=RunOptions(
-            conditions=conditions, tracks=tracks, runs=args.runs,
-            limit=args.limit, retry_errors=args.retry_errors,
-            serial=resolved.provider.is_local,
-            max_workers=settings.triage_job_concurrency,
-        ),
+        llm=llm, config=config, decompose_llm=decompose_llm, generation_models=models,
+        options=options,
         progress_cb=_print_progress,
     )
     print(json.dumps({"run_id": run_id, "manifest": str(paths.manifest), **counts,
@@ -236,11 +266,13 @@ def _faithbench_judge(args: argparse.Namespace) -> int:
     from zotero_summarizer.services._common import read_config
     from zotero_summarizer.services.faithbench import RunInputs, judge_run
     from zotero_summarizer.services.faithbench import _dataset
+    from zotero_summarizer.services.faithbench._runner import _load_manifest
 
     settings = Settings.load(project_root=args.project_root)
     paths = _run_paths(settings, args.run_id)
     manifest = _load_manifest(paths)
-    meta, items = _dataset.load_benchmark(Path(manifest["benchmark_path"]))
+    meta, items = _dataset.load_benchmark(Path(manifest["benchmark_path"]),
+                                         expected_sha256=manifest["benchmark_sha256"])
     judge_llm = _remote_llm(args.judge_base_url_env, args.judge_api_key_env, args.judge_model)
     config = read_config(settings.config_path)
 
@@ -263,17 +295,10 @@ def _faithbench_judge(args: argparse.Namespace) -> int:
 
 def _faithbench_report(args: argparse.Namespace) -> int:
     from zotero_summarizer.services.faithbench import build_report
-    from zotero_summarizer.services.faithbench import _dataset
 
     settings = Settings.load(project_root=args.project_root)
     paths = _run_paths(settings, args.run_id)
-    manifest = _load_manifest(paths)
-    _, items = _dataset.load_benchmark(Path(manifest["benchmark_path"]))
-    report = build_report(
-        paths=paths, items=items, manifest=manifest,
-        benchmark_path=Path(manifest["benchmark_path"]),
-        faithbench_dir=settings.faithbench_dir,
-    )
+    report = build_report(paths=paths, faithbench_dir=settings.faithbench_dir)
     print(json.dumps(report, indent=2, ensure_ascii=False))
     print(f"\nreport.md: {paths.report_md}")
     return 0
@@ -367,7 +392,7 @@ def register_faithbench(subparsers) -> None:
     judge = fb_sub.add_parser(
         "judge",
         help="Judge a run: deterministic hard ladder first, pinned LLM judge for the "
-             "residual band only. Re-runnable; --force re-judges everything (responses untouched).",
+             "residual band only. Re-runnable; --force re-judges everything (completed responses preserved).",
     )
     judge.add_argument("--run-id", required=True)
     judge.add_argument(

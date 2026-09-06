@@ -11,6 +11,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from zotero_summarizer.domain import VERDICT_SOURCE_AUTO_QUALITY, VERDICT_SOURCE_USER
 from zotero_summarizer.services.library.quality_gate import (
     apply_auto_quality_gate,
@@ -60,6 +62,68 @@ def _seed_row(db_path: Path, *, item_key: str, priority: str, llm_score: int | N
 
 def _reviews(quality_for: dict[str, dict]) -> dict:
     return {k: {"quality": v} for k, v in quality_for.items()}
+
+
+@pytest.mark.parametrize("caller", ["deep_review", "fleet", "weekly"])
+def test_review_callers_preserve_labels_until_explicit_triage_gate(monkeypatch, caller):
+    from types import SimpleNamespace
+
+    from test_deep_review import _StubExtractor, _StubReader, _detail, _wire
+    from zotero_summarizer.services._common import settings
+    from zotero_summarizer.services.library import app_library_reader, deep_review
+    from zotero_summarizer.services.library.review_fleet import fleet, verdict_store
+    from zotero_summarizer.services.research_feed import runner
+    from zotero_summarizer.services.setup.bootstrap import _default_goals_config
+    from zotero_summarizer.services.triage.feeds import _tick
+
+    db = _gate_db(settings().data_dir)
+    assert db == settings().triage_db_path
+    _seed_row(db, item_key="REVIEWED", priority="could_read", llm_score=5)
+    _seed_row(db, item_key="UNRELATED", priority="could_read", llm_score=1)
+    insert_or_update_label_verdict(
+        db, item_key="HUMAN", original_derived_priority="could_read",
+        user_priority="should_read", comment="keep", source=VERDICT_SOURCE_USER,
+    )
+    before = list_all_label_verdicts(db)
+    for name, value in (("ZS_AUTO_QUALITY_GATE", "1"), ("ZS_AUTO_QUALITY_LLM_FLOOR", "2"),
+                        ("ZS_AUTO_QUALITY_HIDE_GRADES", "D"), ("ZS_AUTO_QUALITY_HIDE_BANDS", "flag")):
+        monkeypatch.setenv(name, value)
+    reader = _StubReader({"REVIEWED": _detail()})
+    _wire(monkeypatch, _default_goals_config(), reader=reader, extractor=_StubExtractor())
+    monkeypatch.setattr(app_library_reader, "AppLibraryReader", lambda db: reader)
+    monkeypatch.setattr(deep_review._deep_review_layers, "extra_layers",
+                        lambda ctx: ({"grade": "D"}, [], None, None, None))
+    monkeypatch.setattr(deep_review, "_JOBS", {})
+    monkeypatch.setattr(deep_review, "_ensure_pool", lambda provider: SimpleNamespace(
+        submit=lambda fn, *args: fn(*args),
+    ))
+    monkeypatch.setattr(fleet, "_LATCH", fleet._flight.FlightLatch())
+    monkeypatch.setattr(fleet, "_STATE", dict(fleet._STATE))
+    monkeypatch.setattr(fleet._flight, "run_in_background", lambda fn: fn())
+
+    assert deep_review.get_cached_review("REVIEWED") is None
+    if caller == "fleet":
+        result = fleet.start(item_keys=["REVIEWED"])
+        assert result["status"] == "ready" and result["proposed"] == 1
+        assert set(verdict_store.read_all()) == {"REVIEWED"}
+    elif caller == "weekly":
+        runner._ensure_reviews(settings(), [SimpleNamespace(source_id="REVIEWED")], 30)
+    else:
+        deep_review.start(item_keys=["REVIEWED"])
+
+    assert deep_review.status("REVIEWED")["status"] == "ready"
+    assert deep_review.get_cached_review("REVIEWED")["quality"]["grade"] == "D"
+    assert list_all_label_verdicts(db) == before
+    _tick._maybe_auto_quality_gate("test-dry-run", dry_run=True)
+    assert list_all_label_verdicts(db) == before
+    monkeypatch.setenv("ZS_AUTO_QUALITY_GATE", "0")
+    _tick._maybe_auto_quality_gate("test-disabled", dry_run=False)
+    assert list_all_label_verdicts(db) == before
+    monkeypatch.setenv("ZS_AUTO_QUALITY_GATE", "1")
+    _tick._maybe_auto_quality_gate("test-explicit-triage", dry_run=False)
+    assert get_label_verdict(db, "REVIEWED")["source"] == VERDICT_SOURCE_AUTO_QUALITY
+    assert get_label_verdict(db, "UNRELATED")["source"] == VERDICT_SOURCE_AUTO_QUALITY
+    assert get_label_verdict(db, "HUMAN")["user_priority"] == "should_read"
 
 
 # --- pure layer logic ------------------------------------------------------
@@ -158,7 +222,7 @@ def test_manual_relabel_restores_an_auto_hidden_row(tmp_path):
     assert v["source"] == VERDICT_SOURCE_USER  # the UPSERT overwrote the auto source
 
 
-def test_gate_skips_unparseable_payload_without_aborting(tmp_path):
+def test_gate_rejects_unparseable_payload(tmp_path):
     db = _gate_db(tmp_path)
     # one corrupt row (malformed JSON) + one clean hideable row
     conn = sqlite3.connect(str(db))
@@ -173,28 +237,21 @@ def test_gate_skips_unparseable_payload_without_aborting(tmp_path):
     _seed_row(db, item_key="CLEAN_D", priority="could_read", llm_score=5)
     reviews = _reviews({"CLEAN_D": {"grade": "D"}})
 
-    hidden = apply_auto_quality_gate(db, reviews)
-
-    # the corrupt row was skipped (no hide on unparseable data), the clean one hidden
-    assert hidden == 1
+    with pytest.raises(json.JSONDecodeError):
+        apply_auto_quality_gate(db, reviews)
     assert get_label_verdict(db, "CORRUPT") is None
-    assert get_label_verdict(db, "CLEAN_D")["user_priority"] == "dont_read"
 
 
-def test_only_keys_scopes_l2_but_l1_still_applies_everywhere(tmp_path):
-    db = _gate_db(tmp_path)
-    _seed_row(db, item_key="IN_SCOPE_D", priority="could_read", llm_score=5)
-    _seed_row(db, item_key="OUT_SCOPE_D", priority="could_read", llm_score=5)
-    _seed_row(db, item_key="LOW_LLM_ANYWHERE", priority="could_read", llm_score=2)
-    reviews = _reviews({"IN_SCOPE_D": {"grade": "D"}, "OUT_SCOPE_D": {"grade": "D"}})
+def test_gate_runner_propagates_cache_read_failure(monkeypatch):
+    from zotero_summarizer.services.library import deep_review, quality_gate
 
-    # deep-review settle hook: L2 only for IN_SCOPE_D; L1 (LLM floor) applies to all
-    hidden = apply_auto_quality_gate(db, reviews, only_keys={"IN_SCOPE_D"})
+    def unreadable():
+        raise OSError("review cache unavailable")
 
-    assert hidden == 2  # IN_SCOPE_D (L2) + LOW_LLM_ANYWHERE (L1); OUT_SCOPE_D NOT hidden
-    assert get_label_verdict(db, "IN_SCOPE_D") is not None
-    assert get_label_verdict(db, "OUT_SCOPE_D") is None
-    assert get_label_verdict(db, "LOW_LLM_ANYWHERE") is not None
+    monkeypatch.setenv("ZS_AUTO_QUALITY_GATE", "1")
+    monkeypatch.setattr(deep_review, "_read_all", unreadable)
+    with pytest.raises(OSError, match="review cache unavailable"):
+        quality_gate.fire_full()
 
 
 def test_disabled_config_hides_nothing(tmp_path):
@@ -249,4 +306,3 @@ def test_list_verdicts_source_filter_isolates_auto_quality_hides(tmp_path, monke
     # a source with no matches returns empty, not an error
     none_v = asyncio.run(golden_routes.list_verdicts(source="nonexistent"))
     assert none_v["verdicts"] == [] and none_v["total"] == 0
-

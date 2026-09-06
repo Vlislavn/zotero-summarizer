@@ -31,3 +31,12 @@ deliberate ML-only state, not an unreachable-provider error.
 `CorpusItem.doi` defaults to an empty string for older imports. It carries
 identity metadata independently of title/abstract embedding content, enabling
 self-exclusion when the same paper appears under another title.
+
+`ResearchEngineeringCard.worth_reading` includes `unknown` for a withheld reading
+decision. It is distinct from an assessed `skip`; existing `evidence_gaps` carries
+the policy's reason without a second confidence/action field.
+
+`ResearchProfile` admits schema version 1 only. Its strict integer shortlist/card
+types are also used by `research_feed.parse_run_budgets` at CLI/service entry:
+shortlist 1–100, cards 1–20, source rows 1–5,000 and wait timeout 1–86,400 seconds.
+Only omitted shortlist/card overrides use profile defaults; zero is not omission.
