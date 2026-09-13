@@ -181,6 +181,28 @@ def test_ask_paper_rejects_answer_not_contained_in_grounded_quote(tmp_path, monk
     assert out["abstained"] is True and out["answer"] is None
 
 
+def test_ask_paper_accepts_answer_synthesizing_other_context_text(tmp_path, monkeypatch):
+    # Regression (2026-09-11): an answer that quotes one sentence but adds framing
+    # words taken from ANOTHER grounded part of the paper (abstract + intro fusion)
+    # was rejected: answer-vs-quote support alone cannot see the extra tokens.
+    # Quote stays the required grounded pointer; answer support may also come from
+    # the context. A token absent from the paper entirely still fails both bands.
+    pdf = tmp_path / "p.pdf"
+    pdf.write_bytes(b"%PDF-fake")
+
+    class _FusionAnswerLLM:
+        def prompt(self, prompt, **kwargs):
+            return json.dumps({
+                "answer": "GlassNet was evaluated on the ImageNet dataset, and training "
+                          "used 1,281,167 images over 90 epochs.",
+                "quote": "We evaluated GlassNet on the ImageNet dataset.",
+            })
+
+    _fake_state(tmp_path, pdf, _Extractor(), _FusionAnswerLLM(), monkeypatch)
+    out = qa.ask_paper("KEY1", "Which dataset was used?")
+    assert out["abstained"] is False and out["answer"].startswith("GlassNet")
+
+
 @pytest.mark.parametrize("review_field", ["digest", "quality", "goal_summaries"])
 @pytest.mark.parametrize("in_pdf", [False, True])
 def test_generated_review_is_context_but_not_paper_evidence(tmp_path, monkeypatch, review_field, in_pdf):

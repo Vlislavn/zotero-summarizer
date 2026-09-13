@@ -14,6 +14,19 @@ from zotero_summarizer.services.triage.feeds._daily_materialize import (
 from zotero_summarizer.services.zotero.pending import build_provenance_comment, build_triage_note_html
 
 
+def test_build_digest_note_html_marked_and_escaped():
+    from zotero_summarizer.models import PaperDigest
+    from zotero_summarizer.services.zotero.pending import DIGEST_NOTE_MARKER, build_digest_note_html
+
+    d = PaperDigest(read_decision="skim", read_parts=["§2"], grade="A", tldr="About <x> & y",
+                    writing_friction="moderate", writing_reasons=["Term <T> appears before definition."])
+    h = build_digest_note_html(d)
+    assert DIGEST_NOTE_MARKER in h
+    assert "&lt;x&gt;" in h and "&amp;" in h
+    assert "Quality A" in h and "Read parts" in h
+    assert "Writing · moderate" in h and "&lt;T&gt;" in h
+
+
 def _summary(**overrides) -> SummarizeResponse:
     base = {
         "executive_summary": "Paper introduces approach X.",

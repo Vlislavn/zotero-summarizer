@@ -64,6 +64,7 @@ def build_client_for_provider(
             temperature=provider.temperature,
             extra_body=extra_body,
             request_timeout_seconds=settings().summary_timeout_seconds,
+            structured_output=provider.structured_output,
         )
 
     if provider.type == ProviderType.anthropic:

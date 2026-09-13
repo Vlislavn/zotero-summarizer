@@ -40,11 +40,12 @@ def test_openai_plain_dialect_sets_reasoning_effort():
     assert out2 == {"keep": 1, "reasoning_effort": "medium"}
 
 
-def test_openai_plain_dialect_off_omits_reasoning_effort():
-    # off must not force reasoning; an empty result collapses back to None.
-    assert apply_effort_openai("off", None) is None
-    assert apply_effort_openai("off", {"reasoning_effort": "high"}) is None
-    assert apply_effort_openai("off", {"keep": 1}) == {"keep": 1}
+def test_openai_plain_dialect_off_explicitly_disables_reasoning():
+    # Omission leaves thinking enabled on servers whose default is reasoning.
+    assert apply_effort_openai("off", None) == {"reasoning_effort": "none"}
+    base = {"reasoning_effort": "high", "keep": 1}
+    assert apply_effort_openai("off", base) == {"reasoning_effort": "none", "keep": 1}
+    assert base == {"reasoning_effort": "high", "keep": 1}
 
 
 def test_openai_chat_template_dialect_toggles_enable_thinking():

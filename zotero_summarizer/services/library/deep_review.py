@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -70,7 +71,6 @@ _DEFAULT_TOP_K = 5
 
 # Remote APIs still get a bounded default fan-out.
 _MAX_CONCURRENT = 8
-# Keep running jobs plus a bounded recent history.
 _MAX_FINISHED_JOBS = 12
 
 _LOCK = threading.Lock()          # guards _JOBS
@@ -118,11 +118,11 @@ def _set_job(item_key: str, **fields: Any) -> None:
 
 
 def _set_job_progress(item_key: str, progress: dict[str, Any]) -> None:
-    """ReviewReporter sink: write the live within-item progress onto THIS item's job."""
     with _LOCK:
         job = _JOBS.get(item_key)
         if job is not None:
             job["progress"] = progress
+            job["progress_at"] = time.perf_counter()
 
 
 def status(item_key: str | None = None) -> dict[str, Any]:
@@ -145,7 +145,7 @@ def status(item_key: str | None = None) -> dict[str, Any]:
                 "completed": int(job.get("completed") or 0),
                 "error": job.get("error"),
                 "started_at": job.get("started_at"),
-                "progress": dict(job.get("progress") or {}),
+                "progress": _deep_review_progress.live_progress(job),
             }
         jobs = list(_JOBS.values())
     running = [j for j in jobs if j.get("status") == "running"]
@@ -165,7 +165,7 @@ def status(item_key: str | None = None) -> dict[str, Any]:
         "completed": completed,
         "error": error,
         "started_at": min((j.get("started_at") for j in jobs if j.get("started_at")), default=None),
-        "progress": dict((running[0].get("progress") if running else {}) or {}),
+        "progress": _deep_review_progress.live_progress(running[0]) if running else {},
     }
 
 
@@ -261,7 +261,7 @@ def _review_one(
             digest_dump, model_read_decision, reading_policy_flags = apply_reading_policy(
                 digest_dump, quality_dump, goal_dump,
             )
-            digest = digest.model_copy(update=digest_dump)
+            digest = PaperDigest.model_validate(digest_dump)
             reporter.phase("note")
             from zotero_summarizer.services.library import review_detail
             if review_detail.classify_item_key(item_key) == review_detail.SOURCE_LIBRARY:

@@ -1,5 +1,9 @@
 import asyncio
+import os
 import socket
+from contextlib import ExitStack
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -12,6 +16,23 @@ from zotero_summarizer.services import health, lifecycle
 from zotero_summarizer.settings import Settings
 
 
+def test_pytest_temp_roots_are_isolated_and_cleaned():
+    from conftest import pytest_configure
+
+    previous = os.environ.get("PYTEST_DEBUG_TEMPROOT")
+    with ExitStack() as cleanup:
+        config = SimpleNamespace(add_cleanup=cleanup.callback)
+        pytest_configure(config)
+        first = Path(os.environ["PYTEST_DEBUG_TEMPROOT"])
+        pytest_configure(config)
+        second = Path(os.environ["PYTEST_DEBUG_TEMPROOT"])
+        assert first != second
+        assert first.is_dir() and second.is_dir()
+        assert second == Path(os.environ["ZOTERO_SUMMARIZER_HOME"])
+    assert not first.exists() and not second.exists()
+    assert os.environ.get("PYTEST_DEBUG_TEMPROOT") == previous
+
+
 def test_test_environment_never_loads_checkout_state(tmp_path):
     from zotero_summarizer.runtime import get_context
 
@@ -21,6 +42,19 @@ def test_test_environment_never_loads_checkout_state(tmp_path):
     with socket.socket() as sock:
         with pytest.raises(AssertionError, match="mock network"):
             sock.connect(("127.0.0.1", 11434))
+
+
+def test_http_clients_never_probe_system_proxies_in_tests(monkeypatch):
+    import urllib.request
+    import httpx
+
+    def forbidden():
+        pytest.fail("native system proxy discovery after fork")
+
+    monkeypatch.setattr(urllib.request, "getproxies_macosx_sysconf", forbidden, raising=False)
+    assert urllib.request.getproxies_environment()["no"] == "*"
+    with httpx.Client():
+        pass
 
 
 def test_validation_never_echoes_secret_input(caplog):
@@ -111,3 +145,20 @@ def test_startup_corpus_sync_precedes_gate_refresh(monkeypatch):
     asyncio.run(lifecycle._sync_corpus_before_gate_refresh(app_state, gate_enabled=True))
 
     assert events == ["corpus", ("startup-corpus", app_state.classifier_gate)]
+
+
+def test_startup_rss_failure_is_logged_without_unretrieved_task(tmp_path, monkeypatch, caplog):
+    from zotero_summarizer.integrations.app_rss import AppRssReader, RssUrlRejected
+
+    def fail(*args, **kwargs):
+        raise RssUrlRejected("Invalid RSS/Atom feed document")
+
+    monkeypatch.setattr(AppRssReader, "refresh_feeds", fail)
+    monkeypatch.setenv("ZS_STARTUP_RSS_MAX_FEEDS", "1")
+
+    async def run():
+        lifecycle._schedule_startup_rss_refresh(asyncio.get_running_loop(), Settings.load(project_root=tmp_path))
+        await asyncio.gather(*(t for t in asyncio.all_tasks() if t is not asyncio.current_task()))
+
+    asyncio.run(run())
+    assert "startup app RSS refresh failed" in caplog.text

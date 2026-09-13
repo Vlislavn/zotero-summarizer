@@ -17,6 +17,8 @@ def test_build_llm_without_extra_body_does_not_pass_kwarg():
     assert "extra_body" not in kwargs, f"extra_body leaked into OpenAI build: {kwargs}"
     assert kwargs["model"] == "gpt-4o-mini"
     assert kwargs["openai_api_key"] == "sk-xxx"
+    from zotero_summarizer.integrations.llm_callbacks import CompletionGuard
+    assert isinstance(kwargs["callbacks"][0], CompletionGuard)
 
 
 def test_build_llm_with_empty_dict_does_not_pass_kwarg():
@@ -60,3 +62,24 @@ def test_build_llm_threads_explicit_temperature():
     with patch.object(_adapters, "_load_onprem", return_value=(fake_llm_class, None)):
         _adapters.build_llm("https://x", "m", "k", temperature=0.7)
     assert fake_llm_class.call_args.kwargs["temperature"] == 0.7
+
+
+def test_structured_provider_constrains_each_pydantic_call_only():
+    from pydantic import BaseModel
+    from zotero_summarizer.integrations.llm import build_response_format
+
+    class Result(BaseModel):
+        ok: bool
+
+    fake = MagicMock()
+    for enabled in (False, True):
+        with patch.object(_adapters, "_load_onprem", return_value=(fake, None)):
+            client = _adapters.build_llm("https://x", "m", "k", structured_output=enabled)
+        client.pydantic_prompt("Check", Result)
+        kwargs = fake.return_value.pydantic_prompt.call_args.kwargs
+        assert kwargs.get("response_format") == (build_response_format(Result) if enabled else None)
+        explicit = {"type": "json_object"}
+        client.pydantic_prompt("Check", Result, response_format=explicit)
+        assert fake.return_value.pydantic_prompt.call_args.kwargs["response_format"] is explicit
+        client.prompt("Plain text")
+        assert "response_format" not in fake.return_value.prompt.call_args.kwargs

@@ -59,7 +59,7 @@ export default function RssFeedsSection() {
   const refreshMutation = useMutation({
     mutationFn: () => refreshRssFeeds({ max_feeds: 10, max_new_items_per_feed: 25 }),
     onSuccess: (res) => {
-      setMessage(`Refresh stored ${res.inserted || 0} new item${res.inserted === 1 ? '' : 's'}`);
+      setMessage(`Refresh stored ${res.inserted || 0} new item${res.inserted === 1 ? '' : 's'}${res.errors?.length ? `; ${res.errors.length} feed(s) failed — see their errors below` : ''}`);
       invalidate();
     },
   });

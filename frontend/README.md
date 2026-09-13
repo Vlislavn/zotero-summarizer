@@ -168,6 +168,21 @@ understand predecessor receipts.
 
 ## Structure and conventions
 
+Both paper-review surfaces reuse `useDeepReviewRunner` and a per-item React Query
+poll. Status requests time out after 15 seconds, start requests after 30 seconds;
+poll errors end the spinner and expose retry, without cancelling the server job.
+Late start/status responses cannot replace another paper's state after navigation.
+Auto-run waits for the initial status and never restarts a resumed completed job.
+
+Targeted Search offers Recommended, Relevance, and Relevance + prestige orders,
+persisted with the tab's session. The optional blend uses 85% query relevance and
+15% log-normalized citation count, with median-known citations for missing values;
+when citations are absent/zero throughout, it reduces to relevance. Counts are a
+limited prestige proxy (field/age bias), disclosed beside the selector. Explicit
+sorts show the whole pool in that order; only Recommended collapses weak matches.
+Retracted and unscored candidates stay last. This display preference does not
+change server review selection. RSS refresh messages include partial failures.
+
 ```text
 src/
   api/          thin fetch wrappers

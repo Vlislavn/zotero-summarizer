@@ -46,3 +46,23 @@ it('shows every server query variant and files identical-title cards by their di
     { candidate_id: 'local:second', collection_key: null },
   ]);
 });
+
+it('sorts the complete result pool and remembers relevance + prestige on remount', async () => {
+  const research = { id: 'sorted', status: 'reviewed', candidates: [
+    { candidate_id: 'a', title: 'Most relevant', url: 'https://example.com/a', query_score: 0.9, cited_by_count: 0 },
+    { candidate_id: 'b', title: 'Well cited', url: 'https://example.com/b', query_score: 0.85, cited_by_count: 100, relevance_band: 'weak' },
+  ] };
+  sessionStorage.setItem('zs.searchSession', JSON.stringify({ id: research.id }));
+  vi.stubGlobal('fetch', vi.fn(async (path) => new Response(JSON.stringify(
+    path === '/api/search/sorted' ? research : { items: [] },
+  ))));
+  const page = render(<Search />);
+  const selector = await screen.findByRole('combobox', { name: 'Sort by' });
+  fireEvent.change(selector, { target: { value: 'relevance_prestige' } });
+  expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['Well cited', 'Most relevant']);
+  expect(screen.queryByText(/weaker match/)).toBeNull();
+  page.unmount();
+  render(<Search />);
+  expect((await screen.findByRole('combobox', { name: 'Sort by' })).value).toBe('relevance_prestige');
+  expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['Well cited', 'Most relevant']);
+});

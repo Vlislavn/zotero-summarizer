@@ -103,7 +103,16 @@ def ask_paper(
                 item_key, mode, latency, parsed["abstained"])
     if parsed["answer"] is not None and not (
         _quote_is_grounded(parsed["quote"], context) and _quote_is_grounded(parsed["quote"], text)
-        and _answer_is_supported(parsed["answer"], parsed["quote"])
+        and (
+            # The answer's content must come from the quoted evidence — or, when the
+            # answer fuses the quote with other grounded paper text (the common
+            # synthesis shape: quote the intro, add the abstract's framing), from the
+            # context itself. The QUOTE stays the required grounded pointer; only the
+            # answer-side support widens. faithbench's answer-vs-gold-via-quote guard
+            # is untouched (it needs the quote to be THE evidence for the gold).
+            _answer_is_supported(parsed["answer"], parsed["quote"])
+            or _answer_is_supported(parsed["answer"], context)
+        )
     ):
         parsed = {"answer": None, "abstained": True, "quote": None}
     return _with_evidence({

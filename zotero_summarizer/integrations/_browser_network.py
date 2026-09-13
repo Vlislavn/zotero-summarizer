@@ -18,7 +18,7 @@ import sys
 import threading
 from time import monotonic
 
-from zotero_summarizer.integrations.app_rss import RssUrlRejected, _resolve_public_url
+from zotero_summarizer.integrations.app_rss import RssHostUnresolved, RssUrlRejected, _resolve_public_url
 
 
 def _relay(client: socket.socket, upstream: socket.socket, server: _Proxy) -> None:
@@ -57,7 +57,12 @@ class _Request(BaseHTTPRequestHandler):
             self.end_headers()
             return
         tunnel = self.command == "CONNECT"
-        target, address = _resolve_public_url("https://" + self.path if tunnel else self.path)
+        try:
+            target, address = _resolve_public_url("https://" + self.path if tunnel else self.path)
+        except RssHostUnresolved:
+            # Chromium also requests background services unrelated to the paper.
+            self.send_error(502, "Upstream hostname could not be resolved")
+            return
         if tunnel and (target.raw_path != b"/" or target.fragment):
             raise RssUrlRejected("CONNECT requires a host and port, not a URL path")
         if not tunnel and target.scheme != "http":

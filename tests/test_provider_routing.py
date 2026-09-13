@@ -266,9 +266,10 @@ def test_factory_openai_reuses_build_llm(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         factory, "build_llm",
-        lambda url, model, key, max_tokens, temperature, extra_body, request_timeout_seconds: captured.update(
+        lambda url, model, key, max_tokens, temperature, extra_body, request_timeout_seconds, structured_output: captured.update(
             url=url, model=model, key=key, max_tokens=max_tokens, temperature=temperature,
-            extra_body=extra_body, request_timeout_seconds=request_timeout_seconds) or "OPENAI_CLIENT",
+            extra_body=extra_body, request_timeout_seconds=request_timeout_seconds,
+            structured_output=structured_output) or "OPENAI_CLIENT",
     )
     # extra_body carries provider-specific kwargs (e.g. an MLX/vLLM model served
     # with reasoning disabled). With thinking_effort unset it must reach build_llm
@@ -276,7 +277,7 @@ def test_factory_openai_reuses_build_llm(monkeypatch):
     extra = {"chat_template_kwargs": {"enable_thinking": False}}
     provider = ProviderConfig(
         name="mlx", base_url="http://localhost:8080/v1", api_key_env="LOCAL_KEY",
-        max_tokens=8192, extra_body=extra,
+        max_tokens=8192, extra_body=extra, structured_output=True,
     )
     client = factory.build_client_for_provider(provider, "m")
     assert client == "OPENAI_CLIENT"
@@ -284,6 +285,7 @@ def test_factory_openai_reuses_build_llm(monkeypatch):
         "url": "http://localhost:8080/v1", "model": "m", "key": "secret",
         "max_tokens": 8192, "temperature": 0.0, "extra_body": extra,
         "request_timeout_seconds": 17,
+        "structured_output": True,
     }
 
 
@@ -296,7 +298,7 @@ def test_factory_openai_threads_temperature_and_effort(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         factory, "build_llm",
-        lambda url, model, key, max_tokens, temperature, extra_body, request_timeout_seconds: captured.update(
+        lambda url, model, key, max_tokens, temperature, extra_body, request_timeout_seconds, structured_output: captured.update(
             temperature=temperature, extra_body=extra_body) or "C",
     )
     provider = ProviderConfig(
@@ -338,7 +340,7 @@ def test_factory_enable_thinking_override(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         factory, "build_llm",
-        lambda url, model, key, max_tokens, temperature, extra_body, request_timeout_seconds: captured.update(
+        lambda url, model, key, max_tokens, temperature, extra_body, request_timeout_seconds, structured_output: captured.update(
             extra_body=extra_body
         ) or "C",
     )
@@ -360,7 +362,7 @@ def test_factory_enable_thinking_noop_without_chat_template_kwargs(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         factory, "build_llm",
-        lambda url, model, key, max_tokens, temperature, extra_body, request_timeout_seconds: captured.update(
+        lambda url, model, key, max_tokens, temperature, extra_body, request_timeout_seconds, structured_output: captured.update(
             extra_body=extra_body
         ) or "C",
     )
@@ -380,7 +382,7 @@ def test_factory_keep_alive_forwarded_only_when_set(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         factory, "build_llm",
-        lambda url, model, key, max_tokens, temperature, extra_body, request_timeout_seconds: captured.update(
+        lambda url, model, key, max_tokens, temperature, extra_body, request_timeout_seconds, structured_output: captured.update(
             extra_body=extra_body
         ) or "C",
     )

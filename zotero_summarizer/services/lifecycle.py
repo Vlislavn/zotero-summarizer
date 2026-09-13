@@ -299,7 +299,10 @@ def _schedule_startup_rss_refresh(
         LOGGER.info("startup app RSS refresh complete: %s", result)
 
     async def _worker() -> None:
-        await asyncio.to_thread(_run_refresh)
+        try:
+            await asyncio.to_thread(_run_refresh)
+        except Exception:
+            LOGGER.exception("startup app RSS refresh failed")
 
     loop.create_task(_worker())
     return True

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 import socket
 import zlib
 from pathlib import Path
@@ -23,6 +24,10 @@ from zotero_summarizer.settings import offline_requested
 
 class RssUrlRejected(ValueError):
     """A rejected feed destination or response document."""
+
+
+class RssHostUnresolved(RssUrlRejected):
+    """DNS failed before any connection could be made."""
 
 
 def _reject_private_ip(host: str) -> None:
@@ -56,9 +61,9 @@ def _resolve_public_url(url: str) -> tuple[httpx.URL, str]:
             type=socket.SOCK_STREAM,
         )
     except socket.gaierror as exc:
-        raise RssUrlRejected(f"RSS hostname could not be resolved: {host}") from exc
+        raise RssHostUnresolved(f"RSS hostname could not be resolved: {host}") from exc
     if not infos:
-        raise RssUrlRejected(f"RSS hostname could not be resolved: {host}")
+        raise RssHostUnresolved(f"RSS hostname could not be resolved: {host}")
     for info in infos:
         address = str(info[4][0])
         _reject_private_ip(address)
@@ -196,6 +201,27 @@ class AppRssReader:
     def _conn(self):
         return feeds_storage.open_triage_conn(self.triage_db_path)
 
+    def _refresh_feed(self, conn, feed: dict[str, Any], *, timeout: float, limit: int) -> tuple[int, int]:
+        import feedparser
+
+        body, headers = _fetch_public_url(str(feed["url"]), timeout=timeout)
+        parsed = feedparser.parse(body)
+        if parsed.bozo or not parsed.version:
+            raise RssUrlRejected("Invalid RSS/Atom feed document")
+        title = str((parsed.feed or {}).get("title") or feed.get("name") or "")
+        inserted = updated = 0
+        for entry in list(parsed.entries or [])[:limit]:
+            item = _entry_to_item(entry, feed=feed, feed_title=title)
+            if not item.get("stable_feed_key"):
+                continue
+            _, was_inserted = rss_storage.upsert_rss_item(conn, rss_feed_id=int(feed["id"]), item=item)
+            inserted += int(was_inserted)
+            updated += int(not was_inserted)
+        rss_storage.record_rss_fetch_result(conn, int(feed["id"]), error=None,
+                                           etag=headers.get("etag"), modified=headers.get("last-modified"))
+        conn.commit()
+        return inserted, updated
+
     def refresh_feeds(
         self,
         *,
@@ -222,11 +248,11 @@ class AppRssReader:
                 "errors": [],
                 "offline": True,
             }
-        import feedparser
-
         fetched = 0
         inserted = 0
         updated = 0
+        errors = []
+        last_failure = None
         with self._conn() as conn:
             feeds = rss_storage.list_rss_feeds(conn)
             # ponytail: LRU rotation via Python sort ('' < any timestamp puts
@@ -236,36 +262,11 @@ class AppRssReader:
             for feed in feeds:
                 fetched += 1
                 try:
-                    body, headers = _fetch_public_url(
-                        str(feed["url"]), timeout=float(per_feed_timeout)
+                    new, changed = self._refresh_feed(
+                        conn, feed, timeout=float(per_feed_timeout), limit=max(0, int(max_new_items_per_feed)),
                     )
-                    parsed = feedparser.parse(body)
-                    if parsed.bozo or not parsed.version:
-                        raise RssUrlRejected("Invalid RSS/Atom feed document")
-                    feed_title = str(
-                        (parsed.feed or {}).get("title") or feed.get("name") or ""
-                    )
-                    for entry in list(parsed.entries or [])[
-                        : max(0, int(max_new_items_per_feed))
-                    ]:
-                        item = _entry_to_item(entry, feed=feed, feed_title=feed_title)
-                        if not item.get("stable_feed_key"):
-                            continue
-                        _, was_inserted = rss_storage.upsert_rss_item(
-                            conn,
-                            rss_feed_id=int(feed["id"]),
-                            item=item,
-                        )
-                        inserted += 1 if was_inserted else 0
-                        updated += 0 if was_inserted else 1
-                    rss_storage.record_rss_fetch_result(
-                        conn,
-                        int(feed["id"]),
-                        error=None,
-                        etag=headers.get("etag"),
-                        modified=headers.get("last-modified"),
-                    )
-                    conn.commit()
+                    inserted += new
+                    updated += changed
                 except Exception as exc:
                     conn.rollback()
                     rss_storage.record_rss_fetch_result(
@@ -274,12 +275,18 @@ class AppRssReader:
                         error=f"{type(exc).__name__}: {exc}",
                     )
                     conn.commit()
-                    raise
+                    if not isinstance(exc, (RssUrlRejected, httpx.HTTPError)):
+                        raise
+                    last_failure = exc
+                    errors.append({"feed_id": int(feed["id"]), "url": str(feed["url"]), "error": f"{type(exc).__name__}: {exc}"})
+                    logging.getLogger(__name__).warning("RSS feed %s failed: %s", feed["name"], exc)
+        if last_failure is not None and len(errors) == fetched:
+            raise last_failure
         return {
             "feeds": fetched,
             "inserted": inserted,
             "updated": updated,
-            "errors": [],
+            "errors": errors,
         }
 
     def get_feed_groups(self) -> list[dict[str, Any]]:

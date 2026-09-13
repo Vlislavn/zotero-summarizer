@@ -124,6 +124,7 @@ export async function runDeepReview({ topK = 5, itemKey = null, focusPrompt = ''
   return request('/api/library/deep-review/run', {
     method: 'POST',
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000),
   });
 }
 
@@ -134,7 +135,7 @@ export async function runDeepReview({ topK = 5, itemKey = null, focusPrompt = ''
  */
 export async function fetchDeepReviewStatus(itemKey = null) {
   const q = itemKey ? `?item_key=${encodeURIComponent(itemKey)}` : '';
-  return request(`/api/library/deep-review/status${q}`);
+  return request(`/api/library/deep-review/status${q}`, { signal: AbortSignal.timeout(15_000) });
 }
 
 /**

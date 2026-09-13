@@ -4,7 +4,9 @@ All the real work lives here. Modules are grouped into five domains plus a
 small set of shared/infra files at the top level.
 
 Startup RSS limits are read when scheduling, after the project `.env` loads;
-refresh failures propagate to the event loop's error handler.
+partial feed failures are returned by the reader and logged with the result.
+An entirely failed refresh or unexpected error is logged with its traceback in
+the startup task, preventing an unobserved asyncio task exception.
 
 Startup reads the classifier from `Settings.model_dir`, the same project-local
 path used by training, API reads and the daemon worker. ZIP archives take
@@ -69,6 +71,7 @@ and `deep_review_sub_concurrency` (within-review rubric/goal sub-calls) — all 
 shared so the daemon, deep-review job, and `verify-deep-review` CLI never drift),
 `_adapters` (`build_llm`: OpenAI-compatible client via OnPrem — threads the
 configured request timeout and per-provider `temperature` (default 0, deterministic);
+registers the completion guard before OnPrem discards finish reason/token usage;
 `build_pdf_extractor`.
 All LLM clients are constructed through `services/llm/factory`, which calls
 `build_llm` for `openai`-type providers), `lifecycle` (startup composition root — small `_init_*`

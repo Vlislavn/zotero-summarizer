@@ -51,6 +51,16 @@ def test_proxy_authenticates_before_dns_or_connect(monkeypatch):
     assert b'Proxy-Authenticate: Basic realm="paper-fetch"' in response
 
 
+def test_unresolvable_background_request_is_a_local_502(monkeypatch):
+    def unavailable(*args, **kwargs):
+        raise socket.gaierror("DNS unavailable")
+
+    monkeypatch.setattr(socket, "getaddrinfo", unavailable)
+    monkeypatch.setattr(socket, "create_connection", lambda *a, **k: pytest.fail("unresolved TCP connection"))
+    response = _exchange(f"CONNECT android.clients.google.com:443 HTTP/1.1\r\nProxy-Authorization: {AUTH}\r\n\r\n".encode())
+    assert b" 502 " in response
+
+
 @pytest.mark.parametrize("method", ["GET", "CONNECT"])
 def test_proxy_pins_dns_and_preserves_origin_bytes(monkeypatch, method):
     resolutions, connections, received = [], [], []

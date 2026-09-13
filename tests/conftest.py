@@ -58,6 +58,10 @@ def pytest_configure(config):
     directory = TemporaryDirectory(prefix="zs-test-collection-")
     patch = pytest.MonkeyPatch()
     patch.setenv("ZOTERO_SUMMARIZER_HOME", directory.name)
+    # Forked children otherwise rescan a growing shared pytest temp directory.
+    patch.setenv("PYTEST_DEBUG_TEMPROOT", directory.name)
+    # urllib's macOS SystemConfiguration proxy lookup is unsafe after fork().
+    patch.setenv("no_proxy", "*")
     config.add_cleanup(directory.cleanup)
     config.add_cleanup(patch.undo)
 

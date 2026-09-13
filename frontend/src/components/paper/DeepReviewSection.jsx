@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { runDeepReview, fetchDeepReviewStatus } from '../../api/libraryApi.js';
-import { fetchLlmReachability } from '../../api/settingsApi.js';
+import { useState } from 'react';
+import useDeepReviewRunner from '../../hooks/useDeepReviewRunner.js';
 import Spinner from '../ui/Spinner.jsx';
 import { FullTextAccessNotice } from '../library/shared.jsx';
 import PaperReview from './review/PaperReview.jsx';
@@ -21,71 +20,8 @@ function formatDuration(seconds) {
 // until done, then calls onDone() to refetch. Pre-empts a missing PDF, an
 // unreachable model, and an already-running review. Shared by Library + Annotate.
 export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true, compact = false }) {
-  const [status, setStatus] = useState({ status: 'idle', completed: 0, total: 0, error: null });
-  const [error, setError] = useState(null);
   const [focusPrompt, setFocusPrompt] = useState('');
-  // Reachability of the deep_review LLM endpoint (null = unknown/probing).
-  const [llm, setLlm] = useState(null);
-  const pollRef = useRef(null);
-
-  // Proactively probe the deep_review endpoint so an unreachable model is
-  // announced BEFORE the user clicks Run — the failure that silently produced an
-  // empty brief. Cheap GET /models; a probe error is advisory and just hides the
-  // banner (never blocks the section).
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const h = await fetchLlmReachability();
-        if (cancelled) return;
-        setLlm((h.stages || []).find((s) => s.stage === 'deep_review') || null);
-      } catch {
-        /* advisory probe — ignore, the run path still surfaces real errors */
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  // On mount, reflect THIS paper's own running review (if any) so re-opening it mid-run
-  // shows its live progress. Reviews are per-paper now, so another paper running never
-  // shows up here (the old global-single-flight bug that rendered the wrong paper).
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const s = await fetchDeepReviewStatus(itemKey);
-      if (cancelled) return;
-      if (s.status === 'running') { setStatus(s); poll(); }
-    })();
-    return () => {
-      cancelled = true;
-      if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null; }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [itemKey]);
-
-  function poll() {
-    if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null; }
-    pollRef.current = setTimeout(async () => {
-      const s = await fetchDeepReviewStatus(itemKey);
-      setStatus(s);
-      if (s.status === 'running') poll();
-      else onDone?.();
-    }, 3000);
-  }
-
-  async function handleRun() {
-    setError(null);
-    try {
-      const s = await runDeepReview({ itemKey, focusPrompt });
-      setStatus(s);
-      if (s.status === 'running') poll();
-      else onDone?.();
-    } catch (e) {
-      setError(`Deep review failed: ${e.message || e}`);
-    }
-  }
-
-  const running = status.status === 'running';
+  const { status, error, llm, running, run } = useDeepReviewRunner(itemKey, { deep, onDone });
   const reviewed = deep && !deep.needs_pdf && (deep.digest || deep.quality || (deep.goal_summaries || []).length);
   return (
     <div className="space-y-3">
@@ -134,7 +70,7 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
           />
           <button
             type="button"
-            onClick={handleRun}
+            onClick={() => run({ focusPrompt })}
             disabled={running || llm?.enabled === false || llm?.reachable === false}
             className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-teal-700 text-white text-[13px] font-semibold hover:bg-teal-800 disabled:opacity-50"
             title="Run a condensed full-text digest (what it's about + how to use it + quality)"

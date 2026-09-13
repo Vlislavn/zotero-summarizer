@@ -3,6 +3,29 @@
 Once papers are in your library, this domain ranks what to read next and powers
 the deeper review/annotation surfaces, plus the Phase 1.14 feed-review queue.
 
+Deep-review status advances elapsed time from a monotonic snapshot between
+worker phase updates, including while a model call is pending. An exhausted
+ETA becomes unknown rather than remaining frozen. This is progress reporting,
+not a review deadline; provider request timeouts still bound model reads.
+If both verifier clients exhaust their malformed-response retries, digest
+generation stops with `DigestVerifierUnavailable`. It does not regenerate the
+digest or repeat verification again; a factual rejection still gets one
+correction and verification. An unavailable verifier never publishes a digest.
+Verification cites 1-3 source-passage IDs per supported field, reusing faithbench's
+overlapping 1,200-character chunks. Evidence is selected from the original paper,
+not copied/repaired by the model (which mangled PDF line-break hyphens and added
+ellipses). Exact-span/length checks remain unchanged; semantic support still requires
+the verifier's judgment, and citation membership alone is not proof of entailment.
+Missing/duplicate claim indices and missing/invalid evidence IDs get one verifier
+repair attempt, then `DigestVerifierUnavailable`, not a rewrite of the digest.
+The numeric guard treats the hyphen in `85.2%-85.8%` as a range separator,
+not a negative sign; standalone negative values still require source support.
+Providers declaring `structured_output` constrain all Pydantic calls in the shared
+client, including verification and quality sub-calls, not just the first digest.
+The schema builder lives in `integrations.llm` (re-exported by `quality_review`).
+After applying reading policy, the serialized digest is validated back into
+`PaperDigest`, restoring nested `PaperParameters` before Zotero note rendering.
+
 All LLM-facing paper text, metadata, research goals and user focus/question text
 use the shared escaped untrusted-input boundary, including custom digest prompts.
 

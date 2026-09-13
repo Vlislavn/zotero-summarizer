@@ -7,6 +7,7 @@ import {
 import CollectionPicker from '../components/CollectionPicker.jsx';
 import { ErrorBanner, StatusBanner } from '../components/library/shared.jsx';
 import { humanizeError } from '../utils/humanizeError.js';
+import { sortSearchCandidates } from '../utils/searchSort.js';
 
 // Targeted Search — the query-driven pull surface (services/search). Give a
 // research topic, get a per-source query plan, a federated + deduped + relevance-
@@ -197,6 +198,7 @@ export default function Search() {
   const [error, setError] = useState(null);
   // Target Zotero collection for per-result "Add to library" ('' = server "Inbox").
   const [targetCollection, setTargetCollection] = useState(saved.tc || '');
+  const [sort, setSort] = useState(saved.sort || 'recommended');
   const pollRef = useRef(null);
   // The id to persist while no live session exists yet (cleared if it turns out dead).
   const savedIdRef = useRef(saved.id || null);
@@ -206,9 +208,9 @@ export default function Search() {
   // Mirror pointer + drafts to sessionStorage on every change.
   useEffect(() => {
     sessionStorage.setItem(SS_KEY, JSON.stringify(
-      { id: session?.id || savedIdRef.current, q: query, qs: questions, tc: targetCollection },
+      { id: session?.id || savedIdRef.current, q: query, qs: questions, tc: targetCollection, sort },
     ));
-  }, [session?.id, query, questions, targetCollection]);
+  }, [session?.id, query, questions, targetCollection, sort]);
 
   // File one candidate into the chosen collection, then stamp its returned key on
   // the local session so the card flips to "✓ In library" without waiting for a poll.
@@ -226,9 +228,14 @@ export default function Search() {
   const pollUntilDone = useCallback((id) => {
     clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
-      const fresh = await getSession(id);
-      setSession(fresh);
-      if (fresh.status === 'reviewed' || fresh.status === 'error') clearInterval(pollRef.current);
+      try {
+        const fresh = await getSession(id);
+        setSession(fresh);
+        if (fresh.status !== 'reviewing') clearInterval(pollRef.current);
+      } catch (err) {
+        clearInterval(pollRef.current);
+        setError(err);
+      }
     }, 3000);
   }, []);
 
@@ -256,6 +263,7 @@ export default function Search() {
     e?.preventDefault();
     if (!query.trim()) return;
     setLoading(true);
+    clearInterval(pollRef.current);
     setError(null);
     setSession(null);
     try {
@@ -271,7 +279,7 @@ export default function Search() {
     }
   }, [query, questions, pollUntilDone]);
 
-  const reviewing = session?.status === 'reviewing';
+  const reviewing = session?.status === 'reviewing' && !error;
   // Doherty: name the honest stage. During agentic rounds refinements grow but no
   // review has landed yet — showing "Deep-reviewing…" then would mislabel the wait.
   const anyReviewed = (session?.candidates || []).some((c) => c.review && c.review.state);
@@ -315,6 +323,14 @@ export default function Search() {
           <Refinements rounds={session.refinements} />
           <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
             <div className="text-[12px] text-slate-500">{(session.candidates || []).length} candidates</div>
+            <label className="text-[12px] text-slate-600">
+              Sort by{' '}
+              <select value={sort} onChange={(e) => setSort(e.target.value)} className="rounded border border-slate-300 p-1">
+                <option value="recommended">Recommended</option>
+                <option value="relevance">Relevance</option>
+                <option value="relevance_prestige">Relevance + prestige</option>
+              </select>
+            </label>
             <div className="flex items-center gap-2">
               {reviewing && (
                 <div className="text-[12px] text-slate-500 flex items-center gap-1.5">
@@ -327,10 +343,11 @@ export default function Search() {
             </div>
           </div>
           {session.status === 'error' && <StatusBanner isError message="Review failed — see server log." />}
+          {sort === 'relevance_prestige' && <p className="mb-2 text-[12px] text-slate-500">85% relevance + 15% citation prestige (log-scaled within these results; unknown citations use the median). Citation counts favor older papers and vary by field.</p>}
           {(() => {
-            const cands = session.candidates || [];
-            const strong = cands.filter((c) => c.relevance_band !== 'weak');
-            const weak = cands.filter((c) => c.relevance_band === 'weak');
+            const cands = sortSearchCandidates(session.candidates || [], sort);
+            const strong = sort === 'recommended' ? cands.filter((c) => c.relevance_band !== 'weak') : cands;
+            const weak = sort === 'recommended' ? cands.filter((c) => c.relevance_band === 'weak') : [];
             return (
               <>
                 <div className="grid gap-3">

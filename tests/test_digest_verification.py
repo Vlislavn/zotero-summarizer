@@ -24,7 +24,7 @@ class _Verifier:
     def _checks(self, prompt):
         count = max(map(int, re.findall(r"\[(\d+)\]", prompt)), default=-1) + 1
         checks = [
-            {"index": i, "supported": self.supported, "quote": PAPER} for i in range(count)
+            {"index": i, "supported": self.supported, "evidence": [0] if self.supported else []} for i in range(count)
         ]
         return checks + checks[:1] if self.duplicate else checks
 
@@ -61,6 +61,8 @@ def test_digest_verification_rejects_duplicate_checks():
 def test_literal_guard_handles_ranges_without_inventing_negative_numbers():
     assert not _unsupported_literals(["tldr: discovery took 30-45 minutes"], "It took 30-45 minutes.")
     assert not _unsupported_literals(["finding: 43.5-54.6%"], "The range was 43.5%–54.6%.")
+    assert not _unsupported_literals(["finding: 85.2%-85.8%"], "Between 85.2% and 85.8%.")
+    assert _unsupported_literals(["finding: -85.8%"], "The result was 85.8%.")
     assert not _unsupported_literals(["implementation[0]: no numeric claim"], "paper text")
 
 
@@ -76,6 +78,46 @@ def test_digest_verifier_retries_one_malformed_response():
     llm = _EmptyThenValidVerifier()
     verify_digest(_digest(), PAPER, llm)
     assert llm.calls == 2
+
+
+def test_invalid_verifier_evidence_is_repaired_without_rewriting_digest():
+    class Verifier(_Verifier):
+        def _checks(self, prompt):
+            checks = super()._checks(prompt)
+            if self.calls == 1:
+                checks[0]["evidence"] = [999]
+            else:
+                assert "invalid passage IDs" in prompt
+            return checks
+
+    class Generator:
+        calls = 0
+
+        def pydantic_prompt(self, **kwargs):
+            self.calls += 1
+            return _digest()
+
+    generator, verifier = Generator(), Verifier()
+    result = assess_digest(title="Paper", full_text=PAPER, config=_default_goals_config(),
+                           llm=generator, verifier_llm=verifier)
+    assert result.tldr == _digest().tldr
+    assert generator.calls == 1 and verifier.calls == 2
+
+
+@pytest.mark.parametrize("evidence", [[], [-1], [99], [0, 0], ["0"], [True]])
+def test_verifier_rejects_missing_or_invalid_source_references(evidence):
+    from zotero_summarizer.services.library._digest_verification import DigestVerifierUnavailable
+
+    class Verifier(_Verifier):
+        def _checks(self, prompt):
+            checks = super()._checks(prompt)
+            checks[0]["evidence"] = evidence
+            return checks
+
+    verifier = Verifier()
+    with pytest.raises(DigestVerifierUnavailable):
+        verify_digest(_digest(), PAPER, verifier)
+    assert verifier.calls == 2
 
 
 def test_digest_generation_uses_separate_verifier_client():
@@ -138,3 +180,27 @@ def test_unavailable_light_verifier_falls_back_to_generator(monkeypatch):
         llm=generator, verifier_llm=light,
     )
     assert calls == [light, generator]
+
+
+@pytest.mark.parametrize("separate_verifier", [False, True])
+def test_unavailable_verifier_does_not_regenerate_the_digest(separate_verifier):
+    from zotero_summarizer.services.library._digest_verification import DigestVerifierUnavailable
+
+    class Model:
+        def __init__(self):
+            self.generated = self.checked = 0
+
+        def pydantic_prompt(self, *, pydantic_model, **kwargs):
+            if pydantic_model is PaperDigest:
+                self.generated += 1
+                return _digest()
+            self.checked += 1
+            return ""
+
+    generator = Model()
+    verifier = Model() if separate_verifier else generator
+    with pytest.raises(DigestVerifierUnavailable):
+        assess_digest(title="Paper", full_text=PAPER, config=_default_goals_config(),
+                      llm=generator, verifier_llm=verifier)
+    assert generator.generated == 1
+    assert generator.checked == 2 and verifier.checked == 2

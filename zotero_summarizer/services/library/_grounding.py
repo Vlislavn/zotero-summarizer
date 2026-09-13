@@ -36,12 +36,36 @@ MIN_QUOTE_CHARS = 40
 # but rejects scattered common-word overlap (the anti-fabrication property,
 # verified against real CheXNet quotes + hallucinated controls, 2026-06).
 FUZZY_MATCH_RATIO = 0.8
+# Answer-support: fraction of the ANSWER's distinct content tokens that must be
+# present in the quote (order-free). 0.85 admits rewording/reordering of the
+# quoted evidence (the universal answer shape) while any hallucinated token
+# (number, name, verb not in the quote) fails the band. Tuned + verified against
+# real kather/sota Q&A answers vs hallucinated controls, 2026-09-11.
+ANSWER_COVER_RATIO = 0.85
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+# PDF extraction breaks words at line ends as "re-\ntrieval" (whitespace-flattened:
+# "re- trieval"), while any model quote of that span reads "retrieval". Joining the
+# hyphen-broken halves on BOTH sides before matching removes the whole class of
+# false rejections without loosening either strictness level: the same
+# normalization applies to quote and context, so hallucinated content still fails.
+_HYPHEN_SPLIT_RE = re.compile(r"(\w)-\s+(?=[a-z])")
+# PDF extraction emits typographic punctuation (LLM’s, “quoted”); model quotes of
+# the same span use ASCII. Fold before matching — symmetric on both sides.
+_PUNCT_FOLD = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"'})
+
+
+def _dehyphenate(text: str) -> str:
+    return _HYPHEN_SPLIT_RE.sub(r"\1", text)
+
+
+def _match_normalize(text: str) -> str:
+    """Shared pre-match normalization: whitespace-flatten + punctuation fold + dehyphenate."""
+    return _dehyphenate(" ".join(unicodedata.normalize("NFKC", text).translate(_PUNCT_FOLD).split()))
 
 
 def _content_tokens(text: str) -> list[str]:
-    return _TOKEN_RE.findall(unicodedata.normalize("NFKC", text).lower())
+    return _TOKEN_RE.findall(_dehyphenate(unicodedata.normalize("NFKC", text).translate(_PUNCT_FOLD).lower()))
 
 
 def quote_is_grounded(quote: Any, context: str, *, fuzzy: bool = False) -> bool:
@@ -53,10 +77,10 @@ def quote_is_grounded(quote: Any, context: str, *, fuzzy: bool = False) -> bool:
     """
     if quote is None:
         return False
-    normalized_quote = " ".join(str(quote).split())
+    normalized_quote = _match_normalize(str(quote))
     if len(normalized_quote) < MIN_QUOTE_CHARS or len(normalized_quote.split()) < MIN_QUOTE_WORDS:
         return False
-    normalized_context = " ".join((context or "").split())
+    normalized_context = _match_normalize(context or "")
     if normalized_quote in normalized_context:
         return True
     if not fuzzy:
@@ -71,9 +95,31 @@ def quote_is_grounded(quote: Any, context: str, *, fuzzy: bool = False) -> bool:
 
 
 def answer_is_supported_by_quote(answer: Any, quote: Any) -> bool:
-    """Strict extractive-answer contract: the answer must occur in its quote."""
-    answer_tokens, quote_tokens = _content_tokens(str(answer or "")), _content_tokens(str(quote or ""))
-    if not answer_tokens or len(answer_tokens) > len(quote_tokens):
+    """Support contract: the answer's content must come from the quote.
+
+    Two acceptance bands, both anti-fabrication (a token NOT in the quote can
+    never pass):
+
+    * **verbatim span** — the answer's tokens appear contiguously in the quote
+      (the original strict bar, kept for short extractive answers).
+    * **covered paraphrase** (order-free) — ≥ ``ANSWER_COVER_RATIO`` of the
+      answer's distinct content tokens occur in the quote. This is the shape
+      real answers take: the quote is verbatim paper text, while the answer is
+      the model's own words AROUND that text ("SLIM is the framework that
+      separates … tools" vs the quote's "SLIM (Simple Lightweight Information
+      Management), a simple framework that separates …"). Demanding a verbatim
+      answer span rejected every such answer and collapsed Q&A into 100%
+      spurious abstentions (measured live on kather/sota, 2026-09-11), because
+      no non-trivial rewording of a sentence is ever a contiguous subsequence
+      of it. Distinct-token coverage still rejects any answer introducing
+      content absent from the quote.
+    """
+    answer_tokens = _content_tokens(str(answer or ""))
+    quote_tokens = _content_tokens(str(quote or ""))
+    if not answer_tokens or not quote_tokens or len(answer_tokens) > len(quote_tokens):
         return False
     width = len(answer_tokens)
-    return any(quote_tokens[i:i + width] == answer_tokens for i in range(len(quote_tokens) - width + 1))
+    if any(quote_tokens[i:i + width] == answer_tokens for i in range(len(quote_tokens) - width + 1)):
+        return True
+    covered = len(set(answer_tokens) & set(quote_tokens)) / len(set(answer_tokens))
+    return covered >= ANSWER_COVER_RATIO

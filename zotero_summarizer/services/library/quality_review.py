@@ -13,7 +13,9 @@ from __future__ import annotations
 from typing import Any
 
 from zotero_summarizer.models import GoalsConfig, PaperDigest
+from zotero_summarizer.integrations.llm import build_response_format
 from zotero_summarizer.services._common import extract_json_blob, to_text
+from zotero_summarizer.services.library._digest_verification import DigestVerifierUnavailable
 from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.library._review_text import select_review_text
 
@@ -28,25 +30,6 @@ _STRICT_RETRY_SUFFIX = (
     "Read/skim need a concrete "
     "reason, exact target, positive minute estimate, and original-only value."
 )
-
-
-def build_response_format(model: type) -> dict[str, Any]:
-    """Build the OpenAI-compatible ``response_format`` for decoder-level JSON Schema
-    constraint (the decoder-level structured-output path). Forwards ``PaperDigest``'s schema as
-    ``{type: json_schema, json_schema: {name, schema, strict}}`` so a vLLM-style
-    endpoint constrains decoding to the schema at the LOGIT level — a real guarantee, not
-    a prompt hint. MEASURED on a vLLM endpoint (2026-06-27): forces enum/range compliance AND
-    reasoning survives (unlike Ollama native format+think, #10929). OnPrem's
-    ``pydantic_prompt`` forwards this kwarg to the wire (base.py:728-748)."""
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": model.__name__,
-            "schema": model.model_json_schema(),
-            "strict": True,
-        },
-    }
-
 
 
 def _coerce_digest(raw: Any) -> PaperDigest:
@@ -72,9 +55,7 @@ def _coerce_digest(raw: Any) -> PaperDigest:
 def _verify_generated_digest(
     digest: PaperDigest, text: str, verifier: Any, generator: Any, goals: str,
 ) -> None:
-    from zotero_summarizer.services.library._digest_verification import (
-        DigestVerifierUnavailable, verify_digest,
-    )
+    from zotero_summarizer.services.library._digest_verification import verify_digest
 
     try:
         verify_digest(digest, text, verifier, research_goals=goals)
@@ -210,6 +191,8 @@ def assess_digest(
     verifier = verifier_llm or llm
     try:
         _verify_generated_digest(digest, text, verifier, llm, goals)
+    except DigestVerifierUnavailable:
+        raise
     except ValueError as exc:
         correction = llm.pydantic_prompt(
             prompt=(

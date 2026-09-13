@@ -49,6 +49,7 @@ class _StubLLM:
             grade="A", soundness=5, novelty=4, significance=4,
             reproducibility=3, clarity=4, key_strength="s", key_weakness="w", confidence=0.9,
             writing_friction="low", writing_reasons=[],
+            parameters={"dataset": "DATASET"},
         )
 
 
@@ -119,8 +120,14 @@ def test_run_job_clears_progress_when_done(config, monkeypatch):
 
 
 def test_run_job_writes_digest_entry(config, monkeypatch):
+    from zotero_summarizer.services.zotero._notes import build_digest_note_html
+
     reader = _StubReader({"K1": _detail()})
-    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"))
+    def render_note(_key, digest):
+        assert digest.parameters.dataset == "DATASET"
+        assert "DATASET" in build_digest_note_html(digest)
+
+    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"), note_fn=render_note)
 
     _run([{"item_key": "K1", "title": "T", "gate_relevance": 3.0}])
 
@@ -413,19 +420,6 @@ def test_assess_digest_salvages_raw_json_string_and_fails_loud_on_empty(config):
     # An empty completion is unsalvageable → raises (NOT an opaque .model_copy crash).
     with pytest.raises(Exception):
         quality_review.assess_digest(title="T", full_text="BODY", config=config, llm=_StrLLM(""))
-
-
-def test_build_digest_note_html_marked_and_escaped():
-    from zotero_summarizer.models import PaperDigest
-    from zotero_summarizer.services.zotero.pending import DIGEST_NOTE_MARKER, build_digest_note_html
-
-    d = PaperDigest(read_decision="skim", read_parts=["§2"], grade="A", tldr="About <x> & y",
-                    writing_friction="moderate", writing_reasons=["Term <T> appears before definition."])
-    h = build_digest_note_html(d)
-    assert DIGEST_NOTE_MARKER in h
-    assert "&lt;x&gt;" in h and "&amp;" in h          # HTML-escaped
-    assert "Quality A" in h and "Read parts" in h
-    assert "Writing · moderate" in h and "&lt;T&gt;" in h
 
 
 def test_start_accepts_concurrently_no_single_flight(monkeypatch):

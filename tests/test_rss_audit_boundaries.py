@@ -167,6 +167,27 @@ def test_refresh_storage_failure_rolls_back_feed_and_does_not_continue(tmp_path,
     assert reader.get_feed_items() == []
 
 
+@pytest.mark.parametrize("failure", [httpx.ReadTimeout("slow feed"), app_rss.RssUrlRejected("Invalid RSS/Atom feed document"),
+    httpx.HTTPStatusError("missing feed", request=httpx.Request("GET", "https://example.com/rss"), response=httpx.Response(404))])
+def test_failed_feed_does_not_block_healthy_feed(tmp_path, monkeypatch, failure):
+    reader, failed_id = _seed(tmp_path)
+    with reader._conn() as conn:
+        rss.upsert_rss_feed(conn, name="Healthy", url="https://example.com/healthy")
+        conn.commit()
+
+    def fetch(url, **kwargs):
+        if url.endswith("/rss"):
+            raise failure
+        return b'<rss version="2.0"><channel><title>Healthy</title><item><guid>one</guid><title>Paper</title></item></channel></rss>', httpx.Headers()
+
+    monkeypatch.setattr(app_rss, "_fetch_public_url", fetch)
+    result = reader.refresh_feeds()
+    assert result["feeds"] == 2 and result["inserted"] == 1
+    assert result["errors"][0]["feed_id"] == failed_id
+    assert str(failure) in result["errors"][0]["error"]
+    assert [item["title"] for item in reader.get_feed_items()] == ["Paper"]
+
+
 def test_refresh_api_reports_invalid_feed_as_upstream_failure(tmp_path, monkeypatch):
     from types import SimpleNamespace
 

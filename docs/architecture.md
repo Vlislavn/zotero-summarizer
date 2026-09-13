@@ -181,11 +181,19 @@ different shapes; it degrades to deterministic-only when no embedding model is a
 Backend tests isolate runtime state and the default project root per test, hide
 inherited provider credentials/keyring entries, and block TCP connections. Mock
 integrations explicitly; a unit test must never use a live model or Zotero service.
+Before collection/fork, `tests/conftest.py` sets `no_proxy=*` for the test session.
+This avoids macOS SystemConfiguration proxy discovery from HTTP client constructors
+in forked children, as [documented by Python](https://docs.python.org/3.13/library/urllib.request.html).
+It does not change application proxy configuration or fix native ML-library crashes.
+The same session-owned `TemporaryDirectory` is also `PYTEST_DEBUG_TEMPROOT`:
+forked tests never scan the global `pytest-of-*` backlog, parallel runs get separate
+roots, and the parent removes its own temporary tree at session cleanup. Existing
+global temporary files are untouched; an explicit `--basetemp` still takes precedence.
 
 ```bash
 zotero-summarizer smoke-test                       # app constructs
 pre-commit run --all-files                         # guardrails
-KMP_DUPLICATE_LIB_OK=TRUE pytest -q --forked       # backend suite *
+KMP_DUPLICATE_LIB_OK=TRUE make test                # backend suite *
 cd frontend && npm run lint && npm test && npm run build
 ```
 

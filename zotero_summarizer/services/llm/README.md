@@ -14,8 +14,12 @@ llm_routing → resolve_stage → ResolvedStage → factory → LLMClient
   secrets from the keyring with env fallback. OpenAI-compatible transports receive
   the process `SUMMARY_TIMEOUT_SECONDS` request deadline; its optional
   `enable_thinking` overrides only clients already advertising that capability.
+  Declared `structured_output` applies schema constraints to every Pydantic call
+  through the shared adapter, including CLI calls and verifier/correction passes.
 - `thinking.py` translates effort to Anthropic budgets, OpenAI
-  `reasoning_effort`, or qwen/vLLM `enable_thinking`.
+  `reasoning_effort`, or qwen/vLLM `enable_thinking`. Explicit `off` sends
+  `reasoning_effort: none` in the plain OpenAI dialect; omitting it would preserve
+  the server's potentially enabled reasoning default. Unset effort remains a no-op.
 - `operational_check.py` owns the tiny manual inference probe used by stage
   checks, setup validation, and Doctor. Identical routes share one serial probe;
   local cold starts get 60 seconds and hosted checks 30 seconds. Failures become
