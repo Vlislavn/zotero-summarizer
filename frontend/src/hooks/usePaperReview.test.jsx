@@ -16,6 +16,26 @@ vi.mock('../api/libraryApi.js', () => ({ queueRejectTag }));
 
 afterEach(() => vi.clearAllMocks());
 
+it('removes the green device-save notice after its offline verdict is rejected on sync', async () => {
+  fetchReviewDetail.mockResolvedValue({ verdict: null });
+  submitVerdict.mockResolvedValue({ saved_offline: true, queued: true });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const wrapper = ({ children }) => createElement(QueryClientProvider, { client }, children);
+  const { result } = renderHook(() => usePaperReview('P1'), { wrapper });
+
+  act(() => result.current.verdict.onSubmit({ user_priority: 'must_read', comment: 'offline' }));
+  await waitFor(() => expect(result.current.verdict.submitNotice).toContain('Saved on this device'));
+  act(() => window.dispatchEvent(new CustomEvent('zs-sync-status', { detail: {
+    online: true, pending: 1, rejected: [],
+  } })));
+  expect(result.current.verdict.submitNotice).toContain('Saved on this device');
+  act(() => window.dispatchEvent(new CustomEvent('zs-sync-status', { detail: {
+    online: true, pending: 0, rejected: [{ item_key: 'P1', field: 'verdict', status: 'rejected' }],
+  } })));
+  await waitFor(() => expect(result.current.verdict.submitNotice).toBeNull());
+  client.clear();
+});
+
 it('keeps a saved verdict successful when the secondary reject tag fails', async () => {
   fetchReviewDetail.mockResolvedValue({ verdict: null });
   submitVerdict.mockResolvedValue({ verdict: { user_priority: 'dont_read' } });

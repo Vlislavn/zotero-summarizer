@@ -60,6 +60,19 @@ it('renders empty and degraded summaries without inventing findings', () => {
   expect(html).not.toContain('<p class="text-slate-600"></p>');
 });
 
+it('counts supported goals consistently with their visible tiles', () => {
+  const html = renderToStaticMarkup(<PaperReview deep={{ goal_summaries: [
+    { goal: 'Evidence A', retrieval_state: 'hit', relevant: true, summary: 'A.', supporting_quotes: ['A quote.'] },
+    { goal: 'Evidence B', retrieval_state: 'hit', relevant: true, summary: 'B.', supporting_quotes: ['B quote.'] },
+    { goal: 'Unsupported', retrieval_state: 'hit', relevant: false, summary: 'No support.' },
+    { goal: 'Not retrieved', retrieval_state: 'not_retrieved', relevant: false },
+  ] }} />);
+
+  expect(html).toContain('Relevance — 2 of 4 goals addressed');
+  expect((html.match(/● addressed/g) || []).length).toBe(2);
+  expect(html).toContain('○ not supported');
+});
+
 it('deduplicates repeated goal conclusions but keeps distinct evidence and overflow', () => {
   const repeated = 'A shared conclusion explains the clinical result.';
   const goals = Array.from({ length: 5 }, (_, i) => ({

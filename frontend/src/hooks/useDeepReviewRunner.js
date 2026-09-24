@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { runDeepReview, fetchDeepReviewStatus } from '../api/libraryApi.js';
 import { fetchLlmReachability } from '../api/settingsApi.js';
@@ -9,6 +9,21 @@ export default function useDeepReviewRunner(itemKey, { deep, onDone, autoRun = f
   const client = useQueryClient();
   const autoRunFiredFor = useRef(null);
   const lastRunning = useRef(null);
+  const [online, setOnline] = useState(() => navigator.onLine);
+  useEffect(() => {
+    const disconnected = () => setOnline(false);
+    const reconnected = () => {
+      setOnline(true);
+      client.invalidateQueries({ queryKey: ['deep-review-status', itemKey] });
+      client.invalidateQueries({ queryKey: ['deep-review-reachability'] });
+    };
+    window.addEventListener('offline', disconnected);
+    window.addEventListener('online', reconnected);
+    return () => {
+      window.removeEventListener('offline', disconnected);
+      window.removeEventListener('online', reconnected);
+    };
+  }, [client, itemKey]);
   const statusQuery = useQuery({
     queryKey: ['deep-review-status', itemKey],
     queryFn: () => fetchDeepReviewStatus(itemKey),
@@ -24,6 +39,8 @@ export default function useDeepReviewRunner(itemKey, { deep, onDone, autoRun = f
     staleTime: 30_000,
   });
   const llm = (reachability.data?.stages || []).find((stage) => stage.stage === 'deep_review') || null;
+  const llmAvailable = online && reachability.isSuccess && Boolean(llm)
+    && llm.enabled !== false && llm.reachable !== false;
   const { mutate, error: runError, isPending: starting, variables } = useMutation({
     mutationFn: runDeepReview,
     onMutate: (request) => client.cancelQueries({ queryKey: ['deep-review-status', request.itemKey] }),
@@ -34,7 +51,7 @@ export default function useDeepReviewRunner(itemKey, { deep, onDone, autoRun = f
   });
   const run = useCallback((options = {}) => mutate({ ...options, itemKey }), [mutate, itemKey]);
   const status = statusQuery.isError
-    ? { status: 'error', error: `Could not refresh review status: ${statusQuery.error.message}` }
+    ? { status: 'unavailable', error: `Could not refresh review status: ${statusQuery.error.message}` }
     : statusQuery.data || { status: 'idle' };
   const running = status.status === 'running' || (starting && variables?.itemKey === itemKey);
   const reviewed = Boolean(deep && !deep.needs_pdf && (deep.digest || deep.quality || deep.goal_summaries?.length));
@@ -52,11 +69,11 @@ export default function useDeepReviewRunner(itemKey, { deep, onDone, autoRun = f
   useEffect(() => {
     if (!autoRun || !itemKey || reachability.isPending || !statusQuery.isSuccess) return;
     if (reviewed || running || deep?.needs_pdf || status.status !== 'idle') return;
-    if (llm?.enabled === false || llm?.reachable === false || autoRunFiredFor.current === itemKey) return;
+    if (!llmAvailable || autoRunFiredFor.current === itemKey) return;
     autoRunFiredFor.current = itemKey;
     run();
-  }, [autoRun, itemKey, reachability.isPending, statusQuery.isSuccess, reviewed, running, deep, status.status, llm, run]);
+  }, [autoRun, itemKey, reachability.isPending, statusQuery.isSuccess, reviewed, running, deep, status.status, llmAvailable, run]);
 
   return { status, error: variables?.itemKey === itemKey ? runError?.message || null : null,
-    llm, llmChecked: !reachability.isPending, running, run };
+    llm, llmAvailable, online, llmChecked: reachability.isSuccess, running, run };
 }

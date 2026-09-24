@@ -50,6 +50,24 @@ def test_first_verdict_and_detail_need_no_prior_golden_export(tmp_path):
     assert stored['comment'] == 'first rationale'
 
 
+def test_first_today_trash_sample_needs_no_prior_golden_export(tmp_path, monkeypatch):
+    from zotero_summarizer.services.library import review_summary
+
+    golden_csv = tmp_path / 'data' / 'golden.csv'
+    golden_csv.parent.mkdir()
+    monkeypatch.setattr(review_summary, '_fetch_feed_metadata', lambda **_: {'abstract': 'Paper abstract'})
+    row = {'id': 1, 'feed_library_id': 1, 'feed_item_id': 17,
+           'stable_feed_key': 'feed:g:first-label', 'title': 'Fresh feed paper', 'source_type': 'rss'}
+
+    assert review_summary.append_to_golden(row, label='dont_read', note='trashed from Today',
+                                           golden_csv_path=golden_csv)
+
+    assert golden_csv.read_text().startswith('item_key,')
+    assert 'Fresh feed paper' in golden_csv.read_text()
+    assert review_summary.append_to_golden(row, label='dont_read', note='trashed from Today',
+                                           golden_csv_path=golden_csv) is False
+
+
 def test_existing_unreadable_provenance_is_not_an_empty_library(tmp_path, monkeypatch):
     monkeypatch.setattr(_golden_helpers, '_golden_csv_path', lambda: tmp_path)
     with pytest.raises(IsADirectoryError):

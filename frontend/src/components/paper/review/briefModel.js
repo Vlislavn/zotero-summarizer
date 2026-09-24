@@ -6,6 +6,9 @@
 
 // Reference-free band → plain-language gloss. {lead} is bolded; {body} follows.
 // Mirrors _paper_read_brief._BAND_GLOSS (memory-protected decision-aid copy).
+export const isSupportedGoal = (goal) => goal?.retrieval_state === 'hit'
+  && goal?.relevant === true && goal?.abstained !== true;
+
 export const BAND_GLOSS = {
   highlight: {
     lead: 'Rigorous enough to act on.',

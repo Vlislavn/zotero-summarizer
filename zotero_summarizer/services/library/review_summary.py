@@ -224,7 +224,7 @@ def _write_golden_sample(sample: GoldenSample, csv_path: Path) -> bool:
     """Append one :class:`GoldenSample` to the golden CSV, preserving the
     existing header/columns. Idempotent on ``item_key`` (returns False when the
     key is already present). Shared by the feed-row and verdict appenders."""
-    with edit_csv(csv_path) as (fields, rows):
+    with edit_csv(csv_path, create_fields=list(asdict(sample))) as (fields, rows):
         if any(row["item_key"] == sample.item_key for row in rows):
             return False
         new_row = asdict(sample)
@@ -338,7 +338,5 @@ def append_to_golden(
 ) -> bool:
     """Append a metadata-rich CSV sample for the standalone/Today callers."""
     csv_path = golden_csv_path or get_settings().golden_csv_path
-    if not csv_path.exists():
-        raise FileNotFoundError(f"golden CSV not found at {csv_path}; run `goldenset export` first")
     sample = prepare_training_sample(row, label=label, note=note, signal_tier=signal_tier)
     return _write_golden_sample(sample, csv_path)

@@ -21,6 +21,23 @@ beforeEach(() => {
   Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
 });
 
+it('refreshes an open review after a rejected offline verdict is reconciled', async () => {
+  mocks.pendingMutations.mockResolvedValue([{ mutation_id: 'v1', item_key: 'feed:g:paper',
+    field: 'verdict', operation: 'set', value: 'must_read', status: 'pending' }]);
+  mocks.request.mockImplementation(async (path) => path === '/api/sync/push'
+    ? { protocol: 1, results: [{ mutation_id: 'v1', status: 'rejected', error: 'review_required' }] }
+    : { protocol: 1, cursor: 1, papers: [{ item_key: 'feed:g:paper', verdict: null }] });
+  const client = { invalidateQueries: vi.fn().mockResolvedValue() };
+
+  await (await import('./syncClient.js')).syncNow(client);
+
+  expect(mocks.applyPushResults).toHaveBeenCalledWith([
+    { mutation_id: 'v1', status: 'rejected', error: 'review_required' },
+  ]);
+  expect(mocks.applyPull).toHaveBeenCalledOnce();
+  expect(client.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['review-detail'] });
+});
+
 it('surfaces a protocol mismatch instead of masking it as an outage', async () => {
   mocks.request.mockResolvedValue({ protocol: 2 });
   const { syncNow } = await import('./syncClient.js');

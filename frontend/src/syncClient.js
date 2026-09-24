@@ -4,6 +4,7 @@ import {
 } from './offlineStore.js';
 
 let running = null;
+let activeQueryClient = null;
 const SYNC_TIMEOUT_MS = 15_000;
 
 function failureMessage(error) {
@@ -14,7 +15,7 @@ function failureMessage(error) {
   return 'Server unavailable';
 }
 
-export function syncNow() {
+export function syncNow(client = activeQueryClient) {
   if (running) return running;
   running = (async () => {
     if (!navigator.onLine) {
@@ -52,6 +53,7 @@ export function syncNow() {
       });
       if (pulled.protocol !== 1) throw new Error('Sync protocol changed; refresh the app');
       await applyPull(pulled);
+      await client?.invalidateQueries({ queryKey: ['review-detail'] });
     } finally {
       clearTimeout(timeout);
     }
@@ -59,10 +61,12 @@ export function syncNow() {
   return running;
 }
 
-export function startSync() {
-  window.addEventListener('online', syncNow);
+export function startSync(client) {
+  activeQueryClient = client;
+  const onSync = () => syncNow();
+  window.addEventListener('online', onSync);
   window.addEventListener('offline', () => publishStatus());
-  window.addEventListener('focus', syncNow);
-  window.addEventListener('zs-sync-request', syncNow);
+  window.addEventListener('focus', onSync);
+  window.addEventListener('zs-sync-request', onSync);
   syncNow();
 }

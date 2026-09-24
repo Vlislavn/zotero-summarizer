@@ -14,11 +14,14 @@ pending approval instead of aborting the entire Apply-all batch. Legacy
 to that stable paper; an unrelated source is never cancelled. Pending sibling
 rows with the same stable key reuse the one committed Zotero item. A negative reading recommendation still
 qualifies: the human chooses Add or Trash. Existing library items are not
-retroactively gated. The HTML goal board shows each repeated conclusion once,
+retroactively gated. The first explicit Today verdict/trash on a fresh installation
+can create the canonical golden CSV header from its validated sample; an absent
+export no longer blocks the action, while malformed existing files still fail. The HTML goal board shows each repeated conclusion once,
 attributes it to all matching goals, and folds additional findings behind a
 keyboard-accessible disclosure without dropping per-goal quotes. A retrieved
 passage (`hit`) is only styled as addressed when `relevant` is true; otherwise
-the board says evidence did not support the goal, matching React.
+the board says evidence did not support the goal, matching React. Explicit
+abstentions cannot count as supported even when legacy flags disagree.
 
 Once papers are in your library, this domain ranks what to read next and powers
 the deeper review/annotation surfaces, plus the Phase 1.14 feed-review queue.

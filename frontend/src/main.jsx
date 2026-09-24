@@ -27,4 +27,4 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 );
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
-if ('indexedDB' in window) startSync();
+if ('indexedDB' in window) startSync(queryClient);

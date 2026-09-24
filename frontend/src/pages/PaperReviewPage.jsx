@@ -17,6 +17,7 @@ import ActionRail from '../components/paper/review/ActionRail.jsx';
 import { Chip } from '../components/paper/review/primitives.jsx';
 import { FullTextAccessNotice, StatusBanner, timeAgo, formatShortDate } from '../components/library/shared.jsx';
 import { gradeTone, bandTone, BAND_LABEL } from '../components/paper/review/tones.js';
+import { isSupportedGoal } from '../components/paper/review/briefModel.js';
 import Spinner from '../components/ui/Spinner.jsx';
 import { readStoredJson } from '../utils/safeStorage.js';
 
@@ -36,20 +37,28 @@ const EYEBROW = 'mb-2 text-[11px] uppercase tracking-[0.08em] font-semibold text
 // runs. The runner auto-fires on open for a paper with a PDF (the user opted into
 // auto-generate-on-open), so the common case renders instantly.
 function ReviewZone({ deep, runner, sectionOverlay }) {
-  const { status, error, llm, running } = runner;
+  const { status, error, llm, llmAvailable, online, running } = runner;
   const reviewed = deep && !deep.needs_pdf && (deep.digest || deep.quality || (deep.goal_summaries || []).length);
   return (
     <div className="space-y-3">
-      {llm?.enabled === false ? (
+      {!online ? (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-800" role="status">
+          Offline — cached reviews remain readable. Reconnect to generate a review.
+        </div>
+      ) : llm?.enabled === false ? (
         <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] text-slate-700">
           AI reviews are off. Enable them in <span className="font-semibold">Settings → AI models</span>.
         </div>
-      ) : llm && llm.reachable === false && (
+      ) : llm && llm.reachable === false ? (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] leading-relaxed text-amber-800" role="alert">
           <span className="font-semibold">Deep-review model unreachable.</span>{' '}
           <span className="font-mono text-[12px]">{llm.model || '(model unset)'}</span> at{' '}
           <span className="font-mono text-[12px]">{llm.base_url || '(no base URL)'}</span> isn&apos;t responding. Start that
           server, or pick a reachable model in <span className="font-semibold">Settings → LLM routing</span>.
+        </div>
+      ) : !llmAvailable && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-800" role="status">
+          Could not verify the review model. Reconnect to check it before generating.
         </div>
       )}
       <FullTextAccessNotice deep={deep} />
@@ -79,7 +88,7 @@ function ReviewZone({ deep, runner, sectionOverlay }) {
           <button
             type="button"
             onClick={() => runner.run()}
-            disabled={llm?.enabled === false || llm?.reachable === false}
+            disabled={!llmAvailable}
             className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-[13px] font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
           >
             Generate review
@@ -88,6 +97,9 @@ function ReviewZone({ deep, runner, sectionOverlay }) {
       )}
       {status.status === 'error' && status.error && (
         <div className="text-[12px] text-rose-700">Review failed: {status.error}</div>
+      )}
+      {online && status.status === 'unavailable' && status.error && (
+        <div className="text-[12px] text-amber-800" role="status">Review status unavailable: {status.error}</div>
       )}
       {error && <div className="text-[12px] text-rose-700">{error}</div>}
     </div>
@@ -197,7 +209,7 @@ export default function PaperReviewPage() {
   const grade = ql?.grade || dg?.grade || '';
   const band = String(ql?.quality_band || '');
   const redFlagCount = (ql?.red_flags || []).filter(Boolean).length;
-  const nHit = goalsArr.filter((g) => String(g?.retrieval_state || '') === 'hit').length;
+  const nHit = goalsArr.filter(isSupportedGoal).length;
   const hasMap = Boolean(ov && !ov.degraded && (ov.sections || []).length);
 
   const toc = [
@@ -263,7 +275,9 @@ export default function PaperReviewPage() {
         <div className="mt-3"><LinksRow detail={detail} itemKey={itemKey} /></div>
       </header>
 
-      <div className="lg:grid lg:grid-cols-[11rem_minmax(0,1fr)_20rem] lg:gap-8">
+      <div className={`lg:grid lg:gap-8 ${toc.length > 1
+        ? 'lg:grid-cols-[11rem_minmax(0,1fr)_20rem]'
+        : 'lg:grid-cols-[minmax(0,1fr)_20rem]'}`}>
         <StoryToc items={toc} />
 
         <main className="min-w-0 divide-y divide-slate-200/60">

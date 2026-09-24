@@ -181,6 +181,9 @@ case/punctuation deduplicated across goals, capped on first view and disclosed
 on demand; goal labels, evidence quotes and accessible score meters remain.
 Located evidence is not automatically a positive match: a `hit` with
 `relevant=false` now reads as not supported in both React and the HTML brief.
+Header/badge/tile counts share the supported-goal rule, including legacy rows
+without an explicit abstention flag. When a page has no TOC, its desktop review
+uses the freed column instead of squeezing goal cards into the TOC width.
 
 ## Offline boundary
 
@@ -190,7 +193,15 @@ on network failure; conflicts require Keep mine / Use server. PDFs, AI,
 annotation, acquisition, and rescoring remain server-only.
 
 After reconnect, the server gives queued verdicts and notes the same training,
-feed-materialization, and Zotero-mirror effects as online saves. This is a
+feed-materialization, and Zotero-mirror effects as online saves. Once a snapshot
+is reconciled, open paper details refetch: a rejected optimistic verdict no
+longer appears as a saved priority, and the transient green device-save notice
+clears when that verdict is acknowledged or rejected. Rejected drafts and
+conflicts break long stable paper keys inside the mobile header instead of
+expanding the page horizontally. The primary tabs wrap below narrow mobile
+widths instead of pushing the viewport beyond its edge. An offline or unchecked review model cannot
+activate Generate or auto-review; a status transport error is not called a failed
+review job. This is a
 same-machine loopback PWA boundary; remote mobile needs a future authenticated
 HTTPS deployment rather than exposing `/api/sync` directly.
 

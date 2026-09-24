@@ -185,7 +185,7 @@ def _goal_board_html(goals: list[dict[str, Any]]) -> str:
         state = str(g.get("retrieval_state") or "not_retrieved")
         score = float(g.get("score") or 0.0)
         width = int(max(0.0, min(1.0, score / 3.0)) * 100)
-        is_hit = state == "hit" and bool(g.get("relevant"))
+        is_hit = state == "hit" and bool(g.get("relevant")) and not bool(g.get("abstained"))
         extra, has_ev = "", ""
         if state == "hit":
             why = ("grounded summary withheld" if not str(g.get("summary") or "").strip()

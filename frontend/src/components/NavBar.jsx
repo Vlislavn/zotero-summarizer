@@ -49,7 +49,7 @@ export default function NavBar() {
     <header className="glass border border-slate-200 rounded-2xl p-4 mb-5 overflow-visible relative z-30">
       <div className="flex items-center gap-4 flex-wrap">
         <h1 className="font-display text-2xl font-light text-slate-900">Zotero Summarizer</h1>
-        <nav className="flex gap-1.5 items-center">
+        <nav className="flex flex-wrap max-w-full gap-1.5 items-center">
           {PRIMARY.map((t) => (
             <NavLink key={t.to} to={t.to} className={tabClass}>
               {t.label}
@@ -59,8 +59,8 @@ export default function NavBar() {
       </div>
       <div className={`mt-2 text-xs ${conflict ? 'text-rose-700' : sync.online ? 'text-slate-500' : 'text-amber-800'}`}>
         {conflict ? (
-          <span>
-            Sync conflict for {conflict.item_key} ({conflict.field}).{' '}
+          <span className="break-words">
+            Sync conflict for <span className="break-all">{conflict.item_key}</span> ({conflict.field}).{' '}
             <button className="underline font-semibold" onClick={() => resolve(conflict.mutation_id, true)}>Keep mine</button>
             {' · '}
             <button className="underline font-semibold" onClick={() => resolve(conflict.mutation_id, false)}>Use server</button>
@@ -71,7 +71,7 @@ export default function NavBar() {
             <summary>{sync.rejected.length} rejected draft(s) preserved on this device. Other valid changes can still sync.</summary>
             {sync.rejected.map((draft) => (
               <div key={draft.mutation_id} className="mt-2">
-                <p>{draft.item_key} ({draft.field}): {draft.error}.</p>
+                <p className="break-words"><span className="break-all">{draft.item_key}</span> ({draft.field}): {draft.error}.</p>
                 <label>
                   Saved draft — copy this text, correct it and save again on the paper page.
                   <textarea readOnly rows={4} className="block w-full border p-2"

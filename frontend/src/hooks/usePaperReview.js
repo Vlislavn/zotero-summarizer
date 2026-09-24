@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchReviewDetail, submitVerdict, deleteVerdict } from '../api/goldenApi.js';
 import { queueRejectTag } from '../api/libraryApi.js';
+import { syncStatusEvent } from '../offlineStore.js';
 
 // Shared wiring for one paper's review detail + verdict mutations. Lifted out of
 // InlineAnnotate so the inline row card AND the full-page review (/paper/:key)
@@ -30,6 +32,18 @@ export default function usePaperReview(itemKey, { onSaved, onQueueRefresh } = {}
   });
   const deleteMutation = useMutation({ mutationFn: () => deleteVerdict(itemKey) });
   const detail = detailQuery.data;
+
+  useEffect(() => {
+    const reconciled = (event) => {
+      if (!submitMutation.data?.saved_offline || !event.detail?.online) return;
+      const rejected = event.detail.rejected?.some(
+        (row) => row.item_key === itemKey && row.field === 'verdict',
+      );
+      if (rejected || event.detail.pending === 0) submitMutation.reset();
+    };
+    window.addEventListener(syncStatusEvent, reconciled);
+    return () => window.removeEventListener(syncStatusEvent, reconciled);
+  }, [itemKey, submitMutation.data?.saved_offline, submitMutation.reset]);
 
   // POST /api/golden/verdict resolves HTTP 200 even when the best-effort Zotero
   // mirror (label tag / note) failed — it reports label_error/note_error instead

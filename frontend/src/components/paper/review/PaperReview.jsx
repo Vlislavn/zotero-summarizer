@@ -4,7 +4,7 @@ import {
 } from './tones.js';
 import {
   bandGloss, METHOD_CLAUSE, LEGEND, rubricLabel, paperTypeLabel,
-  decisiveRows, fullChecklist, shortGoal,
+  decisiveRows, fullChecklist, shortGoal, isSupportedGoal,
 } from './briefModel.js';
 import { formatShortDate, timeAgo } from '../../library/shared.jsx';
 
@@ -62,8 +62,7 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
   const isNonPaper = quality?.basis === 'non_paper';
   const band = isNonPaper ? '' : String(quality?.quality_band || '');
   const redFlags = isNonPaper ? [] : (quality?.red_flags || []).map((x) => String(x || '').trim()).filter(Boolean);
-  const nHitGoals = goals.filter((g) => g?.retrieval_state === 'hit'
-    && g?.relevant === true && g?.abstained === false).length;
+  const nHitGoals = goals.filter(isSupportedGoal).length;
 
   // The API projects cached decisions through the current policy; absence stays unknown.
   let verdict;
@@ -312,7 +311,7 @@ function SectionAnchor({ section }) {
 
 function GoalTile({ g, sections }) {
   const state = String(g?.retrieval_state || 'not_retrieved');
-  const supported = state === 'hit' && Boolean(g?.relevant);
+  const supported = isSupportedGoal(g);
   const score = Number(g?.score) || 0;
   const width = Math.round(Math.max(0, Math.min(1, score / 3)) * 100);
   const secs = (g?.key_sections || []).filter(Boolean).join(', ');

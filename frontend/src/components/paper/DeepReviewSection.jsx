@@ -21,15 +21,19 @@ function formatDuration(seconds) {
 // unreachable model, and an already-running review. Shared by Library + Annotate.
 export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true, compact = false }) {
   const [focusPrompt, setFocusPrompt] = useState('');
-  const { status, error, llm, running, run } = useDeepReviewRunner(itemKey, { deep, onDone });
+  const { status, error, llm, llmAvailable, online, running, run } = useDeepReviewRunner(itemKey, { deep, onDone });
   const reviewed = deep && !deep.needs_pdf && (deep.digest || deep.quality || (deep.goal_summaries || []).length);
   return (
     <div className="space-y-3">
-      {llm?.enabled === false ? (
+      {!online ? (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-800" role="status">
+          Offline — cached reviews remain readable. Reconnect to generate a review.
+        </div>
+      ) : llm?.enabled === false ? (
         <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] text-slate-700">
           AI reviews are off. Enable them in <span className="font-semibold">Settings → AI models</span>.
         </div>
-      ) : llm && llm.reachable === false && (
+      ) : llm && llm.reachable === false ? (
         // Amber, not rose: this is an APP-STATE notice (a server is down), not a
         // finding about the paper. Rose is reserved for the paper's own red-flags
         // below, so the two never compete (one-code-one-meaning / Von Restorff).
@@ -40,6 +44,10 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
           so a review will produce no digest. Start that server, or pick a reachable model in{' '}
           <span className="font-semibold">Settings → LLM routing</span>.
           {llm.detail && <div className="mt-1 text-[11px] text-amber-600 break-words">{llm.detail}</div>}
+        </div>
+      ) : !llmAvailable && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-800" role="status">
+          Could not verify the review model. Reconnect to check it before generating.
         </div>
       )}
       <FullTextAccessNotice deep={deep} />
@@ -71,7 +79,7 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
           <button
             type="button"
             onClick={() => run({ focusPrompt })}
-            disabled={running || llm?.enabled === false || llm?.reachable === false}
+            disabled={running || !llmAvailable}
             className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-teal-700 text-white text-[13px] font-semibold hover:bg-teal-800 disabled:opacity-50"
             title="Run a condensed full-text digest (what it's about + how to use it + quality)"
           >
@@ -107,6 +115,9 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
       )}
       {status.status === 'error' && status.error && (
         <div className="text-[12px] text-rose-700">Deep review failed: {status.error}</div>
+      )}
+      {online && status.status === 'unavailable' && status.error && (
+        <div className="text-[12px] text-amber-800" role="status">Review status unavailable: {status.error}</div>
       )}
       {error && <div className="text-[12px] text-rose-700">{error}</div>}
     </div>
