@@ -3,6 +3,7 @@ grounding, and the always-length-N board."""
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from zotero_summarizer.services.library import _paper_goal_summaries as gs
 
@@ -97,6 +98,35 @@ def test_no_dense_no_lexical_match_is_not_retrieved(monkeypatch):
         llm=_FacetLLM("x"),
     )
     assert out[0].retrieval_state == "not_retrieved"
+
+
+@pytest.mark.parametrize("fail_after", [0, 1])
+def test_encoder_inference_failure_degrades_to_bm25(monkeypatch, fail_after):
+    class _BrokenEmbedder:
+        calls = 0
+
+        def encode(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls > fail_after:
+                raise RuntimeError("encoder inference failed")
+            return np.ones((1, 2), dtype="float32")
+
+    class _LexicalIndex:
+        available = True
+
+        def ranked(self, _query):
+            return [0]
+
+    _patch(monkeypatch, _BrokenEmbedder())
+    monkeypatch.setattr(gs, "_ChunkBM25", lambda _texts: _LexicalIndex())
+    quote = "We use multimodal patient imaging data and clinical notes for diagnosis"
+    out = gs.summarize_for_goals(
+        goals=["multimodal patient diagnosis"], sections=SECTIONS,
+        full_text="", llm=_FacetLLM(quote),
+    )
+
+    assert out[0].retrieval_state == "hit"
+    assert out[0].summary == "It does multimodal clinical diagnosis."
 
 
 def test_empty_paper_renders_all_cells_not_retrieved(monkeypatch):

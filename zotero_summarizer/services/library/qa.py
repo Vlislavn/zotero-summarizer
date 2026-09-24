@@ -37,9 +37,18 @@ LOGGER = logging.getLogger(__name__)
 
 MODES = ("comprehensive", "retrieval", "full_text")
 
-# A "how many" question scoped to a specific figure/table/section is NOT a
-# whole-document count — let the LLM answer it instead of returning a doc total.
-_SCOPED_REF_RE = re.compile(r"\b(?:figure|fig|table|tbl|section|sec|eq|equation|appendix)\.?\s*\d", re.IGNORECASE)
+# A "how many" question scoped to a figure, table, numbered section, or common
+# named section is NOT a whole-document count — let the LLM answer from text.
+_NAMED_SECTION = (
+    r"abstract|introduction|intro|background|related\s+(?:work|literature)|"
+    r"literature\s+review|methods?|materials\s+and\s+methods|results?|"
+    r"discussion|conclusions?|limitations?|appendix|supplement(?:ary)?\s+material"
+)
+_SCOPED_REF_RE = re.compile(
+    rf"\b(?:figure|fig|table|tbl|section|sec|eq|equation|appendix)\.?\s*\d"
+    rf"|\b(?:in|within|from|does|do)\s+(?:the\s+)?(?:{_NAMED_SECTION})\b",
+    re.IGNORECASE,
+)
 
 def ask_paper(
     item_key: str, question: str, *, mode: str = "comprehensive",

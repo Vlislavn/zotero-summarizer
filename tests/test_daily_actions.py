@@ -182,6 +182,7 @@ def test_add_to_library_runs_real_materialize_row(tmp_path, monkeypatch):
     OTHER add_to_library test mocks ``materialize_row``, so only a test that runs
     the real body — with a capturing Zotero writer — catches it.
     """
+    from types import SimpleNamespace
     db = _build_db(tmp_path)
     pk = _record(db, 400, reading_priority="dont_read")
     fake = _FakeSettings(db, tmp_path / "zot")
@@ -198,7 +199,12 @@ def test_add_to_library_runs_real_materialize_row(tmp_path, monkeypatch):
     monkeypatch.setattr(daily_actions, "get_settings", lambda: fake)
     monkeypatch.setattr(daily_actions, "ZoteroWriter", _MatWriter)
     from zotero_summarizer.services.library import review_materialize
+    from zotero_summarizer.services.triage.feeds import _daily_materialize
     monkeypatch.setattr(review_materialize, "get_settings", lambda: fake)
+    monkeypatch.setattr(
+        _daily_materialize, "ZoteroReader",
+        lambda *_: SimpleNamespace(get_feed_items=lambda **_: []),
+    )
     monkeypatch.setattr(review, "append_to_golden", lambda *a, **k: True)
     monkeypatch.setattr(daily_actions, "_attach_fulltext_best_effort", lambda keys: {"attached": 0})
 
@@ -286,14 +292,15 @@ def test_append_to_golden_writes_signal_tier_to_csv(tmp_path, monkeypatch):
     import dataclasses
     from types import SimpleNamespace
     from zotero_summarizer.services.golden.goldenset import GoldenSample
+    from zotero_summarizer.services.library import review_summary
 
     fields = [f.name for f in dataclasses.fields(GoldenSample)]
     csv_path = tmp_path / "golden.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         _csv.DictWriter(f, fieldnames=fields).writeheader()
 
-    monkeypatch.setattr(review, "_fetch_feed_metadata", lambda **k: {})
-    monkeypatch.setattr(review, "get_settings", lambda: SimpleNamespace(project_root=tmp_path))
+    monkeypatch.setattr(review_summary, "_fetch_feed_metadata", lambda **k: {})
+    monkeypatch.setattr(review_summary, "get_settings", lambda: SimpleNamespace(project_root=tmp_path))
 
     review.append_to_golden(
         {"feed_item_id": 777, "feed_library_id": 1, "title": "T", "doi": ""},
@@ -395,6 +402,8 @@ def test_verdict_materialize_writes_label_tag(tmp_path, monkeypatch):
     """The REAL materialize_row path stamps the verdict's label:<priority> tag on
     the new Zotero item (the user's ground truth must reach Zotero even though it
     was set on a feed paper). Runs the real body with a capturing writer."""
+    from types import SimpleNamespace
+
     db = _build_db(tmp_path)
     pk = _record(db, 500, reading_priority="dont_read")  # gate said dont; user says must
     key = _stable_key(db, pk)
@@ -412,7 +421,12 @@ def test_verdict_materialize_writes_label_tag(tmp_path, monkeypatch):
     monkeypatch.setattr(daily_actions, "get_settings", lambda: fake)
     monkeypatch.setattr(daily_actions, "ZoteroWriter", _CapWriter)
     from zotero_summarizer.services.library import review_materialize
+    from zotero_summarizer.services.triage.feeds import _daily_materialize
     monkeypatch.setattr(review_materialize, "get_settings", lambda: fake)
+    monkeypatch.setattr(
+        _daily_materialize, "ZoteroReader",
+        lambda *_: SimpleNamespace(get_feed_items=lambda **_: []),
+    )
     monkeypatch.setattr(daily_actions.deep_review, "copy_review", lambda *a, **k: None)
     monkeypatch.setattr(daily_actions, "_attach_fulltext_best_effort", lambda keys: {"attached": 0})
     monkeypatch.setattr(daily_actions, "_carry_renders_best_effort", lambda pairs: None)

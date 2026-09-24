@@ -77,7 +77,8 @@ def digest_for_strategy(
         return map_reduce_digest(
             title=title, full_text=full_text, config=config, map_llm=map_llm,
             reduce_llm=reduce_llm, chunk_chars=budget.chunk_chars,
-            sub_concurrency=budget.sub_concurrency, response_format=response_format,
+            sub_concurrency=budget.sub_concurrency, focus_prompt=focus_prompt,
+            response_format=response_format,
         )
     return assess_digest(
         title=title, full_text=full_text, config=config, llm=reduce_llm,
@@ -95,6 +96,7 @@ def map_reduce_digest(
     reduce_llm: Any,
     chunk_chars: int = 8000,
     sub_concurrency: int = 1,
+    focus_prompt: str = "",
     response_format: dict[str, Any] | None = None,
 ) -> PaperDigest:
     """MAP each chunk on ``map_llm`` (parallel up to ``sub_concurrency``), REDUCE the notes into
@@ -117,6 +119,7 @@ def map_reduce_digest(
     extra = {"response_format": response_format} if response_format else {}
     digest = assess_digest(
         title=title, full_text=combined, config=config, llm=reduce_llm,
-        max_chars=len(combined) + 1, verifier_llm=map_llm, **extra,
+        max_chars=len(combined) + 1, verifier_llm=map_llm,
+        focus_prompt=focus_prompt, **extra,
     )
     return digest.model_copy(update={"basis": "map_reduce"})

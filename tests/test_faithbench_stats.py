@@ -66,6 +66,15 @@ def test_single_run_has_zero_std_and_no_pass_k():
     assert "pass_at_k" not in block
 
 
+def test_pass_hat_k_excludes_items_without_a_complete_repeat_cohort():
+    judgments = [_j("qa:A:0", 1, True), _j("qa:A:0", 2, True), _j("qa:A:1", 1, True)]
+    block = calculate_statistics([], judgments, ITEMS_META,
+                                 expected_runs=3)["tracks"]["qa"]["full_text"]
+    assert block["k"] == 3
+    assert block["pass_at_k"] == 0.0
+    assert block["pass_hat_k"] == 0.0
+
+
 def test_unjudgeable_rows_leave_every_denominator():
     judgments = [
         _j("qa:A:0", 1, True),
@@ -115,7 +124,7 @@ def test_escalation_fraction_latency_and_failure_histogram():
     assert block["judge_escalation_fraction"] == round(2 / 3, 4)
     assert block["latency"]["n"] == 3
     assert block["latency"]["p50"] == 20.0
-    assert block["latency"]["total_wall_seconds"] == 60.0
+    assert block["latency"]["total_trial_seconds"] == 60.0
     assert block["failure_reasons"] == {"judge_reject": 1}
     assert block["methods"]["llm_judge"] == 2
 
@@ -156,3 +165,4 @@ def test_markdown_renders_the_same_numbers_as_json():
     block = stats["tracks"]["qa"]["full_text"]
     assert f"{100 * block['accuracy']['mean']:.1f}%" in md  # same dict, same number
     assert "Trap hallucination rate" in md and "r1" in md
+    assert "median 100.0%" in md

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { updateItemCollections } from '../../api/libraryApi.js';
+import { readStorage, writeStorage } from '../../utils/safeStorage.js';
 
 // The user files most papers into their "Read Next" reading list, so the picker
 // pre-selects it by default (one click "Add"). Matched by name — robust to the
@@ -14,7 +15,7 @@ const READ_NEXT_RE = /read[\s_-]*next|read[\s_-]*later|to[\s_-]*read|reading[\s_
 function preferredKey(addable) {
   const named = addable.find((c) => READ_NEXT_RE.test(c.name));
   if (named) return named.key;
-  const last = localStorage.getItem('zs:lastCollectionKey');
+  const last = readStorage('zs:lastCollectionKey');
   return addable.some((c) => c.key === last) ? last : '';
 }
 
@@ -61,7 +62,7 @@ export default function CollectionEditor({ itemKey, current = [], collections = 
       }
       // Remember the last collection added to — the fallback default for users
       // without a Read-Next list (a named match still wins when present).
-      if (add.length) localStorage.setItem('zs:lastCollectionKey', add[0]);
+      if (add.length) writeStorage('zs:lastCollectionKey', add[0]);
       touchedRef.current = false;  // let the default re-seed after the refetch
       setTarget('');
       onChanged?.();

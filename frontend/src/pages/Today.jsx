@@ -29,6 +29,7 @@ import {
 import { fetchReview } from '../api/reviewApi.js';
 import { reviewPaperUrl } from './reviewHelpers.js';
 import { fulltextMessage } from './todayHelpers.js';
+import { writeStorage } from '../utils/safeStorage.js';
 
 // ---------------------------------------------------------------------------
 // Spot-check — a capped, clearly-labeled sample of papers the filter rejected,
@@ -224,7 +225,7 @@ export default function Today() {
   // switching hotkeys work when a review is opened from Today (not just Read next).
   useEffect(() => {
     if (visiblePapers.length) {
-      localStorage.setItem(
+      writeStorage(
         'zs.reviewOrder',
         JSON.stringify(visiblePapers.map((p) => p.stable_feed_key).filter(Boolean)),
       );

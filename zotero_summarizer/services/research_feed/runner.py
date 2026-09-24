@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 import time
 from datetime import datetime
+import logging
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -20,6 +23,7 @@ from zotero_summarizer.settings import Settings
 
 
 ReviewLoader = Callable[[str], dict[str, Any] | None]
+LOGGER = logging.getLogger(__name__)
 
 
 def _words(value: str) -> set[str]:
@@ -51,9 +55,15 @@ def _summary(row: dict[str, Any] | None) -> dict[str, Any]:
     if not row:
         return {}
     try:
-        return (json.loads(row.get("shap_contribs_json") or "{}") or {}).get("summary") or {}
-    except (json.JSONDecodeError, TypeError):
-        return {}
+        payload = json.loads(row.get("shap_contribs_json") or "{}")
+        if not isinstance(payload, dict):
+            raise ValueError("stored triage summary must be a JSON object")
+        summary = payload.get("summary") or {}
+        if not isinstance(summary, dict):
+            raise ValueError("stored triage summary field must be an object")
+        return summary
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ValueError("stored triage summary is invalid JSON") from exc
 
 
 def _contributions(text: str) -> list[str]:
@@ -101,9 +111,7 @@ def _queue_tags(
 
     counts = {"attempted": 0, "succeeded": 0, "failed": 0, "skipped": 0}
     with repositories.with_db_path(settings.triage_db_path):
-        existing = repositories.get_pending_changes(status=None, limit=5000)
-        signatures = {(row["item_key"], row["payload_json"]) for row in existing
-                      if row["change_type"] == "tag_changes"}
+        queued_signatures: set[tuple[str, str]] = set()
         for record in records:
             source_id, card = record["candidate"]["source_id"], record["card"]
             item_key = str((rows.get(source_id) or {}).get("materialized_zotero_key") or "")
@@ -115,59 +123,88 @@ def _queue_tags(
                     *[f"ri:project:{value}" for value in record["triage"]["matched_projects"]]]
             payload = {"add_tags": sorted(set(tags)), "remove_tags": []}
             payload_json = json.dumps(payload, ensure_ascii=False)
-            if (item_key, payload_json) in signatures:
+            signature = (item_key, payload_json)
+            if signature in queued_signatures:
                 counts["skipped"] += 1
                 continue
-            counts["attempted"] += 1
             try:
-                inserted = repositories.insert_pending_changes(
-                    item_key, record["candidate"]["title"],
-                    [{"change_type": "tag_changes", "payload": payload}],
+                inserted = repositories.insert_pending_change_if_absent(
+                    item_key, record["candidate"]["title"], "tag_changes", payload,
                 )
             except Exception:  # noqa: BLE001 - isolate optional per-paper writebacks.
+                counts["attempted"] += 1
                 counts["failed"] += 1
                 continue
-            counts["succeeded"] += inserted
-            signatures.add((item_key, payload_json))
+            if inserted:
+                counts["attempted"] += 1
+                counts["succeeded"] += 1
+                queued_signatures.add(signature)
+            else:
+                counts["skipped"] += 1
     return counts
 
 
 def _assess(
     settings: Settings, start: datetime, end: datetime, source_limit: int, venue: str,
-) -> tuple[Any, list[ResearchCandidate], dict[str, dict[str, Any]], list[tuple[Any, Any]]]:
+) -> tuple[Any, list[ResearchCandidate], dict[str, dict[str, Any]], list[tuple[Any, Any]], list[dict[str, str]]]:
     profile = load_profile(settings.data_dir)
     candidates = load_candidates(
         settings.triage_db_path, start=start, end=end, limit=source_limit, venue=venue,
     )
     rows = _latest_rows(settings.triage_db_path)
-    assessed = [(candidate, triage_candidate(candidate, rows.get(candidate.source_id), profile))
-                for candidate in candidates]
-    return profile, candidates, rows, assessed
+    assessed, failed = [], []
+    for candidate in candidates:
+        try:
+            assessed.append((candidate, triage_candidate(candidate, rows.get(candidate.source_id), profile)))
+        except Exception as exc:  # noqa: BLE001 — malformed history is isolated per paper.
+            LOGGER.warning("research-feed triage failed source=%s: %s", candidate.source_id, exc)
+            failed.append({"source_id": candidate.source_id, "error": f"{type(exc).__name__}: {exc}"})
+    return profile, candidates, rows, assessed, failed
 
 
-def _ensure_reviews(settings: Settings, candidates: list[ResearchCandidate], timeout_seconds: int) -> None:
-    """Run the existing full-text/deep-review path for cache misses, then wait."""
+def _ensure_reviews(
+    settings: Settings, candidates: list[ResearchCandidate], timeout_seconds: int,
+) -> dict[str, str]:
+    """Run reviews for cache misses and return per-key timeout/error outcomes."""
     from zotero_summarizer.services.library import deep_review
     from zotero_summarizer.services.library.app_library_reader import AppLibraryReader
 
     keys = [candidate.source_id for candidate in candidates
             if deep_review.get_current_review(candidate.source_id) is None]
     if not keys:
-        return
-    deep_review.start(
-        item_keys=keys, reader=AppLibraryReader(settings.triage_db_path), acquire_missing=True,
-    )
+        return {}
+    try:
+        deep_review.start(
+            item_keys=keys, reader=AppLibraryReader(settings.triage_db_path), acquire_missing=True,
+        )
+    except Exception as exc:  # noqa: BLE001 — report start failure per affected paper.
+        return {key: f"deep review start failed: {type(exc).__name__}: {exc}" for key in keys}
     deadline = time.monotonic() + timeout_seconds
-    while any(deep_review.status(key)["status"] == "running" for key in keys):
+    pending = set(keys)
+    outcomes = {}
+    while pending:
+        for key in tuple(pending):
+            job = deep_review.status(key)
+            if job.get("status") == "running":
+                continue
+            pending.remove(key)
+            if job.get("status") == "error":
+                outcomes[key] = str(job.get("error") or "deep review failed")
+        if not pending:
+            break
         if time.monotonic() >= deadline:
-            return
+            for key in pending:
+                outcomes[key] = f"deep review timed out after {timeout_seconds}s"
+            break
         time.sleep(0.2)
+    return outcomes
 
 
 def _records(
     shortlist: list[tuple[ResearchCandidate, ResearchFeedTriage]],
     review_loader: ReviewLoader,
     profile: Any,
+    review_outcomes: dict[str, str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, str]]]:
     records: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
@@ -176,7 +213,11 @@ def _records(
         try:
             review = review_loader(candidate.source_id)
             if review is None or not review.get("digest"):
-                missing.append(candidate.model_dump(mode="json"))
+                failure = (review_outcomes or {}).get(candidate.source_id)
+                if failure:
+                    failed.append({"source_id": candidate.source_id, "error": failure})
+                else:
+                    missing.append(candidate.model_dump(mode="json"))
                 continue
             card = build_card(candidate, triage, review, profile)
             records.append({
@@ -233,19 +274,28 @@ def run_weekly(
     review_timeout_seconds: int = 3600,
     review_loader: ReviewLoader = _review_cache.get_current_review,
 ) -> dict[str, Any]:
+    try:
+        if start > end:
+            raise ValueError("start must be on or before end")
+    except TypeError as exc:
+        raise ValueError("start and end must use compatible timezone awareness") from exc
     shortlist_budget, card_budget, source_limit, review_timeout_seconds = parse_run_budgets(
         shortlist_budget, card_budget, source_limit, review_timeout_seconds,
     )
-    profile, candidates, rows, assessed = _assess(
+    profile, candidates, rows, assessed, assess_failed = _assess(
         settings, start, end, source_limit, venue,
     )
     included = sorted((pair for pair in assessed if pair[1].include),
                       key=lambda pair: (pair[1].score, pair[1].confidence, pair[0].title), reverse=True)
     shortlist = included[:profile.shortlist_budget if shortlist_budget is None else shortlist_budget]
     reviewed = shortlist[:profile.card_budget if card_budget is None else card_budget]
+    review_outcomes: dict[str, str] = {}
     if generate_reviews:
-        _ensure_reviews(settings, [candidate for candidate, _triage in reviewed], review_timeout_seconds)
-    records, missing, failed = _records(reviewed, review_loader, profile)
+        review_outcomes = _ensure_reviews(
+            settings, [candidate for candidate, _triage in reviewed], review_timeout_seconds,
+        )
+    records, missing, failed = _records(reviewed, review_loader, profile, review_outcomes)
+    failed = [*assess_failed, *failed]
     rejects = sorted((pair for pair in assessed if not pair[1].include),
                      key=lambda pair: pair[1].score, reverse=True)[:10]
     writebacks = (
@@ -266,7 +316,16 @@ def run_weekly(
     }
     payload = _payload(metadata, records, missing, failed, rejects)
     output_dir = settings.data_dir / "research_feed"
-    slug = f"weekly-{end.date().isoformat()}"
+    identity = {
+        "start": start.isoformat(), "end": end.isoformat(), "venue": venue.casefold().strip(),
+        "dry_run": dry_run, "queue_zotero": queue_zotero,
+        "generate_reviews": generate_reviews, "source_limit": source_limit,
+        "shortlist_budget": shortlist_budget, "card_budget": card_budget,
+        "review_timeout_seconds": review_timeout_seconds,
+        "profile": profile.model_dump(mode="json"),
+    }
+    run_id = hashlib.sha256(json.dumps(identity, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+    slug = f"weekly-{end.date().isoformat()}-{run_id}-{uuid.uuid4().hex[:8]}"
     json_path, md_path = persist(payload, output_dir, slug)
     write_json_atomic(output_dir / "state.json", {
         "schema_version": 1, "last_from": start.isoformat(), "last_to": end.isoformat(),

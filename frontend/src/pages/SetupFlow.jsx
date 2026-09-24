@@ -16,16 +16,18 @@ import StepDone from '../components/setup/StepDone.jsx';
 import { Banner } from '../components/form/Fields.jsx';
 import Button from '../components/ui/Button.jsx';
 import { validateSetup } from '../api/setupApi.js';
+import { readStoredJson, writeStorage } from '../utils/safeStorage.js';
 
 const DEFAULT_TRIAGE_CRITERIA = [
   'Directly advances one of my research goals',
   'Introduces a method, dataset, or result I could build on',
   'Strong venue or credible authors',
 ].join('\n');
+const STEP_LABELS = ['Zotero sync', 'Connect LLM', 'Describe research'];
 const PROGRESS_KEY = 'zs_setup_progress_v1';
 
 function savedProgress() {
-  try { return JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}'); } catch { return {}; }
+  return readStoredJson(PROGRESS_KEY, {}, (value) => value && typeof value === 'object' && !Array.isArray(value));
 }
 
 export default function SetupFlow() {
@@ -90,7 +92,7 @@ export default function SetupFlow() {
   useEffect(() => { setMaxStepReached((m) => Math.max(m, step)); }, [step]);
 
   useEffect(() => {
-    if (draft) localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+    if (draft) writeStorage(PROGRESS_KEY, JSON.stringify({
       step, maxStepReached, draft, draftPaths, pathsChanged,
     }));
   }, [step, maxStepReached, draft, draftPaths, pathsChanged]);
@@ -170,6 +172,11 @@ export default function SetupFlow() {
           </div>
           {step < 3 && (
             <StepProgress current={step} validity={validity} maxReached={maxStepReached} />
+          )}
+          {step < 3 && (
+            <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+              Step {step + 1} of 3: {STEP_LABELS[step]}
+            </p>
           )}
         </header>
 

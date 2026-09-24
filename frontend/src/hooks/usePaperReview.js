@@ -17,10 +17,15 @@ export default function usePaperReview(itemKey, { onSaved, onQueueRefresh } = {}
     enabled: Boolean(itemKey),
   });
   const submitMutation = useMutation({
-    mutationFn: ({ item_key, user_priority, comment }) => {
-      const tasks = [submitVerdict({ item_key, user_priority, comment })];
-      if (user_priority === 'dont_read') tasks.push(queueRejectTag(item_key));
-      return Promise.all(tasks);
+    mutationFn: async ({ item_key, user_priority, comment }) => {
+      const result = await submitVerdict({ item_key, user_priority, comment });
+      if (user_priority !== 'dont_read') return result;
+      try {
+        await queueRejectTag(item_key);
+        return result;
+      } catch (error) {
+        return { ...result, reject_tag_error: error?.message || String(error) };
+      }
     },
   });
   const deleteMutation = useMutation({ mutationFn: () => deleteVerdict(itemKey) });
@@ -31,7 +36,7 @@ export default function usePaperReview(itemKey, { onSaved, onQueueRefresh } = {}
   // of raising (api/routes/golden.py submit_verdict). The verdict itself is
   // already durable at that point; same soft-warning idiom as AnnotationVerdict's
   // flashStatus (data?.label_error || data?.note_error).
-  const [verdictResult] = submitMutation.data || [];
+  const verdictResult = submitMutation.data || null;
   // A positive verdict on a Today-feed paper now materializes it into Zotero
   // (api/routes/golden.py submit_verdict → add_feed_verdict_to_library). Surface
   // the outcome so the user KNOWS it was added — the paper appears in Zotero
@@ -45,7 +50,9 @@ export default function usePaperReview(itemKey, { onSaved, onQueueRefresh } = {}
     ? `Zotero label not written: ${verdictResult.label_error}`
     : verdictResult?.note_error
       ? `Zotero note not written: ${verdictResult.note_error}`
-      : addWarning;
+      : verdictResult?.reject_tag_error
+        ? `Verdict saved, but reject tag was not queued: ${verdictResult.reject_tag_error}`
+        : addWarning;
   const submitNotice = verdictResult?.added_to_library
     ? '✓ Added to your Zotero Inbox — appears after a Zotero restart'
     : verdictResult?.saved_offline

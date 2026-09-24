@@ -36,6 +36,23 @@ def test_includes_configured_dir_tagged_env(tmp_path: Path, monkeypatch):
     assert env_rows[0].db_path == str(zot / "zotero.sqlite")
 
 
+def test_blank_configured_dir_uses_home_default_not_checkout(tmp_path: Path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("ZOTERO_DATA_DIR", "")
+    settings = Settings.load(project_root=project)
+    set_context(AppContext(settings=settings))
+    monkeypatch.setattr(detect_mod, "_platform_candidate_dirs", lambda: [])
+
+    rows = detect_zotero_data_dirs()
+
+    assert settings.zotero_data_dir == (home / "Zotero").resolve()
+    assert [row.data_dir for row in rows] == [str((home / "Zotero").resolve())]
+
+
 def test_db_exists_candidates_are_ordered_first(tmp_path: Path, monkeypatch):
     # Configured dir has NO db; a probe candidate DOES — the probe must sort first.
     no_db = tmp_path / "empty"

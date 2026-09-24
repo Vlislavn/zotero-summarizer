@@ -97,7 +97,9 @@ class Settings:
             summary_timeout_seconds=_env_int("SUMMARY_TIMEOUT_SECONDS", 420),
             triage_job_concurrency=concurrency,
             pdf_root=Path(os.getenv("PDF_ROOT", str(Path.home()))).expanduser().resolve(),
-            zotero_data_dir=Path(os.getenv("ZOTERO_DATA_DIR", str(Path.home() / "Zotero"))).expanduser().resolve(),
+            zotero_data_dir=Path(
+                os.getenv("ZOTERO_DATA_DIR", "").strip() or str(Path.home() / "Zotero")
+            ).expanduser().resolve(),
             app_log_level=os.getenv("APP_LOG_LEVEL", "INFO").upper(),
             app_log_file=app_log_file,
             triage_db_path=data_dir / "triage_history.db",

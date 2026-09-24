@@ -197,4 +197,4 @@ def test_malformed_source_timestamp_is_not_silently_discarded(tmp_path):
     with pytest.raises(ValueError):
         runner.run_weekly(settings, start=START, end=END, review_loader=_review)
 
-    assert not (settings.data_dir / "research_feed" / "weekly-2026-08-29.json").exists()
+    assert not list((settings.data_dir / "research_feed").glob("weekly-*"))

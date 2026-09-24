@@ -88,6 +88,11 @@ def pull(db_path: Path, since: int) -> dict[str, Any]:
 
 
 def _validate_mutation(mutation: dict[str, Any]) -> None:
+    for field in ("device_id", "item_key"):
+        value = mutation.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{field} must contain non-whitespace characters")
+        mutation[field] = value.strip()
     if mutation["operation"] == "set" and mutation["field"] == "verdict":
         if mutation.get("value") not in READING_PRIORITY_SORT_RANK:
             raise ValueError("verdict value must be a reading priority")

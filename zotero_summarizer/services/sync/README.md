@@ -1,7 +1,10 @@
 # services/sync — offline mutation sync
 
 The server SQLite database remains canonical. `pull` returns compact paper
-snapshots plus a monotonic field-change cursor; `push` applies ordered verdict or
+snapshots plus a monotonic field-change cursor; protocol-v1 `changes` is always
+empty because clients reconcile from the snapshot and never consume the event
+history. This keeps stale-device pulls independent of accumulated note/verdict
+transitions. `push` applies ordered verdict or
 review-note mutations. Each mutation has a UUID and per-field base revision, so
 replay is idempotent, edits to different fields merge, and same-field divergence
 returns an explicit conflict. A resolution is another mutation naming the
@@ -27,6 +30,9 @@ field-level optimistic concurrency, not database replication: PDFs, annotations,
 AI runs, and Zotero filesystem state stay server-only. The JSONL label trajectory
 is still best-effort after the transaction; `sync_mutations` is the durable
 mutation/conflict audit.
+The status `conflicts` count includes only conflict receipts without a successful
+resolution mutation; resolved historical receipts remain auditable without being
+reported as active work.
 
 Snapshot review payloads are filtered through the same PDF/model/config identity
 check as Library policy consumers; stale deep-review output is never synced as current.

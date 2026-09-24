@@ -177,9 +177,16 @@ def run_review(session_id: str, *, deps: SearchDeps, top_n: int = LIGHT_REVIEW_N
     request = ScreenRequest(query=sess.raw_query, questions=sess.questions)
     fulltext: dict[str, str] = {}
     for cand in sess.candidates[:top_n]:
-        text = acquire_full_text(cand, extractor=deps.extractor, unpaywall=deps.unpaywall_client)
-        fulltext[cand.candidate_id] = text
-        light_review(cand, full_text=text, sections=[], llm=deps.llm_light, max_chars=_max_chars(deps))
+        if session_store.is_deleted(session_id):
+            return sess
+        try:
+            text = acquire_full_text(cand, extractor=deps.extractor, unpaywall=deps.unpaywall_client)
+            fulltext[cand.candidate_id] = text
+            light_review(cand, full_text=text, sections=[], llm=deps.llm_light, max_chars=_max_chars(deps))
+        except Exception as exc:  # noqa: BLE001 — isolate failures to this paper
+            cand.review = {"state": "error", "error": str(exc)[:500]}
+        if session_store.is_deleted(session_id):
+            return sess
 
     rank_candidates(sess.candidates)  # quality now populated → re-rank the band
     attach_relevance(sess.candidates)  # re-derive bands/why now that quality chips exist
@@ -189,12 +196,21 @@ def run_review(session_id: str, *, deps: SearchDeps, top_n: int = LIGHT_REVIEW_N
 
     deep_set = select_deep_set(sess.candidates, k=k)
     for cand in deep_set:
-        targeted_review(
-            cand, full_text=fulltext.get(cand.candidate_id, ""),
-            query=request.query, questions=request.questions, config=deps.config, llm=deps.llm,
-        )
+        if session_store.is_deleted(session_id):
+            return sess
+        if cand.review and cand.review.get("state") == "error":
+            continue
+        try:
+            targeted_review(
+                cand, full_text=fulltext.get(cand.candidate_id, ""),
+                query=request.query, questions=request.questions, config=deps.config, llm=deps.llm,
+            )
+        except Exception as exc:  # noqa: BLE001 — isolate failures to this paper
+            cand.review = {"state": "error", "error": str(exc)[:500]}
         session_store.save_merge(sess)  # incremental: each deep review appears as it lands
 
+    if session_store.is_deleted(session_id):
+        return sess
     sess.status = "reviewed"
     sess.screened_count = len(sess.candidates[:top_n])
     session_store.save_merge(sess)

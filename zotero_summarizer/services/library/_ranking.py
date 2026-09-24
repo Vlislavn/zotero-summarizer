@@ -6,7 +6,7 @@ The ordering helpers operate on the already-scored unread records and only chang
 their ORDER — banding/tags/distribution stay computed from the gate's relevance
 score, so the ``derivation == prediction`` invariant is untouched. ``reading_queue``
 re-exports these so ``reading_queue._dedup_by_content`` etc. remain the public seam.
-"""
+    """
 from __future__ import annotations
 
 from typing import Any
@@ -203,6 +203,8 @@ def _build_recs(
     stays in ``unread`` and pins to the top (``sort_unread``). The
     ``proposed_verdict`` and quality fields are display-only sidecars (never fed to
     the hide/pin logic)."""
+    from zotero_summarizer.services.library.review_fleet.verdict_store import proposal_matches_review
+
     unread: list[dict[str, Any]] = []
     read: list[dict[str, Any]] = []
     for it in rows:
@@ -258,7 +260,12 @@ def _build_recs(
             # banding-FLOOR signal — kept separate on purpose.
             "prestige_evidence": prestige_evidence,
             "max_author_h_index": author_h_index,
-            "proposed_verdict": proposed_verdicts.get(it["item_key"]),
+            "proposed_verdict": (
+                proposed_verdicts.get(it["item_key"])
+                if proposal_matches_review(
+                    proposed_verdicts.get(it["item_key"]), reviews.get(it["item_key"]),
+                ) else None
+            ),
             "quality_grade": quality_grade,
             "quality_band": quality_band,
         }

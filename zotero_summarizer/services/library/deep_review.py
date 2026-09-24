@@ -128,11 +128,8 @@ def _set_job_progress(item_key: str, progress: dict[str, Any]) -> None:
 def status(item_key: str | None = None) -> dict[str, Any]:
     """Poll payload ``{status, total, completed, error, started_at, progress}``.
 
-    With ``item_key`` set, reports THAT paper's job (``running``/``ready``/``error``,
-    or ``idle`` when no job is tracked) — the per-paper panel polls this so it shows
-    its OWN progress. Without ``item_key``, an AGGREGATE: ``running`` if ANY review is
-    in flight (the ``university_access`` "is a review running?" gate + the review-fleet
-    poll rely on this), else ``error``/``ready``/``idle`` over the tracked jobs."""
+    A keyed query reports that paper's job. Aggregate queries report running when
+    any review is active; otherwise errors reflect the latest finished attempt."""
     with _LOCK:
         if item_key is not None:
             job = _JOBS.get(item_key)
@@ -149,7 +146,9 @@ def status(item_key: str | None = None) -> dict[str, Any]:
             }
         jobs = list(_JOBS.values())
     running = [j for j in jobs if j.get("status") == "running"]
-    error = next((j.get("error") for j in jobs if j.get("status") == "error" and j.get("error")), None)
+    latest = max((j for j in jobs if j.get("status") in ("ready", "error")),
+                 key=lambda j: str(j.get("started_at") or ""), default={})
+    error = latest.get("error") if not running and latest.get("status") == "error" else None
     completed = sum(1 for j in jobs if j.get("status") in ("ready", "error"))
     if running:
         state = "running"
@@ -234,9 +233,10 @@ def _review_one(
         sink = progress_sink if progress_sink is not None else (lambda _p: None)
         reporter = _deep_review_progress.ReviewReporter(item_key, title, sink)
         reporter.phase("extract")
-        # A corrupt PDF raises out of extract_text and is handled by the per-item
-        # boundary in _review_worker (recorded on this item's job).
+        # Extraction failures and empty bodies are recorded by this item's worker.
         text = extractor.extract_text(pdf_path).strip()
+        if not text:
+            raise ValueError("PDF extraction returned no text")
         if text:
             qr = config.quality_review
             max_chars = int(qr.lean_max_text_chars if lean_tier else qr.max_text_chars)
@@ -346,7 +346,7 @@ def _build_ctx(reader: Any = None) -> dict[str, Any]:
         "quality_enabled": bool(cfg.enabled and extractor is not None),
         "llm": app.resolve_stage_client("deep_review"),
         "llm_digest": app.resolve_stage_client("deep_review", enable_thinking=provider.thinking_on),  # DIGEST reasons unless provider thinking_effort=off
-        "llm_map": app.resolve_stage_client("feed"),  # map_reduce MAP-step (cheap feed stage); lazy, unused by default rank
+        "llm_map": app.resolve_stage_client("feed") if cfg.chunk_strategy == "map_reduce" else None,
         "prestige_scores": prestige_scores,
         "prestige_floor_value": prestige_floor_value,
         "lean_tier": bool(getattr(provider, "lean_deep_review", False)),  # ollama=prefill-bound→lean; keyed on flag, not is_local

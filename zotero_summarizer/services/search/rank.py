@@ -18,6 +18,7 @@ only into the exact-score leg. Retracted candidates sink (integrity, spec §11).
 """
 from __future__ import annotations
 
+import math
 import os
 import time
 from typing import Any
@@ -45,9 +46,10 @@ _RERANK_WAIT_SECS = 8.0
 def _epsilon() -> float:
     raw = (os.getenv("ZS_SEARCH_RANK_EPSILON") or "").strip()
     try:
-        return float(raw) if raw else DEFAULT_EPSILON
+        value = float(raw) if raw else DEFAULT_EPSILON
     except ValueError:
         return DEFAULT_EPSILON
+    return value if math.isfinite(value) and value > 0 else DEFAULT_EPSILON
 
 
 def _doc_text(cand: Candidate) -> str:
@@ -106,6 +108,8 @@ def _quality_evidence(cand: Candidate) -> float:
 
 def constrained_key(cand: Candidate, *, epsilon: float) -> tuple[float, float, float]:
     """The lexicographic sort key (spec §8). Retracted → hard-sink bucket."""
+    if not math.isfinite(epsilon) or epsilon <= 0:
+        raise ValueError("epsilon must be finite and greater than zero")
     qs = cand.query_score if cand.query_score is not None else 0.0
     if cand.is_retracted:
         return (float("-inf"), 0.0, qs)

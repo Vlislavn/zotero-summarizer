@@ -210,8 +210,63 @@ export async function applyPushResults(results) {
 }
 
 export async function applyPull(payload) {
-  await savePapers(payload.papers || [], true);
-  await setMeta('cursor', payload.cursor || 0);
+  const incoming = payload.papers || [];
+  const db = await openDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(['papers', 'mutations', 'meta'], 'readwrite');
+    const papers = tx.objectStore('papers');
+    const mutations = tx.objectStore('mutations');
+    const meta = tx.objectStore('meta');
+    const existing = papers.getAll();
+    const queued = mutations.getAll();
+    let reads = 0;
+    const reconcile = () => {
+      if (++reads !== 2) return;
+      const incomingKeys = new Set(incoming.map((row) => row.item_key));
+      const retainedKeys = new Set(queued.result.map((row) => row.item_key));
+      const pendingByKey = new Map();
+      for (const mutation of queued.result
+        .filter((row) => row.status === 'pending')
+        .sort((a, b) => (a.sequence || 0) - (b.sequence || 0)
+          || a.mutation_id.localeCompare(b.mutation_id))) {
+        const fields = pendingByKey.get(mutation.item_key) || {};
+        fields[mutation.field] = mutation.operation === 'delete' ? null
+          : mutation.field === 'verdict'
+            ? { user_priority: mutation.value, comment: mutation.comment || '', source: 'user' }
+            : mutation.value;
+        pendingByKey.set(mutation.item_key, fields);
+      }
+      for (const row of existing.result) {
+        if (!incomingKeys.has(row.item_key)) {
+          if (retainedKeys.has(row.item_key)) continue;
+          papers.delete(row.item_key);
+        }
+      }
+      for (const row of incoming) {
+        const optimistic = pendingByKey.get(row.item_key) || {};
+        const merged = {
+          ...row,
+          ...(Object.hasOwn(optimistic, 'verdict') ? { verdict: optimistic.verdict } : {}),
+          ...(Object.hasOwn(optimistic, 'review_note') ? { review_note: optimistic.review_note } : {}),
+        };
+        papers.put(merged);
+        const key = `response:review:${row.item_key}`;
+        const cached = meta.get(key);
+        cached.onsuccess = () => {
+          if (!cached.result?.value) return;
+          meta.put({ key, value: {
+            ...cached.result.value, verdict: merged.verdict, user_note: merged.review_note,
+          } });
+        };
+      }
+      meta.put({ key: 'cursor', value: payload.cursor || 0 });
+    };
+    existing.onsuccess = reconcile;
+    queued.onsuccess = reconcile;
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('IndexedDB snapshot transaction aborted'));
+  });
   await publishStatus();
 }
 

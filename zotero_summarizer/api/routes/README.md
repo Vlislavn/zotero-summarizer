@@ -24,7 +24,7 @@ __init__.include_routes(app)
 | `triage.py` | `/api/triage*` — run/list/cancel triage jobs |
 | `admin.py` | `/api/admin*` — refresh-labels, retrain, model card. `retrain` now **hot-swaps** the freshly-trained gate into the live runtime + re-scores the Today slate (via `feeds.install_gate`), so it takes effect without a server restart; the job result carries `hot_swapped` + `rescored`. `retrain` now claims the single-flight `_RETRAIN_LOCK` **synchronously** (non-blocking acquire) before spawning the worker — the old `locked()` precheck raced (the worker acquires later, on its own thread), so a fast double-click double-trained + double-hot-swapped; the worker releases it on every exit path. The model-card handler (`model_card`) lives in `services/model/model_card.py` and is **re-exported** here (layering: no api→api import); route registration is unchanged |
 | `setup.py` | `/api/setup*` — readiness, Zotero/path setup, validation, calibration, AI presets/credentials, and `GET/POST doctor`. Presets include the hardware-evaluated local catalog; `llm.enabled=false` is a valid ML-only state, so Doctor skips only AI checks by choice. Credential responses remain redacted. |
-| `sync.py` | `/api/sync/*` protocol v1 — `pull?since=` compact working-set snapshots + monotonic changes, ordered typed `push` mutations with UUID replay safety/per-field conflicts, and status. Applied verdicts/notes run the same idempotent training/materialization/Zotero effects as online saves, including recovery on UUID replay. The client never sees table names or database files; the endpoint is for the default loopback PWA, not an authenticated remote-mobile deployment |
+| `sync.py` | `/api/sync/*` protocol v1 — `pull?since=` compact working-set snapshots + monotonic changes, ordered typed `push` mutations with UUID replay safety/per-field conflicts, and status. Device and item identities are trimmed and blank values rejected. Applied verdicts/notes run the same idempotent training/materialization/Zotero effects as online saves, including recovery on UUID replay. The client never sees table names or database files; the endpoint is for the default loopback PWA, not an authenticated remote-mobile deployment |
 | `relabel_audit.py` | `/api/relabel-audit*` — test-retest reliability study |
 | `results.py` · `corpus.py` · `config.py` · `health.py` | dashboard/corpus/config/health |
 | `_golden_helpers.py` | pure (non-HTTP) helpers for `golden.py` |
@@ -131,3 +131,7 @@ before writes. Existing clients may omit this field for a single batch.
 Verdict rationale delivery now also uses current intent and propagates real
 mirror failures after the durable local save, superseding the old soft-error
 description above; the explicit unconfigured-Zotero boundary remains local-first.
+
+`GET /api/pending?item_key=...` passes the item filter through to the indexed
+storage query. `GET /api/triage/jobs?active_only=true` returns persisted running
+and cancelling jobs without limiting the lookup to newest terminal jobs.

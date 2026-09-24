@@ -123,10 +123,13 @@ def test_write_is_atomic_no_tmp_left_behind(store_dir):
     assert leftovers == []  # tmp.replace leaves no partial file
 
 
-def test_read_all_raises_on_corrupt_file(store_dir):
-    store_dir.write_text("{ this is not json", encoding="utf-8")
-    with pytest.raises(json.JSONDecodeError):
-        verdict_store.read_all()
+def test_read_all_quarantines_corrupt_file(store_dir):
+    damaged = b"{ this is not json\xff"
+    store_dir.write_bytes(damaged)
+
+    assert verdict_store.read_all() == {}
+    assert store_dir.with_name(store_dir.name + ".corrupt").read_bytes() == damaged
+    assert not store_dir.exists()
 
 
 def test_read_all_tolerates_missing_proposals_envelope_key(store_dir):

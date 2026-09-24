@@ -81,3 +81,66 @@ it('allocates concurrent mutations atomically and refreshes cached detail on pul
   expect(pending.map((row) => row.sequence)).toEqual([1, 2]);
   expect(pending.every((row) => row.base_revision === 2)).toBe(true);
 });
+
+it('replaces absent snapshot rows while retaining papers with unsent mutations', async () => {
+  const offline = await import('./offlineStore.js');
+  await offline.savePapers([
+    { item_key: 'REMOVED', title: 'Removed paper' },
+    { item_key: 'PENDING', title: 'Pending paper' },
+  ]);
+  await offline.queueMutation({ item_key: 'PENDING', field: 'verdict', value: 'must_read' });
+
+  await offline.applyPull({ cursor: 8, papers: [] });
+
+  expect((await offline.allPapers()).map((paper) => paper.item_key)).toEqual(['PENDING']);
+  expect((await offline.pendingMutations()).map((mutation) => mutation.item_key)).toEqual(['PENDING']);
+  expect(await offline.getMeta('cursor')).toBe(8);
+});
+
+it('projects pending edits over snapshots, then accepts canonical values after conflict', async () => {
+  const offline = await import('./offlineStore.js');
+  await offline.savePapers([{
+    item_key: 'PENDING', title: 'Paper', verdict: { user_priority: 'must_read' },
+    review_note: 'server note', revisions: { verdict: 3, review_note: 2 },
+  }]);
+  await offline.cacheResponse('review:PENDING', {
+    title: 'Paper', verdict: { user_priority: 'must_read' }, user_note: 'server note',
+  });
+  await offline.queueMutation({ item_key: 'PENDING', field: 'verdict', value: 'dont_read' });
+  await offline.queueMutation({ item_key: 'PENDING', field: 'review_note', value: 'local note' });
+  const [verdict, note] = await offline.pendingMutations();
+
+  await offline.applyPull({ cursor: 5, papers: [{
+    item_key: 'PENDING', title: 'Paper', verdict: { user_priority: 'could_read' },
+    review_note: 'other device note', revisions: { verdict: 4, review_note: 3 },
+  }] });
+
+  expect((await offline.allPapers())[0]).toMatchObject({
+    verdict: { user_priority: 'dont_read' }, review_note: 'local note',
+    revisions: { verdict: 4, review_note: 3 },
+  });
+  expect(await offline.cachedResponse('review:PENDING')).toMatchObject({
+    verdict: { user_priority: 'dont_read' }, user_note: 'local note',
+  });
+
+  let syncStatus;
+  window.addEventListener('zs-sync-status', (event) => { syncStatus = event.detail; }, { once: true });
+  await offline.applyPushResults([
+    { mutation_id: verdict.mutation_id, status: 'conflict', conflict_revision: 5,
+      canonical: { value: 'should_read', comment: 'remote' } },
+    { mutation_id: note.mutation_id, status: 'applied', applied_revision: 4 },
+  ]);
+  await offline.applyPull({ cursor: 6, papers: [{
+    item_key: 'PENDING', title: 'Paper', verdict: { user_priority: 'should_read', comment: 'remote' },
+    review_note: 'local note', revisions: { verdict: 5, review_note: 4 },
+  }] });
+
+  expect((await offline.allPapers())[0]).toMatchObject({
+    verdict: { user_priority: 'should_read' }, review_note: 'local note',
+  });
+  expect(await offline.cachedResponse('review:PENDING')).toMatchObject({
+    verdict: { user_priority: 'should_read' }, user_note: 'local note',
+  });
+  expect(await offline.pendingMutations()).toEqual([]);
+  expect(syncStatus.conflicts[0].status).toBe('conflict');
+});

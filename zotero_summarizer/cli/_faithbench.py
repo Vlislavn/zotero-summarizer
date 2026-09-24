@@ -141,9 +141,11 @@ def _faithbench_build(args: argparse.Namespace) -> int:
         },
     )
     bench_path = _dataset.benchmark_path(faithbench_dir, version)
-    n_items = _dataset.save_benchmark(bench_path, meta, items)
     csv_path = faithbench_dir / f"benchmark_v{version}.review.csv"
-    _dataset.export_review_csv(csv_path, items, {p.item_key: p.text for p in papers})
+    n_items = _dataset.save_benchmark(
+        bench_path, meta, items,
+        review_texts={p.item_key: p.text for p in papers},
+    )
 
     print(json.dumps({
         "benchmark": str(bench_path),

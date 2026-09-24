@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation, useSearchParams } from 'react-router-dom';
 import Review from './Review.jsx';
 import { fetchReview, reviewAction, reviewConfirmAllGateRejected } from '../api/reviewApi.js';
 
@@ -44,4 +44,40 @@ it('keeps rows available for retry when bulk confirmation fails', async () => {
   expect(await screen.findByText(/Bulk-confirm failed/)).toBeTruthy();
   expect(screen.getByText('Retry me')).toBeTruthy();
   expect(screen.getByRole('button', { name: /Confirm remaining/ }).disabled).toBe(false);
+});
+
+function CurrentSearch() {
+  const location = useLocation();
+  return <output data-testid="current-search">{location.search}</output>;
+}
+
+function NavigateToGateRejected() {
+  const [, setSearchParams] = useSearchParams();
+  return <button type="button" onClick={() => setSearchParams({ state: 'gate_rejected' })}>Navigate to rejected pile</button>;
+}
+
+it('loads a deep-linked pile and keeps URL state synchronized with pile changes', async () => {
+  fetchReview.mockResolvedValue({ items: [] });
+  render(
+    <MemoryRouter initialEntries={['/review?state=gate_rejected&from=legacy']}>
+      <CurrentSearch />
+      <NavigateToGateRejected />
+      <Review />
+    </MemoryRouter>,
+  );
+
+  await waitFor(() => expect(fetchReview).toHaveBeenCalledWith({
+    state: 'gate_rejected', limit: 500, sort: 'border',
+  }));
+  fireEvent.click(screen.getByRole('button', { name: 'Awaiting review' }));
+  await waitFor(() => expect(fetchReview).toHaveBeenLastCalledWith({
+    state: 'awaiting_review', limit: 500, sort: 'border',
+  }));
+  expect(screen.getByTestId('current-search').textContent).toContain('state=awaiting_review');
+  expect(screen.getByTestId('current-search').textContent).toContain('from=legacy');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Navigate to rejected pile' }));
+  await waitFor(() => expect(fetchReview).toHaveBeenLastCalledWith({
+    state: 'gate_rejected', limit: 500, sort: 'border',
+  }));
 });

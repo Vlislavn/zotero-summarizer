@@ -8,6 +8,8 @@ import CollectionPicker from '../components/CollectionPicker.jsx';
 import { ErrorBanner, StatusBanner } from '../components/library/shared.jsx';
 import { humanizeError } from '../utils/humanizeError.js';
 import { sortSearchCandidates } from '../utils/searchSort.js';
+import { readStoredJson, removeStorage, writeStorage } from '../utils/safeStorage.js';
+import { pollSessionUntilDone } from '../searchPolling.js';
 
 // Targeted Search — the query-driven pull surface (services/search). Give a
 // research topic, get a per-source query plan, a federated + deduped + relevance-
@@ -186,7 +188,12 @@ function CandidateCard({ cand, onAdd }) {
 // a shareable address, and it dies with the browser tab, matching its lifetime.
 const SS_KEY = 'zs.searchSession';
 function loadSaved() {
-  try { return JSON.parse(sessionStorage.getItem(SS_KEY)) || {}; } catch { return {}; }
+  return readStoredJson(
+    SS_KEY,
+    {},
+    (value) => value && typeof value === 'object' && !Array.isArray(value),
+    'sessionStorage',
+  );
 }
 
 export default function Search() {
@@ -203,13 +210,13 @@ export default function Search() {
   // The id to persist while no live session exists yet (cleared if it turns out dead).
   const savedIdRef = useRef(saved.id || null);
 
-  useEffect(() => () => clearInterval(pollRef.current), []);
+  useEffect(() => () => pollRef.current?.(), []);
 
   // Mirror pointer + drafts to sessionStorage on every change.
   useEffect(() => {
-    sessionStorage.setItem(SS_KEY, JSON.stringify(
+    writeStorage(SS_KEY, JSON.stringify(
       { id: session?.id || savedIdRef.current, q: query, qs: questions, tc: targetCollection, sort },
-    ));
+    ), 'sessionStorage');
   }, [session?.id, query, questions, targetCollection, sort]);
 
   // File one candidate into the chosen collection, then stamp its returned key on
@@ -226,17 +233,15 @@ export default function Search() {
 
   // Poll a reviewing session until the deep reviews finish (screen auto-starts them).
   const pollUntilDone = useCallback((id) => {
-    clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      try {
-        const fresh = await getSession(id);
+    pollRef.current?.();
+    pollRef.current = pollSessionUntilDone(id, {
+      fetchSession: getSession,
+      onSession: (fresh) => {
         setSession(fresh);
-        if (fresh.status !== 'reviewing') clearInterval(pollRef.current);
-      } catch (err) {
-        clearInterval(pollRef.current);
-        setError(err);
-      }
-    }, 3000);
+        setError(null);
+      },
+      onError: setError,
+    });
   }, []);
 
   // Rehydrate the last session on remount (tab switch / reload): refetch from the
@@ -254,7 +259,7 @@ export default function Search() {
       .catch(() => {
         if (cancelled) return;
         savedIdRef.current = null;          // dead pointer — stop persisting it
-        sessionStorage.removeItem(SS_KEY);
+        removeStorage(SS_KEY, 'sessionStorage');
       });
     return () => { cancelled = true; };
   }, [saved.id, pollUntilDone]);

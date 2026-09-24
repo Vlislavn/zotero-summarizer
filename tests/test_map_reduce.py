@@ -124,3 +124,23 @@ def test_digest_for_strategy_dispatches_by_chunk_strategy():
     d_m = digest_for_strategy("T", text, cfg, map_llm=map_llm, reduce_llm=_DigestLLM(), budget=budget)
     assert d_m.basis == "map_reduce"
     assert map_llm.calls == len(split_chunks(text, 8000))  # one map call per chunk — NOT a no-op
+
+
+def test_map_reduce_forwards_focus_prompt_to_reduce(monkeypatch):
+    from zotero_summarizer.services.library import _map_reduce
+
+    captured = {}
+    monkeypatch.setattr(_map_reduce, "_map_chunk", lambda _llm, _chunk: "chunk note")
+
+    def capture_assessment(**kwargs):
+        captured.update(kwargs)
+        return PaperDigest(tldr="ok", read_decision="skip", read_why="sufficient")
+
+    monkeypatch.setattr(_map_reduce, "assess_digest", capture_assessment)
+    digest_for_strategy(
+        "T", "paper body", _default_goals_config(), map_llm=object(),
+        reduce_llm=object(), budget=ChunkBudget(100, 100, 1),
+        focus_prompt="Compare limitations with my replication plan.",
+    )
+
+    assert captured["focus_prompt"] == "Compare limitations with my replication plan."

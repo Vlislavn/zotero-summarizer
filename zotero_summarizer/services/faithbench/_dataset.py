@@ -11,11 +11,14 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import os
 import re
+from tempfile import NamedTemporaryFile
 from pathlib import Path
 from typing import Any, Iterable, Literal, Union
 
 from pydantic import BaseModel, Field
+from filelock import FileLock
 
 from zotero_summarizer.services.faithbench._corpus import sentence_at, sha256_text
 
@@ -119,18 +122,57 @@ def latest_benchmark_path(faithbench_dir: Path) -> Path:
     return benchmark_path(faithbench_dir, versions[-1])
 
 
-def save_benchmark(path: Path, meta: BenchmarkMeta, items: Iterable[BenchmarkItem]) -> int:
-    """Write the meta header + items; refuses to overwrite (immutability)."""
-    if path.exists():
-        raise FileExistsError(f"benchmark file already exists: {path} (benchmarks are immutable)")
+def save_benchmark(
+    path: Path,
+    meta: BenchmarkMeta,
+    items: Iterable[BenchmarkItem],
+    *,
+    review_texts: dict[str, str] | None = None,
+) -> int:
+    """Stage artifacts fully, then publish the benchmark last as commit marker."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    count = 0
+    rows = list(items)
+    review = review_path(path) if review_texts is not None else None
+    lock_path = path.with_name(f".{path.name}.lock")
+    with FileLock(str(lock_path)):
+        if path.exists():
+            raise FileExistsError(f"benchmark file already exists: {path} (benchmarks are immutable)")
+        staged: list[Path] = []
+        try:
+            benchmark_tmp = _stage_file(path, lambda tmp: _write_benchmark(tmp, meta, rows))
+            staged.append(benchmark_tmp)
+            review_tmp = None
+            if review is not None:
+                review_tmp = _stage_file(
+                    review, lambda tmp: export_review_csv(tmp, rows, review_texts or {})
+                )
+                staged.append(review_tmp)
+                os.replace(review_tmp, review)
+            # link is atomic and refuses an existing destination; the benchmark
+            # becomes visible only after all its review data is complete.
+            os.link(benchmark_tmp, path)
+            return len(rows)
+        finally:
+            for tmp in staged:
+                tmp.unlink(missing_ok=True)
+
+
+def _stage_file(path: Path, write: Any) -> Path:
+    with NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False) as f:
+        tmp = Path(f.name)
+    try:
+        write(tmp)
+        return tmp
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _write_benchmark(path: Path, meta: BenchmarkMeta, items: list[BenchmarkItem]) -> None:
     with path.open("w", encoding="utf-8") as f:
         f.write(json.dumps(meta.model_dump(), ensure_ascii=False) + "\n")
         for item in items:
             f.write(json.dumps(item.model_dump(), ensure_ascii=False) + "\n")
-            count += 1
-    return count
 
 
 def load_benchmark(path: Path, *, expected_sha256: str | None = None) -> tuple[BenchmarkMeta, list[BenchmarkItem]]:

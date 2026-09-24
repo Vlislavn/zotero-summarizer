@@ -20,7 +20,8 @@ Vite proxies `/api/*` to `http://localhost:8000`; `npm run build` writes
 - **Ops** — feeds, jobs, pending writes, diagnostics, and retraining.
 
 Legacy `/annotate`, `/review`, `/triage`, and `/pending` links redirect without
-dropping query parameters.
+dropping query parameters. `/review?state=gate_rejected` reaches the Feed Review
+tab in Ops with its pile filter intact.
 
 Library and Today share `todayHelpers.fulltextMessage` for unavailable-PDF
 accounting from per-item outcomes. The full-text API no longer exposes partial
@@ -41,10 +42,14 @@ matched-prediction / feedback coverage and explicitly limits the claim to
 reviewed items; the former “Gate recall” / counterfactual-audit labels are removed.
 Unknown ratios render `n/a`, distinct from measured `0%`. This does not turn
 ordinary approve/reject feedback into an unbiased ML-gate audit.
+The monitor restores each selected job's saved approve/reject decisions from the
+feedback endpoint, so reviewed cards remain marked after reload.
 
 Settings' Current model card describes the loaded gate, not the newest artifact
 or evaluation run. Its API exposes only the four displayed fields; no gate loaded
 is an explicit empty state even if trained artifacts exist on disk.
+Settings deep links to `#university-access` open the matching disclosure, and
+saving an AI-mode change round-trips unsurfaced config fields unchanged.
 
 Search coverage hits reuse their existing Zotero key: the card says In library
 and the server command cannot create a duplicate even if called directly.
@@ -68,6 +73,15 @@ starts a download. Advanced routing and unsurfaced config round-trip through
 `utils/configForm.js`. Provider/model saves hot-swap; path changes need restart.
 ML-only mode is a first-class completed setup state: readiness and paper review
 show AI off rather than reporting an unreachable model, and Settings can re-enable it.
+Wizard progress exposes the current step and completion state in text, and each
+step change is announced politely to assistive technology.
+Optional browser preferences use guarded storage access, so privacy settings that
+block Web Storage do not prevent setup, Today, Library, or Search views from rendering.
+Search session pointers/drafts are best-effort in `sessionStorage`; blocked storage
+simply disables reload restoration for that tab.
+
+Offline sync pulls use the complete paper snapshot and revision cursor; the
+protocol's legacy `changes` field is empty because the PWA does not consume history.
 
 ## Paper review
 
@@ -80,7 +94,9 @@ Library band filters and the automatic review work list share one effective-band
 calculation, matching the server's demote-one-band prestige policy. Only known
 citation prestige below the supplied floor demotes top bands; missing evidence
 does not. The displayed count uses the current queue's floor, and each fleet
-round uses its freshly fetched snapshot's floor. A cross-language matrix checks
+round uses its freshly fetched snapshot's floor. One click drains every undecided
+cool item in the fetched queue (up to the server's 5,000-row queue limit), in
+five-item fleet batches. A cross-language matrix checks
 the client filters/work list against the server rule without new API fields.
 
 Provenance shows the explicit `label:*` source when it determines the exported
@@ -120,6 +136,8 @@ whose summary was withheld. The unused alternative verdict helpers are removed.
 
 Feed Review bulk confirmation sends only the visible, not-yet-actioned row IDs,
 shows the saved-verdict count and removes acknowledged rows from the queue.
+The active pile is encoded in `?state=`; switching piles updates the URL and
+same-mounted query-string navigation updates the view.
 Individual Review actions acknowledge the saved decision without claiming a CSV
 append or pending-change enqueue; the server stores training metadata atomically
 with the verdict and returns only the processed ID and state.
@@ -147,8 +165,9 @@ same-machine loopback PWA boundary; remote mobile needs a future authenticated
 HTTPS deployment rather than exposing `/api/sync` directly.
 
 Sequence allocation, mutation insert, optimistic paper state, and cached-detail
-update share one IndexedDB transaction; pulls refresh both the compact paper and
-any cached review detail. A 15-second sync deadline releases a stuck focus sync,
+update share one IndexedDB transaction; each full pull replaces the compact
+paper snapshot while retaining local papers with unresolved mutations, and
+refreshes cached review details. A 15-second sync deadline releases a stuck focus sync,
 and protocol incompatibility explicitly asks for an app refresh. The IndexedDB
 test kills/reimports the client module and proves cached context
 plus ordered concurrent mutations survive while the server is absent. Ask Paper sends a
@@ -163,6 +182,11 @@ are retained as rejected, with copyable text and paper links in the navigation
 status, while valid rows continue. Unknown acknowledgement IDs/status/revisions
 cannot retire pending rows; HTTP rejections are distinct from connection failure.
 The 15-second deadline still bounds one sync attempt, not all future attempts.
+
+Targeted Search polls one session at a time; transient poll errors keep the last
+session visible and retry, while terminal status and unmount stop further polls.
+Verdict saves remain successful when the separate best-effort reject-tag request
+fails; the page refreshes the saved verdict and displays a warning for the tag.
 Deploy this build with the matching backend; earlier protocol-v1 servers do not
 understand predecessor receipts.
 
@@ -195,7 +219,11 @@ src/
 
 Use React Query for server state and component state for transient UI. Reuse
 `Button`, form primitives, and `CHIP_TONE`; avoid ad-hoc status colors. Keep API
-tests beside wrappers and run `npm run build` for every UI change.
+tests beside wrappers and run `npm run build` for every UI change. Page tests
+cover route/query compatibility, setup validation and completion, Today’s
+source-filtered batch selection, Library mode deep links, settings save errors,
+Ops tab state, paper-review writes, and Search materialization; hook/component
+tests cover keyboard isolation and verdict comment editing.
 
 The optional built-app check runs real Chromium → FastAPI → temporary SQLite:
 `ZS_APPLICATION_BROWSER_SMOKE=1 .venv/bin/pytest -q --forked tests/test_application_browser_live.py`

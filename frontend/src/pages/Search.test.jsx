@@ -3,7 +3,11 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import Search from './Search.jsx';
 
-afterEach(() => { cleanup(); sessionStorage.clear(); vi.unstubAllGlobals(); });
+afterEach(() => {
+  cleanup();
+  try { sessionStorage.clear(); } catch { /* storage may be blocked by the test */ }
+  vi.unstubAllGlobals();
+});
 
 it('shows every server query variant and files identical-title cards by their distinct IDs', async () => {
   const writes = [];
@@ -65,4 +69,19 @@ it('sorts the complete result pool and remembers relevance + prestige on remount
   render(<Search />);
   expect((await screen.findByRole('combobox', { name: 'Sort by' })).value).toBe('relevance_prestige');
   expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['Well cited', 'Most relevant']);
+});
+
+it('keeps Search usable when session storage throws a SecurityError', async () => {
+  vi.stubGlobal('sessionStorage', {
+    getItem: () => { throw new DOMException('Blocked', 'SecurityError'); },
+    setItem: () => { throw new DOMException('Blocked', 'SecurityError'); },
+    removeItem: () => { throw new DOMException('Blocked', 'SecurityError'); },
+    clear: () => { throw new DOMException('Blocked', 'SecurityError'); },
+  });
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ items: [] }))));
+
+  render(<Search />);
+
+  expect(await screen.findByRole('heading', { name: 'Targeted Search' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Search' }).disabled).toBe(true);
 });

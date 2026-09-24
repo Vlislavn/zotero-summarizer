@@ -1,6 +1,8 @@
 """Canonical JSON + compact Markdown rendering for a weekly research feed."""
 from __future__ import annotations
 
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -37,11 +39,19 @@ def markdown(payload: dict[str, Any]) -> str:
 
 
 def persist(payload: dict[str, Any], output_dir: Path, slug: str) -> tuple[Path, Path]:
-    json_path = output_dir / f"{slug}.json"
-    md_path = output_dir / f"{slug}.md"
-    write_json_atomic(json_path, payload)
-    md_path.write_text(markdown(payload), encoding="utf-8")
-    return json_path, md_path
+    output_dir.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{slug}-", dir=output_dir))
+    published = output_dir / slug
+    try:
+        staged_json = staging / f"{slug}.json"
+        staged_markdown = staging / f"{slug}.md"
+        write_json_atomic(staged_json, payload)
+        staged_markdown.write_text(markdown(payload), encoding="utf-8")
+        staging.replace(published)
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return published / staged_json.name, published / staged_markdown.name
 
 
 __all__ = ["markdown", "persist"]

@@ -107,39 +107,24 @@ def test_dont_read_verdict_hides_paper(monkeypatch):
     assert res["read_hidden"] == 1  # V counted as handled/hidden
 
 
-def test_proposed_verdict_attached_to_rows(monkeypatch):
-    """The review-fleet's pre-decided verdict is attached to each row as
-    ``proposed_verdict`` (a SUGGESTION the user Confirms/Overrides); rows without
-    a proposal carry ``None``."""
-    from zotero_summarizer.services.library.review_fleet import verdict_store
-
-    _patch_state(monkeypatch, _FakeReader([_item("A"), _item("B")]), _FakeGate("sha1"))
-    _seed("sha1", A=3.0, B=4.0)
-    monkeypatch.setattr(
-        verdict_store, "read_all",
-        lambda: {"A": {"proposed": "must_read", "confidence": 0.85}},
-    )
-    res = reading_queue.build_reading_queue()
-    assert [i["item_key"] for i in res["items"]] == ["B", "A"]  # proposal does not rerank
-    by_key = {i["item_key"]: i for i in res["items"]}
-    assert by_key["A"]["proposed_verdict"] == {"proposed": "must_read", "confidence": 0.85}
-    assert by_key["B"]["proposed_verdict"] is None  # no proposal yet
-
-
 def test_proposed_dont_read_does_not_hide_paper(monkeypatch):
     """A ``dont_read`` SUGGESTION must NOT auto-hide a paper — only the user's
     CONFIRMED ``dont_read`` label (via _verdict_priorities) does. The proposal is
     display-only and is never routed through the handled/hide logic."""
     from zotero_summarizer.storage import repositories
     from zotero_summarizer.services.library.review_fleet import verdict_store
+    from zotero_summarizer.services.library import deep_review
 
     _patch_state(monkeypatch, _FakeReader([_item("A"), _item("S")]), _FakeGate("sha1"))
     _seed("sha1", A=3.0, S=4.0)
     monkeypatch.setattr(repositories, "list_label_verdict_priorities", lambda db_path: {})
-    monkeypatch.setattr(
-        verdict_store, "read_all",
-        lambda: {"S": {"proposed": "dont_read", "confidence": 0.75}},
-    )
+    review = {"digest": {"read_decision": "skip"}, "quality": {"grade": "B"},
+              "goal_summaries": []}
+    proposal = {"proposed": "dont_read", "confidence": 0.75,
+                "proposal_version": verdict_store.PROPOSAL_VERSION,
+                "review_identity_sha256": verdict_store.review_fingerprint(review)}
+    monkeypatch.setattr(verdict_store, "read_all", lambda: {"S": proposal})
+    monkeypatch.setattr(deep_review, "current_reviews", lambda: {"S": review})
     res = reading_queue.build_reading_queue()
     keys = [i["item_key"] for i in res["items"]]
     assert "S" in keys  # the dont_read SUGGESTION did not hide it

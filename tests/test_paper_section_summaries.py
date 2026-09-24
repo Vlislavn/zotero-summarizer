@@ -23,8 +23,10 @@ class _FakeLLM:
 
 def test_maps_index_to_section_id_and_drops_blanks():
     llm = _FakeLLM([
-        {"index": 0, "summary": "Frames the clinical-agent gap."},
-        {"index": 1, "summary": "  Describes the gate training and eval.  "},
+        {"index": 0, "summary": "Frames the clinical-agent gap.",
+         "supporting_quote": "Framing the clinical-agent gap and prior triage baselines"},
+        {"index": 1, "summary": "  Describes the gate training and eval.  ",
+         "supporting_quote": "triage gate is trained on labelled abstracts"},
     ])
     out = ss.summarize_sections(SECTIONS, llm)
     assert llm.calls == 1                                    # ONE batched call
@@ -35,7 +37,7 @@ def test_maps_index_to_section_id_and_drops_blanks():
 def test_empty_summary_and_out_of_range_index_are_dropped():
     llm = _FakeLLM([
         {"index": 0, "summary": ""},      # empty → dropped
-        {"index": 9, "summary": "x y z"}, # out of range (only 2 usable) → dropped
+        {"index": 9, "summary": "x y z", "supporting_quote": "missing"}, # out of range → dropped
     ])
     assert ss.summarize_sections(SECTIONS, llm) == {}
 
@@ -44,3 +46,12 @@ def test_no_usable_sections_makes_no_call():
     llm = _FakeLLM([])
     assert ss.summarize_sections([{"id": "s", "title": "t", "text": ""}], llm) == {}
     assert llm.calls == 0
+
+
+def test_ungrounded_summary_is_dropped():
+    llm = _FakeLLM([{
+        "index": 0,
+        "summary": "Reports 99% accuracy on SecretSet.",
+        "supporting_quote": "Reports 99% accuracy on SecretSet.",
+    }])
+    assert ss.summarize_sections(SECTIONS, llm) == {}

@@ -110,6 +110,8 @@ def test_status_exposes_progress_field():
     UI can show what a running review is doing; {} when idle."""
     s = deep_review.status()
     assert "progress" in s and s["progress"] == {}
+
+
 def test_run_job_clears_progress_when_done(config, monkeypatch):
     """A finished run resets progress to {} so the next poll doesn't show a stale
     phase from the last review."""

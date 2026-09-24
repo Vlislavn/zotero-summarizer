@@ -157,3 +157,7 @@ process isolation is required. No detached thread is declared terminal here.
 
 **Boundaries:** imports `model/` (gate), `zotero/` (pending), and shared
 scoring; standard services rules.
+
+`triage_jobs.list_triage_jobs(active_only=True)` queries persisted `running` and
+`cancelling` rows before applying the display limit, so status readers can find
+an older active job after many newer terminal jobs have accumulated.

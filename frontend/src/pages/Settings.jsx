@@ -26,6 +26,7 @@ export default function Settings() {
   const [form, setForm] = useState(null);
   const [savedBanner, setSavedBanner] = useState('');
   const [modelsOpen, setModelsOpen] = useState(false);
+  const [universityOpen, setUniversityOpen] = useState(() => window.location.hash === '#university-access');
   const [pathForm, setPathForm] = useState({ zotero_data_dir: '', pdf_root: '' });
 
   const seededFormState = useMemo(
@@ -161,7 +162,7 @@ export default function Settings() {
 
         <RssFeedsSection />
 
-        <details id="university-access" defaultOpen={window.location.hash === '#university-access'}
+        <details id="university-access" open={universityOpen} onToggle={(event) => setUniversityOpen(event.currentTarget.open)}
           className="glass rounded-2xl border border-slate-200 p-4 scroll-mt-20">
           <summary className="cursor-pointer text-sm font-semibold text-slate-700">
             Advanced · performance &amp; library access

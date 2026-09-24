@@ -30,6 +30,7 @@ from zotero_summarizer.services.search._models import (
 # lost-update each other. In-process only — sessions are served by one app process.
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
+_deleted: set[str] = set()
 
 
 def _lock_for(session_id: str) -> threading.Lock:
@@ -69,10 +70,13 @@ def new_session(*, raw_query: str, intent: SearchIntent, plan: QueryPlan, questi
 
 def save(session: ResearchSession) -> None:
     """Persist atomically (temp + rename) so a crash mid-write never truncates."""
-    path = _path(session.id)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(session.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(path)
+    with _locks_guard:
+        if session.id in _deleted:
+            return
+        path = _path(session.id)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(session.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(path)
 
 
 def save_merge(session: ResearchSession) -> ResearchSession:
@@ -81,6 +85,9 @@ def save_merge(session: ResearchSession) -> ResearchSession:
     key is add-only/monotonic, so the review worker's whole-session saves must never
     drop it. Everything else (order, quality, reviews) is owned by the worker."""
     with _lock_for(session.id):
+        with _locks_guard:
+            if session.id in _deleted:
+                return session
         persisted = load(session.id)
         keyed = {
             c.candidate_id: c.materialized_zotero_key
@@ -159,20 +166,33 @@ def list_sessions() -> list[dict[str, object]]:
     """Newest-first summaries (id, created_at, raw_query, counts) for the sidebar."""
     rows: list[dict[str, object]] = []
     for path in _dir().glob("*.json"):
-        data = json.loads(path.read_text(encoding="utf-8"))
-        rows.append({
-            "id": data["id"],
-            "created_at": data["created_at"],
-            "raw_query": data["raw_query"],
-            "status": data.get("status", "created"),
-            "candidate_count": len(data.get("candidates") or []),
-        })
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            rows.append({
+                "id": data["id"],
+                "created_at": data["created_at"],
+                "raw_query": data["raw_query"],
+                "status": data.get("status", "created"),
+                "candidate_count": len(data.get("candidates") or []),
+            })
+        except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError):
+            continue
     rows.sort(key=lambda r: str(r["created_at"]), reverse=True)
     return rows
 
 
 def delete(session_id: str) -> None:
-    _path(session_id).unlink(missing_ok=True)
+    path = _path(session_id)
+    with _lock_for(session_id):
+        with _locks_guard:
+            _deleted.add(session_id)
+            path.unlink(missing_ok=True)
 
 
-__all__ = ["new_session", "save", "save_merge", "update", "materialize_once", "claim", "load", "list_sessions", "delete"]
+def is_deleted(session_id: str) -> bool:
+    """True after DELETE, allowing a worker to stop at its next work boundary."""
+    with _locks_guard:
+        return session_id in _deleted
+
+
+__all__ = ["new_session", "save", "save_merge", "update", "materialize_once", "claim", "load", "list_sessions", "delete", "is_deleted"]

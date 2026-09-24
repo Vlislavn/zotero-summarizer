@@ -195,7 +195,8 @@ def test_benchmark_roundtrip_versioning_and_immutability(tmp_path):
     )
     assert next_benchmark_version(tmp_path) == 1
     path = benchmark_path(tmp_path, 1)
-    assert save_benchmark(path, meta, items) == 1
+    assert save_benchmark(path, meta, items, review_texts={"A": TEXT_A}) == 1
+    assert review_path(path).exists()
     assert next_benchmark_version(tmp_path) == 2
 
     with pytest.raises(FileExistsError):
@@ -208,6 +209,49 @@ def test_benchmark_roundtrip_versioning_and_immutability(tmp_path):
     assert loaded_meta.paper_by_key("A").n_chars == len(TEXT_A)
     with pytest.raises(KeyError):
         loaded_meta.paper_by_key("ZZZ")
+
+
+def test_failed_item_iterator_does_not_publish_or_consume_version(tmp_path):
+    paper = _paper("A", TEXT_A)
+    items = verify_candidates([_cand("Which dataset was used?", "ImageNet")], paper=paper, max_keep=5)
+    meta = BenchmarkMeta(
+        version=1, created_at="t", builder_model="B",
+        papers=[PaperManifestEntry(item_key="A", title="Paper A", text_sha256=paper.text_sha256,
+                                   n_chars=len(TEXT_A))],
+    )
+
+    def broken_items():
+        yield items[0]
+        raise RuntimeError("builder iterator failed")
+
+    path = benchmark_path(tmp_path, 1)
+    with pytest.raises(RuntimeError, match="iterator failed"):
+        save_benchmark(path, meta, broken_items(), review_texts={"A": TEXT_A})
+    assert not path.exists()
+    assert not review_path(path).exists()
+    assert next_benchmark_version(tmp_path) == 1
+
+
+def test_review_export_failure_does_not_publish_benchmark(tmp_path, monkeypatch):
+    import zotero_summarizer.services.faithbench._dataset as dataset
+
+    paper = _paper("A", TEXT_A)
+    items = verify_candidates([_cand("Which dataset was used?", "ImageNet")], paper=paper, max_keep=5)
+    meta = BenchmarkMeta(
+        version=1, created_at="t", builder_model="B",
+        papers=[PaperManifestEntry(item_key="A", title="Paper A", text_sha256=paper.text_sha256,
+                                   n_chars=len(TEXT_A))],
+    )
+    path = benchmark_path(tmp_path, 1)
+
+    def fail_export(*args, **kwargs):
+        raise OSError("review write failed")
+
+    monkeypatch.setattr(dataset, "export_review_csv", fail_export)
+    with pytest.raises(OSError, match="review write failed"):
+        save_benchmark(path, meta, items, review_texts={"A": TEXT_A})
+    assert not path.exists()
+    assert next_benchmark_version(tmp_path) == 1
 
 
 def test_review_csv_contains_span_context(tmp_path):

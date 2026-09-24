@@ -18,6 +18,7 @@ import { Chip } from '../components/paper/review/primitives.jsx';
 import { FullTextAccessNotice, StatusBanner, timeAgo, formatShortDate } from '../components/library/shared.jsx';
 import { gradeTone, bandTone, BAND_LABEL } from '../components/paper/review/tones.js';
 import Spinner from '../components/ui/Spinner.jsx';
+import { readStoredJson } from '../utils/safeStorage.js';
 
 // "92" -> "1m 32s". Live elapsed/ETA for the auto-generating review.
 function fmt(seconds) {
@@ -105,8 +106,11 @@ export default function PaperReviewPage() {
   // auto-run fires). Re-read per paper so a list refreshed in the other tab is
   // picked up. Key not in the order (opened from elsewhere) → idx -1, buttons hide.
   const reviewOrder = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem('zs.reviewOrder') || '[]'); }
-    catch { return []; }
+    return readStoredJson(
+      'zs.reviewOrder',
+      [],
+      (value) => Array.isArray(value) && value.every((key) => typeof key === 'string'),
+    );
     // itemKey dep is deliberate: re-read the stored order on each paper so a list
     // the Read-next tab refreshed mid-session is picked up.
     // eslint-disable-next-line react-hooks/exhaustive-deps

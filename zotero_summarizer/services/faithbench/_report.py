@@ -9,9 +9,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from filelock import FileLock
 
 from zotero_summarizer.services import run_log
 from zotero_summarizer.services._common import now_iso_z
+from zotero_summarizer.services._common import atomic_write
 from zotero_summarizer.services.faithbench._dataset import (
     BenchmarkItem,
     BenchmarkMeta,
@@ -28,6 +30,15 @@ from zotero_summarizer.services.faithbench._runner import (
 from zotero_summarizer.services.faithbench._stats import calculate_statistics
 
 MASTER_LOG_NAME = "faithbench-runs.jsonl"
+
+
+def _append_headline_once(master_log: Path, headline: dict[str, Any]) -> None:
+    """Append a run headline once, serializing cross-process writers by run ID."""
+    master_log.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(f"{master_log}.lock"):
+        if any(row.get("run_id") == headline["run_id"] for row in run_log.load_runs(master_log)):
+            return
+        run_log.append_run(master_log, headline)
 
 
 def _checked_judgments(manifest: dict, meta: BenchmarkMeta, items: list[BenchmarkItem],
@@ -106,7 +117,8 @@ def build_report(
             f"no judgments in {paths.judgments}; run `faithbench judge` before `report`"
         )
     judgments = _checked_judgments(manifest, meta, items, responses, judgments)
-    stats = calculate_statistics(responses, judgments, items_meta(items))
+    stats = calculate_statistics(responses, judgments, items_meta(items),
+                                 expected_runs=int(manifest["runs"]))
 
     judge_models = sorted({str(j["judge_model"]) for j in judgments if j.get("judge_model")})
     report = {
@@ -127,10 +139,9 @@ def build_report(
         **stats,
     }
 
-    paths.report_json.write_text(
-        json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    paths.report_md.write_text(render_markdown(report), encoding="utf-8")
+    atomic_write(paths.report_json, lambda tmp: tmp.write_text(
+        json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"))
+    atomic_write(paths.report_md, lambda tmp: tmp.write_text(render_markdown(report), encoding="utf-8"))
 
     headline: dict[str, Any] = {
         "run_id": report["run_id"],
@@ -149,7 +160,7 @@ def build_report(
     if claims_block:
         headline["claims_support_rate"] = claims_block["support_rate"]["mean"]
         headline["claims_support_rate_median"] = claims_block["support_rate"]["median"]
-    run_log.append_run(faithbench_dir / MASTER_LOG_NAME, headline)
+    _append_headline_once(faithbench_dir / MASTER_LOG_NAME, headline)
     return report
 
 
@@ -167,7 +178,7 @@ def _qa_section(condition: str, block: dict[str, Any]) -> list[str]:
     lines = [
         f"### QA — `{condition}`",
         "",
-        f"- Accuracy: **{_fmt_pct(acc['mean'])}** ± {_fmt_pct(acc['sem_across_runs'])} "
+        f"- Accuracy: **{_fmt_pct(acc['mean'])}** (median {_fmt_pct(acc['median'])}) ± {_fmt_pct(acc['sem_across_runs'])} "
         f"(STD {_fmt_pct(acc['std_across_runs'])}) over {block['n_validated']} validated trials "
         f"({block['n_unjudgeable']} unjudgeable excluded, {block['n_harness_faults']} harness faults)",
         f"- Answerable-only accuracy: {_fmt_pct(block['answerable_accuracy'])}; "
@@ -179,7 +190,7 @@ def _qa_section(condition: str, block: dict[str, Any]) -> list[str]:
         f"- Judge escalation: {_fmt_pct(block['judge_escalation_fraction'])} of validated trials",
         f"- Latency: p50 {block['latency']['p50']}s, p90 {block['latency']['p90']}s, "
         f"mean {block['latency']['mean']}s (n={block['latency']['n']}, "
-        f"total {block['latency']['total_wall_seconds']}s)",
+        f"cumulative trial time {block['latency']['total_trial_seconds']}s)",
     ]
     if "pass_at_k" in block:
         lines.append(
@@ -204,7 +215,7 @@ def _claims_section(block: dict[str, Any]) -> list[str]:
     lines = [
         "### Review claims — `digest`",
         "",
-        f"- Claim support rate: **{_fmt_pct(sr['mean'])}** ± {_fmt_pct(sr['sem_across_runs'])} "
+        f"- Claim support rate: **{_fmt_pct(sr['mean'])}** (median {_fmt_pct(sr['median'])}) ± {_fmt_pct(sr['sem_across_runs'])} "
         f"(STD {_fmt_pct(sr['std_across_runs'])}) over {block['n_validated']} validated claims "
         f"({block['n_unjudgeable']} unjudgeable excluded)",
         f"- Digest latency: p50 {block['latency']['p50']}s, mean {block['latency']['mean']}s "

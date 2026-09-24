@@ -21,7 +21,7 @@ export default function StepProgress({ current, validity, maxReached = 0 }) {
             ? 'bg-emerald-500 text-white border-emerald-500'
             : 'bg-white text-slate-400 border-slate-300';
         return (
-          <li key={label} className="flex items-center gap-2 flex-1 min-w-0">
+          <li key={label} aria-current={active ? 'step' : undefined} className="flex items-center gap-2 flex-1 min-w-0">
             <span
               className={`flex items-center justify-center h-6 w-6 shrink-0 rounded-full border text-xs font-bold ${stateCls}`}
               aria-hidden
@@ -33,7 +33,7 @@ export default function StepProgress({ current, validity, maxReached = 0 }) {
                 active ? 'text-slate-900' : done ? 'text-emerald-700' : 'text-slate-400'
               }`}
             >
-              {label}
+              {label} <span className="sr-only">{active ? 'Current step' : done ? 'Complete' : 'Not complete'}</span>
             </span>
             {i < STEP_LABELS.length - 1 && (
               <span

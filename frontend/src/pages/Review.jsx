@@ -114,11 +114,10 @@ function ReviewItem({ item, localState, onAction }) {
 }
 
 export default function Review() {
-  const [searchParams] = useSearchParams();
-  const initialState = VALID_STATES.has(searchParams.get('state'))
+  const [searchParams, setSearchParams] = useSearchParams();
+  const state = VALID_STATES.has(searchParams.get('state'))
     ? searchParams.get('state')
     : 'awaiting_review';
-  const [state, setState] = useState(initialState);
   // Active-learning default: load uncertain-first (composite_score closest to a
   // class boundary) so triaging maximises model lift per click — a system-owned
   // ML nicety the user shouldn't toggle each session (Tesler's Law).
@@ -130,6 +129,14 @@ export default function Review() {
   const [message, setMessage] = useState('');
   const [isError, setIsError] = useState(false);
   const [itemState, setItemState] = useState({});
+
+  const setState = useCallback((nextState) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set('state', nextState);
+      return next;
+    });
+  }, [setSearchParams]);
 
   const load = useCallback(async (currentState = state, currentSort = sort) => {
     setLoading(true);

@@ -418,6 +418,8 @@ from zotero_summarizer.storage._repo_results import *  # noqa: F401,F403,E402
 from zotero_summarizer.storage._repo_jobs import *  # noqa: F401,F403,E402
 from zotero_summarizer.storage._repo_feedback import *  # noqa: F401,F403,E402
 from zotero_summarizer.storage._repo_pending import *  # noqa: F401,F403,E402
+from zotero_summarizer.storage._repo_pending import pending_change_exists  # noqa: F401,E402
+from zotero_summarizer.storage._repo_pending import insert_pending_change_if_absent  # noqa: F401,E402
 from zotero_summarizer.storage._repo_verdicts import *  # noqa: F401,F403,E402
 from zotero_summarizer.storage._repo_labels import *  # noqa: F401,F403,E402
 from zotero_summarizer.storage._repo_sync import *  # noqa: F401,F403,E402

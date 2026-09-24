@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from zotero_summarizer.api.errors import APIError, install_error_handlers
 from zotero_summarizer.api.routes import daily
 from zotero_summarizer.services.triage import daily_actions
+from zotero_summarizer.services.triage.feeds import _daily_materialize
 from zotero_summarizer.services.library import review_materialize
 from tests.test_daily_actions import env, _record  # noqa: F401 - shared isolated fixture
 
@@ -31,6 +32,11 @@ def test_duplicate_ids_have_one_effect_in_first_seen_order(env, monkeypatch, cli
     writer.mark_feed_items_read.side_effect = len
     monkeypatch.setattr(daily_actions, "ZoteroWriter", lambda _: writer)
     monkeypatch.setattr(review_materialize, "get_settings", daily_actions.get_settings)
+    monkeypatch.setattr(
+        _daily_materialize,
+        "ZoteroReader",
+        lambda _: Mock(get_feed_items=lambda **_: []),
+    )
     monkeypatch.setattr(daily_actions.deep_review, "copy_review", lambda *args: None)
     monkeypatch.setattr(daily_actions, "_attach_fulltext_best_effort", lambda _: {"attached": 0})
     monkeypatch.setattr(daily_actions, "_carry_renders_best_effort", lambda _: None)

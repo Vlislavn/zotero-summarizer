@@ -240,6 +240,15 @@ def test_rejudging_updated_response_replaces_only_that_trial_in_report(judged_ru
     assert report["tracks"]["qa"]["full_text"]["accuracy"]["mean"] == 0.0
 
 
+def test_build_report_is_idempotent_in_master_log(judged_run):
+    (settings, _, _, _, paths, _), _, _ = judged_run
+    faithbench.build_report(paths=paths, faithbench_dir=settings.faithbench_dir)
+    faithbench.build_report(paths=paths, faithbench_dir=settings.faithbench_dir)
+    rows = (settings.faithbench_dir / "faithbench-runs.jsonl").read_text().splitlines()
+    assert len(rows) == 1
+    assert json.loads(rows[0])["run_id"] == "integrity"
+
+
 def test_changed_judge_configuration_cannot_reuse_old_verdicts(judged_run):
     (settings, _, _, _, paths, _), inputs, judge = judged_run
     counts = faithbench.judge_run(inputs=inputs, judge_llm=judge, judge_model="new-judge", max_text_chars=60_000)
@@ -285,11 +294,24 @@ def test_decomposition_cannot_return_or_cache_an_empty_claim_trial(tmp_path, ori
     with pytest.raises(ValueError):
         decompose_digest(digest_dump={} if origin == "empty_digest" else {"tldr": "A factual statement."},
                          digest_sha="abc", title="Paper", decompose_llm=llm, cache_dir=tmp_path)
-    if origin == "empty_decomposition":
+    if origin in {"empty_decomposition", "empty_cache", "malformed_cache"}:
         llm.prompt.assert_called_once()
         assert not cache.exists()
     else:
         llm.prompt.assert_not_called()
+
+
+def test_corrupt_claim_cache_is_rebuilt(tmp_path):
+    from zotero_summarizer.services.faithbench._build_claims import decompose_digest
+
+    cache = tmp_path / "claims-v3-abc.json"
+    cache.write_text("{truncated")
+    llm = Mock()
+    llm.prompt.return_value = '{"claims": [{"field": "tldr", "claim": "Fact."}]}'
+    result = decompose_digest(digest_dump={"tldr": "Fact."}, digest_sha="abc", title="Paper",
+                              decompose_llm=llm, cache_dir=tmp_path)
+    assert result == [{"field": "tldr", "claim": "Fact."}]
+    assert json.loads(cache.read_text()) == result
 
 
 def test_report_requires_every_claim_not_just_every_response(benchmark):

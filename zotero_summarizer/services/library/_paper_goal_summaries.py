@@ -190,15 +190,19 @@ def summarize_for_goals(
     embedder = _get_embedder(embedder_model)
     chunk_mat = goal_vecs = None
     if embedder is not None:
-        import numpy as np
-        chunk_mat = np.asarray(embedder.encode(texts, normalize_embeddings=True), dtype="float32")
-        goal_vecs = {g: np.asarray(embedder.encode([g], normalize_embeddings=True)[0], dtype="float32") for g in goals}
+        try:
+            import numpy as np
+            chunk_mat = np.asarray(embedder.encode(texts, normalize_embeddings=True), dtype="float32")
+            goal_vecs = {g: np.asarray(embedder.encode([g], normalize_embeddings=True)[0], dtype="float32") for g in goals}
+        except Exception as exc:  # noqa: BLE001 — keep the lexical retrieval leg available
+            chunk_mat = goal_vecs = None
+            LOGGER.warning("goal-summaries dense inference failed; dense leg off: %s", exc)
 
     reranker = get_reranker(reranker_model)
     reranker.ensure_loaded_async()
     ctx = _GoalCtx(
         texts=texts, chunks=chunks, bm25=bm25,
-        chunk_mat=chunk_mat, goal_vecs=goal_vecs, has_dense=embedder is not None,
+        chunk_mat=chunk_mat, goal_vecs=goal_vecs, has_dense=chunk_mat is not None,
         reranker=reranker, floor=relevance_floor, llm=llm,
         prompt_tmpl=facet_prompt or _DEFAULT_GOAL_FACET_PROMPT,
     )

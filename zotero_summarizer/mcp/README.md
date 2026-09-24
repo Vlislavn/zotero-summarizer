@@ -24,3 +24,12 @@ and other `mcp/` modules. Never `services/`, `api/`, or `storage/` (enforced).
 Path identifiers reject separators/dot segments/control characters and are
 percent-encoded on the wire. Raw identity is retained in payloads/query parameters.
 Mutations are never automatically retried: a lost response may follow a completed write.
+
+`find_similar_papers` uses the library hybrid-search endpoint to rank unread
+papers and reports when semantic search is unavailable, rather than treating
+title substring matches as similarity. `get_paper` requests pending/history rows scoped by its item key.
+Library status returns `ok=false` when every status subrequest fails, and the
+active-job snapshot uses the API's status-filtered lookup instead of a newest-N
+window. MCP numeric environment settings are validated at import: timeout is
+0.1–3600 seconds, item batches 1–500 (matching the API), and per-item estimates
+1–86400 seconds.

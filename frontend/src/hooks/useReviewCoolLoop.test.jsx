@@ -78,6 +78,20 @@ describe('useReviewCoolLoop', () => {
     expect(runReviewFleet).toHaveBeenCalledTimes(1); // round 1 attempts [A,B]; round 2 next=[] → stop
   });
 
+  it('continues past sixty picks so one click drains the full fetched cool set', async () => {
+    const rows = Array.from({ length: 62 }, (_, index) => ({
+      item_key: `P${index}`,
+      relevance_score: 4.5,
+    }));
+    fetchReadingQueue.mockResolvedValue({ items: rows });
+    const { result } = setup();
+
+    await act(async () => { await result.current.handleReviewCool(); });
+
+    expect(runReviewFleet).toHaveBeenCalledTimes(13);
+    expect(runReviewFleet).toHaveBeenLastCalledWith({ itemKeys: ['P60', 'P61'] });
+  });
+
   it('drains a foreign (prewarm) run on accepted:false, then re-runs OUR keys without marking them attempted', async () => {
     runReviewFleet
       .mockResolvedValueOnce({ status: 'running', accepted: false }) // foreign latch holder

@@ -6,7 +6,7 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services._common import settings
@@ -27,6 +27,14 @@ class _Mutation(BaseModel):
     base_revision: int = Field(ge=0)
     resolves_mutation_id: UUID | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @field_validator("device_id", "item_key")
+    @classmethod
+    def require_nonblank_identity(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must contain non-whitespace characters")
+        return value
 
 
 class _PushRequest(BaseModel):

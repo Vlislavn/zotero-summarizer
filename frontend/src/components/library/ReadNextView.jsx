@@ -10,6 +10,7 @@ import { Disclosure } from '../paper/review/primitives.jsx';
 import { humanizeError } from '../../utils/humanizeError.js';
 import { SORT_FIELDS, SORT_DEFAULT_DIR, DEFAULT_SORT } from '../../utils/relevanceBands.js';
 import Spinner from '../ui/Spinner.jsx';
+import { readStorage } from '../../utils/safeStorage.js';
 
 // Stage-2 "Read next": the single Library surface. Ranked queue over the WHOLE
 // library with an inline annotate panel (links, tags, per-paper deep review).
@@ -122,7 +123,7 @@ export default function ReadNextView({
   // collection (validated against the current list) so the routine "send picks
   // to my reading collection" is select → one click.
   const [targetCollection, setTargetCollection] = useState(
-    () => localStorage.getItem('zs:lastCollectionKey') || '',
+    () => readStorage('zs:lastCollectionKey') || '',
   );
   const targetValid = collections.some((c) => c.key === targetCollection);
   // Incremental reveal: the backend returns the whole ranked library, but we only

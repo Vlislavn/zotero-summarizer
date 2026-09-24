@@ -174,12 +174,28 @@ def federate(
     the pool. OpenAlex lexical is capped at 2 passes (keyless polite-pool budget)."""
     at = now_iso_z()
     tasks: list[Callable[[], list[Candidate]]] = []
-    for q in _variant_queries(plan.arxiv_variants, plan.arxiv):
-        tasks.append(lambda q=q: _arxiv_channel(q, quota, at))
-    for q in _variant_queries(plan.europepmc_variants, plan.europepmc):
-        tasks.append(lambda q=q: _europepmc_channel(q, quota, at))
-    for q in _variant_queries(plan.openalex_lexical_variants, plan.openalex_lexical, cap=2):
-        tasks.append(lambda q=q: _openalex_channel(openalex_client, q, quota, at, semantic=False))
+    def add_variant_tasks(queries: list[str], run: Callable[[str, int], list[Candidate]]) -> None:
+        if not queries:
+            return
+        allocations = [quota // len(queries)] * len(queries)
+        for index in range(quota % len(queries)):
+            allocations[index] += 1
+        for query, limit in zip(queries, allocations):
+            if limit:
+                tasks.append(lambda q=query, n=limit: run(q, n))
+
+    add_variant_tasks(
+        _variant_queries(plan.arxiv_variants, plan.arxiv),
+        lambda q, n: _arxiv_channel(q, n, at),
+    )
+    add_variant_tasks(
+        _variant_queries(plan.europepmc_variants, plan.europepmc),
+        lambda q, n: _europepmc_channel(q, n, at),
+    )
+    add_variant_tasks(
+        _variant_queries(plan.openalex_lexical_variants, plan.openalex_lexical, cap=2),
+        lambda q, n: _openalex_channel(openalex_client, q, n, at, semantic=False),
+    )
     tasks.append(lambda: _openalex_channel(openalex_client, plan.openalex_semantic, quota, at, semantic=True))
     if plan.crossref:
         tasks.append(lambda: _crossref_channel(plan.crossref, quota, at, crossref_mailto))

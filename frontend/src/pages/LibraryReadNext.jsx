@@ -27,6 +27,7 @@ import {
 } from '../utils/relevanceBands.js';
 import { isMachineTag } from '../utils/tags.js';
 import { fulltextMessage } from './todayHelpers.js';
+import { readStorage, writeStorage } from '../utils/safeStorage.js';
 
 // Library page — a single "Read next" surface (Stage 2). The former Browse tab
 // and Triage monitor are merged in: the sidebar collection/tag filters + a
@@ -80,12 +81,12 @@ export default function LibraryReadNext() {
   // Position); the collapsed summary still shows the active scope, so nothing is
   // hidden. Power-users who open it are remembered (localStorage).
   const [browseOpen, setBrowseOpen] = useState(() => {
-    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('zs:libraryBrowseOpen') : null;
+    const saved = readStorage('zs:libraryBrowseOpen');
     return saved === '1';
   });
   function toggleBrowse(open) {
     setBrowseOpen(open);
-    try { localStorage.setItem('zs:libraryBrowseOpen', open ? '1' : '0'); } catch { /* storage unavailable — keep in-memory */ }
+    writeStorage('zs:libraryBrowseOpen', open ? '1' : '0');
   }
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
@@ -99,13 +100,13 @@ export default function LibraryReadNext() {
   // the user's memory. Recorded only on a run that actually synced (or
   // confirmed everything up to date), never on a stale/cancelled attempt.
   const [zoteroSyncedAt, setZoteroSyncedAt] = useState(() => ({
-    tags: localStorage.getItem('zs:lastTagSyncAt') || '',
-    ranks: localStorage.getItem('zs:lastRankSyncAt') || '',
+    tags: readStorage('zs:lastTagSyncAt') || '',
+    ranks: readStorage('zs:lastRankSyncAt') || '',
   }));
 
   function recordZoteroSync(kind) {
     const now = new Date().toISOString();
-    localStorage.setItem(kind === 'tags' ? 'zs:lastTagSyncAt' : 'zs:lastRankSyncAt', now);
+    writeStorage(kind === 'tags' ? 'zs:lastTagSyncAt' : 'zs:lastRankSyncAt', now);
     setZoteroSyncedAt((prev) => ({ ...prev, [kind]: now }));
   }
   const [fetchingFulltext, setFetchingFulltext] = useState(false);
@@ -290,9 +291,7 @@ export default function LibraryReadNext() {
     // fetch resolves, blanking Prev/Next in an already-open review tab. Follows the
     // explicit sort too, so Prev/Next walks the list in the order the user sees.
     if (!displayedQueue.length) return;
-    try {
-      localStorage.setItem('zs.reviewOrder', JSON.stringify(displayedQueue.map((i) => i.item_key)));
-    } catch { /* storage unavailable — the review page just hides its nav buttons */ }
+    writeStorage('zs.reviewOrder', JSON.stringify(displayedQueue.map((i) => i.item_key)));
   }, [displayedQueue]);
 
   function selectCollection(key) {
@@ -353,7 +352,7 @@ export default function LibraryReadNext() {
         }
         added += 1;
       }
-      localStorage.setItem('zs:lastCollectionKey', collectionKey);
+      writeStorage('zs:lastCollectionKey', collectionKey);
       setMessage(`Added ${added} paper${added === 1 ? '' : 's'} to “${name}” in Zotero.`);
       setIsError(false);
       setSelected(new Set());
@@ -674,6 +673,7 @@ export default function LibraryReadNext() {
             stopping={autoReview.stopping}
             coolCount={coolUndecided}
             proposedCount={proposedCount}
+            queueAtLimit={queue.length >= QUEUE_LIMIT}
           />
           <div className="mt-3">
             <ReadNextView

@@ -304,7 +304,15 @@ def _propose_for_item(item_key: str, *, login: dict[str, dict[str, str]]) -> str
         review.get("quality"),
         goal_summaries=review.get("goal_summaries"),
     )
-    verdict_store.upsert(item_key, proposal.model_dump())
+    review_fingerprint = verdict_store.review_fingerprint(review)
+    if not review_fingerprint:
+        return "failed"
+    proposal_data = proposal.model_dump()
+    proposal_data.update({
+        "proposal_version": verdict_store.PROPOSAL_VERSION,
+        "review_identity_sha256": review_fingerprint,
+    })
+    verdict_store.upsert(item_key, proposal_data)
     return "proposed"
 
 

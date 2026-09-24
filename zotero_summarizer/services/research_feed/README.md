@@ -6,7 +6,7 @@ extractor, or model pipeline.
 
 ```text
 rss_items → source/dedupe → prior triage → budget → existing deep_review
-          → engineering card → data/research_feed/{weekly-*.json,weekly-*.md}
+          → engineering card → data/research_feed/weekly-<run-id>/{*.json,*.md}
                                       └─ optional reviewed Zotero tag queue
 ```
 
@@ -14,7 +14,7 @@ rss_items → source/dedupe → prior triage → budget → existing deep_review
 |---|---|
 | `profile.py` | Versioned user-editable profile and controlled topic taxonomy under `data/research_feed/profile.json`. |
 | `source.py` | Bounded date-range adapter over app-owned RSS plus DOI/source/title dedupe. |
-| `runner.py` | Budgeted triage, optional missing deep reviews through `library.deep_review`, per-paper failure isolation, metrics/watermark, and dry-run/idempotent writeback. |
+| `runner.py` | Budgeted triage, optional missing deep reviews through `library.deep_review`, per-paper failure isolation, metrics/watermark, and dry-run/idempotent writeback. Tag idempotency looks up pending changes by target Zotero item, so unrelated older queue rows cannot push a matching writeback beyond a global scan cap. |
 | `card.py` | Pure engineering-card projection; only exact validated artifact URLs survive. |
 | `render.py` | Canonical JSON and compact Markdown persistence. |
 
@@ -22,7 +22,14 @@ Run weekly: `uv run zotero-summarizer research-feed run --from 2026-08-22
 --to 2026-08-29`. Add `--venue NeurIPS` for conference mode, `--cached-only`
 to avoid new model work, or `--queue-zotero` to opt into reviewable tags. A
 cron/launchd entry can invoke the same command weekly. Edit the generated
-`profile.json` to add a theme/project. The sole RSS adapter is `load_candidates`;
+`profile.json` to add a theme/project. Each report name includes a deterministic
+fingerprint of its date window, venue, profile, and output-affecting run options,
+and a run suffix so repeated executions retain immutable results. JSON and Markdown
+are staged together and published by one same-filesystem directory rename; the root
+`state.json` pointer is atomically updated only after publication. A state-write
+failure leaves the prior pointer and complete bundle intact. Independent runs ending
+on the same date keep separate artifacts. Reversed date windows fail before
+profile/source reads or writes. The sole RSS adapter is `load_candidates`;
 the unused source protocol and state-only class wrapper are removed.
 
 Offline acceptance is `uv run python tools/eval_research_feed.py --check`.

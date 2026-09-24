@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from zotero_summarizer.services._common import extract_json_blob, to_text
+from zotero_summarizer.services._common import atomic_write
 from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.faithbench._corpus import sha256_text
 from zotero_summarizer.services.library import quality_review
@@ -108,7 +109,11 @@ def decompose_digest(
     # v3 covers every claim-bearing digest field; never reuse the six-field cache.
     cache_path = cache_dir / f"claims-v3-{digest_sha[:16]}.json"
     if cache_path.exists():
-        return _claim_rows(json.loads(cache_path.read_text(encoding="utf-8")))
+        try:
+            return _claim_rows(json.loads(cache_path.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError, ValueError):
+            # A torn or stale cache must be recoverable on the next run.
+            cache_path.unlink(missing_ok=True)
 
     snippets = snippets_from_digest(digest_dump)
     if not snippets:
@@ -148,5 +153,6 @@ def decompose_digest(
 
     _claim_rows(rows)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    atomic_write(cache_path, lambda tmp: tmp.write_text(
+        json.dumps(rows, ensure_ascii=False), encoding="utf-8"))
     return rows

@@ -19,10 +19,21 @@ from zotero_summarizer.services.library import _flight
 
 
 def profile_dir(ua: Any) -> Path:
-    """The browser profile dir: the configured override, else the app-owned default
-    under ``data/`` (never hardcoded — Settings derives it)."""
+    """Resolve the profile under Settings data, allowing only contained overrides."""
+    current = settings()
+    data_root = current.data_dir.expanduser().resolve()
     configured = str(getattr(ua, "browser_profile_dir", "") or "").strip()
-    return Path(configured).expanduser() if configured else settings().browser_profile_dir
+    candidate = Path(configured).expanduser() if configured else current.browser_profile_dir
+    if not candidate.is_absolute():
+        candidate = data_root / candidate
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(data_root)
+    except ValueError as exc:
+        raise ValueError("browser_profile_dir must resolve inside Settings.data_dir") from exc
+    if resolved == data_root:
+        raise ValueError("browser_profile_dir must be a child of Settings.data_dir")
+    return resolved
 
 
 def status() -> dict[str, Any]:

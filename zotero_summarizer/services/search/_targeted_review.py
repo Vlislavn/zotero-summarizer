@@ -64,9 +64,10 @@ def targeted_review(
         goals=goals, sections=[], full_text=full_text, llm=llm,
     )
     lens = _summary_row(summaries[0]) if summaries else {}
+    valid_questions = [q for q in (questions or []) if str(q).strip()]
     answers = [
         {"question": q, **_summary_row(s)}
-        for q, s in zip(questions or [], summaries[1:])
+        for q, s in zip(valid_questions, summaries[1:])
     ]
 
     cand.review = {"state": "reviewed", "brief": brief, "query_lens": lens, "question_answers": answers}

@@ -23,6 +23,10 @@ CLI setup/doctor ─┘                    ├─ per-stage inference
 | `doctor_environment.py` | Host/config/Zotero/database Doctor checks and the shared row contract; split from orchestration so both modules fit the code-size gate. |
 | `calibration*.py` | Existing endpoint calibration and its single-flight job. |
 
+An empty `ZOTERO_DATA_DIR` is treated as unset, so path detection falls back to
+the per-user Zotero location instead of mistaking the application checkout for
+a Zotero data directory.
+
 `light` uses `qwen3:8b` (12 GB memory / 8 GB disk floor); `balanced` uses
 `qwen3:30b` (32 GB / 22 GB). `existing` accepts an explicit model and compatible
 endpoint. Add runtimes only with install and verification paths.

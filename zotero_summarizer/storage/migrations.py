@@ -73,6 +73,13 @@ def _migration_review_training_sample(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE label_verdicts ADD COLUMN training_sample_json TEXT")
 
 
+def _migration_sync_resolution_index(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sync_mutations_resolution "
+        "ON sync_mutations(resolves_mutation_id)"
+    )
+
+
 # Append-only, version-ordered. To change the schema, add a new Migration with
 # the next version number — never edit a shipped one or add inline ALTERs.
 TRIAGE_MIGRATIONS: list[Migration] = [
@@ -83,6 +90,7 @@ TRIAGE_MIGRATIONS: list[Migration] = [
     Migration(5, "label_mirror_receipts", _migration_label_mirror_receipts),
     Migration(6, "corpus_paper_identity_alignment", _migration_baseline_corpus),
     Migration(7, "review_training_sample", _migration_review_training_sample),
+    Migration(8, "sync_resolution_index", _migration_sync_resolution_index),
 ]
 CORPUS_MIGRATIONS: list[Migration] = [
     Migration(1, "baseline_embedding_cache", _migration_baseline_corpus),
@@ -92,6 +100,7 @@ CORPUS_MIGRATIONS: list[Migration] = [
     Migration(5, "label_mirror_alignment", _migration_baseline_corpus),
     Migration(6, "corpus_paper_identity", _migration_corpus_paper_identity),
     Migration(7, "review_training_alignment", _migration_baseline_corpus),
+    Migration(8, "sync_resolution_index_alignment", _migration_baseline_corpus),
 ]
 
 # Both namespaces advance in lockstep so one reported target stays meaningful;

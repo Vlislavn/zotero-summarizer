@@ -14,7 +14,7 @@ topic + questions
    ▼
 SearchIntent ─ intent.build_query_plan ─> QueryPlan (per-source strings, NOT one universal query;
    │                                        each lexical source = tight "quoted phrase" + broad bag)
-   ▼  federate.federate  (ThreadPoolExecutor — all channels at once; one pass per variant, unioned)
+   ▼  federate.federate  (ThreadPoolExecutor — all channels at once; variants share a per-source quota)
  ┌─────────┬───────────┬──────────────────┬──────────┬───────────────────┬────────────┬──────────────┐
  │ arxiv   │ europepmc │ openalex lex+sem │ crossref │ semantic scholar  │ openreview │ library(TODO)│  → Candidate + Provenance
  └─────────┴───────────┴──────────────────┴──────────┴───────────────────┴────────────┴──────────────┘
@@ -154,6 +154,15 @@ is not authoritative. The unused taxonomy constant, scoring adapter and
 `version_family_id` field are removed (old extra JSON fields remain ignored).
 Search notes reuse the existing provenance marker plus escaped title/query/text;
 they no longer pass a string to the structured triage-summary renderer.
+
+Variant passes divide a lexical source's quota across its query variants, so
+adding tight/bag queries does not multiply that source's candidate budget.
+Ranking epsilon must be finite and positive; invalid environment values fall
+back to the default and invalid direct overrides raise `ValueError`. Targeted
+review pairs answers only with nonblank questions. Review failures are recorded
+on the affected paper and do not stop later candidates. The session list skips
+individual unreadable/corrupt files; deleting a session locks its store entry,
+marks it cancelled, and prevents in-flight review saves from recreating it.
 
 ## Deferred (ponytail seams, known ceilings)
 

@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS sync_mutations (
     created_at   TEXT NOT NULL,
     processed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_sync_mutations_resolution
+    ON sync_mutations(resolves_mutation_id);
 CREATE TRIGGER IF NOT EXISTS sync_label_insert AFTER INSERT ON label_verdicts BEGIN
   INSERT INTO sync_changes(item_key, field, value, comment, source)
   VALUES (NEW.item_key, 'verdict', NEW.user_priority, NEW.comment, NEW.source);
@@ -118,6 +120,12 @@ def _write_value(conn: sqlite3.Connection, request: dict[str, Any]) -> None:
 
 def apply_sync_mutation(db_path: Path, request: dict[str, Any]) -> dict[str, Any]:
     """Idempotently compare-and-write one field under ``BEGIN IMMEDIATE``."""
+    request = dict(request)
+    for field in ("device_id", "item_key"):
+        value = request.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{field} must contain non-whitespace characters")
+        request[field] = value.strip()
     public_request = {key: value for key, value in request.items() if not key.startswith("_")}
     request_json = json.dumps(public_request, sort_keys=True, separators=(",", ":"))
     conn = _connect_to(db_path)
@@ -203,18 +211,21 @@ def sync_applied_revisions(db_path: Path, mutation_ids: list[str]) -> dict[tuple
 
 
 def pull_sync_changes(db_path: Path, since: int) -> dict[str, Any]:
+    """Return the current revision cursor and no deltas.
+
+    Sync pull is a full snapshot protocol; the client derives its local mirror
+    from ``papers`` and does not consume historical transition rows. Keep the
+    empty ``changes`` field for protocol-v1 compatibility without reading or
+    serializing an unbounded event log.
+    """
     conn = _connect_to(db_path)
     try:
         cursor = int(conn.execute(
             "SELECT COALESCE(MAX(revision), 0) FROM sync_changes"
         ).fetchone()[0])
-        rows = conn.execute(
-            """SELECT revision, item_key, field, value, comment, source, changed_at
-               FROM sync_changes WHERE revision > ? ORDER BY revision""", (since,),
-        ).fetchall()
     finally:
         conn.close()
-    return {"cursor": cursor, "changes": [dict(row) for row in rows]}
+    return {"cursor": cursor, "changes": []}
 
 
 def sync_current_fields(db_path: Path) -> dict[tuple[str, str], dict[str, Any]]:
@@ -255,7 +266,13 @@ def sync_status(db_path: Path) -> dict[str, int]:
         ).fetchone()[0])
         mutations = int(conn.execute("SELECT COUNT(*) FROM sync_mutations").fetchone()[0])
         conflicts = int(conn.execute(
-            "SELECT COUNT(*) FROM sync_mutations WHERE json_extract(result_json, '$.status') = 'conflict'"
+            """SELECT COUNT(*) FROM sync_mutations AS conflict
+               WHERE json_extract(conflict.result_json, '$.status') = 'conflict'
+                 AND NOT EXISTS (
+                   SELECT 1 FROM sync_mutations AS resolution
+                   WHERE resolution.resolves_mutation_id = conflict.mutation_id
+                     AND json_extract(resolution.result_json, '$.status') = 'applied'
+                 )"""
         ).fetchone()[0])
     finally:
         conn.close()

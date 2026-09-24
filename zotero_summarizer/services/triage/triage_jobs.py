@@ -306,9 +306,10 @@ async def run_triage_job(req: TriageRunRequest) -> TriageRunResponse:
         return TriageRunResponse(job_id=job_id, status="running", total=len(req.item_keys))
 
 
-async def list_triage_jobs(limit: int = 20) -> dict[str, Any]:
+async def list_triage_jobs(limit: int = 20, active_only: bool = False) -> dict[str, Any]:
     safe_limit = max(1, min(limit, 100))
-    persisted = await asyncio.to_thread(triage_db.list_triage_jobs, safe_limit)
+    statuses = ["running", "cancelling"] if active_only else None
+    persisted = await asyncio.to_thread(triage_db.list_triage_jobs, safe_limit, statuses)
     live_jobs = state().triage_jobs
     return {"items": [public_triage_job(live_jobs.get(job["job_id"], job)) for job in persisted]}
 

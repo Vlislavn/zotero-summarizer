@@ -39,6 +39,20 @@ def test_cached_review_keys_reports_all():
     assert _review_cache.cached_review_keys() == {"A", "B"}
 
 
+def test_corrupt_cache_is_quarantined_without_overwriting_prior_recovery(tmp_path):
+    path = _review_cache._cache_path()
+    corrupt = b'{"reviews":'
+    path.write_bytes(corrupt)
+
+    assert _review_cache.cached_review_keys() == set()
+    assert not path.exists()
+    assert (tmp_path / "deep_reviews.json.corrupt").read_bytes() == corrupt
+
+    path.write_text("not json", encoding="utf-8")
+    assert _review_cache.current_reviews() == {}
+    assert (tmp_path / "deep_reviews.json.corrupt-1").read_text(encoding="utf-8") == "not json"
+
+
 def test_current_review_requires_matching_source_and_generation_identity(monkeypatch):
     from zotero_summarizer.services.library import _review_identity
 

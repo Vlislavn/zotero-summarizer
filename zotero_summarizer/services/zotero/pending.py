@@ -254,14 +254,14 @@ def plan_changes_for_item(
 
 
 async def list_pending_changes(
-    status: str = ChangeStatus.PENDING.value, limit: int = 500
+    status: str = ChangeStatus.PENDING.value, limit: int = 500, item_key: str | None = None
 ) -> PendingChangesResponse:
     safe_status = str(status or "").strip().lower()
     if not safe_status:
         safe_status = ChangeStatus.PENDING.value
     elif safe_status == "all":
         safe_status = None
-    items = await asyncio.to_thread(triage_db.get_pending_changes, safe_status, limit)
+    items = await asyncio.to_thread(triage_db.get_pending_changes, safe_status, limit, item_key=item_key)
     return PendingChangesResponse(items=items)
 
 

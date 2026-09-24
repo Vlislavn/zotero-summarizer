@@ -225,6 +225,7 @@ def test_generated_review_is_context_but_not_paper_evidence(tmp_path, monkeypatc
     monkeypatch.setattr(_review_identity, "current_review_identity", lambda key, stored: stored)
     _review_cache._write_one("KEY1", {
         "review_contract_version": _review_cache.REVIEW_CONTRACT_VERSION,
+        "needs_pdf": review_field != "digest",
         "review_identity": identity, review_field: review_value,
     })
 
@@ -298,6 +299,18 @@ def test_scoped_count_question_falls_through_to_llm(tmp_path, monkeypatch):
     out = qa.ask_paper("KEY1", "How many references does Figure 3 cite?")
     assert out["mode"] != "metadata"  # not the deterministic count path
     assert llm.prompts  # the LLM actually answered
+
+
+def test_named_section_count_question_falls_through_to_llm(tmp_path, monkeypatch):
+    pdf = tmp_path / "p.pdf"
+    pdf.write_bytes(b"%PDF-fake")
+    llm = _LLM(answer="the introduction cites several works")
+    _fake_state(tmp_path, pdf, _Extractor(), llm, monkeypatch)
+
+    out = qa.ask_paper("KEY1", "How many references does the Introduction cite?")
+
+    assert out["mode"] != "metadata"
+    assert llm.prompts
 
 
 def test_ask_paper_boundary_errors(tmp_path, monkeypatch):

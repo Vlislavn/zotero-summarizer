@@ -36,6 +36,10 @@ note_analyzer  : interpret user-written Zotero notes as golden labels
 | `zotero.py` | read-side helpers + the reader/writer accessors for routes. `get_zotero_reader_or_raise` / `get_zotero_writer_or_raise` stay strict for Zotero routes and writes. `get_library_reader()` is the read-path resolver: live Zotero reader when configured, else `services.library.app_library_reader.AppLibraryReader` over kept RSS papers, so the Library queue, paper brief, ask-paper, and deep review still work without Zotero. `resolve_reader_for_key(item_key)` resolves by the KEY's shape instead: a `stable_feed_key` (`feed:<ns>:<sha>`, an un-materialized Today paper) → `AppLibraryReader` EVEN with a live Zotero reader present (only the app library resolves it, decision-independent), anything else → `get_library_reader()` — this is what lets render/detail serve an in-place-reviewed feed paper that has no Zotero item yet. `zotero_set_label_tag` mirrors the app's committed current verdict to the portable `label:<priority>` tag; a direct Zotero/iPad edit reconciles back later, while the app owns decision state/history. `zotero_upsert_user_note` directly upserts the free-text "My notes" review note under `USER_NOTE_MARKER` (refuses while Zotero is open); `zotero_set_item_priority` route writes the `label:*` tag |
 | `note_analyzer.py` | classify user notes into priorities for the golden set |
 
+`pending.list_pending_changes` accepts an optional `item_key` filter, pushed
+into the storage query before its limit. Paper-detail callers therefore retrieve
+that paper's pending and historical rows independently of unrelated queue volume.
+
 **Boundaries:** imports `integrations.zotero_write/read`, `corpus`; standard
 services rules. (Module path is `services.zotero.zotero` — the inner module
 keeps the original name.)

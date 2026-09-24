@@ -15,7 +15,8 @@ it.each(['page', 'compact'])('%s keeps verdict comments until an explicit edit i
     item_key: 'P1', title: 'Paper', authors: [], tags: [], collections: [], has_pdf: false,
     verdict: { id: 1, item_key: 'P1', user_priority: 'must_read', comment: 'critical rationale' },
   };
-  vi.stubGlobal('localStorage', { getItem: () => null });
+  // Valid JSON with the wrong shape must not break Prev/Next navigation.
+  vi.stubGlobal('localStorage', { getItem: () => '{}' });
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
   vi.stubGlobal('fetch', vi.fn(async (path, options = {}) => {
     let data;

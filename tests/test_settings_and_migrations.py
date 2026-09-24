@@ -134,6 +134,38 @@ def test_v2_marker_still_runs_later_schema_reconciliation(tmp_path):
     assert version == SCHEMA_VERSION
 
 
+def test_v7_database_gets_sync_resolution_index_upgrade(tmp_path):
+    from zotero_summarizer.storage import repositories
+    from zotero_summarizer.storage._repo_sync import apply_sync_schema
+
+    settings = Settings.load(project_root=tmp_path)
+    settings.data_dir.mkdir(parents=True)
+    with sqlite3.connect(settings.triage_db_path) as conn:
+        conn.execute(repositories._CREATE_LABEL_VERDICTS_TABLE)
+        conn.execute(repositories._CREATE_REVIEW_NOTES_TABLE)
+        apply_sync_schema(conn)
+        conn.execute("DROP INDEX idx_sync_mutations_resolution")
+        conn.execute(
+            "CREATE TABLE schema_migrations (namespace TEXT PRIMARY KEY, version INTEGER NOT NULL,"
+            " applied_at TEXT DEFAULT (datetime('now')) )"
+        )
+        conn.execute("INSERT INTO schema_migrations(namespace, version) VALUES ('triage', 7)")
+
+    migrate_existing(settings)
+
+    with sqlite3.connect(settings.triage_db_path) as conn:
+        index = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND name=?",
+            ("idx_sync_mutations_resolution",),
+        ).fetchone()
+        version = conn.execute(
+            "SELECT version FROM schema_migrations WHERE namespace='triage'"
+        ).fetchone()[0]
+    assert index is not None
+    assert "resolves_mutation_id" in index[0]
+    assert version == SCHEMA_VERSION
+
+
 def test_apply_schema_adds_verdict_source_and_backfills(tmp_path):
     """Pre-June-2026 DBs gain label_verdicts.source via the column-presence
     ALTER; rows written by the historical "Add to library" path (frozen

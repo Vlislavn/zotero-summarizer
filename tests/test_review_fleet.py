@@ -3,7 +3,7 @@
 Covers two modules with stubs (no real LLM / Zotero / model load); proposal tests live
 in ``test_review_fleet_propose.py`` and ``prewarm`` lives
 in ``test_review_fleet_prewarm.py``:
-  * ``verdict_store`` — atomic JSON sidecar round-trip + clear + corrupt-loud.
+  * ``verdict_store`` — atomic JSON sidecar round-trip + clear + corrupt recovery.
   * ``fleet`` — the single-flight, BATCHED provider-aware job: cache reuse, the one
     batched deep_review.start call, sequential PDF acquire + re-review, the status
     shape, per-item-failure isolation, and the "no Zotero / no review" paths — all
@@ -75,10 +75,34 @@ def test_upsert_rejects_empty_key(_store_path):
         verdict_store.upsert("", {"proposed": "must_read"})
 
 
-def test_read_all_raises_loud_on_corrupt_file(_store_path):
-    _store_path.write_text("{ this is not json", encoding="utf-8")
-    with pytest.raises(Exception):
-        verdict_store.read_all()
+def test_read_all_quarantines_corrupt_file_without_losing_bytes(_store_path, caplog):
+    corrupt = b"{ this is not json\xff"
+    _store_path.write_bytes(corrupt)
+
+    assert verdict_store.read_all() == {}
+
+    backup = _store_path.with_name(_store_path.name + ".corrupt")
+    assert backup.read_bytes() == corrupt
+    assert not _store_path.exists()
+    assert "quarantined corrupt review-fleet verdicts" in caplog.text
+
+
+def test_read_all_quarantine_never_overwrites_prior_recovery(_store_path):
+    _store_path.write_text("invalid first", encoding="utf-8")
+    assert verdict_store.read_all() == {}
+    _store_path.write_text("invalid second", encoding="utf-8")
+
+    assert verdict_store.read_all() == {}
+
+    assert _store_path.with_name(_store_path.name + ".corrupt").read_text() == "invalid first"
+    assert _store_path.with_name(_store_path.name + ".corrupt-1").read_text() == "invalid second"
+
+
+def test_read_all_quarantines_invalid_envelope(_store_path):
+    _store_path.write_text('{"proposals": []}', encoding="utf-8")
+
+    assert verdict_store.read_all() == {}
+    assert _store_path.with_name(_store_path.name + ".corrupt").read_text() == '{"proposals": []}'
 
 
 def test_write_is_atomic_no_tmp_left_behind(_store_path):

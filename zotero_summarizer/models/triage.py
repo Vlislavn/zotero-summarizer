@@ -256,6 +256,8 @@ class ProposedVerdict(BaseModel):
     grade: str = Field(default="")  # A-D from the digest/quality_eval ("" = unknown)
     proposed_at: str = Field(default="")
     source: str = Field(default="review_fleet")
+    proposal_version: int = Field(default=0)
+    review_identity_sha256: str = Field(default="")
 
 
 class RefinedSummary(BaseModel):

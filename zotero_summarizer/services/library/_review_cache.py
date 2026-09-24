@@ -12,10 +12,10 @@ import json
 import threading
 from typing import Any
 
-from zotero_summarizer.services._common import now_iso_z, settings, write_json_atomic
+from zotero_summarizer.services._common import LOGGER, now_iso_z, settings, write_json_atomic
 
 _CACHE_FILENAME = "deep_reviews.json"
-_CACHE_LOCK = threading.Lock()    # guards the read-merge-write of deep_reviews.json
+_CACHE_LOCK = threading.RLock()   # guards cache reads, quarantine, and read-merge-write
 REVIEW_CONTRACT_VERSION = 3
 
 
@@ -25,10 +25,33 @@ def _cache_path():
 
 def _read_all() -> dict[str, Any]:
     path = _cache_path()
-    if not path.exists():
-        return {}
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    return payload.get("reviews") or {}
+    with _CACHE_LOCK:
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            backup = _quarantine_corrupt_cache(path)
+            LOGGER.warning("quarantined corrupt deep-review cache to %s (%s)", backup, exc)
+            return {}
+        reviews = payload.get("reviews") if isinstance(payload, dict) else None
+        if not isinstance(reviews, dict):
+            backup = _quarantine_corrupt_cache(path)
+            LOGGER.warning("quarantined invalid deep-review cache envelope to %s", backup)
+            return {}
+        return reviews
+
+
+def _quarantine_corrupt_cache(path) -> Any:
+    """Move invalid bytes aside without overwriting an earlier recovery copy."""
+    suffix = 0
+    while True:
+        tail = ".corrupt" if suffix == 0 else f".corrupt-{suffix}"
+        backup = path.with_name(path.name + tail)
+        if not backup.exists():
+            path.replace(backup)
+            return backup
+        suffix += 1
 
 
 def _write_all(reviews: dict[str, Any]) -> None:
@@ -61,6 +84,8 @@ def get_cached_review(item_key: str) -> dict[str, Any] | None:
 
 def review_is_current(entry: dict[str, Any] | None, item_key: str = "") -> bool:
     if not entry or entry.get("review_contract_version") != REVIEW_CONTRACT_VERSION:
+        return False
+    if entry.get("digest") is None and not entry.get("needs_pdf"):
         return False
     stored = entry.get("review_identity")
     if not item_key or not isinstance(stored, dict):

@@ -38,3 +38,11 @@ export async function submitResultFeedback(itemKey, verdict) {
     body: JSON.stringify({ verdict }),
   });
 }
+
+/** GET durable approve/reject decisions for the current result cards. */
+export async function fetchLatestResultFeedback(itemKeys) {
+  const keys = [...new Set((itemKeys || []).filter(Boolean))];
+  if (!keys.length) return { items: [] };
+  const qs = new URLSearchParams({ item_keys: keys.join(',') });
+  return request(`/api/triage/feedback/latest?${qs.toString()}`);
+}

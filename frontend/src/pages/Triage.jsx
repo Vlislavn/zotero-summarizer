@@ -5,6 +5,7 @@ import {
   fetchJob,
   cancelJob,
   fetchCalibrationMetrics,
+  fetchLatestResultFeedback,
   submitResultFeedback,
 } from '../api/triageApi.js';
 import { triggerTriageBacklog } from '../api/dailyApi.js';
@@ -177,6 +178,26 @@ export default function Triage() {
   useEffect(() => {
     if (activeJobId) loadJob(activeJobId);
   }, [activeJobId, loadJob]);
+
+  // Feedback is durable in the backend; restore it whenever the selected job
+  // changes so reviewed cards stay excluded from "Needs feedback only".
+  useEffect(() => {
+    const keys = (activeJob?.results || []).map((result) => result.item_key).filter(Boolean);
+    setFeedbackState({});
+    if (!keys.length) return undefined;
+    let cancelled = false;
+    fetchLatestResultFeedback(keys).then((data) => {
+      if (cancelled) return;
+      const restored = Object.fromEntries((data?.items || []).map((item) => [item.item_id, item.verdict]));
+      setFeedbackState((current) => ({ ...restored, ...current }));
+    }).catch((err) => {
+      if (!cancelled) {
+        setMessage(`Could not restore saved feedback: ${humanizeError(err)}`);
+        setIsError(true);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [activeJob?.results]);
 
   // Poll until in-flight work has drained, including cancellation.
   useEffect(() => {

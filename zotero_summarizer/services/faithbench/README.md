@@ -32,8 +32,11 @@ builder LLM ──► [_build_qa] ─► benchmark_vN.jsonl ─► [_runner] ─
    `benchmark_vN.review.csv` starts unapproved; every QA/trap row must be checked
    and marked `approved=yes` before the QA track can run. The exact approved CSV
    hash is bound into the run manifest. Benchmarks are immutable: rebuild ⇒ `v<N+1>`.
-   New extractions never overwrite earlier text versions; publication uses the
-   shared atomic writer. Existing `papers/<key>.txt` files remain readable only
+   New extractions never overwrite earlier text versions. Benchmark JSONL and its
+   review CSV are staged completely; the CSV is published first and the immutable
+   benchmark is linked into place last as the version commit marker. A failed
+   build leaves no readable partial benchmark and does not consume a version.
+   Existing `papers/<key>.txt` files remain readable only
    after SHA verification and are never rewritten on read. Keys, hashes and
    resolved paths are validated; symlink escapes fail. A corrupt hash-named file
    is an error, not a reason to substitute a legacy file. This guarantees atomic
@@ -84,9 +87,12 @@ builder LLM ──► [_build_qa] ─► benchmark_vN.jsonl ─► [_runner] ─
    QA accuracy + claim support rate are reported as **mean AND median** over the
    validated set (a few hard items can't masquerade as a uniformly worse model),
    STD/SEM across **run-level means** (ddof=1, 0.0 when runs ≤ 1), Pass@k /
-   Pass^k when runs > 1, trap hallucination rate, abstention precision/recall,
+   Pass^k over complete item cohorts when runs > 1, trap hallucination rate, abstention precision/recall,
    claim support rate per digest field, judge-escalation fraction, latency
-   percentiles. Headline appended to `faithbench-runs.jsonl` (run_id + git commit
+   percentiles. The report labels summed per-trial latency as cumulative trial time; it is not elapsed wall time.
+   Headline is appended once per run ID in `faithbench-runs.jsonl` under a
+   cross-process file lock; existing log rows are never rewritten. Each row has
+   run_id + git commit
    + benchmark sha + `*_accuracy`/`*_accuracy_median` + `claims_support_rate`/
    `claims_support_rate_median`; mirrors `classifier-runs.jsonl`).
 
@@ -127,8 +133,11 @@ Markdown `N/A (unmeasured)`, including the master headline, never a measured 0%.
 QA generation fully covers papers up to 18,000 characters using up to three
 6,000-character windows; longer papers use bounded evenly-spaced samples including
 both ends. Three windows are an explicit cost ceiling, not a promise to inspect
-every character of a long paper. The short-paper suffix and integer-spacing
-end-point omissions are removed without increasing that ceiling.
+every character of a long paper; factual passages in the gaps can be missed.
+Query-ranked chunks cannot safely replace this build-time sampling because the
+questions are created from those excerpts and do not exist before selection.
+The short-paper suffix and integer-spacing end-point omissions are removed
+without increasing that ceiling.
 
 ## Iterating cheaply (never re-run the full grind)
 
@@ -155,7 +164,10 @@ to be re-used:
 3. **Judge changes cost zero model-under-test time** — `judge --force`
    re-judges existing responses (complete rows are preserved), so judge-model
    ablations or hard-ladder tweaks never re-ask the 35B.
-4. **Claims decomposition is cached** by digest sha (`runs/<id>/claims_cache/`)
+4. **Claims decomposition is cached** by digest sha within the run-scoped
+   `runs/<id>/claims_cache/`; corrupt cache entries are discarded and rebuilt,
+   and writes are atomic. The run manifest pins the decomposer profile, so the
+   cache is not shared across differently configured runs.
    — re-running the claims track on unchanged digests skips the decomposer.
 5. **Benchmark stays frozen** — model/prompt changes never need a rebuild;
    only rebuild (`build` → `v<N+1>`) when you want different papers/questions.

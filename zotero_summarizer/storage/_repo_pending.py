@@ -78,12 +78,37 @@ def _insert_pending_changes(
 
 
 def get_pending_changes(
-    status: str | None = ChangeStatus.PENDING.value, limit: int = 500
+    status: str | None = ChangeStatus.PENDING.value, limit: int = 500, *, item_key: str | None = None
 ) -> list[dict[str, Any]]:
     safe_limit = max(1, min(limit, 5000))
+    safe_item_key = str(item_key or "").strip()
     conn = _get_conn()
     try:
-        if status:
+        if status and safe_item_key:
+            rows = conn.execute(
+                """
+                SELECT id, item_key, item_title, change_type, payload_json, status,
+                       error_message, created_at, applied_at
+                FROM pending_changes
+                WHERE status = ? AND item_key = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (status, safe_item_key, safe_limit),
+            ).fetchall()
+        elif safe_item_key:
+            rows = conn.execute(
+                """
+                SELECT id, item_key, item_title, change_type, payload_json, status,
+                       error_message, created_at, applied_at
+                FROM pending_changes
+                WHERE item_key = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (safe_item_key, safe_limit),
+            ).fetchall()
+        elif status:
             rows = conn.execute(
                 """
                 SELECT id, item_key, item_title, change_type, payload_json, status,
@@ -107,6 +132,68 @@ def get_pending_changes(
                 (safe_limit,),
             ).fetchall()
         return _pending_rows(rows)
+    finally:
+        conn.close()
+
+
+def pending_change_exists(
+    item_key: str, change_type: str, payload_json: str | dict[str, Any], *, status: str | None = None
+) -> bool:
+    """Exact uncapped existence check for one pending-change signature.
+
+    ``status=None`` searches every lifecycle state. The indexed item key and
+    signature predicates execute in SQLite; callers never infer absence from a
+    truncated list.
+    """
+    safe_item_key = str(item_key or "").strip()
+    safe_type = str(change_type or "").strip()
+    if not safe_item_key or not safe_type:
+        return False
+    serialized_payload = (
+        payload_json if isinstance(payload_json, str)
+        else json.dumps(payload_json, ensure_ascii=False)
+    )
+    conn = _get_conn()
+    try:
+        query = """SELECT 1 FROM pending_changes
+                   WHERE item_key = ? AND change_type = ? AND payload_json = ?"""
+        params: tuple[str, ...] = (safe_item_key, safe_type, serialized_payload)
+        if status is not None:
+            query += " AND status = ?"
+            params += (status,)
+        return conn.execute(query + " LIMIT 1", params).fetchone() is not None
+    finally:
+        conn.close()
+
+
+def insert_pending_change_if_absent(
+    item_key: str, item_title: str, change_type: str, payload: dict[str, Any],
+) -> bool:
+    """Atomically insert one pending signature unless it exists in any status."""
+    safe_item_key = str(item_key or "").strip()
+    safe_type = str(change_type or "").strip()
+    if not safe_item_key or not safe_type:
+        raise ValueError("Pending changes require an item key and change type")
+    payload_json = json.dumps(payload, ensure_ascii=False)
+    conn = _get_conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        found = conn.execute(
+            """SELECT 1 FROM pending_changes
+               WHERE item_key = ? AND change_type = ? AND payload_json = ? LIMIT 1""",
+            (safe_item_key, safe_type, payload_json),
+        ).fetchone()
+        if found:
+            conn.commit()
+            return False
+        _insert_pending_changes(conn, safe_item_key, item_title, [{
+            "change_type": safe_type, "payload": payload,
+        }])
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 

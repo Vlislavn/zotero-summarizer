@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Triage from './Triage.jsx';
-import { fetchJobs, fetchJob, fetchCalibrationMetrics } from '../api/triageApi.js';
+import { fetchJobs, fetchJob, fetchCalibrationMetrics, fetchLatestResultFeedback } from '../api/triageApi.js';
 
 vi.mock('../api/triageApi.js', () => ({
-  fetchJobs: vi.fn(), fetchJob: vi.fn(), fetchCalibrationMetrics: vi.fn(), cancelJob: vi.fn(), submitResultFeedback: vi.fn(),
+  fetchJobs: vi.fn(), fetchJob: vi.fn(), fetchCalibrationMetrics: vi.fn(), cancelJob: vi.fn(), submitResultFeedback: vi.fn(), fetchLatestResultFeedback: vi.fn(),
 }));
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); });
 
@@ -62,5 +62,27 @@ it('lists active papers and keeps polling during cancellation until the threads 
   const calls = fetchJob.mock.calls.length;
   await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
   expect(fetchJob).toHaveBeenCalledTimes(calls);
+  client.clear();
+});
+
+it('restores durable feedback so reviewed results stay out of the todo filter', async () => {
+  fetchJobs.mockResolvedValue({ items: [{ job_id: 'J1', status: 'completed' }] });
+  fetchJob.mockResolvedValue({
+    job_id: 'J1', status: 'completed', completed: 1, total: 1,
+    active_items: [], errors: [],
+    results: [{ item_key: 'PAPER-1', title: 'A saved decision', reading_priority: 'should_read' }],
+  });
+  fetchLatestResultFeedback.mockResolvedValue({
+    items: [{ item_id: 'PAPER-1', verdict: 'approve' }],
+  });
+  fetchCalibrationMetrics.mockResolvedValue(null);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><Triage /></QueryClientProvider>);
+
+  expect(await screen.findByText('Approved by you')).toBeTruthy();
+  expect(fetchLatestResultFeedback).toHaveBeenCalledWith(['PAPER-1']);
+  fireEvent.click(screen.getByLabelText('Needs feedback only'));
+  expect(await screen.findByText('All completed items have your feedback. ✓')).toBeTruthy();
+  expect(screen.queryByText('A saved decision')).toBeNull();
   client.clear();
 });

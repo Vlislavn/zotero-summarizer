@@ -191,6 +191,6 @@ def test_v7_migration_preserves_v6_verdict_and_is_repeatable(tmp_path):
         conn.execute("INSERT INTO schema_migrations VALUES ('triage', 6, 'before')")
 
     for _ in range(2):
-        assert run_migrations(db, "triage", TRIAGE_MIGRATIONS) == 7
+        assert run_migrations(db, "triage", TRIAGE_MIGRATIONS[:7]) == 7
         with sqlite3.connect(db) as conn:
             assert conn.execute("SELECT * FROM label_verdicts").fetchall() == [(1, "P1", "must_read", None)]

@@ -41,3 +41,8 @@ including parallel items still draining during cancellation. The old singular
 `current_item_key`/`current_title` fields are removed; update client and API
 together. Missing activity in the response is a contract error, not an invented
 empty list. Historical/terminal jobs receive an explicit empty list from the API.
+
+`find_similar_papers` ranks unread library papers with semantic hybrid search,
+with explicit unavailable feedback when the reranker cannot serve the query. `get_paper` gets
+pending/history rows using the item-key filter, so unrelated queue traffic does
+not consume its result window.

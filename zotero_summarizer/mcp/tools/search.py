@@ -7,7 +7,7 @@ from urllib.parse import quote
 from zotero_summarizer.domain import READING_PRIORITY_SORT_RANK
 
 from zotero_summarizer.mcp.api_client import _api_request, _fetch_pending_rows, _fetch_triage_row
-from zotero_summarizer.mcp.config import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, MAX_PENDING_FETCH
+from zotero_summarizer.mcp.config import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT
 from zotero_summarizer.mcp.helpers import (
     _as_float,
     _as_int,
@@ -32,6 +32,7 @@ from zotero_summarizer.mcp.server import mcp
 SEARCH_SOURCE_MAX_FETCH = 500
 SEARCH_TOTAL_MAX = 10000
 SEARCH_ENRICH_CONCURRENCY = 8
+PAPER_PENDING_FETCH_MAX = 5000
 SEED_QUERY_TITLE_WORD_LIMIT = 8
 
 
@@ -220,7 +221,7 @@ async def get_paper(item_key: str) -> dict[str, Any]:
     triage_row, triage_error = await _fetch_triage_row(safe_item_key)
     triage_payload = _triage_from_result_row(triage_row)
 
-    pending_rows, pending_error = await _fetch_pending_rows("all", MAX_PENDING_FETCH)
+    pending_rows, pending_error = await _fetch_pending_rows("all", PAPER_PENDING_FETCH_MAX, item_key=safe_item_key)
     pending_items: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
 
@@ -267,7 +268,7 @@ async def find_similar_papers(
     query: str | None = None,
     limit: int = 10,
 ) -> dict[str, Any]:
-    """Return candidate similar papers using corpus metadata search."""
+    """Return similar unread library papers using the app's hybrid semantic search."""
     safe_limit = max(1, min(int(limit), 50))
     safe_item_key = str(item_key or "").strip()
     safe_query = str(query or "").strip()
@@ -290,23 +291,22 @@ async def find_similar_papers(
 
     corpus_result = await _api_request(
         "GET",
-        "/api/corpus/items",
+        "/api/library/reading-queue",
         params={
-            "search": safe_query,
-            "sort": "updated_at",
-            "order": "desc",
-            "limit": safe_limit + 5,
-            "offset": 0,
+            "search": safe_query, "semantic": True, "include_read": False,
+            "limit": max(safe_limit + 5, 10),
         },
     )
     corpus_data, corpus_error = _extract_data_or_error(corpus_result)
     if corpus_error is not None:
         return corpus_error
+    if (corpus_data or {}).get("semantic_unavailable"):
+        return _error("semantic_search_unavailable", "Hybrid similarity search is unavailable")
     rows = list((corpus_data or {}).get("items") or [])
 
     similar: list[dict[str, Any]] = []
     for row in rows:
-        candidate_key = str(row.get("item_id") or "").strip()
+        candidate_key = str(row.get("item_key") or "").strip()
         if not candidate_key or candidate_key == safe_item_key:
             continue
 
@@ -314,10 +314,9 @@ async def find_similar_papers(
             {
                 "item_key": candidate_key,
                 "title": str(row.get("title") or ""),
-                "collections": list(row.get("collections") or []),
-                "tags": list(row.get("tags") or []),
-                "engagement_weight": _as_float(row.get("engagement_weight"), 0.0),
-                "updated_at": str(row.get("updated_at") or ""),
+                "relevance_score": row.get("relevance_score"),
+                "why_reason": row.get("why_reason"),
+                "date_added": str(row.get("date_added") or ""),
             }
         )
 
@@ -331,5 +330,5 @@ async def find_similar_papers(
             "query": safe_query,
         },
         items=similar,
-        total=_as_int((corpus_data or {}).get("total"), 0),
+        total=_as_int((corpus_data or {}).get("total_unread"), 0),
     )

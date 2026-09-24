@@ -19,7 +19,7 @@ services/ ─call→ storage/
 | `_repo_results.py` · `_repo_jobs.py` | batch/result rows + queries · triage-job upserts/listing |
 | `_repo_pending.py` · `_repo_feedback.py` | pending-change queue with source-aware status transitions (including retry `failed → applied`) and a per-paper open-sibling check for safe Inbox removal · feedback signals |
 | `_repo_verdicts.py` · `_repo_labels.py` | role-value + weekly-A/B verdicts · label verdicts (with `source` provenance: `user` vs `machine_add` — the provisional "Add to library" verdict that the training overlay may outcome-correct; UPSERT propagates it so a deliberate relabel flips a machine add back to `user`). `list_label_verdict_keys` (keys only — golden-CSV preservation) and `list_label_verdict_priorities` (`{item_key: user_priority}` — the reading-queue handled-filter needs the priority so `dont_read` hides but a positive label stays visible + pins to top) are both **uncapped** (a paged fetch silently drops rows once the table outgrows the cap). Also owns the `review_notes` table (one editable free-text note per paper, jotted during a review — decoupled from a verdict): `upsert_review_note` / `get_review_note`, same UPSERT shape as `label_verdicts` |
-| `_repo_sync.py` | v2 offline-sync persistence: triggers turn every verdict/note write (including delete tombstones) into a monotonic field revision; `BEGIN IMMEDIATE` applies typed UUID mutations idempotently and records applied/conflict/resolution results in `sync_mutations`. Replaying a stored conflict returns that same conflict, while a stored applied write returns `already_applied`. No service imports and no SQLite-file replication |
+| `_repo_sync.py` | v2 offline-sync persistence: triggers turn every verdict/note write (including delete tombstones) into a monotonic field revision; `BEGIN IMMEDIATE` applies typed UUID mutations idempotently and records applied/conflict/resolution results in `sync_mutations`. Device and item identities are trimmed and blank values rejected at both API/service and storage boundaries. Replaying a stored conflict returns that same conflict, while a stored applied write returns `already_applied`. No service imports and no SQLite-file replication |
 | `rows.py` | typed row models for the read boundary — `from_row` fails loud on schema drift, `to_dict` keeps the legacy contract. First adopter: `_repo_pending`. Add a model + route its reader to type more tables. |
 | `corpus.py` | `EmbeddingCache` — embeddings/upserts + the math helpers; exports `open_corpus_conn(db_path)` (timeout + WAL pragma), the single corpus-DB opener `corpus_bm25` now shares so both readers of the same file run the same journal mode; caches a normalized corpus matrix (version-invalidated on write) for the fast affinity path. The default `all-MiniLM-L6-v2` was shoot-out-validated and deliberately KEPT (2026-06-12, `tools/eval_goal_embedder.py` on 491 real kept/trashed decisions): goal_sim AUC 0.714 vs bge-m3's 0.712 (25× larger, MPS-OOM risk without a 512-token cap) and SPECTER2+proximity's 0.684 (paper-paper model, poor on short goal queries) — don't "upgrade" it without re-measuring |
 | `corpus_read.py` · `corpus_types.py` | `EmbeddingCache` read/match methods (mixin): full `match_candidate` (UI) + `affinity_and_goals` (ONE candidate embed → engagement pos−neg affinity AND per-goal `{goal: cosine}` — the single computational definition of both per-candidate corpus signals) + `goal_affinity_for_items` (cached-item cosine to the research-goal embeddings) + `query_affinity_for_items` (cosine to an ad-hoc QUERY string — the dense leg of Library hybrid search); the item-side reads share one `_affinity_to_targets` matmul, no model load. That matmul looks items up in a PROCESS-WIDE normalized-embedding matrix (`_normalized_corpus_matrix`) cached by a `_corpus_fingerprint` (main + `-wal` mtime/size, so a WAL-resident write still invalidates it) — the reading queue builds a fresh `EmbeddingCache` per open, so the instance `_affinity_cache` can't help there; without this every open re-parsed ~2k embeddings from JSON (~0.5s) · shared value types |
@@ -205,3 +205,20 @@ for bounded push continuation. Revisions are keyed by device, item and field;
 unknown/conflict UUIDs cannot supply a base. Existing compare-and-write still
 checks the latest canonical revision inside its writer transaction. Receipt
 lookup never repeats Zotero/CSV effects and requires no new table.
+
+`get_pending_changes(..., item_key=...)` filters by item key in SQLite before
+ordering and applying its row limit. Callers retrieving one paper's history do
+not scan a capped global window and discard unrelated rows afterward.
+`pending_change_exists(item_key, change_type, payload_json, status=None)` is an
+uncapped exact-signature check across every lifecycle state. When a caller must
+make an idempotent queue decision, `insert_pending_change_if_absent(item_key,
+item_title, change_type, payload)` performs that check and insert under one
+`BEGIN IMMEDIATE` transaction, so concurrent callers cannot both queue the same
+change. The read-only existence helper is for reporting, not check-then-insert.
+
+Sync snapshot pulls read only the maximum `sync_changes.revision` as their cursor;
+the legacy `changes` response field stays empty. Conflict status uses the indexed
+resolution reference to count unresolved conflicts, not every historical receipt.
+Migration v8 adds `idx_sync_mutations_resolution` for upgrades from databases
+that already recorded the v2 offline-sync schema; new databases also create it
+with the baseline sync schema.

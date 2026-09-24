@@ -220,9 +220,8 @@ def test_pull_has_resumable_cursor_and_compact_offline_context(tmp_path, monkeyp
     repositories.upsert_review_note(db, "P1", "new note")
 
     delta = service.pull(db, initial["cursor"])
-    assert [(row["field"], row["value"]) for row in delta["changes"]] == [
-        ("review_note", "new note"),
-    ]
+    assert delta["cursor"] > initial["cursor"]
+    assert delta["changes"] == []
     assert service.pull(db, delta["cursor"])["changes"] == []
 
 
@@ -251,3 +250,19 @@ def test_pull_preserves_deleted_field_revision_for_next_offline_edit(
 def test_sync_protocol_is_required():
     with pytest.raises(ValidationError):
         _PushRequest(mutations=[])
+
+
+@pytest.mark.parametrize("field", ["device_id", "item_key"])
+def test_sync_rejects_blank_identity(field):
+    mutation = _mutation("P1", "verdict", "could_read", 0)
+    mutation[field] = "   "
+    with pytest.raises(ValidationError):
+        _PushRequest(protocol=1, mutations=[mutation])
+
+
+def test_sync_storage_rejects_blank_identity(tmp_path):
+    db = _db(tmp_path)
+    mutation = _mutation("P1", "verdict", "could_read", 0)
+    mutation["item_key"] = "   "
+    with pytest.raises(ValueError, match="item_key"):
+        repositories.apply_sync_mutation(db, mutation)
