@@ -203,8 +203,10 @@ start; quality improves as you label more.
 
 The app is **local-first**: the UI, Zotero I/O, the ML relevance gate, and Library
 search (BM25 + embeddings + cross-encoder rerank) all run on your machine. There is no
-telemetry and the served UI pulls no external assets (no CDN/fonts). Only two things
-ever need the internet, and both are one-time or swappable:
+telemetry and the served UI pulls no external assets (no CDN/fonts). Model
+weights and hosted inference require a network unless prefetched or replaced
+with a local model. New RSS items and uncached PDFs also require connectivity;
+strict offline mode can work only with previously acquired paper content:
 
 1. **The ML models** download from Hugging Face on first use (see the [README hardware
    table](../README.md#requirements) for sizes). Pre-cache them once while online:
@@ -223,8 +225,10 @@ ever need the internet, and both are one-time or swappable:
 
 2. **The LLM** (summaries, deep review, quality review) needs an OpenAI-compatible
    endpoint. Point it at a **local** server — Ollama, vLLM, LM Studio, `mlx_lm.server` —
-   in `goals.yaml` / `.env` and you're fully offline. With **no** LLM at all, everything
-   still works except the LLM-written summaries; the **ML-only "Triage backlog"** drain
+   in `goals.yaml` / `.env` for local inference. This alone is **not** strict offline:
+   prefetch ML assets and set `ZS_OFFLINE=1` for cache-only model loading; uncached
+   RSS/PDF acquisition still needs network. With **no** LLM at all, summaries,
+   deep review and Q&A are unavailable; the **ML-only "Triage backlog"** drain
    (the classifier gate) still scores your feed, and Library search/ranking is unaffected.
 
 The optional enrichments — OpenAlex prestige, Unpaywall, arXiv full-text fetch — are

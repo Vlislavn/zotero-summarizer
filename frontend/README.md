@@ -179,6 +179,8 @@ link to Settings.
 Relevance conclusions in both interactive Review and the HTML brief are
 case/punctuation deduplicated across goals, capped on first view and disclosed
 on demand; goal labels, evidence quotes and accessible score meters remain.
+Located evidence is not automatically a positive match: a `hit` with
+`relevant=false` now reads as not supported in both React and the HTML brief.
 
 ## Offline boundary
 

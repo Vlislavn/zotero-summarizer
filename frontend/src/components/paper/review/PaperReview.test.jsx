@@ -36,6 +36,20 @@ it('keeps case-distinct quantitative findings separate', () => {
   expect(html).not.toContain('For: Enrolled women; Enrolled men');
 });
 
+it('does not claim a retrieved goal is relevant when its evidence says otherwise', () => {
+  const html = renderToStaticMarkup(<PaperReview deep={{ goal_summaries: [
+    { goal: 'External clinical validation', retrieval_state: 'hit', relevant: false,
+      summary: 'No external clinical validation was performed.', score: 0,
+      supporting_quotes: ['Evaluation used only the development cohort.'] },
+  ] }} />);
+
+  expect(html).toContain('Evidence did not support this goal');
+  expect(html).toContain('○ not supported');
+  expect(html).not.toContain('● addressed');
+  expect(html).not.toContain('Relevant to this goal');
+  expect(html).toContain('Evaluation used only the development cohort.');
+});
+
 it('renders empty and degraded summaries without inventing findings', () => {
   const html = renderToStaticMarkup(<PaperReview deep={{ goal_summaries: [
     { goal: 'No grounded summary', retrieval_state: 'hit', summary: '' },

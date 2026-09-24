@@ -67,6 +67,19 @@ def test_board_absorbs_per_goal_summary_sections_and_quote():
     assert not hasattr(brief, "per_goal_html")  # the separate repeated section is gone
 
 
+def test_located_evidence_does_not_automatically_mean_goal_is_addressed():
+    goals = [{"goal": "External clinical validation", "retrieval_state": "hit", "relevant": False,
+              "score": 0, "summary": "No external validation was performed.",
+              "supporting_quotes": ["Evaluation used only the development cohort."]}]
+
+    html = brief.brief_html(CONTENT, quality=QUALITY, goal_summaries=goals)
+
+    assert '○ not supported' in html
+    assert '● addressed' not in html
+    assert 'Evidence did not support this goal' in html
+    assert 'Evaluation used only the development cohort.' in html
+
+
 def test_goal_summaries_deduplicate_without_losing_goal_evidence():
     shared = "A multisite clinical study compares triage decisions across independent reader cohorts."
     goals = [

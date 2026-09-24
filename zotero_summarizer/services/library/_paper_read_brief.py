@@ -188,7 +188,7 @@ def _goal_board_html(goals: list[dict[str, Any]]) -> str:
         is_hit = state == "hit" and bool(g.get("relevant"))
         extra, has_ev = "", ""
         if state == "hit":
-            why = ("relevant — grounded summary withheld" if not str(g.get("summary") or "").strip()
+            why = ("grounded summary withheld" if not str(g.get("summary") or "").strip()
                    else "Relevant to this goal" if is_hit else "Evidence did not support this goal")
             _collect_goal_summary(summaries, g)
             secs = ", ".join(_h(s) for s in (g.get("key_sections") or []) if str(s).strip())
@@ -207,10 +207,11 @@ def _goal_board_html(goals: list[dict[str, Any]]) -> str:
         else:
             why = "retrieval degraded — not assessed"
         stain = "stained" if is_hit else "unstained"
+        state_label = "○ not supported" if state == "hit" and not is_hit else _STATE_LABEL.get(state, state)
         cells += (
             f'<div class="gcell state-{state} {stain}{has_ev}">'
             f'<div class="g-label">{_h(_short_goal(g.get("goal", "")))}</div>'
-            f'<div class="g-state">{_h(_STATE_LABEL.get(state, state))}</div>'
+            f'<div class="g-state">{_h(state_label)}</div>'
             f'<div class="g-bar" role="meter" aria-label="{_h(_short_goal(g.get("goal", "")))} relevance" '
             f'aria-valuemin="0" aria-valuemax="3" aria-valuenow="{max(0.0, min(3.0, score))}">'
             f'<span style="width:{width}%"></span></div>'

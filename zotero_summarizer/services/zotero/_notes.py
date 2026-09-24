@@ -65,7 +65,7 @@ def build_triage_note_html(
     """Render the persisted triage artifact as a self-sufficient Zotero note."""
     glyph = _PRIORITY_GLYPH.get(summary.reading_priority, "•")
     priority_label = summary.reading_priority.replace("_", " ").title()
-    verdict = (summary.triage_rationale or summary.should_deep_read or summary.executive_summary or "").strip()
+    verdict = (summary.triage_rationale or summary.executive_summary or "").strip()
     if not verdict:
         verdict = f"Triaged paper: {title or 'Untitled'}."
     parts = [build_provenance_comment(run_id=run_id)] if include_provenance else []
@@ -76,7 +76,6 @@ def build_triage_note_html(
         ("Approach / methods", summary.methods),
         ("Why it matters to my work", summary.relevance_to_research),
         ("Limitations / uncertainty", summary.limitations),
-        ("Reading guidance", summary.should_deep_read),
     )
     for heading, value in text_sections:
         if value and value.strip():

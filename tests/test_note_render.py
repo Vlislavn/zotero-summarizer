@@ -85,6 +85,23 @@ def test_note_renders_available_decision_sections():
         assert any(expected in heading for heading in section_headers)
 
 
+@pytest.mark.parametrize("priority, advice", [
+    ("dont_read", "Yes, this paper directly impacts the current goal."),
+    ("must_read", "No, skip this paper for now."),
+])
+def test_triage_note_does_not_publish_conflicting_standalone_llm_advice(priority, advice):
+    summary = _summary(reading_priority=priority, should_deep_read=advice,
+                       triage_rationale="The ranked triage decision is authoritative.")
+
+    html = build_triage_note_html("Title", summary)
+
+    assert priority.replace("_", " ").title() in html
+    assert "The ranked triage decision is authoritative." in html
+    assert advice not in html
+    assert "Reading guidance" not in html
+    assert "Single-centre evaluation." in html
+
+
 def test_note_preserves_core_decision_artifact():
     html = build_triage_note_html("Title", _summary())
     for expected in ("blinded benchmark", "Single-centre", "multiagent goals"):

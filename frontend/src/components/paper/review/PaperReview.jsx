@@ -312,18 +312,21 @@ function SectionAnchor({ section }) {
 
 function GoalTile({ g, sections }) {
   const state = String(g?.retrieval_state || 'not_retrieved');
+  const supported = state === 'hit' && Boolean(g?.relevant);
   const score = Number(g?.score) || 0;
   const width = Math.round(Math.max(0, Math.min(1, score / 3)) * 100);
   const secs = (g?.key_sections || []).filter(Boolean).join(', ');
   const quotes = (g?.supporting_quotes || []).map((q) => String(q || '').trim()).filter(Boolean);
   let why;
-  if (state === 'hit') why = String(g?.summary || '').trim() ? 'Relevant to this goal' : 'relevant — grounded summary withheld';
+  if (state === 'hit') why = !String(g?.summary || '').trim() ? 'grounded summary withheld'
+    : supported ? 'Relevant to this goal' : 'Evidence did not support this goal';
   else if (state === 'miss') why = 'not addressed in this paper';
   else why = 'retrieval degraded — not assessed';
+  const tone = state === 'hit' && !supported ? TILE_STATE.miss : TILE_STATE[state] || TILE_STATE.not_retrieved;
   return (
-    <div className={`rounded-md border border-slate-200/70 border-l-[3px] bg-white/50 p-2.5 ${TILE_STATE[state] || TILE_STATE.not_retrieved}`}>
+    <div className={`rounded-md border border-slate-200/70 border-l-[3px] bg-white/50 p-2.5 ${tone}`}>
       <div className="text-[12px] font-semibold text-slate-800 leading-snug">{shortGoal(g?.goal)}</div>
-      <div className="mt-0.5 text-[11px] text-slate-400">{STATE_LABEL[state] || state}</div>
+      <div className="mt-0.5 text-[11px] text-slate-400">{state === 'hit' && !supported ? '○ not supported' : STATE_LABEL[state] || state}</div>
       <div className="my-1.5 h-1 rounded-full bg-slate-200/80 overflow-hidden" role="meter"
         aria-label={`${shortGoal(g?.goal)} relevance`} aria-valuemin={0} aria-valuemax={3}
         aria-valuenow={Math.max(0, Math.min(3, score))}>
@@ -390,10 +393,9 @@ function GoalFindings({ goals }) {
   </div>;
 }
 
-// Show only the goals this paper ADDRESSES (the tiles carrying a grounded summary
-// worth reading). The not-addressed / not-retrieved goals are noise on the glance
-// surface — fold them behind a quiet line (visual minimalism: one screen, the
-// signal up front). If nothing is addressed, show all so the section isn't empty.
+// Show located evidence first, including evidence against relevance. Retrieval
+// misses and degraded goals stay behind one disclosure; if none are located,
+// show them all so the section isn't empty.
 function GoalBoard({ goals, goalLoc }) {
   const isHit = (g) => String(g?.retrieval_state || 'not_retrieved') === 'hit';
   const addressed = goals.filter(isHit);
