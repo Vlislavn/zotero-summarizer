@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import csv
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -16,6 +15,7 @@ from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.runtime import AppContext, set_context
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.storage import repositories
+from zotero_summarizer.storage.migrations import TRIAGE_MIGRATIONS, run_migrations
 
 
 GOLDEN_HEADER = [
@@ -33,12 +33,7 @@ def _make_project(tmp_path: Path, rows: list[dict[str, str]]) -> Settings:
         w.writeheader()
         for r in rows:
             w.writerow({k: r.get(k, "") for k in GOLDEN_HEADER})
-    conn = sqlite3.connect(str(settings.triage_db_path))
-    try:
-        conn.execute(repositories._CREATE_LABEL_VERDICTS_TABLE)
-        conn.commit()
-    finally:
-        conn.close()
+    run_migrations(settings.triage_db_path, "triage", TRIAGE_MIGRATIONS)
     set_context(AppContext(settings=settings))
     return settings
 
@@ -128,13 +123,19 @@ def test_submit_verdict_for_key_not_in_csv_succeeds(tmp_path):
     ])
     from zotero_summarizer.api.routes import golden
 
-    req = golden.VerdictRequest(item_key="feed:9001", user_priority="must_read", comment="Today")
+    req = golden.VerdictRequest(item_key="ZGONE999", user_priority="must_read", comment="Orphan")
     out = _run(golden.submit_verdict(req))
     assert "id" in out
-    stored = repositories.get_label_verdict(s.triage_db_path, "feed:9001")
+    stored = repositories.get_label_verdict(s.triage_db_path, "ZGONE999")
     assert stored is not None
     assert stored["user_priority"] == "must_read"
     assert stored["original_derived_priority"] == "unknown"
+    with pytest.raises(APIError, match="Generate a review before adding") as exc:
+        _run(golden.submit_verdict(golden.VerdictRequest(
+            item_key="feed:9001", user_priority="must_read", comment="Today",
+        )))
+    assert exc.value.error == "review_required"
+    assert repositories.get_label_verdict(s.triage_db_path, "feed:9001") is None
 
 
 def test_submit_verdict_anchors_to_provenance_when_in_csv(tmp_path):

@@ -180,14 +180,14 @@ def test_goal_affinity_for_items_returns_max_cosine(tmp_path):
     conn = cache._conn()
     try:
         # Two goals (unit axes) + items aligned to each.
-        conn.execute("INSERT INTO goal_embeddings (goal, embedding_json) VALUES (?, ?)",
-                     ("agents", json.dumps([1.0, 0.0, 0.0])))
-        conn.execute("INSERT INTO goal_embeddings (goal, embedding_json) VALUES (?, ?)",
-                     ("clinical", json.dumps([0.0, 1.0, 0.0])))
+        conn.execute("INSERT INTO goal_embeddings (goal, embedding_json, encoder_id) VALUES (?, ?, ?)",
+                     ("agents", json.dumps([1.0, 0.0, 0.0]), cache._encoder_id))
+        conn.execute("INSERT INTO goal_embeddings (goal, embedding_json, encoder_id) VALUES (?, ?, ?)",
+                     ("clinical", json.dumps([0.0, 1.0, 0.0]), cache._encoder_id))
         for iid, vec in [("on_goal", [0.0, 1.0, 0.0]), ("off_goal", [0.0, 0.0, 1.0])]:
             conn.execute(
-                "INSERT INTO corpus_embeddings (item_id, title, content_hash, embedding_json) VALUES (?,?,?,?)",
-                (iid, iid, "h", json.dumps(vec)),
+                "INSERT INTO corpus_embeddings (item_id, title, content_hash, embedding_json, encoder_id) VALUES (?,?,?,?,?)",
+                (iid, iid, "h", json.dumps(vec), cache._encoder_id),
             )
         conn.commit()
     finally:

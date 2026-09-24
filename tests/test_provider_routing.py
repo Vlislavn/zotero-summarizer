@@ -262,12 +262,14 @@ def test_factory_openai_reuses_build_llm(monkeypatch):
     from zotero_summarizer.services.llm import factory
 
     monkeypatch.setenv("LOCAL_KEY", "secret")
+    monkeypatch.setattr(factory, "settings", lambda: types.SimpleNamespace(summary_timeout_seconds=17))
     captured = {}
     monkeypatch.setattr(
         factory, "build_llm",
-        lambda url, model, key, max_tokens, temperature, extra_body: captured.update(
-            url=url, model=model, key=key, max_tokens=max_tokens,
-            temperature=temperature, extra_body=extra_body) or "OPENAI_CLIENT",
+        lambda url, model, key, max_tokens, temperature, extra_body, request_timeout_seconds, structured_output: captured.update(
+            url=url, model=model, key=key, max_tokens=max_tokens, temperature=temperature,
+            extra_body=extra_body, request_timeout_seconds=request_timeout_seconds,
+            structured_output=structured_output) or "OPENAI_CLIENT",
     )
     # extra_body carries provider-specific kwargs (e.g. an MLX/vLLM model served
     # with reasoning disabled). With thinking_effort unset it must reach build_llm
@@ -275,13 +277,15 @@ def test_factory_openai_reuses_build_llm(monkeypatch):
     extra = {"chat_template_kwargs": {"enable_thinking": False}}
     provider = ProviderConfig(
         name="mlx", base_url="http://localhost:8080/v1", api_key_env="LOCAL_KEY",
-        max_tokens=8192, extra_body=extra,
+        max_tokens=8192, extra_body=extra, structured_output=True,
     )
     client = factory.build_client_for_provider(provider, "m")
     assert client == "OPENAI_CLIENT"
     assert captured == {
         "url": "http://localhost:8080/v1", "model": "m", "key": "secret",
         "max_tokens": 8192, "temperature": 0.0, "extra_body": extra,
+        "request_timeout_seconds": 17,
+        "structured_output": True,
     }
 
 
@@ -294,7 +298,7 @@ def test_factory_openai_threads_temperature_and_effort(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         factory, "build_llm",
-        lambda url, model, key, max_tokens, temperature, extra_body: captured.update(
+        lambda url, model, key, max_tokens, temperature, extra_body, request_timeout_seconds, structured_output: captured.update(
             temperature=temperature, extra_body=extra_body) or "C",
     )
     provider = ProviderConfig(
@@ -336,7 +340,9 @@ def test_factory_enable_thinking_override(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         factory, "build_llm",
-        lambda url, model, key, max_tokens, temperature, extra_body: captured.update(extra_body=extra_body) or "C",
+        lambda url, model, key, max_tokens, temperature, extra_body, request_timeout_seconds, structured_output: captured.update(
+            extra_body=extra_body
+        ) or "C",
     )
     base = {"chat_template_kwargs": {"enable_thinking": False}, "keep": 1}
     provider = ProviderConfig(name="p", base_url="http://localhost:8080/v1",
@@ -356,7 +362,9 @@ def test_factory_enable_thinking_noop_without_chat_template_kwargs(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         factory, "build_llm",
-        lambda url, model, key, max_tokens, temperature, extra_body: captured.update(extra_body=extra_body) or "C",
+        lambda url, model, key, max_tokens, temperature, extra_body, request_timeout_seconds, structured_output: captured.update(
+            extra_body=extra_body
+        ) or "C",
     )
     provider = ProviderConfig(name="oa", base_url="https://api.openai.com/v1",
                               api_key_env="LOCAL_KEY", extra_body=None)
@@ -374,7 +382,9 @@ def test_factory_keep_alive_forwarded_only_when_set(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         factory, "build_llm",
-        lambda url, model, key, max_tokens, temperature, extra_body: captured.update(extra_body=extra_body) or "C",
+        lambda url, model, key, max_tokens, temperature, extra_body, request_timeout_seconds, structured_output: captured.update(
+            extra_body=extra_body
+        ) or "C",
     )
     # Set → forwarded.
     provider = ProviderConfig(name="ollama", base_url="http://localhost:11434/v1",
@@ -432,7 +442,10 @@ def test_operational_check_reports_per_stage_status(monkeypatch):
         def prompt(self, _p):
             return "ok"
 
+    calls = []
+
     def _fake_build(provider, model):
+        calls.append((provider.name, model))
         # The deep_review stage routes to the anthropic ("claude") provider —
         # simulate that endpoint being unreachable (the shared probe_provider now
         # builds per provider+model, not per resolved-stage object).
@@ -449,6 +462,7 @@ def test_operational_check_reports_per_stage_status(monkeypatch):
     assert by_stage["backlog"]["status"] == "operational"
     assert by_stage["deep_review"]["status"] == "fail"
     assert "connection refused" in by_stage["deep_review"]["detail"]
+    assert calls.count(("local", "base-model")) == 1
 
 
 def test_reachability_check_reports_per_stage(monkeypatch):

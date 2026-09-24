@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from typing import Any
 
+import httpx
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
@@ -79,13 +81,14 @@ async def update_feed(feed_id: int, req: RssFeedUpdateRequest) -> dict[str, Any]
 
     def _write() -> dict[str, Any]:
         with feeds_storage.open_triage_conn(get_settings().triage_db_path) as conn:
-            ok = rss_storage.update_rss_feed(
-                conn,
-                int(feed_id),
-                name=req.name,
-                url=safe_url,
-                enabled=req.enabled,
-            )
+            try:
+                ok = rss_storage.update_rss_feed(
+                    conn, int(feed_id), name=req.name, url=safe_url, enabled=req.enabled,
+                )
+            except sqlite3.IntegrityError as exc:
+                if exc.sqlite_errorname != "SQLITE_CONSTRAINT_UNIQUE":
+                    raise
+                raise APIError("conflict", "A feed with this URL already exists", status_code=409) from exc
             if not ok:
                 raise APIError("not_found", f"rss feed id={feed_id} not found", status_code=404)
             conn.commit()
@@ -126,12 +129,15 @@ async def import_from_zotero() -> dict[str, Any]:
 
 async def refresh_feeds(req: RssRefreshRequest) -> dict[str, Any]:
     reader = AppRssReader(get_settings().triage_db_path)
-    return await asyncio.to_thread(
-        reader.refresh_feeds,
-        max_feeds=req.max_feeds,
-        max_new_items_per_feed=req.max_new_items_per_feed,
-        per_feed_timeout=req.per_feed_timeout_secs,
-    )
+    try:
+        return await asyncio.to_thread(
+            reader.refresh_feeds,
+            max_feeds=req.max_feeds,
+            max_new_items_per_feed=req.max_new_items_per_feed,
+            per_feed_timeout=req.per_feed_timeout_secs,
+        )
+    except (RssUrlRejected, httpx.HTTPError) as exc:
+        raise APIError("rss_refresh_failed", "RSS refresh failed; check the feed's last_error", status_code=502) from exc
 
 
 router.add_api_route("/api/rss/feeds", list_feeds, methods=["GET"])

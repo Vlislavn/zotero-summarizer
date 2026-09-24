@@ -6,8 +6,7 @@ from zotero_summarizer.services._common import state
 
 async def health() -> HealthResponse:
     app_state = state()
-    loaded = hasattr(app_state, "app_state")
-    if not loaded:
+    if app_state.app_state is None:
         return HealthResponse(status="starting", config_loaded=False)
 
     config: GoalsConfig = app_state.app_state.config

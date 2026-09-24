@@ -18,51 +18,34 @@ Pipeline:
     3. ``ThreadPoolExecutor`` with ``workers=4`` (default) parallelises the
        per-paper LLM calls — the OnPrem ``LLM`` wrapper is thread-safe
        (each call is a stateless HTTP request).
-    4. Per-paper failures are swallowed; the row just gets an empty priority.
+    4. Provider/schema failures abort the batch before predictions are published.
 """
 
 from __future__ import annotations
 
-import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
-from zotero_summarizer.domain import normalize_reading_priority
-
-
-LOGGER = logging.getLogger(__name__)
-
-
-_VALID_PRIORITIES = {"must_read", "should_read", "could_read", "dont_read"}
+from zotero_summarizer.domain import ReadingPriority
+from zotero_summarizer.services.golden.csv_store import edit_csv
 
 
 @dataclass
 class LLMClassification:
     item_key: str
-    priority: str           # one of must/should/could/dont, or "" on failure
+    priority: str           # canonical priority, or "" for missing title/abstract
     confidence: float
     rationale: str
-    error: str = ""
+    skip_reason: str = ""
 
 
 class _LLMVerdict(BaseModel):
-    priority: str = Field(...)
+    priority: ReadingPriority
     confidence: float = Field(..., ge=0.0, le=1.0)
     rationale: str = Field(default="")
-
-    @field_validator("priority")
-    @classmethod
-    def _normalise(cls, value: str) -> str:
-        v = normalize_reading_priority(str(value or "").strip())
-        if v not in _VALID_PRIORITIES:
-            raise ValueError(
-                f"priority must be one of {_VALID_PRIORITIES}, got {value!r}"
-            )
-        return v
-
 
 _PROMPT_TEMPLATE = """\
 You are pre-screening a single academic paper for a researcher who has
@@ -106,13 +89,14 @@ def classify_papers_with_llm(
     """Classify every row in ``rows`` with the LLM, in parallel.
 
     Rows missing title or abstract are returned with an empty priority and
-    an explanatory ``error`` field.
+    an explanatory ``skip_reason`` field. Provider/schema errors propagate;
+    queued calls are cancelled, but already-running calls must finish.
     """
     goals_text = "\n".join(f"- {g}" for g in research_goals) if research_goals else "- (no goals configured)"
     total = len(rows)
-    results: list[LLMClassification | None] = [None] * total
+    results: dict[int, LLMClassification] = {}
 
-    def _classify_one(idx: int, row: dict[str, str]) -> LLMClassification:
+    def _classify_one(row: dict[str, str]) -> LLMClassification:
         item_key = (row.get("item_key") or "").strip()
         title = (row.get("title") or "").strip()
         abstract = (row.get("abstract") or "").strip()
@@ -122,7 +106,7 @@ def classify_papers_with_llm(
                 priority="",
                 confidence=0.0,
                 rationale="",
-                error="missing title or abstract",
+                skip_reason="missing title or abstract",
             )
         prompt = _PROMPT_TEMPLATE.format(
             goals=goals_text,
@@ -131,35 +115,31 @@ def classify_papers_with_llm(
             authors=(row.get("authors") or "").strip() or "(unknown)",
             venue=(row.get("venue") or "").strip() or "(unknown)",
         )
-        try:
-            verdict = llm_client.pydantic_prompt(prompt=prompt, pydantic_model=_LLMVerdict)
-            return LLMClassification(
-                item_key=item_key,
-                priority=verdict.priority,
-                confidence=float(verdict.confidence),
-                rationale=(verdict.rationale or "")[:400],
-            )
-        except Exception as exc:
-            LOGGER.warning("LLM classify failed for %r: %s", title[:60], exc)
-            return LLMClassification(
-                item_key=item_key,
-                priority="",
-                confidence=0.0,
-                rationale="",
-                error=str(exc)[:300],
-            )
+        verdict = llm_client.pydantic_prompt(prompt=prompt, pydantic_model=_LLMVerdict)
+        return LLMClassification(
+            item_key=item_key,
+            priority=verdict.priority.value,
+            confidence=verdict.confidence,
+            rationale=verdict.rationale[:400],
+        )
 
     completed = 0
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(_classify_one, i, r): i for i, r in enumerate(rows)}
-        for fut in as_completed(futures):
-            idx = futures[fut]
-            results[idx] = fut.result()
-            completed += 1
-            if progress_cb is not None and (completed % 10 == 0 or completed == total):
-                progress_cb(completed, total)
+        futures = {}
+        try:
+            for i, row in enumerate(rows):
+                futures[pool.submit(_classify_one, row)] = i
+            for fut in as_completed(futures):
+                results[futures[fut]] = fut.result()
+                completed += 1
+                if progress_cb is not None and (completed % 10 == 0 or completed == total):
+                    progress_cb(completed, total)
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
 
-    return [r for r in results if r is not None]
+    return [results[i] for i in range(total)]
 
 
 def write_predictions_to_csv(
@@ -175,7 +155,6 @@ def write_predictions_to_csv(
     runs of different LLM endpoints are preserved alongside each other (FAIR
     ``Reusable``).
     """
-    import csv as _csv
     from pathlib import Path
 
     if not classifier_name or "/" in classifier_name or " " in classifier_name:
@@ -184,40 +163,27 @@ def write_predictions_to_csv(
             "(letters / digits / underscore / dash only)."
         )
 
-    path = Path(input_csv)
-    with path.open("r", encoding="utf-8", newline="") as f:
-        reader = _csv.DictReader(f)
-        fieldnames = list(reader.fieldnames or [])
-        rows = list(reader)
+    with edit_csv(Path(input_csv)) as (fieldnames, rows):
+        priority_col = f"cls_{classifier_name}_priority"
+        score_col = f"cls_{classifier_name}_score"
+        rationale_col = f"cls_{classifier_name}_rationale"
+        for col in (priority_col, score_col, rationale_col):
+            if col not in fieldnames:
+                fieldnames.append(col)
 
-    priority_col = f"cls_{classifier_name}_priority"
-    score_col = f"cls_{classifier_name}_score"
-    rationale_col = f"cls_{classifier_name}_rationale"
-    for col in (priority_col, score_col, rationale_col):
-        if col not in fieldnames:
-            fieldnames.append(col)
-
-    by_key = {c.item_key: c for c in classifications}
-    updated = 0
-    for row in rows:
-        key = row.get("item_key", "")
-        c = by_key.get(key)
-        if c is None:
-            row.setdefault(priority_col, "")
-            row.setdefault(score_col, "")
-            row.setdefault(rationale_col, "")
-            continue
-        row[priority_col] = c.priority
-        row[score_col] = f"{c.confidence:.4f}" if c.priority else ""
-        row[rationale_col] = c.rationale
-        if c.priority:
-            updated += 1
-
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8", newline="") as f:
-        writer = _csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
+        by_key = {c.item_key: c for c in classifications}
+        updated = 0
         for row in rows:
-            writer.writerow(row)
-    tmp.replace(path)
+            key = row.get("item_key", "")
+            c = by_key.get(key)
+            if c is None:
+                row.setdefault(priority_col, "")
+                row.setdefault(score_col, "")
+                row.setdefault(rationale_col, "")
+                continue
+            row[priority_col] = c.priority
+            row[score_col] = f"{c.confidence:.4f}" if c.priority else ""
+            row[rationale_col] = c.rationale
+            if c.priority:
+                updated += 1
     return updated

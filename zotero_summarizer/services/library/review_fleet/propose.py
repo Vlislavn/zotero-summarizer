@@ -6,7 +6,7 @@ This is the fleet's brain, and it makes **no LLM call** — the expensive judgem
 module is the cheap, glassbox truth-table that folds those pre-computed signals
 into one reading verdict the human can Confirm/Override.
 
-Truth table (digest ``read_decision`` × ``grade``, then quality-adjusted):
+Truth table (effective digest ``read_decision`` × ``grade``):
 
     read  + grade A/B   -> must_read        skim -> should/could (by grade)
     read  + grade C/D/? -> should_read      skip -> could (match/unknown) / dont (real miss)
@@ -36,22 +36,22 @@ _HIGH_GRADES = frozenset({"A", "B"})
 
 
 def _goal_evidence(goal_summaries: Any) -> str:
-    """Tri-state goal signal: ``"match"`` (≥1 standing goal fired), ``"miss"``
-    (goals WERE evaluated and none fired), or ``"unknown"`` (no usable goal board).
+    """A confirmed hit keeps; only a complete, explicit miss board licenses hiding.
 
-    The distinction is load-bearing for the no-wrong-hide asymmetry: only a REAL
-    miss may license a ``dont_read`` proposal on a skip. An ``unknown`` board —
-    ``None``/empty/malformed, e.g. the goal-summary LLM call errored and
-    ``deep_review`` swallowed it to ``None`` — is NOT a miss: a swallowed infra
-    error must never nudge a paper toward a hide. A board "matched" when any of its
-    ``GoalSummary`` cells is ``relevant``; cells must be dicts to count as evaluated.
+    Abstention is about the generated summary: a retrieval miss can legitimately
+    abstain, but a hit with a withheld summary does not establish a confirmed match.
     """
-    if not isinstance(goal_summaries, list):
+    if not isinstance(goal_summaries, list) or not goal_summaries:
         return "unknown"
     cells = [g for g in goal_summaries if isinstance(g, dict)]
-    if not cells:
-        return "unknown"
-    return "match" if any(bool(g.get("relevant")) for g in cells) else "miss"
+    if any(g.get("retrieval_state") == "hit" and g.get("relevant") is True
+           and g.get("abstained") is False for g in cells):
+        return "match"
+    if len(cells) == len(goal_summaries) and all(
+        g.get("retrieval_state") == "miss" and g.get("relevant") is False for g in cells
+    ):
+        return "miss"
+    return "unknown"
 
 
 def _grade(digest: dict[str, Any] | None, quality: dict[str, Any] | None) -> str:
@@ -109,6 +109,59 @@ def _quality_flags(quality: dict[str, Any] | None) -> tuple[list[str], bool]:
     return flags, shaky
 
 
+def effective_read_decision(
+    digest: dict[str, Any] | None,
+    quality: dict[str, Any] | None,
+    *,
+    goal_summaries: Any = None,
+) -> tuple[str, list[str]]:
+    """Reserve full reading for the intersection of idea, goal, evidence, and effort."""
+    d, q = digest or {}, quality or {}
+    decision = str(d.get("read_decision") or "").strip().lower()
+    if decision == "skip" and _goal_evidence(goal_summaries) == "unknown":
+        return "", ["goals_not_assessed"]
+    if decision != "read":
+        return decision if decision in {"skim", "skip"} else "", []
+    flags: list[str] = []
+    friction = str(d.get("writing_friction") or "")
+    if friction == "high":
+        flags.append("writing_friction")
+    elif friction not in {"low", "moderate"}:
+        flags.append("writing_not_assessed")
+    if _goal_evidence(goal_summaries) != "match":
+        flags.append("active_goal_not_confirmed")
+    idea_score = max(int(d.get("novelty") or 0), int(d.get("significance") or 0))
+    if idea_score < 4:
+        flags.append("idea_value_not_high")
+    band = str(q.get("quality_band") or "")
+    if str(q.get("basis") or "") != "non_paper" and band != "highlight":
+        flags.append("strong_evidence_not_confirmed")
+    if band == "flag" or any(str(value).strip() for value in (q.get("overstatements") or [])):
+        flags.append("weak_evidence")
+    return ("skim", flags) if flags else ("read", [])
+
+
+def apply_reading_policy(
+    digest: dict[str, Any],
+    quality: dict[str, Any] | None,
+    goal_summaries: Any,
+) -> tuple[dict[str, Any], str, list[str]]:
+    """Apply the glassbox reading cap while preserving the model's raw decision."""
+    raw = str(digest.get("read_decision") or "")
+    effective, flags = effective_read_decision(
+        digest, quality, goal_summaries=goal_summaries,
+    )
+    if effective != raw:
+        reason = "Goals not assessed; reading decision withheld." if not effective else (
+            "Full reading threshold not met. " + str(digest.get("read_why") or "")
+        )
+        digest = {**digest,
+            "read_decision": effective,
+            "read_why": reason,
+        }
+    return digest, raw, flags
+
+
 def _confidence(read_decision: str, grade: str, *, goal_evidence: str, shaky: bool) -> float:
     """A bounded [0,1] confidence for the proposal.
 
@@ -136,10 +189,10 @@ def _confidence(read_decision: str, grade: str, *, goal_evidence: str, shaky: bo
 def _rationale(read_decision: str, grade: str, verdict: str, *, goal_evidence: str, shaky: bool) -> str:
     """One short plain-language sentence explaining the proposal (for the UI)."""
     decision_txt = {
-        "read": "the digest says read it",
-        "skim": "the digest says skim it",
-        "skip": "the digest says skip it",
-        "": "no full-text digest yet",
+        "read": "read the original",
+        "skim": "skim targeted parts",
+        "skip": "the digest is enough",
+        "": "reading decision unavailable",
     }[read_decision]
     grade_txt = f"grade {grade}" if grade else "ungraded"
     goal_txt = {"match": "matched a goal", "miss": "no goal match", "unknown": "goals not assessed"}[goal_evidence]
@@ -160,8 +213,8 @@ def propose_verdict(
     Pure + deterministic — NO LLM call, NO I/O. ``digest`` is the cached
     ``PaperDigest`` dump (its ``read_decision``/``grade``), ``quality`` the cached
     ``QualityEval`` dump (``quality_band``/``overstatements``/``red_flags``), and
-    ``goal_summaries`` the cached per-goal board (any ``relevant`` cell = goal
-    match). Any of these may be ``None`` (a layer was skipped) — the mapping
+    ``goal_summaries`` the cached per-goal board (a non-abstained, relevant hit
+    confirms a match). Any of these may be ``None`` (a layer was skipped) — the mapping
     degrades to a safe ``could_read`` rather than guessing a hide.
     """
     read_decision = str((digest or {}).get("read_decision") or "").strip().lower()
@@ -170,10 +223,14 @@ def propose_verdict(
     grade = _grade(digest, quality)
     goal_evidence = _goal_evidence(goal_summaries)
 
-    verdict = _base_verdict(read_decision, grade, goal_evidence=goal_evidence)
     flags, shaky = _quality_flags(quality)
-    confidence = _confidence(read_decision, grade, goal_evidence=goal_evidence, shaky=shaky)
-    rationale = _rationale(read_decision, grade, verdict, goal_evidence=goal_evidence, shaky=shaky)
+    effective_decision, policy_flags = effective_read_decision(
+        digest, quality, goal_summaries=goal_summaries,
+    )
+    flags.extend(flag for flag in policy_flags if flag not in flags)
+    verdict = _base_verdict(effective_decision, grade, goal_evidence=goal_evidence)
+    confidence = _confidence(effective_decision, grade, goal_evidence=goal_evidence, shaky=shaky)
+    rationale = _rationale(effective_decision, grade, verdict, goal_evidence=goal_evidence, shaky=shaky)
 
     return ProposedVerdict(
         proposed=verdict,
@@ -187,4 +244,4 @@ def propose_verdict(
     )
 
 
-__all__ = ["propose_verdict"]
+__all__ = ["apply_reading_policy", "effective_read_decision", "propose_verdict"]

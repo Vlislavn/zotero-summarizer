@@ -10,6 +10,7 @@ import { Disclosure } from '../paper/review/primitives.jsx';
 import { humanizeError } from '../../utils/humanizeError.js';
 import { SORT_FIELDS, SORT_DEFAULT_DIR, DEFAULT_SORT } from '../../utils/relevanceBands.js';
 import Spinner from '../ui/Spinner.jsx';
+import { readStorage } from '../../utils/safeStorage.js';
 
 // Stage-2 "Read next": the single Library surface. Ranked queue over the WHOLE
 // library with an inline annotate panel (links, tags, per-paper deep review).
@@ -110,12 +111,10 @@ export default function ReadNextView({
   sort = DEFAULT_SORT, onSortChange,
 }) {
   const computing = status === 'computing';
-  // Rescore is only actionable when scores are missing, stale, or in flight —
-  // when everything is scored and current, the button is noise (Hick's Law);
-  // retrain/hot-swap rescoring is automatic, so the quiet state needs no control.
+  // A failed read must leave Rescore available even with retained last-good rows.
   const errored = status === 'error';
   const rescoreActionable =
-    computing || errored || scoresStale || !computedAt
+    computing || errored || err != null || scoresStale || !computedAt
     || items.some((it) => typeof it.relevance_score !== 'number');
   const [expandedKey, setExpandedKey] = useState(null);
   const expandedPanelRef = useRef(null);
@@ -124,7 +123,7 @@ export default function ReadNextView({
   // collection (validated against the current list) so the routine "send picks
   // to my reading collection" is select → one click.
   const [targetCollection, setTargetCollection] = useState(
-    () => localStorage.getItem('zs:lastCollectionKey') || '',
+    () => readStorage('zs:lastCollectionKey') || '',
   );
   const targetValid = collections.some((c) => c.key === targetCollection);
   // Incremental reveal: the backend returns the whole ranked library, but we only
@@ -176,7 +175,7 @@ export default function ReadNextView({
                   onSortChange(field === 'best' ? DEFAULT_SORT : { field, dir: SORT_DEFAULT_DIR[field] });
                 }}
                 className="px-1.5 py-0.5 rounded-md border border-slate-300 text-[11px] text-slate-700 bg-white"
-                title="Sort the list — same columns as Zotero (Title, Creator, Publication, Year, Date Added). Best match = ranked by relevance to you."
+                title="Sort the list — same columns as Zotero. Best match uses relevance, goals, and evidence; review suggestions do not affect order."
                 aria-label="Sort by"
               >
                 {SORT_FIELDS.map((f) => (
@@ -201,8 +200,8 @@ export default function ReadNextView({
               ? <span>· ranked by similarity to “{searchQuery}”</span>
               : (modelReady
                 ? (
-                  <span title="Best first: ranked by a blend of model relevance to you, goal match, and author/venue prestige — high-quality papers from strong authors/venues float to the top. Bands stay from the relevance score.">
-                    · relevance &amp; quality
+                  <span title="Best first: model relevance + goal match + author/venue and quality evidence. Review suggestions do not affect this order.">
+                    · relevance + goals + evidence
                   </span>
                 )
                 : <span>· ranked by recency (model not ready yet)</span>)
@@ -312,7 +311,7 @@ export default function ReadNextView({
       {computing && (
         <div className="mb-2 flex items-center gap-2 text-xs text-slate-600">
           <Spinner size="sm" color="teal" />
-          Scoring your whole library… first full scan (~2,400 papers) can take a few minutes; results stream in as they compute, then re-scans are fast.
+          Scoring your whole library… the complete result appears when scoring finishes. The previous cache is preserved if scoring fails.
         </div>
       )}
       {errored && error && (
@@ -388,6 +387,11 @@ export default function ReadNextView({
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-medium text-slate-900 line-clamp-2 sm:truncate">{it.title || '(untitled)'}</span>
                   <span className="block text-xs text-slate-500 line-clamp-1 sm:truncate">{truncateAuthors(it.authors)}</span>
+                  {(it.review_digest?.tldr || it.abstract_preview) && (
+                    <span className="block mt-1 text-xs text-slate-600 line-clamp-2">
+                      {it.review_digest?.tldr || it.abstract_preview}
+                    </span>
+                  )}
                   {(it.user_priority || it.proposed_verdict?.proposed || typeof it.relevance_score === 'number') && (
                     <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-5">
                       {/* Your label leads the row (Von Restorff): a paper you
@@ -407,9 +411,9 @@ export default function ReadNextView({
                       {!it.user_priority && it.proposed_verdict?.proposed && (
                         <span
                           className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200"
-                          title="The review fleet's suggested reading verdict (from cached deep-review signals) — Confirm or Override on the card below."
+                          title="Full-text review suggestion — it does not affect list order. Confirm or Override on the card below."
                         >
-                          ◇ {pretty(it.proposed_verdict.proposed)}
+                          ◇ Review suggests: {pretty(it.proposed_verdict.proposed)}
                         </span>
                       )}
                       {typeof it.relevance_score === 'number' ? (

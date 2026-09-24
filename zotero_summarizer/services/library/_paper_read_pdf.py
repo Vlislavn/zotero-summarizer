@@ -77,66 +77,63 @@ def _looks_like_heading(line: str) -> bool:
 
 
 def extract_pdf_content(pdf_path: Path, *, use_docling: bool = False) -> dict[str, Any]:
-    """Extract metadata, section-ish text, and reference count from a PDF.
-
-    ``use_docling=True`` delegates to the high-fidelity Docling parser (TableFormer
-    structured tables + figure captions — fixes truncated tables / bad figures); the
-    default fitz path below is the light, no-extra-dep extractor."""
-    if use_docling:
-        from zotero_summarizer.services.library import _paper_docling
-        return _paper_docling.extract(pdf_path)
+    """Selected parser text/sections plus common PDF metadata and annotation URIs."""
     with fitz.open(pdf_path) as doc:
+        if use_docling:
+            from zotero_summarizer.services.library import _paper_docling
+            content = _paper_docling.extract(pdf_path)
+        else:
+            content = _extract_fitz_body(doc)
         meta = doc.metadata or {}
-        pages: list[str] = []
-        sections: list[dict[str, Any]] = []
-        current_title = "Front matter"
-        current_page = 1
-        parts: list[str] = []
-
-        def flush() -> None:
-            text = "\n\n".join(parts).strip()
-            if text:
-                sections.append(
-                    {
-                        "id": f"sec-{len(sections) + 1}",
-                        "title": current_title,
-                        "level": 1,
-                        "page": current_page,
-                        "text": text,
-                    }
-                )
-
-        for page_no, page in enumerate(doc):
-            page_text_lines: list[str] = []
-            for _y, block_text in _block_texts(page):
-                lines = [line.strip() for line in block_text.splitlines() if line.strip()]
-                page_text_lines.extend(lines)
-                if len(lines) == 1 and _looks_like_heading(lines[0]):
-                    flush()
-                    current_title = lines[0]
-                    current_page = page_no + 1
-                    parts = []
-                else:
-                    parts.append(block_text)
-            pages.append("\n".join(page_text_lines))
-        flush()
-
-        full_text = "\n\n".join(pages).strip()
-        title = str(meta.get("title") or "").strip() or _title_from_text(full_text) or pdf_path.stem
-        refs = _count_references(full_text)
+        full_text = content["full_text"]
         return {
-            "title": title,
+            **content,
+            "title": str(meta.get("title") or "").strip() or _title_from_text(full_text) or pdf_path.stem,
             "authors": str(meta.get("author") or "").strip(),
             "keywords": _split_keywords(str(meta.get("keywords") or "")),
             "n_pages": doc.page_count,
-            "sections": sections or _sections_by_page(pages),
-            "full_text": full_text,
-            # Hyperlink-annotation URIs, kept OUT of full_text so quality/goal layers
-            # stay pure; the code-link layer appends them so a github link that's only
-            # a clickable annotation (over "our code") is still caught.
             "link_uris": extract_link_uris(doc),
-            "references_count": refs,
+            "references_count": _count_references(full_text),
         }
+
+
+def _extract_fitz_body(doc: fitz.Document) -> dict[str, Any]:
+    pages: list[str] = []
+    sections: list[dict[str, Any]] = []
+    current_title = "Front matter"
+    current_page = 1
+    parts: list[str] = []
+
+    def flush() -> None:
+        text = "\n\n".join(parts).strip()
+        if text:
+            sections.append(
+                {
+                    "id": f"sec-{len(sections) + 1}",
+                    "title": current_title,
+                    "level": 1,
+                    "page": current_page,
+                    "text": text,
+                }
+            )
+
+    for page_no, page in enumerate(doc):
+        page_text_lines: list[str] = []
+        for _y, block_text in _block_texts(page):
+            lines = [line.strip() for line in block_text.splitlines() if line.strip()]
+            page_text_lines.extend(lines)
+            if len(lines) == 1 and _looks_like_heading(lines[0]):
+                flush()
+                current_title = lines[0]
+                current_page = page_no + 1
+                parts = []
+            else:
+                parts.append(block_text)
+        pages.append("\n".join(page_text_lines))
+    flush()
+
+    full_text = "\n\n".join(pages).strip()
+    return {"full_text": full_text, "sections": sections or _sections_by_page(pages)}
 
 
 def extract_pdf_figures(pdf_path: Path, figures_dir: Path, *, max_figures: int = 30) -> list[dict[str, Any]]:

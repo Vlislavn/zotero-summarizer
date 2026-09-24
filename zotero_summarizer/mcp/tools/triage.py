@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal
+from urllib.parse import quote
 
 from zotero_summarizer.mcp.api_client import _api_request
 from zotero_summarizer.mcp.config import DEFAULT_TRIAGE_SECONDS_PER_ITEM, MAX_TRIAGE_ITEM_KEYS
@@ -54,7 +55,7 @@ async def get_job_status(job_id: str) -> dict[str, Any]:
     if validation_error is not None:
         return validation_error
 
-    job_result = await _api_request("GET", f"/api/triage/jobs/{safe_job_id}")
+    job_result = await _api_request("GET", f"/api/triage/jobs/{quote(safe_job_id, safe='')}")
     data, job_error = _extract_data_or_error(job_result)
     if job_error is not None:
         return job_error
@@ -69,8 +70,7 @@ async def get_job_status(job_id: str) -> dict[str, Any]:
         total_items=total,
         completed_items=completed,
         progress_percent=progress_percent,
-        current_item_key=str(data.get("current_item_key") or ""),
-        current_title=str(data.get("current_title") or ""),
+        active_items=data["active_items"],
         results=list(data.get("results") or []),
         errors=list(data.get("errors") or []),
         started_at=str(data.get("started_at") or ""),
@@ -85,7 +85,7 @@ async def cancel_job(job_id: str) -> dict[str, Any]:
     if validation_error is not None:
         return validation_error
 
-    cancel_result = await _api_request("POST", f"/api/triage/jobs/{safe_job_id}/cancel")
+    cancel_result = await _api_request("POST", f"/api/triage/jobs/{quote(safe_job_id, safe='')}/cancel")
     data, cancel_error = _extract_data_or_error(cancel_result)
     if cancel_error is not None:
         return cancel_error
@@ -107,7 +107,7 @@ async def submit_feedback(item_key: str, verdict: Literal["approve", "reject"]) 
 
     feedback_result = await _api_request(
         "POST",
-        f"/api/triage/results/{safe_item_key}/feedback",
+        f"/api/triage/results/{quote(safe_item_key, safe='')}/feedback",
         payload={"verdict": verdict},
     )
     data, feedback_error = _extract_data_or_error(feedback_result)

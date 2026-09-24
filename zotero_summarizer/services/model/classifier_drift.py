@@ -6,8 +6,8 @@ small temporal holdout (n≈111) that drift can swing the forward ρ a lot, and 
 operator gets no signal that the *data* changed (only that the *number* did).
 
 This surfaces the drift at train time: the label-class distribution of THIS run vs
-the n_train of the PRIOR run (read from the run log). Logged + returned for the run
-log so it's visible on the ModelCard, not buried.
+the n_train of the prior artifact in the selected output directory. Returned for the run
+log for historical comparison and offline audits.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from zotero_summarizer.domain import ReadingPriority
-from zotero_summarizer.services import run_log
+from zotero_summarizer.services.model.classifier_store import model_path, read_metadata
 
 LOGGER = logging.getLogger(__name__)
 
@@ -38,17 +38,15 @@ def label_distribution(gold_labels: list[str]) -> dict[str, int]:
     return counts
 
 
-def _prior_n_train(runs_log_path: Path | None, classifier_name: str) -> int | None:
-    """The n_train of the previous run for this classifier, or None (first run)."""
-    if runs_log_path is None or not runs_log_path.exists():
+def _prior_n_train(model_dir: Path, classifier_name: str) -> int | None:
+    """Read the predecessor's row count; absence/legacy unknown size means no delta."""
+    path = model_path(model_dir, classifier_name)
+    if not path.exists():
         return None
-    runs = run_log.load_runs(runs_log_path)
-    latest = run_log.latest_per_classifier(runs).get(classifier_name)
-    if not latest:
-        return None
-    cv = latest.get("cv") or {}
-    n = cv.get("n_rows")
-    return int(n) if isinstance(n, (int, float)) else None
+    n = read_metadata(path).get("n_train")
+    if n is not None and (type(n) is not int or n < 0):
+        raise ValueError("Previous model n_train must be a nonnegative integer")
+    return n
 
 
 def log_label_drift(
@@ -56,16 +54,16 @@ def log_label_drift(
     n_train: int,
     *,
     classifier_name: str,
-    runs_log_path: Path | None,
+    model_dir: Path,
 ) -> dict[str, Any]:
     """Compute + log the label distribution and the n_train delta vs the prior run.
 
-    Pure read of the run log (no write — the caller appends the run entry). Returns a
+    Reads the previous artifact before replacement. Returns a
     ``label_drift`` dict for the run-log entry: ``{distribution, n_train, n_train_delta,
-    prior_n_train}``. The delta is ``None`` on the first run (no prior).
+    prior_n_train}``. The delta is ``None`` when the predecessor or its size is unknown.
     """
     dist = label_distribution(gold_labels)
-    prior = _prior_n_train(runs_log_path, classifier_name)
+    prior = _prior_n_train(model_dir, classifier_name)
     delta = None if prior is None else n_train - prior
     LOGGER.info(
         "label drift: n_train=%d (Δ=%s) must=%d should=%d could=%d dont=%d",

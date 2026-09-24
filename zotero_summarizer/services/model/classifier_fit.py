@@ -59,6 +59,27 @@ def _fit_tabpfn(
     return p_train, p_val
 
 
+def _fit_lightgbm_regressor(
+    X_train: np.ndarray, y_train: np.ndarray,
+    *, lgbm_params: dict[str, Any] | None = None,
+    sample_weight: np.ndarray | None = None,
+) -> Any:
+    """One fitted regression recipe for CV, temporal evaluation and persistence."""
+    import lightgbm as lgb
+
+    defaults = {
+        "objective": "regression", "n_estimators": 200, "num_leaves": 15,
+        "max_depth": 4, "learning_rate": 0.05, "min_child_samples": 10,
+        "reg_lambda": 1.0, "verbose": -1, "random_state": 42,
+        "n_jobs": 1, "num_threads": 1,
+    }
+    if lgbm_params is not None:
+        defaults.update(lgbm_params)
+    reg = lgb.LGBMRegressor(**defaults)
+    reg.fit(X_train, y_train, sample_weight=sample_weight)
+    return reg
+
+
 def _fit_lightgbm(
     X_train: np.ndarray, y_train: np.ndarray, X_val: np.ndarray,
     *, objective: str = "regression", lgbm_params: dict[str, Any] | None = None,
@@ -68,23 +89,9 @@ def _fit_lightgbm(
     import lightgbm as lgb
 
     if objective == "regression":
-        defaults = {
-            "objective": "regression",
-            "n_estimators": 200,
-            "num_leaves": 15,
-            "max_depth": 4,
-            "learning_rate": 0.05,
-            "min_child_samples": 10,
-            "reg_lambda": 1.0,
-            "verbose": -1,
-            "random_state": 42,
-            "n_jobs": 1,
-            "num_threads": 1,
-        }
-        if lgbm_params:
-            defaults.update(lgbm_params)
-        reg = lgb.LGBMRegressor(**defaults)
-        reg.fit(X_train, y_train, sample_weight=sample_weight)
+        reg = _fit_lightgbm_regressor(
+            X_train, y_train, lgbm_params=lgbm_params, sample_weight=sample_weight,
+        )
         p_val = predict_named(reg, X_val)
         p_train = predict_named(reg, X_train) if return_train_probs else None
         return p_train, p_val

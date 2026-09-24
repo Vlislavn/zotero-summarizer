@@ -15,6 +15,7 @@ from typing import Any, NamedTuple
 
 from zotero_summarizer.models import GoalsConfig, PaperDigest
 from zotero_summarizer.services._common import to_text
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.library import quality_review
 from zotero_summarizer.services.triage.prompts import DEFAULT_MAP_PROMPT
 
@@ -38,7 +39,8 @@ def split_chunks(text: str, chunk_chars: int, *, overlap: int = 200) -> list[str
 
 
 def _map_chunk(map_llm: Any, chunk: str) -> str:
-    return to_text(map_llm.prompt(DEFAULT_MAP_PROMPT.format(chunk=chunk))).strip()
+    prompt = UNTRUSTED_INPUT_RULE + "\n\n" + DEFAULT_MAP_PROMPT.format(chunk=untrusted_input(chunk))
+    return to_text(map_llm.prompt(prompt)).strip()
 
 
 class ChunkBudget(NamedTuple):
@@ -75,12 +77,13 @@ def digest_for_strategy(
         return map_reduce_digest(
             title=title, full_text=full_text, config=config, map_llm=map_llm,
             reduce_llm=reduce_llm, chunk_chars=budget.chunk_chars,
-            sub_concurrency=budget.sub_concurrency, response_format=response_format,
+            sub_concurrency=budget.sub_concurrency, focus_prompt=focus_prompt,
+            response_format=response_format,
         )
     return assess_digest(
         title=title, full_text=full_text, config=config, llm=reduce_llm,
         focus_prompt=focus_prompt, max_chars=budget.max_chars, prefix=(strategy == "prefix"),
-        response_format=response_format,
+        response_format=response_format, verifier_llm=map_llm,
     )
 
 
@@ -93,6 +96,7 @@ def map_reduce_digest(
     reduce_llm: Any,
     chunk_chars: int = 8000,
     sub_concurrency: int = 1,
+    focus_prompt: str = "",
     response_format: dict[str, Any] | None = None,
 ) -> PaperDigest:
     """MAP each chunk on ``map_llm`` (parallel up to ``sub_concurrency``), REDUCE the notes into
@@ -115,6 +119,7 @@ def map_reduce_digest(
     extra = {"response_format": response_format} if response_format else {}
     digest = assess_digest(
         title=title, full_text=combined, config=config, llm=reduce_llm,
-        max_chars=len(combined) + 1, **extra,
+        max_chars=len(combined) + 1, verifier_llm=map_llm,
+        focus_prompt=focus_prompt, **extra,
     )
     return digest.model_copy(update={"basis": "map_reduce"})

@@ -319,32 +319,15 @@ def test_write_predictions_rejects_invalid_classifier_name(tmp_path: Path):
             classifier.write_predictions_to_csv(csv_path, report, classifier_name=bad)
 
 
-def test_compute_metrics_auto_resolves_split_column(tmp_path: Path):
-    """When split is set and priority_column ends in _priority, split_column
-    is derived as <prefix>_split automatically."""
-    import csv as _csv
-
-    csv_path = tmp_path / "golden.csv"
-    fields = [
-        "item_key", "gold_priority_final", "gold_signal_strength",
-        "cls_tabpfn_priority", "cls_tabpfn_split",
+def test_compute_metrics_scores_selected_split_predictions():
+    """Callers select split keys directly; metrics never infer a CSV column."""
+    rows = [
+        {"item_key": key, "gold_priority_final": "must_read", "gold_signal_strength": "high"}
+        for key in ("A", "B")
     ]
-    with csv_path.open("w", encoding="utf-8", newline="") as f:
-        w = _csv.DictWriter(f, fieldnames=fields)
-        w.writeheader()
-        w.writerow({"item_key": "A", "gold_priority_final": "must_read",
-                    "gold_signal_strength": "high",
-                    "cls_tabpfn_priority": "must_read", "cls_tabpfn_split": "cv"})
-        w.writerow({"item_key": "B", "gold_priority_final": "must_read",
-                    "gold_signal_strength": "high",
-                    "cls_tabpfn_priority": "dont_read", "cls_tabpfn_split": "holdout"})
 
-    m_cv = classifier.compute_metrics_against_gold(
-        csv_path, split="cv", priority_column="cls_tabpfn_priority",
-    )
-    m_ho = classifier.compute_metrics_against_gold(
-        csv_path, split="holdout", priority_column="cls_tabpfn_priority",
-    )
+    m_cv = classifier.compute_metrics_against_gold(rows, {"A": "must_read"})
+    m_ho = classifier.compute_metrics_against_gold(rows, {"B": "dont_read"})
     assert m_cv["total"] == 1
     assert m_ho["total"] == 1
     assert m_cv["per_class"]["must_read"]["true_positive"] == 1

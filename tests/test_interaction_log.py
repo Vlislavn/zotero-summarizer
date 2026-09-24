@@ -2,21 +2,23 @@
 
 The whole point of this log is the IMMUTABLE trajectory the live verdict tables
 (UPSERT / DELETE) destroy — so the load-bearing test is that re-rating the same
-item appends BOTH events, and that a write failure is warned-not-swallowed.
+item appends BOTH events, and that a write failure propagates.
 """
 
 from __future__ import annotations
 
 import asyncio
 import csv
-import logging
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from zotero_summarizer.runtime import AppContext, set_context
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.services import interaction_log, run_log
+from zotero_summarizer.services.golden import label_verdicts
 from zotero_summarizer.storage import repositories
 
 
@@ -95,25 +97,68 @@ def test_behavioural_outcome_records_the_outcome(tmp_path: Path, monkeypatch):
     assert ev["stable_id"]["feed_item_id"] == 9
 
 
-def test_emit_failure_is_warned_not_swallowed(tmp_path: Path, monkeypatch, caplog):
-    """A logging failure must NOT break the durable decision write, but it MUST
-    surface as a WARNING (no silent swallow — the global fail-fast rule)."""
+def test_emit_failure_propagates(tmp_path: Path, monkeypatch):
     _point_log_at(monkeypatch, tmp_path / "x.jsonl")
 
     def boom(*_a, **_k):
         raise OSError("disk full")
 
     monkeypatch.setattr(run_log, "append_run", boom)
-    logger = logging.getLogger("zotero_summarizer")
-    monkeypatch.setattr(logger, "propagate", True)
-
-    with caplog.at_level(logging.WARNING, logger="zotero_summarizer"):
-        interaction_log.log_human_feedback(  # must NOT raise
+    with pytest.raises(OSError, match="disk full"):
+        interaction_log.log_human_feedback(
             item_key="feed:1", item_key_kind="feed", surface="today_priority",
             model={}, human={"kind": "priority", "value": "must_read"},
         )
 
-    assert any("interaction_log" in r.getMessage() for r in caplog.records)
+def test_label_verdict_command_preserves_transition_classes_and_user_precedence(
+    tmp_path: Path, monkeypatch,
+):
+    db_path = tmp_path / "triage.db"
+    log_path = tmp_path / "interaction-events.jsonl"
+    _point_log_at(monkeypatch, log_path)
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(repositories._CREATE_LABEL_VERDICTS_TABLE)
+        conn.commit()
+    finally:
+        conn.close()
+    repositories.insert_or_update_label_verdict(
+        db_path, item_key="ZKEY1", original_derived_priority="could_read",
+        user_priority="should_read", comment="machine", source="auto_quality",
+    )
+
+    row_id = label_verdicts.set_label_verdict(
+        db_path, item_key="ZKEY1", user_priority="should_read",
+        surface="annotate_verdict", original_derived_priority="must_read",
+        comment="confirmed",
+    )
+    assert label_verdicts.set_label_verdict(
+        db_path, item_key="ZKEY1", user_priority="dont_read",
+        surface="today_keep", original_derived_priority="should_read",
+        source="machine_add",
+    ) == row_id
+    label_verdicts.set_label_verdict(
+        db_path, item_key="ZKEY1", user_priority="should_read",
+        surface="annotate_verdict", original_derived_priority="must_read",
+        comment="same label, new note",
+    )
+    label_verdicts.set_label_verdict(
+        db_path, item_key="ZKEY1", user_priority="dont_read",
+        surface="annotate_verdict", original_derived_priority="must_read",
+    )
+    assert label_verdicts.retract_label_verdict(
+        db_path, item_key="ZKEY1", surface="annotate_retract",
+    )
+
+    events = [e for e in run_log.load_runs(log_path) if e["event"] == "label_transition"]
+    assert [e["transition"] for e in events] == ["assigned", "changed", "retracted"]
+    assert [
+        (e["previous_user_priority"], e["new_user_priority"])
+        for e in events
+    ] == [(None, "should_read"), ("should_read", "dont_read"), ("dont_read", None)]
+    assert events[0]["previous_source"] == "auto_quality"
+    assert events[0]["model_priority"] == "must_read"
+    assert repositories.get_label_verdict(db_path, "ZKEY1") is None
 
 
 # --- end-to-end: the real golden route handlers emit through the live chain ---
@@ -128,24 +173,38 @@ def test_golden_routes_emit_through_the_real_chain(tmp_path: Path):
     settings.golden_csv_path.write_text(
         "item_key,title,abstract,gold_priority_final\n", encoding="utf-8",
     )
-    conn = sqlite3.connect(str(settings.triage_db_path))
-    try:
-        conn.execute(repositories._CREATE_LABEL_VERDICTS_TABLE)
-        conn.commit()
-    finally:
-        conn.close()
+    with repositories.with_db_path(settings.triage_db_path):
+        repositories.init_db()
     set_context(AppContext(settings=settings))
 
     from zotero_summarizer.api.routes import golden
 
     asyncio.run(golden.submit_verdict(
-        golden.VerdictRequest(item_key="ZKEY1", user_priority="must_read", comment="")
+        golden.VerdictRequest(item_key="ZKEY1", user_priority="should_read", comment="")
     ))
+    asyncio.run(golden.submit_verdict(
+        golden.VerdictRequest(item_key="ZKEY1", user_priority="should_read", comment="same")
+    ))
+    asyncio.run(golden.submit_verdict(
+        golden.VerdictRequest(item_key="ZKEY1", user_priority="dont_read", comment="changed")
+    ))
+    assert repositories.get_label_verdict(
+        settings.triage_db_path, "ZKEY1",
+    )["user_priority"] == "dont_read"
     asyncio.run(golden.remove_verdict("ZKEY1"))
 
     events = run_log.load_runs(settings.interaction_log_path)
     surfaces = [e["surface"] for e in events]
     assert "annotate_verdict" in surfaces
     assert "annotate_retract" in surfaces
-    retract = next(e for e in events if e["surface"] == "annotate_retract")
-    assert retract["human"] == {"kind": "retract", "value": "must_read"}
+    retract = next(
+        e for e in events
+        if e["surface"] == "annotate_retract" and e["event"] == "human_feedback"
+    )
+    assert retract["human"] == {"kind": "retract", "value": "dont_read"}
+    transitions = [e for e in events if e["event"] == "label_transition"]
+    assert [e["transition"] for e in transitions] == ["assigned", "changed", "retracted"]
+    assert [
+        (e["previous_user_priority"], e["new_user_priority"])
+        for e in transitions
+    ] == [(None, "should_read"), ("should_read", "dont_read"), ("dont_read", None)]

@@ -158,6 +158,62 @@ def test_cold_start_work_fetches_author_field_percentile(tmp_path):
     assert work.max_author_field_percentile == pytest.approx(0.85)  # median([0.8, 0.9])
 
 
+def test_work_without_resolvable_author_ids_has_unknown_max_h_index(tmp_path):
+    """Missing OpenAlex author IDs mean unknown, not an h-index of zero."""
+    cache = OpenAlexCache(tmp_path / "c.db", ttl_seconds=86400)
+    http = MagicMock()
+    http.get.return_value = _mock_response(200, {
+        "id": "https://openalex.org/W-no-author-ids",
+        "citation_normalized_percentile": {"value": 0.7},
+        "authorships": [{"author": {"id": None, "display_name": "Faisal Mahmood"}}],
+    })
+    client = OpenAlexClient(cache, http_client=http)
+
+    work = client.fetch_work_by_doi("10.1/no-author-ids")
+
+    assert work is not None
+    assert work.max_author_h_index is None
+
+
+def test_zero_author_profile_is_unknown_h_index(tmp_path):
+    cache = OpenAlexCache(tmp_path / "c.db", ttl_seconds=86400)
+    http = MagicMock()
+    http.get.side_effect = [
+        _mock_response(200, {
+            "id": "https://openalex.org/W-split-profile",
+            "citation_normalized_percentile": {"value": 0.7},
+            "authorships": [{"author": {"id": "https://openalex.org/A-stub"}}],
+        }),
+        _mock_response(200, {"summary_stats": {"h_index": 0}}),
+    ]
+    client = OpenAlexClient(cache, http_client=http)
+
+    work = client.fetch_work_by_doi("10.1/split-profile")
+
+    assert work is not None
+    assert work.max_author_h_index is None
+
+
+def test_transient_author_profile_failure_does_not_cache_established_work(tmp_path):
+    cache = OpenAlexCache(tmp_path / "c.db", ttl_seconds=86400)
+    http = MagicMock()
+    http.get.side_effect = [
+        _mock_response(200, {
+            "id": "https://openalex.org/W-profile-failure",
+            "citation_normalized_percentile": {"value": 0.7},
+            "authorships": [{"author": {"id": "https://openalex.org/A1"}}],
+        }),
+        _mock_response(500),
+    ]
+    client = OpenAlexClient(cache, http_client=http)
+
+    work = client.fetch_work_by_doi("10.1/profile-failure")
+
+    assert work is not None
+    assert work.max_author_h_index is None
+    assert cache.get("doi:10.1/profile-failure") is None
+
+
 def test_established_work_skips_author_percentile_fetch(tmp_path):
     """Cost guard: a work WITH its own percentile must NOT trigger the extra
     per-author /works calls (only the h-index lookup runs)."""

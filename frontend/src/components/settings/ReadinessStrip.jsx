@@ -8,21 +8,23 @@
 import { useNavigate } from 'react-router-dom';
 import { useSetupStatus } from '../../hooks/useSetupStatus.js';
 
-function Pill({ label, ok, onClick, title }) {
+function Pill({ label, ok, neutral = false, onClick, title }) {
   const base =
     'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold transition-colors';
-  const tone = ok
+  const tone = neutral
+    ? 'bg-slate-50 border-slate-200 text-slate-600'
+    : ok
     ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
     : 'bg-rose-50 border-rose-200 text-rose-800 hover:bg-rose-100 cursor-pointer';
   return (
     <button
       type="button"
-      onClick={ok ? undefined : onClick}
-      disabled={ok}
+      onClick={ok || neutral ? undefined : onClick}
+      disabled={ok || neutral}
       title={title}
-      className={`${base} ${tone} ${ok ? 'cursor-default' : ''}`}
+      className={`${base} ${tone} ${ok || neutral ? 'cursor-default' : ''}`}
     >
-      <span aria-hidden>{ok ? '✓' : '✗'}</span>
+      <span aria-hidden>{neutral ? '—' : ok ? '✓' : '✗'}</span>
       {label}
     </button>
   );
@@ -49,7 +51,7 @@ export default function ReadinessStrip() {
   // An all-green strip tells the user nothing actionable (it just restates that
   // setup is done, and the LLM dot already lives in Active models below). Surface
   // it ONLY when something needs fixing — success is silent (Tesler / Occam).
-  const allReady = pillars.llm && pillars.goals && pillars.model
+  const allReady = (pillars.llm || pillars.llmDisabled) && pillars.goals && pillars.model
     && subsystemIssues.length === 0;
   if (allReady) return null;
 
@@ -59,10 +61,11 @@ export default function ReadinessStrip() {
         Needs attention
       </span>
       <Pill
-        label="LLM"
+        label={pillars.llmDisabled ? 'AI off' : 'LLM'}
         ok={pillars.llm}
+        neutral={pillars.llmDisabled}
         onClick={() => scrollToAnchor('ai-models')}
-        title={pillars.llm ? 'LLM reachable' : 'LLM not reachable — check the provider in AI models'}
+        title={pillars.llmDisabled ? 'AI features are deliberately disabled' : pillars.llm ? 'LLM reachable' : 'LLM not reachable — check the provider in AI models'}
       />
       <Pill
         label="Goals"

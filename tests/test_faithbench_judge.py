@@ -4,6 +4,7 @@ abstentions, never exact/numeric/containment passes)."""
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 
 import pytest
 
@@ -59,11 +60,11 @@ def _trap(**overrides) -> TrapItem:
     return TrapItem(**base)
 
 
-def _row(answer, *, abstained=None, status="ok", error=None):
+def _row(answer, *, abstained=None, status="ok", error=None, quote=None):
     parsed = None if answer == "MALFORMED" else {
         "answer": answer,
         "abstained": (answer is None) if abstained is None else abstained,
-        "quote": None,
+        "quote": quote if quote is not None else "We trained on the ImageNet dataset using 1,281,167 images.",
     }
     return {
         "run_id": "r", "item_id": "qa:P1:0", "track": "qa", "condition": "full_text",
@@ -101,16 +102,22 @@ def test_normalized_exact_match_passes_without_judge(answer):
     assert verdict.method == JudgeMethod.EXACT
 
 
+def test_correct_answer_with_missing_or_unrelated_quote_fails():
+    for quote in ("", "The paper evaluated a different model on the CIFAR benchmark only."):
+        verdict = hard_qa_judgment(_qa(), _row("ImageNet", quote=quote), PAPER_TEXT)
+        assert verdict.success is False
+
+
 def test_numeric_tolerance_and_integer_strictness():
     qa = _qa(gold_answer="85.3", answer_type="number")
     assert hard_qa_judgment(qa, _row("85.3")).success is True
-    close = hard_qa_judgment(qa, _row("85.0 percent"))
+    close = hard_qa_judgment(qa, _row("85.0"))
     assert close.success is True and close.method == JudgeMethod.NUMERIC  # within 1%
     far = hard_qa_judgment(qa, _row("12.0"))
     assert far.success is False and far.failure_reason == FailureReason.WRONG_ANSWER
 
     int_qa = _qa(gold_answer="1,281,167", answer_type="number")
-    assert hard_qa_judgment(int_qa, _row("1281167 images")).success is True
+    assert hard_qa_judgment(int_qa, _row("1281167")).success is True
     off_by_one = hard_qa_judgment(int_qa, _row("1281168"))
     assert off_by_one.success is False  # integers never get tolerance
 
@@ -144,8 +151,10 @@ def test_residual_band_returns_none_for_escalation():
 
 
 def test_parse_number():
-    assert parse_number("about 1,281,167 images") == 1281167
-    assert parse_number("85.3%") == 85.3
+    assert parse_number("1,281,167") == 1281167
+    assert parse_number("85.3") == Decimal("85.3")
+    assert parse_number("about 1,281,167 images") is None
+    assert parse_number("85.3%") is None
     assert parse_number("no digits") is None
 
 
@@ -167,6 +176,21 @@ def test_judge_equivalence_verdicts_and_error_tri_state():
     broken = judge_equivalence(FakeJudge([RuntimeError("down"), RuntimeError("down")]),
                                item=_qa(), answer="x", judge_model="J")
     assert broken.success is None and broken.failure_reason == FailureReason.JUDGE_ERROR
+
+
+@pytest.mark.parametrize("payload", [
+    {}, {"equivalent": None}, {"equivalent": "false"}, {"equivalent": "true"},
+    {"equivalent": 0}, {"equivalent": 1}, {"equivalent": []}, {"equivalent": {}},
+])
+def test_equivalence_requires_a_json_boolean(payload):
+    judge = FakeJudge([payload])
+
+    verdict = judge_equivalence(judge, item=_qa(), answer="CIFAR-10", judge_model="J")
+
+    assert verdict.success is None
+    assert verdict.failure_reason == FailureReason.JUDGE_ERROR
+    assert "equivalent" in verdict.details
+    assert judge.calls == 1
 
 
 def test_judge_claim_verbatim_skips_judge_and_nei_gets_full_text_pass():
@@ -234,10 +258,14 @@ def test_other_claims_keep_the_paper_only_standard(field, goals):
 def _setup_run(tmp_path, *, sha_override=None):
     papers_dir = tmp_path / "papers"
     sha = freeze_paper_text(papers_dir, "P1", PAPER_TEXT)
+    source_text = "This study enrolled 412 patients."
+    source_sha = freeze_paper_text(papers_dir, "P2", source_text)
     meta = BenchmarkMeta(
         version=1, created_at="t", builder_model="B",
         papers=[PaperManifestEntry(item_key="P1", title="T",
-                                   text_sha256=sha_override or sha, n_chars=len(PAPER_TEXT))],
+                                   text_sha256=sha_override or sha, n_chars=len(PAPER_TEXT)),
+                PaperManifestEntry(item_key="P2", title="Source P2", text_sha256=source_sha,
+                                   n_chars=len(source_text))],
     )
     items = [_qa(paper_text_sha256=sha), _trap(paper_text_sha256=sha)]
     paths = RunPaths(run_dir=tmp_path / "runs" / "r1")
@@ -276,6 +304,23 @@ def test_judge_run_frozen_text_drift_is_harness_fault_not_model_failure(tmp_path
     assert counts["judged"] == 2
     assert all(r["success"] is None for r in rows)
     assert all(r["failure_reason"] == FailureReason.HARNESS_FAULT.value for r in rows)
+
+
+def test_judge_run_records_invalid_equivalence_as_unjudgeable(tmp_path):
+    meta, items, papers_dir, paths = _setup_run(tmp_path)
+    paths.responses.write_text(json.dumps(_row("CIFAR-10")) + "\n", encoding="utf-8")
+
+    counts = judge_run(
+        inputs=RunInputs(meta=meta, items=items, papers_dir=papers_dir, paths=paths),
+        judge_llm=FakeJudge([{"equivalent": "false"}]), judge_model="J", max_text_chars=60_000,
+    )
+
+    rows = [json.loads(line) for line in paths.judgments.read_text().splitlines()]
+    assert counts == {"judged": 1, "skipped": 0, "escalated": 1}
+    assert len(rows) == 1
+    assert rows[0]["success"] is None
+    assert rows[0]["failure_reason"] == FailureReason.JUDGE_ERROR.value
+    assert "equivalent" in rows[0]["details"]
 
 
 def test_judge_run_routes_read_why_claims_through_goal_aware_prompt(tmp_path):
@@ -352,3 +397,41 @@ def test_judgment_invariants():
         Judgment(success=None, failure_reason=FailureReason.WRONG_ANSWER)  # not unjudgeable
     with pytest.raises(ValueError):
         Judgment(success=True, failure_reason=FailureReason.WRONG_ANSWER)
+
+
+@pytest.mark.parametrize("gold,answer", [
+    ("10 mg drug A", "10 cats"), ("10-20", "10-30"),
+    ("10 mg", "10 mg was not used"), ("85.3", "85.3 percent"),
+    ("1e2", "1"), ("1,2", "12"),
+])
+def test_numeric_semantics_beyond_a_scalar_require_the_judge(gold, answer):
+    assert hard_qa_judgment(_qa(gold_answer=gold, answer_type="number"), _row(answer)) is None
+
+
+@pytest.mark.parametrize("gold,answer", [
+    ("-10", "10"), ("9007199254740992", "9007199254740993"),
+])
+def test_numeric_sign_and_integer_precision_are_not_normalized_away(gold, answer):
+    verdict = hard_qa_judgment(_qa(gold_answer=gold, answer_type="number"), _row(answer))
+    assert verdict.success is False
+    assert verdict.failure_reason == FailureReason.WRONG_ANSWER
+
+
+def test_unit_mismatch_is_escalated_and_persisted_as_rejected(tmp_path):
+    meta, items, papers_dir, paths = _setup_run(tmp_path)
+    qa = _qa(gold_answer="90 epochs", answer_type="number", paper_text_sha256=meta.papers[0].text_sha256,
+             span_start=PAPER_TEXT.index("90 epochs"), span_end=PAPER_TEXT.index("90 epochs") + len("90 epochs"),
+             evidence_sentence="The top-1 accuracy was 85.3 percent after 90 epochs.")
+    paths.responses.write_text(json.dumps(_row(
+        "90 cats", quote="The top-1 accuracy was 85.3 percent after 90 epochs.",
+    )) + "\n", encoding="utf-8")
+    judge = FakeJudge([{"equivalent": False, "reason": "different units and entities"}])
+
+    counts = judge_run(inputs=RunInputs(meta, [qa], papers_dir, paths), judge_llm=judge,
+                       judge_model="J", max_text_chars=60000)
+
+    assert counts == {"judged": 1, "skipped": 0, "escalated": 1}
+    assert judge.calls == 1
+    row = json.loads(paths.judgments.read_text())
+    assert row["success"] is False
+    assert row["failure_reason"] == FailureReason.JUDGE_REJECT.value

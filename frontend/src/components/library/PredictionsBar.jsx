@@ -15,9 +15,9 @@ function stateLine(fleetStatus, proposedCount, coolCount, autoActive, stopping) 
   const {
     status, total = 0, completed = 0, proposed = 0,
     no_fetchable_source: noSource = 0, needs_library_login: needsLogin = 0,
-    failed = 0, error, progress = {},
+    browser_extra_unavailable: noBrowser = 0, failed = 0, error, progress = {},
   } = fleetStatus || {};
-  const skipped = noSource + needsLogin;
+  const skipped = noSource + needsLogin + noBrowser;
 
   if (stopping) {
     return { tone: 'text-amber-700', text: 'Stopping — finishing the reviews already in progress (they’re kept); no new papers will start.' };
@@ -39,7 +39,9 @@ function stateLine(fleetStatus, proposedCount, coolCount, autoActive, stopping) 
     return { tone: 'text-rose-700', text: `Review failed: ${error || 'unknown error'}` };
   }
   if (status === 'done_empty') {
-    const detail = failed > 0
+    const detail = noBrowser > 0
+      ? 'browser support is not installed; open Settings → University access.'
+      : failed > 0
       ? `${failed} couldn’t be reviewed — the deep-review step errored (check the server log).`
       : 'none yielded a fetchable digest (a web article, a paywall, or no open-access / arXiv source).';
     return {
@@ -65,7 +67,7 @@ function stateLine(fleetStatus, proposedCount, coolCount, autoActive, stopping) 
   return { tone: 'text-slate-500', text: 'No undecided cool papers.' };
 }
 
-export default function PredictionsBar({ fleetStatus, onRun, onStop, autoActive = false, stopping = false, coolCount = 0, proposedCount = 0 }) {
+export default function PredictionsBar({ fleetStatus, onRun, onStop, autoActive = false, stopping = false, coolCount = 0, proposedCount = 0, queueAtLimit = false }) {
   const line = stateLine(fleetStatus, proposedCount, coolCount, autoActive, stopping);
   // Gated picks (paywalled, session stale) surfaced as sign-in links: open, log in to
   // refresh the publisher session, then run again. Only items that carry a URL.
@@ -115,6 +117,11 @@ export default function PredictionsBar({ fleetStatus, onRun, onStop, autoActive 
           streams progress for minutes — announce each state change to screen
           readers, who otherwise get no feedback during the long-running op. */}
       <p role="status" aria-live="polite" className={`mt-1.5 text-[11px] ${line.tone}`}>{line.text}</p>
+      {queueAtLimit && (
+        <p className="mt-1 text-[11px] text-amber-800">
+          The queue is at its 5,000-paper limit. This run covers the loaded rows; more papers may remain outside this queue.
+        </p>
+      )}
       {loginItems.length > 0 && (
         <div className="mt-1.5 text-[11px] text-slate-600">
           <span>🔒 Sign in to fetch these — open the link, log in, then review again:</span>

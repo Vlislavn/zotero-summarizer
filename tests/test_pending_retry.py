@@ -24,6 +24,10 @@ class _FakeWriter:
             "backup_path": "/tmp/backup.sqlite",
         }
 
+    def remove_items_from_collection(self, item_keys, collection_name, root_only):  # noqa: ARG002
+        self.removed_keys = list(item_keys)
+        return len(item_keys)
+
 
 class _InboxRemovalFailsWriter(_FakeWriter):
     """Applies changes normally but its Inbox-removal write always raises."""
@@ -39,16 +43,32 @@ def _install_capture(monkeypatch, writer=None):
 
     def fake_get_by_ids(change_ids, status=None):
         captured["status"] = status
-        return [{"id": int(cid), "item_key": f"KEY{cid}", "change_type": "tag_changes"} for cid in change_ids]
+        return [
+            {"id": int(cid), "item_key": f"KEY{cid}", "change_type": "tag_changes"}
+            for cid in change_ids
+        ]
 
-    monkeypatch.setattr(pending_service.triage_db, "get_pending_changes_by_ids", fake_get_by_ids)
-    monkeypatch.setattr(pending_service.triage_db, "set_pending_changes_status", lambda *a, **k: len(a[0]))
+    monkeypatch.setattr(
+        pending_service.triage_db, "get_pending_changes_by_ids", fake_get_by_ids
+    )
+    transitions = []
+    monkeypatch.setattr(
+        pending_service.triage_db,
+        "set_pending_changes_status",
+        lambda *a, **k: transitions.append((a, k)) or len(a[0]),
+    )
+    monkeypatch.setattr(
+        pending_service.triage_db,
+        "item_keys_without_open_changes",
+        lambda keys: list(keys),
+    )
     monkeypatch.setattr(zotero_service, "get_zotero_writer_or_raise", lambda: writer)
 
     async def _noop_refresh(item_keys):  # noqa: ARG001
         return (0, 0, 0)
 
     monkeypatch.setattr(corpus_service, "refresh_corpus_items_by_keys", _noop_refresh)
+    captured["transitions"] = transitions
     return captured, writer
 
 
@@ -62,6 +82,7 @@ def test_apply_with_retry_fetches_failed_changes(monkeypatch):
     assert result["applied"] == 2
     assert writer.applied_changes is not None
     assert {int(c["id"]) for c in writer.applied_changes} == {1, 2}
+    assert captured["transitions"][0][0][3] == ChangeStatus.FAILED.value
 
 
 def test_apply_without_retry_uses_pending_status(monkeypatch):
@@ -73,6 +94,24 @@ def test_apply_without_retry_uses_pending_status(monkeypatch):
     assert captured["status"] == ChangeStatus.PENDING.value
     assert result["applied"] == 1
     assert writer.applied_changes is not None
+
+
+def test_inbox_removal_waits_for_sibling_changes(monkeypatch):
+    _captured, writer = _install_capture(monkeypatch)
+    monkeypatch.setattr(
+        pending_service.triage_db,
+        "item_keys_without_open_changes",
+        lambda _keys: [],
+    )
+
+    result = asyncio.run(
+        pending_service.apply_pending_changes(
+            PendingChangeMutationRequest(change_ids=[3], retry=False)
+        )
+    )
+
+    assert result["applied"] == 1
+    assert not hasattr(writer, "removed_keys")
 
 
 def test_retry_flag_defaults_to_false():

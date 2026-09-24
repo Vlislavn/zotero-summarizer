@@ -6,8 +6,8 @@ Optional + lazy: ``docling`` is imported only inside ``extract`` and is only cal
 when ``quality_review.use_docling`` is on (the layout models are heavy), so the base
 install never needs it. Returns the SAME ``{full_text, sections}`` shape as
 ``_paper_read_pdf.extract_pdf_content`` (drop-in) PLUS ``tables`` (each as Markdown,
-not truncated) and ``figures`` (deduped captions). Errors propagate — the caller
-(``_paper_read_pdf`` dispatch) decides whether to fall back to fitz.
+not truncated) and ``figures`` (deduped captions). The shared PDF dispatcher adds
+metadata and annotation URIs. Errors propagate; there is no fitz-on-error fallback.
 """
 from __future__ import annotations
 

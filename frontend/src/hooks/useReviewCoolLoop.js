@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { runReviewFleet, fetchReviewFleetStatus, fetchReadingQueue } from '../api/libraryApi.js';
-import { isCoolUndecided, coolUndecidedKeys } from '../utils/relevanceBands.js';
+import { coolUndecidedKeys } from '../utils/relevanceBands.js';
 
 // "Review cool papers": loop the review fleet over EVERY undecided high-relevance
 // pick (not a fixed 5) so deep reviews + verdicts stream in without per-paper
@@ -14,12 +14,11 @@ import { isCoolUndecided, coolUndecidedKeys } from '../utils/relevanceBands.js';
 // full reload; `setMessage`/`setIsError` drive the shared status banner;
 // `zoteroReady` gates the mount-resume effect.
 const FLEET_CHUNK = 5;              // picks per fleet round (stays inside its batch budget)
-const AUTO_REVIEW_MAX_ROUNDS = 12;  // bounds re-fetch of stuck (paywalled) top picks; ~60 papers/session
 const AUTO_REVIEW_MAX_DRAINS = 5;   // bound: how many foreign (prewarm) runs to wait out before our keys run
 
 const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
-export function useReviewCoolLoop({ queue, queueArgs, applyQueueData, loadQueue, zoteroReady, setMessage, setIsError }) {
+export function useReviewCoolLoop({ queue, prestigeFloor = null, queueArgs, applyQueueData, loadQueue, zoteroReady, setMessage, setIsError }) {
   const [fleetStatus, setFleetStatus] = useState({
     status: 'idle', completed: 0, total: 0, proposed: 0,
     skipped_no_fulltext: 0, failed: 0, error: null, started_at: null, progress: {},
@@ -31,7 +30,7 @@ export function useReviewCoolLoop({ queue, queueArgs, applyQueueData, loadQueue,
   const [autoReview, setAutoReview] = useState({ active: false, stopping: false });
 
   // Undecided cool picks (high relevance, no proposal/label) — the bar's count.
-  const coolUndecided = useMemo(() => queue.filter(isCoolUndecided).length, [queue]);
+  const coolUndecided = useMemo(() => coolUndecidedKeys(queue, prestigeFloor).length, [queue, prestigeFloor]);
 
   // Lightweight mount-resume poller: reflect an already-running fleet and reload
   // ONCE when it finishes (NOT the streaming auto-loop).
@@ -75,8 +74,9 @@ export function useReviewCoolLoop({ queue, queueArgs, applyQueueData, loadQueue,
     }
   }
 
-  // Loop the fleet over EVERY undecided cool pick, FLEET_CHUNK at a time, until the
-  // cool set is drained, Stop is pressed, or the max rounds. Each round PINS the next
+  // Loop the fleet over EVERY undecided cool pick in the current (max 5,000 row)
+  // queue snapshot, FLEET_CHUNK at a time, until the cool set is drained or Stop
+  // is pressed. Each round PINS the next
   // un-attempted cool keys to the fleet (runReviewFleet({itemKeys})) so it reviews the
   // SAME rows the UI counts — not the band-agnostic top-of-undecided slice, which would
   // review higher-blended could_read rows and leave the buried cool stragglers forever.
@@ -90,10 +90,10 @@ export function useReviewCoolLoop({ queue, queueArgs, applyQueueData, loadQueue,
     setMessage('');
     setIsError(false);
     const attempted = new Set();
+    let targetKeys = null;
     let drains = 0;
     try {
-      for (let round = 0; round < AUTO_REVIEW_MAX_ROUNDS; round += 1) {
-        if (autoStopRef.current) break;
+      while (!autoStopRef.current) {
         let data;
         try {
           data = await fetchReadingQueue(queueArgs(false));
@@ -103,7 +103,11 @@ export function useReviewCoolLoop({ queue, queueArgs, applyQueueData, loadQueue,
           break;
         }
         applyQueueData(data);
-        const next = coolUndecidedKeys(data.items).filter((k) => !attempted.has(k));
+        if (targetKeys === null) {
+          targetKeys = new Set((data.items || []).map((item) => item.item_key));
+        }
+        const next = coolUndecidedKeys(data.items, data.distribution?.prestige_floor ?? null)
+          .filter((k) => targetKeys.has(k) && !attempted.has(k));
         if (next.length === 0) break;  // every cool paper now attempted or decided → stop
         const chunk = next.slice(0, FLEET_CHUNK);
         const started = await runReviewFleet({ itemKeys: chunk });
@@ -115,13 +119,16 @@ export function useReviewCoolLoop({ queue, queueArgs, applyQueueData, loadQueue,
         // keys once the latch frees. Keys off `accepted`, not a started_at timestamp,
         // so it's robust to a prewarm that fires AFTER the click; `drains` bounds it.
         if (started.accepted === false) {
-          if (drains >= AUTO_REVIEW_MAX_DRAINS) break;
+          if (drains >= AUTO_REVIEW_MAX_DRAINS) {
+            setMessage('Review paused because another background review kept the queue busy. Retry to continue the remaining papers.');
+            setIsError(true);
+            break;
+          }
           drains += 1;
           setMessage('Finishing a background review already in progress first…');
           setIsError(false);
           const drained = await pollFleetUntilDone();
           if (autoStopRef.current || drained == null) break;
-          round -= 1;
           continue;
         }
         chunk.forEach((k) => attempted.add(k));

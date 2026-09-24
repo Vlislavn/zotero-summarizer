@@ -9,7 +9,12 @@ import fitz
 import pytest
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.services.library import _paper_read_html, paper_render
+from zotero_summarizer.services.library import (
+    _paper_read_html,
+    _paper_read_meta,
+    _paper_read_tex,
+    paper_render,
+)
 
 
 def _make_pdf(path, *, arxiv: bool = False, refs: bool = True):
@@ -35,7 +40,7 @@ def _make_pdf(path, *, arxiv: bool = False, refs: bool = True):
 
 
 def _make_tex_source(pdf):
-    source = pdf.parent / "source"
+    source = paper_render._paper_directory(pdf.resolve()) / "source"
     figs = source / "figs"
     figs.mkdir(parents=True)
     fig_pdf = figs / "arch.pdf"
@@ -85,17 +90,25 @@ def test_build_paper_read_uses_local_tex_and_writes_expected_outputs(tmp_path):
     assert artifact["source_tier"] == "local_tex"
     assert artifact["references_count"] == 2
     assert artifact["figures_count"] == 1
-    assert (tmp_path / "figures" / artifact["figures"][0]["name"]).is_file()
-    notes = artifact["outputs"]["notes"]
+    assert (Path(artifact["outputs"]["figures_dir"]) / artifact["figures"][0]["name"]).is_file()
     html = artifact["outputs"]["presentation"]
-    assert notes.endswith("_notes.md") and html.endswith("_presentation.html")
-    notes_text = open(notes, encoding="utf-8").read()
-    assert "GlassNet" in notes_text
-    assert "Quick Reference" in notes_text
+    assert "notes" not in artifact["outputs"]
+    assert not list(tmp_path.glob("*_notes.md"))
+    assert html.endswith("_presentation.html")
     html_text = open(html, encoding="utf-8").read()
     assert "const imageMap" in html_text
     assert 'id="ph-fig1"' in html_text
     assert artifact["audit"]["status"] == "passed"
+
+
+def test_tex_figure_reference_cannot_escape_source_directory(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    private = tmp_path / "private.png"
+    private.write_bytes(b"private")
+
+    assert _paper_read_tex._resolve_figure_path(source, "../private.png") is None
+    assert _paper_read_tex._resolve_figure_path(source, str(private)) is None
 
 
 def test_pdf_fallback_renders_vector_figure_regions_not_raw_page(tmp_path):
@@ -108,7 +121,7 @@ def test_pdf_fallback_renders_vector_figure_regions_not_raw_page(tmp_path):
     assert artifact["n_pages"] == 2
     assert artifact["references_count"] == 2
     assert artifact["figures_count"] == 1
-    fig_path = tmp_path / "figures" / artifact["figures"][0]["name"]
+    fig_path = Path(artifact["outputs"]["figures_dir"]) / artifact["figures"][0]["name"]
     assert fig_path.is_file()
     with fitz.open(fig_path) as img:
         # Region crop should be much shorter than a full page render.
@@ -120,9 +133,10 @@ def test_arxiv_source_download_requires_explicit_consent(tmp_path, monkeypatch):
     _make_pdf(pdf, arxiv=True)
     calls = {"n": 0}
 
-    def _download(arxiv_id, pdf_path):
+    def _download(arxiv_id, source_dir):
         calls["n"] += 1
         assert arxiv_id == "2401.00001v2"
+        assert source_dir == paper_render._paper_directory(pdf.resolve()) / "source"
         return None
 
     monkeypatch.setattr(paper_render._paper_read_tex, "download_arxiv_source", _download)
@@ -135,15 +149,16 @@ def test_arxiv_source_download_requires_explicit_consent(tmp_path, monkeypatch):
 
 
 def test_audit_reports_missing_placeholder(tmp_path):
-    html = tmp_path / "x.html"
-    notes = tmp_path / "x.md"
-    html.write_text("<html><script>const imageMap={}</script><section lang-zh>A</section><section lang-en>A</section></html>")
-    notes.write_text("notes")
     audit = _paper_read_html._audit_presentation(
-        html, notes, [{"name": "fig1_arch.png", "caption": "Figure 1"}]
+        "<html><script>const imageMap={}</script><section>A</section></html>",
+        {"authors": "Author 1", "full_text": " ".join([r"\section{bad}"] * 9),
+         "figures": [{"name": "fig1_arch.png", "caption": "Figure 1"}]},
+        tmp_path,
     )
     assert audit["status"] == "blocking"
     assert any("ph-fig1" in issue for issue in audit["blocking"])
+    assert any("residual LaTeX" in issue for issue in audit["blocking"])
+    assert any("placeholder authors" in issue for issue in audit["minor"])
 
 
 def test_presentation_has_standard_sections_and_no_bilingual_markup(tmp_path):
@@ -167,7 +182,7 @@ def test_presentation_has_standard_sections_and_no_bilingual_markup(tmp_path):
 def test_tex_figures_distributed_across_sections_not_clustered_in_first(tmp_path):
     pdf = tmp_path / "paper.pdf"
     _make_pdf(pdf)
-    source = pdf.parent / "source"
+    source = paper_render._paper_directory(pdf.resolve()) / "source"
     figs = source / "figs"
     figs.mkdir(parents=True)
     # Create two figures so we can verify they land in different sections.
@@ -216,10 +231,11 @@ def test_presentation_renders_without_figures_or_digest(tmp_path):
         "references_count": 12,
         "source_tier": "pdf",
     }
-    html_out = _paper_read_html._render_presentation(content, "test_paper")
+    html_out = _paper_read_html._render_presentation(content)
     assert "Test Paper" in html_out
     # No figures/digest/quality/goals → an explicit empty-state + the PDF footer.
-    assert "No readable content could be extracted" in html_out
+    assert "No figures or review are available yet" in html_out
+    assert "No readable content" not in html_out
     assert "open the original PDF in Zotero" in html_out
     # No figures section when there are no figures.
     assert 'id="figures"' not in html_out
@@ -227,15 +243,13 @@ def test_presentation_renders_without_figures_or_digest(tmp_path):
     assert 'id="digest"' not in html_out
 
 
-def test_renderer_rev_folds_into_key_and_flags_currency(tmp_path):
+def test_renderer_rev_folds_into_key(tmp_path, monkeypatch):
     pdf = tmp_path / "paper.pdf"
     _make_pdf(pdf)
     key = paper_render._pdf_key(pdf.resolve())
     assert key.startswith(f"{paper_render._PAPER_READ_VERSION}:{paper_render._RENDERER_REV}:")
-    assert paper_render._key_is_current(key) is True
-    # Old 3-part key (pre-renderer-rev) and a different-rev key are stale.
-    assert paper_render._key_is_current(f"{paper_render._PAPER_READ_VERSION}:123:456") is False
-    assert paper_render._key_is_current(f"{paper_render._PAPER_READ_VERSION}:deadbeef:1:2") is False
+    monkeypatch.setattr(paper_render, "_RENDERER_REV", "different")
+    assert paper_render._pdf_key(pdf.resolve()) != key
 
 
 def test_render_paper_flags_stale_when_renderer_changed(tmp_path, monkeypatch):
@@ -246,7 +260,9 @@ def test_render_paper_flags_stale_when_renderer_changed(tmp_path, monkeypatch):
         def get_item_detail(self, key):
             return {"title": "GlassNet", "pdf_path": str(pdf)}
 
-    fake_settings = types.SimpleNamespace(paper_render_dir=tmp_path / "render", pdf_root=tmp_path)
+    fake_settings = types.SimpleNamespace(
+        paper_render_dir=tmp_path / "render", pdf_root=tmp_path, pdf_cache_dir=tmp_path / "cache",
+    )
     monkeypatch.setattr(paper_render, "settings", lambda: fake_settings)
     monkeypatch.setattr(
         "zotero_summarizer.services.zotero.zotero.get_library_reader", lambda: _Reader()
@@ -272,6 +288,36 @@ def test_tex_tier_persists_pdf_body_for_qa_and_sections(tmp_path):
     assert artifact.get("render_sections"), "render_sections (PDF sections) missing for TeX tier"
     # Comprehensive QA context now includes the real body text on a TeX paper.
     assert "ImageNet" in paper_render.artifact_text(artifact, max_chars=100_000)
+
+
+def test_comprehensive_context_uses_structured_review_not_legacy_sidecar(tmp_path):
+    legacy_notes = tmp_path / "old_notes.md"
+    legacy_notes.write_text("LEGACY SIDECAR MUST NOT BE READ", encoding="utf-8")
+    artifact = {
+        "title": "GlassNet", "full_text": "PDF BODY EVIDENCE",
+        "outputs": {"notes": str(legacy_notes)},
+    }
+    review = {
+        "digest": {"tldr": "STRUCTURED DIGEST"},
+        "quality": {"quality_band": "highlight"},
+        "goal_summaries": [{"goal": "Robust ML", "summary": "STRUCTURED GOAL"}],
+    }
+
+    context = _paper_read_meta.artifact_text(artifact, max_chars=10_000, review=review)
+
+    assert "STRUCTURED DIGEST" in context and "STRUCTURED GOAL" in context
+    assert "PDF BODY EVIDENCE" in context
+    assert "LEGACY SIDECAR" not in context
+
+
+def test_legacy_missing_notes_output_does_not_break_completed_artifact(tmp_path):
+    html = tmp_path / "brief.html"
+    html.write_text("brief", encoding="utf-8")
+    state = {
+        "status": "completed",
+        "outputs": {"presentation": str(html), "notes": str(tmp_path / "missing_notes.md")},
+    }
+    assert paper_render._completed_outputs_missing(state) is False
 
 
 def test_pdf_figures_dedup_in_prose_caption_mentions(tmp_path):
@@ -305,7 +351,9 @@ def test_facade_status_presentation_and_figure_guards(tmp_path, monkeypatch):
         def get_item_detail(self, key):
             return {"title": "GlassNet", "pdf_path": str(pdf)}
 
-    fake_settings = types.SimpleNamespace(paper_render_dir=tmp_path / "render", pdf_root=tmp_path)
+    fake_settings = types.SimpleNamespace(
+        paper_render_dir=tmp_path / "render", pdf_root=tmp_path, pdf_cache_dir=tmp_path / "cache",
+    )
     monkeypatch.setattr(paper_render, "settings", lambda: fake_settings)
     monkeypatch.setattr(
         "zotero_summarizer.services.zotero.zotero.get_library_reader",
@@ -333,7 +381,9 @@ def test_missing_presentation_output_is_rebuildable(tmp_path, monkeypatch):
         def get_item_detail(self, key):
             return {"title": "GlassNet", "pdf_path": str(pdf)}
 
-    fake_settings = types.SimpleNamespace(paper_render_dir=tmp_path / "render", pdf_root=tmp_path)
+    fake_settings = types.SimpleNamespace(
+        paper_render_dir=tmp_path / "render", pdf_root=tmp_path, pdf_cache_dir=tmp_path / "cache",
+    )
     monkeypatch.setattr(paper_render, "settings", lambda: fake_settings)
     monkeypatch.setattr(
         "zotero_summarizer.services.zotero.zotero.get_library_reader",
@@ -378,7 +428,10 @@ def test_build_paper_read_acquires_missing_pdf_when_allowed(tmp_path, monkeypatc
         )
         return types.SimpleNamespace(path=acquired, needs_login=False, login_url="")
 
-    fake_settings = types.SimpleNamespace(paper_render_dir=tmp_path / "render", pdf_root=tmp_path)
+    fake_settings = types.SimpleNamespace(
+        paper_render_dir=tmp_path / "render", pdf_root=tmp_path,
+        pdf_cache_dir=tmp_path / "data" / "pdfs",
+    )
     monkeypatch.setattr(paper_render, "settings", lambda: fake_settings)
     monkeypatch.setattr(
         "zotero_summarizer.services.zotero.zotero.get_library_reader",
@@ -404,3 +457,26 @@ def test_build_paper_read_acquires_missing_pdf_when_allowed(tmp_path, monkeypatc
         "url": "https://www.nature.com/articles/s41746-024-01074-z",
         "allow_headed_fallback": True,
     }
+
+
+def test_acquire_missing_reports_browser_setup_instead_of_login(monkeypatch):
+    from zotero_summarizer.services.library import _pdf_acquire
+
+    detail = {"has_pdf": False, "pdf_path": "", "url": "https://publisher.example/x"}
+    monkeypatch.setattr(paper_render, "_item_detail", lambda _key: detail)
+    monkeypatch.setattr(
+        paper_render, "_pdf_from_detail",
+        lambda *_a: (_ for _ in ()).throw(
+            APIError(error="needs_pdf", message="missing", status_code=404),
+        ),
+    )
+    monkeypatch.setattr(
+        _pdf_acquire, "acquire_pdf_for",
+        lambda *_a, **_k: _pdf_acquire.AcquireResult(
+            path=None, outcome="browser_extra_unavailable",
+        ),
+    )
+
+    with pytest.raises(APIError) as caught:
+        paper_render._pdf_for_item_or_acquire("OTHER", allow_acquire_missing=True)
+    assert caught.value.error == "browser_extra_unavailable"

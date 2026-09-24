@@ -126,6 +126,15 @@ def test_load_severity_overrides_rejects_bad_value() -> None:
         slop.load_severity_overrides("slop/comment-slop=loud\n")
 
 
+def test_repo_blocks_touched_code_complexity() -> None:
+    overrides = slop.load_severity_overrides(slop.SEVERITY_CONFIG.read_text())
+    assert overrides == {
+        "slop/function-too-long": "block",
+        "slop/too-many-params": "block",
+        "slop/deep-nesting": "block",
+    }
+
+
 def test_diagnostic_key_format() -> None:
     diag = slop.Diagnostic("p.py", 7, 0, "slop/todo-stub", "advise", "comments", "m")
     assert diag.key == "p.py:7:slop/todo-stub"

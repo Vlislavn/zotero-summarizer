@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any, Callable, Literal
+from urllib.parse import quote
 
 import httpx
 
@@ -16,14 +17,17 @@ from zotero_summarizer.mcp.helpers import (
     _is_retryable,
     _now_iso,
     _ok,
+    _require_non_empty_text,
 )
 
 
-async def _fetch_pending_rows(status: str, limit: int) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+async def _fetch_pending_rows(
+    status: str, limit: int, *, item_key: str | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     pending_result = await _api_request(
         "GET",
         "/api/pending",
-        params={"status": status, "limit": limit},
+        params={"status": status, "limit": limit, "item_key": item_key},
     )
     pending_data, pending_error = _extract_data_or_error(pending_result)
     if pending_error is not None:
@@ -171,7 +175,10 @@ def _snapshot_data_or_warn(
 
 
 async def _fetch_triage_row(item_key: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    result = await _api_request("GET", f"/api/results/{item_key}")
+    safe_key, validation_error = _require_non_empty_text(item_key, "item_key")
+    if validation_error is not None:
+        return None, validation_error["error"]
+    result = await _api_request("GET", f"/api/results/{quote(safe_key, safe='')}")
     if result.get("ok"):
         data = result.get("data")
         if isinstance(data, dict):
@@ -196,7 +203,7 @@ async def _collect_status_snapshot() -> dict[str, Any]:
     status_result, pending_result, jobs_result, calibration_result = await asyncio.gather(
         _api_request("GET", "/api/zotero/status"),
         _api_request("GET", "/api/pending/count", params={"status": "pending"}),
-        _api_request("GET", "/api/triage/jobs", params={"limit": 25}),
+        _api_request("GET", "/api/triage/jobs", params={"active_only": True}),
         _api_request("GET", "/api/calibration/metrics"),
     )
 
@@ -219,7 +226,7 @@ async def _collect_status_snapshot() -> dict[str, Any]:
     if jobs_data is not None:
         jobs = list((jobs_data or {}).get("items") or [])
         running_job = next(
-            (job for job in jobs if str((job or {}).get("status") or "").lower() == "running"),
+            (job for job in jobs if str((job or {}).get("status") or "").lower() in {"running", "cancelling"}),
             None,
         )
         snapshot["active_job"] = running_job

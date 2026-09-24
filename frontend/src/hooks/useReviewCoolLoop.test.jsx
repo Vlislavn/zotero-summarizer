@@ -38,13 +38,30 @@ function setup(overrides = {}) {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   fetchReadingQueue.mockResolvedValue({ items: COOL });
   fetchReviewFleetStatus.mockResolvedValue({ status: 'ready', completed: 1 });
   runReviewFleet.mockResolvedValue({ status: 'ready', accepted: true, proposed: 1 });
 });
 
 describe('useReviewCoolLoop', () => {
+  it('counts effective bands and pins keys using each fetched snapshot’s floor', async () => {
+    const rows = [
+      { item_key: 'LOW', relevance_score: 3.8, prestige_score: 1, prestige_known: true },
+      { item_key: 'HIGH', relevance_score: 4.8, prestige_score: 5, prestige_known: true },
+    ];
+    fetchReadingQueue.mockResolvedValue({ items: rows, distribution: { prestige_floor: 0.5 } });
+    fetchReadingQueue.mockResolvedValueOnce({ items: rows, distribution: { prestige_floor: 3 } });
+    const { result } = setup({ queue: rows, prestigeFloor: 3 });
+    expect(result.current.coolUndecided).toBe(1);
+
+    await act(async () => { await result.current.handleReviewCool(); });
+
+    expect(runReviewFleet).toHaveBeenNthCalledWith(1, { itemKeys: ['HIGH'] });
+    expect(runReviewFleet).toHaveBeenNthCalledWith(2, { itemKeys: ['LOW'] });
+    expect(runReviewFleet).toHaveBeenCalledTimes(2);
+  });
+
   it('pins EXACTLY the cool keys to the fleet (not the band-agnostic could row)', async () => {
     const { result } = setup();
     await act(async () => { await result.current.handleReviewCool(); });
@@ -59,6 +76,20 @@ describe('useReviewCoolLoop', () => {
     const { result } = setup();
     await act(async () => { await result.current.handleReviewCool(); });
     expect(runReviewFleet).toHaveBeenCalledTimes(1); // round 1 attempts [A,B]; round 2 next=[] → stop
+  });
+
+  it('continues past sixty picks so one click drains the full fetched cool set', async () => {
+    const rows = Array.from({ length: 62 }, (_, index) => ({
+      item_key: `P${index}`,
+      relevance_score: 4.5,
+    }));
+    fetchReadingQueue.mockResolvedValue({ items: rows });
+    const { result } = setup();
+
+    await act(async () => { await result.current.handleReviewCool(); });
+
+    expect(runReviewFleet).toHaveBeenCalledTimes(13);
+    expect(runReviewFleet).toHaveBeenLastCalledWith({ itemKeys: ['P60', 'P61'] });
   });
 
   it('drains a foreign (prewarm) run on accepted:false, then re-runs OUR keys without marking them attempted', async () => {

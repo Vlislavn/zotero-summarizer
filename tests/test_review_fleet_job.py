@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import pytest
 
+from zotero_summarizer.models import GoalSummary
 from zotero_summarizer.models.triage import ProposedVerdict
 from zotero_summarizer.services.library.review_fleet import fleet
 from zotero_summarizer.storage import repositories
@@ -36,6 +37,11 @@ def _reset_latch_and_inline_threads(monkeypatch):
             needs_library_login=0, needs_login_items=[], failed=0, started_at=None, progress={},
         )
     monkeypatch.setattr(fleet._flight, "run_in_background", lambda target: target())
+    monkeypatch.setattr(
+        fleet.deep_review, "review_is_current",
+        lambda entry, item_key="": bool(entry)
+        and entry.get("review_contract_version") == fleet.deep_review.REVIEW_CONTRACT_VERSION,
+    )
     yield
     fleet._LATCH.finish(None)
 
@@ -58,9 +64,16 @@ def _queue(*keys):
 
 def _review(read_decision="read", grade="A", *, relevant=True):
     return {
-        "digest": {"read_decision": read_decision, "grade": grade},
-        "quality": {"quality_band": "ok"},
-        "goal_summaries": [{"relevant": relevant}],
+        "review_contract_version": fleet.deep_review.REVIEW_CONTRACT_VERSION,
+        "digest": {
+            "read_decision": read_decision, "grade": grade, "writing_friction": "low",
+            "novelty": 4, "significance": 4,
+        },
+        "quality": {"quality_band": "highlight"},
+        "goal_summaries": [GoalSummary(
+            goal="Fixture goal", relevant=relevant,
+            retrieval_state="hit" if relevant else "miss", abstained=not relevant,
+        ).model_dump()],
     }
 
 
@@ -238,8 +251,10 @@ def test_run_over_fulltextless_papers_reports_done_empty(monkeypatch):
 
     monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: _queue("A", "B"))
     # cached review EXISTS but carries no usable full text (the deep_review needs_pdf case)
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review",
-                        lambda key: {"needs_pdf": True, "digest": None})
+    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: {
+        "review_contract_version": fleet.deep_review.REVIEW_CONTRACT_VERSION,
+        "needs_pdf": True, "digest": None,
+    })
     monkeypatch.setattr(zmod, "get_library_reader", lambda: types.SimpleNamespace(
         get_item_detail=lambda k: {"has_pdf": False, "url": "", "doi": ""}))
     # No source can be acquired, and it's NOT a login issue → no_fetchable_source.
@@ -268,8 +283,10 @@ def test_needs_library_login_when_proxied_source_unreachable(monkeypatch):
     from zotero_summarizer.services.zotero import zotero as zmod
 
     monkeypatch.setattr(fleet.reading_queue, "build_reading_queue", lambda **_k: _queue("A"))
-    monkeypatch.setattr(fleet.deep_review, "get_cached_review",
-                        lambda key: {"needs_pdf": True, "digest": None})
+    monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: {
+        "review_contract_version": fleet.deep_review.REVIEW_CONTRACT_VERSION,
+        "needs_pdf": True, "digest": None,
+    })
     monkeypatch.setattr(zmod, "get_library_reader", lambda: types.SimpleNamespace(
         get_item_detail=lambda k: {"has_pdf": False, "url": "https://www.nature.com/x", "doi": "10.1/x"}))
     monkeypatch.setattr(_pdf_acquire, "acquire_pdf_for",
@@ -323,7 +340,10 @@ def test_needs_pdf_pick_acquires_then_re_reviews_and_proposes(monkeypatch):
         for k in item_keys or []:
             # pass 1 (no override) -> needs_pdf; forced re-review WITH the path -> a digest.
             has_override = bool(pdf_overrides and k in pdf_overrides)
-            cache[k] = _review(grade="A") if has_override else {"needs_pdf": True, "digest": None}
+            cache[k] = _review(grade="A") if has_override else {
+                "review_contract_version": fleet.deep_review.REVIEW_CONTRACT_VERSION,
+                "needs_pdf": True, "digest": None,
+            }
         return {"accepted": True}
 
     monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: cache.get(key))
@@ -339,7 +359,9 @@ def test_needs_pdf_pick_acquires_then_re_reviews_and_proposes(monkeypatch):
 
     out = fleet.start(top_k=1)
     # pass 1 reviews from Zotero (needs_pdf), pass 2 re-reviews WITH the acquired path.
-    assert [s["pdf_overrides"] for s in starts] == [None, {"A": "/tmp/A.pdf"}]
+    assert [s["pdf_overrides"] for s in starts] == [
+        None, {"A": {"path": "/tmp/A.pdf", "source": "", "source_url": ""}},
+    ]
     assert upserts["A"]["proposed"] == "must_read"          # read + grade A
     assert out["proposed"] == 1 and out["status"] == "ready"
 
@@ -359,7 +381,10 @@ def test_needs_pdf_cache_is_reused_without_re_reviewing(monkeypatch):
     """A genuine ``needs_pdf`` cache is USABLE — re-reviewing a paper with no PDF is
     futile, so ``_usable_cache`` returns it and the pick skips the review batch (no
     model load)."""
-    entry = {"needs_pdf": True, "digest": None}
+    entry = {
+        "review_contract_version": fleet.deep_review.REVIEW_CONTRACT_VERSION,
+        "needs_pdf": True, "digest": None,
+    }
     monkeypatch.setattr(fleet.deep_review, "get_cached_review", lambda key: entry)
     assert fleet._usable_cache("A") == entry
 

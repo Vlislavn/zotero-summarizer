@@ -65,7 +65,7 @@ def _latency_block(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "p90": round(_percentile(values, 90), 2),
         "p99": round(_percentile(values, 99), 2),
         "mean": round(_mean(values), 2),
-        "total_wall_seconds": round(sum(values), 1),
+        "total_trial_seconds": round(sum(values), 1),
     }
 
 
@@ -73,6 +73,7 @@ def _qa_condition_stats(
     judgments: list[dict[str, Any]],
     responses: list[dict[str, Any]],
     items_meta: dict[str, dict[str, str]],
+    expected_runs: int,
 ) -> dict[str, Any]:
     validated = [j for j in judgments if j.get("success") is not None]
     unjudgeable = [j for j in judgments if j.get("success") is None]
@@ -93,12 +94,13 @@ def _qa_condition_stats(
     per_item: dict[str, list[bool]] = defaultdict(list)
     for j in validated:
         per_item[str(j["item_id"])].append(bool(j["success"]))
-    n_runs = len(per_run)
     pass_block: dict[str, Any] = {}
-    if n_runs > 1:
-        rates = {i: _mean([1.0 if s else 0.0 for s in succ]) for i, succ in per_item.items()}
+    if expected_runs > 1:
+        complete = {item: succ for item, succ in per_item.items()
+                    if len(succ) == expected_runs}
+        rates = {i: _mean([1.0 if s else 0.0 for s in succ]) for i, succ in complete.items()}
         pass_block = {
-            "k": n_runs,
+            "k": expected_runs,
             "pass_at_k": round(_mean([1.0 if r > 0 else 0.0 for r in rates.values()]), 4),
             "pass_hat_k": round(_mean([1.0 if r == 1.0 else 0.0 for r in rates.values()]), 4),
         }
@@ -141,14 +143,14 @@ def _qa_condition_stats(
         **pass_block,
         "answerable_accuracy": round(
             _mean([1.0 if j["success"] else 0.0 for j in answerable]), 4
-        ),
-        "wrong_abstain_rate": round(wrong_abstains / len(answerable), 4) if answerable else 0.0,
+        ) if answerable else None,
+        "wrong_abstain_rate": round(wrong_abstains / len(answerable), 4) if answerable else None,
         "trap": {
             "n_trap_trials": len(traps),
-            "hallucination_rate": round(hallucinated / len(traps), 4) if traps else 0.0,
-            "abstention_recall": round(trap_passes / len(traps), 4) if traps else 0.0,
+            "hallucination_rate": round(hallucinated / len(traps), 4) if traps else None,
+            "abstention_recall": round(trap_passes / len(traps), 4) if traps else None,
             "abstention_precision": (
-                round(trap_passes / all_abstentions, 4) if all_abstentions else 0.0
+                round(trap_passes / all_abstentions, 4) if all_abstentions else None
             ),
         },
         "by_answer_type": by_type,
@@ -217,6 +219,7 @@ def calculate_statistics(
     responses: list[dict[str, Any]],
     judgments: list[dict[str, Any]],
     items_meta: dict[str, dict[str, str]],
+    *, expected_runs: int | None = None,
 ) -> dict[str, Any]:
     """All report numbers from the long-form rows. ``items_meta`` maps
     ``item_id`` → ``{kind, answer_type}`` (from the benchmark file)."""
@@ -231,6 +234,7 @@ def calculate_statistics(
                 [j for j in qa_judgments if str(j["condition"]) == condition],
                 [r for r in qa_responses if str(r["condition"]) == condition],
                 items_meta,
+                expected_runs or max((int(j["run_number"]) for j in qa_judgments), default=1),
             )
 
     claim_judgments = [j for j in judgments if j.get("track") == "claims"]

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from zotero_summarizer.models import TriageFeedbackResponse
+from zotero_summarizer.models import CalibrationMetricsResponse, TriageFeedbackResponse
 from zotero_summarizer.services import results
 
 router = APIRouter()
+router.add_api_route("/api/calibration/metrics", results.calibration_metrics, methods=["GET"], response_model=CalibrationMetricsResponse)
 router.add_api_route("/api/results", results.dashboard_results, methods=["GET"])
 router.add_api_route("/api/results/{item_id}", results.dashboard_result_detail, methods=["GET"])
 router.add_api_route(

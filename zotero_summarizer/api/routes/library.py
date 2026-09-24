@@ -63,11 +63,19 @@ class RelTagSyncRequest(BaseModel):
     force: bool = Field(default=False)
 
 
+class AskPaperHistoryTurn(BaseModel):
+    question: str = Field(..., min_length=1, max_length=2000)
+    answer: str | None = Field(default=None, max_length=5000)
+    quote: str | None = Field(default=None, max_length=5000)
+    evidence_handle: dict[str, Any] | None = None
+
+
 class AskPaperRequest(BaseModel):
     item_key: str = Field(..., min_length=1)
     question: str = Field(..., min_length=1, max_length=2000)
     # comprehensive (default; metadata+notes+body) | retrieval (top-k chunks) | full_text (raw body)
     mode: Literal["comprehensive", "retrieval", "full_text"] = Field(default="comprehensive")
+    history: list[AskPaperHistoryTurn] = Field(default_factory=list, max_length=20)
 
 
 class PaperRenderBuildRequest(BaseModel):
@@ -134,7 +142,7 @@ async def get_item_pdf(item_key: str) -> FileResponse:
 
 async def get_paper_render(item_key: str) -> dict[str, Any]:
     """Paper-read artifact status/metadata. Use POST ``/build`` to generate the
-    Markdown notes, HTML presentation, figures, and audit files."""
+    HTML presentation, figures, and audit files."""
     return await asyncio.to_thread(paper_render.render_paper, item_key)
 
 
@@ -182,7 +190,10 @@ async def ask_paper(req: AskPaperRequest) -> dict[str, Any]:
     """Grounded Q&A about one paper using the local deep_review-stage model and
     the benchmark-validated abstention prompt. ``answer`` is null when the model
     abstains (the paper doesn't contain the answer)."""
-    return await asyncio.to_thread(qa.ask_paper, req.item_key, req.question, mode=req.mode)
+    return await asyncio.to_thread(
+        qa.ask_paper, req.item_key, req.question, mode=req.mode,
+        history=[turn.model_dump(mode="json") for turn in req.history],
+    )
 
 
 async def run_deep_review(req: DeepReviewRunRequest) -> dict[str, Any]:
@@ -225,15 +236,6 @@ async def run_review_fleet(req: ReviewFleetRunRequest) -> dict[str, Any]:
     SUGGESTIONS surfaced on the queue as ``proposed_verdict`` — never auto-applied
     labels. Single-flight: returns the in-flight status when a run is already going.
     Poll ``GET /api/library/review-fleet/status``."""
-    if req.item_keys:
-        bad = [k for k in req.item_keys if is_stable_feed_key(k)]
-        if bad:
-            raise APIError(
-                error="validation_error",
-                message="review-fleet only accepts library (Zotero) keys; feed: keys are not supported",
-                status_code=422,
-                details={"feed_keys": bad},
-            )
     return await asyncio.to_thread(review_fleet.start, req.top_k, item_keys=req.item_keys)
 
 

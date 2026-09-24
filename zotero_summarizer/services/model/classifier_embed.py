@@ -12,7 +12,8 @@ from typing import Any, Callable  # noqa: F401
 
 import numpy as np  # noqa: F401
 
-from zotero_summarizer.services.model.classifier_const import *  # noqa: F401,F403
+from zotero_summarizer.services.model import classifier_const as const
+from zotero_summarizer.services.model.classifier_const import EMBEDDING_DIM, LOGGER, _SCHEMA
 
 # Process-wide cache of the loaded SPECTER2 model/tokenizer (lazy, first call).
 _MODEL_CACHE: dict[str, Any] = {}
@@ -28,15 +29,12 @@ _PREDICT_LOCK = threading.Lock()
 
 
 def _content_hash(title: str, abstract: str, authors: str = "", venue: str = "") -> str:
-    """Stable identity for SPECTER2 embedding cache.
-
-    Sprint-3a (May 2026): the hash mixes `title|abstract|adapter-name` so
-    that swapping the proximity adapter automatically invalidates every
-    cached vector. `authors` and `venue` are accepted for backward compat
-    but no longer affect the hash (Sprint 1).
-    """
-    blob = f"{title}|||{abstract}|||{SPECTER2_ADAPTER_NAME}"
-    return hashlib.sha1(blob.encode("utf-8")).hexdigest()
+    """Content plus exact base/adapter revisions; authors/venue are not encoded."""
+    blob = json.dumps([
+        title, abstract, const.SPECTER2_MODEL_NAME, const.SPECTER2_MODEL_REVISION,
+        const.SPECTER2_ADAPTER_NAME, const.SPECTER2_ADAPTER_REVISION,
+    ])
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 def _select_device(torch: Any) -> str:
@@ -68,17 +66,22 @@ def _load_specter2() -> tuple[Any, Any, Any]:
             return _MODEL_CACHE["tok"], _MODEL_CACHE["mdl"], _MODEL_CACHE["torch"]
         LOGGER.info(
             "loading SPECTER2 base %r + proximity adapter %r (first call ~400MB+50MB)",
-            SPECTER2_MODEL_NAME, SPECTER2_ADAPTER_NAME,
+            const.SPECTER2_MODEL_NAME, const.SPECTER2_ADAPTER_NAME,
         )
         import torch
         from adapters import AutoAdapterModel
         from transformers import AutoTokenizer
 
         try:
-            tok = AutoTokenizer.from_pretrained(SPECTER2_MODEL_NAME)
-            mdl = AutoAdapterModel.from_pretrained(SPECTER2_MODEL_NAME)
+            tok = AutoTokenizer.from_pretrained(
+                const.SPECTER2_MODEL_NAME, revision=const.SPECTER2_MODEL_REVISION,
+            )
+            mdl = AutoAdapterModel.from_pretrained(
+                const.SPECTER2_MODEL_NAME, revision=const.SPECTER2_MODEL_REVISION,
+            )
             mdl.load_adapter(
-                SPECTER2_ADAPTER_NAME,
+                const.SPECTER2_ADAPTER_NAME,
+                version=const.SPECTER2_ADAPTER_REVISION,
                 source="hf",
                 load_as="proximity",
                 set_active=True,
@@ -89,7 +92,7 @@ def _load_specter2() -> tuple[Any, Any, Any]:
             # offline + not-yet-cached is the common cause.
             raise RuntimeError(
                 f"Could not load the SPECTER2 gate encoder "
-                f"({SPECTER2_MODEL_NAME} + {SPECTER2_ADAPTER_NAME}). If you are offline, "
+                f"({const.SPECTER2_MODEL_NAME} + {const.SPECTER2_ADAPTER_NAME}). If you are offline, "
                 f"the model is not cached yet — run `zotero-summarizer prefetch-models` "
                 f"while online once to populate the cache. Original error: {exc}"
             ) from exc
@@ -268,14 +271,16 @@ def _ensure_schema(db_path: Path) -> None:
 def _embedding_cached(db_path: Path, item_key: str, content_hash: str) -> bool:
     if not db_path.exists():
         return False
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)
     try:
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='specter2_embeddings'"
+        ).fetchone() is None:
+            return False
         row = conn.execute(
             "SELECT 1 FROM specter2_embeddings WHERE item_key=? AND content_hash=?",
             (item_key, content_hash),
         ).fetchone()
-    except sqlite3.OperationalError:
-        return False
     finally:
         conn.close()
     return row is not None

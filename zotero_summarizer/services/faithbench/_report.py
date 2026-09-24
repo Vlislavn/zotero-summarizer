@@ -9,17 +9,82 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from filelock import FileLock
 
 from zotero_summarizer.services import run_log
 from zotero_summarizer.services._common import now_iso_z
+from zotero_summarizer.services._common import atomic_write
 from zotero_summarizer.services.faithbench._dataset import (
     BenchmarkItem,
+    BenchmarkMeta,
     QAItem,
+    load_benchmark,
+    _validate_item,
+    _benchmark_sha,
 )
-from zotero_summarizer.services.faithbench._runner import RunPaths, latest_by_key, load_jsonl
+from zotero_summarizer.services.faithbench._build_claims import _claim_rows
+from zotero_summarizer.services.faithbench._corpus import load_frozen_text
+from zotero_summarizer.services.faithbench._runner import (
+    RunOptions, RunPaths, latest_by_key, load_jsonl, trial_key, _load_manifest, _response_sha,
+)
 from zotero_summarizer.services.faithbench._stats import calculate_statistics
 
 MASTER_LOG_NAME = "faithbench-runs.jsonl"
+
+
+def _append_headline_once(master_log: Path, headline: dict[str, Any]) -> None:
+    """Append a run headline once, serializing cross-process writers by run ID."""
+    master_log.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(f"{master_log}.lock"):
+        if any(row.get("run_id") == headline["run_id"] for row in run_log.load_runs(master_log)):
+            return
+        run_log.append_run(master_log, headline)
+
+
+def _checked_judgments(manifest: dict, meta: BenchmarkMeta, items: list[BenchmarkItem],
+                       responses: list[dict], judgments: list[dict]) -> list[dict]:
+    options = RunOptions(conditions=tuple(manifest["conditions"]), tracks=tuple(manifest["tracks"]),
+                         runs=manifest["runs"], limit=manifest.get("limit"))
+    expected = {
+        ("qa", item.item_id, condition, run) for item in items[:options.limit]
+        for condition in options.conditions for run in range(1, options.runs + 1)
+    } if "qa" in options.tracks else set()
+    if "claims" in options.tracks:
+        expected.update(("claims", f"claims:{p.item_key}", "digest", run)
+                        for p in meta.papers for run in range(1, options.runs + 1))
+    for row in responses + judgments:
+        if row.get("run_id") != manifest["run_id"] or type(row.get("run_number")) is not int:
+            raise ValueError("Trial identity does not match the run manifest")
+    current = {(row["track"], *trial_key(row)): row for row in responses}
+    if not expected or set(current) != expected:
+        raise ValueError("Incomplete or unexpected response coverage; finish the configured run before reporting")
+    expected_judgments = set()
+    for key, row in current.items():
+        indices = [None]
+        if row["track"] == "claims" and row.get("status") == "ok":
+            parsed = row.get("parsed")
+            try:
+                indices = list(range(len(_claim_rows(parsed.get("claims") if isinstance(parsed, dict) else None))))
+            except ValueError:
+                indices = [None]  # Malformed output has one explicit failed-trial judgment, not zero rows.
+        expected_judgments.update((key, index) for index in indices)
+    latest = {}
+    for row in judgments:
+        key = (row["track"], *trial_key(row))
+        if key not in current or row.get("response_sha256") != _response_sha(current[key]):
+            continue  # Earlier attempts remain history, not evidence for the current response.
+        index = row.get("claim_idx")
+        if index is not None and type(index) is not int:
+            raise ValueError("Claim index must be an integer or null")
+        latest[(key, index)] = row
+    if set(latest) != expected_judgments:
+        raise ValueError("Incomplete or stale judgments; run faithbench judge before reporting")
+    context = next(iter(latest.values())).get("judge_context")
+    if (not isinstance(context, dict) or context.get("benchmark_sha256") != _benchmark_sha(meta, items)
+            or context.get("paper_faults") or context.get("item_faults")
+            or any(row.get("judge_context") != context for row in latest.values())):
+        raise ValueError("Mixed or stale judging context; finish re-judging the intact benchmark")
+    return list(latest.values())
 
 
 def items_meta(items: list[BenchmarkItem]) -> dict[str, dict[str, str]]:
@@ -35,19 +100,25 @@ def items_meta(items: list[BenchmarkItem]) -> dict[str, dict[str, str]]:
 def build_report(
     *,
     paths: RunPaths,
-    items: list[BenchmarkItem],
-    manifest: dict[str, Any],
-    benchmark_path: Path,
     faithbench_dir: Path,
 ) -> dict[str, Any]:
     """Assemble + persist report.json / report.md; returns the report dict."""
+    manifest = _load_manifest(paths)
+    benchmark_path = Path(manifest["benchmark_path"])
+    meta, items = load_benchmark(benchmark_path, expected_sha256=manifest["benchmark_sha256"])
+    texts = {paper.item_key: load_frozen_text(faithbench_dir / "papers", paper.item_key,
+                                             expected_sha256=paper.text_sha256) for paper in meta.papers}
+    for item in items:
+        _validate_item(item, meta, texts)
     responses = list(latest_by_key(load_jsonl(paths.responses)).values())
     judgments = load_jsonl(paths.judgments)
     if not judgments:
         raise RuntimeError(
             f"no judgments in {paths.judgments}; run `faithbench judge` before `report`"
         )
-    stats = calculate_statistics(responses, judgments, items_meta(items))
+    judgments = _checked_judgments(manifest, meta, items, responses, judgments)
+    stats = calculate_statistics(responses, judgments, items_meta(items),
+                                 expected_runs=int(manifest["runs"]))
 
     judge_models = sorted({str(j["judge_model"]) for j in judgments if j.get("judge_model")})
     report = {
@@ -61,17 +132,16 @@ def build_report(
             "provider": manifest.get("provider_name"),
             "base_url": manifest.get("base_url"),
         },
-        "judge": {"models_used": judge_models},
+        "judge": {"models_used": judge_models, "context": judgments[0]["judge_context"]},
         "num_runs": manifest.get("runs"),
         "conditions": manifest.get("conditions"),
         "tracks": manifest.get("tracks"),
         **stats,
     }
 
-    paths.report_json.write_text(
-        json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    paths.report_md.write_text(render_markdown(report), encoding="utf-8")
+    atomic_write(paths.report_json, lambda tmp: tmp.write_text(
+        json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"))
+    atomic_write(paths.report_md, lambda tmp: tmp.write_text(render_markdown(report), encoding="utf-8"))
 
     headline: dict[str, Any] = {
         "run_id": report["run_id"],
@@ -90,7 +160,7 @@ def build_report(
     if claims_block:
         headline["claims_support_rate"] = claims_block["support_rate"]["mean"]
         headline["claims_support_rate_median"] = claims_block["support_rate"]["median"]
-    run_log.append_run(faithbench_dir / MASTER_LOG_NAME, headline)
+    _append_headline_once(faithbench_dir / MASTER_LOG_NAME, headline)
     return report
 
 
@@ -99,8 +169,8 @@ def build_report(
 # ---------------------------------------------------------------------------
 
 
-def _fmt_pct(x: float) -> str:
-    return f"{100.0 * float(x):.1f}%"
+def _fmt_pct(x: float | None) -> str:
+    return "N/A (unmeasured)" if x is None else f"{100.0 * x:.1f}%"
 
 
 def _qa_section(condition: str, block: dict[str, Any]) -> list[str]:
@@ -108,7 +178,7 @@ def _qa_section(condition: str, block: dict[str, Any]) -> list[str]:
     lines = [
         f"### QA — `{condition}`",
         "",
-        f"- Accuracy: **{_fmt_pct(acc['mean'])}** ± {_fmt_pct(acc['sem_across_runs'])} "
+        f"- Accuracy: **{_fmt_pct(acc['mean'])}** (median {_fmt_pct(acc['median'])}) ± {_fmt_pct(acc['sem_across_runs'])} "
         f"(STD {_fmt_pct(acc['std_across_runs'])}) over {block['n_validated']} validated trials "
         f"({block['n_unjudgeable']} unjudgeable excluded, {block['n_harness_faults']} harness faults)",
         f"- Answerable-only accuracy: {_fmt_pct(block['answerable_accuracy'])}; "
@@ -120,7 +190,7 @@ def _qa_section(condition: str, block: dict[str, Any]) -> list[str]:
         f"- Judge escalation: {_fmt_pct(block['judge_escalation_fraction'])} of validated trials",
         f"- Latency: p50 {block['latency']['p50']}s, p90 {block['latency']['p90']}s, "
         f"mean {block['latency']['mean']}s (n={block['latency']['n']}, "
-        f"total {block['latency']['total_wall_seconds']}s)",
+        f"cumulative trial time {block['latency']['total_trial_seconds']}s)",
     ]
     if "pass_at_k" in block:
         lines.append(
@@ -145,7 +215,7 @@ def _claims_section(block: dict[str, Any]) -> list[str]:
     lines = [
         "### Review claims — `digest`",
         "",
-        f"- Claim support rate: **{_fmt_pct(sr['mean'])}** ± {_fmt_pct(sr['sem_across_runs'])} "
+        f"- Claim support rate: **{_fmt_pct(sr['mean'])}** (median {_fmt_pct(sr['median'])}) ± {_fmt_pct(sr['sem_across_runs'])} "
         f"(STD {_fmt_pct(sr['std_across_runs'])}) over {block['n_validated']} validated claims "
         f"({block['n_unjudgeable']} unjudgeable excluded)",
         f"- Digest latency: p50 {block['latency']['p50']}s, mean {block['latency']['mean']}s "

@@ -21,7 +21,7 @@ export async function startReview(sessionId) {
 
 /** GET /api/search/{id} — poll one session (status + candidates + reviews). */
 export async function getSession(sessionId) {
-  return request(`/api/search/${encodeURIComponent(sessionId)}`);
+  return request(`/api/search/${encodeURIComponent(sessionId)}`, { signal: AbortSignal.timeout(15_000) });
 }
 
 /** POST /api/search/{id}/materialize — file one candidate into a chosen Zotero

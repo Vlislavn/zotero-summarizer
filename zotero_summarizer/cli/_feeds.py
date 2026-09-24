@@ -5,15 +5,13 @@ import json
 import sys
 
 from zotero_summarizer.settings import Settings
-from zotero_summarizer.cli._helpers import _feeds_lock, _resolve_feed_ids
+from zotero_summarizer.cli._helpers import _resolve_feed_ids
 
 
 def _bootstrap_feeds_cli(args: argparse.Namespace) -> tuple[Settings, list[int] | None]:
     """Shared bootstrap for the feeds subcommands: load settings, resolve an
     optional ``--feeds`` filter, set the runtime context, and run app startup
-    with an optional ``--model`` override. Divergent per-subcommand logic (PID
-    lock vs no-lock, daemon loop vs single tick vs daily selection) stays in
-    each caller."""
+    with an optional ``--model`` override. Tick exclusion belongs to the service."""
     from zotero_summarizer.runtime import AppContext, set_context
     from zotero_summarizer.services import lifecycle
 
@@ -23,7 +21,10 @@ def _bootstrap_feeds_cli(args: argparse.Namespace) -> tuple[Settings, list[int] 
         feed_filter = _resolve_feed_ids(args.feeds, settings)
 
     set_context(AppContext(settings=settings))
-    lifecycle.startup(override_model=getattr(args, "model", None) or None)
+    lifecycle.startup(
+        override_model=getattr(args, "model", None) or None,
+        background=not getattr(args, "dry_run", False),
+    )
     return settings, feed_filter
 
 
@@ -41,39 +42,19 @@ def _feeds_run(args: argparse.Namespace) -> int:
     """
     import asyncio
 
-    settings = Settings.load(project_root=args.project_root)
-    feed_filter: list[int] | None = None
-    if args.feeds:
-        feed_filter = _resolve_feed_ids(args.feeds, settings)
-
-    gate_only = bool(args.gate_only)
-
     async def _run() -> int:
-        from zotero_summarizer.runtime import AppContext, set_context
-        from zotero_summarizer.services import lifecycle
         from zotero_summarizer.services.triage.feeds import run_daemon_tick
 
-        set_context(AppContext(settings=settings))
-        lifecycle.startup(override_model=args.model or None)
-
-        with _feeds_lock(settings.project_root):
-            report = await asyncio.to_thread(
-                run_daemon_tick,
-                feed_library_ids=feed_filter,
-                batch_size=None,                # unlimited — exhaust the feed
-                force_daily_selection=False,    # never auto-materialise from `feeds run`
-                review_mode=True,
-                gate_only=gate_only,
-                dry_run=args.dry_run,
-            )
-        print(json.dumps(report.as_dict(), indent=2))
-        mode_hint = "gate-only" if gate_only else "LLM-triage"
-        print(
-            f"\n[{mode_hint}] {report.triaged} item(s) awaiting review. "
-            f"Open http://localhost:8000/review (run `zotero-summarizer serve` first).",
-            file=sys.stderr,
+        _settings, feed_filter = _bootstrap_feeds_cli(args)
+        report = await asyncio.to_thread(
+            run_daemon_tick, feed_library_ids=feed_filter, batch_size=None,
+            review_mode=True,
+            gate_only=args.gate_only, dry_run=args.dry_run,
         )
-        return 0
+        print(json.dumps(report.as_dict(), indent=2))
+        action = "would await review (not saved)" if args.dry_run else "awaiting review"
+        print(f"{report.triaged} item(s) {action}.", file=sys.stderr)
+        return int(bool(report.errors or report.fatal_llm_error))
 
     return asyncio.run(_run())
 
@@ -109,40 +90,36 @@ def _feeds_serve(args: argparse.Namespace) -> int:
       - triages them (LLM scoring + corpus pre-filter)
       - marks them read in Zotero so the unread badge updates
       - resolves a few due outcomes from prior materializations
-      - at the configured morning time (daily_selection_at), materializes
-        the 1-2 best items from the rolling 24h pool into the Inbox collection
+      - optionally reviews top Today papers in place; only the user can Add
+        a reviewed paper to the Zotero Inbox
     SIGTERM / SIGINT finishes the current tick cleanly before exiting.
     """
     import asyncio
 
+    if args.max_ticks is not None and args.max_ticks < 0:
+        raise ValueError("max_ticks must be nonnegative")
+    if args.max_ticks == 0:
+        return 0
+
     async def _run() -> int:
         from zotero_summarizer.services.triage.feeds import run_daemon_loop
 
-        settings, feed_filter = _bootstrap_feeds_cli(args)
-        with _feeds_lock(settings.project_root):
-            await run_daemon_loop(
-                feed_library_ids=feed_filter,
-                max_ticks=args.max_ticks,
-            )
+        _settings, feed_filter = _bootstrap_feeds_cli(args)
+        await run_daemon_loop(feed_library_ids=feed_filter, max_ticks=args.max_ticks)
         return 0
 
     return asyncio.run(_run())
 
 
 def _feeds_select_daily(args: argparse.Namespace) -> int:
-    """Manually trigger one round of daily selection.
-
-    Normally the daemon runs this once every `daily_selection_interval_hours`
-    (default 24h). This subcommand forces it on demand — useful for testing
-    or for catching up after a long downtime.
-    """
+    """Inspect an advisory daily plateau selection without Zotero writes."""
     import asyncio
 
     async def _run() -> int:
         from zotero_summarizer.services.triage.feeds import run_daily_selection
 
         _bootstrap_feeds_cli(args)
-        result = await asyncio.to_thread(run_daily_selection, dry_run=args.dry_run)
+        result = await asyncio.to_thread(run_daily_selection)
         print(json.dumps(result, indent=2))
         return 0 if not result.get("errors") else 1
 
@@ -154,7 +131,7 @@ def _feeds_tick(args: argparse.Namespace) -> int:
 
     Useful for cron-driven setups (e.g., macOS launchd / systemd timer)
     instead of a long-running daemon, or for one-off testing.
-    Does NOT acquire the PID lock — intentionally safe to run alongside the daemon.
+    An overlapping daemon/UI tick is rejected by the shared service lock.
     """
     import asyncio
 
@@ -162,14 +139,15 @@ def _feeds_tick(args: argparse.Namespace) -> int:
         from zotero_summarizer.services.triage.feeds import run_daemon_tick
 
         _settings, feed_filter = _bootstrap_feeds_cli(args)
+        from zotero_summarizer.services.triage.feeds._common import _load_config
+        batch = args.batch_size if args.batch_size is not None else _load_config()["feeds"]["daemon_batch_size"]
         report = await asyncio.to_thread(
             run_daemon_tick,
             feed_library_ids=feed_filter,
-            batch_size=args.batch_size,
-            force_daily_selection=args.force_daily,
+            batch_size=batch,
         )
         print(json.dumps(report.as_dict(), indent=2))
-        return 0
+        return int(bool(report.errors or report.fatal_llm_error))
 
     return asyncio.run(_run())
 
@@ -300,7 +278,7 @@ def register_feeds(subparsers) -> None:
 
     feeds_tick = feeds_subparsers.add_parser(
         "tick",
-        help="Run exactly one daemon tick and exit (cron-friendly; safe alongside daemon)",
+        help="Run one daemon tick; fail if another tick is active (cron-friendly)",
     )
     feeds_tick.add_argument(
         "--feeds",
@@ -321,22 +299,12 @@ def register_feeds(subparsers) -> None:
         default=None,
         help="Override LLM model for this tick. Uses goals.yaml value if omitted.",
     )
-    feeds_tick.add_argument(
-        "--force-daily",
-        action="store_true",
-        help="Force daily selection to run this tick (skip the time-of-day check)",
-    )
     feeds_tick.add_argument("--project-root", default=None)
     feeds_tick.set_defaults(func=_feeds_tick)
 
     feeds_daily = feeds_subparsers.add_parser(
         "select-daily",
-        help="Manually trigger daily selection over the rolling 24h triage pool",
-    )
-    feeds_daily.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Plateau-select but don't materialize items into Zotero",
+        help="Inspect the rolling 24h plateau picks without modifying Zotero",
     )
     feeds_daily.add_argument("--project-root", default=None)
     feeds_daily.set_defaults(func=_feeds_select_daily)

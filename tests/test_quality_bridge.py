@@ -24,7 +24,7 @@ def _model_cand(id_: int, composite: float, rank: float, band: str | None = None
 
 
 def test_attach_quality_bridges_only_via_materialized_key(monkeypatch) -> None:
-    monkeypatch.setattr(deep_review, "_read_all", lambda: {
+    monkeypatch.setattr(deep_review, "current_reviews", lambda: {
         "ZK1": {"quality": {"quality_band": "highlight", "grade": "A"}},
     })
     cands = [
@@ -42,7 +42,7 @@ def test_attach_quality_bridges_only_via_materialized_key(monkeypatch) -> None:
 def test_attach_quality_bridges_via_stable_feed_key(monkeypatch) -> None:
     """The IN-PLACE Today review caches under stable_feed_key — the bridge must join on
     it too, so an un-materialized (no-Zotero-write) card still shows quality."""
-    monkeypatch.setattr(deep_review, "_read_all", lambda: {
+    monkeypatch.setattr(deep_review, "current_reviews", lambda: {
         "feed:d:abc": {"quality": {"quality_band": "highlight", "grade": "A"}},
     })
     cands = [
@@ -58,7 +58,7 @@ def test_attach_quality_bridges_via_stable_feed_key(monkeypatch) -> None:
 def test_attach_quality_prefers_materialized_over_feed_key(monkeypatch) -> None:
     """Post-materialize the Zotero-key entry wins over the feed-key one (the copy made
     at materialization is the canonical library record)."""
-    monkeypatch.setattr(deep_review, "_read_all", lambda: {
+    monkeypatch.setattr(deep_review, "current_reviews", lambda: {
         "ZK1": {"quality": {"grade": "A"}},
         "feed:d:abc": {"quality": {"grade": "C"}},
     })

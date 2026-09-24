@@ -15,23 +15,31 @@ lost.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import logging
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Callable
+from uuid import uuid4
 
-from zotero_summarizer.services._common import extract_json_blob, now_iso_z, to_text
+from zotero_summarizer.services._common import atomic_write, extract_json_blob, now_iso_z, to_text, write_json_atomic
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.faithbench import _build_claims
 from zotero_summarizer.services.faithbench._constants import RETRIEVAL_TOP_K
-from zotero_summarizer.services.faithbench._corpus import PaperChunkIndex, load_frozen_text
-from zotero_summarizer.services.faithbench._dataset import BenchmarkItem, BenchmarkMeta
+from zotero_summarizer.services.faithbench._corpus import (
+    PaperChunkIndex, _CONTEXT_SEPARATOR, _clip_chunks, load_frozen_text,
+)
+from zotero_summarizer.services.faithbench._dataset import (
+    BenchmarkItem, BenchmarkMeta, _benchmark_sha, _require_qa_cohort, _validate_identity, _validate_item,
+    load_benchmark, require_review_approval,
+)
 
 LOGGER = logging.getLogger(__name__)
-
 CONDITIONS = ("full_text", "retrieval")
 TRACKS = ("qa", "claims")
 CLAIMS_CONDITION = "digest"
@@ -39,6 +47,7 @@ CLAIMS_CONDITION = "digest"
 # Public: services/library/qa.py reuses this EXACT prompt so the product Q&A
 # runs the same instruction the benchmark validated (single source of truth).
 ANSWER_PROMPT = (
+    UNTRUSTED_INPUT_RULE + "\n\n"
     "Answer the question using ONLY the provided paper text. If the text does "
     "not contain the answer, you MUST abstain — do not guess, do not use outside "
     "knowledge.\n\n"
@@ -89,6 +98,9 @@ class RunInputs:
     papers_dir: Path
     paths: RunPaths
 
+    def __post_init__(self) -> None:
+        _validate_identity(self.meta, self.items)
+
 
 # ---------------------------------------------------------------------------
 # JSONL helpers — last row per trial key wins (a --retry-errors resume appends
@@ -96,15 +108,46 @@ class RunInputs:
 # ---------------------------------------------------------------------------
 
 
+def _decode_jsonl(raw: bytes) -> list[dict[str, Any]]:
+    rows = [json.loads(line) for line in raw.splitlines() if line.strip()]
+    if any(not isinstance(row, dict) for row in rows):
+        raise ValueError("JSONL trial rows must be objects")
+    return rows
+
+
 def load_jsonl(path: Path) -> list[dict[str, Any]]:
+    return _decode_jsonl(path.read_bytes()) if path.exists() else []
+
+
+def _repair_jsonl_tail(path: Path) -> None:
+    """Resume-only recovery: archive an interrupted EOF, never skip interior damage."""
+    # ponytail: one writer per run; add process locking before concurrent resumes.
     if not path.exists():
-        return []
-    with path.open("r", encoding="utf-8") as f:
-        return [json.loads(line) for line in f if line.strip()]
+        return
+    raw = path.read_bytes()
+    if not raw or raw.endswith(b"\n"):
+        return
+    prefix, separator, tail = raw.rpartition(b"\n")
+    prefix += separator
+    _decode_jsonl(prefix)
+    try:
+        _decode_jsonl(tail)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        backup = path.with_name(f"{path.name}.interrupted-{uuid4().hex}")
+        atomic_write(backup, lambda tmp: tmp.write_bytes(raw))
+        LOGGER.warning("Recovering interrupted EOF in %s; original archived at %s", path, backup)
+        repaired = prefix
+    else:
+        repaired = raw + b"\n"
+    atomic_write(path, lambda tmp: tmp.write_bytes(repaired))
 
 
 def trial_key(row: dict[str, Any]) -> tuple[str, str, int]:
     return (str(row["item_id"]), str(row["condition"]), int(row["run_number"]))
+
+
+def _response_sha(row: dict[str, Any]) -> str:
+    return hashlib.sha256(json.dumps(row, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def latest_by_key(rows: list[dict[str, Any]]) -> dict[tuple[str, str, int], dict[str, Any]]:
@@ -125,16 +168,57 @@ def done_keys(rows: list[dict[str, Any]], *, retry_errors: bool) -> set[tuple[st
 # Manifest (resume guard)
 # ---------------------------------------------------------------------------
 
-_MANIFEST_GUARD_FIELDS = ("model", "benchmark_sha256", "conditions", "tracks", "runs")
+_MANIFEST_GUARD_FIELDS = (
+    "run_id", "model", "provider_name", "base_url", "benchmark_sha256", "benchmark_content_sha256",
+    "benchmark_review_sha256",
+    "generation_sha256", "research_goals", "conditions", "tracks", "runs", "limit", "serial", "max_workers",
+)
+
+
+def generation_identity(config: Any, models: tuple) -> str:
+    """Conservative generation identity; never inspect clients or retain credentials."""
+    from zotero_summarizer.models import PaperDigest
+    from zotero_summarizer.models.providers import ResolvedStage
+    from zotero_summarizer.services import _adapters, _common
+    from zotero_summarizer.services.faithbench import _corpus
+    from zotero_summarizer.services.library import _review_text, quality_review
+    from zotero_summarizer.services.llm import factory
+
+    if len(models) != 2 or not isinstance(models[0], ResolvedStage) or (
+        models[1] is not None and not isinstance(models[1], ResolvedStage)
+    ):
+        raise ValueError("Generation identity requires resolved model profiles")
+    modules = (_build_claims, _corpus, quality_review, _review_text, _common, _adapters, factory)
+    sources = [Path(__file__), Path(inspect.getfile(PaperDigest)), *(Path(m.__file__) for m in modules)]
+    payload = {"config": config.model_dump(mode="json"),
+               "models": [model.model_dump(mode="json") if model else None for model in models],
+               "timeout_seconds": _common.settings().summary_timeout_seconds,
+               "prompts": [ANSWER_PROMPT, _build_claims._DECOMPOSE_PROMPT, quality_review._DEFAULT_DIGEST_PROMPT],
+               "schema": PaperDigest.model_json_schema(),
+               "sources": [hashlib.sha256(path.read_bytes()).hexdigest() for path in sources]}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _load_manifest(paths: RunPaths) -> dict[str, Any]:
+    manifest = json.loads(paths.manifest.read_text(encoding="utf-8"))
+    sha = manifest.get("benchmark_sha256") if isinstance(manifest, dict) else None
+    if not isinstance(sha, str) or not re.fullmatch(r"[a-f0-9]{64}", sha):
+        raise ValueError("Run manifest must contain a valid benchmark SHA-256")
+    return manifest
 
 
 def write_or_check_manifest(paths: RunPaths, manifest: dict[str, Any]) -> dict[str, Any]:
     """First start writes the manifest; a resume must match the guard fields."""
+    identity_fields = ["generation_sha256", "benchmark_content_sha256"]
+    if "qa" in manifest.get("tracks", []):
+        identity_fields.append("benchmark_review_sha256")
+    for field in identity_fields:
+        if not isinstance(manifest.get(field), str) or not re.fullmatch(r"[a-f0-9]{64}", manifest[field]):
+            raise ValueError(f"Run generation identity is missing or invalid: {field}")
     if not paths.manifest.exists():
-        paths.run_dir.mkdir(parents=True, exist_ok=True)
-        paths.manifest.write_text(
-            json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        if any(path.exists() and path.stat().st_size for path in (paths.responses, paths.judgments)):
+            raise RuntimeError("Run manifest is missing; refusing to relabel existing trial artifacts")
+        write_json_atomic(paths.manifest, manifest)
         return manifest
     existing = json.loads(paths.manifest.read_text(encoding="utf-8"))
     for field in _MANIFEST_GUARD_FIELDS:
@@ -199,8 +283,8 @@ def _qa_context(item: BenchmarkItem, *, condition: str, text: str,
                 index: PaperChunkIndex, max_chars: int) -> str:
     if condition == "full_text":
         return text[:max_chars]
-    chunks = index.top_chunks(item.question, RETRIEVAL_TOP_K)
-    return "\n\n[...]\n\n".join(chunks) if chunks else text[: max_chars // 10]
+    chunks = _clip_chunks(index.top_chunks(item.question, RETRIEVAL_TOP_K), max_chars)
+    return _CONTEXT_SEPARATOR.join(chunks) if chunks else text[: max_chars // 10]
 
 
 @dataclass(frozen=True)
@@ -215,6 +299,22 @@ class RunOptions:
     retry_errors: bool = False
     serial: bool = True
     max_workers: int = 4
+
+    def __post_init__(self) -> None:
+        for name, allowed in (("conditions", CONDITIONS), ("tracks", TRACKS)):
+            values = getattr(self, name)
+            if not isinstance(values, tuple) or not values or any(v not in allowed for v in values):
+                raise ValueError(f"{name} must be a nonempty tuple drawn from {allowed}")
+            if len(set(values)) != len(values):
+                raise ValueError(f"{name} must not contain duplicates")
+        for name in ("runs", "limit", "max_workers"):
+            value = getattr(self, name)
+            if name == "limit" and value is None:
+                continue
+            if type(value) is not int or value < 1:
+                raise ValueError(f"{name} must be a positive integer")
+        if self.limit is not None and "qa" not in self.tracks:
+            raise ValueError("limit requires the qa track")
 
 
 @dataclass(frozen=True)
@@ -242,7 +342,8 @@ def _qa_trial(ctx: _TrialContext, item: BenchmarkItem, condition: str, run_numbe
         index=ctx.indexes.get(item.paper_item_key) or PaperChunkIndex(text),
         max_chars=ctx.max_chars,
     )
-    prompt = ANSWER_PROMPT.format(context=context, question=item.question)
+    prompt = ANSWER_PROMPT.format(
+        context=untrusted_input(context), question=untrusted_input(item.question))
     started = now_iso_z()
     t0 = perf_counter()
     parsed, raw = answer_with_retry(ctx.llm, prompt)
@@ -278,6 +379,23 @@ def _claims_trial(ctx: _TrialContext, paper_key: str, run_number: int) -> dict[s
     }
 
 
+def _check_run_identity(run_id: str, inputs: RunInputs, config: Any, models: tuple, options: RunOptions) -> None:
+    manifest = _load_manifest(inputs.paths)
+    benchmark = Path(manifest["benchmark_path"])
+    load_benchmark(benchmark, expected_sha256=manifest["benchmark_sha256"])
+    review_sha = require_review_approval(benchmark, inputs.items) if "qa" in options.tracks else None
+    write_or_check_manifest(inputs.paths, {
+        **manifest, "run_id": run_id, "generation_sha256": generation_identity(config, models),
+        "benchmark_content_sha256": _benchmark_sha(inputs.meta, inputs.items),
+        "benchmark_review_sha256": review_sha,
+        "research_goals": list(config.research_goals),
+        "conditions": list(options.conditions), "tracks": list(options.tracks),
+        "runs": options.runs, "limit": options.limit, "serial": options.serial, "max_workers": options.max_workers,
+    })
+    if "claims" in options.tracks and models[1] is None:
+        raise ValueError("claims track requires a decomposer generation identity")
+
+
 def run_benchmark(
     *,
     run_id: str,
@@ -285,13 +403,17 @@ def run_benchmark(
     llm: Any,
     config: Any,
     decompose_llm: Any | None,
+    generation_models: tuple,
     options: RunOptions = RunOptions(),
     progress_cb: Callable[[str], None] | None = None,
 ) -> dict[str, int]:
     """Execute all pending trials; returns ``{executed, skipped, failed}``."""
     meta, items, papers_dir, paths = inputs.meta, inputs.items, inputs.papers_dir, inputs.paths
+    if "qa" in options.tracks:
+        _require_qa_cohort(items)
     if "claims" in options.tracks and decompose_llm is None:
         raise ValueError("claims track requested but no decompose_llm provided")
+    _check_run_identity(run_id, inputs, config, generation_models, options)
 
     max_chars = int(config.quality_review.max_text_chars)
     texts: dict[str, str] = {}
@@ -302,8 +424,11 @@ def run_benchmark(
         texts[paper.item_key] = load_frozen_text(
             papers_dir, paper.item_key, expected_sha256=paper.text_sha256
         )
+    for item in items:
+        _validate_item(item, meta, texts)
 
-    bench_items = items[: options.limit] if options.limit else items
+    bench_items = items[: options.limit]
+    _repair_jsonl_tail(paths.responses)
     done = done_keys(load_jsonl(paths.responses), retry_errors=options.retry_errors)
     write_lock = threading.Lock()
 
@@ -367,7 +492,7 @@ def run_benchmark(
         for thunk, key in pending:
             execute(thunk, key)
     else:
-        with ThreadPoolExecutor(max_workers=max(1, options.max_workers)) as pool:
+        with ThreadPoolExecutor(max_workers=options.max_workers) as pool:
             futures = [pool.submit(execute, thunk, key) for thunk, key in pending]
             for future in as_completed(futures):
                 future.result()  # re-raise anything outside the per-trial boundary

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import contextlib
-import os
 import sys
 from pathlib import Path
-from typing import Callable, Generator
+from typing import Callable
 
 from zotero_summarizer.settings import Settings
 
@@ -85,42 +83,6 @@ def _resolve_feed_ids(raw: str, settings: Settings) -> list[int]:
     return ids
 
 
-@contextlib.contextmanager
-def _feeds_lock(project_root: Path) -> Generator[None, None, None]:
-    """Exclusive lock that prevents simultaneous `feeds run` / `feeds serve` calls.
-
-    Uses a PID file at ``{project_root}/feeds.lock``.  If the PID in the file
-    belongs to an active process the command exits with an error message.
-    Stale locks (dead PID) are silently overwritten.
-
-    ``feeds tick`` and ``feeds select-daily`` do NOT use this lock — they are
-    explicitly designed to be run alongside a daemon.
-    """
-    lock_path = project_root / "feeds.lock"
-    if lock_path.exists():
-        try:
-            existing_pid = int(lock_path.read_text().strip())
-            os.kill(existing_pid, 0)  # Signal 0: raises if process does not exist
-            print(
-                f"ERROR: a feeds process is already running (PID {existing_pid}).\n"
-                "Stop it first (Ctrl-C or kill), then retry.\n"
-                "Tip: `feeds tick` can run alongside the daemon for a one-shot batch.",
-                file=sys.stderr,
-            )
-            raise SystemExit(1)
-        except (ProcessLookupError, PermissionError) as _:
-            pass  # Stale lock — overwrite it
-        except ValueError as _:
-            pass  # Corrupt lock file — overwrite it
-
-    lock_path.write_text(str(os.getpid()))
-    try:
-        yield
-    finally:
-        try:
-            lock_path.unlink(missing_ok=True)
-        except OSError as _:
-            pass
 
 
 def _slugify_model(model_name: str) -> str:

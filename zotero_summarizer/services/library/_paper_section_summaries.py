@@ -12,6 +12,8 @@ from __future__ import annotations
 from typing import Any
 
 from pydantic import BaseModel, Field
+from zotero_summarizer.services.library._grounding import quote_is_grounded
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 
 # Body chars per section fed to the summarizer — enough to characterize a section
 # without spending the prompt budget on a long paper's full body.
@@ -26,13 +28,15 @@ _SECTION_SUMMARY_PROMPT = (
     "NOT invent facts, numbers, or findings; if a section's text is too sparse to "
     'tell, return an empty string for it.\n\n{blocks}\n\n'
     'Return ONE strict JSON object: {{"sections": [{{"index": <int 0-based>, '
-    '"summary": "..."}}, ...]}} — one entry per index above. Start {{ end }}.'
+    '"summary": "...", "supporting_quote": "..."}}, ...]}} — one entry per index above. '
+    'The quote must be copied verbatim from that section. Start {{ end }}.'
 )
 
 
 class _SectionLine(BaseModel):
     index: int = Field(default=-1)
     summary: str = Field(default="")
+    supporting_quote: str = Field(default="")
 
 
 class _SectionSummaryResponse(BaseModel):
@@ -48,12 +52,12 @@ def summarize_sections(sections: list[dict[str, Any]], llm: Any) -> dict[str, st
     usable = [s for s in (sections or []) if str(s.get("text") or "").strip()][:_MAX_SECTIONS]
     if not usable:
         return {}
-    blocks = "\n\n".join(
+    blocks = untrusted_input("\n\n".join(
         f"[Section {i}] {s.get('title') or 'Section'}\n{str(s.get('text') or '')[:_SECTION_BODY_CHARS]}"
         for i, s in enumerate(usable)
-    )
+    ))
     parsed = llm.pydantic_prompt(
-        prompt=_SECTION_SUMMARY_PROMPT.format(blocks=blocks),
+        prompt=UNTRUSTED_INPUT_RULE + "\n\n" + _SECTION_SUMMARY_PROMPT.format(blocks=blocks),
         pydantic_model=_SectionSummaryResponse,
     )
     out: dict[str, str] = {}
@@ -61,7 +65,8 @@ def summarize_sections(sections: list[dict[str, Any]], llm: Any) -> dict[str, st
         i = int(line.index)
         if 0 <= i < len(usable):
             summary = " ".join(str(line.summary or "").split()).strip()
-            if summary:
+            quote = str(line.supporting_quote or "").strip()
+            if summary and quote_is_grounded(quote, str(usable[i].get("text") or "")):
                 out[str(usable[i].get("id") or "")] = summary
     return out
 

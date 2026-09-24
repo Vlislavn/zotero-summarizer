@@ -17,6 +17,7 @@ import re
 from typing import Any
 
 from zotero_summarizer.services._common import extract_json_blob, to_text
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.search._models import SearchIntent, QueryPlan
 
 LOGGER = logging.getLogger(__name__)
@@ -79,10 +80,10 @@ def parse_intent(raw_query: str, questions: list[str], *, llm: Any) -> SearchInt
 
     q_block = ""
     if questions:
-        q_block = "The researcher also wants these questions answered:\n" + "\n".join(
-            f"- {q}" for q in questions
-        ) + "\n"
-    prompt = _PROMPT.format(topic=raw, questions_block=q_block)
+        q_block = "The researcher also wants these questions answered:\n" + untrusted_input(
+            "\n".join(f"- {q}" for q in questions)) + "\n"
+    prompt = UNTRUSTED_INPUT_RULE + "\n\n" + _PROMPT.format(
+        topic=untrusted_input(raw), questions_block=q_block)
     try:
         parsed = _parse_once(prompt, llm=llm)
     except ValueError:
@@ -137,6 +138,23 @@ def _variants(tight: str, bag: str) -> list[str]:
     return [tight, bag] if tight and tight != bag else [bag]
 
 
+def _constrained_lexical(query: str, intent: SearchIntent) -> str:
+    """OpenAlex/Europe PMC Boolean syntax; all source results are also checked locally."""
+    def quoted(term: str) -> str:
+        return '"' + term.replace('\\', ' ').replace('"', ' ').strip() + '"'
+
+    if intent.synonyms:
+        query = "(" + " OR ".join([f"({query})", *(quoted(term) for term in intent.synonyms)]) + ")"
+    clauses = [f"({query})"]
+    clauses.extend(quoted(term) for term in intent.must_include)
+    if intent.study_types:
+        clauses.append("(" + " OR ".join(quoted(term) for term in intent.study_types) + ")")
+    constrained = " AND ".join(clauses)
+    for term in intent.must_not_include:
+        constrained += " NOT " + quoted(term)
+    return constrained if len(clauses) > 1 or intent.must_not_include or intent.synonyms else query
+
+
 def build_query_plan(intent: SearchIntent) -> QueryPlan:
     """Derive a source-specific query per channel (spec §13.1). Deterministic —
     no LLM. Lexical channels get concise concept terms; the semantic + library-
@@ -150,19 +168,29 @@ def build_query_plan(intent: SearchIntent) -> QueryPlan:
     expanded = intent.canonical_question or intent.raw_query
     if concepts:
         expanded = (expanded + " " + " ".join(concepts[:6])).strip()
+    semantic = intent.canonical_question or intent.raw_query
+    for name, values in (("Alternative terms", intent.synonyms), ("Required terms", intent.must_include),
+                         ("Exclude", intent.must_not_include), ("Study types (any)", intent.study_types)):
+        if values:
+            semantic += f". {name}: " + "; ".join(values)
+            expanded += f". {name}: " + "; ".join(values)
+    variants = [_constrained_lexical(query, intent) for query in _variants(tight, lexical)]
+    lexical = _constrained_lexical(lexical, intent)
     return QueryPlan(
         library_raw=intent.raw_query,
         library_expanded=expanded,
         openalex_lexical=lexical,
-        openalex_semantic=intent.canonical_question or intent.raw_query,
+        openalex_semantic=semantic,
         europepmc=lexical,
         arxiv=arxiv_bag,
-        crossref=lexical,  # broad scholarly metadata — keyword bag
-        semantic_scholar=intent.canonical_question or intent.raw_query,  # relevance-ranked NL
-        openreview=intent.canonical_question or intent.raw_query,  # relevance search over text (peer-review signal)
-        openalex_lexical_variants=_variants(tight, lexical),
-        europepmc_variants=_variants(tight, lexical),
+        crossref=" ".join([*concepts[:6], *intent.must_include, *intent.synonyms]),
+        semantic_scholar=semantic,
+        openreview=semantic,
+        openalex_lexical_variants=variants,
+        europepmc_variants=variants,
         arxiv_variants=_variants(tight, arxiv_bag),
+        must_include=list(intent.must_include), must_not_include=list(intent.must_not_include),
+        study_types=list(intent.study_types),
     )
 
 

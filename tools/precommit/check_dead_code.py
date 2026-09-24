@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Identify dead code in the runtime package via two complementary tiers.
 
-Ported from IVAI's ``scripts/dead_code_guard.py`` and reshaped to this repo's
-``loc_allowlist.txt`` grandfathering idiom (existing findings are frozen; only
-*new* dead code blocks).
+Ported from IVAI's ``scripts/dead_code_guard.py`` with existing findings frozen
+so only *new* dead code blocks.
 
 Tier 1 — consumer-check (stdlib AST + ``git grep``): a public, top-level,
 *undecorated* function/class with no reference inside ``zotero_summarizer/``

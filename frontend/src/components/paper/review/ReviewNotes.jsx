@@ -30,7 +30,9 @@ export default function ReviewNotes({ itemKey, initialNote = '', onSaved = () =>
     setStatus(null);
     try {
       const res = await saveReviewNote({ item_key: itemKey, note });
-      if (res.note_written) {
+      if (res.saved_offline) {
+        setStatus({ tone: 'soft', text: 'Saved on this device — waiting to sync.' });
+      } else if (res.note_written) {
         setStatus({ tone: 'ok', text: 'Saved to the app and Zotero.' });
       } else if (res.note_error) {
         setStatus({ tone: 'soft', text: 'Saved in the app — close Zotero to sync it there.' });

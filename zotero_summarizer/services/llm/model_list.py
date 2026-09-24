@@ -13,7 +13,44 @@ from __future__ import annotations
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.integrations import llm_models
 from zotero_summarizer.models.providers import ProviderConfig, ProviderType
+from zotero_summarizer.services._common import state
 from zotero_summarizer.services.llm.factory import resolve_api_key
+from zotero_summarizer.services.llm.presets import PROVIDER_PRESET_REGISTRY, _compile_preset
+
+
+def _identity(provider: ProviderConfig) -> tuple[ProviderType, str, str]:
+    return (
+        provider.type,
+        (provider.base_url or "").rstrip("/"),
+        provider.api_key_env,
+    )
+
+
+def _allowed_remote_identities() -> set[tuple[ProviderType, str, str]]:
+    allowed = {
+        _identity(_compile_preset(name))
+        for name in PROVIDER_PRESET_REGISTRY
+        if name not in {"custom", "local"}
+    }
+    try:
+        providers = state().app_state.config.llm_routing.providers
+    except (AttributeError, RuntimeError):
+        providers = []
+    allowed.update(_identity(provider) for provider in providers if not provider.is_local)
+    return allowed
+
+
+def _discovery_api_key(provider: ProviderConfig) -> str:
+    if provider.is_local:
+        return "local"
+    if _identity(provider) not in _allowed_remote_identities():
+        raise APIError(
+            error="unsafe_provider_discovery",
+            message="Save this custom remote provider before listing its models",
+            status_code=403,
+            details={"provider": provider.name},
+        )
+    return resolve_api_key(provider)
 
 
 def list_models_for_provider(provider: ProviderConfig) -> list[str]:
@@ -25,7 +62,7 @@ def list_models_for_provider(provider: ProviderConfig) -> list[str]:
     rejects the request — the picker shows that reason inline rather than a bare
     500, so the user can fix the URL/key/endpoint.
     """
-    api_key = resolve_api_key(provider)
+    api_key = _discovery_api_key(provider)
 
     try:
         if provider.type == ProviderType.openai:

@@ -2,6 +2,12 @@
 // All functions return parsed JSON or throw on non-2xx responses.
 // Designed to be called from React Query's `queryFn` / `mutationFn`.
 
+import { cacheResponse, cachedResponse, queueMutation } from '../offlineStore.js';
+
+function requestSync() {
+  window.dispatchEvent(new Event('zs-sync-request'));
+}
+
 const BASE = '/api/golden';
 
 async function request(path, options = {}) {
@@ -60,7 +66,16 @@ export async function fetchProvenanceList({ priority, flag, limit = 200, collect
 export async function fetchReviewDetail(itemKey) {
   if (!itemKey) throw new Error('fetchReviewDetail: itemKey is required');
   const qs = new URLSearchParams({ item_key: itemKey });
-  return request(`/review-detail?${qs.toString()}`);
+  const key = `review:${itemKey}`;
+  try {
+    const data = await request(`/review-detail?${qs.toString()}`);
+    await cacheResponse(key, data).catch((err) => console.warn('offline detail cache unavailable', err));
+    return data;
+  } catch (err) {
+    const cached = !err.status && await cachedResponse(key);
+    if (cached) return cached;
+    throw err;
+  }
 }
 
 /**
@@ -71,10 +86,16 @@ export async function fetchReviewDetail(itemKey) {
 export async function submitVerdict({ item_key, user_priority, comment }) {
   if (!item_key) throw new Error('submitVerdict: item_key is required');
   if (!user_priority) throw new Error('submitVerdict: user_priority is required');
-  return request('/verdict', {
-    method: 'POST',
-    body: JSON.stringify({ item_key, user_priority, comment: comment ?? '' }),
-  });
+  try {
+    const result = await request('/verdict', {
+      method: 'POST', body: JSON.stringify({ item_key, user_priority, comment: comment ?? '' }),
+    });
+    requestSync();
+    return result;
+  } catch (err) {
+    if (err.status) throw err;
+    return queueMutation({ item_key, field: 'verdict', value: user_priority, comment: comment ?? '' });
+  }
 }
 
 /**
@@ -86,10 +107,16 @@ export async function submitVerdict({ item_key, user_priority, comment }) {
  */
 export async function saveReviewNote({ item_key, note }) {
   if (!item_key) throw new Error('saveReviewNote: item_key is required');
-  return request('/review-note', {
-    method: 'POST',
-    body: JSON.stringify({ item_key, note: note ?? '' }),
-  });
+  try {
+    const result = await request('/review-note', {
+      method: 'POST', body: JSON.stringify({ item_key, note: note ?? '' }),
+    });
+    requestSync();
+    return result;
+  } catch (err) {
+    if (err.status) throw err;
+    return queueMutation({ item_key, field: 'review_note', value: note ?? '' });
+  }
 }
 
 /**
@@ -99,7 +126,14 @@ export async function saveReviewNote({ item_key, note }) {
 export async function deleteVerdict(itemKey) {
   if (!itemKey) throw new Error('deleteVerdict: itemKey is required');
   const qs = new URLSearchParams({ item_key: itemKey });
-  return request(`/verdict?${qs.toString()}`, { method: 'DELETE' });
+  try {
+    const result = await request(`/verdict?${qs.toString()}`, { method: 'DELETE' });
+    requestSync();
+    return result;
+  } catch (err) {
+    if (err.status) throw err;
+    return queueMutation({ item_key: itemKey, field: 'verdict', operation: 'delete' });
+  }
 }
 
 /**

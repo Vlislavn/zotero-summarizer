@@ -13,10 +13,10 @@ from pathlib import Path
 
 def _goldenset_model_history(args: argparse.Namespace) -> int:
     """List versioned snapshots of the trained gate (rollback targets)."""
-    from zotero_summarizer.services.model.classifier_artifact import DEFAULT_MODEL_DIR
+    from zotero_summarizer.services._common import settings
     from zotero_summarizer.services.model.classifier_backup import list_snapshots
 
-    model_dir = Path(args.output_dir) if args.output_dir else DEFAULT_MODEL_DIR
+    model_dir = Path(args.output_dir) if args.output_dir else settings().model_dir
     snaps = list_snapshots(model_dir, args.classifier)
     if not snaps:
         print(f"No snapshots for {args.classifier} in {model_dir}/history/")
@@ -33,10 +33,10 @@ def _goldenset_model_history(args: argparse.Namespace) -> int:
 
 def _goldenset_restore_model(args: argparse.Namespace) -> int:
     """Restore a snapshot as the live model (backs up the current live model first)."""
-    from zotero_summarizer.services.model.classifier_artifact import DEFAULT_MODEL_DIR
+    from zotero_summarizer.services._common import settings
     from zotero_summarizer.services.model.classifier_backup import restore_snapshot
 
-    model_dir = Path(args.output_dir) if args.output_dir else DEFAULT_MODEL_DIR
+    model_dir = Path(args.output_dir) if args.output_dir else settings().model_dir
     joblib_path = restore_snapshot(model_dir, args.classifier, args.snapshot)
     print(f"Restored {args.snapshot} -> {joblib_path}")
     print("(the prior live model was snapshotted first — restore is reversible)")
@@ -58,7 +58,7 @@ def register_goldenset_backup(gs_sub) -> None:
     )
     gs_history.add_argument(
         "--output-dir", default=None,
-        help="Model dir. Default: ~/.cache/zotero-summarizer/models/.",
+        help="Model dir. Default: <project-root>/data/models/.",
     )
     gs_history.set_defaults(func=_goldenset_model_history)
 
@@ -81,6 +81,6 @@ def register_goldenset_backup(gs_sub) -> None:
     )
     gs_restore.add_argument(
         "--output-dir", default=None,
-        help="Model dir. Default: ~/.cache/zotero-summarizer/models/.",
+        help="Model dir. Default: <project-root>/data/models/.",
     )
     gs_restore.set_defaults(func=_goldenset_restore_model)

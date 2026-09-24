@@ -214,8 +214,8 @@ def normalize_authors(raw: Any, *, top_author_h: int | None = None) -> list[dict
       * single comma-separated string (from ``_fetch_feed_metadata``)
       * empty / falsy -> ``[]``
 
-    Only the FIRST author carries ``h_index`` (set to ``top_author_h`` if
-    provided). The OpenAlex cache only stores ``max_author_h_index``
+    Only the FIRST author carries ``h_index`` (set to a positive ``top_author_h``
+    when available; zero/unresolved stays ``None``). The OpenAlex cache only stores ``max_author_h_index``
     across the top-3 authors, not per-author — per-author h-indices
     would need new OpenAlex calls on the request path, explicitly
     excluded by the plan.
@@ -238,7 +238,7 @@ def normalize_authors(raw: Any, *, top_author_h: int | None = None) -> list[dict
         return []
 
     parsed = [{"name": name, "h_index": None} for name in names]
-    if parsed and top_author_h is not None:
+    if parsed and top_author_h is not None and int(top_author_h) > 0:
         parsed[0]["h_index"] = int(top_author_h)
     return parsed
 
@@ -304,7 +304,7 @@ def build_feed_detail_by_key(
     from zotero_summarizer.services.library import deep_review
 
     cached_review = (
-        deep_review.get_cached_review(feed_key)
+        deep_review.get_current_review(feed_key)
         if isinstance(feed_key, str) and is_stable_feed_key(feed_key)
         else None
     )
@@ -434,7 +434,7 @@ def build_library_detail(
         "notes": list(detail.get("notes") or []),
         "date_added": str(detail.get("date_added", "")),
         "scoring": scoring,
-        "deep_review": deep_review.get_cached_review(item_key),
+        "deep_review": deep_review.get_current_review(item_key),
     }
 
 

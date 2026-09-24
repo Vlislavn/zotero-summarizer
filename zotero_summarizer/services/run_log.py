@@ -1,7 +1,7 @@
 """Append-only run log for classifier experiments.
 
 Every ``goldenset classify`` and ``classify-llm`` invocation appends one JSONL
-line to ``classifier-runs.jsonl`` in the project root. Each line is a
+line to ``classifier-runs.jsonl`` under the selected project's data directory. Each line is a
 self-contained snapshot of:
 
 * **What was run** — classifier name, model, CLI args.
@@ -24,16 +24,17 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 
 LOGGER = logging.getLogger(__name__)
 
 
 def make_run_id(classifier_name: str, *, now: datetime | None = None) -> str:
-    """Compact unique identifier: ``YYYYMMDD_HHMMSS_<classifier>``."""
+    """Readable UTC timestamp + UUID; uniqueness does not depend on clock resolution."""
     now = now or datetime.now(timezone.utc)
     stamp = now.strftime("%Y%m%d_%H%M%S")
-    return f"{stamp}_{classifier_name}"
+    return f"{stamp}_{uuid4().hex}_{classifier_name}"
 
 
 def short_git_commit(repo_dir: Path | None = None) -> str:
@@ -87,9 +88,5 @@ def load_runs(log_path: Path) -> list[dict[str, Any]]:
 
 
 def latest_per_classifier(runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Pick the most recent run for each classifier name (by run_id sort)."""
-    out: dict[str, dict[str, Any]] = {}
-    for r in sorted(runs, key=lambda x: x.get("run_id", "")):
-        name = r.get("classifier", "unknown")
-        out[name] = r
-    return out
+    """Pick the last appended run per classifier; IDs are opaque, not chronology."""
+    return {run["classifier"]: run for run in runs}

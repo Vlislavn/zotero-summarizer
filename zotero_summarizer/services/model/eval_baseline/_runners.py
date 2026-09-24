@@ -12,6 +12,7 @@ from typing import Any, Callable
 import numpy as np
 
 from zotero_summarizer.services.model import classifier
+from zotero_summarizer.services.model.library_features import recompute_engagement_columns
 from zotero_summarizer.services.model.eval_baseline._bootstrap import bca_ci
 from zotero_summarizer.services.model.eval_baseline._featurize import (
     FeaturizedGolden,
@@ -85,38 +86,6 @@ def _is_degenerate_val(feat: FeaturizedGolden, val_idx: np.ndarray) -> bool:
     return len(set(feat.y_binary[val_idx])) < 2
 
 
-def _recompute_library_columns(
-    feat: FeaturizedGolden, train_idx: np.ndarray,
-) -> np.ndarray:
-    """Return a copy of ``feat.X`` whose 5 P-set library columns are rebuilt
-    against a positive set drawn ONLY from the train fold (leave-one-out per
-    row). A single up-front featurization computes those columns against ALL
-    rows — so val rows leak into their own features; rebuilding per fold against
-    train-only P makes the fold metrics reflect serve time. P is built from the
-    embeddings already in ``X`` (no DB re-read)."""
-    from zotero_summarizer.services.model.library_features import (
-        compute_library_features,
-        positive_library_from_embeddings,
-    )
-
-    rows = feat.selected_rows or []
-    emb = classifier.EMBEDDING_DIM
-    lib = positive_library_from_embeddings(
-        [rows[i] for i in train_idx],
-        [feat.item_keys[i] for i in train_idx],
-        feat.X[train_idx, :emb],
-    )
-    lo = emb + 7  # P-set features occupy extra-indices 7..11
-    X = feat.X.copy()
-    for i in range(X.shape[0]):
-        authors_i = (rows[i].get("authors") or "").strip()
-        X[i, lo:lo + 5] = compute_library_features(
-            feat.X[i, :emb], lib,
-            candidate_authors=authors_i, exclude_item_key=feat.item_keys[i],
-        )
-    return X
-
-
 def _one_fold_metrics(
     feat: FeaturizedGolden,
     train_idx: np.ndarray,
@@ -124,7 +93,6 @@ def _one_fold_metrics(
     *,
     classifier_name: str,
     pca_dim: int,
-    X_override: np.ndarray | None = None,
 ) -> FoldMetrics:
     """Run one CV fold (regression path).
 
@@ -145,7 +113,7 @@ def _one_fold_metrics(
     from zotero_summarizer.services.model.tune import load_tuned_params
 
     tuned_params, tuned_pca = load_tuned_params()
-    X = feat.X if X_override is None else X_override
+    X = recompute_engagement_columns(feat.X, feat.selected_rows, train_idx, feat.corpus_affinity)
     X_tr, y_tr = X[train_idx], feat.y_continuous[train_idx]
     X_val = X[val_idx]
     sw = feat.sample_weights[train_idx] if feat.sample_weights is not None else None
@@ -206,10 +174,9 @@ def run_baseline(
                     repeat_i + 1, n_repeats, fold_i + 1,
                 )
                 continue
-            X_fold = _recompute_library_columns(feat, train_idx)
             fm = _one_fold_metrics(
                 feat, train_idx, val_idx,
-                classifier_name=classifier_name, pca_dim=pca_dim, X_override=X_fold,
+                classifier_name=classifier_name, pca_dim=pca_dim,
             )
             fold_results.append(fm)
             LOGGER.info(
@@ -253,7 +220,7 @@ def run_baseline(
     )
 
 
-def _subset_featurized(feat: FeaturizedGolden, sub_idx: np.ndarray, sub_rows: list) -> FeaturizedGolden:
+def _subset_featurized(feat: FeaturizedGolden, sub_idx: np.ndarray) -> FeaturizedGolden:
     """A ``FeaturizedGolden`` restricted to the rows at ``sub_idx``."""
     return FeaturizedGolden(
         X=feat.X[sub_idx],
@@ -262,7 +229,9 @@ def _subset_featurized(feat: FeaturizedGolden, sub_idx: np.ndarray, sub_rows: li
         y_priority=[feat.y_priority[i] for i in sub_idx],
         item_keys=[feat.item_keys[i] for i in sub_idx],
         n_features=feat.n_features,
-        selected_rows=sub_rows,
+        selected_rows=[feat.selected_rows[i] for i in sub_idx],
+        sample_weights=feat.sample_weights[sub_idx] if feat.sample_weights is not None else None,
+        corpus_affinity=feat.corpus_affinity.subset(sub_idx) if feat.corpus_affinity is not None else None,
     )
 
 
@@ -314,19 +283,17 @@ def run_learning_curve(
             sub_neg = rng.choice(neg_idx, size=n_neg, replace=False)
             sub_idx = np.concatenate([sub_pos, sub_neg])
             rng.shuffle(sub_idx)
-            sub_rows = [feat.selected_rows[i] for i in sub_idx]
-            sub_feat = _subset_featurized(feat, sub_idx, sub_rows)
-            sub_groups = np.array([paper_group_id(r) for r in sub_rows])
+            sub_feat = _subset_featurized(feat, sub_idx)
+            sub_groups = np.array([paper_group_id(r) for r in sub_feat.selected_rows])
             skf = StratifiedGroupKFold(
                 n_splits=n_folds, shuffle=True, random_state=seed + repeat_i,
             )
             for train_idx, val_idx in skf.split(sub_feat.X, sub_feat.y_binary, sub_groups):
                 if _is_degenerate_val(sub_feat, val_idx):
                     continue
-                X_fold = _recompute_library_columns(sub_feat, train_idx)
                 fm = _one_fold_metrics(
                     sub_feat, train_idx, val_idx,
-                    classifier_name=classifier_name, pca_dim=pca_dim, X_override=X_fold,
+                    classifier_name=classifier_name, pca_dim=pca_dim,
                 )
                 rho_vals.append(fm.spearman_rho)
                 ndcg_vals.append(fm.ndcg_at_10)

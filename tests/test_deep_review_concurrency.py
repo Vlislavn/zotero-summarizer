@@ -153,3 +153,18 @@ def test_status_unknown_item_is_idle(monkeypatch):
     _wire(monkeypatch, is_local=False, max_sub=2)
     assert deep_review.status("NEVER")["status"] == "idle"
     assert deep_review.status()["status"] == "idle"  # aggregate with no jobs
+
+
+def test_progress_clock_advances_while_model_is_busy(monkeypatch):
+    now = [100.0]
+    monkeypatch.setattr(deep_review.time, "perf_counter", lambda: now[0])
+    deep_review._set_job("A", status="running")
+    deep_review._set_job_progress("A", {"phase": "digest", "total_elapsed_seconds": 1,
+                                         "phase_elapsed_seconds": 0, "eta_seconds": 68})
+    now[0] += 30
+    progress = deep_review.status("A")["progress"]
+    assert progress["total_elapsed_seconds"] == 31 and progress["eta_seconds"] == 38
+    assert deep_review.status()["progress"] == progress
+    assert deep_review._JOBS["A"]["progress"]["total_elapsed_seconds"] == 1
+    now[0] += 60
+    assert deep_review.status("A")["progress"]["eta_seconds"] is None

@@ -4,6 +4,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+from zotero_summarizer.integrations._zotero_read_common import _USER_LIBRARY_ID_SELECT
 from zotero_summarizer.integrations._zotero_write_common import (  # noqa: F401
     ZoteroWriteError,
     generate_unique_key,
@@ -12,6 +13,36 @@ from zotero_summarizer.integrations._zotero_write_common import (  # noqa: F401
 
 
 class ZoteroCollectionMixin:
+    def _find_collection_id(self, conn: sqlite3.Connection, key: str, path: str) -> int | None:
+        if key:
+            row = conn.execute(
+                f"SELECT collectionID FROM collections WHERE key = ? "
+                f"AND libraryID = ({_USER_LIBRARY_ID_SELECT}) LIMIT 1", (key,),
+            ).fetchone()
+            return int(row["collectionID"]) if row else None
+        by_path = self._find_collection_id_by_path(conn, path)
+        if by_path is not None:
+            return by_path
+        row = conn.execute(
+            f"SELECT collectionID FROM collections WHERE lower(collectionName) = lower(?) "
+            f"AND libraryID = ({_USER_LIBRARY_ID_SELECT}) ORDER BY collectionID LIMIT 1", (path,),
+        ).fetchone()
+        return int(row["collectionID"]) if row else None
+
+    @staticmethod
+    def _find_collection_id_by_path(conn: sqlite3.Connection, path: str) -> int | None:
+        parent = None
+        for part in (part.strip() for part in path.split(">") if part.strip()):
+            row = conn.execute(
+                f"SELECT collectionID FROM collections WHERE parentCollectionID IS ? "
+                f"AND lower(collectionName) = lower(?) AND libraryID = ({_USER_LIBRARY_ID_SELECT}) "
+                "ORDER BY collectionID LIMIT 1", (parent, part),
+            ).fetchone()
+            if row is None:
+                return None
+            parent = int(row["collectionID"])
+        return parent
+
     def _ensure_collection(
         self,
         conn: sqlite3.Connection,
@@ -25,7 +56,8 @@ class ZoteroCollectionMixin:
         (first daemon tick on a fresh library creates Inbox once).
         """
         existing = conn.execute(
-            "SELECT collectionID FROM collections WHERE lower(collectionName)=lower(?) AND parentCollectionID IS NULL LIMIT 1",
+            f"SELECT collectionID FROM collections WHERE lower(collectionName)=lower(?) "
+            f"AND parentCollectionID IS NULL AND libraryID = ({_USER_LIBRARY_ID_SELECT}) LIMIT 1",
             (collection_name,),
         ).fetchone()
         if existing:
@@ -38,7 +70,7 @@ class ZoteroCollectionMixin:
             raise ZoteroWriteError("Cannot auto-create collection: no user library")
         user_library_id = int(user_library_row["libraryID"])
 
-        new_key = self._generate_unique_collection_key(conn)
+        new_key = generate_unique_key(conn, "collections", self._KEY_ALPHABET, "collection")
         now = self._sqlite_timestamp_now()
         insert_values: dict[str, Any] = {
             "collectionName": collection_name,
@@ -59,15 +91,11 @@ class ZoteroCollectionMixin:
         )
         return int(cursor.lastrowid)
 
-    def _generate_unique_collection_key(self, conn: sqlite3.Connection) -> str:
-        return generate_unique_key(conn, "collections", self._KEY_ALPHABET, "collection")
-
     def _resolve_collection_target(
         self,
         conn: sqlite3.Connection,
         item_key: str,
         payload: dict[str, Any],
-        collection_columns: set[str],
     ) -> tuple[int, int | None, str]:
         """Resolve ``(item_id, collection_id, missing_ref)`` for a collection
         add/remove. ``collection_id`` is ``None`` when no collection matches
@@ -80,7 +108,7 @@ class ZoteroCollectionMixin:
         if not collection_key and not collection_path:
             raise ZoteroWriteError("Collection payload is empty")
 
-        collection_id = self._find_collection_id(conn, collection_key, collection_path, collection_columns)
+        collection_id = self._find_collection_id(conn, collection_key, collection_path)
         return item_id, collection_id, collection_key or collection_path
 
     def _apply_collection_change(
@@ -89,14 +117,13 @@ class ZoteroCollectionMixin:
         item_key: str,
         payload: dict[str, Any],
         item_columns: set[str],
-        collection_columns: set[str],
         collection_item_columns: set[str],
     ) -> None:
         if not {"itemID", "collectionID"}.issubset(collection_item_columns):
             raise ZoteroWriteError("Unsupported Zotero schema: required collectionItems columns missing")
 
         item_id, collection_id, missing_ref = self._resolve_collection_target(
-            conn, item_key, payload, collection_columns
+            conn, item_key, payload
         )
         if collection_id is None:
             raise ZoteroWriteError(f"Collection not found: {missing_ref}")
@@ -113,10 +140,9 @@ class ZoteroCollectionMixin:
         item_key: str,
         payload: dict[str, Any],
         item_columns: set[str],
-        collection_columns: set[str],
     ) -> None:
         item_id, collection_id, _missing_ref = self._resolve_collection_target(
-            conn, item_key, payload, collection_columns
+            conn, item_key, payload
         )
         if collection_id is None:
             return  # Already not in collection
@@ -148,30 +174,13 @@ class ZoteroCollectionMixin:
             conn.row_factory = sqlite3.Row
             try:
                 conn.execute("PRAGMA foreign_keys=ON")
-                try:
-                    conn.execute("PRAGMA journal_mode=WAL")
-                except sqlite3.Error as _:
-                    pass
-
-                if root_only:
-                    coll_row = conn.execute(
-                        """
-                        SELECT collectionID FROM collections
-                        WHERE lower(collectionName) = lower(?)
-                          AND parentCollectionID IS NULL
-                        LIMIT 1
-                        """,
-                        (collection_name.strip(),),
-                    ).fetchone()
-                else:
-                    coll_row = conn.execute(
-                        """
-                        SELECT collectionID FROM collections
-                        WHERE lower(collectionName) = lower(?)
-                        LIMIT 1
-                        """,
-                        (collection_name.strip(),),
-                    ).fetchone()
+                conn.execute("PRAGMA journal_mode=WAL")
+                coll_row = conn.execute(
+                    f"SELECT collectionID FROM collections WHERE lower(collectionName) = lower(?) "
+                    f"AND libraryID = ({_USER_LIBRARY_ID_SELECT}) "
+                    "AND (NOT ? OR parentCollectionID IS NULL) ORDER BY collectionID LIMIT 1",
+                    (collection_name.strip(), root_only),
+                ).fetchone()
 
                 if not coll_row:
                     return 0

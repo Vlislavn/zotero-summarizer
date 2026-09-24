@@ -15,13 +15,14 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import asdict
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services import interaction_log
+from zotero_summarizer.services.golden import label_verdicts, verdict_effects
 from zotero_summarizer.services.triage import daily_actions, daily_select
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.storage import feeds as feeds_storage
@@ -31,12 +32,9 @@ from zotero_summarizer.storage import repositories
 
 router = APIRouter()
 
-
 # ---------------------------------------------------------------------------
 # Request bodies
 # ---------------------------------------------------------------------------
-
-
 class RoleVerdictRequest(BaseModel):
     # Bug-fix Phase 1.18 Step 4: item_key for feed papers is the live
     # arxiv URL (``http://arxiv.org/abs/...``) which contains ``/``. Path
@@ -375,15 +373,7 @@ _VALID_DAILY_PRIORITIES = ("must_read", "should_read", "could_read", "dont_read"
 
 
 async def submit_daily_verdict(body: DailyVerdictRequest) -> dict[str, Any]:
-    """Record a must/should/could/don't verdict on a Today card.
-
-    The verdict is the user's manual label and must (a) persist + win, (b)
-    feed golden-set training. We therefore both UPSERT ``label_verdicts``
-    (keyed ``feed:<feed_item_id>`` — consistent with review_detail + the
-    golden CSV) AND append the feed item to the golden CSV via
-    ``review.append_to_golden`` (idempotent) so the next retrain trains on
-    the manual label through ``hybrid_gt``.
-    """
+    """Write a reviewed positive or immediate negative Today label to the golden set."""
     if body.user_priority not in _VALID_DAILY_PRIORITIES:
         raise APIError(
             error="validation_error",
@@ -399,6 +389,11 @@ async def submit_daily_verdict(body: DailyVerdictRequest) -> dict[str, Any]:
             status_code=404,
         )
 
+    if body.user_priority != "dont_read" and not await asyncio.to_thread(daily_actions._materialized_key_for, row):
+        from zotero_summarizer.services.library.review_eligibility import require_review
+
+        await asyncio.to_thread(require_review, row)
+
     golden_key = row_feed_keys(row)[0]
 
     # Append to golden CSV (idempotent) so the row enters the training set.
@@ -411,13 +406,16 @@ async def submit_daily_verdict(body: DailyVerdictRequest) -> dict[str, Any]:
     # UPSERT the manual verdict so it wins + stays visible/editable.
     derived = (row.get("reading_priority") or "").strip() or "unknown"
     row_id = await asyncio.to_thread(
-        repositories.insert_or_update_label_verdict,
+        label_verdicts.set_label_verdict,
         _db_path(),
         item_key=golden_key,
         original_derived_priority=derived,
         user_priority=body.user_priority,
+        surface="today_priority",
         comment=body.comment,
     )
+    if body.user_priority == "dont_read":
+        await asyncio.to_thread(verdict_effects.cancel_pending_feed_add, _db_path(), golden_key)
     await asyncio.to_thread(
         daily_actions.record_row_outcome, row, feeds_storage.OUTCOME_USER_LABELED,
     )
@@ -435,7 +433,7 @@ async def submit_daily_verdict(body: DailyVerdictRequest) -> dict[str, Any]:
 
 
 class BatchItemsRequest(BaseModel):
-    item_ids: list[int] = Field(
+    item_ids: list[Annotated[int, Field(strict=True, gt=0, lt=2**63)]] = Field(
         ..., min_length=1,
         description="processed_feed_items PKs (SlatePaper.item_id) to act on.",
     )

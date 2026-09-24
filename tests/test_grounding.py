@@ -63,3 +63,37 @@ def test_strict_default_unchanged_for_safety_critical_callers():
     ctx = "We evaluate DxChain on the MIMIC-IV cardiac dataset for held-out testing."
     assert _grounding.quote_is_grounded("We evaluate DxChain on the MIMIC-IV cardiac dataset", ctx) is True
     assert _grounding.quote_is_grounded("we assess DxChain using the MIMIC cardiac data", ctx) is False
+
+
+def test_answer_support_accepts_reworded_answer_from_verbatim_quote():
+    # Regression (2026-09-11): the strict extractive bar required the ANSWER to be a
+    # contiguous token span of the quote, but real answers are the model's own words
+    # AROUND the quoted evidence — so every non-trivial rewording was rejected and the
+    # product Q&A collapsed into 100% spurious abstentions (measured live on
+    # kather/sota). Order-free token coverage must pass while still requiring the
+    # answer's content to come from the quote.
+    quote = ("Then, we introduce SLIM (Simple Lightweight Information Management), a simple "
+             "framework that separates retrieval into distinct search and browse tools, and "
+             "periodically summarizes the trajectory, keeping context concise.")
+    answer = ("SLIM is a framework that separates retrieval into distinct search and browse "
+              "tools, and periodically summarizes the trajectory to keep context concise.")
+    assert _grounding.answer_is_supported_by_quote(answer, quote) is True
+    # verbatim span still passes (original behavior preserved)
+    assert _grounding.answer_is_supported_by_quote("separates retrieval into distinct search and browse tools", quote) is True
+
+
+def test_answer_support_rejects_hallucinated_content_in_answer():
+    # Anti-fabrication: ANY answer token absent from the quote fails — the coverage
+    # band may not smuggle in outside facts (numbers, names, claims).
+    quote = ("Annotations were obtained independently from four practicing radiologists "
+             "at the medical center.")
+    assert _grounding.answer_is_supported_by_quote(
+        "The trial enrolled 7400 patients in randomized double-blind conditions at the center", quote) is False
+    assert _grounding.answer_is_supported_by_quote(
+        "The annotations were obtained from four radiologists and 7400 patients", quote) is False
+    # mostly-reworded answer still passes (>= cover ratio, order-free)
+    assert _grounding.answer_is_supported_by_quote(
+        "four practicing radiologists independently obtained the annotations at the center", quote) is True
+    # empty inputs
+    assert _grounding.answer_is_supported_by_quote(None, quote) is False
+    assert _grounding.answer_is_supported_by_quote("anything", None) is False

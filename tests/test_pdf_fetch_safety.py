@@ -2,19 +2,27 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import httpx
 
+from zotero_summarizer.integrations import pdf_fetch
 from zotero_summarizer.integrations.pdf_fetch import fetch_pdf
 
 
 class _FakeStream:
     """Mimics httpx.Response in a context-manager stream."""
 
-    def __init__(self, status: int, chunks: list[bytes]):
+    def __init__(self, status: int, chunks: list[bytes], location: str | None = None):
         self.status_code = status
         self._chunks = chunks
+        self.headers = {"location": location} if location else {}
+        self.extensions = {
+            "network_stream": SimpleNamespace(
+                get_extra_info=lambda _name: ("8.8.8.8", 443),
+            ),
+        }
 
     def __enter__(self):
         return self
@@ -98,3 +106,23 @@ def test_cache_hit_short_circuits(tmp_path):
     )
     assert second is not None
     assert second == first
+
+
+def test_rejects_private_pdf_destination_before_request(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        pdf_fetch.httpx,
+        "Client",
+        lambda **_kw: (_ for _ in ()).throw(AssertionError("network requested")),
+    )
+    assert fetch_pdf("http://127.0.0.1/x.pdf", cache_dir=tmp_path) is None
+
+
+def test_rejects_redirect_to_private_destination(tmp_path, monkeypatch):
+    client = _client_with_stream(
+        _FakeStream(302, [], location="http://10.0.0.8/private.pdf"),
+    )
+    client.close = MagicMock()
+    monkeypatch.setattr(pdf_fetch.httpx, "Client", lambda **_kw: client)
+
+    assert fetch_pdf("https://8.8.8.8/start.pdf", cache_dir=tmp_path) is None
+    assert client.stream.call_count == 1

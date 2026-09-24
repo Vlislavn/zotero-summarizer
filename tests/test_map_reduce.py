@@ -13,6 +13,12 @@ from zotero_summarizer.services.library._map_reduce import (
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
 
 
+@pytest.fixture(autouse=True)
+def _isolate_digest_generation(monkeypatch):
+    from zotero_summarizer.services.library import _digest_verification
+    monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
+
+
 def test_split_chunks_basic_and_overlap():
     text = "x" * 20000
     chunks = split_chunks(text, 8000, overlap=200)
@@ -44,7 +50,12 @@ class _ReduceLLM:
     def pydantic_prompt(self, *, prompt, pydantic_model):
         # The reduce model sees the chunk notes as its source text.
         assert "note 1" in prompt and "chunk 1" in prompt
-        return PaperDigest(tldr="synthesized from notes")
+        return PaperDigest(
+            tldr="synthesized from notes", read_decision="skip",
+            read_why="The synthesis is sufficient.", read_parts=[], skip_parts=[],
+            estimated_read_minutes=None, original_value="",
+            writing_friction="low", writing_reasons=[],
+        )
 
 
 def test_map_reduce_maps_each_chunk_then_reduces():
@@ -79,7 +90,11 @@ class _DigestLLM:
     def pydantic_prompt(self, *, prompt, pydantic_model):
         self.seen_text = prompt
         self.pydantic_calls += 1
-        return PaperDigest(tldr="ok")
+        return PaperDigest(
+            tldr="ok", read_decision="skip", read_why="The digest is sufficient.",
+            read_parts=[], skip_parts=[], estimated_read_minutes=None, original_value="",
+            writing_friction="low", writing_reasons=[],
+        )
 
 
 def test_digest_for_strategy_dispatches_by_chunk_strategy():
@@ -109,3 +124,23 @@ def test_digest_for_strategy_dispatches_by_chunk_strategy():
     d_m = digest_for_strategy("T", text, cfg, map_llm=map_llm, reduce_llm=_DigestLLM(), budget=budget)
     assert d_m.basis == "map_reduce"
     assert map_llm.calls == len(split_chunks(text, 8000))  # one map call per chunk — NOT a no-op
+
+
+def test_map_reduce_forwards_focus_prompt_to_reduce(monkeypatch):
+    from zotero_summarizer.services.library import _map_reduce
+
+    captured = {}
+    monkeypatch.setattr(_map_reduce, "_map_chunk", lambda _llm, _chunk: "chunk note")
+
+    def capture_assessment(**kwargs):
+        captured.update(kwargs)
+        return PaperDigest(tldr="ok", read_decision="skip", read_why="sufficient")
+
+    monkeypatch.setattr(_map_reduce, "assess_digest", capture_assessment)
+    digest_for_strategy(
+        "T", "paper body", _default_goals_config(), map_llm=object(),
+        reduce_llm=object(), budget=ChunkBudget(100, 100, 1),
+        focus_prompt="Compare limitations with my replication plan.",
+    )
+
+    assert captured["focus_prompt"] == "Compare limitations with my replication plan."

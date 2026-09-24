@@ -1,40 +1,11 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { checkLlm, listModels } from '../api/settingsApi.js';
-// StatusPill now lives with its badge siblings in ui/Badge.jsx; re-exported here
-// so existing importers (CheckResults below, setup/StepConnectLlm) keep working.
 import { StatusPill } from './ui/Badge.jsx';
 
 export { StatusPill };
 
-// LLM providers & per-stage routing editor for the Settings page.
-//
-// Backend contract: zotero_summarizer/models.py :: GoalsConfig.llm_routing.
-// Shape (always present in GET responses — synthesized from the legacy `llm:`
-// block for old configs):
-//   {
-//     providers: [
-//       { name, type: 'openai'|'anthropic', base_url, api_key_env,
-//         extra_body, max_tokens }, ...
-//     ],
-//     default:     { provider, model },
-//     feed:        { provider|null, model|null },
-//     backlog:     { provider|null, model|null },
-//     deep_review: { provider|null, model|null },
-//   }
-//
-// Inheritance-first (Tesler / Pareto): a stage with provider:null AND model:null
-// inherits `default`. The UI defaults every stage row to "Inherit default" so
-// the common case is "configure once, override per stage only when needed".
-//
-// We KEEP `extra_body` (and any other unknown provider keys) untouched in the
-// payload — we just don't surface them in the UI.
-//
-// This component is controlled: it receives the structured `llm_routing` object
-// as `value` and emits a brand-new object via `onChange` on every edit. It must
-// never mutate `value` in place (it's the same reference React Query / the form
-// dirty-check rely on), so every handler shallow/deep-clones the parts it
-// touches.
+// Advanced controlled editor for the existing llm_routing contract.
 
 const STAGES = [
   {
@@ -70,8 +41,6 @@ function emptyProvider() {
     max_tokens: DEFAULT_MAX_TOKENS,
   };
 }
-
-// --- Provider registry editor --------------------------------------------
 
 function ProviderRow({ provider, index, onPatch, onRemove }) {
   const isOpenai = (provider.type || 'openai') === 'openai';
@@ -159,8 +128,6 @@ function ProviderRow({ provider, index, onPatch, onRemove }) {
             className={INPUT_CLS}
           />
         </label>
-        {/* Temperature — openai-path only; Anthropic Opus rejects the param, so it's
-            disabled there (Tesler: the system, not the user, knows it's a no-op). */}
         <label className="block w-32">
           <span className="text-xs font-semibold text-slate-700">Temperature</span>
           <input
@@ -183,9 +150,6 @@ function ProviderRow({ provider, index, onPatch, onRemove }) {
             className={`${INPUT_CLS} disabled:bg-slate-100 disabled:text-slate-400`}
           />
         </label>
-        {/* Thinking effort — Default leaves the provider untouched (deep-review still
-            decides per call). On reasoning models this sets the effort; simpler
-            on/off endpoints (vLLM) treat any non-Off level as "on". */}
         <label className="block w-36">
           <span className="text-xs font-semibold text-slate-700">Thinking effort</span>
           <select
@@ -221,11 +185,6 @@ function ProviderRow({ provider, index, onPatch, onRemove }) {
   );
 }
 
-// --- Per-stage / default routing rows -------------------------------------
-
-// Inline status under a Model field: loading / error+retry / "N models — type
-// to filter" + refresh. Doherty Threshold: the network fetch must give visible
-// feedback right where the user is choosing.
 function ModelHint({ entry, count, onRefresh }) {
   const status = entry?.status;
   if (!status || status === 'idle') return null;
@@ -267,16 +226,12 @@ function StageRow({
 }) {
   const providerValue = stage?.provider ?? '';
   const modelValue = stage?.model ?? '';
-  // Blank model placeholder shows what would be inherited from `default`.
   const modelPlaceholder = allowInherit
     ? defaultModel
       ? `Inherit default (${defaultModel})`
       : 'Inherit default'
     : 'e.g. gpt-oss:20b';
 
-  // The provider whose catalogue feeds this row's model suggestions: the row's
-  // own provider, or — for an inheriting stage left on "Inherit default" — the
-  // default's provider (the system resolves it; Tesler's Law).
   const effectiveProvider = providerValue || (allowInherit ? defaultProviderName : '');
   const entry = effectiveProvider ? catalog[effectiveProvider] : null;
   const models = entry?.models || [];
@@ -295,8 +250,6 @@ function StageRow({
           onChange={(e) => {
             const v = e.target.value;
             onChange({ ...stage, provider: v === '' ? null : v });
-            // Auto-load the picked provider's catalogue so the model field is
-            // ready to suggest immediately ("very easy way").
             const eff = v || (allowInherit ? defaultProviderName : '');
             if (eff) onLoadModels(eff);
           }}
@@ -315,9 +268,6 @@ function StageRow({
       </label>
       <label className="block">
         <span className="text-xs font-semibold text-slate-700">Model</span>
-        {/* Combobox, not a locked dropdown (Postel's Law): the datalist offers
-            the provider's models as type-ahead suggestions, but any id can still
-            be typed (e.g. an Ollama model you'll pull later). */}
         <input
           type="text"
           list={models.length ? listId : undefined}
@@ -350,8 +300,6 @@ function StageRow({
     </div>
   );
 }
-
-// --- Operational check ----------------------------------------------------
 
 export function CheckResults({ result }) {
   if (!result) return null;

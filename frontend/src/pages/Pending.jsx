@@ -104,6 +104,11 @@ export default function Pending() {
     const q = titleFilter.trim().toLowerCase();
     return q ? pending.filter((it) => (it.item_title || '').toLowerCase().includes(q)) : pending;
   }, [pending, titleFilter]);
+  const visibleSelected = useMemo(
+    () => new Set((loading || loadError ? [] : filteredPending)
+      .filter((row) => row.status === 'pending' && selected.has(row.id)).map((row) => row.id)),
+    [filteredPending, selected, loading, loadError],
+  );
 
   const groupedPending = useMemo(() => {
     const map = new Map();
@@ -246,12 +251,16 @@ export default function Pending() {
         return;
       }
       const inboxRemoved = Number(data?.inbox_removed || 0);
-      setMessage(
-        inboxRemoved > 0
+      const applied = Number(data?.applied || 0);
+      const failed = Number(data?.failed || 0);
+      if (failed > 0) {
+        setMessage(`${applied} change(s) applied; ${failed} failed. Open the Failed tab to retry.`);
+      } else {
+        setMessage(inboxRemoved > 0
           ? `Selected changes applied. Removed from Inbox: ${inboxRemoved}.`
-          : 'Selected changes applied.',
-      );
-      setIsError(false);
+          : 'Selected changes applied.');
+      }
+      setIsError(failed > 0);
       load(status);
     },
     rollback: (err, _vars, ctx) => {
@@ -289,10 +298,10 @@ export default function Pending() {
       setIsError(true);
       return;
     }
-    if (!selected.size) return;
-    const ids = [...selected];
+    if (!visibleSelected.size) return;
+    const ids = [...visibleSelected];
     runApply({ ids, force: false }, { context: { ids, force: false } });
-  }, [isPending, selected, runApply]);
+  }, [isPending, visibleSelected, runApply]);
 
   const handleReject = useCallback(() => {
     if (!isPending) {
@@ -300,10 +309,10 @@ export default function Pending() {
       setIsError(true);
       return;
     }
-    if (!selected.size) return;
-    const ids = [...selected];
+    if (!visibleSelected.size) return;
+    const ids = [...visibleSelected];
     runReject({ ids }, { context: { ids } });
-  }, [isPending, selected, runReject]);
+  }, [isPending, visibleSelected, runReject]);
 
   // Retry one FAILED change — re-apply it via the same writer path without
   // re-queuing. Only wired on the Failed tab (see ChangeGroup); reuses the
@@ -374,7 +383,7 @@ export default function Pending() {
             <button
               type="button"
               onClick={handleApply}
-              disabled={selected.size === 0}
+              disabled={visibleSelected.size === 0}
               className="px-3 py-1.5 rounded bg-green-700 text-white hover:bg-green-800 disabled:bg-slate-300 disabled:text-slate-500"
             >
               Apply selected
@@ -382,7 +391,7 @@ export default function Pending() {
             <button
               type="button"
               onClick={handleReject}
-              disabled={selected.size === 0}
+              disabled={visibleSelected.size === 0}
               className="px-3 py-1.5 rounded bg-amber-600 text-white hover:bg-amber-700 disabled:bg-slate-300 disabled:text-slate-500"
             >
               Reject selected
@@ -436,7 +445,7 @@ export default function Pending() {
             isActive={isPending && idx === activeIdx}
             groupRef={activeGroupRef}
             isPending={isPending}
-            selected={selected}
+            selected={visibleSelected}
             toggleOne={toggleOne}
             drafts={drafts}
             setDrafts={setDrafts}

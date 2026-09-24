@@ -17,20 +17,20 @@ primitives underneath (they can't drift):
 
 - **Web — the `/setup` wizard.** A brand-new install is redirected here once
   (skippable/resumable): **Connect Zotero** (auto-detects likely Zotero data dirs, picks the
-  one whose `zotero.sqlite` exists) → **Connect LLM** (pick the provider, run a live
-  connection test) → **Describe research** (your goals). Empty-state "finish setup" cards on
+  one whose `zotero.sqlite` exists) → **Choose AI-assisted or ML-only** (AI mode can run a live
+  provider test) → **Describe research** (your goals). Empty-state "finish setup" cards on
   `/today` and `/library` link back here until you're ready.
-- **Terminal — `zotero-summarizer setup`.** The same three steps headless: detect/confirm
-  the Zotero dir, configure + probe the LLM provider, set your research goals.
+- **Terminal — `zotero-summarizer setup`.** The same steps headless. Use `--mode hosted`,
+  `--mode local`, or `--mode no-llm`; the hosted route is saved before its optional probe.
 
-**Secrets are name-only.** Neither front end ever has a raw-secret field. You give the
-**env-var name** that holds your key (e.g. `OPENAI_API_KEY`); the wizard checks whether that
-var is set and runs an *advisory* reachability probe, but you set the actual value yourself
-in `.env` (or your shell). That's deliberate: the app collects a name, you own the secret.
+**Secrets stay server-side.** The web wizard may accept a key and stores it in the OS
+keyring; status and config responses expose only redacted metadata. The terminal flow asks
+for an env-var name (for example `OPENAI_API_KEY`) and reads the value from your environment.
+ML-only mode stores no credential and deliberately skips AI Doctor checks.
 
-The wizard can finish before the secret/endpoint is live — **Next** gates only on a
+AI-assisted setup can finish before the secret/endpoint is live — **Next** gates only on a
 structurally-valid provider (type + base URL + key env-var name + model), not on a passing
-connection test. After editing `.env`, **restart the server** to apply the change.
+connection test. Environment changes require a restart; keyring saves apply immediately.
 
 ## Two ways to run triage
 
@@ -40,9 +40,10 @@ SQLite). What *triggers* it is your choice:
 - **UI, on demand (simplest).** Run `serve` and click **Triage backlog** on *Today*
   whenever you want fresh papers scored. No background process.
 - **Daemon, automatic (optional).** `zotero-summarizer feeds serve` runs a background
-  loop that scores unread items every few minutes and, each morning, auto-materializes
-  the 1–2 best into your Zotero *Inbox* — so a slate is waiting without you clicking
-  anything. The `feeds.*` block in `goals.yaml` only matters if you run this.
+  loop that scores unread items and can review top Today candidates in place. It
+  never adds a candidate to Zotero automatically: open its full review, then explicitly
+  Add it; Trash works immediately. The `feeds.*` block in `goals.yaml` only matters
+  if you run the daemon.
 
 The daemon is convenience, not a requirement.
 
@@ -141,31 +142,23 @@ abstract is too thin, that's the signal to add the deferred efetch backfill.
 
 ### HackerNoon (practitioner / engineering angle)
 
-HackerNoon adds the *building-agents* engineering view that arXiv (research) and
-PubMed (clinical) miss. It's a tag-filtered RSS feed — same **Settings → RSS
-feeds** flow as any other source. Tags are the only filter (no boolean queries),
-so pick a narrow one and let the gate + goal_sim do the rest:
+Add the working AI tag through the same **Settings → RSS feeds** form as every
+other source:
 
 ```
-https://hackernoon.com/tagged/llm/feed                     # best fit (~50/feed; LLM/agent eng.)
-https://hackernoon.com/tagged/artificial-intelligence/feed # broader (more general-ML noise)
-https://hackernoon.com/tagged/chatgpt/feed                 # optional
+https://hackernoon.com/tagged/ai/feed
 ```
 
-Validated live: the `llm` tag is genuinely on-point ("Guardrails That Stopped My
-AI Agent From Going Rogue", "API Gateway Pattern for Safer Enterprise AI Agents",
-"Local LLMs Need More Than OpenAI-Compatible Endpoints") with some SEO/marketing
-filler the gate filters out. Note the narrower `ai-agents` / `agentic-ai` /
-`generative-ai` tags **don't exist as feeds** — use `llm`.
+They use generic RSS identity/dedup and the same rank/slate. Only the triage rubric
+changes: concrete architecture, implementation, failures, measurements and reusable
+steps score well; promotion, SEO and unsupported trend claims do not. Selected posts
+continue through the existing web-article render/review rung.
 
-Two differences from the academic sources, both fine:
-- **Triage is title-driven.** HackerNoon's tag feed carries the title + a
-  one-sentence lede, no full abstract — so the gate/goal_sim rank mostly on the
-  (informative) title. Make sure your goals.yaml has an agentic-AI goal sentence.
-- **Triage-only — read on the web.** Blog posts have no PDF/DOI/PMC, so there's no
-  prestige (cold-start, never penalised) and the PDF-based deep-review/ask-paper
-  don't apply (they're built for papers with method checklists). HackerNoon picks
-  surface in the slate; click through to read. No app code is involved.
+Operational caveat (verified 2026-08-29): HackerNoon documents tag RSS, but the
+narrow `ai-agents` and `agentic-ai` paths return Cloudflare 403. The broader
+official `ai` tag returns RSS and is the supported fallback; the practitioner
+rubric filters its wider input. Refresh surfaces any later upstream error in the
+feed row. Do not work around it with a source-specific scraper.
 
 ### Cover the flagship journal, not just the sub-journal
 
@@ -210,8 +203,10 @@ start; quality improves as you label more.
 
 The app is **local-first**: the UI, Zotero I/O, the ML relevance gate, and Library
 search (BM25 + embeddings + cross-encoder rerank) all run on your machine. There is no
-telemetry and the served UI pulls no external assets (no CDN/fonts). Only two things
-ever need the internet, and both are one-time or swappable:
+telemetry and the served UI pulls no external assets (no CDN/fonts). Model
+weights and hosted inference require a network unless prefetched or replaced
+with a local model. New RSS items and uncached PDFs also require connectivity;
+strict offline mode can work only with previously acquired paper content:
 
 1. **The ML models** download from Hugging Face on first use (see the [README hardware
    table](../README.md#requirements) for sizes). Pre-cache them once while online:
@@ -230,8 +225,10 @@ ever need the internet, and both are one-time or swappable:
 
 2. **The LLM** (summaries, deep review, quality review) needs an OpenAI-compatible
    endpoint. Point it at a **local** server — Ollama, vLLM, LM Studio, `mlx_lm.server` —
-   in `goals.yaml` / `.env` and you're fully offline. With **no** LLM at all, everything
-   still works except the LLM-written summaries; the **ML-only "Triage backlog"** drain
+   in `goals.yaml` / `.env` for local inference. This alone is **not** strict offline:
+   prefetch ML assets and set `ZS_OFFLINE=1` for cache-only model loading; uncached
+   RSS/PDF acquisition still needs network. With **no** LLM at all, summaries,
+   deep review and Q&A are unavailable; the **ML-only "Triage backlog"** drain
    (the classifier gate) still scores your feed, and Library search/ranking is unaffected.
 
 The optional enrichments — OpenAlex prestige, Unpaywall, arXiv full-text fetch — are
@@ -277,8 +274,9 @@ logs into anything on your behalf.
 Two files under the project root, both gitignored and created for you on first run (see
 [First-run setup](#first-run-setup)). The split of who owns what:
 
-- **`.env` = secrets you set + the two Zotero paths the app manages.** You add your API key
-  by name; the `/setup` wizard / `setup` CLI write `PDF_ROOT` / `ZOTERO_DATA_DIR` here for you.
+- **`.env` = optional environment-backed secrets + the two Zotero paths the app manages.**
+  The web wizard uses the OS keyring; the setup surfaces write `PDF_ROOT` /
+  `ZOTERO_DATA_DIR` here for you.
 - **`goals.yaml` = app-authored; don't hand-edit.** Edit research goals + LLM routing in the
   **Settings** page; the app serializes the file. (Hand-edits are tolerated but the app is the
   writer of record.)
@@ -287,7 +285,7 @@ Two files under the project root, both gitignored and created for you on first r
 
 Settings is chunked to keep the common path short:
 
-- **Essentials (always visible):** research goals, triage criteria, the default LLM provider,
+- **Essentials (always visible):** research goals, triage criteria, AI on/off, the default LLM provider,
   Zotero paths — plus a readiness strip (Zotero · LLM · Goals · Model).
 - **Advanced (one collapsible disclosure):** full stage routing, classifier gate (sub-fields
   appear only when the gate is enabled), corpus.
@@ -295,7 +293,8 @@ Settings is chunked to keep the common path short:
 The legacy `llm.draft_model / refine_model / api_base / api_key_env` inputs were **removed**
 from the UI — they duplicated the LLM-routing editor. The backend still auto-migrates an old
 `llm` block in `goals.yaml`, so existing configs keep working. The LLM API secret is
-**name-only** in the UI — never a raw-secret field.
+redacted on every response; a key entered in the web form goes directly to the server-side
+OS keyring.
 
 ### The guarded `.env` path writer + restart banner
 
@@ -331,7 +330,7 @@ You set the **secret** rows by hand; the **path** rows are written for you by th
 | `PDF_ROOT` | app-managed | Your Zotero PDF storage, e.g. `/Users/you/Zotero/storage` — written by the setup flow; blank → defaults to your home dir |
 | `ZOTERO_DATA_DIR` | app-managed | Your Zotero data dir, e.g. `/Users/you/Zotero` — written by the setup flow; blank → defaults to `~/Zotero` |
 | `CUSTOM_BASE_URL` / `CUSTOM_API_KEY` | no | Optional second provider for the *Today* "Triage backlog" drain (a stronger model for the freshest papers). Leave blank to skip |
-| `SUMMARY_TIMEOUT_SECONDS` | no | LLM call timeout (default 900) |
+| `SUMMARY_TIMEOUT_SECONDS` | no | Per-request OpenAI-compatible LLM timeout and whole-triage summary deadline (default 420) |
 | `TRIAGE_JOB_CONCURRENCY` | no | Parallel triage jobs (default 4, max 16) |
 | `ZS_OFFLINE` | no | `1` → cache-only model loading (offline) |
 | `ZS_DEEP_REVIEW_PREWARM_K` | no | Top-N deep reviews to background-prewarm on launch (overrides `quality_review.prewarm_on_startup_k`, default 5; `0` disables) |
@@ -377,7 +376,7 @@ uv run zotero-summarizer prefetch-models  # download the ML models for offline u
 
 # Feeds (optional daemon / one-shots)
 uv run zotero-summarizer feeds list                 # discover feed names + IDs
-uv run zotero-summarizer feeds serve                # background daemon (auto-triage + daily pick)
+uv run zotero-summarizer feeds serve                # background feed triage (review before manual Add)
 uv run zotero-summarizer feeds run --feeds "Agents" # one-shot: exhaust one feed
 uv run zotero-summarizer feeds tick                 # single tick (cron/launchd-friendly)
 

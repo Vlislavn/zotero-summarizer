@@ -4,25 +4,8 @@ import { queueRejectTag } from '../../api/libraryApi.js';
 import { pretty } from '../../utils/priorityLabels.js';
 import { Chip } from '../paper/review/primitives.jsx';
 
-// The Confirm/Override card (Phase 2): the review-fleet has PRE-DECIDED a reading
-// verdict for this paper (rec.proposed_verdict, computed from cached deep-review
-// signals — never an LLM call here). The human only ratifies it, so the surface
-// has exactly TWO primary actions (Tesler's Law: the system owns the decision;
-// Hick's Law: not the four-button picker on every row):
-//
-//   Confirm  → one-tap submitVerdict(proposed); dont_read also queues the ❌ tag
-//              (same reject path as InlineAnnotate). Then onSaved() collapses +
-//              refetches, so the ratified paper drops out of the queue.
-//   Override → expand the row so the EXISTING InlineAnnotate → VerdictPanel shows
-//              (the human picks independently — FORK-A: no pre-selection). No new editor.
-//
-// AMBIGUITY GOES TO THE HUMAN (Tesler's Law): when the proposal is low-confidence
-// OR carries any quality flag, the one-tap Confirm is WITHHELD — only Override is
-// offered, forcing the human to look. A `dont_read` proposal is shown but its
-// Confirm is the reject path, made visually distinct (rose) from a keep.
-//
-// INDIRECT-PROMPT-INJECTION: the proposal is ingested from PDF/abstract-derived
-// signals, so it NEVER auto-writes. Every write here is behind an explicit click.
+// A cached suggestion never auto-writes: Confirm uses the verdict path; Override
+// opens the editor. Ambiguous suggestions expose only Override.
 
 // Below this the proposal is treated as uncertain → Confirm is withheld. A clean
 // `read`+A/B scores 0.85, a plain `read` 0.65, a goal-miss skip 0.75; the shaky
@@ -63,13 +46,13 @@ export default function ProposedVerdictCard({ itemKey, proposal, onSaved, onOver
     <div className="mt-2 rounded-lg border-l-[3px] border-indigo-300 bg-indigo-50/40 pl-3.5 pr-3 py-2.5 space-y-2">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[11px] uppercase tracking-[0.06em] font-semibold text-indigo-500">
-          Proposed
+          Review suggestion · not used for rank
         </span>
         {/* Von Restorff: the proposal chip — its own colour, distinct from 🏷 amber
             label and ★ teal score, so the pre-decision reads as its own thing. */}
         <Chip
           tone={isRemove ? 'rose' : 'indigo'}
-          title="The review fleet pre-decided this reading verdict from the paper's cached deep-review signals. Confirm to accept, or Override to change it."
+          title="Full-text review suggestion; it does not affect list order. Confirm to accept, or Override to change it."
         >
           {pretty(proposed)}
         </Chip>

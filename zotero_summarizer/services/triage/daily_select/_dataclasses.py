@@ -40,6 +40,7 @@ class SlatePaper:
     # Full-text peer-review QualityReview (services.quality_review), persisted on
     # the top-K picks. Empty ``{}`` when not in the reviewed set.
     quality: dict[str, Any] = field(default_factory=dict)
+    review_ready: bool = False
     # Feed item abstract and publication year, stored at triage time from Zotero
     # feedItems. Empty string / None for rows predating this column rollout.
     abstract: str = ""

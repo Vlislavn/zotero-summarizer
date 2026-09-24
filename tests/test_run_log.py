@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -13,10 +15,11 @@ from zotero_summarizer.services import run_log
 def test_make_run_id_includes_classifier_and_utc_timestamp():
     rid = run_log.make_run_id("tabpfn")
     assert rid.endswith("_tabpfn")
-    # Format YYYYMMDD_HHMMSS_<name>
-    head, _ = rid.rsplit("_", 1)
-    assert len(head) == 15  # 8 digits + underscore + 6 digits
-    assert "_" in head
+    stamp, suffix = rid[:15], rid[16:]
+    assert datetime.strptime(stamp, "%Y%m%d_%H%M%S")
+    token, classifier = suffix.split("_", 1)
+    assert len(token) == 32 and int(token, 16) >= 0
+    assert classifier == "tabpfn"
 
 
 def test_append_and_load_preserves_order(tmp_path: Path):
@@ -46,7 +49,7 @@ def test_load_runs_returns_empty_for_missing_file(tmp_path: Path):
     assert run_log.load_runs(tmp_path / "absent.jsonl") == []
 
 
-def test_latest_per_classifier_picks_newest_by_run_id(tmp_path: Path):
+def test_latest_per_classifier_picks_last_record(tmp_path: Path):
     runs = [
         {"run_id": "20260101_000000_tabpfn", "classifier": "tabpfn", "auc": 0.5},
         {"run_id": "20260102_000000_tabpfn", "classifier": "tabpfn", "auc": 0.8},
@@ -56,6 +59,40 @@ def test_latest_per_classifier_picks_newest_by_run_id(tmp_path: Path):
     assert latest["tabpfn"]["auc"] == 0.8
     assert latest["lightgbm"]["auc"] == 0.7
     assert set(latest) == {"tabpfn", "lightgbm"}
+
+
+def test_run_ids_do_not_collide_with_a_frozen_clock():
+    frozen = datetime(2026, 9, 5, 12, 0, tzinfo=timezone.utc)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        ids = list(pool.map(lambda _: run_log.make_run_id("logreg", now=frozen), range(100)))
+    assert len(set(ids)) == 100
+
+
+def test_latest_run_is_last_append_not_largest_identifier():
+    earlier = {"run_id": "z", "classifier": "logreg", "auc": 0.5}
+    later = {"run_id": "a", "classifier": "logreg", "auc": 0.8}
+    assert run_log.latest_per_classifier([earlier, later])["logreg"] is later
+
+
+def test_same_second_cli_reports_preserve_both_runs(tmp_path):
+    from zotero_summarizer.cli._helpers import _persist_run_log
+    from zotero_summarizer.settings import Settings
+
+    settings = Settings.load(project_root=tmp_path)
+    frozen = datetime(2026, 9, 5, 12, 0, tzinfo=timezone.utc)
+    entries = []
+    for auc in (0.5, 0.8):
+        entry = {
+            "run_id": run_log.make_run_id("logreg", now=frozen),
+            "classifier": "logreg", "timestamp": frozen.isoformat(),
+            "input_csv": "fixture.csv", "cv": {"auc": auc},
+        }
+        _persist_run_log(settings, entry)
+        entries.append(entry)
+    assert entries[0]["report_path"] != entries[1]["report_path"]
+    assert "0.5" in Path(entries[0]["report_path"]).read_text()
+    assert "0.8" in Path(entries[1]["report_path"]).read_text()
+    assert len(run_log.load_runs(settings.data_dir / "classifier-runs.jsonl")) == 2
 
 
 def test_file_sha256_is_stable_for_same_content(tmp_path: Path):

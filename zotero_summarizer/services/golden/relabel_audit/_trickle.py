@@ -11,11 +11,11 @@ This module never mutates ``responses``; it only writes the top-level
 """
 from __future__ import annotations
 
-import json
 import random
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from zotero_summarizer.services._common import write_json_atomic
 from zotero_summarizer.services.golden.relabel_audit._constants import (
     AGE_BUCKET_NAMES,
     AuditCandidate,
@@ -132,10 +132,7 @@ def next_audit_for_today(
         return []
 
     session["last_trickle_emitted_at"] = now_iso()
-    session_path.write_text(
-        json.dumps(session, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    write_json_atomic(session_path, session)
     return picked
 
 

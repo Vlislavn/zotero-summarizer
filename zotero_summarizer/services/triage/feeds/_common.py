@@ -10,7 +10,7 @@ import random
 import re
 import sqlite3
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
 
@@ -67,23 +67,7 @@ class DaemonTickReport:
     elapsed_seconds: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
-        return {
-            "tick_id": self.tick_id,
-            "fetched": self.fetched,
-            "skipped_already_processed": self.skipped_already_processed,
-            "skipped_processed_dedup": self.skipped_processed_dedup,
-            "skipped_library_dedup": self.skipped_library_dedup,
-            "triaged": self.triaged,
-            "fast_rejected": self.fast_rejected,
-            "gate_rejected": self.gate_rejected,
-            "errors": self.errors,
-            "marked_read": self.marked_read,
-            "outcomes_resolved": self.outcomes_resolved,
-            "daily_selection_ran": self.daily_selection_ran,
-            "daily_materialized": self.daily_materialized,
-            "daily_rejected": self.daily_rejected,
-            "elapsed_seconds": round(self.elapsed_seconds, 2),
-        }
+        return {**asdict(self), "elapsed_seconds": round(self.elapsed_seconds, 2)}
 
 
 def _generate_zotero_key(seen: set[str]) -> str:
@@ -186,6 +170,23 @@ _FATAL_LLM_ERROR_SIGNALS = (
 def _is_fatal_llm_error(exc: BaseException) -> bool:
     msg = str(exc).lower()
     return any(signal in msg for signal in _FATAL_LLM_ERROR_SIGNALS)
+
+
+@contextmanager
+def _tick_lock() -> Iterator[None]:
+    """One tick per triage database, across processes and threads.
+
+    SQLite owns the lock lifetime; process exit releases it without PID probing
+    or stale-file cleanup. The separate lock database leaves app writes unblocked.
+    """
+    path = get_settings().triage_db_path.with_suffix(".tick-lock.sqlite")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path, timeout=0)
+    try:
+        conn.execute("BEGIN EXCLUSIVE")
+        yield
+    finally:
+        conn.close()
 
 
 @contextmanager

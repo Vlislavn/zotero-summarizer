@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   fetchReview,
   reviewAction,
@@ -101,8 +101,14 @@ function ReviewItem({ item, localState, onAction }) {
         <VerdictPicker
           label="Relabel:"
           disabled={Boolean(localState)}
+          disabledPriorities={item.review_ready ? [] : ['must_read', 'should_read', 'could_read']}
           onPick={(priority) => onAction(item.id, 'relabel', priority)}
         />
+        {!item.review_ready && item.stable_feed_key && (
+          <Link className="text-xs text-teal-700 underline" to={`/paper/${encodeURIComponent(item.stable_feed_key)}`}>
+            Generate a review before adding
+          </Link>
+        )}
         {localState && (
           <span className={`text-xs ml-2 ${localState === 'approved' ? 'text-emerald-700' : 'text-rose-700'}`}>
             → {localState}
@@ -114,11 +120,10 @@ function ReviewItem({ item, localState, onAction }) {
 }
 
 export default function Review() {
-  const [searchParams] = useSearchParams();
-  const initialState = VALID_STATES.has(searchParams.get('state'))
+  const [searchParams, setSearchParams] = useSearchParams();
+  const state = VALID_STATES.has(searchParams.get('state'))
     ? searchParams.get('state')
     : 'awaiting_review';
-  const [state, setState] = useState(initialState);
   // Active-learning default: load uncertain-first (composite_score closest to a
   // class boundary) so triaging maximises model lift per click — a system-owned
   // ML nicety the user shouldn't toggle each session (Tesler's Law).
@@ -130,6 +135,14 @@ export default function Review() {
   const [message, setMessage] = useState('');
   const [isError, setIsError] = useState(false);
   const [itemState, setItemState] = useState({});
+
+  const setState = useCallback((nextState) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set('state', nextState);
+      return next;
+    });
+  }, [setSearchParams]);
 
   const load = useCallback(async (currentState = state, currentSort = sort) => {
     setLoading(true);
@@ -164,13 +177,10 @@ export default function Review() {
 
   const handleAction = useCallback(async (id, action, label = null) => {
     try {
-      const result = await reviewAction(id, action, label);
+      await reviewAction(id, action, label);
       const wentApproved = action === 'approve' || (action === 'relabel' && label !== 'dont_read');
       setItemState((prev) => ({ ...prev, [id]: wentApproved ? 'approved' : 'rejected' }));
-      const parts = [`Item ${id}: ${action}${label ? ` (${pretty(label)})` : ''} OK`];
-      if (result?.queued_pending_changes) parts.push(`queued ${result.queued_pending_changes} pending change(s)`);
-      if (result?.golden_csv_row_added) parts.push('appended to golden CSV');
-      setMessage(parts.join(' — '));
+      setMessage(`Item ${id}: ${action}${label ? ` (${pretty(label)})` : ''} OK`);
       setIsError(false);
     } catch (err) {
       setMessage(`Item ${id}: ${action} failed — ${humanizeError(err)}`);
@@ -204,18 +214,22 @@ export default function Review() {
   }, [load, state]);
 
   const handleConfirmGateRejected = useCallback(async () => {
+    const processedIds = items.filter((item) => !itemState[item.id]).map((item) => item.id);
+    if (processedIds.length === 0) return;
     if (!window.confirm(
-      `Confirm all ${items.length} unaltered gate-rejected items as ${pretty('dont_read')}?\n\n`
-      + 'This appends them to zotero-summarizer-golden.csv as negative training rows. '
-      + 'Already-relabelled items are skipped automatically. The next feeds run will retrain.',
+      `Confirm all ${processedIds.length} unaltered gate-rejected items as ${pretty('dont_read')}?\n\n`
+      + 'This saves your verdicts for training and removes these items from the review queue. '
+      + 'Already-relabelled items are skipped automatically.',
     )) return;
     setConfirming(true);
     setMessage('');
     try {
-      const result = await reviewConfirmAllGateRejected();
+      const result = await reviewConfirmAllGateRejected(processedIds);
+      const submitted = new Set(processedIds);
+      setItems((current) => current.filter((item) => !submitted.has(item.id)));
       setMessage(
-        `Appended ${result?.appended || 0} dont_read row(s) to golden CSV; `
-        + `${result?.skipped_duplicate || 0} already there.`,
+        `Confirmed ${result.confirmed} item(s) as ${pretty('dont_read')}; `
+        + `${result.skipped} already changed.`,
       );
       setIsError(false);
     } catch (err) {
@@ -224,7 +238,7 @@ export default function Review() {
     } finally {
       setConfirming(false);
     }
-  }, [items.length]);
+  }, [items, itemState]);
 
   return (
     <div className="glass rounded-2xl border border-slate-200 p-4">
@@ -281,7 +295,7 @@ export default function Review() {
             <button
               type="button"
               onClick={handleConfirmGateRejected}
-              disabled={confirming}
+              disabled={confirming || loading || items.every((item) => itemState[item.id])}
               className="px-3 py-1 rounded-lg text-xs font-semibold bg-rose-700 text-white hover:bg-rose-800 disabled:bg-slate-300"
             >
               {confirming ? 'Writing…' : `Confirm remaining as ${pretty('dont_read')}`}

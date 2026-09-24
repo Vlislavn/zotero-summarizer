@@ -14,6 +14,12 @@ from zotero_summarizer.services.library.quality_review import assess_digest
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
 
 
+@pytest.fixture(autouse=True)
+def _isolate_digest_generation(monkeypatch):
+    from zotero_summarizer.services.library import _digest_verification
+    monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
+
+
 class _FakeLLM:
     """Returns queued responses for successive pydantic_prompt calls."""
 
@@ -29,7 +35,11 @@ class _FakeLLM:
 
 def test_assess_digest_retries_on_malformed_then_succeeds():
     bad = '{"soundness": 0, "novelty": 0, "significance": 0, "reproducibility": 0, "clarity": 0}'
-    good = PaperDigest()  # all-default → valid (scores default to in-range values)
+    good = PaperDigest(
+        read_decision="skip", read_why="The digest is sufficient.",
+        read_parts=[], skip_parts=[], estimated_read_minutes=None, original_value="",
+        writing_friction="low", writing_reasons=[],
+    )
     llm = _FakeLLM([bad, good])
     out = assess_digest(title="T", full_text="paper body", config=_default_goals_config(), llm=llm)
     assert isinstance(out, PaperDigest)

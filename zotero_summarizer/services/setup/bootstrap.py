@@ -129,19 +129,14 @@ def _bootstrap_env(settings: Settings) -> bool:
 
 
 def _bootstrap_database(settings: Settings) -> bool:
-    """Run the version-gated migration when the triage DB is absent.
-
-    Reuses ``storage.migrations.migrate_existing`` (the SAME logic behind the
-    ``migrate`` CLI) — never a duplicate schema path. Returns True iff the DB was
-    absent and got initialized on this call.
-    """
-    if settings.triage_db_path.exists():
-        return False
+    """Migrate both stores; report whether this call created the triage DB."""
+    created = not settings.triage_db_path.exists()
     from zotero_summarizer.storage.migrations import migrate_existing
 
     migrate_existing(settings)
-    LOGGER.info("Bootstrap: initialized triage DB at %s", settings.triage_db_path)
-    return True
+    if created:
+        LOGGER.info("Bootstrap: initialized triage DB at %s", settings.triage_db_path)
+    return created
 
 
 def bootstrap_phase0(settings: Settings) -> BootstrapResult:

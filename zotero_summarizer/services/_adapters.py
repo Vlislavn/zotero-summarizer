@@ -40,7 +40,11 @@ def build_llm(
     # asserted in test_adapters_openai / test_provider_routing). Override per provider.
     temperature: float = 0,
     extra_body: dict[str, Any] | None = None,
+    request_timeout_seconds: float | None = None,
+    structured_output: bool = False,
 ) -> InstrumentedLLMClient:
+    from zotero_summarizer.integrations.llm_callbacks import CompletionGuard
+
     llm_cls, _ = _load_onprem()
     kwargs: dict[str, Any] = dict(
         model_url=model_url,
@@ -50,10 +54,13 @@ def build_llm(
         max_tokens=max_tokens,
         mute_stream=True,
         verbose=False,
+        callbacks=[CompletionGuard()],
     )
     if extra_body:
         kwargs["extra_body"] = extra_body
-    return InstrumentedLLMClient(llm_cls(**kwargs))
+    if request_timeout_seconds is not None:
+        kwargs["timeout"] = request_timeout_seconds
+    return InstrumentedLLMClient(llm_cls(**kwargs), structured_output=structured_output)
 
 
 def build_pdf_extractor() -> OnPremPdfExtractor:

@@ -109,6 +109,16 @@ def test_federate_new_channels_contribute_and_dedupe(monkeypatch):
     assert {p.source for p in shared.provenance} == {"crossref", "semantic_scholar"}
 
 
+def test_variant_passes_share_one_source_quota(monkeypatch):
+    from zotero_summarizer.services.search import federate as fed
+
+    requested = []
+    monkeypatch.setattr(fed, "search_arxiv", lambda query, max_results: requested.append(max_results) or [])
+    plan = QueryPlan(arxiv_variants=["tight", "bag"])
+    fed.federate(plan, quota=5)
+    assert requested == [3, 2]
+
+
 def test_build_query_plan_wires_crossref_and_semantic_scholar():
     # Regression: both new-source queries must be POPULATED by the plan builder or
     # federate's `if plan.crossref:` / `if plan.semantic_scholar:` never fire (the two

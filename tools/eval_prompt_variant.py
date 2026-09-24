@@ -88,7 +88,7 @@ def hallucination_rate(report: dict[str, Any]) -> float:
             "(faithbench run --tracks qa,claims)"
         ) from exc
     rates = [
-        float(cond["trap"]["hallucination_rate"])
+        cond["trap"]["hallucination_rate"]
         for cond in qa.values()
         if isinstance(cond, dict) and cond.get("trap") is not None
     ]
@@ -97,7 +97,9 @@ def hallucination_rate(report: dict[str, Any]) -> float:
             "no QA condition carries tracks.qa.<condition>.trap.hallucination_rate "
             "— the benchmark has no trap items, so safety cannot be A/B'd"
         )
-    return max(rates)
+    if any(rate is None for rate in rates):
+        raise ValueError("trap hallucination rate is unmeasured; safety cannot be A/B'd")
+    return max(float(rate) for rate in rates)
 
 
 def _judge_models(report: dict[str, Any]) -> list[str]:

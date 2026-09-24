@@ -5,6 +5,8 @@ summary to its quote) → self-explaining quality panel. The full paper body is 
 embedded; the digest is collapsed."""
 from __future__ import annotations
 
+import re
+
 from zotero_summarizer.services.library import _paper_read_brief as brief
 from zotero_summarizer.services.library import _paper_read_html as h
 
@@ -65,16 +67,149 @@ def test_board_absorbs_per_goal_summary_sections_and_quote():
     assert not hasattr(brief, "per_goal_html")  # the separate repeated section is gone
 
 
+def test_located_evidence_does_not_automatically_mean_goal_is_addressed():
+    goals = [{"goal": "External clinical validation", "retrieval_state": "hit", "relevant": False,
+              "score": 0, "summary": "No external validation was performed.",
+              "supporting_quotes": ["Evaluation used only the development cohort."]}]
+
+    html = brief.brief_html(CONTENT, quality=QUALITY, goal_summaries=goals)
+
+    assert '○ not supported' in html
+    assert '● addressed' not in html
+    assert 'Evidence did not support this goal' in html
+    assert 'Evaluation used only the development cohort.' in html
+
+
+def test_goal_summaries_deduplicate_without_losing_goal_evidence():
+    shared = "A multisite clinical study compares triage decisions across independent reader cohorts."
+    goals = [
+        {"goal": "Goal Alpha: clinical workflow", "retrieval_state": "hit", "relevant": True,
+         "score": 2.7, "summary": f"{shared} {shared}", "key_sections": ["Methods"],
+         "supporting_quotes": ["Shared evidence supports Goal Alpha and Goal Gamma.", "Alpha-specific evidence passage." ]},
+        {"goal": "Goal Beta: model safety", "retrieval_state": "hit", "relevant": True,
+         "score": 2.6, "summary": "A MULTISITE CLINICAL STUDY COMPARES TRIAGE DECISIONS ACROSS INDEPENDENT READER COHORTS!",
+         "key_sections": ["Results"], "supporting_quotes": ["Beta-specific evidence passage."]},
+        {"goal": "Goal Gamma: reader outcomes", "retrieval_state": "hit", "relevant": True,
+         "score": 2.5, "summary": "A separate analysis measures reader agreement and reports calibrated outcomes for each clinical site.",
+         "key_sections": ["Evaluation"], "supporting_quotes": ["Shared evidence supports Goal Alpha and Goal Gamma."]},
+        {"goal": "Goal Delta: long-form result", "retrieval_state": "hit", "relevant": True,
+         "score": 2.4, "summary": "Delta " + " ".join(f"finding{i}" for i in range(70)),
+         "supporting_quotes": ["Delta-specific evidence passage."]},
+        {"goal": "Goal Epsilon: late finding", "retrieval_state": "hit", "relevant": True,
+         "score": 2.3, "summary": "An independent late summary is preserved for a fourth distinct interest.",
+         "supporting_quotes": ["Epsilon-specific evidence passage."]},
+        {"goal": "Goal Zeta: final finding", "retrieval_state": "hit", "relevant": True,
+         "score": 2.2, "summary": "A final separate result belongs only to the fifth interest.",
+         "supporting_quotes": ["Zeta-specific evidence passage."]},
+    ]
+
+    html = brief.brief_html(CONTENT, quality=QUALITY, goal_summaries=goals)
+    visible_board = html.split('<details class="goal-summary-more">')[0]
+    visible_summaries = re.findall(r'<li class="goal-summary-item">.*?</li>', visible_board, re.DOTALL)
+    visible_text = [re.search(r'<p class="goal-summary-text">(.*?)</p>', item, re.DOTALL).group(1)
+                    for item in visible_summaries]
+
+    assert len(visible_summaries) <= 3
+    assert sum(len(text.replace("…", "").split()) for text in visible_text) <= 90
+    assert html.count(shared) == 1  # repeated sentence + punctuation/case variant are shown once
+    assert "For: Goal Alpha: clinical workflow; Goal Beta: model safety" in html
+    assert "Goal Gamma: reader outcomes" in html  # same quote does not merge distinct summaries
+    assert "goal-summary-more" in html and "finding69" in html and "Goal Zeta: final finding" in html
+    assert html.count("Shared evidence supports Goal Alpha and Goal Gamma.") == 2
+    for evidence in ("Alpha-specific", "Beta-specific", "Delta-specific", "Epsilon-specific", "Zeta-specific"):
+        assert evidence in html
+    assert html.count('role="meter"') == len(goals)
+
+
+def test_question_does_not_merge_into_an_asserted_goal_finding():
+    goals = [
+        {"goal": "Hypothesis", "retrieval_state": "hit", "relevant": True, "score": 2.0,
+         "summary": "The drug is safe?"},
+        {"goal": "Conclusion", "retrieval_state": "hit", "relevant": True, "score": 2.0,
+         "summary": "The drug is safe."},
+    ]
+    html = brief.brief_html(CONTENT, quality=QUALITY, goal_summaries=goals)
+    assert "The drug is safe?" in html and "The drug is safe." in html
+    assert "For: Hypothesis; Conclusion" not in html
+
+
+def test_numeric_interval_cannot_merge_with_point_estimate():
+    goals = [{"goal": f"Goal {i}", "retrieval_state": "hit", "relevant": True,
+              "score": 2.0, "summary": text}
+             for i, text in enumerate(("Hazard ratio 1.2.", "Hazard ratio 1–2."))]
+    html = brief.brief_html(CONTENT, quality=QUALITY, goal_summaries=goals)
+    assert "Hazard ratio 1.2." in html and "Hazard ratio 1–2." in html
+    assert "For: Goal 0; Goal 1" not in html
+
+
+def test_casefold_duplicate_does_not_merge_distinct_quantitative_findings():
+    goals = [
+        {"goal": "Large cohort", "retrieval_state": "hit", "relevant": True, "score": 2.0,
+         "summary": "N=120 participants completed follow-up."},
+        {"goal": "Small cohort", "retrieval_state": "hit", "relevant": True, "score": 2.0,
+         "summary": "n=120 participants completed follow-up."},
+    ]
+
+    html = brief.brief_html(CONTENT, quality=QUALITY, goal_summaries=goals)
+
+    assert "N=120 participants completed follow-up." in html
+    assert "n=120 participants completed follow-up." in html
+    assert "For: Large cohort; Small cohort" not in html
+
+
+def test_legacy_degraded_goal_data_retains_long_detail_inline():
+    detail = "Legacy result: " + " ".join(f"observation{i}" for i in range(70))
+    goals = [
+        {"goal": "Legacy goal", "retrieval_state": "hit", "relevant": True,
+         "score": 2.0, "summary": detail},
+        {"goal": "Degraded goal", "retrieval_state": "hit", "relevant": True,
+         "score": 2.0, "summary": "A separate degraded-data finding."},
+    ]
+
+    html = brief.brief_html(CONTENT, quality=None, goal_summaries=goals)
+
+    assert detail in html
+    assert "A separate degraded-data finding." in html
+    assert "Legacy goal" in html and "Degraded goal" in html
+
+
+def test_goal_summary_disclosure_is_keyboard_accessible_and_responsive():
+    goals = [dict(GOALS[0], goal=f"Goal {i}", summary=f"Distinct conclusion {i}.") for i in range(4)]
+    html = brief.brief_html(CONTENT, quality=QUALITY, goal_summaries=goals)
+    css = brief.brief_css()
+
+    assert '<details class="goal-summary-more">' in html
+    assert "<summary" in html and "summary:focus-visible" in css
+    assert ".goal-summary-list" in css and "overflow-wrap:anywhere" in css
+    assert "@media(max-width:600px){.goal-board{grid-template-columns:1fr}" in css
+
+
 def test_flag_verdict_inlines_the_red_flag():
-    html = brief.brief_html(CONTENT, quality=FLAG_Q, goal_summaries=GOALS)
-    assert "SKIM" in html and "FLAGGED" in html
+    html = brief.brief_html(CONTENT, digest=DIGEST, quality=FLAG_Q, goal_summaries=GOALS)
+    assert "SKIM" in html and "evidence weak" in html
     assert "near-perfect 99.2% metric with no leakage discussion" in html  # visible in the verdict bar
 
 
-def test_no_fired_goal_is_skip():
+def test_brief_keeps_idea_evidence_and_writing_separate():
+    digest = {**DIGEST, "read_decision": "skim", "novelty": 5, "significance": 4,
+              "writing_friction": "high", "writing_reasons": ["Taxonomy mixes axes."]}
+    html = brief.brief_html(CONTENT, digest=digest, quality=QUALITY, goal_summaries=GOALS)
+    assert "Idea: high" in html and "Evidence: NEUTRAL" in html and "Writing: high" in html
+
+
+def test_digest_action_overrides_relevance_without_hiding_relevance():
+    digest = {"read_decision": "skip", "read_why": "The digest captures the useful result.",
+              "estimated_read_minutes": 4}
+    html = brief.brief_html(CONTENT, digest=digest, quality=HIGHLIGHT_Q, goal_summaries=GOALS)
+    assert "DIGEST IS ENOUGH · 4 MIN" in html and "digest captures" in html
+    assert "HIGH RELEVANCE" in html and "DEEP-READ" not in html
+
+
+def test_missing_digest_does_not_invent_skip_even_for_assessed_misses():
     misses = [{"goal": g["goal"], "retrieval_state": "miss", "relevant": False, "score": 0.1} for g in GOALS]
     html = brief.brief_html(CONTENT, quality=QUALITY, goal_summaries=misses)
-    assert "SKIP" in html
+    assert "REVIEW" in html
+    assert ">SKIP<" not in html
 
 
 def test_quality_panel_is_self_explaining():
@@ -96,13 +231,12 @@ def test_quality_panel_flag_leads_with_red_flags():
 
 
 def test_presentation_integrates_brief_no_sections_dump_no_cdn():
-    html = h._render_presentation(CONTENT, "AgentClinic", DIGEST, QUALITY, GOALS)
+    html = h._render_presentation(CONTENT, DIGEST, QUALITY, GOALS)
     assert 'class="gauge"' in html and 'id="quality"' in html
     assert 'id="sections"' not in html and 'id="per-goal"' not in html  # the dumps are gone
     assert 'class="fade-in digest-fold"' in html  # digest collapsed by default
     assert "cdn.jsdelivr" not in html
-    notes = h._render_notes(CONTENT, DIGEST, QUALITY, GOALS)
-    assert "## Executive Summary" in notes and "## Relevance to your goals" in notes
+    assert "READ" in html
 
 
 def test_abstained_hit_shows_withheld_not_evidence_found():
@@ -114,3 +248,5 @@ def test_abstained_hit_shows_withheld_not_evidence_found():
 
 def test_brief_empty_without_data():
     assert brief.brief_html(CONTENT, quality=None, goal_summaries=None) == ""
+    digest_only = brief.brief_html(CONTENT, digest={"read_decision": "skip"}, quality=None, goal_summaries=None)
+    assert "OFF GOAL" not in digest_only and "Idea: not assessed" in digest_only and "fonts.googleapis" not in h._render_presentation(CONTENT, DIGEST, None, None)

@@ -42,7 +42,6 @@ def _select_labeled_rows(rows: list[dict[str, str]]):
     titles: list[str] = []
     abstracts: list[str] = []
     labels: list[int] = []
-    gold_priorities: list[str] = []
     selected_rows: list[dict[str, str]] = []
     for r in rows:
         gold = (r.get("gold_priority_final") or "").strip()
@@ -54,17 +53,17 @@ def _select_labeled_rows(rows: list[dict[str, str]]):
         titles.append(title)
         abstracts.append(abstract)
         labels.append(1 if gold in POSITIVE_CLASSES else 0)
-        gold_priorities.append(gold)
         selected_rows.append(r)
-    return keys, titles, abstracts, labels, gold_priorities, selected_rows
+    return keys, titles, abstracts, labels, selected_rows
 
 
 def _build_feature_matrix(
     keys: list[str], titles: list[str], abstracts: list[str], selected_rows: list[dict[str, str]],
     *, corpus_db_path: Path, goals_config: Any, progress_cb: Callable[[int, int], None] | None = None,
 ):
-    """Full SPECTER2 + tabular feature matrix for the kept rows. Returns (X, computed, cached)."""
+    """Feature matrix, cache counts and per-run corpus snapshot for kept rows."""
     embed_cache, openalex_client, cold_start_policy = _build_aux_providers(corpus_db_path, goals_config)
+    corpus = embed_cache.corpus_affinity(selected_rows) if embed_cache is not None else None
     computed = 0
     cached = 0
     X = np.zeros((len(keys), FEATURE_DIM), dtype=np.float32)
@@ -80,7 +79,7 @@ def _build_feature_matrix(
         year_i = int(year_str[:4]) if year_str[:4].isdigit() else None
         doi = (selected_rows[i].get("doi") or "").strip()
         affinity, prestige = _compute_aux(
-            embed_cache, openalex_client, title=t, abstract=a, doi=doi, year=year_i,
+            None, openalex_client, title=t, abstract=a, doi=doi, year=year_i,
             cold_start_policy=cold_start_policy,
         )
         X[i, EMBEDDING_DIM:] = _extra_features(
@@ -88,7 +87,9 @@ def _build_feature_matrix(
         )
         if progress_cb is not None and (i + 1) % 25 == 0:
             progress_cb(i + 1, len(keys))
-    return X, computed, cached
+    if corpus is not None:
+        X[:, EMBEDDING_DIM + 5] = corpus.scores()
+    return X, computed, cached, corpus
 
 
 def cross_validate(
@@ -136,9 +137,10 @@ def cross_validate(
     """
     from sklearn.metrics import roc_auc_score
     from sklearn.model_selection import StratifiedKFold, train_test_split
+    from zotero_summarizer.services.model.library_features import recompute_engagement_columns
 
     start = time.perf_counter()
-    keys, titles, abstracts, labels, gold_priorities, selected_rows = _select_labeled_rows(rows)
+    keys, titles, abstracts, labels, selected_rows = _select_labeled_rows(rows)
 
     if len(labels) < n_folds * 2:
         raise ValueError(
@@ -146,7 +148,7 @@ def cross_validate(
         )
 
     # Build feature matrix for ALL kept rows (CV + held-out).
-    X, computed, cached = _build_feature_matrix(
+    X, computed, cached, corpus = _build_feature_matrix(
         keys, titles, abstracts, selected_rows,
         corpus_db_path=corpus_db_path, goals_config=goals_config, progress_cb=progress_cb,
     )
@@ -169,8 +171,9 @@ def cross_validate(
     probs_oof = np.zeros(len(y_cv), dtype=np.float64)
     skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=42)
     for fold_idx, (train_local, val_local) in enumerate(skf.split(X_cv, y_cv), start=1):
-        Xtr, ytr = X_cv[train_local], y_cv[train_local]
-        Xval = X_cv[val_local]
+        X_fold = recompute_engagement_columns(X, selected_rows, cv_idx[train_local], corpus)
+        Xtr, ytr = X_fold[cv_idx[train_local]], y_cv[train_local]
+        Xval = X_fold[cv_idx[val_local]]
         p_tr_raw, p_val_raw = _fit_predict(
             classifier_name, Xtr, ytr, Xval, pca_dim=pca_dim, return_train_probs=True,
         )
@@ -200,9 +203,10 @@ def cross_validate(
     holdout_auc = 0.0
     holdout_n_positive = 0
     if len(holdout_idx) >= 2:
+        X = recompute_engagement_columns(X, selected_rows, cv_idx, corpus)
         X_ho, y_ho = X[holdout_idx], y[holdout_idx]
         _, p_holdout_raw = _fit_predict(
-            classifier_name, X_cv, y_cv, X_ho, pca_dim=pca_dim, return_train_probs=False,
+            classifier_name, X[cv_idx], y_cv, X_ho, pca_dim=pca_dim, return_train_probs=False,
         )
         holdout_calibrator = _fit_calibrator(probs_oof, y_cv, method=calibration)
         p_holdout_cal = _apply_calibrator(holdout_calibrator, p_holdout_raw)
@@ -215,20 +219,16 @@ def cross_validate(
         ]
         holdout_n_positive = int(y_ho.sum())
 
-    elapsed = time.perf_counter() - start
-    keys_cv = [keys[i] for i in cv_idx]
-    keys_ho = [keys[i] for i in holdout_idx]
-
     return ClassifierReport(
         n_rows=len(y_cv),
         n_positive=int(y_cv.sum()),
         embeddings_computed=computed,
         embeddings_cached=cached,
         auc=auc,
-        elapsed_seconds=elapsed,
+        elapsed_seconds=time.perf_counter() - start,
         cv_probabilities=probs_oof.tolist(),
         cv_predictions=cv_predictions,
-        item_keys=keys_cv,
+        item_keys=[keys[i] for i in cv_idx],
         optimal_threshold=t_opt,
         must_threshold=must_t,
         could_threshold=could_t,
@@ -237,7 +237,7 @@ def cross_validate(
         holdout_auc=holdout_auc,
         holdout_probabilities=holdout_probs,
         holdout_predictions=holdout_predictions,
-        holdout_item_keys=keys_ho,
+        holdout_item_keys=[keys[i] for i in holdout_idx],
     )
 
 
@@ -298,9 +298,8 @@ def _featurize_new_items(
             title=title, abstract=abstract, doi=doi, year=year_i,
             cold_start_policy=cold_start_policy,
         )
-        authors_str = (it.get("authors") or "").strip()
         nearest_n, centroid_n, recent_n, drift_n, authors_overlap_n = compute_library_features(
-            emb_new, library, candidate_authors=authors_str, exclude_item_key=cache_key,
+            emb_new, library, candidate_row=it,
         )
         venue = (it.get("publication_title") or it.get("venue") or "").strip()
         feature_row = {"doi": doi, "venue": venue, "year": year_str}
@@ -353,7 +352,7 @@ def predict_new_items(
     abstract_preview_chars: int = 200,
     goals_config: Any | None = None,
     progress_cb: Callable[[int, int], None] | None = None,
-) -> tuple[list[FeedPrediction], dict[str, float]]:
+) -> tuple[list[FeedPrediction], dict[str, float | None]]:
     """Train regressor on `gold_inferred_relevance`, predict relevance for new items.
 
     Sprint-1 redesign (May 2026). The model now outputs a continuous score
@@ -373,66 +372,27 @@ def predict_new_items(
     diagnostic OOF Spearman ρ and the row counts. No threshold dict any
     more — thresholds are constants in ``domain``.
     """
-    from scipy.stats import spearmanr
-    from sklearn.model_selection import GroupKFold
-
-    from zotero_summarizer.domain import paper_group_id
+    from zotero_summarizer.services.model.classifier_training import (
+        _featurize_training_matrix, _oof_predictions,
+    )
+    from zotero_summarizer.services.model.library_features import load_positive_library_from_rows
 
     # 1. Filter & featurise training set.
-    keys, titles, abstracts, y_cont, train_rows = _filter_train_rows(
-        training_rows, n_folds=n_folds
-    )
-
-    embed_cache, openalex_client, cold_start_policy = _build_aux_providers(corpus_db_path, goals_config)
-    from zotero_summarizer.services.model.library_features import (
-        compute_library_features,
-        load_positive_library_from_rows,
-    )
+    data = _filter_train_rows(training_rows, n_folds=n_folds)
+    _keys, _titles, _abstracts, y_cont, train_rows = data
     library = load_positive_library_from_rows(training_rows, corpus_db_path)
     n_train = len(y_cont)
-    X_train = np.zeros((n_train, FEATURE_DIM), dtype=np.float32)
-    for i, (k, t, a) in enumerate(zip(keys, titles, abstracts)):
-        emb = get_or_compute_embedding(corpus_db_path, k, t, a)
-        X_train[i, :EMBEDDING_DIM] = emb
-        year_str = (train_rows[i].get("year") or "").strip()
-        year_i = int(year_str[:4]) if year_str[:4].isdigit() else None
-        doi = (train_rows[i].get("doi") or "").strip()
-        affinity, prestige = _compute_aux(
-            embed_cache, openalex_client,
-            title=t, abstract=a, doi=doi, year=year_i,
-            cold_start_policy=cold_start_policy,
-        )
-        authors_str = (train_rows[i].get("authors") or "").strip()
-        nearest, centroid, recent, drift, authors_overlap = compute_library_features(
-            emb, library, candidate_authors=authors_str, exclude_item_key=k,
-        )
-        X_train[i, EMBEDDING_DIM:] = _extra_features(
-            train_rows[i], t, a,
-            corpus_affinity=affinity, prestige_score=prestige,
-            nearest_kept_cosine=nearest, positive_centroid_cosine=centroid,
-            recent_centroid_cosine=recent, topic_drift=drift,
-            author_overlap_count=authors_overlap,
-        )
-        if progress_cb is not None and (i + 1) % 50 == 0:
-            progress_cb(i + 1, n_train)
-    y_train = np.asarray(y_cont, dtype=np.float64)
-    from zotero_summarizer.services.model.label_weights import compute_row_weights
-    sw_all = compute_row_weights(train_rows)
+    matrix = _featurize_training_matrix(
+        data, library, corpus_db_path=corpus_db_path,
+        goals_config=goals_config, progress_cb=progress_cb,
+    )
+    X_train, y_train, sw_all = matrix.X, matrix.y, matrix.sample_weight
 
     # 2. K-fold OOF predictions purely for diagnostic Spearman ρ logging.
-    preds_oof = np.zeros(n_train, dtype=np.float64)
-    groups = [paper_group_id(r) for r in train_rows]
-    skf = GroupKFold(n_splits=n_folds)
-    for fold_idx, (tr, vl) in enumerate(skf.split(X_train, groups=groups), start=1):
-        _, p_vl = _fit_predict(
-            classifier_name, X_train[tr], y_train[tr], X_train[vl],
-            pca_dim=pca_dim, return_train_probs=False,
-            objective="regression",
-            sample_weight=sw_all[tr],
-        )
-        preds_oof[vl] = p_vl
-        LOGGER.info("oof fold %d/%d done", fold_idx, n_folds)
-    oof_rho = float(spearmanr(y_train, preds_oof).statistic) if n_train > 2 else 0.0
+    _, oof_rho = _oof_predictions(
+        classifier_name, matrix, train_rows,
+        n_folds=n_folds, pca_dim=pca_dim,
+    )
 
     # 3. Featurise new items.
     valid_new: list[dict[str, str]] = [
@@ -442,6 +402,7 @@ def predict_new_items(
     if not valid_new:
         return [], {"oof_spearman": oof_rho, "n_train": float(n_train)}
 
+    embed_cache, openalex_client, cold_start_policy = _build_aux_providers(corpus_db_path, goals_config)
     X_new = _featurize_new_items(
         valid_new,
         corpus_db_path=corpus_db_path,
@@ -465,4 +426,3 @@ def predict_new_items(
         valid_new, p_new, abstract_preview_chars=abstract_preview_chars
     )
     return predictions, {"oof_spearman": oof_rho, "n_train": float(n_train)}
-

@@ -13,6 +13,7 @@ from zotero_summarizer.domain import (
     is_valid_reading_priority,
 )
 from zotero_summarizer.models import (
+    CalibrationMetricsResponse,
     CalibrationPeriodMetrics,
     TriageFeedbackRequest,
     TriageFeedbackResponse,
@@ -29,6 +30,7 @@ def _safe_ratio(numerator: int, denominator: int) -> float | None:
 
 
 def compute_calibration_period(rows: list[dict[str, Any]]) -> CalibrationPeriodMetrics:
+    """Observed agreement with saved at-decision triage priorities, not gate recall."""
     approved_count = 0
     rejected_count = 0
     with_prediction_count = 0
@@ -49,7 +51,7 @@ def compute_calibration_period(rows: list[dict[str, Any]]) -> CalibrationPeriodM
         approved_count += 1 if is_approved else 0
         rejected_count += 0 if is_approved else 1
 
-        reading_priority = str(row.get("reading_priority") or "").strip()
+        reading_priority = str(row.get("original_priority") or "").strip()
         if not is_valid_reading_priority(reading_priority):
             continue
 
@@ -83,6 +85,17 @@ def compute_calibration_period(rows: list[dict[str, Any]]) -> CalibrationPeriodM
         precision=_safe_ratio(true_positive_count, predicted_positive_count),
         recall=_safe_ratio(true_positive_count, actual_positive_count),
     )
+
+
+async def calibration_metrics() -> CalibrationMetricsResponse:
+    """Observed metrics for latest explicit feedback, not a classifier-gate audit."""
+    rows = await asyncio.to_thread(triage_db.get_latest_explicit_feedback)
+    return CalibrationMetricsResponse(periods={
+        name: compute_calibration_period([
+            row for row in rows if days is None or row["age_days"] <= days
+        ])
+        for name, days in (("last_7d", 7), ("last_30d", 30), ("all_time", None))
+    })
 
 
 async def dashboard_results(
@@ -142,11 +155,9 @@ async def submit_triage_feedback(item_key: str, req: TriageFeedbackRequest) -> T
         raise APIError(error="not_found", message="Item has no triage result yet", status_code=404)
 
     signal = feedback_signal_from_verdict(req.verdict)
-    opposite_signal = "explicit_reject" if signal == "explicit_approve" else "explicit_approve"
     inferred_relevance = 5.0 if req.verdict == "approve" else 1.0
     original_priority = str(result_row.get("forced_priority") or result_row.get("reading_priority") or "").strip()
 
-    await asyncio.to_thread(triage_db.delete_feedback_signals, safe_item_key, [opposite_signal])
     await asyncio.to_thread(
         triage_db.insert_feedback_events,
         [

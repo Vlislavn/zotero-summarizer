@@ -1,0 +1,1028 @@
+{
+  "fixture": "reading-policy-v2-source-captured-2026-09-06",
+  "provenance": "Human annotations and all 17 IDs are unchanged from reading-policy-v1. Model signals are complete policy-input projections of the matching legacy cache entries, captured read-only on 2026-09-06; this is not a model rerun or evidence of current review freshness.",
+  "source": {
+    "cache_sha256": "31e849771365a98e45f77d7be9b44d60ac10820048cc943c571202b1a04c3f54",
+    "cache_updated_at": "2026-09-02T11:55:18Z",
+    "annotations_sha256": "c097645ef9494a0a08fd6a6609c5a9488093d0446471cdfb6575cec24ec6a928",
+    "projection": "All digest/quality fields consumed by effective_read_decision, plus grade; all goal cells retain their goal and three assessment-state fields. Missing fields remain null, never inferred from human labels."
+  },
+  "papers": [
+    {
+      "item_key": "I7427BEF",
+      "title": "AgentClinic: a multimodal benchmark for tool-using clinical AI agents",
+      "human_priority": "must_read",
+      "idea_worth_preserving": true,
+      "writing_friction": "unknown",
+      "scientific_concern": "no",
+      "expected_read_decision": "read",
+      "signals": {
+        "digest": {
+          "read_decision": "read",
+          "grade": "A",
+          "writing_friction": null,
+          "novelty": 4,
+          "significance": 4
+        },
+        "quality": {
+          "quality_band": "highlight",
+          "basis": "full_text",
+          "overstatements": []
+        },
+        "goal_summaries": [
+          {
+            "goal": "Multiagent systems in clinical and scientific research",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": true
+          },
+          {
+            "goal": "Agent autonomy, determinism, and glassboxing",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Multimodal AI for clinics",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Autonomous software development pipelines",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Policy enforcement in AI systems",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "Agentic AI in bioinformatics",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          }
+        ]
+      },
+      "source_reviewed_at": "2026-06-23T22:27:15Z"
+    },
+    {
+      "item_key": "ZBQCD3RW",
+      "title": "Overcoming regulatory barriers to the implementation of AI agents in healthcare",
+      "human_priority": "must_read",
+      "idea_worth_preserving": true,
+      "writing_friction": "unknown",
+      "scientific_concern": "no",
+      "expected_read_decision": "read",
+      "signals": {
+        "digest": {
+          "read_decision": "skim",
+          "grade": "B",
+          "writing_friction": "moderate",
+          "novelty": 3,
+          "significance": 4
+        },
+        "quality": null,
+        "goal_summaries": null
+      },
+      "source_reviewed_at": "2026-08-28T22:35:05Z"
+    },
+    {
+      "item_key": "2V4X35XN",
+      "title": "AI-induced never-skilling in medical education",
+      "human_priority": "must_read",
+      "idea_worth_preserving": true,
+      "writing_friction": "unknown",
+      "scientific_concern": "uncertain",
+      "expected_read_decision": "read",
+      "signals": {
+        "digest": {
+          "read_decision": "skip",
+          "grade": "B",
+          "writing_friction": "low",
+          "novelty": 4,
+          "significance": 4
+        },
+        "quality": {
+          "quality_band": "highlight",
+          "basis": "full_text",
+          "overstatements": []
+        },
+        "goal_summaries": [
+          {
+            "goal": "\"Multiagent systems in clinical and scientific research\",",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "\"Agent autonomy, determinism, and glassboxing\",",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "\"Multimodal AI for clinics\",",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "\"Autonomous software development pipelines\",",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "\"Policy enforcement in AI systems\",",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "\"Agentic AI in bioinformatics\"",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          }
+        ]
+      },
+      "source_reviewed_at": "2026-08-28T22:48:35Z"
+    },
+    {
+      "item_key": "feed:g:50b0bb412168612a3150d3e2301094239efd5e8e63f09a9678b5a8a4707b612f",
+      "title": "SwarmWorld: Stigmergic technological evolution in societies of language-model agents",
+      "human_priority": "must_read",
+      "idea_worth_preserving": true,
+      "writing_friction": "low",
+      "scientific_concern": "no",
+      "expected_read_decision": "read",
+      "signals": {
+        "digest": {
+          "read_decision": "read",
+          "grade": "A",
+          "writing_friction": "low",
+          "novelty": 5,
+          "significance": 4
+        },
+        "quality": {
+          "quality_band": "highlight",
+          "basis": "full_text",
+          "overstatements": []
+        },
+        "goal_summaries": [
+          {
+            "goal": "\"Multiagent systems in clinical and scientific research\",",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "\"Agent autonomy, determinism, and glassboxing\",",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": true
+          },
+          {
+            "goal": "\"Multimodal AI for clinics\",",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "\"Autonomous software development pipelines\",",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "\"Policy enforcement in AI systems\",",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "\"Agentic AI in bioinformatics\"",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          }
+        ]
+      },
+      "source_reviewed_at": "2026-08-28T16:38:38Z"
+    },
+    {
+      "item_key": "feed:g:b9b4a1df9606f24a8929cc0b124ae343c4c517b502851bac6eef2a2fcd6d8b06",
+      "title": "An agentic artificially intelligent X-ray scientist",
+      "human_priority": "should_read",
+      "idea_worth_preserving": true,
+      "writing_friction": "unknown",
+      "scientific_concern": "no",
+      "expected_read_decision": "skim",
+      "signals": {
+        "digest": {
+          "read_decision": "read",
+          "grade": "B",
+          "writing_friction": null,
+          "novelty": 4,
+          "significance": 4
+        },
+        "quality": {
+          "quality_band": "highlight",
+          "basis": "full_text",
+          "overstatements": []
+        },
+        "goal_summaries": [
+          {
+            "goal": "\"Multiagent systems in clinical and scientific research\",",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "\"Agent autonomy, determinism, and glassboxing\",",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "\"Multimodal AI for clinics\",",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "\"Autonomous software development pipelines\",",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "\"Policy enforcement in AI systems\",",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "\"Agentic AI in bioinformatics\"",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          }
+        ]
+      },
+      "source_reviewed_at": "2026-07-04T11:19:30Z"
+    },
+    {
+      "item_key": "HSR6I6DI",
+      "title": "CancerLLM: a large language model in cancer domain",
+      "human_priority": "should_read",
+      "idea_worth_preserving": true,
+      "writing_friction": "unknown",
+      "scientific_concern": "no",
+      "expected_read_decision": "skim",
+      "signals": {
+        "digest": {
+          "read_decision": "read",
+          "grade": "B",
+          "writing_friction": null,
+          "novelty": 3,
+          "significance": 4
+        },
+        "quality": {
+          "quality_band": "highlight",
+          "basis": "full_text",
+          "overstatements": []
+        },
+        "goal_summaries": [
+          {
+            "goal": "Multiagent systems in clinical and scientific research",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Agent autonomy, determinism, and glassboxing",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "Multimodal AI for clinics",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Autonomous software development pipelines",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Policy enforcement in AI systems",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "Agentic AI in bioinformatics",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          }
+        ]
+      },
+      "source_reviewed_at": "2026-06-26T08:04:18Z"
+    },
+    {
+      "item_key": "feed:g:ee817cfe1faecb6618a2a1f1969d7c1b805c302c8fc152f16d695a28d1356337",
+      "title": "Agentic AI and cybersecurity, the story so far",
+      "human_priority": "should_read",
+      "idea_worth_preserving": true,
+      "writing_friction": "unknown",
+      "scientific_concern": "no",
+      "expected_read_decision": "skim",
+      "signals": {
+        "digest": {
+          "read_decision": "read",
+          "grade": "B",
+          "writing_friction": null,
+          "novelty": 3,
+          "significance": 4
+        },
+        "quality": {
+          "quality_band": "highlight",
+          "basis": "full_text",
+          "overstatements": []
+        },
+        "goal_summaries": [
+          {
+            "goal": "\"Multiagent systems in clinical and scientific research\",",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "\"Agent autonomy, determinism, and glassboxing\",",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "\"Multimodal AI for clinics\",",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "\"Autonomous software development pipelines\",",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "\"Policy enforcement in AI systems\",",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": true
+          },
+          {
+            "goal": "\"Agentic AI in bioinformatics\"",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          }
+        ]
+      },
+      "source_reviewed_at": "2026-08-19T08:35:11Z"
+    },
+    {
+      "item_key": "feed:g:de0cf6fb6d807e9debdac18e79dd1258ef796ad1494e2e3a4f77be82036f1058",
+      "title": "ScienceFlow: A long-horizon agent for ML research, scientific discovery and beyond",
+      "human_priority": "should_read",
+      "idea_worth_preserving": true,
+      "writing_friction": "unknown",
+      "scientific_concern": "no",
+      "expected_read_decision": "skim",
+      "signals": {
+        "digest": {
+          "read_decision": "read",
+          "grade": "B",
+          "writing_friction": null,
+          "novelty": 4,
+          "significance": 4
+        },
+        "quality": {
+          "quality_band": "highlight",
+          "basis": "full_text",
+          "overstatements": []
+        },
+        "goal_summaries": [
+          {
+            "goal": "\"Multiagent systems in clinical and scientific research\",",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "\"Agent autonomy, determinism, and glassboxing\",",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": true
+          },
+          {
+            "goal": "\"Multimodal AI for clinics\",",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "\"Autonomous software development pipelines\",",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": true
+          },
+          {
+            "goal": "\"Policy enforcement in AI systems\",",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "\"Agentic AI in bioinformatics\"",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          }
+        ]
+      },
+      "source_reviewed_at": "2026-08-19T08:35:49Z"
+    },
+    {
+      "item_key": "6C9E9EV7",
+      "title": "Ratchet: A Minimal Hygiene Recipe for Self-Evolving LLM Agents",
+      "human_priority": "could_read",
+      "idea_worth_preserving": true,
+      "writing_friction": "unknown",
+      "scientific_concern": "no",
+      "expected_read_decision": "skim",
+      "signals": {
+        "digest": {
+          "read_decision": "read",
+          "grade": "B",
+          "writing_friction": null,
+          "novelty": 4,
+          "significance": 4
+        },
+        "quality": {
+          "quality_band": "highlight",
+          "basis": "full_text",
+          "overstatements": []
+        },
+        "goal_summaries": [
+          {
+            "goal": "Multiagent systems in clinical and scientific research",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "Agent autonomy, determinism, and glassboxing",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Multimodal AI for clinics",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "Autonomous software development pipelines",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Policy enforcement in AI systems",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Agentic AI in bioinformatics",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          }
+        ]
+      },
+      "source_reviewed_at": "2026-06-23T21:28:35Z"
+    },
+    {
+      "item_key": "WZUHIRWN",
+      "title": "Teaching large language models to reason like expert diagnosticians",
+      "human_priority": "could_read",
+      "idea_worth_preserving": true,
+      "writing_friction": "unknown",
+      "scientific_concern": "no",
+      "expected_read_decision": "skim",
+      "signals": {
+        "digest": {
+          "read_decision": "read",
+          "grade": "A",
+          "writing_friction": null,
+          "novelty": 4,
+          "significance": 5
+        },
+        "quality": {
+          "quality_band": "highlight",
+          "basis": "full_text",
+          "overstatements": []
+        },
+        "goal_summaries": [
+          {
+            "goal": "Multiagent systems in clinical and scientific research",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Agent autonomy, determinism, and glassboxing",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Multimodal AI for clinics",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Autonomous software development pipelines",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "Policy enforcement in AI systems",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "Agentic AI in bioinformatics",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          }
+        ]
+      },
+      "source_reviewed_at": "2026-06-18T10:31:31Z"
+    },
+    {
+      "item_key": "BF2F7WJK",
+      "title": "BALAR: A Bayesian Agentic Loop for Active Reasoning",
+      "human_priority": "could_read",
+      "idea_worth_preserving": true,
+      "writing_friction": "unknown",
+      "scientific_concern": "no",
+      "expected_read_decision": "skim",
+      "signals": {
+        "digest": {
+          "read_decision": "read",
+          "grade": "A",
+          "writing_friction": null,
+          "novelty": 5,
+          "significance": 4
+        },
+        "quality": {
+          "quality_band": "neutral",
+          "basis": "full_text",
+          "overstatements": [
+            "BALAR significantly outperforms all baselines across all three benchmarks",
+            "BALAR outperforms all baselines across all three benchmarks and both agent models"
+          ]
+        },
+        "goal_summaries": [
+          {
+            "goal": "Multiagent systems in clinical and scientific research",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Agent autonomy, determinism, and glassboxing",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Multimodal AI for clinics",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": true
+          },
+          {
+            "goal": "Autonomous software development pipelines",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "Policy enforcement in AI systems",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "Agentic AI in bioinformatics",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          }
+        ]
+      },
+      "source_reviewed_at": "2026-06-18T06:10:26Z"
+    },
+    {
+      "item_key": "feed:g:b7fae31c463571014fe88394ded60f2e1c046a3fc73936db78cd12e77aa4efc3",
+      "title": "From Triage to Discharge: A Survey of NLP Tasks, Methods, and Open Challenges in the Emergency Department",
+      "human_priority": "could_read",
+      "idea_worth_preserving": true,
+      "writing_friction": "unknown",
+      "scientific_concern": "no",
+      "expected_read_decision": "skim",
+      "signals": {
+        "digest": {
+          "read_decision": "read",
+          "grade": "B",
+          "writing_friction": null,
+          "novelty": 3,
+          "significance": 4
+        },
+        "quality": {
+          "quality_band": "highlight",
+          "basis": "full_text",
+          "overstatements": []
+        },
+        "goal_summaries": [
+          {
+            "goal": "\"Multiagent systems in clinical and scientific research\",",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "\"Agent autonomy, determinism, and glassboxing\",",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "\"Multimodal AI for clinics\",",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": true
+          },
+          {
+            "goal": "\"Autonomous software development pipelines\",",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "\"Policy enforcement in AI systems\",",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "\"Agentic AI in bioinformatics\"",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": true
+          }
+        ]
+      },
+      "source_reviewed_at": "2026-08-26T20:09:49Z"
+    },
+    {
+      "item_key": "BGYQ6HIG",
+      "title": "OMGs: A multi-agent system supporting MDT decision-making across the ovarian tumour care continuum",
+      "human_priority": "dont_read",
+      "idea_worth_preserving": false,
+      "writing_friction": "unknown",
+      "scientific_concern": "no",
+      "expected_read_decision": "skip",
+      "signals": {
+        "digest": {
+          "read_decision": "read",
+          "grade": "A",
+          "writing_friction": null,
+          "novelty": 4,
+          "significance": 5
+        },
+        "quality": {
+          "quality_band": "highlight",
+          "basis": "full_text",
+          "overstatements": []
+        },
+        "goal_summaries": [
+          {
+            "goal": "Multiagent systems in clinical and scientific research",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Agent autonomy, determinism, and glassboxing",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Multimodal AI for clinics",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Autonomous software development pipelines",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "Policy enforcement in AI systems",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Agentic AI in bioinformatics",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          }
+        ]
+      },
+      "source_reviewed_at": "2026-06-18T16:46:55Z"
+    },
+    {
+      "item_key": "8WZRX7F3",
+      "title": "AutoResearchBench: Benchmarking AI Agents on Complex Scientific Literature Discovery",
+      "human_priority": "dont_read",
+      "idea_worth_preserving": false,
+      "writing_friction": "unknown",
+      "scientific_concern": "no",
+      "expected_read_decision": "skip",
+      "signals": {
+        "digest": {
+          "read_decision": "read",
+          "grade": "B",
+          "writing_friction": null,
+          "novelty": 4,
+          "significance": 4
+        },
+        "quality": {
+          "quality_band": "highlight",
+          "basis": "full_text",
+          "overstatements": []
+        },
+        "goal_summaries": [
+          {
+            "goal": "Multiagent systems in clinical and scientific research",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": true
+          },
+          {
+            "goal": "Agent autonomy, determinism, and glassboxing",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Multimodal AI for clinics",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "Autonomous software development pipelines",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Policy enforcement in AI systems",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Agentic AI in bioinformatics",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          }
+        ]
+      },
+      "source_reviewed_at": "2026-06-26T07:46:49Z"
+    },
+    {
+      "item_key": "AEGCFE4D",
+      "title": "Can AI Agents Synthesize Scientific Conclusions?",
+      "human_priority": "dont_read",
+      "idea_worth_preserving": false,
+      "writing_friction": "unknown",
+      "scientific_concern": "no",
+      "expected_read_decision": "skip",
+      "signals": {
+        "digest": {
+          "read_decision": "read",
+          "grade": "B",
+          "writing_friction": null,
+          "novelty": 4,
+          "significance": 4
+        },
+        "quality": {
+          "quality_band": "highlight",
+          "basis": "full_text",
+          "overstatements": []
+        },
+        "goal_summaries": [
+          {
+            "goal": "Multiagent systems in clinical and scientific research",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Agent autonomy, determinism, and glassboxing",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Multimodal AI for clinics",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Autonomous software development pipelines",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Policy enforcement in AI systems",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Agentic AI in bioinformatics",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          }
+        ]
+      },
+      "source_reviewed_at": "2026-06-23T22:45:21Z"
+    },
+    {
+      "item_key": "H9BQZLJ2",
+      "title": "Computational Pathology in the Era of Emerging Foundation and Agentic AI",
+      "human_priority": "dont_read",
+      "idea_worth_preserving": false,
+      "writing_friction": "unknown",
+      "scientific_concern": "no",
+      "expected_read_decision": "skip",
+      "signals": {
+        "digest": {
+          "read_decision": "read",
+          "grade": "B",
+          "writing_friction": null,
+          "novelty": 3,
+          "significance": 4
+        },
+        "quality": {
+          "quality_band": "highlight",
+          "basis": "full_text",
+          "overstatements": []
+        },
+        "goal_summaries": [
+          {
+            "goal": "Multiagent systems in clinical and scientific research",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Agent autonomy, determinism, and glassboxing",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Multimodal AI for clinics",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Autonomous software development pipelines",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": true
+          },
+          {
+            "goal": "Policy enforcement in AI systems",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": true
+          },
+          {
+            "goal": "Agentic AI in bioinformatics",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          }
+        ]
+      },
+      "source_reviewed_at": "2026-06-23T22:58:43Z"
+    },
+    {
+      "item_key": "QRPEWC69",
+      "title": "Towards World Models in Biomedical Research",
+      "human_priority": "dont_read",
+      "idea_worth_preserving": true,
+      "writing_friction": "high",
+      "scientific_concern": "uncertain",
+      "expected_read_decision": "skim",
+      "signals": {
+        "digest": {
+          "read_decision": "skim",
+          "grade": "B",
+          "writing_friction": null,
+          "novelty": 3,
+          "significance": 4
+        },
+        "quality": {
+          "quality_band": "flag",
+          "basis": "full_text",
+          "overstatements": []
+        },
+        "goal_summaries": [
+          {
+            "goal": "Multiagent systems in clinical and scientific research",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Agent autonomy, determinism, and glassboxing",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Multimodal AI for clinics",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          },
+          {
+            "goal": "Autonomous software development pipelines",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "Policy enforcement in AI systems",
+            "relevant": false,
+            "retrieval_state": "miss",
+            "abstained": true
+          },
+          {
+            "goal": "Agentic AI in bioinformatics",
+            "relevant": true,
+            "retrieval_state": "hit",
+            "abstained": false
+          }
+        ]
+      },
+      "source_reviewed_at": "2026-06-15T22:21:11Z"
+    }
+  ]
+}

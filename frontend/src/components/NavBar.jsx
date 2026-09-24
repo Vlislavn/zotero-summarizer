@@ -1,4 +1,7 @@
+import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
+import { publishStatus, resolveConflict, syncStatusEvent } from '../offlineStore.js';
+import { syncNow } from '../syncClient.js';
 
 // Primary tabs: Library / Today / Settings / Ops (Increment 3 nav collapse —
 // 8 routes folded to 3 daily surfaces + one Ops surface). Library (Read next) is
@@ -29,17 +32,64 @@ function tabClass({ isActive }) {
 }
 
 export default function NavBar() {
+  const [sync, setSync] = useState({ online: navigator.onLine, pending: 0, conflicts: [], rejected: [], message: '' });
+  useEffect(() => {
+    const update = (event) => setSync(event.detail);
+    window.addEventListener(syncStatusEvent, update);
+    publishStatus();
+    return () => window.removeEventListener(syncStatusEvent, update);
+  }, []);
+  async function resolve(id, keepLocal) {
+    await resolveConflict(id, keepLocal);
+    syncNow();
+  }
+  const conflict = sync.conflicts[0];
+  const rejected = sync.rejected[0];
   return (
     <header className="glass border border-slate-200 rounded-2xl p-4 mb-5 overflow-visible relative z-30">
       <div className="flex items-center gap-4 flex-wrap">
         <h1 className="font-display text-2xl font-light text-slate-900">Zotero Summarizer</h1>
-        <nav className="flex gap-1.5 items-center">
+        <nav className="flex flex-wrap max-w-full gap-1.5 items-center">
           {PRIMARY.map((t) => (
             <NavLink key={t.to} to={t.to} className={tabClass}>
               {t.label}
             </NavLink>
           ))}
         </nav>
+      </div>
+      <div className={`mt-2 text-xs ${conflict ? 'text-rose-700' : sync.online ? 'text-slate-500' : 'text-amber-800'}`}>
+        {conflict ? (
+          <span className="break-words">
+            Sync conflict for <span className="break-all">{conflict.item_key}</span> ({conflict.field}).{' '}
+            <button className="underline font-semibold" onClick={() => resolve(conflict.mutation_id, true)}>Keep mine</button>
+            {' · '}
+            <button className="underline font-semibold" onClick={() => resolve(conflict.mutation_id, false)}>Use server</button>
+            {sync.conflicts.length > 1 && ` · ${sync.conflicts.length - 1} more`}
+          </span>
+        ) : rejected ? (
+          <details>
+            <summary>{sync.rejected.length} rejected draft(s) preserved on this device. Other valid changes can still sync.</summary>
+            {sync.rejected.map((draft) => (
+              <div key={draft.mutation_id} className="mt-2">
+                <p className="break-words"><span className="break-all">{draft.item_key}</span> ({draft.field}): {draft.error}.</p>
+                <label>
+                  Saved draft — copy this text, correct it and save again on the paper page.
+                  <textarea readOnly rows={4} className="block w-full border p-2"
+                    value={`${draft.value ?? ''}${draft.comment ? `\n\nComment:\n${draft.comment}` : ''}`} />
+                </label>
+                <NavLink className="underline" to={`/paper/${encodeURIComponent(draft.item_key)}`}>Open paper</NavLink>
+              </div>
+            ))}
+          </details>
+        ) : sync.online ? (
+          <span>{sync.pending
+            ? `${sync.pending} change${sync.pending === 1 ? '' : 's'} waiting to sync`
+            : sync.message === 'Server unavailable'
+              ? 'Server unavailable · cached papers, verdicts, and notes work; PDFs, AI, and rescore are unavailable.'
+              : (sync.message || 'Synced')}</span>
+        ) : (
+          <span>Offline · {sync.pending} pending · cached papers, verdicts, and notes work; PDFs, AI, and rescore are unavailable.</span>
+        )}
       </div>
     </header>
   );

@@ -82,3 +82,29 @@ def test_add_attachment_unknown_parent_fails(writer_and_pdf):
         create_backup=False,
     )
     assert res["applied_ids"] == [] and len(res["failed"]) == 1
+
+
+@pytest.mark.parametrize(("name", "content_type", "expected"), [
+    ("bad\n\t\r\x00\x7f\x85\u202ename/\\.pdf", "application/pdf", "badname.pdf"),
+    ("a" * 125, "application/pdf", "a" * 116 + ".pdf"),
+    ("b" * 125 + ".PDF", "application/pdf", "b" * 116 + ".pdf"),
+    ("c" * 125 + ".png", "image/png", "c" * 116 + ".png"),
+    (" étude.pdf ", "application/pdf", "étude.pdf"),
+    ("", "application/pdf", "fulltext.pdf"),
+    ("\n/\\", "image/png", "fulltext.png"),
+    ("notes\n.txt", "text/plain", "notes.txt"),
+    ("..", "text/plain", "fulltext"),
+])
+def test_attachment_filename_matches_stored_file(writer_and_pdf, name, content_type, expected):
+    writer, pdf, data_dir = writer_and_pdf
+    change = _change(pdf)
+    change["payload_json"].update(filename=name, content_type=content_type)
+
+    result = writer.apply_changes([change], create_backup=False)
+
+    assert result["applied_ids"] == [1] and result["failed"] == []
+    row = _attachment_row(writer.db_path)
+    assert row["path"] == f"storage:{expected}"
+    assert row["contentType"] == content_type
+    stored = data_dir / "storage" / row["key"] / expected
+    assert stored.read_bytes() == pdf.read_bytes()

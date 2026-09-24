@@ -21,6 +21,7 @@ import os
 from typing import Any
 
 from zotero_summarizer.services._common import extract_json_blob, to_text
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.search import session as session_store
 from zotero_summarizer.services.search._models import Candidate, ResearchSession, SearchIntent
 from zotero_summarizer.services.search._relevance import attach_relevance
@@ -28,6 +29,7 @@ from zotero_summarizer.services.search.dedup import to_version_families
 from zotero_summarizer.services.search.federate import federate
 from zotero_summarizer.services.search.intent import _as_str_list, build_query_plan
 from zotero_summarizer.services.search.rank import rank_candidates, score_query_relevance
+from zotero_summarizer.settings import offline_requested
 
 LOGGER = logging.getLogger(__name__)
 
@@ -76,10 +78,10 @@ def refine_once(sess: ResearchSession, *, llm: Any) -> dict[str, list[str]]:
     top = sess.candidates[:_REFINE_TOP_N]
     if not top:
         return {"add_concepts": [], "drop_terms": []}
-    prompt = _REFINE_PROMPT.format(
-        question=sess.intent.canonical_question or sess.raw_query,
-        concepts=", ".join(sess.intent.concepts) or sess.raw_query,
-        results_block="\n".join(_result_line(c) for c in top),
+    prompt = UNTRUSTED_INPUT_RULE + "\n\n" + _REFINE_PROMPT.format(
+        question=untrusted_input(sess.intent.canonical_question or sess.raw_query),
+        concepts=untrusted_input(", ".join(sess.intent.concepts) or sess.raw_query),
+        results_block=untrusted_input("\n".join(_result_line(c) for c in top)),
     )
     try:
         parsed = extract_json_blob(to_text(llm.prompt(prompt)))
@@ -96,10 +98,11 @@ def _delta_intent(base: SearchIntent, add_concepts: list[str], drop_terms: list[
     """A focused intent for the delta federation: fetch the NEW concepts (lexical
     channels), anchored to the original question + new facets (semantic channel).
 
-    ``drop_terms`` steer the delta AWAY (excluded from must-include, recorded in
-    must-not-include) — they do NOT retroactively remove already-fetched candidates;
+    ``drop_terms`` steer the delta AWAY (unless explicitly required) — they do
+    NOT retroactively remove already-fetched candidates;
     the constrained rank already sinks off-topic hits by low ``query_score``."""
-    drops = {d.lower() for d in drop_terms}
+    required = {term.casefold() for term in base.must_include}
+    drop_terms = [term for term in drop_terms if term.casefold() not in required]
     canonical = base.canonical_question or base.raw_query
     if add_concepts:
         canonical = (canonical + " " + " ".join(add_concepts)).strip()
@@ -108,7 +111,7 @@ def _delta_intent(base: SearchIntent, add_concepts: list[str], drop_terms: list[
         canonical_question=canonical,
         concepts=list(add_concepts),
         synonyms=base.synonyms,
-        must_include=[t for t in base.must_include if t.lower() not in drops],
+        must_include=list(base.must_include),
         must_not_include=list(dict.fromkeys(base.must_not_include + drop_terms)),
         study_types=base.study_types,
         questions=base.questions,
@@ -132,16 +135,19 @@ def run_agentic_rounds(session_id: str, *, deps: Any, max_rounds: int = 2) -> Re
     the LLM proposes no additions or the strong band stabilizes (work-based budget, no
     wall-clock cap). Serial by design (each round federates + one LLM call)."""
     sess = session_store.load(session_id)
+    if offline_requested():
+        return sess
     query = sess.raw_query or sess.intent.canonical_question
     for rnd in range(1, max_rounds + 1):
         before = _top_band_signature(sess.candidates)
         delta = refine_once(sess, llm=deps.llm)
         add, drop = delta["add_concepts"], delta["drop_terms"]
-        if not add:
-            LOGGER.info("targeted_search.refine: round %d proposed no additions; converged", rnd)
+        if not add and not drop:
+            LOGGER.info("targeted_search.refine: round %d proposed no changes; converged", rnd)
             break
 
-        delta_plan = build_query_plan(_delta_intent(sess.intent, add, drop))
+        previous_drops = [term for row in sess.refinements for term in row["drop_terms"]]
+        delta_plan = build_query_plan(_delta_intent(sess.intent, add, previous_drops + drop))
         new_cands = federate(
             delta_plan, openalex_client=deps.openalex_client,
             library_finder=deps.library_finder, quota=deps.quota,

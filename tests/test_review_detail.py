@@ -99,7 +99,12 @@ def test_normalize_authors_empty_returns_empty_list():
     assert rd.normalize_authors([]) == []
 
 
-def test_normalize_authors_attaches_top_author_h_to_first_only():
+def test_normalize_authors_does_not_show_unknown_zero_h_index():
+    authors = rd.normalize_authors(["Faisal Mahmood"], top_author_h=0)
+    assert authors == [{"name": "Faisal Mahmood", "h_index": None}]
+
+
+def test_normalize_authors_attaches_known_top_author_h_to_first_only():
     authors = rd.normalize_authors(["Smith J", "Lee P"], top_author_h=42)
     assert authors[0]["h_index"] == 42
     assert authors[1]["h_index"] is None
@@ -360,7 +365,7 @@ def test_build_feed_detail_by_key_folds_in_cached_review(tmp_path, monkeypatch):
     monkeypatch.setattr(rd, "_fetch_feed_metadata", _no_zotero)
     monkeypatch.setattr(rd, "build_scoring", lambda row: None)
     monkeypatch.setattr(rd._candidate, "parse_payload", lambda row: {})
-    monkeypatch.setattr(deep_review, "get_cached_review", lambda key: {"quality": {"grade": "A"}})
+    monkeypatch.setattr(deep_review, "get_current_review", lambda key: {"quality": {"grade": "A"}})
 
     feed_key = "feed:d:" + ("a" * 64)
     detail = rd.build_feed_detail_by_key(triage_db_path=tmp_path / "t.db", zotero_data_dir=tmp_path, feed_key=feed_key)

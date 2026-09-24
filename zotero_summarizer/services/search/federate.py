@@ -13,6 +13,7 @@ exception from a channel propagates (fail-fast), it is not swallowed here.
 from __future__ import annotations
 
 from collections.abc import Callable
+import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -142,6 +143,19 @@ def _variant_queries(variants: list[str], scalar: str, *, cap: int | None = None
     return queries[:cap] if cap else queries
 
 
+def _matches_constraints(candidate: Candidate, plan: Any) -> bool:
+    """Literal whole-token phrases, not a claim to classify study design semantically."""
+    text = " " + " ".join(re.findall(r"\w+", f"{candidate.title} {candidate.abstract}".casefold())) + " "
+
+    def contains(term: str) -> bool:
+        tokens = re.findall(r"\w+", term.casefold())
+        return bool(tokens) and (" " + " ".join(tokens) + " ") in text
+
+    return (all(contains(term) for term in plan.must_include)
+            and not any(contains(term) for term in plan.must_not_include)
+            and (not plan.study_types or any(contains(term) for term in plan.study_types)))
+
+
 def federate(
     plan: Any,
     *,
@@ -160,12 +174,28 @@ def federate(
     the pool. OpenAlex lexical is capped at 2 passes (keyless polite-pool budget)."""
     at = now_iso_z()
     tasks: list[Callable[[], list[Candidate]]] = []
-    for q in _variant_queries(plan.arxiv_variants, plan.arxiv):
-        tasks.append(lambda q=q: _arxiv_channel(q, quota, at))
-    for q in _variant_queries(plan.europepmc_variants, plan.europepmc):
-        tasks.append(lambda q=q: _europepmc_channel(q, quota, at))
-    for q in _variant_queries(plan.openalex_lexical_variants, plan.openalex_lexical, cap=2):
-        tasks.append(lambda q=q: _openalex_channel(openalex_client, q, quota, at, semantic=False))
+    def add_variant_tasks(queries: list[str], run: Callable[[str, int], list[Candidate]]) -> None:
+        if not queries:
+            return
+        allocations = [quota // len(queries)] * len(queries)
+        for index in range(quota % len(queries)):
+            allocations[index] += 1
+        for query, limit in zip(queries, allocations):
+            if limit:
+                tasks.append(lambda q=query, n=limit: run(q, n))
+
+    add_variant_tasks(
+        _variant_queries(plan.arxiv_variants, plan.arxiv),
+        lambda q, n: _arxiv_channel(q, n, at),
+    )
+    add_variant_tasks(
+        _variant_queries(plan.europepmc_variants, plan.europepmc),
+        lambda q, n: _europepmc_channel(q, n, at),
+    )
+    add_variant_tasks(
+        _variant_queries(plan.openalex_lexical_variants, plan.openalex_lexical, cap=2),
+        lambda q, n: _openalex_channel(openalex_client, q, n, at, semantic=False),
+    )
     tasks.append(lambda: _openalex_channel(openalex_client, plan.openalex_semantic, quota, at, semantic=True))
     if plan.crossref:
         tasks.append(lambda: _crossref_channel(plan.crossref, quota, at, crossref_mailto))
@@ -185,7 +215,7 @@ def federate(
         channel_results = [f.result() for f in [pool.submit(t) for t in tasks]]
 
     unioned = [cand for channel in channel_results for cand in channel]
-    return to_version_families(unioned)
+    return [candidate for candidate in to_version_families(unioned) if _matches_constraints(candidate, plan)]
 
 
 __all__ = ["federate", "LibraryFinder"]

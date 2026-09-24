@@ -2,7 +2,7 @@
 chunking and a tiny per-paper BM25 chunk index.
 
 **Frozen text is the ground-truth substrate.** ``build`` extracts each paper's
-PDF once and writes the raw text to ``papers/<item_key>.txt`` with a sha256
+PDF once and writes the raw text to ``papers/<item_key>-<sha256>.txt`` with its sha256
 recorded in the benchmark file. ``run`` and ``judge`` always read the frozen
 file and verify the sha — PDF re-extraction drift therefore becomes a
 ``HARNESS_FAULT``, never a model failure.
@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from zotero_summarizer.services._common import atomic_write
 from zotero_summarizer.services.faithbench._constants import (
     CHUNK_CHARS,
     CHUNK_OVERLAP,
@@ -33,6 +34,20 @@ LOGGER = logging.getLogger(__name__)
 _TOKEN_RE = re.compile(r"[a-z0-9]+")  # normalize_text only; word tokens live in storage.corpus_bm25.tokenize
 _ARTICLES = frozenset({"a", "an", "the"})
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+_CONTEXT_SEPARATOR = "\n\n[...]\n\n"
+
+
+def _clip_chunks(chunks: list[str], budget: int, *, separator: str = _CONTEXT_SEPARATOR) -> list[str]:
+    """Keep a ranked prefix of nonempty chunks, counting separators in the cap."""
+    kept: list[str] = []
+    remaining = budget
+    for chunk in chunks:
+        remaining -= len(separator) if kept else 0
+        if remaining <= 0:
+            break
+        kept.append(chunk[:remaining])
+        remaining -= len(kept[-1])
+    return kept
 
 
 # ---------------------------------------------------------------------------
@@ -74,15 +89,28 @@ def sentence_at(text: str, offset: int) -> str:
 # ---------------------------------------------------------------------------
 
 
-def paper_text_path(papers_dir: Path, item_key: str) -> Path:
-    return papers_dir / f"{item_key}.txt"
+def paper_text_path(papers_dir: Path, item_key: str, *, text_sha256: str | None = None) -> Path:
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", item_key):
+        raise ValueError("Invalid frozen-paper key")
+    if text_sha256 is not None and not re.fullmatch(r"[a-f0-9]{64}", text_sha256):
+        raise ValueError("Invalid frozen-paper SHA-256")
+    name = f"{item_key}-{text_sha256}" if text_sha256 is not None else item_key
+    path = papers_dir / f"{name}.txt"
+    if path.resolve().parent != papers_dir.resolve():
+        raise ValueError("Frozen-paper path escapes its directory")
+    return path
 
 
 def freeze_paper_text(papers_dir: Path, item_key: str, text: str) -> str:
-    """Persist the raw extracted text; returns its sha256."""
+    """Publish an immutable text version; rebuilding never replaces older text."""
+    sha = sha256_text(text)
+    path = paper_text_path(papers_dir, item_key, text_sha256=sha)
     papers_dir.mkdir(parents=True, exist_ok=True)
-    paper_text_path(papers_dir, item_key).write_text(text, encoding="utf-8")
-    return sha256_text(text)
+    if path.exists():
+        load_frozen_text(papers_dir, item_key, expected_sha256=sha)
+    else:
+        atomic_write(path, lambda tmp: tmp.write_text(text, encoding="utf-8"))
+    return sha
 
 
 def load_frozen_text(papers_dir: Path, item_key: str, *, expected_sha256: str) -> str:
@@ -92,7 +120,10 @@ def load_frozen_text(papers_dir: Path, item_key: str, *, expected_sha256: str) -
     converts these into ``HARNESS_FAULT`` for the affected items; they must
     never be silently absorbed here.
     """
-    path = paper_text_path(papers_dir, item_key)
+    path = paper_text_path(papers_dir, item_key, text_sha256=expected_sha256)
+    if not path.exists():
+        # Legacy benchmarks reference key-only files; never rewrite them on read.
+        path = paper_text_path(papers_dir, item_key)
     text = path.read_text(encoding="utf-8")
     actual = sha256_text(text)
     if actual != expected_sha256:
@@ -142,6 +173,8 @@ def select_papers(
     selection contract of the build stage (the benchmark needs full texts),
     not error masking; a corrupt PDF still raises out of the extractor.
     """
+    if type(n_papers) is not int or n_papers < 2:
+        raise ValueError("n_papers must be an integer of at least two for a QA/trap benchmark")
     if item_keys:
         candidates = [{"item_key": k} for k in item_keys]
     else:
@@ -150,7 +183,7 @@ def select_papers(
 
     records: list[PaperRecord] = []
     for row in candidates:
-        if len(records) >= max(1, n_papers):
+        if len(records) >= n_papers:
             break
         item_key = str(row.get("item_key") or "")
         detail = reader.get_item_detail(item_key)

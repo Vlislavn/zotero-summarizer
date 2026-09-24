@@ -50,6 +50,21 @@ _PHASE_MEDIANS: dict[str, float] = {
 _PHASE_ORDER = list(PHASE_LABELS)  # canonical order for ETA summation
 
 
+def live_progress(job: dict[str, Any]) -> dict[str, Any]:
+    """Advance clocks between phase updates without mutating the worker's snapshot."""
+    progress = dict(job.get("progress") or {})
+    if job.get("status") != "running" or job.get("progress_at") is None:
+        return progress
+    elapsed = max(0.0, time.perf_counter() - job["progress_at"])
+    for key in ("phase_elapsed_seconds", "total_elapsed_seconds"):
+        if key in progress:
+            progress[key] = round(progress[key] + elapsed, 1)
+    if progress.get("eta_seconds") is not None:
+        remaining = progress["eta_seconds"] - elapsed
+        progress["eta_seconds"] = round(remaining) if remaining > 0 else None
+    return progress
+
+
 class ReviewReporter:
     """Threads through one deep review: tracks the current phase + sub-progress,
     pushes it to ``on_update`` for the polled status, and logs INFO timing per

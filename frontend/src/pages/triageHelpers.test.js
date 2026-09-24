@@ -48,8 +48,9 @@ describe('formatPercent', () => {
     expect(formatPercent(NaN)).toBe('n/a');
   });
 
-  it('coerces null to 0% (Number(null) === 0), matching the original helper', () => {
-    expect(formatPercent(null)).toBe('0%');
+  it('keeps an unavailable ratio distinct from measured zero', () => {
+    expect(formatPercent(null)).toBe('n/a');
+    expect(formatPercent(0)).toBe('0%');
   });
 });
 

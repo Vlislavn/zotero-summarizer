@@ -10,8 +10,8 @@ import {
 import Spinner from '../ui/Spinner.jsx';
 import { Disclosure } from '../paper/review/primitives.jsx';
 
-// Figures & full brief. A build job writes notes, figures and a single-file HTML
-// brief next to the Zotero PDF. The decision content (verdict / quality / goals /
+// Figures & full brief. A build job publishes audited figures and a single-file HTML
+// brief beside its source PDF. The decision content (verdict / quality / goals /
 // digest) now renders natively in <PaperReview>, so this pane no longer iframes
 // the whole document (which was a second design system embedded inside the app —
 // "embedding in embedding"). Instead it shows the figures as native thumbnails
@@ -37,8 +37,7 @@ export default function PaperReaderPane({ itemKey, open, onOpenChange, hasPdf = 
   const figures = (render?.figures || []).filter((f) => f && f.name);
   const version = render?.built_at || render?.pdf_key;
 
-  // A stale artifact (built by an older renderer revision) rebuilds itself once
-  // so the figures/brief reflect the current renderer.
+  // A changed PDF, parser setting or renderer triggers one automatic rebuild.
   useEffect(() => {
     if (render?.stale && !running && !staleRebuiltRef.current) {
       staleRebuiltRef.current = true;
@@ -72,7 +71,7 @@ export default function PaperReaderPane({ itemKey, open, onOpenChange, hasPdf = 
         )}
         {render?.status === 'missing' && (
           <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
-            No paper brief yet. Build will write notes, the HTML brief, figures and audit files next to the PDF it uses.
+            No paper brief yet. Build will publish the HTML brief, figures and audit beside the source PDF only after the audit passes.
           </div>
         )}
         {render?.status === 'error' && (
@@ -82,13 +81,13 @@ export default function PaperReaderPane({ itemKey, open, onOpenChange, hasPdf = 
         )}
         {render?.stale && completed && (
           <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
-            This brief was built by an older renderer — rebuilding with the latest…
+            The PDF source, parser setting or renderer changed; this brief is out of date.
           </div>
         )}
         {running && (
           <div className="flex items-center gap-2 text-slate-500" role="status" aria-live="polite">
             <Spinner size="sm" color="slate" />
-            Building notes, figures, the HTML brief and audit…
+            Building figures and the HTML brief; checking the audit before publication…
           </div>
         )}
 

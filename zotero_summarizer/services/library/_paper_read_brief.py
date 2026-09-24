@@ -80,37 +80,28 @@ def _short_goal(goal: str, words: int = 4) -> str:
 
 def _relevance_verdict(n_fired: int, max_score: float) -> str:
     if n_fired and max_score >= 2.3:
-        return "MUST READ"
+        return "HIGH RELEVANCE"
     if n_fired and max_score >= 1.5:
-        return "SHOULD READ"
+        return "RELEVANT"
     if n_fired:
-        return "COULD READ"
-    return "SKIP"
-
-
-def _read_verdict(n_fired: int, band: str) -> tuple[str, str, str]:
-    """(css_key, label, one-clause reason)."""
-    if not n_fired:
-        return "skip", "SKIP", "none of your research goals are addressed"
-    if band == "flag":
-        return "skim", "SKIM", "relevant to your goals but rigor is flagged — read critically"
-    if band == "highlight":
-        return "deep", "DEEP-READ", "relevant to your goals and rigorous"
-    return "deep", "DEEP-READ", "relevant to your goals; quality is acceptable"
+        return "WEAK RELEVANCE"
+    return "OFF GOAL"
 
 
 def brief_html(
     content: dict[str, Any],
     *,
+    digest: dict[str, Any] | None = None,
     quality: dict[str, Any] | None,
     goal_summaries: list[dict[str, Any]] | None,
 ) -> str:
     """Verdict (loudest) → ARR spine → goal board. '' when no decision data
     exists (the brief silently degrades to the plain digest)."""
     goals = goal_summaries or []
-    if not goals and not quality:
+    if not goals and not quality and not digest:
         return ""
-    fired = [g for g in goals if g.get("retrieval_state") == "hit" and g.get("relevant")]
+    fired = [g for g in goals if g.get("retrieval_state") == "hit"
+             and g.get("relevant") is True and g.get("abstained") is False]
     n_fired = len(fired)
     max_score = max((float(g.get("score") or 0) for g in goals), default=0.0)
     band = str((quality or {}).get("quality_band") or "")
@@ -119,22 +110,40 @@ def brief_html(
 
     # The verdict is the loudest line — the "diagnosis". For a flagged-but-relevant
     # paper, inline the actual red flag so the warning is readable without scrolling.
-    vkey, vlabel, vreason = _read_verdict(n_fired, band)
-    if band == "flag" and n_fired:
-        rf = [str(x).strip() for x in ((quality or {}).get("red_flags") or []) if str(x).strip()]
-        if rf:
-            vreason = f"relevant, but rigor is FLAGGED — {rf[0]}. Read critically."
+    decision = str((digest or {}).get("read_decision") or "").lower()
+    weak_evidence = band == "flag" or any((quality or {}).get("overstatements") or [])
+    high_friction = str((digest or {}).get("writing_friction") or "") == "high"
+    capped = decision == "read" and (weak_evidence or high_friction)
+    if capped:
+        decision = "skim"
+    if decision in {"read", "skim", "skip"}:
+        vkey = "deep" if decision == "read" else decision
+        vlabel = {"read": "READ", "skim": "SKIM", "skip": "DIGEST IS ENOUGH"}[decision]
+        minutes = (digest or {}).get("estimated_read_minutes")
+        if minutes is not None:
+            vlabel += f" · {int(minutes)} MIN"
+        vreason = str((digest or {}).get("read_why") or "")
+        if capped:
+            rf = [str(x).strip() for x in ((quality or {}).get("red_flags") or []) if str(x).strip()]
+            warning = f"Concept interesting; evidence weak{f' — {rf[0]}' if rf else ''}." if weak_evidence else "Idea preserved; writing friction is high."
+            vreason = f"{warning} {vreason}"
+    else:
+        vkey, vlabel = "skip", "REVIEW"
+        vreason = str((digest or {}).get("read_why") or "Reading decision unavailable; review the evidence.")
     # Relevance folds INTO the diagnosis reason line (the separate chip is gone).
     rel_verdict = _relevance_verdict(n_fired, max_score)
     rel_line = (
         f'<div class="v-rel">{_h(rel_verdict)} · {n_fired} goal{"s" if n_fired != 1 else ""} '
         f'matched · {max_score:.1f}/3</div>'
-    )
+    ) if fired else ""
+    idea_score = max(int((digest or {}).get("novelty") or 0), int((digest or {}).get("significance") or 0))
+    idea = "not assessed" if not idea_score else "high" if idea_score >= 4 else "low" if idea_score <= 2 else "moderate"
+    axes = f'<div class="v-rel">Idea: {idea} · Evidence: {_h(_BAND_LABEL.get(band, "not assessed"))} · Writing: {_h((digest or {}).get("writing_friction") or "not assessed")}</div>'
     verdict = (
         f'<div class="verdict v-{vkey}"><div class="v-eyebrow">Diagnosis</div>'
         f'<div class="v-word">{_h(vlabel)}</div>'
-        f'<div class="v-why">{_h(vreason)}</div>{rel_line}</div>'
-    ) if (goals or quality) else ""
+        f'<div class="v-why">{_h(vreason)}</div>{rel_line}{axes}</div>'
+    ) if (goals or quality or digest) else ""
 
     gauge = _gauge_html(band, agreed, total) if quality else ""
     board = _goal_board_html(goals) if goals else ""
@@ -171,34 +180,89 @@ def _goal_board_html(goals: list[dict[str, Any]]) -> str:
     inline so the binding reads at a glance (Uniform Connectedness). Miss / not-
     retrieved cells stay "unstained" — tissue that didn't take the stain."""
     cells = ""
+    summaries: dict[str, dict[str, Any]] = {}
     for g in goals:
         state = str(g.get("retrieval_state") or "not_retrieved")
         score = float(g.get("score") or 0.0)
         width = int(max(0.0, min(1.0, score / 3.0)) * 100)
-        is_hit = state == "hit" and bool(g.get("relevant"))
+        is_hit = state == "hit" and bool(g.get("relevant")) and not bool(g.get("abstained"))
         extra, has_ev = "", ""
         if state == "hit":
-            why = str(g.get("summary") or "").strip() or "relevant — grounded summary withheld"
+            why = ("grounded summary withheld" if not str(g.get("summary") or "").strip()
+                   else "Relevant to this goal" if is_hit else "Evidence did not support this goal")
+            _collect_goal_summary(summaries, g)
             secs = ", ".join(_h(s) for s in (g.get("key_sections") or []) if str(s).strip())
             quotes = [str(q).strip() for q in (g.get("supporting_quotes") or []) if str(q).strip()]
             if secs:
                 extra += f'<div class="g-sec">Read for you: {secs}</div>'
             if quotes:
-                has_ev = " has-evidence"  # gates the tether rail (only when evidence exists)
+                has_ev = " has-evidence"
                 extra += f'<div class="g-quote">“{_h(quotes[0])}”</div>'
+                if len(quotes) > 1:
+                    extra += '<details><summary>More evidence</summary>'
+                    extra += ''.join(f'<div class="g-quote">“{_h(quote)}”</div>' for quote in quotes[1:])
+                    extra += '</details>'
         elif state == "miss":
             why = "not addressed in this paper"
         else:
             why = "retrieval degraded — not assessed"
         stain = "stained" if is_hit else "unstained"
+        state_label = "○ not supported" if state == "hit" and not is_hit else _STATE_LABEL.get(state, state)
         cells += (
             f'<div class="gcell state-{state} {stain}{has_ev}">'
             f'<div class="g-label">{_h(_short_goal(g.get("goal", "")))}</div>'
-            f'<div class="g-state">{_h(_STATE_LABEL.get(state, state))}</div>'
-            f'<div class="g-bar"><span style="width:{width}%"></span></div>'
+            f'<div class="g-state">{_h(state_label)}</div>'
+            f'<div class="g-bar" role="meter" aria-label="{_h(_short_goal(g.get("goal", "")))} relevance" '
+            f'aria-valuemin="0" aria-valuemax="3" aria-valuenow="{max(0.0, min(3.0, score))}">'
+            f'<span style="width:{width}%"></span></div>'
             f'<div class="g-why">{_h(why)}</div>{extra}</div>'
         )
-    return f'<div class="goal-board">{cells}</div>'
+    return f'<div class="goal-board">{cells}</div>{_goal_summaries_html(summaries)}'
+
+
+def _collect_goal_summary(summaries: dict[str, dict[str, Any]], goal: dict[str, Any]) -> None:
+    """Fold identical sentences into one conclusion while retaining every goal label."""
+    text = str(goal.get("summary") or "").strip()
+    if not text:
+        return
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        sentence = sentence.strip()
+        key = re.sub(r"[.!]+$", "", re.sub(r"\s+", " ", sentence.casefold())).strip()
+        symbols = re.findall(r"\b[A-Za-z]{1,5}(?:\d+|\s*=\s*\d[\d.,]*)", sentence)
+        if not sentence.isupper():
+            symbols += re.findall(r"\b[A-Z]{2,}\b", sentence)
+        if symbols:
+            key += "|" + "|".join(re.sub(r"\s+", "", symbol) for symbol in symbols)
+        if not key:
+            continue
+        entry = summaries.setdefault(key, {"text": sentence, "goals": []})
+        label = str(goal.get("goal") or "").strip()
+        if label and label not in entry["goals"]:
+            entry["goals"].append(label)
+
+
+def _goal_summaries_html(summaries: dict[str, dict[str, Any]]) -> str:
+    if not summaries:
+        return ""
+    visible, overflow = [], []
+    for entry in summaries.values():
+        text = entry["text"]
+        words = text.split()
+        short = " ".join(words[:30]) + ("…" if len(words) > 30 else "")
+        label = "; ".join(entry["goals"])
+        detail = (f'<details><summary>Full finding</summary><p>{_h(text)}</p></details>'
+                  if len(words) > 30 else '')
+        item = (f'<li class="goal-summary-item"><strong>For: {_h(label)}</strong>'
+                f'<p class="goal-summary-text">{_h(short)}</p>{detail}</li>')
+        if len(visible) < 3:
+            visible.append(item)
+        else:
+            overflow.append(item)
+    result = '<ul class="goal-summary-list">' + ''.join(visible) + '</ul>'
+    if overflow:
+        result += ('<details class="goal-summary-more"><summary>More goal findings</summary>'
+                   '<ul class="goal-summary-list">' + ''.join(overflow) + '</ul></details>')
+    return result
 
 
 def _question_lookup() -> dict[str, str]:
@@ -365,6 +429,9 @@ def brief_css() -> str:
 .gauge-passes{font-family:var(--font-mono);font-size:12px;color:var(--muted)}
 .gauge-method{font-family:var(--font-mono);font-size:11px;color:var(--muted);margin-top:5px;letter-spacing:.01em}
 .goal-board{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:11px;margin-bottom:6px}
+.goal-summary-list{margin:0 0 10px;padding-left:22px;overflow-wrap:anywhere}
+.goal-summary-item{margin-bottom:8px}.goal-summary-text{margin:3px 0;font:14px/1.5 var(--font-read)}
+.goal-summary-more summary:focus-visible{outline:2px solid var(--hema);outline-offset:3px}
 .gcell{position:relative;border:1px solid var(--border);border-radius:11px;padding:12px 13px 13px;background:var(--card);box-shadow:var(--shadow)}
 .gcell.stained{border-left:3px solid var(--hema)}
 .gcell.unstained{border-left:2px dotted var(--hair);opacity:.72}

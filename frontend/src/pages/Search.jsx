@@ -7,6 +7,9 @@ import {
 import CollectionPicker from '../components/CollectionPicker.jsx';
 import { ErrorBanner, StatusBanner } from '../components/library/shared.jsx';
 import { humanizeError } from '../utils/humanizeError.js';
+import { sortSearchCandidates } from '../utils/searchSort.js';
+import { readStoredJson, removeStorage, writeStorage } from '../utils/safeStorage.js';
+import { pollSessionUntilDone } from '../searchPolling.js';
 
 // Targeted Search — the query-driven pull surface (services/search). Give a
 // research topic, get a per-source query plan, a federated + deduped + relevance-
@@ -32,22 +35,14 @@ const REL_BAND = {
 };
 
 function QueryPlan({ plan }) {
-  const rows = [
-    ['library', plan.library_expanded || plan.library_raw],
-    ['openalex (lexical)', plan.openalex_lexical],
-    ['openalex (semantic)', plan.openalex_semantic],
-    ['europepmc', plan.europepmc],
-    ['arxiv', plan.arxiv],
-    ['crossref', plan.crossref],
-    ['semantic scholar', plan.semantic_scholar],
-  ].filter(([, q]) => q);
+  const rows = plan.display || [];
   if (!rows.length) return null;
   return (
     <details className="mb-4 text-[12px]">
       <summary className="cursor-pointer text-slate-600 font-semibold">Query plan (per source)</summary>
       <div className="mt-2 grid gap-1">
-        {rows.map(([src, q]) => (
-          <div key={src} className="flex gap-2">
+        {rows.map(({ source: src, query: q }, index) => (
+          <div key={index} className="flex gap-2">
             <span className="text-slate-500 w-40 shrink-0">{src}</span>
             <span className="mono text-slate-800">{q}</span>
           </div>
@@ -116,7 +111,7 @@ function CandidateCard({ cand, onAdd }) {
   const sources = [...new Set((cand.provenance || []).map((p) => p.source))];
   const band = (cand.quality?.quality_band || '').toLowerCase();
   const meta = [cand.venue, cand.year].filter(Boolean).join(' · ');
-  const added = Boolean(cand.materialized_zotero_key);
+  const added = Boolean(cand.materialized_zotero_key || cand.existing_zotero_key);
   const rel = REL_BAND[cand.relevance_band];
   const why = Array.isArray(cand.why) ? cand.why : [];
   const [adding, setAdding] = useState(false);
@@ -193,7 +188,12 @@ function CandidateCard({ cand, onAdd }) {
 // a shareable address, and it dies with the browser tab, matching its lifetime.
 const SS_KEY = 'zs.searchSession';
 function loadSaved() {
-  try { return JSON.parse(sessionStorage.getItem(SS_KEY)) || {}; } catch { return {}; }
+  return readStoredJson(
+    SS_KEY,
+    {},
+    (value) => value && typeof value === 'object' && !Array.isArray(value),
+    'sessionStorage',
+  );
 }
 
 export default function Search() {
@@ -205,18 +205,19 @@ export default function Search() {
   const [error, setError] = useState(null);
   // Target Zotero collection for per-result "Add to library" ('' = server "Inbox").
   const [targetCollection, setTargetCollection] = useState(saved.tc || '');
+  const [sort, setSort] = useState(saved.sort || 'recommended');
   const pollRef = useRef(null);
   // The id to persist while no live session exists yet (cleared if it turns out dead).
   const savedIdRef = useRef(saved.id || null);
 
-  useEffect(() => () => clearInterval(pollRef.current), []);
+  useEffect(() => () => pollRef.current?.(), []);
 
   // Mirror pointer + drafts to sessionStorage on every change.
   useEffect(() => {
-    sessionStorage.setItem(SS_KEY, JSON.stringify(
-      { id: session?.id || savedIdRef.current, q: query, qs: questions, tc: targetCollection },
-    ));
-  }, [session?.id, query, questions, targetCollection]);
+    writeStorage(SS_KEY, JSON.stringify(
+      { id: session?.id || savedIdRef.current, q: query, qs: questions, tc: targetCollection, sort },
+    ), 'sessionStorage');
+  }, [session?.id, query, questions, targetCollection, sort]);
 
   // File one candidate into the chosen collection, then stamp its returned key on
   // the local session so the card flips to "✓ In library" without waiting for a poll.
@@ -232,12 +233,15 @@ export default function Search() {
 
   // Poll a reviewing session until the deep reviews finish (screen auto-starts them).
   const pollUntilDone = useCallback((id) => {
-    clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      const fresh = await getSession(id);
-      setSession(fresh);
-      if (fresh.status === 'reviewed' || fresh.status === 'error') clearInterval(pollRef.current);
-    }, 3000);
+    pollRef.current?.();
+    pollRef.current = pollSessionUntilDone(id, {
+      fetchSession: getSession,
+      onSession: (fresh) => {
+        setSession(fresh);
+        setError(null);
+      },
+      onError: setError,
+    });
   }, []);
 
   // Rehydrate the last session on remount (tab switch / reload): refetch from the
@@ -255,7 +259,7 @@ export default function Search() {
       .catch(() => {
         if (cancelled) return;
         savedIdRef.current = null;          // dead pointer — stop persisting it
-        sessionStorage.removeItem(SS_KEY);
+        removeStorage(SS_KEY, 'sessionStorage');
       });
     return () => { cancelled = true; };
   }, [saved.id, pollUntilDone]);
@@ -264,6 +268,7 @@ export default function Search() {
     e?.preventDefault();
     if (!query.trim()) return;
     setLoading(true);
+    clearInterval(pollRef.current);
     setError(null);
     setSession(null);
     try {
@@ -279,7 +284,7 @@ export default function Search() {
     }
   }, [query, questions, pollUntilDone]);
 
-  const reviewing = session?.status === 'reviewing';
+  const reviewing = session?.status === 'reviewing' && !error;
   // Doherty: name the honest stage. During agentic rounds refinements grow but no
   // review has landed yet — showing "Deep-reviewing…" then would mislabel the wait.
   const anyReviewed = (session?.candidates || []).some((c) => c.review && c.review.state);
@@ -323,6 +328,14 @@ export default function Search() {
           <Refinements rounds={session.refinements} />
           <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
             <div className="text-[12px] text-slate-500">{(session.candidates || []).length} candidates</div>
+            <label className="text-[12px] text-slate-600">
+              Sort by{' '}
+              <select value={sort} onChange={(e) => setSort(e.target.value)} className="rounded border border-slate-300 p-1">
+                <option value="recommended">Recommended</option>
+                <option value="relevance">Relevance</option>
+                <option value="relevance_prestige">Relevance + prestige</option>
+              </select>
+            </label>
             <div className="flex items-center gap-2">
               {reviewing && (
                 <div className="text-[12px] text-slate-500 flex items-center gap-1.5">
@@ -335,14 +348,15 @@ export default function Search() {
             </div>
           </div>
           {session.status === 'error' && <StatusBanner isError message="Review failed — see server log." />}
+          {sort === 'relevance_prestige' && <p className="mb-2 text-[12px] text-slate-500">85% relevance + 15% citation prestige (log-scaled within these results; unknown citations use the median). Citation counts favor older papers and vary by field.</p>}
           {(() => {
-            const cands = session.candidates || [];
-            const strong = cands.filter((c) => c.relevance_band !== 'weak');
-            const weak = cands.filter((c) => c.relevance_band === 'weak');
+            const cands = sortSearchCandidates(session.candidates || [], sort);
+            const strong = sort === 'recommended' ? cands.filter((c) => c.relevance_band !== 'weak') : cands;
+            const weak = sort === 'recommended' ? cands.filter((c) => c.relevance_band === 'weak') : [];
             return (
               <>
                 <div className="grid gap-3">
-                  {strong.map((c) => <CandidateCard key={c.candidate_id || c.title} cand={c} onAdd={materializeCard} />)}
+                  {strong.map((c) => <CandidateCard key={c.candidate_id} cand={c} onAdd={materializeCard} />)}
                 </div>
                 {weak.length > 0 && (
                   <details className="mt-3">
@@ -350,7 +364,7 @@ export default function Search() {
                       {weak.length} weaker match{weak.length === 1 ? '' : 'es'} ▾
                     </summary>
                     <div className="grid gap-3 mt-2">
-                      {weak.map((c) => <CandidateCard key={c.candidate_id || c.title} cand={c} onAdd={materializeCard} />)}
+                      {weak.map((c) => <CandidateCard key={c.candidate_id} cand={c} onAdd={materializeCard} />)}
                     </div>
                   </details>
                 )}

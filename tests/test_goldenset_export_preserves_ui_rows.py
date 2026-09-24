@@ -12,6 +12,7 @@ Zotero's ``items`` table and must survive re-export.
 from __future__ import annotations
 
 import csv
+import json
 from dataclasses import asdict
 from pathlib import Path
 
@@ -158,9 +159,47 @@ def test_corrupted_existing_csv_without_item_key_column_raises(tmp_path: Path):
         _write_csv([_sample("ABC123")], csv_path)
 
 
-def test_empty_samples_writes_empty_file(tmp_path: Path):
-    """Pre-existing behavior: empty samples → empty CSV file (no error)."""
+def test_empty_export_preserves_ui_and_verdict_rows(tmp_path: Path):
     csv_path = tmp_path / "golden.csv"
-    csv_path.write_text("seed", encoding="utf-8")
+    _write_csv([_sample("feed:42"), _sample("note:A:1"), _sample("MANUAL"), _sample("OLD")], csv_path)
+    _write_csv([], csv_path, preserve_keys=frozenset({"MANUAL"}))
+    assert _read_keys(csv_path) == ["feed:42", "note:A:1", "MANUAL"]
+
+
+def test_first_empty_export_writes_a_valid_header(tmp_path: Path):
+    csv_path = tmp_path / "golden.csv"
     _write_csv([], csv_path)
-    assert csv_path.read_text() == ""
+    with csv_path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        assert "item_key" in reader.fieldnames
+        assert list(reader) == []
+
+
+@pytest.mark.parametrize("fresh", [[], [_sample("NEW")]])
+def test_export_twins_and_counts_include_preserved_rows(tmp_path, monkeypatch, fresh):
+    from zotero_summarizer.services.golden import goldenset
+
+    (tmp_path / "zotero.sqlite").touch()
+    csv_path = tmp_path / "golden.csv"
+    jsonl_path = tmp_path / "golden.jsonl"
+    _write_csv([_sample("feed:42", "must_read")], csv_path)
+    monkeypatch.setattr(goldenset, "_pull_samples", lambda *a, **kw: fresh)
+    result = goldenset.export_golden_dataset(tmp_path, csv_path, jsonl_path)
+    exported = [json.loads(line) for line in jsonl_path.read_text().splitlines()]
+    assert [row["item_key"] for row in exported] == _read_keys(csv_path)
+    with csv_path.open(newline="", encoding="utf-8") as f:
+        assert list(csv.DictReader(f)) == [
+            {key: str(value) for key, value in row.items()} for row in exported
+        ]
+    assert all(type(row["note_count"]) is int and type(row["in_trash"]) is bool for row in exported)
+    assert result["total"] == len(fresh) + 1 == len(exported)
+    assert result["by_class"]["must_read"] == 1
+    assert sum(result["by_strength"].values()) == len(exported)
+
+
+def test_empty_export_refuses_to_erase_corrupt_existing_csv(tmp_path):
+    path = tmp_path / "golden.csv"
+    path.write_text("broken\nvalue\n")
+    with pytest.raises(ValueError, match="no item_key column"):
+        _write_csv([], path)
+    assert path.read_text() == "broken\nvalue\n"

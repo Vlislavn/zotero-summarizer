@@ -39,7 +39,7 @@ class OpenAlexWork:
     """Subset of OpenAlex fields used for prestige scoring."""
 
     openalex_id: str
-    max_author_h_index: int
+    max_author_h_index: int | None
     venue_works_count: int
     venue_display_name: str
     cited_by_count: int
@@ -144,7 +144,7 @@ class OpenAlexClient:
         if not _title_match(candidate_title, title_clean):
             return None
         enriched = self._enrich_with_authors(top)
-        if not enriched.pop("__author_pct_incomplete", False):
+        if not enriched.pop("__author_enrichment_incomplete", False):
             self.cache.set(key, enriched)
         return self._work_from_payload(enriched)
 
@@ -188,7 +188,7 @@ class OpenAlexClient:
         if not payload:
             return None
         enriched = self._enrich_with_authors(payload)
-        if not enriched.pop("__author_pct_incomplete", False):
+        if not enriched.pop("__author_enrichment_incomplete", False):
             self.cache.set(cache_key, enriched)
         return self._work_from_payload(enriched)
 
@@ -201,7 +201,7 @@ class OpenAlexClient:
         want_author_pct = work_pct is None
         h_indices: list[int] = []
         author_pcts: list[float] = []
-        pct_incomplete = False
+        enrichment_incomplete = False
         for auth in authorships[: self.max_authors]:
             author = (auth or {}).get("author") or {}
             author_id = author.get("id")
@@ -210,17 +210,21 @@ class OpenAlexClient:
             short_id = author_id.rsplit("/", 1)[-1]  # e.g. 'A1234'
             cache_key = f"author:{short_id}"
             cached = self.cache.get(cache_key)
+            h: int | None
             if cached is not None:
                 h = int(cached.get("h_index") or 0)
             else:
                 profile = self._get(f"/authors/{short_id}")
-                h = 0
-                if profile:
+                h = None
+                if profile is not None:
                     h = int(
                         ((profile.get("summary_stats") or {}).get("h_index")) or 0
                     )
                     self.cache.set(cache_key, {"h_index": h})
-            h_indices.append(h)
+                else:
+                    enrichment_incomplete = True
+            if h is not None:
+                h_indices.append(h)
             if want_author_pct:
                 ap = self._author_field_percentile(short_id)
                 if ap is not None:
@@ -231,16 +235,16 @@ class OpenAlexClient:
                     # transient failure freeze this work at "no author signal" for
                     # the whole work-cache TTL — mark it so the caller skips
                     # caching and the next pass retries.
-                    pct_incomplete = True
-        work["__max_author_h_index"] = max(h_indices) if h_indices else 0
+                    enrichment_incomplete = True
+        work["__max_author_h_index"] = max(h_indices) if h_indices else None
         # MAX across the work's authors (mirrors __max_author_h_index): a paper
         # inherits the standing of its STRONGEST author — the common junior-first-
         # author / senior-PI case is exactly what the cold-start prior should
         # reward. The bounded cap + convex map keep one gamed coauthor from
         # dominating (max composite delta ≈ 0.075 on the [1,5] scale).
         work["__max_author_field_percentile"] = max(author_pcts) if author_pcts else None
-        if pct_incomplete:
-            work["__author_pct_incomplete"] = True
+        if enrichment_incomplete:
+            work["__author_enrichment_incomplete"] = True
         return work
 
     def _author_field_percentile(self, short_id: str) -> float | None:
@@ -292,9 +296,13 @@ class OpenAlexClient:
             cnp = payload.get("citation_normalized_percentile") or {}
             pct = cnp.get("value")
             fwci = payload.get("fwci")
+            raw_max_h = payload.get("__max_author_h_index")
+            max_author_h = int(raw_max_h) if raw_max_h is not None else None
+            if max_author_h is not None and max_author_h <= 0:
+                max_author_h = None
             return OpenAlexWork(
                 openalex_id=str(payload.get("id") or ""),
-                max_author_h_index=int(payload.get("__max_author_h_index") or 0),
+                max_author_h_index=max_author_h,
                 venue_works_count=int(venue.get("works_count") or 0),
                 venue_display_name=str(venue.get("display_name") or ""),
                 cited_by_count=int(payload.get("cited_by_count") or 0),

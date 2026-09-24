@@ -22,6 +22,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from zotero_summarizer.models import GoalSummary
+from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.faithbench._corpus import chunk_text
 from zotero_summarizer.services.library._grounding import quote_is_grounded
 from zotero_summarizer.storage.corpus_bm25 import tokenize
@@ -52,7 +53,7 @@ _DEFAULT_GOAL_FACET_PROMPT = (
 
 
 class GoalFacetResponse(BaseModel):
-    relevant: bool = Field(default=False)
+    relevant: bool = Field(strict=True)
     summary: str = Field(default="")
     supporting_quotes: list[str] = Field(default_factory=list)
 
@@ -73,11 +74,8 @@ _BATCHED_GOAL_PROMPT = (
 )
 
 
-class _BatchedGoalFacet(BaseModel):
+class _BatchedGoalFacet(GoalFacetResponse):
     goal_index: int = Field(default=-1)
-    relevant: bool = Field(default=False)
-    summary: str = Field(default="")
-    supporting_quotes: list[str] = Field(default_factory=list)
 
 
 class BatchedGoalResponse(BaseModel):
@@ -192,15 +190,19 @@ def summarize_for_goals(
     embedder = _get_embedder(embedder_model)
     chunk_mat = goal_vecs = None
     if embedder is not None:
-        import numpy as np
-        chunk_mat = np.asarray(embedder.encode(texts, normalize_embeddings=True), dtype="float32")
-        goal_vecs = {g: np.asarray(embedder.encode([g], normalize_embeddings=True)[0], dtype="float32") for g in goals}
+        try:
+            import numpy as np
+            chunk_mat = np.asarray(embedder.encode(texts, normalize_embeddings=True), dtype="float32")
+            goal_vecs = {g: np.asarray(embedder.encode([g], normalize_embeddings=True)[0], dtype="float32") for g in goals}
+        except Exception as exc:  # noqa: BLE001 — keep the lexical retrieval leg available
+            chunk_mat = goal_vecs = None
+            LOGGER.warning("goal-summaries dense inference failed; dense leg off: %s", exc)
 
     reranker = get_reranker(reranker_model)
     reranker.ensure_loaded_async()
     ctx = _GoalCtx(
         texts=texts, chunks=chunks, bm25=bm25,
-        chunk_mat=chunk_mat, goal_vecs=goal_vecs, has_dense=embedder is not None,
+        chunk_mat=chunk_mat, goal_vecs=goal_vecs, has_dense=chunk_mat is not None,
         reranker=reranker, floor=relevance_floor, llm=llm,
         prompt_tmpl=facet_prompt or _DEFAULT_GOAL_FACET_PROMPT,
     )
@@ -343,7 +345,9 @@ def _one_goal(goal: str, ctx: _GoalCtx) -> GoalSummary:
     if early is not None:
         return early
     parsed = ctx.llm.pydantic_prompt(
-        prompt=ctx.prompt_tmpl.format(goal=goal, passages=ret.context), pydantic_model=GoalFacetResponse
+        prompt=UNTRUSTED_INPUT_RULE + "\n\n" + ctx.prompt_tmpl.format(
+            goal=untrusted_input(goal), passages=untrusted_input(ret.context)),
+        pydantic_model=GoalFacetResponse,
     )
     return _facet_to_summary(ret, relevant=parsed.relevant, summary=parsed.summary, quotes=parsed.supporting_quotes)
 
@@ -352,10 +356,10 @@ def _batch_goals(retrievals: list[_GoalRetrieval], ctx: _GoalCtx) -> dict[int, _
     """ONE LLM call summarizing ALL gate-passing goals. Returns ``{goal_index: facet}``
     for the indices the model returned (a missing index → caller marks that goal
     hit/abstained; a malformed JSON raises out to the goal-layer boundary)."""
-    blocks = "\n\n".join(
+    blocks = untrusted_input("\n\n".join(
         f"[Goal {i}]: {r.goal}\nPassages:\n{r.context}" for i, r in enumerate(retrievals)
-    )
-    prompt = _BATCHED_GOAL_PROMPT.format(n=len(retrievals), blocks=blocks)
+    ))
+    prompt = UNTRUSTED_INPUT_RULE + "\n\n" + _BATCHED_GOAL_PROMPT.format(n=len(retrievals), blocks=blocks)
     parsed = ctx.llm.pydantic_prompt(prompt=prompt, pydantic_model=BatchedGoalResponse)
     return {
         int(f.goal_index): f for f in (parsed.summaries or [])

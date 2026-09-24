@@ -2,27 +2,22 @@
 hybrid search.
 
 In-memory `rank_bm25` index over each corpus item's title + abstract + tags,
-rebuilt only when the corpus changes (keyed by row count + ``MAX(updated_at)``),
+rebuilt when the SQLite main/WAL fingerprint changes,
 so repeated searches reuse it. Pure-Python, no DB migration. A process-level
 singleton (``get_corpus_bm25``) keeps the index resident across requests.
 """
 from __future__ import annotations
 
 import json
-import logging
 import re
 import sqlite3
 import threading
 from pathlib import Path
 
 from zotero_summarizer.storage.corpus import open_corpus_conn
+from zotero_summarizer.storage.corpus_read import _corpus_fingerprint
 
-try:
-    from rank_bm25 import BM25Okapi
-except Exception:  # pragma: no cover - optional dependency boundary
-    BM25Okapi = None
-
-LOGGER = logging.getLogger("zotero_summarizer.corpus_bm25")
+from rank_bm25 import BM25Okapi
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
@@ -34,13 +29,10 @@ def tokenize(text: str) -> list[str]:
 
 
 def _parse_tags(raw: str | None) -> list[str]:
-    # Boundary parse of a DB JSON column (mirrors EmbeddingCache._parse_list):
-    # corrupt tags must not break search, so fall back to no tags.
-    try:
-        value = json.loads(raw or "[]")
-    except (ValueError, TypeError):
-        return []
-    return [str(v) for v in value] if isinstance(value, list) else []
+    value = json.loads(raw if raw is not None else "[]")
+    if not isinstance(value, list) or any(not isinstance(tag, str) for tag in value):
+        raise ValueError("Corpus tags must be a JSON list of strings")
+    return value
 
 
 class CorpusBM25:
@@ -49,27 +41,21 @@ class CorpusBM25:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self._lock = threading.Lock()
-        self._version: tuple[int, str] | None = None
+        self._version: tuple | None = None
         self._keys: list[str] = []
         self._bm25 = None  # BM25Okapi | None
 
     def _conn(self) -> sqlite3.Connection:
         return open_corpus_conn(self.db_path)
 
-    @staticmethod
-    def _db_version(conn: sqlite3.Connection) -> tuple[int, str]:
-        row = conn.execute(
-            "SELECT COUNT(*) AS c, COALESCE(MAX(updated_at), '') AS m FROM corpus_embeddings"
-        ).fetchone()
-        return (int(row["c"] or 0), str(row["m"] or ""))
-
     def _ensure_index(self) -> None:
         """Build/refresh the index if the corpus changed. Caller holds ``_lock``."""
+        # ponytail: DB-wide invalidation; table revisions if unrelated cache churn dominates.
+        version = _corpus_fingerprint(str(self.db_path))
+        if version == self._version:
+            return
         conn = self._conn()
         try:
-            version = self._db_version(conn)
-            if self._bm25 is not None and version == self._version:
-                return
             rows = conn.execute(
                 "SELECT item_id, title, abstract, tags_json FROM corpus_embeddings"
             ).fetchall()
@@ -85,16 +71,13 @@ class CorpusBM25:
             ))
             keys.append(str(r["item_id"]))
             docs.append(tokenize(text))
-        self._keys = keys
-        self._version = version
-        self._bm25 = BM25Okapi(docs) if (BM25Okapi is not None and docs) else None
-        if BM25Okapi is None:
-            LOGGER.warning("rank_bm25 unavailable; BM25 leg of hybrid search is off (dense-only)")
+        bm25 = BM25Okapi(docs) if any(docs) else None
+        self._keys, self._bm25, self._version = keys, bm25, version
 
     def search(self, query: str, candidate_keys: list[str], top_k: int = 100) -> dict[str, float]:
         """``{item_key: bm25 score}`` for ``candidate_keys``, top_k by score.
-        Empty when rank_bm25 is unavailable, the corpus is empty, the query has no
-        tokens, or no candidate scores positive."""
+        Empty when the corpus/query has no tokens or no candidate scores positive.
+        Dependency, storage and indexing errors propagate."""
         q_tokens = tokenize(query)
         if not q_tokens or not candidate_keys:
             return {}

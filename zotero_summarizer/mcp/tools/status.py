@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 from zotero_summarizer.mcp.api_client import _collect_status_snapshot, _resource_json_from_api
-from zotero_summarizer.mcp.helpers import _now_iso, _ok
+from zotero_summarizer.mcp.helpers import _error, _now_iso, _ok
 from zotero_summarizer.mcp.server import mcp
 
 
@@ -12,6 +12,11 @@ from zotero_summarizer.mcp.server import mcp
 async def get_library_status() -> dict[str, Any]:
     """Get high-level library status, active job, and calibration snapshot."""
     snapshot = await _collect_status_snapshot()
+    if not any(key in snapshot for key in ("zotero", "pending_changes_count", "active_job", "calibration")):
+        return _error(
+            "backend_unavailable", "No status service responded successfully",
+            details={"warnings": snapshot.get("warnings") or []},
+        )
     return _ok(**snapshot)
 
 

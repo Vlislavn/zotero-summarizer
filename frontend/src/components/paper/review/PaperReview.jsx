@@ -4,7 +4,7 @@ import {
 } from './tones.js';
 import {
   bandGloss, METHOD_CLAUSE, LEGEND, rubricLabel, paperTypeLabel,
-  summarizeGoals, readVerdict, decisiveRows, fullChecklist, shortGoal,
+  decisiveRows, fullChecklist, shortGoal, isSupportedGoal,
 } from './briefModel.js';
 import { formatShortDate, timeAgo } from '../../library/shared.jsx';
 
@@ -62,24 +62,24 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
   const isNonPaper = quality?.basis === 'non_paper';
   const band = isNonPaper ? '' : String(quality?.quality_band || '');
   const redFlags = isNonPaper ? [] : (quality?.red_flags || []).map((x) => String(x || '').trim()).filter(Boolean);
-  const { nFired } = summarizeGoals(goals);
-  const nHitGoals = goals.filter((g) => String(g?.retrieval_state || '') === 'hit').length;
-  const hasBrief = Boolean((quality && !isNonPaper) || goals.length);
+  const nHitGoals = goals.filter(isSupportedGoal).length;
 
-  // Lead verdict: the synthesized goals×rigor call when we have those layers;
-  // otherwise fall back to the digest's own read decision.
+  // The API projects cached decisions through the current policy; absence stays unknown.
   let verdict;
-  if (hasBrief) {
-    verdict = readVerdict({ nFired, band, redFlags });
-  } else if (digest?.read_decision) {
-    const d = String(digest.read_decision).toLowerCase();
+  const rawDigestDecision = String(digest?.read_decision || '').toLowerCase();
+  const weakEvidence = band === 'flag' || (quality?.overstatements || []).some(Boolean);
+  const capped = rawDigestDecision === 'read' && (weakEvidence || digest?.writing_friction === 'high');
+  const digestDecision = capped ? 'skim' : rawDigestDecision;
+  if (['read', 'skim', 'skip'].includes(digestDecision)) {
     verdict = {
-      key: d === 'read' ? 'deep' : d === 'skim' ? 'skim' : 'skip',
-      label: d.toUpperCase(),
-      reason: digest.verdict || '',
+      key: digestDecision === 'read' ? 'deep' : digestDecision,
+      label: { read: 'READ', skim: 'SKIM', skip: 'DIGEST IS ENOUGH' }[digestDecision],
+      reason: capped
+        ? `${weakEvidence ? `Concept interesting; evidence weak${redFlags[0] ? ` — ${redFlags[0]}` : ''}.` : 'Idea preserved; writing friction is high.'} ${digest.read_why || ''}`
+        : digest.read_why || '',
     };
   } else {
-    verdict = { key: 'skip', label: 'REVIEW', reason: digest?.verdict || '' };
+    verdict = { key: 'skip', label: 'REVIEW', reason: digest?.read_why || 'Reading decision unavailable; review the evidence.' };
   }
   // Deterministic checklist grade FIRST: quality.grade comes from grounded
   // coverage (stable run-to-run); digest.grade is the LLM's holistic guess and can
@@ -88,6 +88,8 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
   // caches. None for non-papers.
   const grade = isNonPaper ? '' : (quality?.grade || digest?.grade || '');
   const tldr = digest?.tldr || '';
+  const ideaScore = Math.max(Number(digest?.novelty) || 0, Number(digest?.significance) || 0);
+  const ideaLabel = ideaScore >= 4 ? 'high' : ideaScore >= 3 ? 'moderate' : ideaScore > 0 ? 'low' : 'not assessed';
 
   // Located findings (the story page passes the section overlay; the compact card
   // does not → unchanged). Keyed by VALUE (goal/flag text, critical item) so the
@@ -157,6 +159,7 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
       <div className={`rounded-lg border-l-[3px] px-3.5 py-3 ${VERDICT_ACCENT[verdict.key] || VERDICT_ACCENT.skip}`}>
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-display text-[22px] font-light tracking-tight text-slate-900">{verdict.label}</span>
+          {digest?.estimated_read_minutes != null && <Chip tone="slate">{digest.estimated_read_minutes} min</Chip>}
           {grade && (
             <Chip tone={gradeTone(grade)} title="Reference-free full-text quality grade">
               {compact ? grade : `Quality ${grade}`}
@@ -177,6 +180,11 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
         </div>
         {verdict.reason && (
           <p className="mt-1.5 text-[13px] leading-relaxed text-slate-700 max-w-[66ch]">{verdict.reason}</p>
+        )}
+        {digest && (
+          <p className="mt-1 text-[11px] text-slate-500">
+            Idea: {ideaLabel} · Evidence: {BAND_LABEL[band] || 'not assessed'} · Writing: {digest.writing_friction || 'not assessed'}
+          </p>
         )}
       </div>
 
@@ -303,19 +311,24 @@ function SectionAnchor({ section }) {
 
 function GoalTile({ g, sections }) {
   const state = String(g?.retrieval_state || 'not_retrieved');
+  const supported = isSupportedGoal(g);
   const score = Number(g?.score) || 0;
   const width = Math.round(Math.max(0, Math.min(1, score / 3)) * 100);
   const secs = (g?.key_sections || []).filter(Boolean).join(', ');
-  const quote = (g?.supporting_quotes || []).map((q) => String(q || '').trim()).find(Boolean);
+  const quotes = (g?.supporting_quotes || []).map((q) => String(q || '').trim()).filter(Boolean);
   let why;
-  if (state === 'hit') why = String(g?.summary || '').trim() || 'relevant — grounded summary withheld';
+  if (state === 'hit') why = !String(g?.summary || '').trim() ? 'grounded summary withheld'
+    : supported ? 'Relevant to this goal' : 'Evidence did not support this goal';
   else if (state === 'miss') why = 'not addressed in this paper';
   else why = 'retrieval degraded — not assessed';
+  const tone = state === 'hit' && !supported ? TILE_STATE.miss : TILE_STATE[state] || TILE_STATE.not_retrieved;
   return (
-    <div className={`rounded-md border border-slate-200/70 border-l-[3px] bg-white/50 p-2.5 ${TILE_STATE[state] || TILE_STATE.not_retrieved}`}>
+    <div className={`rounded-md border border-slate-200/70 border-l-[3px] bg-white/50 p-2.5 ${tone}`}>
       <div className="text-[12px] font-semibold text-slate-800 leading-snug">{shortGoal(g?.goal)}</div>
-      <div className="mt-0.5 text-[11px] text-slate-400">{STATE_LABEL[state] || state}</div>
-      <div className="my-1.5 h-1 rounded-full bg-slate-200/80 overflow-hidden">
+      <div className="mt-0.5 text-[11px] text-slate-400">{state === 'hit' && !supported ? '○ not supported' : STATE_LABEL[state] || state}</div>
+      <div className="my-1.5 h-1 rounded-full bg-slate-200/80 overflow-hidden" role="meter"
+        aria-label={`${shortGoal(g?.goal)} relevance`} aria-valuemin={0} aria-valuemax={3}
+        aria-valuenow={Math.max(0, Math.min(3, score))}>
         <span className="block h-full bg-teal-500" style={{ width: `${width}%` }} />
       </div>
       <div className="text-[12px] leading-relaxed text-slate-600">{why}</div>
@@ -327,24 +340,61 @@ function GoalTile({ g, sections }) {
       ) : secs ? (
         <div className="mt-1.5 text-[11px] text-slate-400">Read for you: {secs}</div>
       ) : null)}
-      {state === 'hit' && quote && (
+      {state === 'hit' && quotes.length > 0 && (
         <details className="mt-1 group">
           <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden rounded text-[11px] font-semibold text-teal-600 hover:text-teal-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 focus-visible:ring-offset-1">
             evidence
           </summary>
-          <blockquote className="mt-1 border-l-2 border-teal-300 pl-2 text-[11px] italic text-slate-500 leading-relaxed">
+          {quotes.map((quote, i) => <blockquote key={`${i}-${quote}`}
+            className="mt-1 border-l-2 border-teal-300 pl-2 text-[11px] italic text-slate-500 leading-relaxed">
             “{quote}”
-          </blockquote>
+          </blockquote>)}
         </details>
       )}
     </div>
   );
 }
 
-// Show only the goals this paper ADDRESSES (the tiles carrying a grounded summary
-// worth reading). The not-addressed / not-retrieved goals are noise on the glance
-// surface — fold them behind a quiet line (visual minimalism: one screen, the
-// signal up front). If nothing is addressed, show all so the section isn't empty.
+function uniqueGoalFindings(goals) {
+  const findings = new Map();
+  for (const goal of goals) {
+    if (goal?.retrieval_state !== 'hit') continue;
+    for (const sentence of String(goal.summary || '').trim().split(/(?<=[.!?])\s+/)) {
+      const text = sentence.trim();
+      let key = text.toLocaleLowerCase().replace(/\s+/g, ' ').replace(/[.!]+$/g, '').trim();
+      const symbols = text.match(/\b[A-Za-z]{1,5}(?:\d+|\s*=\s*\d[\d.,]*)/g) || [];
+      if (text !== text.toLocaleUpperCase()) symbols.push(...(text.match(/\b[A-Z]{2,}\b/g) || []));
+      if (symbols.length) key += `|${symbols.map((s) => s.replace(/\s+/g, '')).join('|')}`;
+      if (!key) continue;
+      if (!findings.has(key)) findings.set(key, { text, goals: [] });
+      const labels = findings.get(key).goals;
+      if (goal.goal && !labels.includes(goal.goal)) labels.push(goal.goal);
+    }
+  }
+  return [...findings.values()];
+}
+
+function GoalFindings({ goals }) {
+  const findings = uniqueGoalFindings(goals);
+  if (!findings.length) return null;
+  const item = (finding, index) => {
+    const words = finding.text.split(/\s+/);
+    return <li key={`${index}-${finding.text}`} className="mb-2 break-words">
+      <strong className="text-slate-700">For: {finding.goals.join('; ')}</strong>
+      <p className="text-slate-600">{words.slice(0, 30).join(' ')}{words.length > 30 ? '…' : ''}</p>
+      {words.length > 30 && <details><summary className="cursor-pointer text-teal-700 focus-visible:ring-2">Full finding</summary>
+        <p>{finding.text}</p></details>}
+    </li>;
+  };
+  return <div className="text-xs"><ul className="list-disc pl-5">{findings.slice(0, 3).map(item)}</ul>
+    {findings.length > 3 && <details><summary className="cursor-pointer text-teal-700 focus-visible:ring-2">
+      {findings.length - 3} more findings</summary><ul className="list-disc pl-5">{findings.slice(3).map((f, i) => item(f, i + 3))}</ul></details>}
+  </div>;
+}
+
+// Show located evidence first, including evidence against relevance. Retrieval
+// misses and degraded goals stay behind one disclosure; if none are located,
+// show them all so the section isn't empty.
 function GoalBoard({ goals, goalLoc }) {
   const isHit = (g) => String(g?.retrieval_state || 'not_retrieved') === 'hit';
   const addressed = goals.filter(isHit);
@@ -358,6 +408,7 @@ function GoalBoard({ goals, goalLoc }) {
   return (
     <div className="space-y-2">
       {grid(addressed)}
+      <GoalFindings goals={addressed} />
       {rest.length > 0 && (
         <details className="group">
           <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden text-[11px] font-semibold text-slate-400 hover:text-slate-600">
@@ -544,6 +595,7 @@ function RubricMark({ value }) {
 // The structured digest, behind the "Full digest" disclosure. Rendered ONCE
 // (the old DigestBlock + iframe both showed it). Reading-scale KeyVal rows.
 function DigestRows({ digest: d }) {
+  const p = d.parameters || {};
   return (
     <dl className="space-y-2">
       <KeyVal label="Summary">{d.executive_summary}</KeyVal>
@@ -554,8 +606,20 @@ function DigestRows({ digest: d }) {
       {(d.read_parts || []).filter(Boolean).length > 0 && (
         <KeyVal label="Read parts"><Bullets items={d.read_parts} /></KeyVal>
       )}
+      {(d.skip_parts || []).filter(Boolean).length > 0 && (
+        <KeyVal label="Skip parts"><Bullets items={d.skip_parts} /></KeyVal>
+      )}
+      <KeyVal label="What the original adds">{d.original_value}</KeyVal>
+      {(d.writing_reasons || []).filter(Boolean).length > 0 && (
+        <KeyVal label={`Writing friction · ${d.writing_friction}`}><Bullets items={d.writing_reasons} /></KeyVal>
+      )}
       <KeyVal label="Relevance">{d.relevance}</KeyVal>
       <KeyVal label="Methods">{d.methods}</KeyVal>
+      <KeyVal label="Dataset / sample">{[p.dataset, p.sample_size].filter(Boolean).join(' · ')}</KeyVal>
+      <KeyVal label="Architecture">{p.architecture}</KeyVal>
+      {(p.baselines || []).filter(Boolean).length > 0 && <KeyVal label="Baselines"><Bullets items={p.baselines} /></KeyVal>}
+      {(p.metrics || []).filter(Boolean).length > 0 && <KeyVal label="Metrics"><Bullets items={p.metrics} /></KeyVal>}
+      {p.external_validation != null && <KeyVal label="External validation">{p.external_validation ? 'Yes' : 'No'}</KeyVal>}
       <KeyVal label="Limitations">{d.limitations}</KeyVal>
       <KeyVal label="Controversies">{d.controversies}</KeyVal>
       <KeyVal label="Impact">{d.impact}</KeyVal>

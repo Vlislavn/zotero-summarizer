@@ -159,10 +159,10 @@ async def get_metrics() -> dict[str, Any]:
         )
     session = relabel_audit.read_session(path)
     responses = relabel_audit.responses_from_session(session)
-    if not responses:
+    if len(responses) < 2:
         raise APIError(
-            error="no_responses",
-            message="Session has zero re-labels yet — submit at least one verdict first.",
+            error="insufficient_responses",
+            message="Metrics require at least two paired verdicts; submit more re-labels first.",
             status_code=400,
         )
     metrics = relabel_audit.compute_metrics(responses)
@@ -184,11 +184,11 @@ router.add_api_route(
     "/api/relabel-audit/next", get_next, methods=["GET"],
 )
 router.add_api_route(
-    "/api/relabel-audit/{item_key}", submit, methods=["POST"],
-)
-router.add_api_route(
     "/api/relabel-audit/metrics", get_metrics, methods=["GET"],
 )
 router.add_api_route(
     "/api/relabel-audit/reset", reset, methods=["POST"],
+)
+router.add_api_route(
+    "/api/relabel-audit/{item_key}", submit, methods=["POST"],
 )

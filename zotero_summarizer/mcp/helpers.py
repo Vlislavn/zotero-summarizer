@@ -25,23 +25,17 @@ def _encode_cursor(offset: int) -> str:
     return str(max(0, int(offset)))
 
 
-def _decode_search_cursor(cursor: str | None) -> tuple[int, int]:
-    """Decode search cursor as `source_offset[:filtered_offset]`."""
+def _decode_search_cursor(cursor: str | None) -> int:
+    """Global sorted offset; old source-window cursors must restart."""
     if not cursor:
-        return 0, 0
-    if ":" not in cursor:
-        return _decode_cursor(cursor), 0
-
-    source_raw, filtered_raw = cursor.split(":", 1)
-    return _decode_cursor(source_raw), _decode_cursor(filtered_raw)
+        return 0
+    if not cursor.startswith("g:") or not cursor[2:].isascii() or not cursor[2:].isdigit():
+        raise ValueError("Invalid or obsolete search cursor; restart without a cursor")
+    return int(cursor[2:])
 
 
-def _encode_search_cursor(source_offset: int, filtered_offset: int = 0) -> str:
-    safe_source = _decode_cursor(str(source_offset))
-    safe_filtered = _decode_cursor(str(filtered_offset))
-    if safe_filtered <= 0:
-        return _encode_cursor(safe_source)
-    return f"{safe_source}:{safe_filtered}"
+def _encode_search_cursor(offset: int) -> str:
+    return f"g:{offset}"
 
 
 def _as_float(value: Any, default: float = 0.0) -> float:
@@ -133,6 +127,8 @@ def _ok(**payload: Any) -> dict[str, Any]:
 
 def _require_non_empty_text(value: str | None, field_name: str) -> tuple[str | None, dict[str, Any] | None]:
     safe_value = str(value or "").strip()
+    if safe_value in {".", ".."} or any(c in "/\\" or ord(c) < 32 or ord(c) == 127 for c in safe_value):
+        return None, _error("validation_error", f"{field_name} must be a single path identifier")
     if safe_value:
         return safe_value, None
     return None, _error("validation_error", f"{field_name} is required")

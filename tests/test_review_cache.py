@@ -37,3 +37,44 @@ def test_cached_review_keys_reports_all():
     _review_cache._write_one("A", {"x": 1})
     _review_cache._write_one("B", {"x": 2})
     assert _review_cache.cached_review_keys() == {"A", "B"}
+
+
+def test_corrupt_cache_is_quarantined_without_overwriting_prior_recovery(tmp_path):
+    path = _review_cache._cache_path()
+    corrupt = b'{"reviews":'
+    path.write_bytes(corrupt)
+
+    assert _review_cache.cached_review_keys() == set()
+    assert not path.exists()
+    assert (tmp_path / "deep_reviews.json.corrupt").read_bytes() == corrupt
+
+    path.write_text("not json", encoding="utf-8")
+    assert _review_cache.current_reviews() == {}
+    assert (tmp_path / "deep_reviews.json.corrupt-1").read_text(encoding="utf-8") == "not json"
+
+
+def test_current_review_requires_matching_source_and_generation_identity(monkeypatch):
+    from zotero_summarizer.services.library import _review_identity
+
+    identity = {
+        "generation_sha256": "a" * 64, "source_sha256": "b" * 64,
+        "source_kind": "library", "source_path": "/paper.pdf", "focus_prompt": "",
+    }
+    current = {
+        "review_contract_version": _review_cache.REVIEW_CONTRACT_VERSION,
+        "review_identity": identity, "digest": {},
+    }
+    _review_cache._write_one("CURRENT", current)
+    _review_cache._write_one("LEGACY", {"digest": {}})
+    monkeypatch.setattr(_review_identity, "current_review_identity", lambda key, stored: identity)
+
+    assert _review_cache.get_current_review("CURRENT") == current
+    assert _review_cache.get_current_review("LEGACY") is None
+    assert _review_cache.current_review_keys() == {"CURRENT"}
+
+    monkeypatch.setattr(
+        _review_identity, "current_review_identity",
+        lambda key, stored: {**identity, "source_sha256": "c" * 64},
+    )
+    assert _review_cache.get_current_review("CURRENT") is None
+    assert _review_cache.current_review_keys() == set()

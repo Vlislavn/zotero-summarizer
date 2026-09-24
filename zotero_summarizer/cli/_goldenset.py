@@ -13,6 +13,40 @@ from zotero_summarizer.cli._goldenset_predict import register_goldenset_predict
 from zotero_summarizer.cli._goldenset_setup_colors import register_goldenset_setup_tag_colors
 
 
+def _validate_goldenset_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """Validate command budgets and coupled bounds before Settings/handler I/O."""
+    minimums = {
+        "abstract_chars": 0, "min_chars": 0, "seed": 0,
+        "folds": 2, "n_folds": 2,
+        "pca_dim": 1, "n_repeats": 1, "n_bootstrap": 1, "n_trials": 1,
+        "top_k": 1, "limit": 1, "workers": 1, "max_chars": 1,
+    }
+    for name, minimum in minimums.items():
+        value = getattr(args, name, None)
+        if value is not None and value < minimum:
+            parser.error(f"--{name.replace('_', '-')} must be at least {minimum}")
+    seed = getattr(args, "seed", None)
+    if seed is not None and seed + getattr(args, "n_repeats", 1) > 2**32:
+        parser.error("--seed and repeat offsets must fit the unsigned 32-bit random-state range")
+    holdout = getattr(args, "holdout_fraction", None)
+    if holdout is not None and not 0 <= holdout < 1:
+        parser.error("--holdout-fraction must be finite and in [0, 1); 0 disables holdout")
+    if getattr(args, "min_chars", None) is not None and args.min_chars > args.max_chars:
+        parser.error("--min-chars must not exceed --max-chars")
+    raw_fractions = getattr(args, "learning_curve_fractions", None)
+    if raw_fractions is None:
+        return
+    if not args.learning_curve:
+        parser.error("--learning-curve-fractions requires --learning-curve")
+    try:
+        fractions = tuple(float(part) for part in raw_fractions.split(","))
+    except ValueError:
+        parser.error("--learning-curve-fractions must contain comma-separated numbers")
+    if any(not 0 < f <= 1 for f in fractions) or any(a >= b for a, b in zip(fractions, fractions[1:])):
+        parser.error("--learning-curve-fractions must be strictly increasing finite numbers in (0, 1]")
+    args.learning_curve_fractions = fractions
+
+
 def _goldenset_export(args: argparse.Namespace) -> int:
     """Export the user's existing Zotero engagement signals as a golden dataset."""
     from zotero_summarizer.services.golden import goldenset
@@ -37,7 +71,7 @@ def _goldenset_export(args: argparse.Namespace) -> int:
 def _goldenset_train_classifier(args: argparse.Namespace) -> int:
     """Train a classifier on the golden CSV and persist it for the daemon gate.
 
-    Phase 1.13: writes ``~/.cache/zotero-summarizer/models/{name}.{joblib,json}``
+    Writes ``data/models/{name}.zip`` in the selected project
     plus a ``classifier-runs.jsonl`` entry. The daemon reads these at startup
     when ``classifier_gate.enabled: true`` in goals.yaml.
     """
@@ -54,7 +88,7 @@ def _goldenset_train_classifier(args: argparse.Namespace) -> int:
             f"Golden CSV not found at {golden_csv}; run `goldenset export` first."
         )
 
-    output_dir = Path(args.output_dir) if args.output_dir else classifier_persistence.DEFAULT_MODEL_DIR
+    output_dir = Path(args.output_dir) if args.output_dir else settings.model_dir
 
     if args.force:
         trained = classifier_persistence.train_and_save(
@@ -66,6 +100,7 @@ def _goldenset_train_classifier(args: argparse.Namespace) -> int:
             n_folds=args.folds,
             pca_dim=args.pca_dim,
             progress_cb=progress_printer("featurising"),
+            triage_db_path=settings.triage_db_path,
         )
     else:
         trained = classifier_persistence.load_or_train(
@@ -77,6 +112,7 @@ def _goldenset_train_classifier(args: argparse.Namespace) -> int:
             force_retrain=False,
             n_folds=args.folds,
             pca_dim=args.pca_dim,
+            triage_db_path=settings.triage_db_path,
         )
 
     # Append run-log entry so the FAIR audit trail is complete.
@@ -87,7 +123,7 @@ def _goldenset_train_classifier(args: argparse.Namespace) -> int:
         "git_commit": run_log.short_git_commit(settings.project_root),
         "classifier": trained.classifier_name,
         "type": "train_artifact",
-        "model_path": str(output_dir / f"{trained.classifier_name}.joblib"),
+        "model_path": str(classifier_persistence.model_path(output_dir, trained.classifier_name)),
         "golden_csv": str(golden_csv),
         "golden_csv_sha256_prefix": trained.golden_csv_sha256[:12],
         "thresholds": {
@@ -112,21 +148,19 @@ def _goldenset_eval_baseline(args: argparse.Namespace) -> int:
     """Phase 1.16 Step 0 — baseline + learning-curve measurement."""
     from zotero_summarizer.services.model import eval_baseline
     from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.golden.hybrid_gt import apply_hybrid
 
     settings = Settings.load(project_root=args.project_root)
     config = read_config(settings.config_path)
 
     golden_csv = Path(args.input or settings.golden_csv_path)
-    rows = eval_baseline.load_golden_rows(golden_csv)
+    rows = apply_hybrid(eval_baseline.load_golden_rows(golden_csv), settings.triage_db_path)
 
     timestamp = _utc_iso_now().replace(":", "").replace("-", "")[:15]
 
     if args.learning_curve:
-        if args.learning_curve_fractions:
-            fractions = tuple(
-                float(s.strip()) for s in args.learning_curve_fractions.split(",")
-            )
-        else:
+        fractions = args.learning_curve_fractions
+        if fractions is None:
             fractions = eval_baseline.DEFAULT_LEARNING_CURVE_FRACTIONS
         report = eval_baseline.run_learning_curve(
             rows,
@@ -134,6 +168,7 @@ def _goldenset_eval_baseline(args: argparse.Namespace) -> int:
             goals_config=config,
             classifier_name=args.classifier,
             fractions=fractions,
+            n_repeats=args.n_repeats,
             n_folds=args.n_folds,
             n_bootstrap=args.n_bootstrap,
             pca_dim=args.pca_dim,
@@ -167,24 +202,16 @@ def _goldenset_eval_baseline(args: argparse.Namespace) -> int:
 
 def _goldenset_tune(args: argparse.Namespace) -> int:
     """Sprint-3c — Optuna hyperparameter sweep over the LightGBM regressor."""
-    import csv as _csv
-
-    from zotero_summarizer.services._common import read_config
-    from zotero_summarizer.services.model.tune import (
-        DEFAULT_TUNED_PARAMS_PATH,
-        tune_lightgbm,
-    )
+    from zotero_summarizer.services._common import load_golden_rows, read_config
+    from zotero_summarizer.services.golden.hybrid_gt import apply_hybrid
+    from zotero_summarizer.services.model.tune import tune_lightgbm
 
     settings = Settings.load(project_root=args.project_root)
     input_csv = Path(args.input or settings.golden_csv_path)
-    if not input_csv.exists():
-        raise FileNotFoundError(f"Golden CSV not found at {input_csv}")
-
-    with input_csv.open("r", encoding="utf-8", newline="") as f:
-        rows = list(_csv.DictReader(f))
+    rows = apply_hybrid(load_golden_rows(input_csv), settings.triage_db_path)
 
     goals_config = read_config(settings.config_path)
-    output_path = Path(args.output) if args.output else DEFAULT_TUNED_PARAMS_PATH
+    output_path = Path(args.output) if args.output else settings.tuned_params_path
 
     result = tune_lightgbm(
         rows,
@@ -271,7 +298,7 @@ def register_goldenset(subparsers) -> None:
         "train-classifier",
         help=(
             "Train a classifier on the golden CSV and persist it to "
-            "~/.cache/zotero-summarizer/models/. The daemon's hybrid gate "
+            "<project-root>/data/models/. The daemon's hybrid gate "
             "loads this artifact at startup. Pure model output: no CV-row "
             "writeback to the golden CSV."
         ),
@@ -303,8 +330,8 @@ def register_goldenset(subparsers) -> None:
         "--output-dir",
         default=None,
         help=(
-            "Directory for model artefact. Default: ~/.cache/zotero-summarizer/models/. "
-            "Two files written: <classifier>.joblib + <classifier>.json (metadata)."
+            "Directory for model artefact. Default: <project-root>/data/models/. "
+            "One archive written: <classifier>.zip (model + metadata)."
         ),
     )
     gs_train.add_argument(
@@ -386,7 +413,7 @@ def register_goldenset(subparsers) -> None:
             "Sprint-3c (May 2026) — Optuna sweep over LightGBM hyperparameters "
             "and PCA dim. Maximises median per-fold Spearman ρ over a "
             "5-fold CV. Writes the winning params to "
-            "~/.cache/zotero-summarizer/optuna-best-params.json so the next "
+            "<project-root>/data/optuna-best-params.json so the next "
             "`train-classifier --force` retrain picks them up automatically."
         ),
     )
@@ -408,7 +435,7 @@ def register_goldenset(subparsers) -> None:
     )
     gs_tune.add_argument(
         "--output", default=None,
-        help="Where to write best params. Default: ~/.cache/zotero-summarizer/optuna-best-params.json",
+        help="Where to write best params. Default: <project-root>/data/optuna-best-params.json",
     )
     gs_tune.add_argument("--project-root", default=None)
     gs_tune.set_defaults(func=_goldenset_tune)

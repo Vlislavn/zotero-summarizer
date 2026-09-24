@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
-# Inject a short fail-fast reminder before Edit/Write/NotebookEdit on Python files.
-# Per IVAI-D001 (scripts/lint_ivai.py) and .github/instructions/python.instructions.md.
+# Inject fail-fast and simplification context before a Python edit.
 
 set -euo pipefail
 
 input="$(cat)"
-file_path="$(printf '%s' "$input" | jq -r '.tool_input.file_path // ""')"
+file_path="$(printf '%s' "$input" | jq -r '
+  if (.tool_input | type) == "object" then .tool_input.file_path // "" else "" end
+')"
+patch="$(printf '%s' "$input" | jq -r '
+  if (.tool_input | type) == "string" then .tool_input
+  elif (.tool_input | type) == "object" then .tool_input.patch // .tool_input.input // ""
+  else "" end
+')"
 
 case "$file_path" in
   *.py|*.pyi) ;;
-  *) exit 0 ;;
+  *) printf '%s' "$patch" | grep -Eq '\.pyi?([[:space:]:]|$)' || exit 0 ;;
 esac
 
 jq -n --arg msg "$(cat <<'EOF'
@@ -23,7 +29,17 @@ Before writing this file, verify the code:
 - Errors are signals — let them propagate
 
 If a fallback is genuinely required (boundary contract, user request), keep it narrow and document the user instruction that authorized it.
-Also: make sure files are <500 LOC strict, not more than 3 levels deep, and have a clear single responsibility. If not, refactor first before adding complexity.
+
+CODE-IN-HEAD SIMPLIFICATION
+- Use the `code-that-fits-in-your-head` skill for every code change.
+- Trace callers and search for an existing helper before writing.
+- Prefer deletion, reuse, or a direct stdlib/platform feature over new code or abstractions.
+- Keep responsibilities cohesive; do not split only to game a metric.
+- Hard limits: every Python file <=500 LOC; production function body <=88 code lines;
+  <=6 required parameters; control flow <=5 levels deep.
+- Before finishing, inspect the touched code for duplicated branches, dead paths,
+  unnecessary indirection, and nearby duplication. Simplify now when safe.
+- State the simplification assessment explicitly in the final response.
 EOF
 )" '{
   "hookSpecificOutput": {

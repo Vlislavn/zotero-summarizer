@@ -22,6 +22,7 @@ export default function VerdictPicker({
   value = null,
   onPick = () => {},
   disabled = false,
+  disabledPriorities = [],
   size = 'sm',
   label = null,
 }) {
@@ -35,7 +36,7 @@ export default function VerdictPicker({
           <button
             key={p.key}
             type="button"
-            disabled={disabled}
+            disabled={disabled || disabledPriorities.includes(p.key)}
             aria-pressed={active}
             onClick={() => onPick(p.key)}
             className={`${pad} rounded-lg font-semibold transition-colors border focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 disabled:opacity-50 disabled:cursor-not-allowed ${

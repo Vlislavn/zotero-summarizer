@@ -144,6 +144,9 @@ def list_triage_jobs(limit: int = 20, statuses: list[str] | None = None) -> list
 def mark_running_triage_jobs_interrupted() -> int:
     conn = _get_conn()
     try:
+        conn.execute(
+            "UPDATE triage_jobs SET status = 'cancelled', updated_at = datetime('now') WHERE status = 'cancelling'"
+        )
         cursor = conn.execute(
             """
             UPDATE triage_jobs

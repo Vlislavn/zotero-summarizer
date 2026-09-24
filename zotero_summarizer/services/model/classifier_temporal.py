@@ -16,6 +16,8 @@ from typing import Any
 import numpy as np
 
 from zotero_summarizer.services.model import classifier
+from zotero_summarizer.services.model.golden_metrics import spearman_correlation
+from zotero_summarizer.services.model.library_features import recompute_engagement_columns
 
 _TEMPORAL_HOLDOUT_FRACTION = 0.2
 _TEMPORAL_MIN_TEST = 30  # below this a forward Spearman is noise, not signal
@@ -79,27 +81,30 @@ def _temporal_holdout_metrics(
     groups: list[str],
     *,
     pca_dim: int,
+    lgbm_params: dict[str, Any] | None = None,
+    pca_specter_dim: int | None = None,
 ) -> dict[str, Any] | None:
     """Forward-looking Spearman on the newest-20% holdout; one extra fit.
 
     ``matrix`` is any object exposing ``X``/``y``/``sample_weight`` arrays (the
     training :class:`_TrainMatrix`). ``None`` is the defined "metric not
     computable" result — holdout under ``_TEMPORAL_MIN_TEST`` rows or a constant
-    label vector on either side (Spearman undefined) — which small test fixtures
-    legitimately hit.
+    label vector on either side or constant predictions (Spearman undefined).
     """
-    from scipy.stats import spearmanr
-
     X, y, sw = matrix.X, matrix.y, matrix.sample_weight
     tr, te = _temporal_group_split(train_rows, groups)
     if len(te) < _TEMPORAL_MIN_TEST:
         return None
     if len(set(y[tr].tolist())) < 2 or len(set(y[te].tolist())) < 2:
         return None
+    X = recompute_engagement_columns(X, train_rows, tr, matrix.corpus_affinity)
     _, p_te = classifier._fit_predict(
         classifier_name, X[tr], y[tr], X[te],
         pca_dim=pca_dim, return_train_probs=False,
         objective="regression", sample_weight=sw[tr],
+        lgbm_params=lgbm_params, pca_specter_dim=pca_specter_dim,
     )
-    rho = float(spearmanr(y[te], p_te).statistic)
+    rho = spearman_correlation(y[te], p_te)
+    if rho is None:
+        return None
     return {"temporal_spearman": round(rho, 4), "temporal_holdout_n": int(len(te))}

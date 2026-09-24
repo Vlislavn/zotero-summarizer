@@ -23,7 +23,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from zotero_summarizer.domain import LABEL_TAG_PREFIX, PRIORITY_TO_RELEVANCE
 from zotero_summarizer.services import emoji_signals
+from zotero_summarizer.services.golden import user_labels
 
 
 @dataclass(frozen=True)
@@ -95,55 +97,38 @@ class LabelProvenance:
 
     # Flags for the UI
     flags: list[str] = field(default_factory=list)
+    explicit_label: str | None = None
 
 
-def _hard_dont_read_provenance(
+def _short_circuit_provenance(
+    common: dict[str, Any],
     *,
-    item_key: str,
-    title: str,
-    annotation_count: int,
-    user_note_count: int,
-    days_since_added: int,
-    persisted_priority: str,
-    persisted_score: float,
-    is_direct_user_verdict: bool,
-    flags: list[str],
-    in_trash_override: bool,
-    hard_veto_emojis: list[str],
+    explicit_label: str | None = None,
+    in_trash_override: bool = False,
+    hard_veto_emojis: tuple[str, ...] | list[str] = (),
 ) -> LabelProvenance:
-    """Fixed ``dont_read``/high-strength provenance for a hard short-circuit
-    (in-trash or hard-veto emoji): every engagement signal is zeroed."""
+    """An explicit label or hard veto bypasses all engagement scoring."""
+    priority = explicit_label if explicit_label is not None else "dont_read"
     return LabelProvenance(
-        item_key=item_key,
-        title=title,
-        derived_priority="dont_read",
-        derived_score=1.0,
+        **common,
+        derived_priority=priority,
+        derived_score=PRIORITY_TO_RELEVANCE[priority],
         derived_strength="high",
+        explicit_label=explicit_label,
         in_trash_override=in_trash_override,
-        hard_veto_emojis=hard_veto_emojis,
-        baseline=emoji_signals.NEUTRAL_SCORE,
+        hard_veto_emojis=list(hard_veto_emojis),
         emoji_contributions=[],
-        annotation_count=annotation_count,
         annotation_score_raw=0.0,
         annotation_score_capped=0.0,
         annotation_decayed=0.0,
-        user_note_count=user_note_count,
         user_note_score_raw=0.0,
         user_note_score_capped=0.0,
         user_note_decayed=0.0,
-        days_since_added=days_since_added,
-        decay_factor=emoji_signals.decay_weight(days_since_added),
+        decay_factor=emoji_signals.decay_weight(common["days_since_added"]),
         engagement_sum_raw=0.0,
         engagement_sum_capped=0.0,
         engagement_sum_decayed=0.0,
-        threshold_dont_read_upper=emoji_signals.SCORE_DONT_READ_UPPER,
-        threshold_could_read_upper=emoji_signals.SCORE_COULD_READ_UPPER,
-        threshold_should_read_upper=emoji_signals.SCORE_SHOULD_READ_UPPER,
-        persisted_priority=persisted_priority,
-        persisted_score=persisted_score,
-        is_direct_user_verdict=is_direct_user_verdict,
-        is_manual_override=_is_manual_override("dont_read", persisted_priority, is_direct_user_verdict),
-        flags=flags,
+        is_manual_override=_is_manual_override(priority, common["persisted_priority"], common["is_direct_user_verdict"]),
     )
 
 
@@ -180,11 +165,18 @@ def compute_provenance(
         days_since_added=days_since_added,
         persisted_priority=persisted_priority, persisted_score=persisted_score,
         is_direct_user_verdict=is_direct_user_verdict, flags=flags,
+        baseline=emoji_signals.NEUTRAL_SCORE,
+        threshold_dont_read_upper=emoji_signals.SCORE_DONT_READ_UPPER,
+        threshold_could_read_upper=emoji_signals.SCORE_COULD_READ_UPPER,
+        threshold_should_read_upper=emoji_signals.SCORE_SHOULD_READ_UPPER,
     )
 
-    # Hard short-circuit 1: trash → dont_read
+    explicit = user_labels.detect_label(tags)
+    if explicit is not None:
+        return _short_circuit_provenance(common, explicit_label=explicit)
+
     if in_trash:
-        return _hard_dont_read_provenance(**common, in_trash_override=True, hard_veto_emojis=[])
+        return _short_circuit_provenance(common, in_trash_override=True)
 
     # Hard short-circuit 2: hard-veto emoji → dont_read
     veto_emojis = [
@@ -192,25 +184,18 @@ def compute_provenance(
         if any(e in t for t in tags if t)
     ]
     if veto_emojis:
-        return _hard_dont_read_provenance(**common, in_trash_override=False, hard_veto_emojis=veto_emojis)
+        return _short_circuit_provenance(common, hard_veto_emojis=veto_emojis)
 
     # Additive scoring path
     signals = emoji_signals.detect_signals(tags)
     decay = emoji_signals.decay_weight(days_since_added)
 
-    emoji_contribs: list[EmojiContribution] = []
-    emoji_sum_raw = 0.0
-    for s in signals:
-        emoji_contribs.append(
-            EmojiContribution(
-                emoji=s.emoji,
-                description=s.description,
-                tier=s.tier,
-                raw_delta=s.score_delta,
-                decayed_delta=s.score_delta * decay,
-            )
-        )
-        emoji_sum_raw += s.score_delta
+    emoji_contribs = [
+        EmojiContribution(emoji=s.emoji, description=s.description, tier=s.tier,
+                          raw_delta=s.score_delta, decayed_delta=s.score_delta * decay)
+        for s in signals
+    ]
+    emoji_sum_raw = emoji_signals.score_signals(signals)
 
     ann_raw = annotation_count * emoji_signals.ANNOTATION_SCORE_DELTA
     ann_capped = min(ann_raw, emoji_signals.ANNOTATION_SCORE_CAP)
@@ -242,38 +227,26 @@ def compute_provenance(
         flags.append("near_must_read")  # within 0.2 of the must_read boundary
 
     return LabelProvenance(
-        item_key=item_key,
-        title=title,
+        **common,
         derived_priority=priority,
         derived_score=final_score,
         derived_strength=strength,
         in_trash_override=False,
         hard_veto_emojis=[],
-        baseline=emoji_signals.NEUTRAL_SCORE,
         emoji_contributions=emoji_contribs,
-        annotation_count=annotation_count,
         annotation_score_raw=round(ann_raw, 4),
         annotation_score_capped=round(ann_capped, 4),
         annotation_decayed=round(ann_capped * decay, 4),
-        user_note_count=user_note_count,
         user_note_score_raw=round(note_raw, 4),
         user_note_score_capped=round(note_capped, 4),
         user_note_decayed=round(note_capped * decay, 4),
-        days_since_added=days_since_added,
         decay_factor=round(decay, 4),
         engagement_sum_raw=round(engagement_raw, 4),
         engagement_sum_capped=round(engagement_capped, 4),
         engagement_sum_decayed=round(engagement_decayed, 4),
-        threshold_dont_read_upper=emoji_signals.SCORE_DONT_READ_UPPER,
-        threshold_could_read_upper=emoji_signals.SCORE_COULD_READ_UPPER,
-        threshold_should_read_upper=emoji_signals.SCORE_SHOULD_READ_UPPER,
-        persisted_priority=persisted_priority,
-        persisted_score=persisted_score,
-        is_direct_user_verdict=is_direct_user_verdict,
         is_manual_override=_is_manual_override(
             priority, persisted_priority, is_direct_user_verdict,
         ),
-        flags=flags,
     )
 
 
@@ -308,6 +281,11 @@ def provenance_from_row(row: dict[str, str]) -> LabelProvenance:
         raise ValueError("row missing item_key")
     title = (row.get("title") or "").strip()
     tags = [t for t in (row.get("matched_emojis") or "").split() if t]
+    if (row.get("gold_signal_tier") or "").strip() == "user_label":
+        original = (row.get("gold_priority_inferred") or "").strip()
+        if original not in PRIORITY_TO_RELEVANCE:
+            raise ValueError("user_label row requires a valid gold_priority_inferred")
+        tags.append(f"{LABEL_TAG_PREFIX}{original}")
     in_trash = (row.get("in_trash") or "").strip().lower() == "true"
     annotation_count = _parse_int(
         row.get("annotation_count"), default=0, field_name="annotation_count",
@@ -400,6 +378,7 @@ def provenance_to_dict(p: LabelProvenance) -> dict[str, Any]:
         "is_manual_override": p.is_manual_override,
         "flags": list(p.flags),
         "short_circuits": {
+            "explicit_label": p.explicit_label,
             "in_trash_override": p.in_trash_override,
             "hard_veto_emojis": list(p.hard_veto_emojis),
         },

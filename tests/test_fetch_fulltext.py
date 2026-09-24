@@ -1,112 +1,126 @@
-"""services/library/fulltext — fetch arXiv PDFs and attach to Zotero.
+"""Multi-source PDF acquisition → backup-first Zotero attachment."""
+from pathlib import Path
 
-Stubs the network fetch + the writer so the classification (skip-has-pdf /
-no-arxiv / fetch-fail) and the add_attachment change shape are tested without
-touching the network or a real Zotero DB."""
-from __future__ import annotations
+import pytest
 
-
-from zotero_summarizer.services.library import fulltext
+from zotero_summarizer.integrations._zotero_read_common import _arxiv_id_from_url_or_doi
+from zotero_summarizer.services.library import _pdf_acquire, fulltext
 
 
 class _FakeWriter:
-    def __init__(self, running: bool = False):
-        self._running = running
-        self.calls: list = []
+    def __init__(self, *, running=False, fail=False):
+        self.running, self.fail, self.calls = running, fail, []
 
-    def is_connector_running(self) -> bool:
-        return self._running
+    def is_connector_running(self):
+        return self.running
 
     def apply_changes(self, changes, create_backup):
         self.calls.append((changes, create_backup))
-        return {"applied_ids": list(range(len(changes))), "failed": [], "backup_path": "/tmp/zotero.bak"}
+        applied = [] if self.fail else [change["id"] for change in changes]
+        return {"applied_ids": applied, "failed": [{}] if self.fail else [],
+                "backup_path": "/tmp/zotero.bak"}
 
 
-def _arxiv(key: str) -> dict:
-    return {"item_key": key, "has_pdf": False, "url": "http://arxiv.org/abs/1706.03762", "doi": ""}
+def _item(key="A", **extra):
+    return {"item_key": key, "has_pdf": False, "url": "", "doi": "", **extra}
 
 
-def test_attaches_arxiv_pdf_with_backup_first(monkeypatch, tmp_path):
-    pdf = tmp_path / "1706.03762.pdf"
-    pdf.write_bytes(b"%PDF-1.4\n")
-    monkeypatch.setattr(fulltext.pdf_fetch, "fetch_pdf", lambda url, **k: pdf)
-    writer = _FakeWriter()
-    monkeypatch.setattr(fulltext, "get_zotero_writer_or_raise", lambda: writer)
-
-    res = fulltext.fetch_fulltext_for_items([_arxiv("A")])
-
-    assert res["attached"] == 1 and res["backup_path"] == "/tmp/zotero.bak"
-    changes, create_backup = writer.calls[0]
-    assert create_backup is True                              # backup-first
-    c = changes[0]
-    assert c["change_type"] == "add_attachment" and c["item_key"] == "A"
-    assert c["payload_json"]["source_path"] == str(pdf)
-    assert c["payload_json"]["source_url"].endswith("1706.03762.pdf")  # arXiv PDF url
-    assert c["payload_json"]["filename"] == "1706.03762.pdf"
-
-
-def test_skips_items_that_already_have_a_pdf(monkeypatch):
-    called = {"n": 0}
-    monkeypatch.setattr(fulltext.pdf_fetch, "fetch_pdf", lambda *a, **k: called.__setitem__("n", called["n"] + 1))
-    writer = _FakeWriter()
-    monkeypatch.setattr(fulltext, "get_zotero_writer_or_raise", lambda: writer)
-
-    res = fulltext.fetch_fulltext_for_items([{**_arxiv("A"), "has_pdf": True}])
-
-    assert res["skipped_has_pdf"] == 1 and res["attached"] == 0
-    assert called["n"] == 0 and writer.calls == []            # no fetch, no write
-
-
-def test_skips_items_without_an_arxiv_link(monkeypatch):
-    monkeypatch.setattr(fulltext.pdf_fetch, "fetch_pdf", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not fetch")))
-    writer = _FakeWriter()
-    monkeypatch.setattr(fulltext, "get_zotero_writer_or_raise", lambda: writer)
-
-    res = fulltext.fetch_fulltext_for_items(
-        [{"item_key": "A", "has_pdf": False, "url": "https://example.com/paper", "doi": "10.1/x"}]
+def _acquired(tmp_path: Path, source: str):
+    path = tmp_path / f"{source}.pdf"
+    path.write_bytes(b"%PDF-1.4\n")
+    return _pdf_acquire.AcquireResult(
+        path=path, source=source, source_url=f"https://oa.test/{source}.pdf",
+        outcome=f"acquired_{source}",
     )
 
-    assert res["no_arxiv"] == 1 and res["attached"] == 0 and writer.calls == []
 
-
-def test_resolves_ar5iv_and_arxiv_html_urls(monkeypatch, tmp_path):
-    # ar5iv / arxiv.org/html URLs embed the id but dodge the abs|pdf matcher —
-    # they must still resolve to the arXiv PDF (real-data gap found in review).
-    pdf = tmp_path / "p.pdf"
-    pdf.write_bytes(b"%PDF-1.4\n")
-    monkeypatch.setattr(fulltext.pdf_fetch, "fetch_pdf", lambda url, **k: pdf)
+@pytest.mark.parametrize("source", ["arxiv", "unpaywall", "pmc", "openalex", "direct"])
+def test_attaches_every_oa_source_with_typed_outcome(monkeypatch, tmp_path, source):
+    acquired = _acquired(tmp_path, source)
+    monkeypatch.setattr(fulltext._pdf_acquire, "acquire_pdf_for", lambda *a, **k: acquired)
     writer = _FakeWriter()
     monkeypatch.setattr(fulltext, "get_zotero_writer_or_raise", lambda: writer)
-    items = [
-        {"item_key": "AR5IV", "has_pdf": False, "url": "https://ar5iv.labs.arxiv.org/html/2410.17309", "doi": ""},
-        {"item_key": "HTML", "has_pdf": False, "url": "https://arxiv.org/html/2401.00001v2", "doi": ""},
+
+    result = fulltext.fetch_fulltext_for_items([_item()])
+
+    assert result["outcomes"][0]["status"] == f"attached_{source}"
+    assert result["attached"] == 1 and result["backup_path"] == "/tmp/zotero.bak"
+    changes, backup = writer.calls[0]
+    assert backup is True and changes[0]["change_type"] == "add_attachment"
+    assert changes[0]["payload_json"]["source_url"] == acquired.source_url
+
+
+def test_cached_deep_review_pdf_is_reused_without_acquisition(monkeypatch, tmp_path):
+    cached = _acquired(tmp_path, "unpaywall")
+    monkeypatch.setattr(
+        fulltext._pdf_acquire, "acquire_pdf_for",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not refetch")),
+    )
+    monkeypatch.setattr(fulltext, "get_zotero_writer_or_raise", lambda: _FakeWriter())
+    item = _item(cached_acquisition={
+        "path": str(cached.path), "source": cached.source, "source_url": cached.source_url,
+    })
+
+    result = fulltext.fetch_fulltext_for_items([item])
+
+    assert result["outcomes"][0] == {
+        "item_key": "A", "path": str(cached.path), "source": "unpaywall",
+        "source_url": cached.source_url, "status": "attached_cached",
+    }
+
+
+def test_skip_unavailable_and_write_failure_are_distinct(monkeypatch):
+    results = {
+        "NO": _pdf_acquire.AcquireResult(path=None, outcome="no_oa_source"),
+        "FETCH": _pdf_acquire.AcquireResult(path=None, outcome="fetch_failed"),
+        "POLICY": _pdf_acquire.AcquireResult(path=None, outcome="browser_not_attempted"),
+        "OFFLINE": _pdf_acquire.AcquireResult(path=None, outcome="offline_uncached"),
+        "EXTRA": _pdf_acquire.AcquireResult(path=None, outcome="browser_extra_unavailable"),
+        "LOGIN": _pdf_acquire.AcquireResult(path=None, outcome="needs_login"),
+    }
+    monkeypatch.setattr(fulltext._pdf_acquire, "acquire_pdf_for", lambda key, *_a, **_k: results[key])
+    writer = _FakeWriter()
+    monkeypatch.setattr(fulltext, "get_zotero_writer_or_raise", lambda: writer)
+
+    result = fulltext.fetch_fulltext_for_items([
+        _item("HAVE", has_pdf=True), *(_item(key) for key in results),
+    ])
+
+    assert [row["status"] for row in result["outcomes"]] == [
+        "skipped_has_pdf", "no_oa_source", "fetch_failed", "browser_not_attempted",
+        "offline_uncached", "browser_extra_unavailable", "needs_login",
     ]
-    res = fulltext.fetch_fulltext_for_items(items)
-    assert res["attached"] == 2 and res["no_arxiv"] == 0
-    urls = {c["item_key"]: c["payload_json"]["source_url"] for c in writer.calls[0][0]}
-    assert urls["AR5IV"].endswith("2410.17309.pdf")
-    assert "2401.00001" in urls["HTML"]
+    assert set(result) == {"attached", "skipped_has_pdf", "backup_path", "outcomes"}
+    assert result["attached"] == 0 and result["skipped_has_pdf"] == 1
+    assert writer.calls == []
 
 
-def test_arxiv_only_does_not_grab_random_pdf_urls():
-    # The arXiv-only contract: a non-arXiv .pdf URL must NOT resolve (we never
-    # attach a random publisher PDF — the goal is arXiv full text).
-    assert fulltext._arxiv_pdf_url("https://ar5iv.labs.arxiv.org/html/2410.17309", "").endswith("2410.17309.pdf")
-    assert fulltext._arxiv_pdf_url("https://arxiv.org/abs/1706.03762", "").endswith("1706.03762.pdf")
-    assert fulltext._arxiv_pdf_url("https://journal.example.com/paper.pdf", "") is None
+def test_write_failure_is_per_item(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        fulltext._pdf_acquire, "acquire_pdf_for", lambda *a, **k: _acquired(tmp_path, "arxiv")
+    )
+    monkeypatch.setattr(fulltext, "get_zotero_writer_or_raise", lambda: _FakeWriter(fail=True))
+    result = fulltext.fetch_fulltext_for_items([_item()])
+    assert result["outcomes"][0]["status"] == "write_failed" and result["attached"] == 0
 
 
-def test_fetch_failure_recorded_not_fatal(monkeypatch):
-    monkeypatch.setattr(fulltext.pdf_fetch, "fetch_pdf", lambda url, **k: None)  # arXiv 404/non-PDF
-    writer = _FakeWriter()
-    monkeypatch.setattr(fulltext, "get_zotero_writer_or_raise", lambda: writer)
+def test_bulk_delegates_to_same_engine(monkeypatch):
+    reader = type("Reader", (), {
+        "get_all_items": lambda self, **_k: {"items": [{"item_key": "A", "has_pdf": False}]},
+        "get_field_values": lambda self, field: {"A": "10.1/x" if field == "DOI" else ""},
+    })()
+    seen = {}
+    monkeypatch.setattr(fulltext, "get_zotero_reader_or_raise", lambda: reader)
+    monkeypatch.setattr(
+        fulltext, "fetch_fulltext_for_items",
+        lambda items, **kw: seen.update(items=items, kw=kw) or {"attached": 1},
+    )
+    assert fulltext.fetch_fulltext_bulk()["attached"] == 1
+    assert seen["items"][0]["doi"] == "10.1/x"
 
-    res = fulltext.fetch_fulltext_for_items([_arxiv("A"), _arxiv("B")])
 
-    assert res["attached"] == 0 and res["failed_count"] == 2 and writer.calls == []
-
-
-def test_requires_force_when_zotero_running(monkeypatch):
+def test_connector_guard_and_arxiv_variants(monkeypatch):
     monkeypatch.setattr(fulltext, "get_zotero_writer_or_raise", lambda: _FakeWriter(running=True))
-    res = fulltext.fetch_fulltext_for_items([_arxiv("A")], force=False)
-    assert res.get("requires_force") is True
+    assert fulltext.fetch_fulltext_for_items([_item()]).get("requires_force") is True
+    assert _arxiv_id_from_url_or_doi("https://ar5iv.labs.arxiv.org/html/2410.17309", "") == "2410.17309"
+    assert _arxiv_id_from_url_or_doi("https://arxiv.org/html/2401.00001v2", "") == "2401.00001v2"

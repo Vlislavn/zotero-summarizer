@@ -1,13 +1,4 @@
-// First-run wizard orchestrator. Owns:
-//   - the active step index (0..3)
-//   - the shared `draft` form state, seeded from GET /api/config (so a returning
-//     user resumes their real config, never a blank slate) + a sensible default
-//     triage-criteria prefill
-//   - per-step validity (which gates Next + the final Finish)
-//
-// Finish writes formStateToConfig(draft, baseConfig) via PUT /api/config, then
-// invalidates ['setup-status'] and advances to the Done step. Skippable and
-// resumable: "Skip for now" persists zs:setupDismissed=1 and routes home.
+// Skippable, resumable mode → Zotero → model (if selected) → research wizard.
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -25,13 +16,40 @@ import StepDone from '../components/setup/StepDone.jsx';
 import { Banner } from '../components/form/Fields.jsx';
 import Button from '../components/ui/Button.jsx';
 import { validateSetup } from '../api/setupApi.js';
+import { readStoredJson, writeStorage } from '../utils/safeStorage.js';
 
-// A sensible, editable default so the Describe step is never blank.
 const DEFAULT_TRIAGE_CRITERIA = [
   'Directly advances one of my research goals',
   'Introduces a method, dataset, or result I could build on',
   'Strong venue or credible authors',
 ].join('\n');
+const STEP_LABELS = ['Choose mode', 'Zotero sync', 'Connect LLM', 'Describe research'];
+const PROGRESS_KEY = 'zs_setup_progress_v1';
+
+function savedProgress() {
+  return readStoredJson(PROGRESS_KEY, {}, (value) => value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function modeMatchesStages(routing, mode) {
+  if (mode === 'none') return true;
+  if (!routing?.default?.model) return false;
+  const providers = new Map((routing.providers || []).map((provider) => [provider.name, provider]));
+  return ['default', 'feed', 'backlog', 'deep_review'].every((stage) => {
+    const selection = routing[stage] || {};
+    const provider = providers.get(selection.provider || routing.default.provider);
+    const model = selection.model || routing.default.model;
+    if (!provider || !model) return false;
+    if (!provider.base_url && provider.type !== 'anthropic') return false;
+    let local = false;
+    if (provider.base_url) {
+      try {
+        const host = new URL(provider.base_url).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+        local = ['localhost', '127.0.0.1', '::1'].includes(host);
+      } catch { return false; }
+    }
+    return mode === 'local' ? local : !local;
+  });
+}
 
 export default function SetupFlow() {
   const navigate = useNavigate();
@@ -40,33 +58,22 @@ export default function SetupFlow() {
 
   const configQuery = useQuery({ queryKey: ['runtime-config'], queryFn: fetchConfig });
 
-  const [step, setStep] = useState(0);
-  // Furthest step the user has actually reached. A step only earns its green
-  // "done" check once it's been reached AND is valid — otherwise step 3, whose
-  // prefilled defaults are valid from the start, would show done before the user
-  // ever sees it (a false Goal-Gradient signal).
-  const [maxStepReached, setMaxStepReached] = useState(0);
-  const [draft, setDraft] = useState(null);
-  // Tracks whether the LLM "Test connection" passed for the current fields.
-  // Advisory only (populates the model datalist + the success pill) — it does
-  // NOT gate Next: the secret lives outside the app (.env), so a first-run user
-  // who hasn't set it yet must still be able to finish setup (Tesler's Law —
-  // never trap the user). Next gates on structural validity instead.
+  const saved = useMemo(savedProgress, []);
+  const [mode, setMode] = useState(saved.mode || null);
+  const [step, setStep] = useState(saved.mode ? (saved.step || 0) : 0);
+  const [maxStepReached, setMaxStepReached] = useState(saved.mode ? (saved.maxStepReached || 0) : 0);
+  const [draft, setDraft] = useState(saved.draft || null);
   const [llmTestedOk, setLlmTestedOk] = useState(false);
-  // Field errors from the last describe-step validate-config.
   const [fieldErrors, setFieldErrors] = useState([]);
   const [finishError, setFinishError] = useState('');
-  // Set when the Zotero paths were saved during setup → StepDone reminds to restart.
-  const [pathsChanged, setPathsChanged] = useState(false);
+  const [pathsChanged, setPathsChanged] = useState(Boolean(saved.pathsChanged));
 
-  // Path draft is separate from the GoalsConfig draft: paths are written via the
-  // dedicated /api/setup/paths route, not the config PUT.
-  const [draftPaths, setDraftPaths] = useState({ zotero_data_dir: '', pdf_root: '' });
+  const [draftPaths, setDraftPaths] = useState(saved.draftPaths || { zotero_data_dir: '', pdf_root: '' });
 
-  // Seed the GoalsConfig draft once the server config lands.
   useEffect(() => {
     if (configQuery.data && draft === null) {
       const seeded = configToFormState(configQuery.data);
+      if (seeded?.research_goals_text?.startsWith('Replace with your ')) seeded.research_goals_text = '';
       if (seeded && !seeded.triage_criteria_text) {
         seeded.triage_criteria_text = DEFAULT_TRIAGE_CRITERIA;
       }
@@ -74,7 +81,6 @@ export default function SetupFlow() {
     }
   }, [configQuery.data, draft]);
 
-  // Seed the path draft from the live status payload (the resolved values).
   useEffect(() => {
     if (status?.paths) {
       setDraftPaths((prev) => {
@@ -89,13 +95,8 @@ export default function SetupFlow() {
 
   const validity = useMemo(() => {
     const zoteroOk = true;
-    // LLM step: structurally well-formed config, NOT a passing live test. The
-    // provider needs a name for the key env var, a base URL (openai only), and a
-    // default model. The endpoint being reachable / the secret being exported are
-    // surfaced as advisory signals, never as a gate (the app degrades gracefully
-    // without a live LLM, and the secret is set outside the app).
     const provider = (draft?.llm_routing?.providers || [])[0];
-    const llmOk = Boolean(
+    const llmOk = draft?.llm_enabled === false || Boolean(
       provider
         && provider.api_key_env && String(provider.api_key_env).trim()
         && (provider.type !== 'openai' || (provider.base_url && String(provider.base_url).trim()))
@@ -105,14 +106,19 @@ export default function SetupFlow() {
     const goalsOk = Boolean(
       draft && draft.research_goals_text && draft.research_goals_text.trim().length > 0,
     );
-    return [zoteroOk, llmOk, goalsOk];
-  }, [draft]);
+    return [Boolean(mode), zoteroOk,
+      mode === 'none' || (llmOk && modeMatchesStages(draft?.llm_routing, mode)), goalsOk];
+  }, [draft, mode]);
 
   const allValid = validity.every(Boolean);
 
-  // Remember the furthest step reached so StepProgress only credits steps the
-  // user has actually visited (monotonic — going Back keeps earlier checks).
   useEffect(() => { setMaxStepReached((m) => Math.max(m, step)); }, [step]);
+
+  useEffect(() => {
+    if (draft) writeStorage(PROGRESS_KEY, JSON.stringify({
+      step, maxStepReached, draft, draftPaths, pathsChanged, mode,
+    }));
+  }, [step, maxStepReached, draft, draftPaths, pathsChanged, mode]);
 
   const finishMutation = useMutation({
     mutationFn: (payload) => updateConfig(payload),
@@ -123,12 +129,12 @@ export default function SetupFlow() {
         queryClient.invalidateQueries({ queryKey: ['runtime-config'] });
       }
       queryClient.invalidateQueries({ queryKey: ['setup-status'] });
-      setStep(3);
+      queryClient.removeQueries({ queryKey: ['setup-doctor'] });
+      setStep(4);
     },
     onError: (err) => setFinishError(humanizeError(err)),
   });
 
-  // Validate the GoalsConfig before saving so field errors surface inline.
   const validateMutation = useMutation({
     mutationFn: (cfg) => validateSetup({ config: cfg, test_connection: false }),
   });
@@ -146,16 +152,11 @@ export default function SetupFlow() {
     setFinishError('');
     const payload = formStateToConfig(draft, configQuery.data);
     // Field-level validation first; show inline errors and stop if invalid.
-    try {
-      const res = await validateMutation.mutateAsync(payload);
-      if (res && res.valid === false) {
-        setFieldErrors(res.field_errors || []);
-        setStep(2); // jump back to the describe step where the errors live
-        return;
-      }
-    } catch {
-      // Validation endpoint unreachable — fall through to the PUT, which
-      // re-validates strictly server-side and surfaces its own error banner.
+    const res = await validateMutation.mutateAsync(payload).catch(() => null);
+    if (res && res.valid === false) {
+      setFieldErrors(res.field_errors || []);
+      setStep(3);
+      return;
     }
     setFieldErrors([]);
     finishMutation.mutate(payload);
@@ -174,8 +175,10 @@ export default function SetupFlow() {
     );
   }
 
-  const stepValid = step < 3 ? validity[step] : true;
-  const isLast = step === 2;
+  const stepValid = step < 4 ? validity[step] : true;
+  const isLast = step === 3;
+  const labels = mode === 'none' ? STEP_LABELS.filter((_, i) => i !== 2) : STEP_LABELS;
+  const progressStep = mode === 'none' && step === 3 ? 2 : step;
 
   return (
     <div className="max-w-2xl mx-auto pb-10">
@@ -183,7 +186,7 @@ export default function SetupFlow() {
         <header className="space-y-3">
           <div className="flex items-baseline justify-between gap-3">
             <h2 className="text-lg font-bold text-slate-900">Set up Zotero Summarizer</h2>
-            {step < 3 && (
+            {step < 4 && (
               <button
                 type="button"
                 onClick={handleSkip}
@@ -193,12 +196,35 @@ export default function SetupFlow() {
               </button>
             )}
           </div>
-          {step < 3 && (
-            <StepProgress current={step} validity={validity} maxReached={maxStepReached} />
+          {step < 4 && (
+            <StepProgress current={progressStep} validity={mode === 'none' ? validity.filter((_, i) => i !== 2) : validity}
+              maxReached={mode === 'none' && maxStepReached >= 3 ? 2 : maxStepReached} labels={labels} />
+          )}
+          {step < 4 && (
+            <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+              Step {progressStep + 1} of {labels.length}: {STEP_LABELS[step]}
+            </p>
           )}
         </header>
 
         {step === 0 && (
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-semibold text-slate-800">How should summaries run?</legend>
+            {[
+              ['local', 'Full local', 'All inference stays on this machine. Choose a compatible profile next.'],
+              ['hosted', 'Hosted model', 'Connect an AI service with a key.'],
+              ['none', 'Triage without an LLM', 'Classifier/search only. AI reviews, Ask Paper and adding new feed papers to Zotero stay off; manual Zotero imports still work.'],
+            ].map(([id, label, description]) => (
+              <label key={id} className="flex items-start gap-2 rounded-lg border border-slate-200 p-3 cursor-pointer">
+                <input type="radio" name="setup-mode" className="mt-0.5" checked={mode === id}
+                  onChange={() => { setMode(id); patchDraft({ llm_enabled: id !== 'none' }); }} />
+                <span><span className="block text-sm font-medium">{label}</span>
+                  <span className="block text-xs text-slate-500">{description}</span></span>
+              </label>
+            ))}
+          </fieldset>
+        )}
+        {step === 1 && (
           <StepConnectZotero
             status={status}
             draftPaths={draftPaths}
@@ -207,31 +233,26 @@ export default function SetupFlow() {
             onPathsSaved={() => setPathsChanged(true)}
           />
         )}
-        {step === 1 && (
-          <StepConnectLlm
-            status={status}
-            routing={draft.llm_routing}
-            onPatchRouting={patchRouting}
-            testedOk={llmTestedOk}
-            onTested={setLlmTestedOk}
-          />
+        {step === 2 && mode !== 'none' && (
+          <StepConnectLlm status={status} routing={draft.llm_routing} mode={mode}
+            onPatchRouting={patchRouting} testedOk={llmTestedOk} onTested={setLlmTestedOk} />
         )}
-        {step === 2 && (
+        {step === 3 && (
           <StepDescribeResearch
             draft={draft}
             onPatchDraft={patchDraft}
             fieldErrors={fieldErrors}
           />
         )}
-        {step === 3 && <StepDone pathsChanged={pathsChanged} />}
+        {step === 4 && <StepDone pathsChanged={pathsChanged} />}
 
         {finishError && <Banner kind="error">{finishError}</Banner>}
 
-        {step < 3 && (
+        {step < 4 && (
           <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">
             <Button
               variant="secondary"
-              onClick={() => setStep((s) => Math.max(0, s - 1))}
+              onClick={() => setStep((s) => mode === 'none' && s === 3 ? 1 : Math.max(0, s - 1))}
               disabled={step === 0}
             >
               Back
@@ -240,13 +261,13 @@ export default function SetupFlow() {
               <Button
                 onClick={handleFinish}
                 disabled={!allValid || finishMutation.isPending || validateMutation.isPending}
-                title={!allValid ? 'Complete the LLM and research steps to finish.' : undefined}
+                title={!allValid ? 'Choose an AI mode and add your research goals to finish.' : undefined}
               >
                 {finishMutation.isPending || validateMutation.isPending ? 'Saving…' : 'Finish'}
               </Button>
             ) : (
               <Button
-                onClick={() => setStep((s) => Math.min(2, s + 1))}
+                onClick={() => setStep((s) => mode === 'none' && s === 1 ? 3 : Math.min(3, s + 1))}
                 disabled={!stepValid}
                 title={!stepValid ? 'Finish this step to continue.' : undefined}
               >

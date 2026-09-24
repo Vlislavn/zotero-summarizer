@@ -1,7 +1,7 @@
 """Read-only sqlite access for the daily slate.
 
 Single responsibility: open the triage DB read-only, fetch rows by decision
-within a lookback window. No allocation, no JSON parsing — those live in
+without a pre-filter cap. No allocation, no JSON parsing — those live in
 sibling modules.
 
 Fail-fast posture:
@@ -13,7 +13,6 @@ Fail-fast posture:
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -30,29 +29,18 @@ def fetch_rows_by_decisions(
     conn: sqlite3.Connection,
     *,
     decisions: list[str],
-    lookback_hours: int,
-    now: datetime,
 ) -> list[dict[str, Any]]:
-    """Fetch rows whose decision is in ``decisions`` within the lookback window.
-
-    The ``created_at`` column stores text in either ISO-8601 or sqlite's
-    ``YYYY-MM-DD HH:MM:SS`` format. Both are lexicographically comparable
-    after we normalise the cutoff to the same shape, so a string ``>=``
-    works without parsing every row.
-    """
+    """Fetch the primary rows; the shared loader cleans before applying limits."""
     if not decisions:
         raise ValueError("decisions must be non-empty")
-    cutoff_dt = now.astimezone(timezone.utc) - timedelta(hours=int(lookback_hours))
-    cutoff_iso = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
     placeholders = ",".join("?" * len(decisions))
     rows = conn.execute(
         f"""
         SELECT *
         FROM processed_feed_items
         WHERE decision IN ({placeholders})
-          AND created_at >= ?
         """,
-        (*decisions, cutoff_iso),
+        decisions,
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -161,41 +149,9 @@ def fetch_trashed_guids(
     return {str(r["guid"]).strip() for r in rows if str(r["guid"] or "").strip()}
 
 
-def fetch_recent_rows_by_decisions(
-    conn: sqlite3.Connection,
-    *,
-    decisions: list[str],
-    limit: int,
-) -> list[dict[str, Any]]:
-    """Fetch the most recent ``limit`` rows in ``decisions``, ignoring the
-    time window.
-
-    Used as the never-empty fallback: when the windowed query returns
-    nothing (the last triage was > lookback_hours ago and no daemon is
-    running), Today still shows the freshest scored items that exist so the
-    tab is never blank. The caller flags this as ``fellback_to_recent``.
-    """
-    if not decisions:
-        raise ValueError("decisions must be non-empty")
-    safe_limit = max(1, int(limit))
-    placeholders = ",".join("?" * len(decisions))
-    rows = conn.execute(
-        f"""
-        SELECT *
-        FROM processed_feed_items
-        WHERE decision IN ({placeholders})
-        ORDER BY created_at DESC
-        LIMIT ?
-        """,
-        (*decisions, safe_limit),
-    ).fetchall()
-    return [dict(r) for r in rows]
-
-
 __all__ = [
     "open_ro",
     "fetch_rows_by_decisions",
-    "fetch_recent_rows_by_decisions",
     "fetch_handled_keys",
     "fetch_decided_content_keys",
     "fetch_trashed_guids",

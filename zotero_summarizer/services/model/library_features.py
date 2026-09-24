@@ -7,7 +7,7 @@ subset** P, defined as Zotero items the user has actively engaged with
 (tags / annotations / notes), excluding UI-batch dismissals and items
 merely sitting in a collection.
 
-Features (4 dims total):
+Features (5 dims total):
   Sprint 1
     - ``nearest_kept_cosine``        max cosine to any P row
     - ``positive_centroid_cosine``   cosine to mean(P)
@@ -15,9 +15,8 @@ Features (4 dims total):
     - ``recent_centroid_cosine``     cosine to mean(P ∩ last 90 days)
     - ``topic_drift``                recent_centroid − positive_centroid
 
-Author/venue overlap (Sprint 2 extension) is exposed separately by the
-caller because it needs the raw author string at predict time. See
-:func:`author_overlap` below.
+The fifth feature counts overlapping author surnames. Candidate paper groups
+are excluded from all five features, including the author set.
 
 P is materialised from the same golden CSV the classifier trains on, which
 keeps the features in sync with the labels by construction.
@@ -31,6 +30,8 @@ from pathlib import Path
 
 import numpy as np
 
+from zotero_summarizer.domain import paper_group_id
+from zotero_summarizer.storage.corpus_types import CorpusAffinity
 
 LOGGER = logging.getLogger(__name__)
 
@@ -101,11 +102,11 @@ class PositiveLibrary:
     embeddings: np.ndarray
     centroid: np.ndarray
     recent_centroid: np.ndarray
-    item_keys: tuple[str, ...]
+    paper_groups: tuple[str, ...]
     authors_lower: frozenset[str]
-    # Pre-normalisation embeddings + recent flags, retained so a single row can
-    # be left out (LOO) when scoring a candidate that is itself in P — without
-    # this the candidate self-matches at cosine ≈ 1.0 (train/serve leakage).
+    author_tokens: tuple[frozenset[str], ...]
+    # Raw vectors and recency survive persistence so excluding a whole paper
+    # group can rebuild both centroids without its self-match.
     raw_embeddings: np.ndarray
     recent_mask: np.ndarray
 
@@ -155,15 +156,6 @@ def _author_tokens(authors_str: str) -> set[str]:
     return tokens
 
 
-def _collect_author_tokens(rows: list[dict[str, str]]) -> frozenset[str]:
-    out: set[str] = set()
-    for row in rows:
-        if not _is_positive_engagement(row):
-            continue
-        out.update(_author_tokens((row.get("authors") or "")))
-    return frozenset(out)
-
-
 def load_positive_library_from_rows(
     rows: list[dict[str, str]],
     corpus_db_path: Path,
@@ -189,31 +181,29 @@ def load_positive_library_from_rows(
     )
     raw_embeddings = [embeddings[i] for i in range(len(valid))]
     recent_mask = [_parse_days_since(row) <= RECENT_WINDOW_DAYS for row in valid]
-    authors = _collect_author_tokens(rows)
-    return _stack_library(keys, raw_embeddings, recent_mask, authors)
+    return _stack_library(valid, raw_embeddings, recent_mask)
 
 
 def positive_library_from_embeddings(
     rows: list[dict[str, str]],
-    item_keys: list[str],
     embeddings: np.ndarray,
 ) -> PositiveLibrary:
     """Build P from rows whose embeddings are ALREADY computed.
 
-    ``rows[i]`` aligns with ``item_keys[i]`` and ``embeddings[i]``. Used by
+    ``rows[i]`` aligns with ``embeddings[i]``. Used by
     per-fold cross-validation to rebuild P from a train fold without re-reading
     the embedding cache — which also keeps it unit-testable without SPECTER2.
     """
-    keys: list[str] = []
+    positive_rows: list[dict[str, str]] = []
     raw: list[np.ndarray] = []
     recent_mask: list[bool] = []
     for i, row in enumerate(rows):
         if not _is_positive_engagement(row):
             continue
-        keys.append(item_keys[i])
+        positive_rows.append(row)
         raw.append(np.asarray(embeddings[i], dtype=np.float32))
         recent_mask.append(_parse_days_since(row) <= RECENT_WINDOW_DAYS)
-    return _stack_library(keys, raw, recent_mask, _collect_author_tokens(rows))
+    return _stack_library(positive_rows, raw, recent_mask)
 
 
 def _empty_library() -> PositiveLibrary:
@@ -225,18 +215,43 @@ def _empty_library() -> PositiveLibrary:
         embeddings=zeros,
         centroid=centroid_zero,
         recent_centroid=centroid_zero,
-        item_keys=tuple(),
+        paper_groups=tuple(),
         authors_lower=frozenset(),
+        author_tokens=tuple(),
         raw_embeddings=zeros,
         recent_mask=np.zeros((0,), dtype=bool),
     )
 
 
+def recompute_engagement_columns(
+    X: np.ndarray, rows: list[dict[str, str]], train_idx: np.ndarray,
+    corpus: CorpusAffinity | None,
+) -> np.ndarray:
+    """Copy X with corpus affinity and five library columns from train rows.
+
+    Rows align with X. Reuse their embeddings; do not reread the corpus or
+    retain held-out engagement in the positive library.
+    """
+    from zotero_summarizer.services.model import classifier
+
+    emb = classifier.EMBEDDING_DIM
+    library = positive_library_from_embeddings(
+        [rows[i] for i in train_idx], X[train_idx, :emb],
+    )
+    result = X.copy()
+    result[:, emb + 5] = corpus.scores(train_idx) if corpus is not None else 0
+    lo = emb + 7
+    for i, row in enumerate(rows):
+        result[i, lo:lo + 5] = compute_library_features(
+            X[i, :emb], library, candidate_row=row,
+        )
+    return result
+
+
 def _stack_library(
-    keys: list[str],
+    rows: list[dict[str, str]],
     raw_embeddings: list[np.ndarray],
     recent_mask: list[bool],
-    authors_lower: frozenset[str],
 ) -> PositiveLibrary:
     """Internal — turn the raw collected embeddings into a `PositiveLibrary`."""
     if not raw_embeddings:
@@ -256,6 +271,8 @@ def _stack_library(
     else:
         # No recent items — fall back to the global centroid (topic_drift = 0).
         recent_centroid = centroid
+    authors = tuple(frozenset(_author_tokens(row.get("authors") or "")) for row in rows)
+    authors_lower = frozenset().union(*authors)
     LOGGER.info(
         "loaded positive-engagement subset: n=%d, n_recent=%d, n_authors=%d",
         normalised.shape[0], int(sum(recent_mask)), len(authors_lower),
@@ -264,22 +281,21 @@ def _stack_library(
         embeddings=normalised,
         centroid=centroid,
         recent_centroid=recent_centroid,
-        item_keys=tuple(keys),
+        paper_groups=tuple(paper_group_id(row) for row in rows),
         authors_lower=authors_lower,
+        author_tokens=authors,
         raw_embeddings=stacked,
         recent_mask=np.asarray(recent_mask, dtype=bool),
     )
 
 
-def _exclusion_mask(library: PositiveLibrary, exclude_item_key: str | None) -> np.ndarray | None:
-    """Bool mask of P rows whose key == ``exclude_item_key`` (None if no match,
-    or if the library carries no item keys — e.g. a persisted predict-time P,
-    where leave-one-out can't and needn't apply)."""
-    if not exclude_item_key or not library.item_keys:
+def _exclusion_mask(library: PositiveLibrary, exclude_group: str | None) -> np.ndarray | None:
+    """Mask the candidate's entire paper group; legacy payloads have no groups."""
+    if not exclude_group or not library.paper_groups:
         return None
     mask = np.fromiter(
-        (k == exclude_item_key for k in library.item_keys),
-        dtype=bool, count=len(library.item_keys),
+        (group == exclude_group for group in library.paper_groups),
+        dtype=bool, count=len(library.paper_groups),
     )
     return mask if mask.any() else None
 
@@ -301,9 +317,14 @@ def _cosines_over_kept(
     return nearest, float(centroid @ cand), float(recent @ cand)
 
 
-def _author_overlap(library: PositiveLibrary, candidate_authors: str) -> float:
-    if library.authors_lower and candidate_authors:
-        overlap = len(_author_tokens(candidate_authors) & library.authors_lower)
+def _author_overlap(
+    library: PositiveLibrary, candidate_authors: str, excluded: np.ndarray | None,
+) -> float:
+    authors = library.authors_lower if excluded is None else frozenset().union(*(
+        tokens for tokens, drop in zip(library.author_tokens, excluded, strict=True) if not drop
+    ))
+    if authors and candidate_authors:
+        overlap = len(_author_tokens(candidate_authors) & authors)
         return float(min(overlap, 5))
     return 0.0
 
@@ -312,8 +333,7 @@ def compute_library_features(
     candidate_embedding: np.ndarray,
     library: PositiveLibrary,
     *,
-    candidate_authors: str = "",
-    exclude_item_key: str | None = None,
+    candidate_row: dict[str, str] | None = None,
 ) -> tuple[float, float, float, float, float]:
     """Return library features for one candidate.
 
@@ -324,15 +344,14 @@ def compute_library_features(
       3  topic_drift  (recent − all-time, captures interest drift)
       4  author_overlap_count (clipped to [0, 5])
 
-    ``exclude_item_key`` enables leave-one-out: when the candidate is itself in
-    P (train/eval time), its own row is dropped so it can't self-match at
-    cosine ≈ 1.0. At production-predict time a new item isn't in P, so passing
-    its key is a no-op. All five default to 0.0 when the library is empty.
+    ``candidate_row`` supplies authors and paper identity. The whole candidate
+    group is excluded from embeddings, centroids AND authors. A genuinely new
+    paper has no match in P. All five are zero when the library is empty.
     """
     if library.n_rows == 0:
         return 0.0, 0.0, 0.0, 0.0, 0.0
     cand = _l2_normalise(candidate_embedding.astype(np.float32))
-    excl = _exclusion_mask(library, exclude_item_key)
+    excl = _exclusion_mask(library, paper_group_id(candidate_row) if candidate_row is not None else None)
     if excl is None:
         nearest = float(np.max(library.embeddings @ cand))
         centroid_cos = float(library.centroid @ cand)
@@ -340,5 +359,7 @@ def compute_library_features(
     else:
         nearest, centroid_cos, recent_cos = _cosines_over_kept(cand, library, ~excl)
     drift = recent_cos - centroid_cos
-    author_overlap = _author_overlap(library, candidate_authors)
+    author_overlap = _author_overlap(
+        library, (candidate_row.get("authors") or "") if candidate_row is not None else "", excl,
+    )
     return nearest, centroid_cos, recent_cos, drift, author_overlap

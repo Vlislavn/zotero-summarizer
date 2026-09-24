@@ -5,7 +5,6 @@ from typing import Any
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models import (
-    CalibrationMetricsResponse,
     CorpusItem,
     GoalsConfig,
     SummarizeRequest,
@@ -62,6 +61,7 @@ def run_corpus_match(req: SummarizeRequest, paper_text: str) -> dict[str, Any]:
     match = cache.match_candidate(
         title=req.title,
         abstract=abstract_seed,
+        doi=req.doi or "",
         stale_days_for_weak_negative=config.corpus.stale_days_for_weak_negative,
     )
     return {
@@ -76,32 +76,11 @@ def run_corpus_match(req: SummarizeRequest, paper_text: str) -> dict[str, Any]:
     }
 
 
-def _corpus_item_from_zotero_row(row: dict[str, Any]) -> CorpusItem | None:
-    item_id = str(row.get("item_key") or "").strip()
-    title = str(row.get("title") or "").strip()
-    if not item_id or not title:
-        return None
-
-    return CorpusItem(
-        item_id=item_id,
-        title=title,
-        abstract=str(row.get("abstract") or "").strip(),
-        tags=unique_non_empty_strings(row.get("tags") or []),
-        collections=unique_non_empty_strings(row.get("collections") or []),
-        annotation_count=0,
-        manual_note_count=0,
-        created_at=str(row.get("date_added") or "").strip() or None,
-    )
-
-
-def _corpus_item_from_zotero_detail(detail: dict[str, Any] | None) -> CorpusItem | None:
-    if not detail:
-        return None
-
+def _corpus_item_from_zotero_detail(detail: dict[str, Any]) -> CorpusItem:
     item_id = str(detail.get("item_key") or "").strip()
     title = str(detail.get("title") or "").strip()
     if not item_id or not title:
-        return None
+        raise ValueError("Zotero corpus detail requires an item key and title")
 
     collections: list[str] = []
     for entry in detail.get("collections") or []:
@@ -116,53 +95,24 @@ def _corpus_item_from_zotero_detail(detail: dict[str, Any] | None) -> CorpusItem
         item_id=item_id,
         title=title,
         abstract=str(detail.get("abstract") or "").strip(),
+        doi=str(detail.get("doi") or "").strip(),
         tags=unique_non_empty_strings(detail.get("tags") or []),
         collections=unique_non_empty_strings(collections),
-        annotation_count=0,
+        annotation_count=len(detail.get("annotations") or []),
         manual_note_count=len(detail.get("notes") or []),
         created_at=str(detail.get("date_added") or "").strip() or None,
     )
 
 
-async def import_corpus_items(items: list[CorpusItem]) -> tuple[int, int, int]:
-    if not items:
-        return 0, 0, 0
-
-    app_state = state()
-    corpus_lock: asyncio.Lock | None = getattr(app_state, "corpus_write_lock", None)
-    if corpus_lock is None:
-        corpus_lock = asyncio.Lock()
-        app_state.corpus_write_lock = corpus_lock
-
-    async with corpus_lock:
-        cache: EmbeddingCache | None = getattr(app_state, "embedding_cache", None)
-        if cache is None:
-            raise APIError(error="corpus_unavailable", message="Corpus cache is not initialized", status_code=503)
-        imported, updated = await asyncio.to_thread(cache.upsert_items, items)
-
-    latest_results_by_item_id = await asyncio.to_thread(
-        triage_db.get_latest_results_for_items,
-        [str(item.item_id).strip() for item in items if str(item.item_id).strip()],
-    )
-    feedback_events = feedback.infer_feedback_events_from_corpus_items(
-        items,
-        app_state.app_state.config.corpus.stale_days_for_weak_negative,
-        latest_results_by_item_id,
-    )
-
-    inserted_feedback = 0
-    if feedback_events:
-        inserted_feedback = await asyncio.to_thread(triage_db.insert_feedback_events, feedback_events)
-    return imported, updated, inserted_feedback
-
-
 async def auto_import_corpus_from_zotero(page_size: int = 200) -> None:
+    """Reconcile listed and cached keys; ``page_size`` bounds detail/write batches."""
     app_state = state()
     reader = getattr(app_state, "zotero_reader", None)
     if reader is None:
         LOGGER.info("Skipping corpus auto-import: Zotero reader unavailable")
         return
-    if getattr(app_state, "embedding_cache", None) is None:
+    cache = getattr(app_state, "embedding_cache", None)
+    if cache is None:
         LOGGER.info("Skipping corpus auto-import: embedding cache unavailable")
         return
 
@@ -170,37 +120,29 @@ async def auto_import_corpus_from_zotero(page_size: int = 200) -> None:
     total_updated = 0
     total_feedback = 0
     safe_page_size = max(1, min(int(page_size), 500))
-    offset = 0
 
     LOGGER.info("Starting corpus auto-import from Zotero page_size=%s", safe_page_size)
     try:
-        while True:
-            page = await asyncio.to_thread(reader.get_items, None, None, None, safe_page_size, offset)
-            rows = list(page.get("items") or [])
-            if not rows:
-                break
-
-            corpus_items = [item for row in rows if (item := _corpus_item_from_zotero_row(row)) is not None]
-            imported, updated, inferred_feedback = await import_corpus_items(corpus_items)
+        page = await asyncio.to_thread(reader.get_all_items, include_abstract=False)
+        cached_keys = await asyncio.to_thread(cache.list_item_ids)
+        keys = unique_non_empty_strings([row["item_key"] for row in page["items"]] + cached_keys)
+        for offset in range(0, len(keys), safe_page_size):
+            # ponytail: one detail read per item; batch engagement reads if sync latency warrants it.
+            imported, updated, inferred_feedback = await refresh_corpus_items_by_keys(
+                keys[offset:offset + safe_page_size]
+            )
             total_imported += imported
             total_updated += updated
             total_feedback += inferred_feedback
 
-            offset += len(rows)
-            total = int(page.get("total") or 0)
             LOGGER.info(
                 "Corpus auto-import progress processed=%s/%s imported=%s updated=%s feedback=%s",
-                offset,
-                total if total > 0 else "?",
+                min(offset + safe_page_size, len(keys)),
+                len(keys),
                 total_imported,
                 total_updated,
                 total_feedback,
             )
-
-            if total > 0 and offset >= total:
-                break
-            if len(rows) < safe_page_size:
-                break
 
         LOGGER.info(
             "Corpus auto-import completed imported=%s updated=%s feedback=%s",
@@ -210,9 +152,11 @@ async def auto_import_corpus_from_zotero(page_size: int = 200) -> None:
         )
     except Exception:
         LOGGER.exception("Corpus auto-import failed")
+        raise
 
 
 async def refresh_corpus_items_by_keys(item_keys: list[str]) -> tuple[int, int, int]:
+    """Reconcile one batch. Only an explicit missing detail authorizes deletion."""
     normalized_keys = unique_non_empty_strings(item_keys)
     if not normalized_keys:
         return 0, 0, 0
@@ -222,23 +166,38 @@ async def refresh_corpus_items_by_keys(item_keys: list[str]) -> tuple[int, int, 
     if reader is None or getattr(app_state, "embedding_cache", None) is None:
         return 0, 0, 0
 
-    corpus_items: list[CorpusItem] = []
-    for item_key in normalized_keys:
-        detail = await asyncio.to_thread(reader.get_item_detail, item_key)
-        corpus_item = _corpus_item_from_zotero_detail(detail)
-        if corpus_item is not None:
-            corpus_items.append(corpus_item)
+    corpus_lock = getattr(app_state, "corpus_write_lock", None)
+    if corpus_lock is None:
+        corpus_lock = asyncio.Lock()
+        app_state.corpus_write_lock = corpus_lock
+    async with corpus_lock:
+        corpus_items: list[CorpusItem] = []
+        missing_keys: list[str] = []
+        for item_key in normalized_keys:
+            detail = await asyncio.to_thread(reader.get_item_detail, item_key)
+            if detail is None:
+                missing_keys.append(item_key)
+            else:
+                item = _corpus_item_from_zotero_detail(detail)
+                if item.item_id != item_key:
+                    raise ValueError("Zotero detail key does not match the requested corpus key")
+                corpus_items.append(item)
+        imported, updated = await asyncio.to_thread(
+            app_state.embedding_cache.upsert_items, corpus_items, missing_item_ids=missing_keys,
+        )
 
-    if not corpus_items:
-        return 0, 0, 0
-
-    imported, updated, inferred_feedback = await import_corpus_items(corpus_items)
+    latest_results = await asyncio.to_thread(triage_db.get_latest_results_for_items, [item.item_id for item in corpus_items])
+    events = feedback.infer_feedback_events_from_corpus_items(
+        corpus_items, app_state.app_state.config.corpus.stale_days_for_weak_negative, latest_results,
+    )
+    inferred_feedback = await asyncio.to_thread(triage_db.insert_feedback_events, events) if events else 0
     LOGGER.info(
-        "Corpus refreshed for item_keys=%s imported=%s updated=%s feedback=%s",
+        "Corpus refreshed for item_keys=%s imported=%s updated=%s feedback=%s missing=%s",
         ",".join(normalized_keys),
         imported,
         updated,
         inferred_feedback,
+        len(missing_keys),
     )
     return imported, updated, inferred_feedback
 
@@ -280,18 +239,3 @@ async def corpus_items_metadata(
         sort,
         order,
     )
-
-
-async def calibration_metrics() -> CalibrationMetricsResponse:
-    from zotero_summarizer.services.results import compute_calibration_period
-
-    periods: dict[str, int | None] = {
-        "last_7d": 7,
-        "last_30d": 30,
-        "all_time": None,
-    }
-    metrics = {}
-    for period_name, days in periods.items():
-        rows = await asyncio.to_thread(triage_db.get_latest_explicit_feedback_with_results, days)
-        metrics[period_name] = compute_calibration_period(rows)
-    return CalibrationMetricsResponse(periods=metrics)

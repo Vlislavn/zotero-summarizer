@@ -58,12 +58,8 @@ def apply_effort_openai(
         ctk = dict(extra["chat_template_kwargs"])
         ctk["enable_thinking"] = effort != "off"
         extra["chat_template_kwargs"] = ctk
-    elif effort == "off":
-        # plain dialect, off: don't force reasoning — drop any prior reasoning_effort.
-        extra.pop("reasoning_effort", None)
     else:
-        extra["reasoning_effort"] = effort
+        # Omission preserves the server default, which can still enable reasoning.
+        extra["reasoning_effort"] = "none" if effort == "off" else effort
 
-    # Collapse an empty dict back to None so a no-op never injects "extra_body: {}"
-    # (real OpenAI rejects unknown/empty keys — same discipline as _override_thinking).
-    return extra or None
+    return extra
