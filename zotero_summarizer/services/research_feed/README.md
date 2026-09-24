@@ -33,8 +33,14 @@ profile/source reads or writes. The sole RSS adapter is `load_candidates`;
 the unused source protocol and state-only class wrapper are removed.
 
 Offline acceptance is `uv run python tools/eval_research_feed.py --check`.
-The shipped 30-paper fixture records user inclusion labels and manually verified
-artifact URLs; the separate 17-paper fixture supplies read/skim/skip agreement.
+The shipped 30-paper fixture records human inclusion and verified artifact labels
+but lacks frozen pre-human abstracts/scores/summaries and review outputs. The
+checker exits nonzero and reports unavailable (`null`) production metrics,
+not fallback-path zero precision or by-construction code-link precision. The
+separate 17-paper fixture supplies a clearly labelled reading-policy diagnostic.
+See `docs/issue-evidence-research-feed.md` for the required source snapshot;
+ARE's deterministic hard-check principle is used, but event-trajectory judging
+is deferred because this is a fixed paper projection, not an agent trace.
 
 Engineering cards preserve a withheld reading action as `worth_reading="unknown"`
 and include current/stored reading-policy flags in `evidence_gaps`; absence is not

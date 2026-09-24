@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
+from urllib.parse import urlsplit
 from time import perf_counter
 
 from zotero_summarizer.models import ResearchCandidate, ResearchProfile
-from zotero_summarizer.services.research_feed.card import build_card
 from zotero_summarizer.services.research_feed.profile import DEFAULT_PROJECTS, DEFAULT_THEMES
 from zotero_summarizer.services.research_feed.runner import triage_candidate
 from zotero_summarizer.services.library.review_fleet.propose import effective_read_decision
@@ -21,35 +22,49 @@ READING_FIXTURE = Path(__file__).with_name("reading_policy_fixture_v2.json")
 
 
 def _case(row, profile):
+    machine = row.get("frozen_machine")
+    if machine is not None and not isinstance(machine, dict):
+        raise ValueError(f"malformed frozen_machine for {row['id']}")
+    required = ("abstract", "source_url", "composite_score", "reading_priority", "summary")
+    missing = [key for key in required if machine is None or machine.get(key) is None]
+    if machine is not None and not missing:
+        url = urlsplit(machine["source_url"]) if isinstance(machine["source_url"], str) else None
+        score = machine["composite_score"]
+        if (not isinstance(machine["abstract"], str) or not machine["abstract"].strip()
+                or not url or url.scheme not in {"http", "https"} or not url.hostname
+                or isinstance(score, bool) or not isinstance(score, (int, float))
+                or not math.isfinite(score) or not 1 <= score <= 5
+                or machine["reading_priority"] not in {"must_read", "should_read", "could_read", "dont_read"}
+                or not isinstance(machine["summary"], dict)):
+            raise ValueError(f"malformed frozen_machine for {row['id']}")
+        projected = {
+            "composite_score": machine["composite_score"],
+            "reading_priority": machine["reading_priority"],
+            "shap_contribs_json": json.dumps({"summary": machine["summary"]}),
+        }  # Never inject a post-human 'decision' into the model's projection.
+    else:
+        machine = None  # explicitly unscorable; never promote null evidence to a measured zero
+        projected = None
     candidate = ResearchCandidate(
         source_id=row["id"], source="fixture", title=row["title"],
-        abstract=str(row.get("abstract") or ""), url=f"https://example.test/{row['id']}",
+        abstract=str(machine["abstract"] if machine else ""),
+        url=str(machine["source_url"] if machine else f"https://example.test/{row['id']}"),
     )
-    triage = triage_candidate(candidate, None, profile)
-    artifact = row.get("verified_code_url")
-    review = {
-        "digest": {"tldr": row["title"], "methods": "evaluation benchmark",
-                   "implementation": [], "relevance": candidate.abstract,
-                   "read_decision": "skim", "basis": "full_text", "novelty": 3,
-                   "significance": 3},
-        "quality": {"quality_band": "neutral", "missing_critical": [], "red_flags": []},
-        "goal_summaries": [{"relevant": triage.include}],
-        "code_link": ({"found": True, "exists": True, "relevance": "matched", "url": artifact}
-                      if artifact else {"found": False}),
-    }
-    card = build_card(candidate, triage, review, profile)
-    return row | {"predicted_include": triage.include, "reported_urls": card.code_urls,
-                  "project_use": card.project_uses}
+    triage = triage_candidate(candidate, projected, profile)
+    return row | {"predicted_include": triage.include, "predicted_score": triage.score,
+                  "predicted_confidence": triage.confidence,
+                  "frozen_input_ok": machine is not None, "missing_frozen_fields": missing}
 
 
 def evaluate(payload):
     started = perf_counter()
     profile = ResearchProfile(themes=DEFAULT_THEMES, projects=DEFAULT_PROJECTS)
     rows = [_case(row, profile) for row in payload["papers"]]
-    ranked = [row for row in rows if row["predicted_include"]][:10]
+    scorable = all(row["frozen_input_ok"] for row in rows)
+    ranked = sorted((row for row in rows if row["predicted_include"]),
+                    key=lambda row: (row["predicted_score"], row["predicted_confidence"],
+                                     row["title"], row["id"]), reverse=True)[:10] if scorable else []
     must = [row for row in rows if row["must_not_miss"]]
-    reported = [url for row in rows for url in row["reported_urls"]]
-    verified = {row["verified_code_url"] for row in rows if row.get("verified_code_url")}
     reading_rows = json.loads(READING_FIXTURE.read_text())["papers"]
     reading_matches = 0
     for row in reading_rows:
@@ -61,27 +76,35 @@ def evaluate(payload):
         reading_matches += action == row["expected_read_decision"]
     metrics = {
         "papers": len(rows),
-        "shortlist_precision_at_10": sum(row["human_include"] for row in ranked) / len(ranked) if ranked else 0.0,
-        "must_not_miss_recall": sum(row["predicted_include"] for row in must) / len(must),
-        "read_skim_skip_agreement": round(reading_matches / len(reading_rows), 3),
-        "artifact_availability_accuracy": sum(
-            bool(row["reported_urls"]) == bool(row.get("verified_code_url")) for row in rows
-        ) / len(rows),
-        "reported_code_link_precision": sum(url in verified for url in reported) / len(reported),
-        "fabricated_urls": sorted(set(reported) - verified),
-        "project_use_coverage": sum(
-            row["project_use"] != ["not_applicable"] for row in rows if row["human_include"]
-        ) / sum(row["human_include"] for row in rows),
-        "estimated_review_minutes": len(ranked) * 2.5,
-        "runtime_seconds": round(perf_counter() - started, 4),
-        "llm_tokens": 0, "llm_cost": 0,
+        "inclusion_basis": "frozen_machine" if scorable else "unscorable_missing_frozen_machine",
+        "unscorable_ids": [row["id"] for row in rows if not row["frozen_input_ok"]],
+        "unscorable_fields": {row["id"]: row["missing_frozen_fields"] for row in rows
+                              if not row["frozen_input_ok"]},
+        "shortlist_precision_at_10": (sum(row["human_include"] for row in ranked) / len(ranked)
+                                      if ranked else 0.0) if scorable else None,
+        "must_not_miss_recall": (sum(row["predicted_include"] for row in must) / len(must)
+                                 if must else 0.0) if scorable else None,
+        "read_skim_skip_agreement": None,  # no frozen reviews for these 30 feed candidates
+        "reading_policy_fixture_agreement": round(reading_matches / len(reading_rows), 3),
+        "artifact_basis": "unscorable_missing_frozen_review",
+        "artifact_availability_accuracy": None,
+        "reported_code_link_precision": None,
+        "fabricated_urls": None,
+        "project_use_coverage": None,  # cards use synthetic rather than frozen review outputs
+        "estimated_review_minutes": None,  # no measured human review-time input
+        "runtime_seconds": None,
+        "evaluator_runtime_seconds": round(perf_counter() - started, 4),
+        "llm_tokens": None, "llm_cost": None,
     }
     metrics["passes"] = bool(
-        len(rows) >= 30 and metrics["shortlist_precision_at_10"] >= 0.8
+        scorable and len(rows) >= 30 and metrics["shortlist_precision_at_10"] >= 0.8
         and metrics["must_not_miss_recall"] == 1
+        and metrics["read_skim_skip_agreement"] is not None
         and metrics["read_skim_skip_agreement"] >= 0.8
+        and metrics["reported_code_link_precision"] is not None
         and metrics["reported_code_link_precision"] >= 0.9
-        and not metrics["fabricated_urls"] and metrics["estimated_review_minutes"] <= 30
+        and metrics["estimated_review_minutes"] is not None
+        and metrics["estimated_review_minutes"] <= 30
     )
     return metrics
 

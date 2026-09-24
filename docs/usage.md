@@ -40,9 +40,10 @@ SQLite). What *triggers* it is your choice:
 - **UI, on demand (simplest).** Run `serve` and click **Triage backlog** on *Today*
   whenever you want fresh papers scored. No background process.
 - **Daemon, automatic (optional).** `zotero-summarizer feeds serve` runs a background
-  loop that scores unread items every few minutes and, each morning, auto-materializes
-  the 1–2 best into your Zotero *Inbox* — so a slate is waiting without you clicking
-  anything. The `feeds.*` block in `goals.yaml` only matters if you run this.
+  loop that scores unread items and can review top Today candidates in place. It
+  never adds a candidate to Zotero automatically: open its full review, then explicitly
+  Add it; Trash works immediately. The `feeds.*` block in `goals.yaml` only matters
+  if you run the daemon.
 
 The daemon is convenience, not a requirement.
 
@@ -371,7 +372,7 @@ uv run zotero-summarizer prefetch-models  # download the ML models for offline u
 
 # Feeds (optional daemon / one-shots)
 uv run zotero-summarizer feeds list                 # discover feed names + IDs
-uv run zotero-summarizer feeds serve                # background daemon (auto-triage + daily pick)
+uv run zotero-summarizer feeds serve                # background feed triage (review before manual Add)
 uv run zotero-summarizer feeds run --feeds "Agents" # one-shot: exhaust one feed
 uv run zotero-summarizer feeds tick                 # single tick (cron/launchd-friendly)
 

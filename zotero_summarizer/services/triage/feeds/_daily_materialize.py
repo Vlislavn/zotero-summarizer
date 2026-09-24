@@ -206,6 +206,11 @@ def materialize_pick(
         pick.composite_score,
         "  [black-swan]" if pick.is_black_swan else "",
     )
+    from zotero_summarizer.services.library.review_eligibility import ReviewRequired, require_review
+
+    if pick.row.get("decision") != feeds_storage.DECISION_USER_APPROVED:
+        raise ReviewRequired()
+    require_review(pick.row)
     new_key = feeds_storage.reserve_materialization_key(
         get_settings().triage_db_path, int(pick.row["id"]), _generate_zotero_key(used_keys)
     )
@@ -231,22 +236,28 @@ def materialize_pick(
         note_html.count("<h2>"),
         summary_source == "legacy_sparse",
     )
-    writer.apply_feed_materialization(
-        new_item_key=new_key,
-        feed_payload=feed_payload,
-        inbox_collection_name=ctx.inbox_collection_name,
-        matched_collections=matched,
-        tags=tags,
-        note_title=f"Triage: {str(pick.row.get('title') or '')[:80]}",
-        note_html=note_html,
-        provenance_tag=pending_service.SYSTEM_TAG_FEEDS_V3,
-    )
     decision = (
         feeds_storage.DECISION_BLACK_SWAN
         if pick.is_black_swan
         else feeds_storage.DECISION_SELECTED
     )
     with _triage_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        existing = feeds_storage.current_materialization_intent(conn, pick.row)
+        if existing:
+            feeds_storage.link_materialized_sibling(conn, pick.row, existing)
+            conn.commit()
+            return existing
+        writer.apply_feed_materialization(
+            new_item_key=new_key,
+            feed_payload=feed_payload,
+            inbox_collection_name=ctx.inbox_collection_name,
+            matched_collections=matched,
+            tags=tags,
+            note_title=f"Triage: {str(pick.row.get('title') or '')[:80]}",
+            note_html=note_html,
+            provenance_tag=pending_service.SYSTEM_TAG_FEEDS_V3,
+        )
         if feeds_storage.record_materialization(
             conn,
             feed_library_id=int(pick.row["feed_library_id"]),

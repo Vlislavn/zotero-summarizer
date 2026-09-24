@@ -29,10 +29,9 @@ flowchart LR
 3. **api** serves the React UI and the JSON API; routes are thin.
 4. **you** cull on *Today*, read on *Library*, fine-label on *Annotate*.
 5. **golden** is your label dataset; **model** retrains on it — the loop closes.
-6. **zotero** writes back three things: the daily best-picks materialized into
-   the *Inbox*, approved label tags/notes (queued + reviewed, backup first),
-   and an automatic read-state sync that marks Zotero's own feed cards read
-   once the app has triaged them.
+6. **zotero** writes reviewed papers into the *Inbox* only after an explicit
+   Add/positive verdict, approved label tags/notes (queued + reviewed, backup
+   first), and read-state sync for Zotero feed cards triaged by the app.
 
 ## Runtime view — which subsystem owns this?
 
@@ -96,7 +95,8 @@ Triage (the pipeline above) runs identically whether it is triggered by:
 - the **UI** — the *Today* tab's "Triage backlog" button (`POST /api/daily/triage-backlog`),
   on demand; or
 - the **daemon** — `zotero-summarizer feeds serve`, a separate long-running process
-  that ticks on a timer and auto-materializes a daily pick; or
+  that ticks on a timer, scores feeds and optionally reviews the Today slate in place,
+  but never adds a pick to Zotero without an explicit user Add after review; or
 - the **CLI** — `feeds run` / `feeds tick` one-shots.
 
 The daemon is optional automation, not a separate engine. The `feeds.*` block in

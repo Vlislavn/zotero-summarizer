@@ -5,13 +5,16 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from tests._zotero_fixtures import add_feed_item, build_zotero_db
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.models import MethodAndCode, SummarizeResponse
-from zotero_summarizer.services.library import review_materialize
+from zotero_summarizer.services.library import _review_cache, review_materialize
+from zotero_summarizer.services.library.review_eligibility import ReviewRequired
 from zotero_summarizer.services.triage.feeds import _daily_materialize
 from zotero_summarizer.services.triage.feeds._gate import _pack_review_payload
-from zotero_summarizer.storage import feeds
+from zotero_summarizer.storage import feeds, repositories
 
 
 class _Settings:
@@ -45,7 +48,7 @@ def test_restart_materializes_persisted_summary_verbatim(tmp_path, monkeypatch):
     assert json.loads(payload or "{}")["summary_schema_version"] == 1
 
     with feeds.open_triage_conn(triage_db) as conn:
-        feeds.init_feeds_schema(conn)
+        repositories.apply_schema(conn)
         row_id = feeds.record_decision(
             conn, run_id="before-restart",
             feed_item={
@@ -68,6 +71,12 @@ def test_restart_materializes_persisted_summary_verbatim(tmp_path, monkeypatch):
     monkeypatch.setattr(review_materialize, "get_settings", lambda: settings)
     monkeypatch.setattr(_daily_materialize, "get_settings", lambda: settings)
     monkeypatch.setattr(ZoteroWriter, "is_connector_running", lambda self: False)
+    with pytest.raises(ReviewRequired):
+        review_materialize.materialize_row(row, writer=ZoteroWriter(zotero_dir), used_keys=set())
+    # Simulate a generated, persisted deep review available after restart.
+    monkeypatch.setattr(_review_cache, "get_current_review", lambda key: {
+        "needs_pdf": False, "digest": {"tldr": "Paper-specific deep review."},
+    })
     new_key = review_materialize.materialize_row(
         row, writer=ZoteroWriter(zotero_dir), used_keys=set(),
     )

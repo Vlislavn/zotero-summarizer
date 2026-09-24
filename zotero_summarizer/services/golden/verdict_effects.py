@@ -17,7 +17,8 @@ from zotero_summarizer.services.zotero.zotero import (
     zotero_upsert_user_note,
     zotero_upsert_verdict_note,
 )
-from zotero_summarizer.storage import label_mirrors, review_notes
+from zotero_summarizer.storage import feeds as feeds_storage, label_mirrors, repositories, review_notes
+from zotero_summarizer.storage.feed_identity import LEGACY_FEED_PREFIX
 
 LOGGER = logging.getLogger(__name__)
 _POSITIVE_PRIORITIES = ("must_read", "should_read", "could_read")
@@ -68,7 +69,22 @@ def append_training_row(item_key: str, priority: str, comment: str) -> None:
     )
 
 
-def add_feed_verdict_to_library(item_key: str, priority: str) -> dict[str, Any]:
+def cancel_pending_feed_add(db_path: Path, item_key: str) -> int:
+    """Retire every unmaterialized sibling after an explicit negative verdict."""
+    with feeds_storage.open_triage_conn(db_path) as conn:
+        row = feeds_storage.get_processed_feed_item_by_stable_key(conn, item_key)
+        if row is None and item_key.startswith(LEGACY_FEED_PREFIX):
+            suffix = item_key[len(LEGACY_FEED_PREFIX):]
+            if suffix.isdigit():
+                row = feeds_storage.get_processed_feed_item_by_id(conn, int(suffix))
+        count = feeds_storage.cancel_pending_materialization(
+            conn, str(row.get("stable_feed_key") or "")
+        ) if row is not None else 0
+        conn.commit()
+        return count
+
+
+def add_feed_verdict_to_library(item_key: str, priority: str, db_path: Path | None = None) -> dict[str, Any]:
     """Resolve a feed verdict's real Zotero key, creating positive picks only."""
     from zotero_summarizer.services.triage import daily_actions
 
@@ -79,6 +95,8 @@ def add_feed_verdict_to_library(item_key: str, priority: str) -> dict[str, Any]:
             "add_error": None,
         }
     try:
+        if priority not in _POSITIVE_PRIORITIES and db_path is not None:
+            cancel_pending_feed_add(db_path, item_key)
         result = daily_actions.materialize_feed_verdict(
             item_key,
             priority,
@@ -128,18 +146,35 @@ def mirror_current_verdict(db_path: Path, item_key: str, *, redeliver: bool = Fa
         return None
 
 
-def apply_verdict_effects(db_path: Path, item_key: str, priority: str, comment: str) -> dict[str, Any]:
-    """Run the online/offline training, materialization, and mirror effects.
+def _current_verdict(db_path: Path, item_key: str) -> dict[str, Any] | None:
+    """Choose latest stable/unique-legacy intent, not the first alias found."""
+    if review_detail.classify_item_key(item_key) != review_detail.SOURCE_FEED:
+        return repositories.get_label_verdict(db_path, item_key)
+    with feeds_storage.open_triage_conn(db_path) as conn:
+        row = feeds_storage.get_processed_feed_item_by_stable_key(conn, item_key)
+        if row is None and item_key.startswith(LEGACY_FEED_PREFIX):
+            suffix = item_key[len(LEGACY_FEED_PREFIX):]
+            if suffix.isdigit():
+                row = feeds_storage.get_processed_feed_item_by_id(conn, int(suffix))
+        return (feeds_storage.current_feed_verdict(conn, row) if row is not None
+                else repositories.get_label_verdict(db_path, item_key))
 
-    Both external mirrors read current state. A stored sync mutation can retry
-    a failed delivery without replacing newer labels or rationale.
-    """
+
+def apply_verdict_effects(db_path: Path, item_key: str, priority: str, comment: str) -> dict[str, Any]:
+    """Deliver current online/offline effects; an obsolete UUID cannot re-Add."""
+    current = _current_verdict(db_path, item_key)
+    if current is None or current["user_priority"] != priority or current["comment"] != comment:
+        mirror = mirror_current_verdict(db_path, item_key, redeliver=True)
+        return {"added_to_library": False, "add_status": "superseded", "add_error": None,
+                "label_written": mirror["label_written"] if mirror else False,
+                "note_written": mirror["note_written"] if mirror else False,
+                "label_error": None, "note_error": None}
     try:
         append_training_row(item_key, priority, comment)
     except Exception as exc:  # noqa: BLE001 - enrichment cannot undo the verdict
         LOGGER.warning("golden append for verdict %s failed: %s", item_key, exc)
 
-    add_result = add_feed_verdict_to_library(item_key, priority)
+    add_result = add_feed_verdict_to_library(item_key, priority, db_path)
     source = review_detail.classify_item_key(item_key)
     mirror_key = (
         item_key

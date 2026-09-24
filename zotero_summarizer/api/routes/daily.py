@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services import interaction_log
-from zotero_summarizer.services.golden import label_verdicts
+from zotero_summarizer.services.golden import label_verdicts, verdict_effects
 from zotero_summarizer.services.triage import daily_actions, daily_select
 from zotero_summarizer.services._common import settings as get_settings
 from zotero_summarizer.storage import feeds as feeds_storage
@@ -373,15 +373,7 @@ _VALID_DAILY_PRIORITIES = ("must_read", "should_read", "could_read", "dont_read"
 
 
 async def submit_daily_verdict(body: DailyVerdictRequest) -> dict[str, Any]:
-    """Record a must/should/could/don't verdict on a Today card.
-
-    The verdict is the user's manual label and must (a) persist + win, (b)
-    feed golden-set training. We therefore both UPSERT ``label_verdicts``
-    (keyed ``feed:<feed_item_id>`` — consistent with review_detail + the
-    golden CSV) AND append the feed item to the golden CSV via
-    ``review.append_to_golden`` (idempotent) so the next retrain trains on
-    the manual label through ``hybrid_gt``.
-    """
+    """Write a reviewed positive or immediate negative Today label to the golden set."""
     if body.user_priority not in _VALID_DAILY_PRIORITIES:
         raise APIError(
             error="validation_error",
@@ -396,6 +388,11 @@ async def submit_daily_verdict(body: DailyVerdictRequest) -> dict[str, Any]:
             message=f"no processed_feed_items row with id={body.item_id}",
             status_code=404,
         )
+
+    if body.user_priority != "dont_read" and not await asyncio.to_thread(daily_actions._materialized_key_for, row):
+        from zotero_summarizer.services.library.review_eligibility import require_review
+
+        await asyncio.to_thread(require_review, row)
 
     golden_key = row_feed_keys(row)[0]
 
@@ -417,6 +414,8 @@ async def submit_daily_verdict(body: DailyVerdictRequest) -> dict[str, Any]:
         surface="today_priority",
         comment=body.comment,
     )
+    if body.user_priority == "dont_read":
+        await asyncio.to_thread(verdict_effects.cancel_pending_feed_add, _db_path(), golden_key)
     await asyncio.to_thread(
         daily_actions.record_row_outcome, row, feeds_storage.OUTCOME_USER_LABELED,
     )

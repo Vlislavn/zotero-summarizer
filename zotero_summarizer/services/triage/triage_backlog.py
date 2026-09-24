@@ -197,7 +197,6 @@ def _drain_worker() -> None:
                 batch_size=_BATCH_SIZE,
                 review_mode=False,           # writes triaged_pending (slate needs it)
                 gate_only=gate_only,         # ML-only bulk: no per-item LLM
-                allow_daily_selection=False,  # the UI button must not auto-materialize
                                               # papers into the Inbox — the user picks
                                               # on Today. Only the daemon auto-selects.
                 triage_llm=triage_llm,

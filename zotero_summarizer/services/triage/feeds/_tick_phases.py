@@ -1,7 +1,7 @@
 """feeds: the discrete phases of one daemon tick.
 
 ``run_daemon_tick`` (in ``_tick``) orchestrates these in order: pick unread ->
-prepare/dedup -> triage -> record decisions -> mark read -> daily selection.
+prepare/dedup -> triage -> record decisions -> mark read.
 They live here so the orchestrator stays a thin, readable sequence.
 """
 from __future__ import annotations
@@ -28,10 +28,6 @@ from zotero_summarizer.services.triage.feeds._gate import (
     _synthesize_gate_only_candidate,
 )
 from zotero_summarizer.services.triage.feeds._triage import _score_survivors
-from zotero_summarizer.services.triage.feeds._daily import (
-    _should_run_daily_selection,
-    run_daily_selection,
-)
 
 
 @dataclass
@@ -365,36 +361,3 @@ def mark_processed_read(
             )
         conn.commit()
     return marked
-
-
-def maybe_run_daily(
-    feeds_cfg: dict[str, Any],
-    *,
-    reader: ZoteroReader,
-    writer: ZoteroWriter | None,
-    tick_id: str,
-    feed_library_ids: list[int] | None,
-    force: bool = False,
-    dry_run: bool = False,
-) -> tuple[bool, int, int, list[str]]:
-    """Run daily selection when forced or due; return (ran, materialized, rejected, materialized_keys).
-
-    ``materialized_keys`` are the Zotero library keys just created — the tick
-    auto-reviews them via deep_review when ``quality_review.auto_on_tick_k`` is set.
-    ``force`` + ``feed_library_ids`` scopes the pool to those feeds. A selection
-    failure is logged and reported as not-run (empty keys).
-    """
-    if not (force or _should_run_daily_selection(feeds_cfg)):
-        return False, 0, 0, []
-    if writer is None:
-        LOGGER.info("[%s] daily selection skipped: Zotero writer unavailable", tick_id)
-        return False, 0, 0, []
-    try:
-        scoped_ids = feed_library_ids if force else None
-        sel = run_daily_selection(
-            reader=reader, writer=writer, feed_library_ids=scoped_ids, dry_run=dry_run,
-        )
-        return True, sel.get("materialized", 0), sel.get("rejected", 0), list(sel.get("materialized_keys") or [])
-    except Exception:
-        LOGGER.exception("[%s] daily selection failed", tick_id)
-        return False, 0, 0, []

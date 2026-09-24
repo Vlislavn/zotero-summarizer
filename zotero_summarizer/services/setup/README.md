@@ -1,5 +1,20 @@
 # services/setup — one setup domain, two front-ends
 
+The web wizard chooses Full local, Hosted or No LLM **before** Zotero paths;
+ML-only skips the model step. Full-local mode shows compatible profiles with
+no API-key field. Doctor's fresh-process asset probe not only enables HF
+cache-only flags but denies/records outbound TCP attempts during model loads;
+`strict_offline` cannot be Ready if an asset tried the network, even if the
+loader raised before returning its inventory. Persisted Doctor success is
+invalidated when goals/routing, calibration or `.env` Zotero/PDF paths
+change. Enabled RSS source IDs/names/URLs, the effective offline mode and in-app
+credential replacement also invalidate Ready. Credential writes serialize
+with Doctor checks, rotate an app-owned `data/setup_credential_revision.json`
+marker **before** the key changes, and clear any cached browser Ready result;
+a concurrent run cannot publish stale success for a new key. A saved path differing from startup Settings demands
+restart before checks can pass. Zotero remains diagnostic but optional for
+RSS-only setups; an enabled RSS source is still required for Today.
+
 Web and CLI share profile, validation, and Doctor services. State lives under
 `Settings.data_dir`; secrets stay in the keyring or legacy environment.
 
@@ -32,14 +47,17 @@ a Zotero data directory.
 endpoint. Add runtimes only with install and verification paths.
 
 Doctor state is `data/setup_doctor.json`; stale `running` rows become Needs
-action. It is current state, not an audit log. Recovery strings are displayed,
+action **and clear any earlier Ready flag**, even if the last full pass succeeded.
+It is current state, not an audit log. Recovery strings are displayed,
 never executed. `--fix` only runs idempotent bootstrap/migrations.
 Bootstrap owns migration; Doctor does not repeat it. Path validation snapshots
 read the resulting `.env`, including unchanged paths and empty update requests.
 Calibration accepts 1–10 papers, checks item paths (including symlinks) remain
 inside `Settings.paper_render_dir`, and loads input before contacting a model.
 ML-only mode marks model/inference/dry-run checks as intentionally skipped and
-keeps classifier triage available; it can be changed later in Settings.
+keeps classifier/search triage available; it cannot generate the full-text
+review required before an app-controlled feed Add. Manual Zotero imports remain
+possible, and AI can be enabled later in Settings.
 
 The advisory classifier panel uses the same loaded-gate card as Settings. A
 saved but unloaded artifact is not reported as the active classifier; no model

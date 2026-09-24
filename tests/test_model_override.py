@@ -5,7 +5,38 @@ from pathlib import Path
 
 import pytest
 
-from tests.test_daemon_loop import _MINIMAL_GOALS_YAML, _bootstrap_minimal_settings
+_MINIMAL_GOALS_YAML = """
+research_goals:
+  - Test research goal
+relevance_scale:
+  1: low
+  2: low-mid
+  3: mid
+  4: high-mid
+  5: high
+llm:
+  draft_model: test
+  refine_model: test
+  api_base: http://localhost:9999/v1
+  api_key_env: TEST_KEY
+"""
+
+
+def _bootstrap_minimal_settings(project: Path, monkeypatch):
+    from zotero_summarizer.runtime import AppContext, set_context
+    from zotero_summarizer.services import lifecycle
+    from zotero_summarizer.settings import Settings
+    import asyncio
+
+    project.mkdir(parents=True, exist_ok=True)
+    (project / "goals.yaml").write_text(_MINIMAL_GOALS_YAML, encoding="utf-8")
+    monkeypatch.setenv("TEST_KEY", "test-key-not-used")
+    settings = Settings.load(project_root=project)
+    set_context(AppContext(settings=settings))
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    lifecycle.startup()
+    return settings
 
 
 def test_startup_uses_yaml_model_by_default(tmp_path: Path, monkeypatch):

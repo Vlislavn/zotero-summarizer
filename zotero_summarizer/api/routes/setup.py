@@ -72,9 +72,11 @@ async def list_ai_presets() -> dict:
 
 async def save_ai_credential(req: CredentialRequest) -> dict:
     """Store one API key in the OS keyring; never echo it in the response."""
-    from zotero_summarizer.services.llm.credentials import store_api_key
+    from zotero_summarizer.services.setup.doctor import store_credential_and_invalidate
 
-    return {"credential": await asyncio.to_thread(store_api_key, req.name, req.api_key)}
+    credential = await asyncio.to_thread(store_credential_and_invalidate,
+                                         get_settings(), req.name, req.api_key)
+    return {"credential": credential}
 
 
 class CalibrateRequest(BaseModel):

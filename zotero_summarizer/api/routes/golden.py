@@ -282,6 +282,11 @@ async def submit_verdict(req: VerdictRequest) -> dict[str, Any]:
     prov_match = next((p for p in provs if p.item_key == req.item_key), None)
     original = prov_match.derived_priority if prov_match is not None else None
 
+    if req.user_priority != "dont_read" and req.item_key.startswith("feed:"):
+        from zotero_summarizer.services.library.review_eligibility import require_feed_review
+
+        await asyncio.to_thread(require_feed_review, _db_path(), req.item_key)
+
     row_id = label_verdicts.set_label_verdict(
         _db_path(),
         item_key=req.item_key,

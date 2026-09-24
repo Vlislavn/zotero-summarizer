@@ -2,6 +2,22 @@
 
 Owns the two local databases under `data/` and all SQL. Services call these
 functions; nothing here reaches up into `services/` or `api/`.
+`sync_mutation_exists(db_path, uuid)` lets the feed-review gate skip a previously
+committed UUID so replays remain idempotent even when the original review
+becomes stale; new mutations still require review before storage is called.
+`feeds_history.cancel_pending_materialization` conditionally cancels every
+unmaterialized approved sibling when a newer negative verdict wins, clearing
+pending sync and its obsolete provisional outcome atomically.
+`current_feed_verdict` resolves stable/unique-legacy intent by monotonic sync
+revision (or stored update time on pre-sync databases), not original row ID:
+updating a verdict cannot leave an older alias in control. `current_materialization_intent`
+checks that label under a write lock: a newer explicit positive may reverse a
+cancelled pending Add, but an old provisional label may not. Both materializers
+hold the lock through the Zotero write and final row transition; already
+materialized siblings are linked to the same item, never written twice. `mark_pending_if_current` parks a
+reviewed Add in one conditional transaction, never over a newer rejection.
+The old independent sync-status setter was removed: pending state now shares
+one transaction with the decision and provisional outcome.
 
 ```
 services/ ─call→ storage/

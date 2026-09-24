@@ -59,7 +59,18 @@ def list_by_state(
             sort=sort,
         )
         rows = _drop_trashed_rearrivals(conn, rows)
-    return [_decorate_row(r) for r in rows]
+    from zotero_summarizer.services.library import deep_review
+    from zotero_summarizer.services.library.review_eligibility import usable_review
+
+    from zotero_summarizer.storage.feed_identity import is_stable_feed_key
+
+    reviews = deep_review.current_reviews()
+    results = [_decorate_row(row) for row in rows]
+    for row in results:
+        row["review_ready"] = any(
+            usable_review(reviews.get(key)) for key in row_feed_keys(row) if is_stable_feed_key(key)
+        )
+    return results
 
 
 def _decorate_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -135,6 +146,10 @@ def _commit_review(
     row: dict[str, Any], priority: str, *, surface: str, write_to_golden: bool = True,
 ) -> dict[str, Any]:
     """Commit the decision, label and training metadata in one SQLite transaction."""
+    if priority != "dont_read":
+        from zotero_summarizer.services.library.review_eligibility import require_review
+
+        require_review(row)
     payload = None
     if priority != "dont_read":
         summary = _build_summary_for_queue(row, priority)

@@ -118,6 +118,17 @@ def _write_value(conn: sqlite3.Connection, request: dict[str, Any]) -> None:
     )
 
 
+def sync_mutation_exists(db_path: Path, mutation_id: str) -> bool:
+    """Let replay reach the idempotent mutation path even if its review went stale."""
+    conn = _connect_to(db_path)
+    try:
+        return conn.execute(
+            "SELECT 1 FROM sync_mutations WHERE mutation_id = ?", (mutation_id,)
+        ).fetchone() is not None
+    finally:
+        conn.close()
+
+
 def apply_sync_mutation(db_path: Path, request: dict[str, Any]) -> dict[str, Any]:
     """Idempotently compare-and-write one field under ``BEGIN IMMEDIATE``."""
     request = dict(request)
@@ -279,5 +290,5 @@ def sync_status(db_path: Path) -> dict[str, int]:
     return {"cursor": cursor, "mutations": mutations, "conflicts": conflicts}
 
 
-__all__ = ["apply_sync_schema", "apply_sync_mutation", "pull_sync_changes",
+__all__ = ["apply_sync_schema", "sync_mutation_exists", "apply_sync_mutation", "pull_sync_changes",
            "sync_current_fields", "sync_status", "sync_applied_revisions"]

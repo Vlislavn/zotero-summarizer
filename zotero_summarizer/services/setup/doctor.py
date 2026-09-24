@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import closing
 from datetime import datetime, timezone
 import importlib.util
 import shutil
 import sqlite3
+from pathlib import Path
 from threading import Lock
 from typing import Any, Callable
 
@@ -41,7 +43,7 @@ _CHECKS = (
     "dry_run",
     "optional_extras",
 )
-_REQUIRED = frozenset(_CHECKS) - {"local_profile", "optional_extras"}
+_REQUIRED = frozenset(_CHECKS) - {"local_profile", "optional_extras", "zotero"}
 _LOCK = Lock()
 
 
@@ -164,14 +166,17 @@ def _ml_assets(settings: Settings) -> dict[str, Any]:
 
     report = offline_asset_report(settings)
     missing = [row["repo_id"] for row in report["models"] if not row["cached"]]
-    ok = report["offline_ready"] and report["loadable"]
+    attempts = report.get("network_attempts") or []
+    ok = report["offline_ready"] and report["loadable"] and not attempts
     return _row(
         "ml_assets",
         "ready" if ok else "needs_action",
-        "ML assets load in cache-only mode" if ok else "ML assets are incomplete",
-        ", ".join(missing) or f"{len(report['models'])} models loaded offline",
-        action="Prefetch ML assets",
-        command="uv run zotero-summarizer prefetch-models",
+        "ML assets load in cache-only mode" if ok else (
+            "ML assets attempted network access" if attempts else "ML assets are incomplete"
+        ),
+        ", ".join(attempts or missing) or f"{len(report['models'])} models loaded offline",
+        action="Inspect offline model load" if attempts else "Prefetch ML assets",
+        command=None if attempts else "uv run zotero-summarizer prefetch-models",
     )
 
 
@@ -257,18 +262,84 @@ def _save(settings: Settings, payload: dict[str, Any]) -> None:
     write_json_atomic(settings.data_dir / "setup_doctor.json", payload)
 
 
+def _invalidate_doctor_unlocked(settings: Settings) -> None:
+    from uuid import uuid4
+
+    write_json_atomic(settings.data_dir / "setup_credential_revision.json", {"revision": uuid4().hex})
+    _save(settings, {"status": "not_started", "ready": False, "config_signature": ""})
+
+
+def store_credential_and_invalidate(settings: Settings, name: str, key: str) -> dict[str, Any]:
+    """A credential cannot change between Doctor's final check and Ready reply."""
+    from zotero_summarizer.services.llm.credentials import store_api_key
+
+    with _LOCK:
+        _invalidate_doctor_unlocked(settings)
+        return store_api_key(name, key)
+
+
+def _config_signature(settings: Settings) -> str:
+    """Invalidate old Doctor success after routing, goals, or paths change."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    for path in (settings.config_path, settings.calibration_path):
+        digest.update(path.read_bytes() if path.is_file() else b"")
+    saved = _saved_paths(settings)
+    credential_revision = read_json_or_empty(settings.data_dir / "setup_credential_revision.json")
+    digest.update(str((saved.get("ZOTERO_DATA_DIR"), saved.get("PDF_ROOT"),
+                       settings.zotero_data_dir, settings.pdf_root, offline_requested(),
+                       credential_revision.get("revision"))).encode())
+    if settings.triage_db_path.is_file():
+        with closing(sqlite3.connect(
+            f"file:{settings.triage_db_path}?mode=ro", uri=True, timeout=10
+        )) as conn:
+            try:
+                feeds = conn.execute(
+                    "SELECT id, name, url FROM rss_feeds WHERE enabled = 1 ORDER BY id"
+                ).fetchall()
+            except sqlite3.OperationalError as exc:
+                if "no such table: rss_feeds" not in str(exc):
+                    raise
+                feeds = []  # first run, before bootstrap creates feed tables
+        digest.update(repr(feeds).encode())
+    else:
+        digest.update(b"feed-db-not-created")
+    return digest.hexdigest()
+
+
+def _saved_paths(settings: Settings) -> dict[str, str | None]:
+    from dotenv import dotenv_values
+
+    values = dotenv_values(settings.env_path) if settings.env_path.is_file() else {}
+    return {key: values.get(key) for key in ("ZOTERO_DATA_DIR", "PDF_ROOT")}
+
+
+def _restart_required(settings: Settings) -> bool:
+    saved = _saved_paths(settings)
+    return any(
+        raw and Path(raw).expanduser().resolve() != getattr(settings, attr).resolve()
+        for key, attr in (("ZOTERO_DATA_DIR", "zotero_data_dir"), ("PDF_ROOT", "pdf_root"))
+        if (raw := saved.get(key))
+    )
+
+
 def doctor_status(settings: Settings) -> dict[str, Any]:
     path = settings.data_dir / "setup_doctor.json"
     payload = read_json_or_empty(path)
-    if not payload:
+    restart = _restart_required(settings)
+    if restart or not payload or payload.get("config_signature") != _config_signature(settings):
+        checks = [_row(check_id, "not_started", "Not checked yet") for check_id in _CHECKS]
+        if restart:
+            checks[0] = _row("environment", "needs_action", "Restart app to apply new Zotero/PDF paths",
+                             action="Retry after restart")
         return {
-            "status": "not_started",
+            "status": "needs_action" if restart else "not_started",
             "ready": False,
-            "checks": [
-                _row(check_id, "not_started", "Not checked yet") for check_id in _CHECKS
-            ],
+            "checks": checks,
             "modes": {},
             "last_successful_at": None,
+            "config_signature": _config_signature(settings),
         }
     by_id = {row["id"]: row for row in payload.get("checks", [])}
     payload["checks"] = [
@@ -281,6 +352,11 @@ def doctor_status(settings: Settings) -> dict[str, Any]:
                 row.update(
                     status="needs_action", message="Previous check was interrupted"
                 )
+                payload["status"] = "needs_action"
+    if payload.get("status") != "ready" or any(
+        row["id"] in _REQUIRED and row["status"] != "ready" for row in payload["checks"]
+    ):
+        payload["ready"] = False
     return payload
 
 
@@ -353,6 +429,8 @@ def run_doctor(
         raise APIError(
             "unknown_doctor_check", f"Unknown check IDs: {unknown}", status_code=422
         )
+    if _restart_required(settings):
+        return doctor_status(settings)
     if not _LOCK.acquire(blocking=False):
         raise APIError(
             "doctor_running", "Setup checks are already running", status_code=409
@@ -363,6 +441,7 @@ def run_doctor(
 
             bootstrap_phase0(settings)
         current = doctor_status(settings)
+        started_signature = _config_signature(settings)
         by_id = {row["id"]: row for row in current["checks"]}
         for row in by_id.values():
             if row["status"] == "running":
@@ -374,8 +453,10 @@ def run_doctor(
         running = {
             **current,
             "status": "running",
+            "ready": False,
             "checks": [by_id[key] for key in _CHECKS],
             "started_at": _now(),
+            "config_signature": started_signature,
         }
         _save(settings, running)
         for check_id in selected:
@@ -389,8 +470,12 @@ def run_doctor(
                     f"{type(exc).__name__}: {exc}",
                 )
         rows = [by_id[key] for key in _CHECKS]
+        changed = _config_signature(settings) != started_signature
+        if changed:
+            rows[0] = _row("environment", "needs_action", "Setup changed during checks",
+                           action="Run checks again")
         _redact_details(settings, rows)
-        ready = all(row["status"] == "ready" for row in rows if row["id"] in _REQUIRED)
+        ready = not changed and all(row["status"] == "ready" for row in rows if row["id"] in _REQUIRED)
         payload = {
             "status": "ready" if ready else "needs_action",
             "ready": ready,
@@ -400,6 +485,7 @@ def run_doctor(
             "last_successful_at": _now()
             if ready
             else current.get("last_successful_at"),
+            "config_signature": started_signature,
         }
         _save(settings, payload)
         return payload

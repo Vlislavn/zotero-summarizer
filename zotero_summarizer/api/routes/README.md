@@ -1,5 +1,14 @@
 # api/routes — HTTP endpoints (thin)
 
+`POST /api/golden/verdict` checks a new positive feed verdict for a current,
+usable full-text review **before** writing its label. Missing/empty/failed
+reviews return HTTP 409 `review_required`; negative verdicts remain immediate.
+Both `/api/daily/verdict` and `/api/golden/verdict` gate a new positive feed
+label before it can hide a paper from Today. Today Add reports the same code
+per blocked item while processing eligible batch members. The server, not the frontend badge, enforces this invariant.
+Replacing a hosted credential through `/api/setup/ai-credential` invalidates
+prior Doctor inference success without returning the key to the browser.
+
 One module per resource. Each registers its paths on a router; `__init__.py`
 collects them via `include_routes(app)`. Handlers parse/validate and delegate
 to `services/`; they raise `APIError` for failures.

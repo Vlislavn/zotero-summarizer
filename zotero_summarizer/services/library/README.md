@@ -1,5 +1,23 @@
 # services/library — Stage-2 reading + feed review
 
+**Feed Add gate:** `review_eligibility` accepts only a current review with a
+paper-specific digest (not a quality badge, failed job, missing-PDF/login
+placeholder, or empty cache entry). `review_materialize.materialize_row` checks it before reserving a Zotero
+key; a previously checked per-row proof can be reused within the same Add
+without rechecking after its label has committed. Under SQLite `BEGIN IMMEDIATE`,
+materialization rechecks the latest verdict and holds the intent lock through
+Zotero write and finalization; a concurrent Trash cannot be overwritten.
+Approved-row retries exclude unreviewed or superseded papers and report
+`review_required`/`superseded` per row; a newer rejection also cancels stale
+pending approval instead of aborting the entire Apply-all batch. Legacy
+`feed:<id>` verdicts only participate when the alias unambiguously resolves
+to that stable paper; an unrelated source is never cancelled. Pending sibling
+rows with the same stable key reuse the one committed Zotero item. A negative reading recommendation still
+qualifies: the human chooses Add or Trash. Existing library items are not
+retroactively gated. The HTML goal board shows each repeated conclusion once,
+attributes it to all matching goals, and folds additional findings behind a
+keyboard-accessible disclosure without dropping per-goal quotes.
+
 Once papers are in your library, this domain ranks what to read next and powers
 the deeper review/annotation surfaces, plus the Phase 1.14 feed-review queue.
 

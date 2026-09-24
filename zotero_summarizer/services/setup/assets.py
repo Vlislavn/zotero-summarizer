@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import subprocess
 import sys
 from typing import Any
+from unittest.mock import patch
 
 from zotero_summarizer.services._common import read_config
 
@@ -87,12 +89,42 @@ def prefetch_assets(settings: Any) -> dict[str, Any]:
     return asset_report(settings)
 
 
+def offline_probe_main(settings: Any) -> dict[str, Any]:
+    """Deny and record outbound socket attempts while loading cached assets."""
+    attempts: list[str] = []
+
+    def deny_connection(sock: socket.socket, address: Any) -> None:
+        if sock.family in (socket.AF_INET, socket.AF_INET6):
+            attempts.append(str(address))
+            raise OSError("network connection attempted during offline asset load")
+        return original_connect(sock, address)
+
+    original_connect = socket.socket.connect
+    original_connect_ex = socket.socket.connect_ex
+
+    def deny_connect_ex(sock: socket.socket, address: Any) -> int:
+        if sock.family in (socket.AF_INET, socket.AF_INET6):
+            attempts.append(str(address))
+            raise OSError("network connection attempted during offline asset load")
+        return original_connect_ex(sock, address)
+
+    with patch.object(socket.socket, "connect", deny_connection), patch.object(socket.socket, "connect_ex", deny_connect_ex):
+        try:
+            report = asset_report(settings, load=True)
+        except OSError:
+            if not attempts:
+                raise
+            return {"offline_ready": False, "loadable": False,
+                    "models": [], "network_attempts": attempts}
+    return {**report, "network_attempts": attempts}
+
+
 def offline_asset_report(settings: Any, *, timeout: int = 300) -> dict[str, Any]:
-    """Load in a fresh cache-only process so imported libraries cannot retain online flags."""
+    """Load in a fresh cache-only process and record any blocked TCP attempts."""
     script = (
         "import json,sys; from zotero_summarizer.settings import Settings; "
-        "from zotero_summarizer.services.setup.assets import asset_report; "
-        "print(json.dumps(asset_report(Settings.load(project_root=sys.argv[1]), load=True)))"
+        "from zotero_summarizer.services.setup.assets import offline_probe_main; "
+        "print(json.dumps(offline_probe_main(Settings.load(project_root=sys.argv[1]))))"
     )
     env = os.environ.copy()
     env.update(HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", HF_DATASETS_OFFLINE="1")

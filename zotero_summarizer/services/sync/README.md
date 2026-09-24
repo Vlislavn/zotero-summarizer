@@ -1,5 +1,11 @@
 # services/sync — offline mutation sync
 
+A *new* positive feed verdict must have a current usable review before its
+SQLite mutation; an unreviewed feed mutation is rejected as `review_required`
+without a label or Zotero write. An existing UUID still reaches the idempotent
+replay path if its review has since gone stale. Negative verdicts and library
+items do not need a feed review.
+
 The server SQLite database remains canonical. `pull` returns compact paper
 snapshots plus a monotonic field-change cursor; protocol-v1 `changes` is always
 empty because clients reconcile from the snapshot and never consume the event

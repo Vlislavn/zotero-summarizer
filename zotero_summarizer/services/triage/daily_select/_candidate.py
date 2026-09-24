@@ -380,6 +380,7 @@ def attach_quality_from_reviews(candidates: list[dict[str, Any]]) -> int:
     NONE match — the v1 trap was a silently always-0 join, never surface that as
     'no quality'."""
     from zotero_summarizer.services.library import deep_review  # lazy cross-domain read
+    from zotero_summarizer.services.library.review_eligibility import usable_review
 
     reviews = deep_review.current_reviews()
     joinable = 0
@@ -396,6 +397,7 @@ def attach_quality_from_reviews(candidates: list[dict[str, Any]]) -> int:
         entry = (reviews.get(mkey) if mkey else None) or (reviews.get(skey) if skey else None)
         if entry is None:
             continue
+        cand["review_ready"] = usable_review(entry)
         # The QualityEval carries the coverage-based signal the card + brief render
         # (grade, band, coverage_met/applicable, red_flags) — the honest replacement
         # for the digest's unvalidated 1-5 self-scores. No digest merge needed.

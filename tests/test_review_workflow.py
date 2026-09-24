@@ -94,6 +94,12 @@ def patched_settings(tmp_path: Path, monkeypatch):
     )
     monkeypatch.setattr(review, "get_settings", lambda: fake_settings)
     monkeypatch.setattr(review_materialize, "get_settings", lambda: fake_settings)
+    # These legacy tests exercise review labels and Zotero failures, with a
+    # successful review supplied by the shared test fixture. The gate's failure
+    # states have their own focused tests.
+    from zotero_summarizer.services.library import review_eligibility
+    monkeypatch.setattr(review_eligibility, "review_ready", lambda row: True)
+    monkeypatch.setattr(review_materialize, "review_ready", lambda row: True)
     # The golden-append + summary helpers now live in review_summary.
     monkeypatch.setattr(review_summary, "get_settings", lambda: fake_settings)
     # Stub _fetch_feed_metadata so tests don't need a real Zotero install.

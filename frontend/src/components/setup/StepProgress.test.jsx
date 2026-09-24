@@ -5,7 +5,7 @@ import StepProgress from './StepProgress.jsx';
 
 describe('StepProgress accessibility', () => {
   it('announces the current step and labels completed steps without relying on color', () => {
-    render(<StepProgress current={1} validity={[true, true, false]} maxReached={1} />);
+    render(<StepProgress current={2} validity={[true, true, true, false]} maxReached={2} />);
 
     const steps = screen.getByRole('list', { name: 'Setup progress' });
     const current = within(steps).getByRole('listitem', { current: 'step' });

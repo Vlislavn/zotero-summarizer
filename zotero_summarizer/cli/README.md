@@ -2,7 +2,9 @@
 
 Each command group lives in its own module and owns both its handlers and its
 argparse registration. `__init__.build_parser()` just wires the groups together,
-so no single file holds the whole parser.
+so no single file holds the whole parser. `feeds tick --force-daily` was removed:
+a daemon tick can no longer auto-Add or reject a pick. `feeds select-daily`
+is a read-only diagnostic preview; reviewed user Adds use Today/Review.
 
 ```
 __init__.build_parser()

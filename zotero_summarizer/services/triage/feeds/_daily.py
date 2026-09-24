@@ -6,85 +6,21 @@ the original triage tick.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from zotero_summarizer.integrations.zotero_read import ZoteroReader
-from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.models import SummarizeRequest
 from zotero_summarizer.services.triage import select as select_service
 from zotero_summarizer.services.triage.summarization import run_pipeline
 from zotero_summarizer.storage import feeds as feeds_storage
 from zotero_summarizer.services.triage.feeds._common import (
     LOGGER,
-    _DEFAULT_BLACK_SWAN_TAG,
     _load_config,
     _triage_conn,
     get_settings,
     get_state,
 )
-from zotero_summarizer.services.triage.feeds._daily_materialize import (
-    _MaterializeCtx,
-    _PendingScoredRow,
-    materialize_pick,
-)
+from zotero_summarizer.services.triage.feeds._daily_materialize import _PendingScoredRow
 from zotero_summarizer.services.triage.feeds._triage import _apply_prestige
-
-
-def _should_run_daily_selection(feeds_cfg: dict[str, Any]) -> bool:
-    """Return True when daily selection should fire.
-
-    Two modes:
-    - ``daily_selection_at: "HH:MM"`` (preferred) — fires once per calendar day
-      after that local clock time, regardless of when the daemon started.
-    - ``daily_selection_interval_hours`` (legacy fallback) — fires when >= N hours
-      have elapsed since the last selection run.  ``0`` means "always run".
-    """
-    with _triage_conn() as conn:
-        row = conn.execute(
-            "SELECT MAX(updated_at) AS ts FROM processed_feed_items WHERE decision IN (?, ?, ?)",
-            (
-                feeds_storage.DECISION_SELECTED,
-                feeds_storage.DECISION_BLACK_SWAN,
-                feeds_storage.DECISION_REJECTED_DAILY_CUTOFF,
-            ),
-        ).fetchone()
-    last_ts = row["ts"] if row is not None else None
-
-    target_time_str = feeds_cfg.get("daily_selection_at")
-    if target_time_str:
-        # Time-of-day mode: fire once per calendar day after the target local time.
-        try:
-            target_h, target_m = (int(x) for x in str(target_time_str).split(":"))
-        except (ValueError, AttributeError):
-            target_h, target_m = 8, 0
-        now_local = datetime.now()  # local wall clock
-        today_target = now_local.replace(hour=target_h, minute=target_m, second=0, microsecond=0)
-        if now_local < today_target:
-            return False  # too early today
-        if not last_ts:
-            return True
-        try:
-            last_dt_utc = datetime.strptime(str(last_ts), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-            last_dt_local = last_dt_utc.astimezone().replace(tzinfo=None)
-        except ValueError:
-            return True
-        # Already ran today at or after the target window.
-        return last_dt_local < today_target
-
-    # Legacy interval mode.
-    interval_raw = feeds_cfg.get("daily_selection_interval_hours")
-    interval_h = int(interval_raw if interval_raw is not None else 24)
-    # interval_h <= 0 means "always run" (useful for tests and `feeds select-daily`).
-    if interval_h <= 0:
-        return True
-    if not last_ts:
-        return True
-    try:
-        last_dt = datetime.strptime(str(last_ts), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-    except ValueError:
-        return True
-    return datetime.now(timezone.utc) - last_dt >= timedelta(hours=interval_h)
 
 
 def _refine_with_full_text(
@@ -194,53 +130,15 @@ def _allocate_black_swan(
     return picks
 
 
-def _reject_unselected(
-    scored: list[_PendingScoredRow],
-    final_inbox: list[_PendingScoredRow],
-    *,
-    decision_reason: str,
-    run_id: str,
-) -> int:
-    """Flip every non-selected candidate to rejected_daily_cutoff; return count."""
-    selected_keys = {p.key for p in final_inbox}
-    rejected_count = 0
-    with _triage_conn() as conn:
-        for pick in scored:
-            if pick.key in selected_keys:
-                continue
-            if feeds_storage.update_to_decision(
-                conn,
-                feed_library_id=int(pick.row.get("feed_library_id") or 0),
-                feed_item_id=int(pick.row.get("feed_item_id") or 0),
-                decision=feeds_storage.DECISION_REJECTED_DAILY_CUTOFF,
-                decision_reason=decision_reason,
-            ):
-                LOGGER.debug(
-                    "[%s] ✗ rejected: %r  composite=%.2f  reason=%s",
-                    run_id, str(pick.row.get("title") or "")[:60],
-                    pick.composite_score, decision_reason,
-                )
-                rejected_count += 1
-        conn.commit()
-    return rejected_count
-
-
-def run_daily_selection(
-    *,
-    reader: ZoteroReader | None = None,
-    writer: ZoteroWriter | None = None,
-    dry_run: bool = False,
-    feed_library_ids: list[int] | None = None,
-) -> dict[str, Any]:
+def run_daily_selection(*, feed_library_ids: list[int] | None = None) -> dict[str, Any]:
     """Plateau-select 1-2 best from rolling 24h of `triaged_pending` rows.
 
     Reads `processed_feed_items` WHERE decision='triaged_pending'
     AND created_at >= now - daily_window_hours, plateau-selects with
     hard_min=daily_target_min (default 1) and hard_max=daily_target_max
-    (default 2), allocates 0-1 black-swan from the rejected pool, and
-    materializes selected items directly into Zotero (Inbox + matched
-    collections + tags + v3 note). All other rows flip to
-    `rejected_daily_cutoff`.
+    (default 2) and allocates 0-1 black-swan from the rejected pool. Selected
+    candidates and all non-selected rows remain pending until the user
+    explicitly Adds or Trashes a paper after inspecting its review.
 
     When ``feed_library_ids`` is provided, the candidate pool is restricted
     to those feeds — used by ``feeds run --feeds <name>`` so selection stays
@@ -257,14 +155,9 @@ def run_daily_selection(
     daily_max = int(feeds_cfg.get("daily_target_max") or 2)
     daily_window_h = int(feeds_cfg.get("daily_window_hours") or 24)
     kneedle_S = float(selection_cfg.get("kneedle_sensitivity") or 1.0)
-    inbox_collection_name = str(feeds_cfg.get("inbox_collection_name") or "Inbox")
-    outcome_window_days = int(feeds_cfg.get("outcome_window_days") or 7)
     bs_min_score = float(surprise_cfg.get("min_score") or 0.30)
-    black_swan_tag = str(surprise_cfg.get("black_swan_tag") or _DEFAULT_BLACK_SWAN_TAG)
     daily_force_black_swan = bool(feeds_cfg.get("daily_force_black_swan_every_run", False))
 
-    reader = reader or ZoteroReader(get_settings().zotero_data_dir)
-    writer = writer or ZoteroWriter(get_settings().zotero_data_dir)
     run_id = feeds_storage.new_run_id(prefix="daily")
 
     # 1. Gather candidates (optionally scoped to specific feeds).
@@ -314,34 +207,19 @@ def run_daily_selection(
     # Re-sort in case full-text scoring changed the ranking.
     final_inbox.sort(key=lambda p: p.composite_score, reverse=True)
 
-    # 4. Materialize selected items directly.
+    # Ranking is advisory. Only an explicit Add after a usable review may write
+    # to Zotero; the daemon must not promote a merely selected paper.
     materialized_keys: list[str] = []
-    used_keys: set[str] = set()
-    if not dry_run:
-        mat_ctx = _MaterializeCtx(
-            inbox_collection_name=inbox_collection_name,
-            black_swan_tag=black_swan_tag,
-            outcome_window_days=outcome_window_days,
-            decision_reason=selection.reason,
-        )
-        for pick in final_inbox:
-            materialized_keys.append(materialize_pick(
-                pick, writer=writer, run_id=run_id, used_keys=used_keys, ctx=mat_ctx,
-            ))
 
-    # 5. Flip all the rest to rejected_daily_cutoff.
-    rejected_count = 0
-    if not dry_run:
-        rejected_count = _reject_unselected(
-            scored, final_inbox, decision_reason=selection.reason, run_id=run_id,
-        )
-
+    # No automated decision: all candidates stay pending until explicit Add/Trash.
     return {
         "run_id": run_id,
         "materialized": len(materialized_keys),
         "materialized_keys": materialized_keys,
-        "rejected": rejected_count,
+        "rejected": 0,
         "black_swans": len(bs_picks),
+        "selected": [{"id": int(p.row["id"]), "title": str(p.row.get("title") or "")}
+                     for p in final_inbox],
         "errors": [],
         "cutoff": selection.cutoff,
         "cutoff_reason": selection.reason,

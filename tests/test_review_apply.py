@@ -121,6 +121,57 @@ def test_unexpected_apply_error_propagates(patched_settings, monkeypatch, failur
         asyncio.run(apply_all())
 
 
+def test_upserted_stable_rejection_beats_older_legacy_positive(patched_settings, monkeypatch):
+    db = patched_settings / "triage.db"
+    with fs.open_triage_conn(db) as conn:
+        row_id = _insert_awaiting(conn, feed_item_id=88)
+        conn.execute("UPDATE processed_feed_items SET decision='user_approved' WHERE id=?", (row_id,))
+        row = dict(conn.execute("SELECT * FROM processed_feed_items WHERE id=?", (row_id,)).fetchone())
+        conn.commit()
+    stable = row["stable_feed_key"]
+    for key in (stable, "feed:88"):
+        repositories.insert_or_update_label_verdict(db, item_key=key,
+            original_derived_priority="should_read", user_priority="must_read", comment="keep")
+    repositories.insert_or_update_label_verdict(db, item_key=stable,
+        original_derived_priority="should_read", user_priority="dont_read", comment="changed mind")
+    writes = []
+    monkeypatch.setattr(zotero_write, "ZoteroWriter", lambda *args: object())
+    monkeypatch.setattr(review_materialize, "materialize_row",
+                        lambda row, **kwargs: writes.append(row["id"]))
+    result = review.apply_all_approved()
+    assert result["applied"] == 0 and result["failed"][0]["code"] == "superseded"
+    assert writes == []
+    with fs.open_triage_conn(db) as conn:
+        assert conn.execute("SELECT decision FROM processed_feed_items WHERE id=?", (row_id,)).fetchone()[0] == "user_rejected"
+
+
+def test_legacy_negative_label_does_not_cancel_another_feeds_same_id(patched_settings, monkeypatch):
+    from zotero_summarizer.storage.feed_identity import stable_feed_key_from_parts
+
+    db = patched_settings / "triage.db"
+    with fs.open_triage_conn(db) as conn:
+        a = _insert_awaiting(conn, feed_library_id=2, feed_item_id=42)
+        b = _insert_awaiting(conn, feed_library_id=3, feed_item_id=42)
+        b_key = stable_feed_key_from_parts(guid="unrelated-42")
+        conn.execute("UPDATE processed_feed_items SET stable_feed_key=? WHERE id=?", (b_key, b))
+        a_key = conn.execute("SELECT stable_feed_key FROM processed_feed_items WHERE id=?", (a,)).fetchone()[0]
+        conn.execute("INSERT OR REPLACE INTO feed_key_aliases(old_key, stable_feed_key) VALUES (?, ?)",
+                     ("feed:42", a_key))
+        conn.execute("UPDATE processed_feed_items SET decision='user_approved'")
+        conn.commit()
+    repositories.insert_or_update_label_verdict(db, item_key="feed:42",
+        original_derived_priority="should_read", user_priority="dont_read", comment="reject A")
+    written = []
+    monkeypatch.setattr(zotero_write, "ZoteroWriter", lambda *args: object())
+    monkeypatch.setattr(review_materialize, "materialize_row",
+                        lambda row, **kwargs: written.append(row["id"]) or "PAPER001")
+    result = review.apply_all_approved()
+    assert result["applied"] == 1 and written == [b]
+    assert result["failed"][0]["id"] == a
+    with fs.open_triage_conn(db) as conn:
+        assert conn.execute("SELECT decision FROM processed_feed_items WHERE id=?", (b,)).fetchone()[0] == "user_approved"
+
+
 def test_changed_negative_verdict_blocks_stale_approval(patched_settings, monkeypatch):
     with fs.open_triage_conn(patched_settings / "triage.db") as conn:
         row_id = _insert_awaiting(conn)
@@ -134,6 +185,9 @@ def test_changed_negative_verdict_blocks_stale_approval(patched_settings, monkey
     calls = []
     monkeypatch.setattr(zotero_write, "ZoteroWriter", lambda *args: object())
     monkeypatch.setattr(review_materialize, "materialize_row", lambda row, **kwargs: calls.append(row))
-    with pytest.raises(ValueError, match="dont_read"):
-        review.apply_all_approved()
+    result = review.apply_all_approved()
+    assert result["applied"] == result["pending_sync"] == 0
+    assert result["failed"][0]["code"] == "superseded"
     assert calls == []
+    with fs.open_triage_conn(patched_settings / "triage.db") as conn:
+        assert conn.execute("SELECT decision FROM processed_feed_items WHERE id=?", (row_id,)).fetchone()[0] == "user_rejected"

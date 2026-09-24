@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { listModels } from '../../api/settingsApi.js';
 import { fetchAiPresets, saveAiCredential } from '../../api/setupApi.js';
 import { humanizeError } from '../../utils/humanizeError.js';
@@ -22,7 +22,8 @@ function presetFor(provider, presets) {
   ))?.id || 'custom';
 }
 
-export default function StepConnectLlm({ status, routing, onPatchRouting, testedOk, onTested }) {
+export default function StepConnectLlm({ status, routing, mode, onPatchRouting, testedOk, onTested }) {
+  const queryClient = useQueryClient();
   const presetsQuery = useQuery({ queryKey: ['ai-presets'], queryFn: fetchAiPresets });
   const presets = presetsQuery.data?.presets || [];
   const localCatalog = presetsQuery.data?.local_profiles;
@@ -31,23 +32,29 @@ export default function StepConnectLlm({ status, routing, onPatchRouting, tested
   const [localProfile, setLocalProfile] = useState(null);
   const [apiKey, setApiKey] = useState('');
   const [models, setModels] = useState([]);
-  const selectedId = choice || presetFor(current, presets);
+  const selectedId = mode === 'local' ? 'local' : choice || presetFor(current, presets);
   const selected = presets.find((preset) => preset.id === selectedId);
-  const selectedLocal = localCatalog?.profiles.find((profile) => profile.id === localProfile);
-  const provider = selectedId === 'custom' ? current : selectedLocal?.provider || selected?.provider;
+  const selectedLocal = localCatalog?.profiles.find((profile) => profile.id === localProfile)
+    || (current?.name === 'local' ? (
+      localCatalog?.profiles.find((profile) => profile.model && profile.model === routing?.default?.model)
+      || localCatalog?.profiles.find((profile) => profile.id === 'existing')
+    ) : null);
+  const provider = selectedId === 'custom' ? current
+    : selectedId === 'local'
+      ? (selectedLocal?.id === 'existing' ? current : selectedLocal?.provider || selected?.provider)
+      : selected?.provider;
   const defaultModel = routing?.default?.model || '';
 
   function patchProvider(next, clearModel = false) {
-    const old = routing?.default?.provider;
-    const oldIsRouted = ['feed', 'backlog', 'deep_review'].some((key) => routing?.[key]?.provider === old);
-    const providers = (routing?.providers || []).filter((item) =>
-      item.name !== next.name && (item.name !== old || oldIsRouted));
+    const providers = (routing?.providers || []).filter((item) => item.name !== next.name);
     providers.push(next);
+    const model = clearModel ? null : routing?.default?.model;
     onPatchRouting({
-      ...routing,
-      providers,
-      default: { ...(routing?.default || {}), provider: next.name,
-        model: clearModel ? null : routing?.default?.model },
+      ...routing, providers,
+      default: { provider: next.name, model },
+      feed: { provider: next.name, model: null },
+      backlog: { provider: next.name, model: null },
+      deep_review: { provider: next.name, model: null },
     });
     onTested?.(false);
     setModels([]);
@@ -79,6 +86,14 @@ export default function StepConnectLlm({ status, routing, onPatchRouting, tested
     setModels([]);
   }
 
+  function patchExistingEndpoint(base_url) {
+    if (current?.name !== 'local') return;
+    onPatchRouting({ ...routing,
+      providers: routing.providers.map((item) => item.name === current.name ? { ...item, base_url } : item),
+    });
+    onTested?.(false);
+  }
+
   function patchCustom(fields) {
     patchProvider({
       name: current?.name || 'custom', type: current?.type || 'openai',
@@ -90,11 +105,9 @@ export default function StepConnectLlm({ status, routing, onPatchRouting, tested
   function patchModel(model) {
     const next = { ...routing,
       default: { ...(routing?.default || {}), provider: provider?.name, model: model || null } };
-    if (selectedId === 'local') {
-      ['feed', 'backlog', 'deep_review'].forEach((stage) => {
-        next[stage] = { provider: provider?.name, model: model || null };
-      });
-    }
+    ['feed', 'backlog', 'deep_review'].forEach((stage) => {
+      next[stage] = { provider: provider?.name, model: null };
+    });
     onPatchRouting(next);
   }
 
@@ -102,6 +115,8 @@ export default function StepConnectLlm({ status, routing, onPatchRouting, tested
     mutationFn: async () => {
       if (requiresKey && apiKey) {
         await saveAiCredential(provider.api_key_env, apiKey);
+        queryClient.setQueryData(['setup-doctor'], { ready: false, status: 'not_started', checks: [], modes: {} });
+        queryClient.invalidateQueries({ queryKey: ['setup-doctor'] });
       }
       return listModels(provider);
     },
@@ -117,7 +132,7 @@ export default function StepConnectLlm({ status, routing, onPatchRouting, tested
   const legacyStored = status?.llm?.api_key_env === provider?.api_key_env
     && status?.llm?.api_key_present;
   const stored = Boolean(selected?.credential?.present || legacyStored);
-  const canConnect = Boolean(provider && (selectedId !== 'local' || localProfile)
+  const canConnect = Boolean(provider && (selectedId !== 'local' || selectedLocal)
     && (!requiresKey || apiKey || stored));
   const connected = Boolean(testedOk && connectMutation.isSuccess && models.includes(defaultModel));
   const cardClass = (id) => `text-left rounded-xl border px-3 py-2 transition-colors ${
@@ -128,11 +143,15 @@ export default function StepConnectLlm({ status, routing, onPatchRouting, tested
     <div className="space-y-4">
       <div>
         <h3 className="text-base font-semibold text-slate-900">Connect AI</h3>
-        <p className="text-sm text-slate-500 mt-1">Choose a service, paste its key, then pick one model.</p>
+        <p className="text-sm text-slate-500 mt-1">
+          {mode === 'local' ? 'Choose a compatible local profile, then confirm its model.'
+            : 'Choose a service, paste its key, then pick one model.'}
+        </p>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2" aria-label="AI services">
-        {presets.map((preset) => (
+        {presets.filter((preset) => mode === 'local' ? preset.id === 'local'
+          : mode === 'hosted' ? preset.id !== 'local' : true).map((preset) => (
           <button key={preset.id} type="button" className={cardClass(preset.id)} onClick={() => choosePreset(preset.id)}>
             <span className="block text-sm font-semibold text-slate-800">{preset.label}</span>
             {preset.recommended && <span className="text-[11px] text-forest-800">Recommended</span>}
@@ -151,9 +170,9 @@ export default function StepConnectLlm({ status, routing, onPatchRouting, tested
           <div className="grid sm:grid-cols-3 gap-2">
             {localCatalog.profiles.map((profile) => (
               <button key={profile.id} type="button" disabled={!profile.compatible}
-                aria-pressed={localProfile === profile.id}
+                aria-pressed={selectedLocal?.id === profile.id}
                 className={`text-left rounded-xl border px-3 py-2 ${
-                  localProfile === profile.id ? 'border-forest-800 bg-forest-800/5' : 'border-slate-200'
+                  selectedLocal?.id === profile.id ? 'border-forest-800 bg-forest-800/5' : 'border-slate-200'
                 } disabled:opacity-50 disabled:cursor-not-allowed`}
                 onClick={() => chooseLocalProfile(profile)}>
                 <span className="block text-sm font-semibold text-slate-800">{profile.label}</span>
@@ -164,6 +183,10 @@ export default function StepConnectLlm({ status, routing, onPatchRouting, tested
               </button>
             ))}
           </div>
+          {selectedLocal?.id === 'existing' && (
+            <Field label="Local endpoint URL" value={current?.base_url || ''}
+              onChange={patchExistingEndpoint} />
+          )}
           {selectedLocal && (
             <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600">
               <p>{selectedLocal.runtime} · {selectedLocal.features.join(', ')}</p>

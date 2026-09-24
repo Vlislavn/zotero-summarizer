@@ -48,7 +48,7 @@ def _feeds_run(args: argparse.Namespace) -> int:
         _settings, feed_filter = _bootstrap_feeds_cli(args)
         report = await asyncio.to_thread(
             run_daemon_tick, feed_library_ids=feed_filter, batch_size=None,
-            force_daily_selection=False, review_mode=True,
+            review_mode=True,
             gate_only=args.gate_only, dry_run=args.dry_run,
         )
         print(json.dumps(report.as_dict(), indent=2))
@@ -90,8 +90,8 @@ def _feeds_serve(args: argparse.Namespace) -> int:
       - triages them (LLM scoring + corpus pre-filter)
       - marks them read in Zotero so the unread badge updates
       - resolves a few due outcomes from prior materializations
-      - at the configured morning time (daily_selection_at), materializes
-        the 1-2 best items from the rolling 24h pool into the Inbox collection
+      - optionally reviews top Today papers in place; only the user can Add
+        a reviewed paper to the Zotero Inbox
     SIGTERM / SIGINT finishes the current tick cleanly before exiting.
     """
     import asyncio
@@ -112,19 +112,14 @@ def _feeds_serve(args: argparse.Namespace) -> int:
 
 
 def _feeds_select_daily(args: argparse.Namespace) -> int:
-    """Manually trigger one round of daily selection.
-
-    Normally the daemon runs this once every `daily_selection_interval_hours`
-    (default 24h). This subcommand forces it on demand — useful for testing
-    or for catching up after a long downtime.
-    """
+    """Inspect an advisory daily plateau selection without Zotero writes."""
     import asyncio
 
     async def _run() -> int:
         from zotero_summarizer.services.triage.feeds import run_daily_selection
 
         _bootstrap_feeds_cli(args)
-        result = await asyncio.to_thread(run_daily_selection, dry_run=args.dry_run)
+        result = await asyncio.to_thread(run_daily_selection)
         print(json.dumps(result, indent=2))
         return 0 if not result.get("errors") else 1
 
@@ -150,7 +145,6 @@ def _feeds_tick(args: argparse.Namespace) -> int:
             run_daemon_tick,
             feed_library_ids=feed_filter,
             batch_size=batch,
-            force_daily_selection=args.force_daily,
         )
         print(json.dumps(report.as_dict(), indent=2))
         return int(bool(report.errors or report.fatal_llm_error))
@@ -305,22 +299,12 @@ def register_feeds(subparsers) -> None:
         default=None,
         help="Override LLM model for this tick. Uses goals.yaml value if omitted.",
     )
-    feeds_tick.add_argument(
-        "--force-daily",
-        action="store_true",
-        help="Force daily selection to run this tick (skip the time-of-day check)",
-    )
     feeds_tick.add_argument("--project-root", default=None)
     feeds_tick.set_defaults(func=_feeds_tick)
 
     feeds_daily = feeds_subparsers.add_parser(
         "select-daily",
-        help="Manually trigger daily selection over the rolling 24h triage pool",
-    )
-    feeds_daily.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Plateau-select but don't materialize items into Zotero",
+        help="Inspect the rolling 24h plateau picks without modifying Zotero",
     )
     feeds_daily.add_argument("--project-root", default=None)
     feeds_daily.set_defaults(func=_feeds_select_daily)

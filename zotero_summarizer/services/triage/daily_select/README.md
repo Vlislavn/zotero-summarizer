@@ -10,7 +10,10 @@ the primary pool emptied, and the spot-check now lives in the Review page +
 Today's SpotCheck section (`services/library/review.list_by_state`).
 
 Quality joins consume only deep reviews whose PDF and generation identity is
-still current; stale cached grades cannot reorder a new slate.
+still current; stale cached grades cannot reorder a new slate. The same join
+sets `review_ready` only for a usable paper-specific digest, so the Today UI
+can explain disabled Add without mistaking a quality badge for a review. The
+server rechecks at every write boundary; this flag is advisory, not permission.
 
 ```
 processed_feed_items ─_querying.open_ro→ rows ─drop handled ─drop trashed-GUID ─drop content dupes─┐

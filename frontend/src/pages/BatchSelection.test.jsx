@@ -18,7 +18,7 @@ it.each([
   const papers = [1, 2, 3].map((id) => ({
     item_id: id, item_key: `P${id}`, title: id === 1 ? 'Alpha' : `Beta ${id}`,
     feed_name: id === 1 ? 'arXiv' : 'PubMed', quality_grade: id === 1 ? 'A' : 'D',
-    relevance_score: 4, has_pdf: false,
+    relevance_score: 4, has_pdf: false, review_ready: true,
   }));
   vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} });
   vi.stubGlobal('fetch', vi.fn(async (path, options = {}) => {

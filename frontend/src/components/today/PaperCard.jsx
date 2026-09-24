@@ -74,7 +74,7 @@ function WhyRow({ why }) {
 // Paper card
 // ---------------------------------------------------------------------------
 
-export default function PaperCard({ paper, selected, onToggleSelect }) {
+export default function PaperCard({ paper, selected, onToggleSelect, llmEnabled = true }) {
   const authors = parseAuthorsString(paper.authors);
   if (authors.length > 0 && typeof paper.max_author_h_index === 'number' && paper.max_author_h_index > 0) {
     authors[0] = { ...authors[0], h_index: paper.max_author_h_index };
@@ -150,6 +150,14 @@ export default function PaperCard({ paper, selected, onToggleSelect }) {
               the durable stable_feed_key (the top feed papers carry a rendered brief +
               the in-place review; others show the review). Reuse, not a new view; one
               name per target (Jakob): "full review" = the interactive page, everywhere. */}
+          {paper.stable_feed_key && !paper.review_ready && (
+            <p className="mt-2 text-xs text-amber-800">
+              {llmEnabled ? 'Generate a review before adding.' : <>
+                AI review is off. <Link className="underline" to="/settings">Enable AI</Link> before adding,
+                or import this paper manually in Zotero.
+              </>}
+            </p>
+          )}
           {paper.stable_feed_key && (
             <Link
               to={`/paper/${encodeURIComponent(paper.stable_feed_key)}`}

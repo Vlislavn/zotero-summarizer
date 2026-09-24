@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from zotero_summarizer.services.triage import daily_actions
-from zotero_summarizer.services.library import review
+from zotero_summarizer.services.library import review, _review_cache
 from zotero_summarizer.storage import feeds as fs
 from zotero_summarizer.storage import repositories as repo
 from zotero_summarizer.storage import rss as rss_storage
@@ -72,6 +72,9 @@ def env(tmp_path, monkeypatch):
     fake = _FakeSettings(db, tmp_path / "zot")
     monkeypatch.setattr(daily_actions, "get_settings", lambda: fake)
     monkeypatch.setattr(daily_actions, "ZoteroWriter", _FakeWriter)
+    monkeypatch.setattr(_review_cache, "get_current_review", lambda key: {
+        "needs_pdf": False, "digest": {"tldr": f"Reviewed paper {key}"},
+    })
     appended: list[tuple[int, str, str]] = []
     monkeypatch.setattr(
         review, "append_to_golden",
@@ -112,7 +115,7 @@ def test_add_to_library_materializes_and_labels_should_read(env, monkeypatch):
     labels: list[str | None] = []
     monkeypatch.setattr(
         review, "materialize_row",
-        lambda row, *, writer, used_keys, reason="x", collection_name="Inbox", label_priority=None:
+        lambda row, *, writer, used_keys, reason="x", collection_name="Inbox", label_priority=None, review_proof=None:
             (materialized.append(int(row["feed_item_id"])), labels.append(label_priority))[0] or "KEY1",
     )
     res = daily_actions.add_to_library([pk])
@@ -198,6 +201,9 @@ def test_add_to_library_runs_real_materialize_row(tmp_path, monkeypatch):
 
     monkeypatch.setattr(daily_actions, "get_settings", lambda: fake)
     monkeypatch.setattr(daily_actions, "ZoteroWriter", _MatWriter)
+    monkeypatch.setattr(_review_cache, "get_current_review", lambda key: {
+        "needs_pdf": False, "digest": {"tldr": f"Reviewed paper {key}"},
+    })
     from zotero_summarizer.services.library import review_materialize
     from zotero_summarizer.services.triage.feeds import _daily_materialize
     monkeypatch.setattr(review_materialize, "get_settings", lambda: fake)
@@ -359,7 +365,7 @@ def test_materialize_feed_verdict_adds_without_relabelling(env, monkeypatch):
     materialized: list[tuple[int, str | None]] = []
     monkeypatch.setattr(
         review, "materialize_row",
-        lambda row, *, writer, used_keys, reason="x", collection_name="Inbox", label_priority=None:
+        lambda row, *, writer, used_keys, reason="x", collection_name="Inbox", label_priority=None, review_proof=None:
             materialized.append((int(row["feed_item_id"]), label_priority)) or "ZKNEW",
     )
     monkeypatch.setattr(daily_actions.deep_review, "copy_review", lambda *a, **k: None)
@@ -420,6 +426,9 @@ def test_verdict_materialize_writes_label_tag(tmp_path, monkeypatch):
 
     monkeypatch.setattr(daily_actions, "get_settings", lambda: fake)
     monkeypatch.setattr(daily_actions, "ZoteroWriter", _CapWriter)
+    monkeypatch.setattr(_review_cache, "get_current_review", lambda key: {
+        "needs_pdf": False, "digest": {"tldr": f"Reviewed paper {key}"},
+    })
     from zotero_summarizer.services.library import review_materialize
     from zotero_summarizer.services.triage.feeds import _daily_materialize
     monkeypatch.setattr(review_materialize, "get_settings", lambda: fake)

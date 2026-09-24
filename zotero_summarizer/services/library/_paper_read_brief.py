@@ -180,6 +180,7 @@ def _goal_board_html(goals: list[dict[str, Any]]) -> str:
     inline so the binding reads at a glance (Uniform Connectedness). Miss / not-
     retrieved cells stay "unstained" — tissue that didn't take the stain."""
     cells = ""
+    summaries: dict[str, dict[str, Any]] = {}
     for g in goals:
         state = str(g.get("retrieval_state") or "not_retrieved")
         score = float(g.get("score") or 0.0)
@@ -187,14 +188,20 @@ def _goal_board_html(goals: list[dict[str, Any]]) -> str:
         is_hit = state == "hit" and bool(g.get("relevant"))
         extra, has_ev = "", ""
         if state == "hit":
-            why = str(g.get("summary") or "").strip() or "relevant — grounded summary withheld"
+            why = ("relevant — grounded summary withheld" if not str(g.get("summary") or "").strip()
+                   else "Relevant to this goal" if is_hit else "Evidence did not support this goal")
+            _collect_goal_summary(summaries, g)
             secs = ", ".join(_h(s) for s in (g.get("key_sections") or []) if str(s).strip())
             quotes = [str(q).strip() for q in (g.get("supporting_quotes") or []) if str(q).strip()]
             if secs:
                 extra += f'<div class="g-sec">Read for you: {secs}</div>'
             if quotes:
-                has_ev = " has-evidence"  # gates the tether rail (only when evidence exists)
+                has_ev = " has-evidence"
                 extra += f'<div class="g-quote">“{_h(quotes[0])}”</div>'
+                if len(quotes) > 1:
+                    extra += '<details><summary>More evidence</summary>'
+                    extra += ''.join(f'<div class="g-quote">“{_h(quote)}”</div>' for quote in quotes[1:])
+                    extra += '</details>'
         elif state == "miss":
             why = "not addressed in this paper"
         else:
@@ -204,10 +211,57 @@ def _goal_board_html(goals: list[dict[str, Any]]) -> str:
             f'<div class="gcell state-{state} {stain}{has_ev}">'
             f'<div class="g-label">{_h(_short_goal(g.get("goal", "")))}</div>'
             f'<div class="g-state">{_h(_STATE_LABEL.get(state, state))}</div>'
-            f'<div class="g-bar"><span style="width:{width}%"></span></div>'
+            f'<div class="g-bar" role="meter" aria-label="{_h(_short_goal(g.get("goal", "")))} relevance" '
+            f'aria-valuemin="0" aria-valuemax="3" aria-valuenow="{max(0.0, min(3.0, score))}">'
+            f'<span style="width:{width}%"></span></div>'
             f'<div class="g-why">{_h(why)}</div>{extra}</div>'
         )
-    return f'<div class="goal-board">{cells}</div>'
+    return f'<div class="goal-board">{cells}</div>{_goal_summaries_html(summaries)}'
+
+
+def _collect_goal_summary(summaries: dict[str, dict[str, Any]], goal: dict[str, Any]) -> None:
+    """Fold identical sentences into one conclusion while retaining every goal label."""
+    text = str(goal.get("summary") or "").strip()
+    if not text:
+        return
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        sentence = sentence.strip()
+        key = re.sub(r"[.!]+$", "", re.sub(r"\s+", " ", sentence.casefold())).strip()
+        symbols = re.findall(r"\b[A-Za-z]{1,5}(?:\d+|\s*=\s*\d[\d.,]*)", sentence)
+        if not sentence.isupper():
+            symbols += re.findall(r"\b[A-Z]{2,}\b", sentence)
+        if symbols:
+            key += "|" + "|".join(re.sub(r"\s+", "", symbol) for symbol in symbols)
+        if not key:
+            continue
+        entry = summaries.setdefault(key, {"text": sentence, "goals": []})
+        label = str(goal.get("goal") or "").strip()
+        if label and label not in entry["goals"]:
+            entry["goals"].append(label)
+
+
+def _goal_summaries_html(summaries: dict[str, dict[str, Any]]) -> str:
+    if not summaries:
+        return ""
+    visible, overflow = [], []
+    for entry in summaries.values():
+        text = entry["text"]
+        words = text.split()
+        short = " ".join(words[:30]) + ("…" if len(words) > 30 else "")
+        label = "; ".join(entry["goals"])
+        detail = (f'<details><summary>Full finding</summary><p>{_h(text)}</p></details>'
+                  if len(words) > 30 else '')
+        item = (f'<li class="goal-summary-item"><strong>For: {_h(label)}</strong>'
+                f'<p class="goal-summary-text">{_h(short)}</p>{detail}</li>')
+        if len(visible) < 3:
+            visible.append(item)
+        else:
+            overflow.append(item)
+    result = '<ul class="goal-summary-list">' + ''.join(visible) + '</ul>'
+    if overflow:
+        result += ('<details class="goal-summary-more"><summary>More goal findings</summary>'
+                   '<ul class="goal-summary-list">' + ''.join(overflow) + '</ul></details>')
+    return result
 
 
 def _question_lookup() -> dict[str, str]:
@@ -374,6 +428,9 @@ def brief_css() -> str:
 .gauge-passes{font-family:var(--font-mono);font-size:12px;color:var(--muted)}
 .gauge-method{font-family:var(--font-mono);font-size:11px;color:var(--muted);margin-top:5px;letter-spacing:.01em}
 .goal-board{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:11px;margin-bottom:6px}
+.goal-summary-list{margin:0 0 10px;padding-left:22px;overflow-wrap:anywhere}
+.goal-summary-item{margin-bottom:8px}.goal-summary-text{margin:3px 0;font:14px/1.5 var(--font-read)}
+.goal-summary-more summary:focus-visible{outline:2px solid var(--hema);outline-offset:3px}
 .gcell{position:relative;border:1px solid var(--border);border-radius:11px;padding:12px 13px 13px;background:var(--card);box-shadow:var(--shadow)}
 .gcell.stained{border-left:3px solid var(--hema)}
 .gcell.unstained{border-left:2px dotted var(--hair);opacity:.72}

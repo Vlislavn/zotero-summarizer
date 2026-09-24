@@ -36,6 +36,12 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ### Changed
 
+- Feed papers now need a current full-text review before Add or a positive feed label; the daemon no longer auto-adds/rejects picks. Mixed batches report `review_required`, while Trash stays immediate. Stale offline replays and concurrent Add/Trash cannot revive a rejected pending Add; an explicit newer positive verdict can reauthorize it. Approved sibling rows reuse one Zotero item; updated stable verdicts outrank older legacy aliases.
+- Setup chooses local, hosted or no LLM before Zotero, validates every stage and gates completion on Doctor. Cache-only assets report blocked network attempts; config/RSS/credential changes invalidate stale success. Zotero stays optional for RSS-only use; No LLM mode now explains why new feed Adds need AI while manual imports remain available.
+- Review Relevance renders repeated goal conclusions once in React and HTML, caps the first view, and keeps distinct goal evidence behind disclosures.
+- Research-feed offline check now marks missing frozen production inputs and reviews as unscorable instead of reporting fallback-path 0% inclusion or synthetic 100% artifact precision; it still fails acceptance.
+- Today displays top-level full-text acquisition errors without confusing the failure with a successful Zotero Add; Spot-check now keeps pending-sync/mark-read failures visible in a warning after acting on its last card.
+- An interrupted Doctor retry now clears cached Ready instead of letting a stale success unlock Today; credential replacement now serializes with Doctor, rotates a durable revision before writing the key, and clears cached UI Ready.
 - Targeted Search page state survives tab switches: session id + typed drafts + target collection persist in `sessionStorage`; on remount the server-backed session is refetched and a still-running review resumes polling. A dead pointer clears itself.
 - Library Rescore button renders only when actionable (computing/error/stale/never-scored/unscored rows) — quiet-state noise removed; retrain hot-swap already rescores automatically.
 - One name per target: the interactive `/paper/:key` page is "Open full review ↗" everywhere (Today card renamed); the standalone HTML artifact link in the reader pane is now "Open static brief ↗".

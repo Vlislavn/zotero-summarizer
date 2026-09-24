@@ -15,11 +15,131 @@ from zotero_summarizer.domain import (
     PRIORITY_SHOULD_READ_THRESHOLD,
 )
 from zotero_summarizer.storage.feeds_constants import (
-    DECISION_TRIAGED_PENDING, OUTCOME_DELETED_ALL, OUTCOME_ENGAGED, OUTCOME_KEPT_INBOX,
+    DECISION_TRIAGED_PENDING, DECISION_USER_APPROVED, DECISION_USER_REJECTED,
+    OUTCOME_DELETED_ALL, OUTCOME_ENGAGED, OUTCOME_KEPT_INBOX, OUTCOME_KEPT_UNREAD_APP,
     OUTCOME_MOVED_COLLECTION, OUTCOME_TRASHED, OUTCOME_UNKNOWN, OUTCOME_WEIGHT,
     relevance_from_signal_weight,
 )
+from zotero_summarizer.storage.feed_identity import row_feed_keys
+from zotero_summarizer.storage.feeds_lookup import get_processed_feed_item_by_id
 from zotero_summarizer.storage.feeds_schema import open_triage_conn
+
+
+class MaterializationSuperseded(ValueError):
+    """The feed row was rejected or its positive verdict changed before write."""
+
+
+def current_feed_verdict(conn: sqlite3.Connection, row: dict[str, Any]) -> dict[str, Any] | None:
+    """Newest stable verdict; consult a legacy key only when its alias names this paper."""
+    keys = row_feed_keys(row)[:1]
+    stable = row.get("stable_feed_key")
+    if stable:
+        siblings = conn.execute(
+            "SELECT DISTINCT feed_item_id FROM processed_feed_items WHERE stable_feed_key = ?",
+            (stable,),
+        ).fetchall()
+        for sibling in siblings:
+            feed_id = int(sibling["feed_item_id"])
+            resolved = get_processed_feed_item_by_id(conn, feed_id)
+            if resolved is not None and resolved.get("stable_feed_key") == stable:
+                legacy = f"feed:{feed_id}"
+                if legacy not in keys:
+                    keys.append(legacy)
+    placeholders = ",".join("?" for _ in keys)
+    has_revisions = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sync_changes'"
+    ).fetchone() is not None
+    order = (
+        "COALESCE((SELECT MAX(revision) FROM sync_changes s WHERE s.item_key = v.item_key "
+        "AND s.field = 'verdict'), 0) DESC, " if has_revisions else ""
+    ) + "v.created_at DESC, v.id DESC"
+    label = conn.execute(
+        f"SELECT v.user_priority, v.source, v.comment FROM label_verdicts v "
+        f"WHERE v.item_key IN ({placeholders}) ORDER BY {order} LIMIT 1", keys,
+    ).fetchone()
+    return dict(label) if label is not None else None
+
+
+def current_materialization_intent(
+    conn: sqlite3.Connection, row: dict[str, Any], label_priority: str | None = None,
+) -> str | None:
+    """Check current intent under BEGIN IMMEDIATE; return an existing item key."""
+    current = conn.execute(
+        "SELECT decision, materialized_zotero_key FROM processed_feed_items WHERE id = ?",
+        (int(row["id"]),),
+    ).fetchone()
+    if current is None:
+        raise KeyError(f"Missing processed feed row: {row['id']}")
+    if current["materialized_zotero_key"]:
+        return str(current["materialized_zotero_key"])
+    label = current_feed_verdict(conn, row)
+    if label is not None and (label["user_priority"] == "dont_read" or (
+        label_priority is not None and label["user_priority"] != label_priority
+    )):
+        raise MaterializationSuperseded("A newer verdict cancelled this Add")
+    if current["decision"] == DECISION_USER_REJECTED and not (
+        label and label["source"] == "user" and label["user_priority"] != "dont_read"
+    ):
+        raise MaterializationSuperseded("A newer rejection cancelled this Add")
+    if row.get("stable_feed_key"):
+        sibling = conn.execute(
+            "SELECT materialized_zotero_key FROM processed_feed_items "
+            "WHERE stable_feed_key = ? AND materialized_zotero_key IS NOT NULL "
+            "ORDER BY id LIMIT 1", (row["stable_feed_key"],),
+        ).fetchone()
+        if sibling:
+            return str(sibling["materialized_zotero_key"])
+    return None
+
+
+def link_materialized_sibling(conn: sqlite3.Connection, row: dict[str, Any], key: str) -> bool:
+    """Resolve an approved duplicate onto its already-written Zotero item."""
+    cursor = conn.execute(
+        """UPDATE processed_feed_items
+           SET materialized_zotero_key = ?, decision = 'selected',
+               decision_reason = 'reused_materialized_sibling', zotero_sync_status = 'synced',
+               final_outcome = NULL, outcome_signal_weight = NULL,
+               outcome_detected_at = NULL, updated_at = datetime('now')
+           WHERE id = ? AND materialized_zotero_key IS NULL""",
+        (key, int(row["id"])),
+    )
+    return bool(cursor.rowcount)
+
+
+def mark_pending_if_current(conn: sqlite3.Connection, row: dict[str, Any], reason: str) -> bool:
+    """Atomically park a reviewed Add only while no newer rejection exists."""
+    existing = current_materialization_intent(conn, row)
+    if existing:
+        link_materialized_sibling(conn, row, existing)
+        return False
+    cursor = conn.execute(
+        """UPDATE processed_feed_items
+           SET decision = ?, decision_reason = ?, zotero_sync_status = 'pending',
+               final_outcome = ?, outcome_signal_weight = ?,
+               outcome_detected_at = datetime('now'), updated_at = datetime('now')
+           WHERE id = ?""",
+        (DECISION_USER_APPROVED, reason, OUTCOME_KEPT_UNREAD_APP,
+         OUTCOME_WEIGHT[OUTCOME_KEPT_UNREAD_APP], int(row["id"])),
+    )
+    return bool(cursor.rowcount)
+
+
+def cancel_pending_materialization(conn: sqlite3.Connection, stable_feed_key: str) -> int:
+    """A newer negative verdict wins over every unmaterialized sibling Add."""
+    if not stable_feed_key:
+        return 0
+    cursor = conn.execute(
+        """UPDATE processed_feed_items
+           SET decision = ?, decision_reason = 'negative_verdict_after_pending_add',
+               zotero_sync_status = 'cancelled', final_outcome = NULL,
+               outcome_signal_weight = NULL, outcome_detected_at = NULL,
+               updated_at = datetime('now')
+           WHERE stable_feed_key = ? AND decision = ?
+             AND materialized_zotero_key IS NULL""",
+        (DECISION_USER_REJECTED, stable_feed_key, DECISION_USER_APPROVED),
+    )
+    return int(cursor.rowcount or 0)
+
 
 _ORDER_BY = {
     "score": "COALESCE(composite_score, 0) DESC",

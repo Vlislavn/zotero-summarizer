@@ -28,12 +28,13 @@ def test_process_exit_keeps_decision_label_and_sample_together(patched_settings,
 import os, sys
 from pathlib import Path
 from types import SimpleNamespace
-from zotero_summarizer.services.library import review, review_summary
+from zotero_summarizer.services.library import review, review_summary, review_eligibility
 from zotero_summarizer.services.golden import label_verdicts
 from zotero_summarizer.storage import repositories
 root = Path(sys.argv[1])
 settings = SimpleNamespace(triage_db_path=root / 'triage.db', golden_csv_path=root / 'zotero-summarizer-golden.csv')
 review.get_settings = review_summary.get_settings = lambda: settings
+review_eligibility.review_ready = lambda row: True  # reviewed paper in this commit-boundary test
 review_summary._fetch_feed_metadata = lambda **kw: {'abstract': 'Durable full abstract'}
 label_verdicts.log_committed_transition = lambda **kw: None
 if sys.argv[3] == 'before_commit':

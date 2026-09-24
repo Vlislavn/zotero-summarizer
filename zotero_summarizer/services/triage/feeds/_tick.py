@@ -33,7 +33,6 @@ from zotero_summarizer.services.triage.feeds._tick_dedup import (
 from zotero_summarizer.services.triage.feeds._tick_phases import (
     _TickResults,
     mark_processed_read,
-    maybe_run_daily,
     pick_and_log,
     prepare_unprocessed,
     record_tick_decisions,
@@ -119,43 +118,6 @@ def _maybe_rescue_l1(
         except (ValueError, AttributeError, OSError) as exc:  # config/I/O only — bugs propagate
             LOGGER.warning("[%s] recover-abstract-l1 skipped: %s", tick_id, exc)
     return triaged_results
-
-
-def _maybe_auto_review(tick_id: str, materialized_keys: list[str]) -> None:
-    """Fire the full-text quality review for the just-materialized Today picks.
-
-    This is the fix for "I never see the deep review during triage": before this
-    hook, ``deep_review`` only ran at startup (prewarm) or on a manual button/API
-    trigger. Daily selection has just materialized these items into Zotero, so
-    their PDFs are fetchable and their library keys are real — the first point a
-    full-text review can run. Reuses ``deep_review.start`` (single-flight: skips
-    already-running + cached; provider-aware pool: parallel on a remote provider,
-    queued on a local one) — the SAME ``assess_digest`` path the per-paper button
-    and the library use, not a second review. Fire-and-forget: ``start`` submits
-    to its pool and returns, so the tick is never blocked.
-
-    Gated by ``quality_review.auto_on_tick_k`` (0 disables). Capped to that many
-    keys per tick. A failure to *submit* is a daemon-tick boundary (logged, never
-    crashes the tick); per-paper review failures are recorded on each item's job
-    by the deep_review worker, not here.
-    """
-    config = _load_config()
-    qr = config.get("quality_review") or {}
-    k = int(qr.get("auto_on_tick_k") or 0)
-    if k <= 0 or not materialized_keys:
-        return
-    keys = [str(key).strip() for key in materialized_keys if str(key).strip()]
-    if not keys:
-        return
-    if len(keys) > k:
-        keys = keys[:k]
-    try:
-        from zotero_summarizer.services.library import deep_review
-
-        deep_review.start(item_keys=keys)
-        LOGGER.info("[%s] auto-review: submitted %d materialized pick(s) for full-text review", tick_id, len(keys))
-    except Exception:
-        LOGGER.exception("[%s] auto-review submit failed", tick_id)
 
 
 def _auto_review_slate(tick_id: str) -> None:
@@ -251,8 +213,6 @@ def run_daemon_tick(
     writer: ZoteroWriter | None = None,
     feed_library_ids: list[int] | None = None,
     batch_size: int | None = None,
-    force_daily_selection: bool = False,
-    allow_daily_selection: bool = True,
     dry_run: bool = False,
     review_mode: bool | None = None,
     gate_only: bool = False,
@@ -313,15 +273,9 @@ def run_daemon_tick(
             sync_zotero_read_state(zotero_reader=zotero_reader, writer=writer, tick_id=tick_id)
         if flags.outcome_check_per_tick > 0 and zotero_reader is not None:
             report.outcomes_resolved = _resolve_due_outcomes(reader=zotero_reader, limit=flags.outcome_check_per_tick)
-    materialized_keys = []
-    if not review_mode and allow_daily_selection:
-        report.daily_selection_ran, report.daily_materialized, report.daily_rejected, materialized_keys = maybe_run_daily(
-            feeds_cfg, reader=reader, writer=writer, tick_id=tick_id,
-            feed_library_ids=feed_library_ids, force=force_daily_selection, dry_run=dry_run,
-        )
+    # Only the explicit reviewed Add path may materialize a feed candidate.
+    # The daemon still reviews the Today slate in place, without Zotero writes.
     if not dry_run:
-        if materialized_keys:
-            _maybe_auto_review(tick_id, materialized_keys)
         _auto_review_slate(tick_id)
         _auto_render_slate(tick_id)
         _maybe_auto_quality_gate(tick_id, dry_run=False)

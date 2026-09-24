@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   fetchReview,
   reviewAction,
@@ -101,8 +101,14 @@ function ReviewItem({ item, localState, onAction }) {
         <VerdictPicker
           label="Relabel:"
           disabled={Boolean(localState)}
+          disabledPriorities={item.review_ready ? [] : ['must_read', 'should_read', 'could_read']}
           onPick={(priority) => onAction(item.id, 'relabel', priority)}
         />
+        {!item.review_ready && item.stable_feed_key && (
+          <Link className="text-xs text-teal-700 underline" to={`/paper/${encodeURIComponent(item.stable_feed_key)}`}>
+            Generate a review before adding
+          </Link>
+        )}
         {localState && (
           <span className={`text-xs ml-2 ${localState === 'approved' ? 'text-emerald-700' : 'text-rose-700'}`}>
             → {localState}

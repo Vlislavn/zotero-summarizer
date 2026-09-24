@@ -415,25 +415,6 @@ def record_materialization(
     return int(cursor.rowcount or 0) > 0
 
 
-def record_zotero_sync_status(
-    conn: sqlite3.Connection,
-    *,
-    feed_library_id: int,
-    feed_item_id: int,
-    status: str,
-) -> bool:
-    cursor = conn.execute(
-        """
-        UPDATE processed_feed_items
-        SET zotero_sync_status = ?,
-            updated_at = datetime('now')
-        WHERE feed_library_id = ? AND feed_item_id = ?
-        """,
-        (str(status or "").strip(), int(feed_library_id), int(feed_item_id)),
-    )
-    return int(cursor.rowcount or 0) > 0
-
-
 def record_app_outcome(
     conn: sqlite3.Connection,
     *,
@@ -483,6 +464,12 @@ def record_read_marked(
 
 # Selection + outcome/history queries live in feeds_history (re-exported).
 from zotero_summarizer.storage.feeds_history import (  # noqa: F401,E402
+    MaterializationSuperseded,
+    cancel_pending_materialization,
+    current_feed_verdict,
+    current_materialization_intent,
+    link_materialized_sibling,
+    mark_pending_if_current,
     due_outcome_checks,
     record_outcome,
     reserve_materialization_key,

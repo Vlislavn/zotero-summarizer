@@ -1,16 +1,15 @@
 """Two real SQLite stores: durable planning survives retry and concurrent writers."""
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
 from types import SimpleNamespace
 
 import pytest
 
 from tests._zotero_fixtures import build_zotero_db
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
-from zotero_summarizer.services.library import review_materialize
+from zotero_summarizer.services.library import review_eligibility, review_materialize
 from zotero_summarizer.services.triage.feeds import _daily_materialize as dm
-from zotero_summarizer.storage import feeds
+from zotero_summarizer.storage import feeds, repositories
 
 
 @pytest.fixture
@@ -21,16 +20,18 @@ def stores(tmp_path, monkeypatch):
     monkeypatch.setattr(review_materialize, "get_settings", lambda: settings)
     monkeypatch.setattr(dm, "get_settings", lambda: settings)
     monkeypatch.setattr(dm, "_triage_conn", lambda: feeds.open_triage_conn(triage))
+    monkeypatch.setattr(review_eligibility, "review_ready", lambda row: True)
     monkeypatch.setattr(ZoteroWriter, "is_connector_running", lambda self: False)
     # Metadata acquisition is outside recovery; the two database writers stay real.
     payload = lambda row: {"title": row["title"], "abstract": "A real abstract."}
     monkeypatch.setattr(dm, "_feed_payload_from_row", payload)
     monkeypatch.setattr("zotero_summarizer.services.triage.feeds._feed_payload_from_row", payload)
     with feeds.open_triage_conn(triage) as conn:
+        repositories.apply_schema(conn)
         rid = feeds.record_decision(
             conn, run_id="seed", feed_item={
                 "feed_library_id": 2, "item_id": 400, "guid": "recovery", "title": "Recovery paper",
-            }, decision=feeds.DECISION_TRIAGED_PENDING, composite_score=4.0,
+            }, decision=feeds.DECISION_USER_APPROVED, composite_score=4.0,
             reading_priority="should_read",
         )
         conn.commit()
@@ -72,7 +73,7 @@ def test_post_zotero_failure_reuses_committed_plan_after_reload(stores, lane):
     failed = _row(stores)
     assert failed["planned_zotero_key"]
     assert failed["materialized_zotero_key"] is None
-    assert failed["decision"] == feeds.DECISION_TRIAGED_PENDING
+    assert failed["decision"] == feeds.DECISION_USER_APPROVED
     assert _zotero_counts(stores) == (1, 1)
     with sqlite3.connect(stores[0]) as conn:
         conn.execute("DROP TRIGGER fail_finalize")
@@ -97,11 +98,11 @@ def test_plan_failure_prevents_zotero_write(stores, lane):
 @pytest.mark.parametrize("lanes", [("review", "review"), ("daily", "daily"), ("review", "daily")])
 def test_concurrent_materializers_share_one_key_and_preserve_resolved_outcome(stores, monkeypatch, lanes):
     stale = _row(stores)
-    barrier = Barrier(2)
+    writes = []
     apply = ZoteroWriter.apply_feed_materialization
 
     def overlap(writer, **kwargs):
-        barrier.wait(timeout=15)
+        writes.append(kwargs["new_item_key"])
         return apply(writer, **kwargs)
 
     with monkeypatch.context() as patch:
@@ -111,6 +112,7 @@ def test_concurrent_materializers_share_one_key_and_preserve_resolved_outcome(st
                        for lane in lanes]
             keys = [future.result(timeout=25) for future in futures]
     assert keys[0] == keys[1] == _row(stores)["materialized_zotero_key"]
+    assert writes == [keys[0]]  # serialized intent: only one physical Zotero write
     assert _zotero_counts(stores) == (1, 1)
 
     with sqlite3.connect(stores[0]) as conn:

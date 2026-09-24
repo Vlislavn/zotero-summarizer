@@ -39,7 +39,7 @@ import { writeStorage } from '../utils/safeStorage.js';
 
 const SPOTCHECK_LIMIT = 5;
 
-function SpotCheckCard({ item, onAdd, onTrash, busy }) {
+function SpotCheckCard({ item, onAdd, onTrash, busy, llmEnabled }) {
   const url = reviewPaperUrl(item);
   const scoreStr =
     item.composite_score != null ? Number(item.composite_score).toFixed(2) : '—';
@@ -65,11 +65,17 @@ function SpotCheckCard({ item, onAdd, onTrash, busy }) {
         <button
           type="button"
           onClick={() => onAdd(item.id)}
-          disabled={busy}
+          disabled={busy || !item.review_ready}
+          title={!item.review_ready ? (llmEnabled ? 'Generate a review before adding' : 'Enable AI to generate a review') : undefined}
           className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40"
         >
           Add to library
         </button>
+        {!item.review_ready && item.stable_feed_key && (llmEnabled ? (
+          <a href={`/paper/${encodeURIComponent(item.stable_feed_key)}`} className="text-xs text-teal-700 underline">
+            Generate review
+          </a>
+        ) : <a href="/settings" className="text-xs text-teal-700 underline">Enable AI to add</a>)}
         <button
           type="button"
           onClick={() => onTrash(item.id)}
@@ -83,15 +89,16 @@ function SpotCheckCard({ item, onAdd, onTrash, busy }) {
   );
 }
 
-function SpotCheck({ onNavigate }) {
+function SpotCheck({ onNavigate, llmEnabled }) {
   const queryClient = useQueryClient();
   const [dismissed, setDismissed] = useState(() => new Set());
-  const [msg, setMsg] = useState('');
+  const [msg, setMsg] = useState(null);
 
   const query = useQuery({
     queryKey: ['spotcheck-gate-rejected', SPOTCHECK_LIMIT],
     queryFn: () => fetchReview({ state: 'gate_rejected', limit: SPOTCHECK_LIMIT }),
     staleTime: 30_000,
+    refetchOnMount: 'always',
   });
 
   const addMut = useMutation({ mutationFn: addToLibrary });
@@ -102,9 +109,19 @@ function SpotCheck({ onNavigate }) {
     (mutation, id, verb) => {
       mutation.mutate([id], {
         onSuccess: (res) => {
-          setDismissed((prev) => new Set(prev).add(id));
+          if (res?.failed_count) {
+            setMsg({ text: res.failed?.[0]?.error || 'Generate a review before adding.', tone: 'warn' });
+            return;
+          }
+          const count = res?.added ?? res?.trashed ?? 0;
+          if (count > 0) setDismissed((prev) => new Set(prev).add(id));
+          const warnings = [];
+          if (res?.pending_sync) warnings.push(`Zotero sync pending (${res.pending_sync}); not saved to Zotero yet`);
+          if (res?.marked_read_error) warnings.push('Zotero mark-read failed');
           const pdf = fulltextMessage(res?.fulltext);
-          setMsg(`${verb} 1 paper${pdf ? ` — ${pdf.text}` : ''}.`);
+          if (pdf) warnings.push(pdf.text);
+          setMsg({ text: `${verb} ${count} paper${count === 1 ? '' : 's'}${warnings.length ? ` — ${warnings.join(', ')}` : ''}.`,
+            tone: warnings.length || count === 0 ? 'warn' : 'success' });
           queryClient.invalidateQueries({ queryKey: ['daily-pipeline'] });
         },
       });
@@ -113,7 +130,7 @@ function SpotCheck({ onNavigate }) {
   );
 
   const items = (query.data?.items || []).filter((it) => !dismissed.has(it.id));
-  if (query.isLoading || items.length === 0) return null;
+  if (query.isLoading || (items.length === 0 && !msg)) return null;
 
   return (
     <div className="mt-4">
@@ -131,8 +148,10 @@ function SpotCheck({ onNavigate }) {
         Papers the model rejected (marked read in Zotero, not added). Add any it got wrong.
       </p>
       {msg && (
-        <div className="my-2 p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800">
-          {msg}
+        <div role="status" className={`my-2 p-2 rounded-lg border text-xs ${msg.tone === 'warn'
+          ? 'bg-amber-50 border-amber-200 text-amber-900'
+          : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
+          {msg.text}
         </div>
       )}
       <div className="mt-2 space-y-2">
@@ -141,6 +160,7 @@ function SpotCheck({ onNavigate }) {
             key={item.id}
             item={item}
             busy={busy}
+            llmEnabled={llmEnabled}
             onAdd={(id) => act(addMut, id, 'Added')}
             onTrash={(id) => act(trashMut, id, 'Trashed')}
           />
@@ -252,6 +272,9 @@ export default function Today() {
   }, [visiblePapers]);
 
   const busy = addMutation.isPending || trashMutation.isPending;
+  const selectedReadyCount = visiblePapers.filter((paper) => selectedIds.has(paper.item_id) && paper.review_ready).length;
+  const blockedSelected = visibleSelectedIds.length > selectedReadyCount;
+  const llmEnabled = status?.llm?.enabled !== false;
 
   const commit = useCallback(
     (mutation, verb) => {
@@ -272,7 +295,7 @@ export default function Today() {
           if (typeof res?.pending_sync === 'number' && res.pending_sync > 0) {
             bits.push(`Zotero sync pending (${res.pending_sync})`);
             warn = true;
-          } else if (res && 'added' in res) {
+          } else if (res?.added > 0) {
             bits.push('saved to Zotero');
           }
           if (res?.marked_read_error) {
@@ -280,7 +303,8 @@ export default function Today() {
             warn = true;
           }
           if (res?.failed_count > 0) {
-            bits.push(`${res.failed_count} failed`);
+            bits.push(`${res.failed_count} blocked or failed`);
+            if (res.failed?.some((item) => item.code === 'review_required')) bits.push('Generate a review before adding');
             warn = true;
           }
           const pdf = fulltextMessage(res?.fulltext);
@@ -416,7 +440,7 @@ export default function Today() {
               </p>
             </div>
           )}
-          <SpotCheck onNavigate={navigate} />
+          <SpotCheck onNavigate={navigate} llmEnabled={llmEnabled} />
         </>
       )}
 
@@ -474,11 +498,15 @@ export default function Today() {
             <button
               type="button"
               onClick={() => commit(addMutation, 'Added')}
-              disabled={selectedCount === 0 || busy}
+              disabled={selectedReadyCount === 0 || busy}
+              title={selectedReadyCount === 0 && selectedCount ? 'Generate a review before adding' : undefined}
               className="px-3 py-1.5 rounded-lg border text-xs font-semibold bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {addMutation.isPending ? 'Adding…' : `Add ${selectedCount || ''} to library`}
             </button>
+            {blockedSelected && <span className="text-xs text-amber-800">
+              {llmEnabled ? 'Generate a review before adding selected papers.' : 'Enable AI in Settings before adding unreviewed papers.'}
+            </span>}
             <button
               type="button"
               onClick={() => commit(trashMutation, 'Trashed')}
@@ -504,6 +532,7 @@ export default function Today() {
                   paper={paper}
                   selected={selectedIds.has(paper.item_id)}
                   onToggleSelect={toggleSelect}
+                  llmEnabled={llmEnabled}
                 />
               ))
             )}

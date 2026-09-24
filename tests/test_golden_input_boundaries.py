@@ -78,6 +78,9 @@ def test_padded_key_is_identical_for_provenance_storage_events_and_effects(tmp_p
     with db.with_db_path(path):
         db.init_db()
     monkeypatch.setattr(golden, "_db_path", lambda: path)
+    # Review eligibility is tested separately; this isolates key normalization.
+    from zotero_summarizer.services.library import review_eligibility
+    monkeypatch.setattr(review_eligibility, "require_feed_review", lambda *args: None)
     monkeypatch.setattr(golden, "_load_all", lambda: [SimpleNamespace(item_key=key, derived_priority="should_read")])
     monkeypatch.setattr(label_verdicts, "log_committed_transition", lambda **kw: None)
     events, effects = [], []

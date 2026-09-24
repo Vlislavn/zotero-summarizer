@@ -22,7 +22,7 @@ export function DoctorChecklist() {
 
   if (query.isLoading) return <p className="text-sm text-slate-500">Loading local health…</p>;
   if (query.isError) return <Banner kind="error">{humanizeError(query.error)}</Banner>;
-  const data = mutation.data || query.data;
+  const data = query.data || mutation.data;
   const checks = data?.checks || [];
   const visible = checks.filter((check) => ['needs_action', 'running'].includes(check.status));
   const passed = checks.filter((check) => check.status === 'ready');

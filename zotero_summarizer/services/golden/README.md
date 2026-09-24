@@ -3,6 +3,14 @@
 Owns the training dataset and the "manual label always wins" rule. The golden
 CSV is derived from your Zotero engagement (emoji tags, notes, collections);
 your explicit verdicts overlay on top via hybrid ground truth.
+A replayed offline verdict may repair post-commit effects only if it still
+matches the latest stable/unique-legacy priority **and** rationale (not the
+first alias found). An older positive UUID cannot
+re-add a paper after a later rejection; the newer negative also cancels any
+unmaterialized pending feed Add and clears its stale provisional outcome.
+The current Zotero tag is re-mirrored on stale replays, including retractions.
+Negative Today/legacy feed verdicts cancel unmaterialized approved siblings
+before Apply-all, so a stale pending Add cannot later override the rejection.
 
 Feed Review now commits training metadata with its SQLite verdict, not through
 a pre-commit CSV append. Hybrid training unions these samples with CSV rows and

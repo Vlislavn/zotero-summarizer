@@ -3,16 +3,16 @@
 // finishing — the wizard is short by design, so the bar reads as nearly-full
 // almost immediately.
 
-const STEP_LABELS = ['Zotero sync', 'Connect LLM', 'Describe research'];
+const STEP_LABELS = ['Choose mode', 'Zotero sync', 'Connect LLM', 'Describe research'];
 
-export default function StepProgress({ current, validity, maxReached = 0 }) {
+export default function StepProgress({ current, validity, maxReached = 0, labels = STEP_LABELS }) {
   // current is the 0-based active step index. A step earns its green check only
   // once it is BOTH valid AND has been reached (i <= maxReached) — otherwise a
   // step whose prefilled defaults are already valid (e.g. step 3 "Describe
   // research") would render as "done" before the user ever navigates to it.
   return (
     <ol className="flex items-center gap-2" aria-label="Setup progress">
-      {STEP_LABELS.map((label, i) => {
+      {labels.map((label, i) => {
         const done = Boolean(validity?.[i]) && i <= maxReached;
         const active = i === current;
         const stateCls = active
@@ -35,7 +35,7 @@ export default function StepProgress({ current, validity, maxReached = 0 }) {
             >
               {label} <span className="sr-only">{active ? 'Current step' : done ? 'Complete' : 'Not complete'}</span>
             </span>
-            {i < STEP_LABELS.length - 1 && (
+            {i < labels.length - 1 && (
               <span
                 className={`h-px flex-1 ${done ? 'bg-emerald-300' : 'bg-slate-200'}`}
                 aria-hidden

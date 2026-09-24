@@ -315,16 +315,18 @@ function GoalTile({ g, sections }) {
   const score = Number(g?.score) || 0;
   const width = Math.round(Math.max(0, Math.min(1, score / 3)) * 100);
   const secs = (g?.key_sections || []).filter(Boolean).join(', ');
-  const quote = (g?.supporting_quotes || []).map((q) => String(q || '').trim()).find(Boolean);
+  const quotes = (g?.supporting_quotes || []).map((q) => String(q || '').trim()).filter(Boolean);
   let why;
-  if (state === 'hit') why = String(g?.summary || '').trim() || 'relevant — grounded summary withheld';
+  if (state === 'hit') why = String(g?.summary || '').trim() ? 'Relevant to this goal' : 'relevant — grounded summary withheld';
   else if (state === 'miss') why = 'not addressed in this paper';
   else why = 'retrieval degraded — not assessed';
   return (
     <div className={`rounded-md border border-slate-200/70 border-l-[3px] bg-white/50 p-2.5 ${TILE_STATE[state] || TILE_STATE.not_retrieved}`}>
       <div className="text-[12px] font-semibold text-slate-800 leading-snug">{shortGoal(g?.goal)}</div>
       <div className="mt-0.5 text-[11px] text-slate-400">{STATE_LABEL[state] || state}</div>
-      <div className="my-1.5 h-1 rounded-full bg-slate-200/80 overflow-hidden">
+      <div className="my-1.5 h-1 rounded-full bg-slate-200/80 overflow-hidden" role="meter"
+        aria-label={`${shortGoal(g?.goal)} relevance`} aria-valuemin={0} aria-valuemax={3}
+        aria-valuenow={Math.max(0, Math.min(3, score))}>
         <span className="block h-full bg-teal-500" style={{ width: `${width}%` }} />
       </div>
       <div className="text-[12px] leading-relaxed text-slate-600">{why}</div>
@@ -336,18 +338,56 @@ function GoalTile({ g, sections }) {
       ) : secs ? (
         <div className="mt-1.5 text-[11px] text-slate-400">Read for you: {secs}</div>
       ) : null)}
-      {state === 'hit' && quote && (
+      {state === 'hit' && quotes.length > 0 && (
         <details className="mt-1 group">
           <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden rounded text-[11px] font-semibold text-teal-600 hover:text-teal-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 focus-visible:ring-offset-1">
             evidence
           </summary>
-          <blockquote className="mt-1 border-l-2 border-teal-300 pl-2 text-[11px] italic text-slate-500 leading-relaxed">
+          {quotes.map((quote, i) => <blockquote key={`${i}-${quote}`}
+            className="mt-1 border-l-2 border-teal-300 pl-2 text-[11px] italic text-slate-500 leading-relaxed">
             “{quote}”
-          </blockquote>
+          </blockquote>)}
         </details>
       )}
     </div>
   );
+}
+
+function uniqueGoalFindings(goals) {
+  const findings = new Map();
+  for (const goal of goals) {
+    if (goal?.retrieval_state !== 'hit') continue;
+    for (const sentence of String(goal.summary || '').trim().split(/(?<=[.!?])\s+/)) {
+      const text = sentence.trim();
+      let key = text.toLocaleLowerCase().replace(/\s+/g, ' ').replace(/[.!]+$/g, '').trim();
+      const symbols = text.match(/\b[A-Za-z]{1,5}(?:\d+|\s*=\s*\d[\d.,]*)/g) || [];
+      if (text !== text.toLocaleUpperCase()) symbols.push(...(text.match(/\b[A-Z]{2,}\b/g) || []));
+      if (symbols.length) key += `|${symbols.map((s) => s.replace(/\s+/g, '')).join('|')}`;
+      if (!key) continue;
+      if (!findings.has(key)) findings.set(key, { text, goals: [] });
+      const labels = findings.get(key).goals;
+      if (goal.goal && !labels.includes(goal.goal)) labels.push(goal.goal);
+    }
+  }
+  return [...findings.values()];
+}
+
+function GoalFindings({ goals }) {
+  const findings = uniqueGoalFindings(goals);
+  if (!findings.length) return null;
+  const item = (finding, index) => {
+    const words = finding.text.split(/\s+/);
+    return <li key={`${index}-${finding.text}`} className="mb-2 break-words">
+      <strong className="text-slate-700">For: {finding.goals.join('; ')}</strong>
+      <p className="text-slate-600">{words.slice(0, 30).join(' ')}{words.length > 30 ? '…' : ''}</p>
+      {words.length > 30 && <details><summary className="cursor-pointer text-teal-700 focus-visible:ring-2">Full finding</summary>
+        <p>{finding.text}</p></details>}
+    </li>;
+  };
+  return <div className="text-xs"><ul className="list-disc pl-5">{findings.slice(0, 3).map(item)}</ul>
+    {findings.length > 3 && <details><summary className="cursor-pointer text-teal-700 focus-visible:ring-2">
+      {findings.length - 3} more findings</summary><ul className="list-disc pl-5">{findings.slice(3).map((f, i) => item(f, i + 3))}</ul></details>}
+  </div>;
 }
 
 // Show only the goals this paper ADDRESSES (the tiles carrying a grounded summary
@@ -367,6 +407,7 @@ function GoalBoard({ goals, goalLoc }) {
   return (
     <div className="space-y-2">
       {grid(addressed)}
+      <GoalFindings goals={addressed} />
       {rest.length > 0 && (
         <details className="group">
           <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden text-[11px] font-semibold text-slate-400 hover:text-slate-600">

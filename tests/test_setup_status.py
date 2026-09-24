@@ -17,7 +17,7 @@ from zotero_summarizer.models import AppState
 from zotero_summarizer.runtime import AppContext, RuntimeState, set_context
 from zotero_summarizer.services._common import read_config
 from zotero_summarizer.services._common import write_user_config
-from zotero_summarizer.services.setup import status as status_mod
+from zotero_summarizer.services.setup import doctor, status as status_mod
 from zotero_summarizer.services.setup import get_setup_status
 from zotero_summarizer.settings import Settings
 
@@ -42,6 +42,12 @@ def _write_valid_goals(config_path: Path) -> None:
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
 
+def _fake_verified_doctor(settings: Settings) -> None:
+    payload = {"status": "ready", "ready": True, "config_signature": doctor._config_signature(settings),
+               "checks": [doctor._row(check_id, "ready", "ok") for check_id in doctor._CHECKS]}
+    (settings.data_dir / "setup_doctor.json").write_text(json.dumps(payload))
+
+
 def _seed(
     tmp_path: Path, *, key_value: str | None, db_found: bool, feeds: int
 ) -> Settings:
@@ -50,7 +56,7 @@ def _seed(
     settings = Settings.load(project_root=tmp_path)
     _write_valid_goals(settings.config_path)
     settings.data_dir.mkdir()
-    (settings.data_dir / "setup_doctor.json").write_text('{"ready": true}')
+    _fake_verified_doctor(settings)
 
     state = RuntimeState()
     state.app_state = AppState(config=read_config(settings.config_path))
@@ -141,6 +147,7 @@ def test_ml_only_mode_is_ready_without_a_key_or_probe(tmp_path, monkeypatch):
         settings.config_path,
         config.model_copy(update={"llm_enabled": False}),
     )
+    _fake_verified_doctor(settings)
     _patch_externals(monkeypatch, key_value=None, db_found=False, feeds=0)
     monkeypatch.setattr(
         status_mod.operational_check,

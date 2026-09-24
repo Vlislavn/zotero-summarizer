@@ -61,8 +61,11 @@ nested collections; it does not mistake the response envelope for the tree.
 
 ## Setup and AI
 
-`/setup` is a skippable Zotero → AI-assisted/ML-only → research wizard. Saving immediately
-unlocks Today; verification is optional and explicit. The wizard and Settings
+`/setup` is a skippable Mode (Full local / Hosted / No LLM) → Zotero → AI
+profile (skipped for No LLM) → research wizard. Local mode shows no API-key
+control; hardware-incompatible profiles cannot be selected. Saving unlocks
+Today only after explicit Doctor verification passes; saving alone never
+claims the configured pipeline works. The wizard and Settings
 share the compact server-side Doctor checklist. The gate uses backend
 `configured`; stricter operational `ready` remains diagnostic.
 
@@ -71,8 +74,11 @@ the OS credential store; the UI receives only presence/source metadata. Local
 profiles are hardware-gated and show an explicit pull command—the app never
 starts a download. Advanced routing and unsurfaced config round-trip through
 `utils/configForm.js`. Provider/model saves hot-swap; path changes need restart.
-ML-only mode is a first-class completed setup state: readiness and paper review
-show AI off rather than reporting an unreachable model, and Settings can re-enable it.
+ML-only mode is a first-class classifier/search-only setup state: AI reviews,
+Ask Paper and new feed Adds to Zotero remain unavailable without a prior
+full-text review; manual Zotero imports and immediate Trash still work. Today
+links directly to Settings to enable AI instead of offering an impossible
+Generate review action. Settings can re-enable AI later.
 Wizard progress exposes the current step and completion state in text, and each
 step change is announced politely to assistive technology.
 Optional browser preferences use guarded storage access, so privacy settings that
@@ -151,6 +157,28 @@ Shared list shortcuts operate outside interactive controls only. Native inputs
 widgets keep their own keys; composition and already-handled events are ignored.
 Pending's collection selector cannot issue Apply/Reject, while the explicit batch
 buttons and shortcuts on the non-interactive list surface remain available.
+
+Today now reports top-level full-text attachment failures as unavailable
+(in addition to typed per-paper outcomes), rather than silently omitting them.
+Spot-check distinguishes a saved label with pending Zotero sync or failed
+mark-read from a successful Zotero write and leaves its warning visible after
+the last card is dismissed.
+Today shows `review_ready` only after a current, non-empty deep review. Add is
+disabled when every selected paper needs review; mixed batches surface per-item
+`review_required` errors without claiming blocked papers were added. A full-review
+link provides the existing Generate review flow; Trash is always available.
+Feed Review similarly disables only positive relabels on unreviewed rows,
+leaving `dont_read` available. Switching hosted/local resets per-stage routing;
+Finish checks every resolved stage endpoint (not just the default provider).
+The existing-local-endpoint profile can use a custom loopback URL without
+adding an API-key field. A hosted provider sharing a local model name does not
+automatically select a local profile. Doctor success is re-fetched after Save;
+credential replacement immediately clears cached Ready in Settings, even if a
+previous verification mutation had completed. Missing Zotero/RSS prerequisites
+link to Settings.
+Relevance conclusions in both interactive Review and the HTML brief are
+case/punctuation deduplicated across goals, capped on first view and disclosed
+on demand; goal labels, evidence quotes and accessible score meters remain.
 
 ## Offline boundary
 

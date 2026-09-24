@@ -9,7 +9,7 @@ keep/trash decisions train the model, so tomorrow's slate is sharper.
   app RSS pool (self-fetched) → [ML gate → LLM] → ranked daily slate → you cull / read / label
         ▲                                                                      │
         └──────────────── retrain on your labels ◄─────────────────────────────┘
-        daily picks → Zotero Inbox · approved tag/note changes → Zotero (backup first)
+        reviewed + explicitly added picks → Zotero Inbox · approved tag/note changes → Zotero (backup first)
 ```
 
 **Local-first · no telemetry · trained on _your_ labels** (nothing ships with the repo —
@@ -19,9 +19,10 @@ Zotero remains the PDF/citation surface and a synced representation of approved 
 ## Requirements
 
 - **Python 3.10+** and **[uv](https://docs.astral.sh/uv/getting-started/installation/)**
-- **Zotero desktop**, plus at least one **RSS feed** added in the app (arXiv,
-  bioRxiv, or a **PubMed** saved search — see [docs/usage.md](docs/usage.md)
-  "Adding sources"); existing Zotero feed subscriptions can be imported in one click
+- At least one **RSS feed** added in the app (arXiv, bioRxiv, or a **PubMed** saved
+  search — see [docs/usage.md](docs/usage.md) "Adding sources").
+- Optional: **Zotero desktop** for PDFs/citations and approved Zotero writeback;
+  existing Zotero feed subscriptions can be imported in one click.
 - Optional: an **OpenAI-compatible LLM endpoint** — **local** (Ollama, vLLM,
   LM Studio, `mlx_lm.server`) or **hosted** (any API). ML-only mode needs none.
 - **Node 20.19+** to build the browser UI from a clean checkout.
@@ -31,7 +32,7 @@ Zotero remains the PDF/citation surface and a synced representation of approved 
 | You run… | Need | What you get |
 |---|---|---|
 | **Hosted API, or no LLM** | ~8 GB RAM · any modern CPU · **no GPU** | ML triage + Library search run on-device; a hosted API adds summaries / brief / ask with **no local-LLM RAM** |
-| **A local ~7–20B LLM** | 16–32 GB unified RAM (Apple Silicon) or an NVIDIA GPU | summaries, paper brief, ask-the-paper, deep review — fully offline |
+| **A local ~7–20B LLM** | 16–32 GB unified RAM (Apple Silicon) or an NVIDIA GPU | local inference for summaries, briefs and Q&A; RSS/PDF acquisition may still need network |
 | **A local ~35B LLM** | 48 GB+ unified memory, or 24 GB+ VRAM | highest-quality deep reviews + quality grading |
 
 The on-device ML (relevance gate + search) runs on **CPU** — no GPU required for the app.
@@ -62,7 +63,7 @@ install ─▶ build UI ─▶ serve ─▶ /setup wizard ─▶ Today
 ```
 
 Open <http://127.0.0.1:8000/>. A brand-new install lands on the **`/setup` wizard**
-(Connect Zotero → choose AI-assisted or ML-only → Describe research) with Zotero-path
+(choose Full local / Hosted / No LLM → Connect Zotero → choose a model if needed → Describe research) with Zotero-path
 auto-detect and an optional live LLM connection test. The web wizard can store an entered
 API key in the OS keyring and never returns it to the browser. The headless CLI asks only for
 an env-var name and saves the chosen routing before its optional probe. Use
@@ -74,8 +75,9 @@ zotero-summarizer prefetch-models` once while online — see [docs/usage.md](doc
 
 ## What you'll do
 
-- **Today — cull.** A ranked slate of fresh feed papers. One binary call each: **Add to
-  library** (keep → materialized into your Zotero *Inbox*) or **Trash**. Both train the gate.
+- **Today — cull.** A ranked slate of fresh feed papers. Generate and inspect a full-text
+  review before explicitly **Add to library** (materialized into the Zotero *Inbox*);
+  **Trash** remains immediate without a review. Both decisions train the gate.
 - **Library — read.** Your unread papers, ranked by relevance. For each you get:
   - a **paper brief** — at-a-glance read verdict, goal-match board (which of your goals it
     serves), a reference-free **quality grade** (FLAG / NEUTRAL / HIGHLIGHT), and figures;
@@ -111,7 +113,7 @@ uv run zotero-summarizer doctor           # verify the real configured pipeline
 uv run zotero-summarizer calibrate        # optional measured runtime calibration
 uv run zotero-summarizer migrate          # init / upgrade the local databases (serve does this for you)
 uv run zotero-summarizer prefetch-models  # download ML models for offline use (--check = status)
-uv run zotero-summarizer feeds serve      # optional background daemon (auto-triage + daily pick)
+uv run zotero-summarizer feeds serve      # optional feed triage and in-place slate reviews (no automatic Zotero Add)
 uv run zotero-summarizer goldenset train-classifier  # retrain the relevance gate on your labels
 ```
 
@@ -119,6 +121,8 @@ uv run zotero-summarizer goldenset train-classifier  # retrain the relevance gat
 
 - **[docs/usage.md](docs/usage.md)** — the daemon, how the model learns from your labels,
   offline / air-gapped use, the safety model, and the full config reference.
+- **[Research-feed evaluation evidence](docs/issue-evidence-research-feed.md)** — why the current
+  30-paper fixture is unscorable for production inclusion quality (not a 0%-precision result).
 - **[docs/architecture.md](docs/architecture.md)** — how it works, the layering rules, and
   the dev / verification workflow.
 - **[CHANGELOG.md](CHANGELOG.md)** — notable changes (latest: the guided first-run setup).

@@ -1,4 +1,7 @@
 export function fulltextMessage(fulltext) {
+  if (fulltext?.error) {
+    return { text: `Full text unavailable: ${fulltext.error}`, unavailable: 1 };
+  }
   if (!Array.isArray(fulltext?.outcomes)) return null;
   const unavailable = fulltext.outcomes.filter(
     (row) => !String(row.status || '').startsWith('attached_') && row.status !== 'skipped_has_pdf',

@@ -10,7 +10,7 @@ from zotero_summarizer.api.errors import APIError, install_error_handlers
 from zotero_summarizer.api.routes import daily
 from zotero_summarizer.services.triage import daily_actions
 from zotero_summarizer.services.triage.feeds import _daily_materialize
-from zotero_summarizer.services.library import review_materialize
+from zotero_summarizer.services.library import _review_cache, review_materialize
 from tests.test_daily_actions import env, _record  # noqa: F401 - shared isolated fixture
 
 
@@ -56,6 +56,52 @@ def test_duplicate_ids_have_one_effect_in_first_seen_order(env, monkeypatch, cli
         assert all(keys) and len(set(keys)) == 2
     else:
         writer.mark_feed_items_read.assert_called_once_with([202, 101])
+
+
+def test_negative_today_verdict_cancels_unmaterialized_add(env, monkeypatch, client):
+    db, _labels = env
+    pk = _record(db, 350)
+    monkeypatch.setattr(daily, "_db_path", lambda: db)
+    monkeypatch.setattr(review_materialize, "get_settings", daily_actions.get_settings)
+    monkeypatch.setattr(daily_actions, "ZoteroWriter", lambda *_: (_ for _ in ()).throw(RuntimeError("offline")))
+    added = client.post("/api/daily/add-to-library", json={"item_ids": [pk]})
+    assert added.status_code == 200 and added.json()["pending_sync"] == 1
+    rejected = client.post("/api/daily/verdict", json={"item_id": pk, "user_priority": "dont_read"})
+    assert rejected.status_code == 200, rejected.text
+    with sqlite3.connect(db) as conn:
+        row = conn.execute("SELECT decision, zotero_sync_status FROM processed_feed_items WHERE id=?", (pk,)).fetchone()
+    assert row == ("user_rejected", "cancelled")
+    from zotero_summarizer.services.library import review
+    assert review.apply_all_approved()["pending_sync"] == 0
+
+
+def test_daily_positive_verdict_cannot_hide_unreviewed_feed_paper(env, monkeypatch, client):
+    db, labels = env
+    pk = _record(db, 304)
+    monkeypatch.setattr(daily, "_db_path", lambda: db)
+    monkeypatch.setattr(_review_cache, "get_current_review", lambda _: None)
+    response = client.post("/api/daily/verdict", json={
+        "item_id": pk, "user_priority": "must_read", "comment": "premature",
+    })
+    assert response.status_code == 409 and response.json()["error"] == "review_required"
+    assert not labels
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT decision FROM processed_feed_items WHERE id=?", (pk,)).fetchone()[0] == "triaged_pending"
+        assert conn.execute("SELECT COUNT(*) FROM label_verdicts").fetchone()[0] == 0
+
+
+def test_direct_http_add_cannot_bypass_review_gate(env, monkeypatch, client):
+    db, labels = env
+    pk = _record(db, 303)
+    monkeypatch.setattr(_review_cache, "get_current_review", lambda _: None)
+    response = client.post("/api/daily/add-to-library", json={"item_ids": [pk]})
+    assert response.status_code == 200
+    assert response.json()["added"] == response.json()["pending_sync"] == 0
+    assert response.json()["failed"] == [{"id": pk, "title": "P303",
+        "code": "review_required", "error": "Generate a review before adding this paper to the library."}]
+    assert not labels
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT decision FROM processed_feed_items WHERE id=?", (pk,)).fetchone()[0] == "triaged_pending"
 
 
 @pytest.mark.parametrize("action", ["add-to-library", "trash"])

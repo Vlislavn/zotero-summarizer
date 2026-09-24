@@ -5,6 +5,8 @@ summary to its quote) → self-explaining quality panel. The full paper body is 
 embedded; the digest is collapsed."""
 from __future__ import annotations
 
+import re
+
 from zotero_summarizer.services.library import _paper_read_brief as brief
 from zotero_summarizer.services.library import _paper_read_html as h
 
@@ -63,6 +65,110 @@ def test_board_absorbs_per_goal_summary_sections_and_quote():
     assert "Read for you: Methods" in html
     assert "g-quote" in html and "held-out cohort" in html
     assert not hasattr(brief, "per_goal_html")  # the separate repeated section is gone
+
+
+def test_goal_summaries_deduplicate_without_losing_goal_evidence():
+    shared = "A multisite clinical study compares triage decisions across independent reader cohorts."
+    goals = [
+        {"goal": "Goal Alpha: clinical workflow", "retrieval_state": "hit", "relevant": True,
+         "score": 2.7, "summary": f"{shared} {shared}", "key_sections": ["Methods"],
+         "supporting_quotes": ["Shared evidence supports Goal Alpha and Goal Gamma.", "Alpha-specific evidence passage." ]},
+        {"goal": "Goal Beta: model safety", "retrieval_state": "hit", "relevant": True,
+         "score": 2.6, "summary": "A MULTISITE CLINICAL STUDY COMPARES TRIAGE DECISIONS ACROSS INDEPENDENT READER COHORTS!",
+         "key_sections": ["Results"], "supporting_quotes": ["Beta-specific evidence passage."]},
+        {"goal": "Goal Gamma: reader outcomes", "retrieval_state": "hit", "relevant": True,
+         "score": 2.5, "summary": "A separate analysis measures reader agreement and reports calibrated outcomes for each clinical site.",
+         "key_sections": ["Evaluation"], "supporting_quotes": ["Shared evidence supports Goal Alpha and Goal Gamma."]},
+        {"goal": "Goal Delta: long-form result", "retrieval_state": "hit", "relevant": True,
+         "score": 2.4, "summary": "Delta " + " ".join(f"finding{i}" for i in range(70)),
+         "supporting_quotes": ["Delta-specific evidence passage."]},
+        {"goal": "Goal Epsilon: late finding", "retrieval_state": "hit", "relevant": True,
+         "score": 2.3, "summary": "An independent late summary is preserved for a fourth distinct interest.",
+         "supporting_quotes": ["Epsilon-specific evidence passage."]},
+        {"goal": "Goal Zeta: final finding", "retrieval_state": "hit", "relevant": True,
+         "score": 2.2, "summary": "A final separate result belongs only to the fifth interest.",
+         "supporting_quotes": ["Zeta-specific evidence passage."]},
+    ]
+
+    html = brief.brief_html(CONTENT, quality=QUALITY, goal_summaries=goals)
+    visible_board = html.split('<details class="goal-summary-more">')[0]
+    visible_summaries = re.findall(r'<li class="goal-summary-item">.*?</li>', visible_board, re.DOTALL)
+    visible_text = [re.search(r'<p class="goal-summary-text">(.*?)</p>', item, re.DOTALL).group(1)
+                    for item in visible_summaries]
+
+    assert len(visible_summaries) <= 3
+    assert sum(len(text.replace("…", "").split()) for text in visible_text) <= 90
+    assert html.count(shared) == 1  # repeated sentence + punctuation/case variant are shown once
+    assert "For: Goal Alpha: clinical workflow; Goal Beta: model safety" in html
+    assert "Goal Gamma: reader outcomes" in html  # same quote does not merge distinct summaries
+    assert "goal-summary-more" in html and "finding69" in html and "Goal Zeta: final finding" in html
+    assert html.count("Shared evidence supports Goal Alpha and Goal Gamma.") == 2
+    for evidence in ("Alpha-specific", "Beta-specific", "Delta-specific", "Epsilon-specific", "Zeta-specific"):
+        assert evidence in html
+    assert html.count('role="meter"') == len(goals)
+
+
+def test_question_does_not_merge_into_an_asserted_goal_finding():
+    goals = [
+        {"goal": "Hypothesis", "retrieval_state": "hit", "relevant": True, "score": 2.0,
+         "summary": "The drug is safe?"},
+        {"goal": "Conclusion", "retrieval_state": "hit", "relevant": True, "score": 2.0,
+         "summary": "The drug is safe."},
+    ]
+    html = brief.brief_html(CONTENT, quality=QUALITY, goal_summaries=goals)
+    assert "The drug is safe?" in html and "The drug is safe." in html
+    assert "For: Hypothesis; Conclusion" not in html
+
+
+def test_numeric_interval_cannot_merge_with_point_estimate():
+    goals = [{"goal": f"Goal {i}", "retrieval_state": "hit", "relevant": True,
+              "score": 2.0, "summary": text}
+             for i, text in enumerate(("Hazard ratio 1.2.", "Hazard ratio 1–2."))]
+    html = brief.brief_html(CONTENT, quality=QUALITY, goal_summaries=goals)
+    assert "Hazard ratio 1.2." in html and "Hazard ratio 1–2." in html
+    assert "For: Goal 0; Goal 1" not in html
+
+
+def test_casefold_duplicate_does_not_merge_distinct_quantitative_findings():
+    goals = [
+        {"goal": "Large cohort", "retrieval_state": "hit", "relevant": True, "score": 2.0,
+         "summary": "N=120 participants completed follow-up."},
+        {"goal": "Small cohort", "retrieval_state": "hit", "relevant": True, "score": 2.0,
+         "summary": "n=120 participants completed follow-up."},
+    ]
+
+    html = brief.brief_html(CONTENT, quality=QUALITY, goal_summaries=goals)
+
+    assert "N=120 participants completed follow-up." in html
+    assert "n=120 participants completed follow-up." in html
+    assert "For: Large cohort; Small cohort" not in html
+
+
+def test_legacy_degraded_goal_data_retains_long_detail_inline():
+    detail = "Legacy result: " + " ".join(f"observation{i}" for i in range(70))
+    goals = [
+        {"goal": "Legacy goal", "retrieval_state": "hit", "relevant": True,
+         "score": 2.0, "summary": detail},
+        {"goal": "Degraded goal", "retrieval_state": "hit", "relevant": True,
+         "score": 2.0, "summary": "A separate degraded-data finding."},
+    ]
+
+    html = brief.brief_html(CONTENT, quality=None, goal_summaries=goals)
+
+    assert detail in html
+    assert "A separate degraded-data finding." in html
+    assert "Legacy goal" in html and "Degraded goal" in html
+
+
+def test_goal_summary_disclosure_is_keyboard_accessible_and_responsive():
+    goals = [dict(GOALS[0], goal=f"Goal {i}", summary=f"Distinct conclusion {i}.") for i in range(4)]
+    html = brief.brief_html(CONTENT, quality=QUALITY, goal_summaries=goals)
+    css = brief.brief_css()
+
+    assert '<details class="goal-summary-more">' in html
+    assert "<summary" in html and "summary:focus-visible" in css
+    assert ".goal-summary-list" in css and "overflow-wrap:anywhere" in css
+    assert "@media(max-width:600px){.goal-board{grid-template-columns:1fr}" in css
 
 
 def test_flag_verdict_inlines_the_red_flag():

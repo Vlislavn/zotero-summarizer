@@ -24,7 +24,7 @@ it('confirms the visible IDs and removes acknowledged rows from the queue', asyn
 });
 
 it('does not send an individually relabelled row in a later bulk confirmation', async () => {
-  fetchReview.mockResolvedValue({ items: [{ id: 9, title: 'Already reviewed', reading_priority: 'dont_read' }] });
+  fetchReview.mockResolvedValue({ items: [{ id: 9, title: 'Already reviewed', reading_priority: 'dont_read', review_ready: true }] });
   reviewAction.mockResolvedValue({ state: 'user_approved' });
   render(<MemoryRouter initialEntries={['/?state=gate_rejected']}><Review /></MemoryRouter>);
   await screen.findByText('Already reviewed');
@@ -32,6 +32,16 @@ it('does not send an individually relabelled row in a later bulk confirmation', 
   await screen.findByText('→ approved');
   expect(screen.getByRole('button', { name: /Confirm remaining/ }).disabled).toBe(true);
   expect(reviewConfirmAllGateRejected).not.toHaveBeenCalled();
+});
+
+it('requires a review for positive relabels while keeping rejection available', async () => {
+  fetchReview.mockResolvedValue({ items: [{ id: 9, title: 'Awaiting full review',
+    stable_feed_key: 'feed:g:abcdef', reading_priority: 'could_read', review_ready: false }] });
+  render(<MemoryRouter><Review /></MemoryRouter>);
+  await screen.findByText('Awaiting full review');
+  expect(screen.getByRole('button', { name: /Must read/i }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: /Remove/i }).disabled).toBe(false);
+  expect(screen.getByText('Generate a review before adding').getAttribute('href')).toContain('/paper/feed%3Ag%3Aabcdef');
 });
 
 it('keeps rows available for retry when bulk confirmation fails', async () => {

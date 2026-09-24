@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from zotero_summarizer.api.routes.sync import _PushRequest
 from zotero_summarizer.services.golden import label_verdicts
 from zotero_summarizer.services.sync import service
+from zotero_summarizer.services.library.review_eligibility import ReviewRequired
 from zotero_summarizer.storage import repositories
 from zotero_summarizer.storage.migrations import TRIAGE_MIGRATIONS, run_migrations
 
@@ -103,6 +104,26 @@ def test_ordered_offline_changes_merge_other_fields_and_replay_once(
     assert merged["results"][0]["status"] == "applied"
     assert repositories.get_review_note(db, "P1") == "offline note"
     assert repositories.get_label_verdict(db, "P1")["user_priority"] == "dont_read"
+
+
+def test_positive_feed_mutation_needs_review_but_uuid_replay_stays_idempotent(tmp_path, monkeypatch):
+    db = _db(tmp_path)
+    from zotero_summarizer.storage import feeds
+    with feeds.open_triage_conn(db) as conn:
+        feeds.record_decision(conn, run_id="sync", feed_item={
+            "feed_library_id": 1, "item_id": 17, "guid": "offline-review", "title": "Paper",
+        }, decision=feeds.DECISION_TRIAGED_PENDING, composite_score=3.0)
+        conn.commit()
+        key = conn.execute("SELECT stable_feed_key FROM processed_feed_items").fetchone()[0]
+    mutation = _mutation(key, "verdict", "must_read", 0)
+    monkeypatch.setattr(service, "require_feed_review", lambda *_: (_ for _ in ()).throw(ReviewRequired()))
+    denied = service.push(db, [mutation])["results"][0]
+    assert denied["status"] == "rejected" and denied["code"] == "review_required"
+    assert repositories.get_label_verdict(db, key) is None
+    monkeypatch.setattr(service, "require_feed_review", lambda *_: None)
+    assert service.push(db, [mutation])["results"][0]["status"] == "applied"
+    monkeypatch.setattr(service, "require_feed_review", lambda *_: (_ for _ in ()).throw(ReviewRequired()))
+    assert service.push(db, [mutation])["results"][0]["status"] == "already_applied"
 
 
 def test_applied_and_replayed_mutations_run_idempotent_domain_effects(

@@ -123,13 +123,19 @@ def test_submit_verdict_for_key_not_in_csv_succeeds(tmp_path):
     ])
     from zotero_summarizer.api.routes import golden
 
-    req = golden.VerdictRequest(item_key="feed:9001", user_priority="must_read", comment="Today")
+    req = golden.VerdictRequest(item_key="ZGONE999", user_priority="must_read", comment="Orphan")
     out = _run(golden.submit_verdict(req))
     assert "id" in out
-    stored = repositories.get_label_verdict(s.triage_db_path, "feed:9001")
+    stored = repositories.get_label_verdict(s.triage_db_path, "ZGONE999")
     assert stored is not None
     assert stored["user_priority"] == "must_read"
     assert stored["original_derived_priority"] == "unknown"
+    with pytest.raises(APIError, match="Generate a review before adding") as exc:
+        _run(golden.submit_verdict(golden.VerdictRequest(
+            item_key="feed:9001", user_priority="must_read", comment="Today",
+        )))
+    assert exc.value.error == "review_required"
+    assert repositories.get_label_verdict(s.triage_db_path, "feed:9001") is None
 
 
 def test_submit_verdict_anchors_to_provenance_when_in_csv(tmp_path):

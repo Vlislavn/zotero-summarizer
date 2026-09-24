@@ -41,11 +41,13 @@ afterEach(cleanup);
 
 it('completes ML-only setup after validation and saves the personalized goal', async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  client.setQueryData(['setup-doctor'], { ready: true }); // from an older configuration
   render(<QueryClientProvider client={client}><MemoryRouter><SetupFlow /></MemoryRouter></QueryClientProvider>);
 
-  await screen.findByText('Zotero step');
+  await screen.findByRole('radio', { name: /Triage without an LLM/ });
+  fireEvent.click(screen.getByRole('radio', { name: /Triage without an LLM/ }));
   fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-  fireEvent.click(screen.getByLabelText(/ML-only triage/));
+  await screen.findByText('Zotero step');
   fireEvent.click(screen.getByRole('button', { name: 'Next' }));
   fireEvent.change(screen.getByLabelText('Research goal'), { target: { value: 'Evidence synthesis for clinical agents' } });
   fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
@@ -59,6 +61,41 @@ it('completes ML-only setup after validation and saves the personalized goal', a
   expect(saved.llm_enabled).toBe(false);
   expect(saved.research_goals).toEqual(['Evidence synthesis for clinical agents']);
   expect(saved.prestige).toEqual(config.prestige);
+  expect(client.getQueryData(['setup-doctor'])).toBeUndefined();
+  client.clear();
+});
+
+it('presents the setup-mode choice before Zotero or provider setup', async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  render(<QueryClientProvider client={client}><MemoryRouter><SetupFlow /></MemoryRouter></QueryClientProvider>);
+
+  await waitFor(() => expect(screen.queryByText('Preparing setup…')).toBeNull());
+  expect(screen.getByRole('radio', { name: /Full local/i })).toBeTruthy();
+  expect(screen.getByRole('radio', { name: /Hosted model/i })).toBeTruthy();
+  expect(screen.getByRole('radio', { name: /Triage without an LLM/i })).toBeTruthy();
+  expect(screen.queryByText('Zotero step')).toBeNull();
+  expect(screen.queryByText('AI provider step')).toBeNull();
+  client.clear();
+});
+
+it.each([
+  ['Full local', { ...config.llm_routing, providers: [
+    { ...config.llm_routing.providers[0], name: 'local', base_url: 'https://remote.test/v1' }],
+    default: { provider: 'local', model: 'remote' } }],
+  ['Hosted model', { ...config.llm_routing,
+    providers: [...config.llm_routing.providers,
+      { ...config.llm_routing.providers[0], name: 'local', base_url: 'http://localhost:11434/v1' }],
+    feed: { provider: 'local', model: 'qwen3:8b' } }],
+])('cannot finish %s with a provider/stage outside its inference boundary', async (choice, llm_routing) => {
+  api.fetchConfig.mockResolvedValue({ ...config, llm_routing });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><MemoryRouter><SetupFlow /></MemoryRouter></QueryClientProvider>);
+  fireEvent.click(await screen.findByRole('radio', { name: new RegExp(choice) }));
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  await screen.findByText('Zotero step');
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  await screen.findByText('AI provider step');
+  expect(screen.getByRole('button', { name: 'Next' }).disabled).toBe(true);
   client.clear();
 });
 
@@ -69,9 +106,10 @@ it('returns to the research step on validation errors and does not save invalid 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   render(<QueryClientProvider client={client}><MemoryRouter><SetupFlow /></MemoryRouter></QueryClientProvider>);
 
-  await screen.findByText('Zotero step');
+  await screen.findByRole('radio', { name: /Triage without an LLM/ });
+  fireEvent.click(screen.getByRole('radio', { name: /Triage without an LLM/ }));
   fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-  fireEvent.click(screen.getByLabelText(/ML-only triage/));
+  await screen.findByText('Zotero step');
   fireEvent.click(screen.getByRole('button', { name: 'Next' }));
   fireEvent.change(screen.getByLabelText('Research goal'), { target: { value: 'Valid-looking goal' } });
   fireEvent.click(screen.getByRole('button', { name: 'Finish' }));

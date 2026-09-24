@@ -8,6 +8,7 @@ from typing import Any
 from zotero_summarizer.domain import READING_PRIORITY_SORT_RANK
 from zotero_summarizer.services.golden import label_verdicts, verdict_effects
 from zotero_summarizer.services.library import deep_review, reading_queue
+from zotero_summarizer.services.library.review_eligibility import ReviewRequired, require_feed_review
 from zotero_summarizer.storage import repositories
 
 _PAPER_FIELDS = (
@@ -148,12 +149,18 @@ def push(db_path: Path, mutations: list[dict[str, Any]], predecessors: list[str]
             effective["_effective_base_revision"] = last_applied[key]
         try:
             _validate_mutation(effective)
+            if (effective["field"] == "verdict" and effective["operation"] == "set"
+                    and effective.get("value") != "dont_read"
+                    and effective["item_key"].startswith("feed:")
+                    and not repositories.sync_mutation_exists(db_path, effective["mutation_id"])):
+                require_feed_review(db_path, effective["item_key"])
             result = repositories.apply_sync_mutation(db_path, effective)
-        except ValueError as exc:
+        except (ValueError, ReviewRequired) as exc:
             result = {
                 "mutation_id": mutation["mutation_id"],
                 "status": "rejected",
                 "error": str(exc),
+                "code": "review_required" if isinstance(exc, ReviewRequired) else "validation_error",
             }
         else:
             if effective["field"] == "verdict":
