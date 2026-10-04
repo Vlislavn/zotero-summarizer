@@ -49,6 +49,17 @@ The schema builder lives in `integrations.llm` (re-exported by `quality_review`)
 After applying reading policy, the serialized digest is validated back into
 `PaperDigest`, restoring nested `PaperParameters` before Zotero note rendering.
 
+Map-reduce notes are generation context, not paper evidence. The caller passes
+the original paper as `assess_digest(verification_text=...)` for both initial
+verification and the one correction; rank/prefix retain their selected-source
+contract. Empty chunk summaries fail before reduction, including partial empty
+coverage. Empty selected text or an explicitly empty verification source fails
+before any digest call; these errors never manufacture a skip review. The numeric
+guard, claim fields (including `read_why`), passage checks and retry bounds are
+unchanged. Original-source verification may increase map-reduce verifier context;
+provider context limits/latency and the historical #34 incident require live
+evidence. This does not classify HTTP error pages or change Today/Fair ranking.
+
 All LLM-facing paper text, metadata, research goals and user focus/question text
 use the shared escaped untrusted-input boundary, including custom digest prompts.
 

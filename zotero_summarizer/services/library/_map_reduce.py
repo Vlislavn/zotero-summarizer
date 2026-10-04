@@ -2,11 +2,11 @@
 parallel, low per-call cost), then synthesise the notes into the structured digest on the
 BIG/API model (the reduce — the complex decision step).
 
-This is the chunk-local / synthesis-API split: the expensive long-context reasoning only sees
-short per-chunk notes, so the whole paper is represented (not just a prefix or the top-ranked
-chunks), while the heavy synthesis runs once on the remote model. Contrast the default ``rank``
-strategy (BM25-select chunks to fit one budget, single call) — see ``tools/eval_chunking.py``
-for the A/B that decides which wins on coverage-per-cost.
+The synthesis prompt contains per-chunk notes rather than the full paper. Verification
+separately reads the original text, so notes cannot authorize their own hallucinations;
+its context cost is not bounded by note size. Contrast the default ``rank`` strategy
+(BM25-select chunks to fit one budget) — see ``tools/eval_chunking.py`` for the A/B
+that decides which wins on coverage-per-cost.
 """
 from __future__ import annotations
 
@@ -40,7 +40,10 @@ def split_chunks(text: str, chunk_chars: int, *, overlap: int = 200) -> list[str
 
 def _map_chunk(map_llm: Any, chunk: str) -> str:
     prompt = UNTRUSTED_INPUT_RULE + "\n\n" + DEFAULT_MAP_PROMPT.format(chunk=untrusted_input(chunk))
-    return to_text(map_llm.prompt(prompt)).strip()
+    note = to_text(map_llm.prompt(prompt)).strip()
+    if not note:
+        raise ValueError("map_reduce_digest: empty chunk summary")
+    return note
 
 
 class ChunkBudget(NamedTuple):
@@ -101,8 +104,9 @@ def map_reduce_digest(
 ) -> PaperDigest:
     """MAP each chunk on ``map_llm`` (parallel up to ``sub_concurrency``), REDUCE the notes into
     a ``PaperDigest`` on ``reduce_llm``. The reduce reuses ``quality_review.assess_digest`` (its
-    hardened JSON contract + one-retry) — the notes ARE the source text it synthesises, so the
-    whole paper is represented. ``response_format`` (decoder-level JSON Schema) is forwarded
+    hardened JSON contract + one-retry). Notes are generation context only; verification
+    uses the original paper, never the generated notes. Every chunk must yield a nonempty
+    note, otherwise partial coverage fails before reduction. ``response_format`` is forwarded
     to the reduce's assess_digest when the reduce provider supports structured output. Errors
     propagate (caught at deep_review's per-item boundary)."""
     chunks = split_chunks(full_text, chunk_chars)
@@ -115,11 +119,11 @@ def map_reduce_digest(
     else:
         notes = [_map_chunk(map_llm, chunk) for chunk in chunks]
 
-    combined = "\n\n".join(f"[chunk {i + 1}/{len(notes)}]\n{note}" for i, note in enumerate(notes) if note)
+    combined = "\n\n".join(f"[chunk {i + 1}/{len(notes)}]\n{note}" for i, note in enumerate(notes))
     extra = {"response_format": response_format} if response_format else {}
     digest = assess_digest(
         title=title, full_text=combined, config=config, llm=reduce_llm,
         max_chars=len(combined) + 1, verifier_llm=map_llm,
-        focus_prompt=focus_prompt, **extra,
+        focus_prompt=focus_prompt, verification_text=full_text, **extra,
     )
     return digest.model_copy(update={"basis": "map_reduce"})

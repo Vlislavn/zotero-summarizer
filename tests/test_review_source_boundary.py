@@ -121,7 +121,9 @@ def test_map_reduce_correction_is_grounded_in_original_not_generated_notes():
 
 def test_source_supported_http_number_in_read_why_is_not_blanket_rejected():
     source = "The paper evaluates an HTTP client that handles HTTP 403 responses."
-    digest = _digest().model_copy(update={"read_why": "Inspect how the client handles HTTP 403 responses."})
+    digest = _digest("The paper evaluates an HTTP client.").model_copy(
+        update={"read_why": "Inspect how the client handles HTTP 403 responses."},
+    )
     mapper, generator = _Mapper("The paper evaluates an HTTP client."), _Generator(digest)
     result = map_reduce_digest("Paper", source, _default_goals_config(),
                                map_llm=mapper, reduce_llm=generator)
@@ -162,4 +164,36 @@ def test_empty_direct_source_never_becomes_a_skip_review(prefix, source):
     with pytest.raises(ValueError, match="non-empty source text"):
         assess_digest(title="Paper", full_text=source, config=_default_goals_config(),
                       llm=generator, verifier_llm=_AccessVerifier(), prefix=prefix)
+    assert generator.prompts == []
+
+
+@pytest.mark.parametrize("corrected", [False, True], ids=["unresolved", "corrected"])
+def test_number_free_access_story_in_map_notes_is_not_paper_evidence(corrected):
+    class AccessMapper(_Mapper):
+        def _checks(self, prompt):
+            return _AccessVerifier()._checks(prompt)
+
+    bad = _digest().model_copy(update={"read_why": NO_ACCESS, "key_weakness": "No paper content retrievable;"})
+    mapper = AccessMapper(NO_ACCESS)
+    generator = _Generator(bad, _digest() if corrected else bad)
+    kwargs = dict(title="Paper", full_text=PAPER, config=_default_goals_config(),
+                  map_llm=mapper, reduce_llm=generator)
+    if corrected:
+        assert map_reduce_digest(**kwargs).read_why == _digest().read_why
+    else:
+        with pytest.raises(ValueError, match="unsupported fields"):
+            map_reduce_digest(**kwargs)
+    assert len(generator.prompts) == 2 and mapper.calls == 2
+    for prompt in mapper.verification_prompts:
+        evidence = prompt.split("Paper text (numbered verbatim passages):", 1)[1]
+        evidence = evidence.split("Reader goals", 1)[0]
+        assert PAPER in evidence and NO_ACCESS not in evidence
+
+
+@pytest.mark.parametrize("source", ["", " \n\t"])
+def test_explicit_empty_verification_source_never_falls_back_to_generated_notes(source):
+    generator = _Generator(_digest())
+    with pytest.raises(ValueError, match="non-empty source text"):
+        assess_digest(title="Paper", full_text=PAPER, verification_text=source,
+                      config=_default_goals_config(), llm=generator, verifier_llm=_Verifier())
     assert generator.prompts == []
