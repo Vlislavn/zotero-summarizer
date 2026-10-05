@@ -120,6 +120,12 @@ The daemon is optional automation, not a separate engine. The `feeds.*` block in
 
 The live JSON API is self-documenting: run `serve` and open `/docs` (OpenAPI).
 
+Deep-review source ownership stays explicit: map-reduce notes feed generation,
+while the original paper feeds verification, including correction and fallback.
+Rank/prefix verification uses its selected original spans. Empty sources or map
+summaries fail before review publication, not as scientific-quality judgments.
+See `services/library/README.md` for the contract and remaining context-limit caveat.
+
 ## Layering rules (lower never imports higher)
 
 - `integrations/`, `storage/` never import `services/` or `api/`.

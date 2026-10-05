@@ -141,7 +141,7 @@ _DEFAULT_DIGEST_PROMPT = (
 def assess_digest(
     *, title: str, full_text: str, config: GoalsConfig, llm: Any, focus_prompt: str = "",
     max_chars: int | None = None, prefix: bool = False, response_format: dict[str, Any] | None = None,
-    verifier_llm: Any = None,
+    verifier_llm: Any = None, verification_text: str | None = None,
 ) -> PaperDigest:
     """Condensed paper digest (quality + the user's 7-point investigation) from
     the full text (must be non-empty). Personalised to ``config.research_goals``.
@@ -153,7 +153,9 @@ def assess_digest(
     section-aware + BM25 ranking in ``select_review_text``. ``response_format`` (from
     ``build_response_format``) switches to decoder-level JSON Schema constraint —
     pass it only when the provider advertises ``structured_output`` (vLLM-style); it's
-    a no-op fall-through to the prompt-level path when None."""
+    a no-op fall-through to the prompt-level path when None. ``verification_text``
+    supplies original paper text when generation uses map notes; otherwise the
+    selected generation text is also the verification source."""
     template = config.prompts.paper_digest or _DEFAULT_DIGEST_PROMPT
     cap = int(max_chars if max_chars is not None else config.quality_review.max_text_chars)
     # Budget-aware selection instead of a blind prefix slice. ``full_text`` here is
@@ -164,6 +166,9 @@ def assess_digest(
     # for those that exceed the cap (see services/library/_review_text.py).
     # ``prefix`` bypasses ranking for the naive-truncate A/B baseline.
     text = full_text[:cap] if prefix else select_review_text([], full_text, budget=cap)
+    source_text = text if verification_text is None else verification_text
+    if not text.strip() or not source_text.strip():
+        raise ValueError("Digest assessment requires non-empty source text")
     goals = "; ".join(g for g in (config.research_goals or []) if str(g).strip()) or "(not specified)"
     prompt = UNTRUSTED_INPUT_RULE + "\n\n" + template.format(
         title=untrusted_input(title or "Untitled"), full_text=untrusted_input(text),
@@ -190,7 +195,7 @@ def assess_digest(
     digest = digest.model_copy(update={"basis": "full_text"})
     verifier = verifier_llm or llm
     try:
-        _verify_generated_digest(digest, text, verifier, llm, goals)
+        _verify_generated_digest(digest, source_text, verifier, llm, goals)
     except DigestVerifierUnavailable:
         raise
     except ValueError as exc:
@@ -203,5 +208,5 @@ def assess_digest(
             **extra,
         )
         digest = _coerce_digest(correction).model_copy(update={"basis": "full_text"})
-        _verify_generated_digest(digest, text, verifier, llm, goals)
+        _verify_generated_digest(digest, source_text, verifier, llm, goals)
     return digest
