@@ -59,6 +59,10 @@ guard, claim fields (including `read_why`), passage checks and retry bounds are
 unchanged. Original-source verification may increase map-reduce verifier context;
 provider context limits/latency and the historical #34 incident require live
 evidence. This does not classify HTTP error pages or change Today/Fair ranking.
+`tests/test_review_source_boundary.py` exercises production verification through
+parallel empty/exception map results, malformed-verifier fallback before/after
+correction, and over-budget rank/prefix dispatch. Scripted semantic verdicts test
+source plumbing and retry contracts, not live-model entailment accuracy.
 
 All LLM-facing paper text, metadata, research goals and user focus/question text
 use the shared escaped untrusted-input boundary, including custom digest prompts.

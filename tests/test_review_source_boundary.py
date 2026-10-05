@@ -197,3 +197,97 @@ def test_explicit_empty_verification_source_never_falls_back_to_generated_notes(
         assess_digest(title="Paper", full_text=PAPER, verification_text=source,
                       config=_default_goals_config(), llm=generator, verifier_llm=_Verifier())
     assert generator.prompts == []
+
+
+@pytest.mark.parametrize("failure", ["empty", "exception"])
+def test_parallel_mapping_failure_stops_before_reduction(failure):
+    class FailingMapper(_Mapper):
+        def prompt(self, prompt):
+            if "FAIL_CHUNK" in prompt:
+                if failure == "exception":
+                    raise RuntimeError("scripted mapper failure")
+                return ""
+            return PAPER
+
+    source = "GOOD_CHUNK " + "x" * 500 + " FAIL_CHUNK " + "y" * 500
+    mapper, generator = FailingMapper(PAPER), _Generator(_digest())
+    error = RuntimeError if failure == "exception" else ValueError
+    message = "scripted mapper failure" if failure == "exception" else "empty chunk summary"
+    with pytest.raises(error, match=message):
+        map_reduce_digest("Paper", source, _default_goals_config(),
+                          map_llm=mapper, reduce_llm=generator,
+                          chunk_chars=600, sub_concurrency=2)
+    assert generator.prompts == [] and mapper.calls == 0
+
+
+@pytest.mark.parametrize("strategy", ["rank", "prefix"])
+def test_strategy_dispatch_verifies_only_real_selected_source(strategy):
+    from zotero_summarizer.services.faithbench._corpus import chunk_text
+    from zotero_summarizer.services.library._map_reduce import ChunkBudget, digest_for_strategy
+    from zotero_summarizer.services.library._prompt_security import untrusted_input
+    from zotero_summarizer.services.library._review_text import select_review_text
+
+    source = ("Opening background prose. " * 200
+              + "Methodology study design evaluation results findings performance. " * 100
+              + " UNSELECTED_TAIL")
+    cap = 700
+    selected = source[:cap] if strategy == "prefix" else select_review_text([], source, budget=cap)
+    assert len(source) > cap and "UNSELECTED_TAIL" not in selected
+    if strategy == "rank":
+        assert selected != source[:cap]
+    config = _default_goals_config()
+    config.quality_review.chunk_strategy = strategy
+    mapper = _Mapper("unused map note")
+    generator = _Generator(_digest("The paper presents a qualitative discussion."))
+    result = digest_for_strategy("Paper", source, config, map_llm=mapper,
+                                 reduce_llm=generator, budget=ChunkBudget(cap, 8000, 2))
+    assert result.basis == "full_text" and mapper.map_calls == 0
+    assert len(mapper.verification_prompts) == 1
+    evidence = mapper.verification_prompts[0].split(
+        "Paper text (numbered verbatim passages):", 1)[1].split("Reader goals", 1)[0].strip()
+    expected = "\n\n".join(f"PASSAGE {i}:\n{untrusted_input(p)}"
+                            for i, p in enumerate(chunk_text(selected)))
+    assert evidence == expected
+    assert "UNSELECTED_TAIL" not in evidence
+
+
+@pytest.mark.parametrize("corrected", [False, True], ids=["initial", "corrected"])
+def test_map_reduce_malformed_verifier_fallback_keeps_original_source(corrected):
+    from zotero_summarizer.models import PaperDigest
+    from zotero_summarizer.services.library._digest_verification import _Checks
+
+    class MalformedMapper(_Mapper):
+        def pydantic_prompt(self, *, prompt, **kwargs):
+            self.verification_prompts.append(prompt)
+            return {"checks": []}
+
+    class FallbackGenerator(_Generator):
+        def __init__(self, *digests):
+            super().__init__(*digests)
+            self.verification_prompts = []
+
+        def pydantic_prompt(self, *, prompt, pydantic_model, **kwargs):
+            if pydantic_model is PaperDigest:
+                return super().pydantic_prompt(prompt=prompt, pydantic_model=pydantic_model, **kwargs)
+            assert pydantic_model is _Checks
+            self.verification_prompts.append(prompt)
+            checks = _AccessVerifier()._checks(prompt)
+            return pydantic_model(checks=checks)
+
+    good = _digest()
+    bad = good.model_copy(update={"read_why": NO_ACCESS})
+    mapper = MalformedMapper(NO_ACCESS)
+    generator = FallbackGenerator(bad, good) if corrected else FallbackGenerator(good)
+    result = map_reduce_digest("Paper", PAPER, _default_goals_config(),
+                               map_llm=mapper, reduce_llm=generator)
+    assert result.read_why == good.read_why and result.basis == "map_reduce"
+    pathways = 2 if corrected else 1
+    assert len(generator.prompts) == pathways
+    assert len(mapper.verification_prompts) == 2 * pathways
+    assert len(generator.verification_prompts) == pathways
+    for prompt in mapper.verification_prompts + generator.verification_prompts:
+        evidence = prompt.split("Paper text (numbered verbatim passages):", 1)[1]
+        evidence = evidence.split("Reader goals", 1)[0]
+        assert PAPER in evidence and NO_ACCESS not in evidence
+    if corrected:
+        assert "failed source verification" in generator.prompts[1]

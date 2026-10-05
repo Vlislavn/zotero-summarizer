@@ -36,6 +36,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ### Changed
 
+- Map-reduce digests now verify against the original paper, including correction/fallback, never generated notes. Empty sources or chunk summaries fail before publishing a review. Regression tests cover parallel map failures and over-budget rank/prefix dispatch (#36; refs #32/#34).
 - Feed papers now need a current full-text review before Add or a positive feed label; the daemon no longer auto-adds/rejects picks. Mixed batches report `review_required`, while Trash stays immediate. Stale offline replays and concurrent Add/Trash cannot revive a rejected pending Add; an explicit newer positive verdict can reauthorize it. Approved sibling rows reuse one Zotero item; updated stable verdicts outrank older legacy aliases.
 - Setup chooses local, hosted or no LLM before Zotero, validates every stage and gates completion on Doctor. Cache-only assets report blocked network attempts; config/RSS/credential changes invalidate stale success. Zotero stays optional for RSS-only use; No LLM mode now explains why new feed Adds need AI while manual imports remain available.
 - Review Relevance renders repeated goal conclusions once in React and HTML, caps the first view, and keeps distinct goal evidence behind disclosures.

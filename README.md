@@ -82,7 +82,9 @@ zotero-summarizer prefetch-models` once while online — see [docs/usage.md](doc
   - a **paper brief** — at-a-glance read verdict, goal-match board (which of your goals it
     serves), a reference-free **quality grade** (FLAG / NEUTRAL / HIGHLIGHT), and figures;
   - **ask the paper** — grounded Q&A that quotes the text and abstains when the answer isn't there;
-  - **deep review** — an on-demand full-text digest + quality assessment for your top picks.
+  - **deep review** — an on-demand full-text digest + quality assessment for your top picks;
+    map-reduce verifies claims against the original paper, not its generated notes.
+    Empty source text or chunk summaries fail rather than becoming a skip recommendation.
 - **Annotate — label.** When you actually read one, give it the fine label
   (`must` / `should` / `could` / `don't`). That's your ground truth; the model retrains on it.
 
