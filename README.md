@@ -29,6 +29,11 @@ It performs no Zotero writes and disables thinking
 for its diagnostic calls. See [library](zotero_summarizer/services/library/README.md)
 and [CLI](zotero_summarizer/cli/README.md) contracts.
 
+Full reviews keep contribution, caveats and findings together before folded assessment.
+Goal evidence remains accessible without repeated summaries; approved Zotero notes use
+persisted paper-specific content. See [usage](docs/usage.md#reading-reviews-and-zotero-notes)
+for long-field omission notices and the separate native/user acceptance boundaries.
+
 Search's folded explicit constraints are user-owned. Model proposals are visible,
 not hard gates; inferred refinement exclusions cannot silently remove results.
 Confirmed publication types require source metadata, with bounded exact-DOI recovery;

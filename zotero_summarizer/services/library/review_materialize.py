@@ -44,7 +44,7 @@ def materialize_row(
     tags = _tags_from_row(is_black_swan=False, black_swan_tag="")
     if label_priority:
         tags = [*tags, label_tag_for_priority(label_priority)]
-        summary.reading_priority = label_priority
+        summary = summary.model_copy(update={"reading_priority": label_priority})
     note_html = pending_service.build_triage_note_html(
         title=str(row.get("title") or ""),
         summary=summary,
@@ -52,6 +52,11 @@ def materialize_row(
         surprise_score=None,
         run_id=f"{reason}:{row_id}",
     )
+    from zotero_summarizer.services.zotero._notes import triage_note_metrics
+
+    LOGGER.info("note artifact_source=%s metrics=%s",
+                "persisted_summary" if stored is not None else "legacy_sparse",
+                triage_note_metrics(note_html, summary))
     with feeds_storage.open_triage_conn(get_settings().triage_db_path) as conn:
         conn.execute("BEGIN IMMEDIATE")
         existing = feeds_storage.current_materialization_intent(conn, row, label_priority)

@@ -250,3 +250,70 @@ def test_brief_empty_without_data():
     assert brief.brief_html(CONTENT, quality=None, goal_summaries=None) == ""
     digest_only = brief.brief_html(CONTENT, digest={"read_decision": "skip"}, quality=None, goal_summaries=None)
     assert "OFF GOAL" not in digest_only and "Idea: not assessed" in digest_only and "fonts.googleapis" not in h._render_presentation(CONTENT, DIGEST, None, None)
+
+
+def test_all_goal_quotes_share_one_closed_evidence_disclosure():
+    from copy import deepcopy
+    from xml.etree import ElementTree as ET
+
+    goals = [dict(GOALS[0], goal=f'Goal {i} <safety> "RNA"',
+                  summary=f'Conclusion {i}: ' + ' '.join(f'finding{j}' for j in range(65)) +
+                  ' Uncertainty remains; no external validation.',
+                  key_sections=['Methods <pilot>', 'Results & limits'],
+                  supporting_quotes=['Shared <quote> & evidence.', f'Goal {i} second "quote".'])
+             for i in range(6)]
+    original = deepcopy(goals)
+    html = brief.brief_html(CONTENT, quality=None, goal_summaries=goals)
+    root = ET.fromstring(html)
+    cells = root.findall('.//div[@class="goal-board"]/div')
+    assert len(cells) == 6
+    for i, cell in enumerate(cells):
+        disclosures = cell.findall('details')
+        assert len(disclosures) == 1
+        assert disclosures[0].find('summary').text == 'Evidence'
+        assert 'open' not in disclosures[0].attrib
+        assert cell.findall('div[@class="g-quote"]') == []
+        assert [q.text for q in disclosures[0].findall('div[@class="g-quote"]')] == [
+            '“Shared <quote> & evidence.”', f'“Goal {i} second "quote".”']
+        assert cell.attrib['title'] == goals[i]['goal']
+        assert 'Methods <pilot>, Results & limits' in ''.join(cell.itertext())
+    assert html.count('Shared &lt;quote&gt; &amp; evidence.') == 6
+    for goal in goals:
+        assert goal['summary'] in ''.join(root.itertext())
+    assert goals == original
+
+
+def test_abstention_is_distinct_even_with_legacy_summary_and_quotes():
+    goals = [dict(GOALS[0], abstained=True, summary='Legacy unverified conclusion.')]
+    html = brief.brief_html(CONTENT, quality=None, goal_summaries=goals)
+    assert 'grounded summary withheld' in html
+    assert '○ abstained' in html
+    assert '● addressed' not in html
+    assert 'held-out cohort' in html
+    assert 'Legacy unverified conclusion.' in html
+
+
+def test_acronym_case_is_not_a_duplicate_conclusion():
+    goals = [dict(GOALS[0], goal=f'Goal {i}', summary=text)
+             for i, text in enumerate(('We measured RNA abundance.', 'We measured rna abundance.'))]
+    html = brief.brief_html(CONTENT, quality=None, goal_summaries=goals)
+    assert 'We measured RNA abundance.' in html
+    assert 'We measured rna abundance.' in html
+    assert 'For: Goal 0; Goal 1' not in html
+
+
+def test_single_quote_is_also_closed_and_empty_legacy_adds_no_disclosure():
+    from xml.etree import ElementTree as ET
+
+    goals = [GOALS[0], {'goal': 'Legacy unknown'}, GOALS[1], GOALS[2]]
+    root = ET.fromstring(brief.brief_html(CONTENT, quality=None, goal_summaries=goals))
+    cells = root.findall('.//div[@class="goal-board"]/div')
+    assert cells[0].find('div[@class="g-quote"]') is None
+    evidence = cells[0].find('details')
+    assert evidence is not None and 'open' not in evidence.attrib
+    assert evidence.find('summary').text == 'Evidence'
+    assert evidence.find('div[@class="g-quote"]').text == '“We evaluate on a held-out cohort here.”'
+    for cell in cells[1:]:
+        assert cell.find('details') is None
+    assert cells[1].find('div[@class="g-state"]').text == '⚠ not retrieved'
+    assert cells[2].find('div[@class="g-state"]').text == '○ not addressed'

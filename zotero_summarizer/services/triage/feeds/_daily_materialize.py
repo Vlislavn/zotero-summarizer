@@ -10,7 +10,6 @@ item — Inbox + matched collections + tags + v3 note — flipping its DB decisi
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -227,15 +226,10 @@ def materialize_pick(
         surprise_score=pick.surprise_score if pick.is_black_swan else None,
         run_id=run_id,
     )
-    words = len(re.findall(r"\b[\w'-]+\b", re.sub(r"<[^>]+>", " ", note_html)))
-    LOGGER.info(
-        "[%s] note source=%s words=%d sections=%d generic_fallback=%s",
-        run_id,
-        summary_source,
-        words,
-        note_html.count("<h2>"),
-        summary_source == "legacy_sparse",
-    )
+    from zotero_summarizer.services.zotero._notes import triage_note_metrics
+
+    LOGGER.info("[%s] note artifact_source=%s metrics=%s", run_id, summary_source,
+                triage_note_metrics(note_html, summary))
     decision = (
         feeds_storage.DECISION_BLACK_SWAN
         if pick.is_black_swan

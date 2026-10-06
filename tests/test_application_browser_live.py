@@ -93,9 +93,20 @@ def test_built_application_mobile_verdict_survives_reload(application_browser):
             composite_score=4.5,
         )
         conn.commit()
-    response = client.post("/api/golden/verdict", json={
-        "item_key": key, "user_priority": "must_read", "comment": "critical rationale",
+    payload = {"item_key": key, "user_priority": "must_read", "comment": "critical rationale"}
+    blocked = client.post("/api/golden/verdict", json=payload)
+    assert blocked.status_code == 409 and blocked.json()["error"] == "review_required"
+    from zotero_summarizer.services.library import _review_cache, _review_identity
+
+    identity = _review_identity.build_review_identity(
+        config=read_config(settings.config_path), pdf_path="", source_kind="override", focus_prompt="",
+    )
+    _review_cache._write_one(key, {
+        "digest": {"tldr": "Synthetic browser paper contribution."},
+        "quality": {"grade": "B", "quality_band": "neutral"}, "goal_summaries": [],
+        "review_contract_version": _review_cache.REVIEW_CONTRACT_VERSION, "review_identity": identity,
     })
+    response = client.post("/api/golden/verdict", json=payload)
     assert response.status_code == 200, response.text
     page.goto(f"http://127.0.0.1/paper/{key}")
     expect(page.get_by_role("heading", name="Browser paper", exact=True)).to_be_visible()

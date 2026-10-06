@@ -3,27 +3,17 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from pathlib import Path
+import subprocess
+import sys
 
-import pytest
 
 from tests._zotero_fixtures import add_feed_item, build_zotero_db
-from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.models import MethodAndCode, SummarizeResponse
-from zotero_summarizer.services.library import _review_cache, review_materialize
-from zotero_summarizer.services.library.review_eligibility import ReviewRequired
-from zotero_summarizer.services.triage.feeds import _daily_materialize
 from zotero_summarizer.services.triage.feeds._gate import _pack_review_payload
 from zotero_summarizer.storage import feeds, repositories
 
 
-class _Settings:
-    def __init__(self, triage_db_path: Path, zotero_data_dir: Path):
-        self.triage_db_path = triage_db_path
-        self.zotero_data_dir = zotero_data_dir
-
-
-def test_restart_materializes_persisted_summary_verbatim(tmp_path, monkeypatch):
+def test_restart_materializes_persisted_summary_verbatim(tmp_path):
     triage_db = tmp_path / "triage.db"
     zotero_dir = tmp_path / "zotero"
     zotero_db = build_zotero_db(zotero_dir)
@@ -61,25 +51,32 @@ def test_restart_materializes_persisted_summary_verbatim(tmp_path, monkeypatch):
         )
         conn.commit()
 
-    # A new connection is the process-restart boundary: no in-memory summary survives.
-    with feeds.open_triage_conn(triage_db) as conn:
-        row = dict(conn.execute(
-            "SELECT * FROM processed_feed_items WHERE id = ?", (row_id,),
-        ).fetchone())
-
-    settings = _Settings(triage_db, zotero_dir)
-    monkeypatch.setattr(review_materialize, "get_settings", lambda: settings)
-    monkeypatch.setattr(_daily_materialize, "get_settings", lambda: settings)
-    monkeypatch.setattr(ZoteroWriter, "is_connector_running", lambda self: False)
-    with pytest.raises(ReviewRequired):
-        review_materialize.materialize_row(row, writer=ZoteroWriter(zotero_dir), used_keys=set())
-    # Simulate a generated, persisted deep review available after restart.
-    monkeypatch.setattr(_review_cache, "get_current_review", lambda key: {
-        "needs_pdf": False, "digest": {"tldr": "Paper-specific deep review."},
-    })
-    new_key = review_materialize.materialize_row(
-        row, writer=ZoteroWriter(zotero_dir), used_keys=set(),
+    script = """
+import json
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+from zotero_summarizer.storage import feeds
+from zotero_summarizer.services.library import _review_cache, review_materialize
+from zotero_summarizer.services.library.review_summary import pick_stored_summary
+from zotero_summarizer.services.triage.feeds import _daily_materialize
+from zotero_summarizer.integrations.zotero_write import ZoteroWriter
+settings = SimpleNamespace(triage_db_path=Path(sys.argv[1]), zotero_data_dir=Path(sys.argv[2]))
+review_materialize.get_settings = lambda: settings
+_daily_materialize.get_settings = lambda: settings
+ZoteroWriter.is_connector_running = lambda self: False
+with feeds.open_triage_conn(settings.triage_db_path) as conn:
+    row = dict(conn.execute('SELECT * FROM processed_feed_items WHERE id = ?', (int(sys.argv[3]),)).fetchone())
+assert pick_stored_summary(row).model_dump() == json.loads(sys.argv[4])
+_review_cache.get_current_review = lambda key: {'needs_pdf': False, 'digest': {'tldr': 'Paper-specific deep review.'}}
+key = review_materialize.materialize_row(row, writer=ZoteroWriter(settings.zotero_data_dir), used_keys=set())
+print(key)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(triage_db), str(zotero_dir), str(row_id),
+         summary.model_dump_json()], check=True, capture_output=True, text=True,
     )
+    new_key = result.stdout.strip()
 
     with sqlite3.connect(zotero_db) as conn:
         note = conn.execute(

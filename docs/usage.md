@@ -4,6 +4,22 @@ Everything beyond the [README](../README.md) Quickstart: first-run setup, the tw
 run triage, how the model learns from your labels, offline use, the safety model, and the
 full config reference. (Architecture and dev workflow live in [architecture.md](architecture.md).)
 
+## Reading reviews and Zotero notes
+
+Full paper reviews lead with contribution and visible material caveats. Findings,
+methods and limitations stay together; the rubric and secondary reference fields
+are under **Full digest and assessment**. **Evidence** retains source quotes, and
+**Original goal summaries** retains full supplied text. Abstained, unsupported and
+unretrieved goals are different states. Smaller cards keep their compact disclosure.
+
+Approved triage notes retain saved summaries across restarts and include available
+methods, findings, relevance, uncertainty and optional implementation/impact sections.
+A blank rationale falls back to a usable overview, not a generic placeholder. Long
+fields exceeding provisional per-field budgets show an explicit omission notice;
+consult the full saved summary rather than treating that notice as evidence of absence.
+Raw summary data and exact artifact URLs are retained. Native-editor round trips and
+human read/skip sufficiency remain separate acceptance checks.
+
 ## First-run setup
 
 There's nothing to copy and nothing to migrate by hand. On the first `serve` (or `setup`),

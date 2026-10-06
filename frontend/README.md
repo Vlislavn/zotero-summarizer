@@ -187,6 +187,16 @@ Header/badge/tile counts share the supported-goal rule, including legacy rows
 without an explicit abstention flag. When a page has no TOC, its desktop review
 uses the freed column instead of squeezing goal cards into the TOC width.
 
+The full paper reader puts contribution, material caveats/coverage, findings,
+methods and limitations before the folded assessment/reference tail. Findings and
+reading rationale have one displayed home; original goal summaries, evidence and
+all secondary digest fields remain available. The page header does not repeat review
+grades. Full-page prose uses 16px text and a 66ch measure; sidebars yield below 1280px.
+Semantic headings and native keyboard disclosures are reused. Compact cards remain
+folded; explicit abstention is separate from unsupported and not-retrieved evidence.
+Synthetic browser checks exercise 390/1024/1440px, 320px reflow, text resizing,
+spacing and computed contrast. They are not native-user comprehension acceptance.
+
 ## Offline boundary
 
 The installable local-first PWA caches only its shell. IndexedDB holds compact

@@ -16,9 +16,7 @@ import SectionMap from '../components/paper/review/SectionMap.jsx';
 import StoryToc from '../components/paper/review/StoryToc.jsx';
 import ActionRail from '../components/paper/review/ActionRail.jsx';
 import { Chip } from '../components/paper/review/primitives.jsx';
-import { FullTextAccessNotice, StatusBanner, timeAgo, formatShortDate } from '../components/library/shared.jsx';
-import { gradeTone, bandTone, BAND_LABEL } from '../components/paper/review/tones.js';
-import { isSupportedGoal } from '../components/paper/review/briefModel.js';
+import { FullTextAccessNotice, StatusBanner } from '../components/library/shared.jsx';
 import Spinner from '../components/ui/Spinner.jsx';
 import { readStoredJson } from '../utils/safeStorage.js';
 
@@ -200,15 +198,6 @@ export default function PaperReviewPage() {
 
   const deep = detail.deep_review || null;
   const ov = deep?.section_overlay || null;
-  const dg = deep?.digest || null;
-  const ql = deep?.quality || null;
-  const goalsArr = deep?.goal_summaries || [];
-  // Deterministic checklist grade (ql.grade) first — digest.grade is the LLM's and
-  // flips A↔B between runs; the chip is labelled "reference-free", which is ql.grade.
-  const grade = ql?.grade || dg?.grade || '';
-  const band = String(ql?.quality_band || '');
-  const redFlagCount = (ql?.red_flags || []).filter(Boolean).length;
-  const nHit = goalsArr.filter(isSupportedGoal).length;
   const hasMap = Boolean(ov && !ov.degraded && (ov.sections || []).length);
 
   const toc = [
@@ -219,7 +208,7 @@ export default function PaperReviewPage() {
   ].filter(Boolean);
 
   return (
-    <div className="pb-24 lg:pb-6">
+    <div className="paper-reading-page min-w-0 pb-24 lg:pb-6">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
         <Link to="/library" className="hover:text-teal-700">← Read next</Link>
         {navIdx >= 0 && (
@@ -257,26 +246,12 @@ export default function PaperReviewPage() {
             <span className="text-slate-600">{detail.venue}</span>{detail.venue && detail.year ? ' · ' : ''}{detail.year}
           </div>
         )}
-        {(grade || band || redFlagCount > 0 || goalsArr.length > 0 || deep?.reviewed_at) && (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            {grade && <Chip tone={gradeTone(grade)} title="Reference-free full-text quality grade">Quality {grade}</Chip>}
-            {band && <Chip tone={bandTone(band)}>{BAND_LABEL[band] || '—'}</Chip>}
-            {redFlagCount > 0 && <Chip tone="rose" title="Red flags found in the review">⚑ {redFlagCount}</Chip>}
-            {goalsArr.length > 0 && <Chip tone="emerald">◎ {nHit}/{goalsArr.length} goals</Chip>}
-            {/* When the deep review ran — a stale review is a weaker signal. Exact date on hover. */}
-            {deep?.reviewed_at && (
-              <span className="text-[11px] text-slate-500" title={`Deep review generated ${formatShortDate(deep.reviewed_at)}`}>
-                reviewed {timeAgo(deep.reviewed_at)}
-              </span>
-            )}
-          </div>
-        )}
         <div className="mt-3"><LinksRow detail={detail} itemKey={itemKey} /></div>
       </header>
 
-      <div className={`lg:grid lg:gap-8 ${toc.length > 1
-        ? 'lg:grid-cols-[11rem_minmax(0,1fr)_20rem]'
-        : 'lg:grid-cols-[minmax(0,1fr)_20rem]'}`}>
+      <div className={`xl:grid xl:gap-8 ${toc.length > 1
+        ? 'xl:grid-cols-[11rem_minmax(0,1fr)_20rem]'
+        : 'xl:grid-cols-[minmax(0,1fr)_20rem]'}`}>
         <StoryToc items={toc} />
 
         <main className="min-w-0 divide-y divide-slate-200/60">
@@ -317,7 +292,7 @@ export default function PaperReviewPage() {
           )}
         </main>
 
-        <aside id="paper-actions" tabIndex={-1} className="mt-8 scroll-mt-20 lg:sticky lg:top-4 lg:mt-0 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
+        <aside id="paper-actions" tabIndex={-1} className="mt-8 scroll-mt-20 xl:sticky xl:top-4 xl:mt-0 xl:max-h-[calc(100vh-2rem)] xl:self-start xl:overflow-y-auto">
           <ActionRail
             itemKey={itemKey}
             detail={detail}
