@@ -277,3 +277,19 @@ model quality, actual Zotero delivery or full offline service-worker behavior.
 The Search journey also verifies the full query projection and independent Adds
 for two identical-title cards through real HTTP/session persistence and reload;
 only the external Zotero writer is substituted.
+
+Deep-review failures on both paper review surfaces share `ReviewFailure`: show
+the server's typed recovery and disclose code/stage/original error under Technical
+details. Legacy string-only failures still render normally. The keyed runner
+passes diagnostics through without interpreting model prose as HTTP/login state.
+Sensitive attempt capture is CLI-only; no capture switch or new dashboard appears.
+
+Targeted Search folds confirmed exact-phrase/type constraints into one optional
+panel. Topic-derived restrictions appear as confirmation-required plan rows;
+confirm by entering the desired filters and searching again. The existing plan
+panel also shows authority, observed retrieval accounting and coverage limits.
+
+Targeted Search's folded explicit constraints are forwarded through `searchApi`
+only when supplied; the natural-language topic alone never submits confirmed
+filters. The existing plan panel shows confirmation proposals and unknown
+zero-result retrieval states.

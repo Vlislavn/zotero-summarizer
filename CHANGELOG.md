@@ -11,6 +11,16 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Added
+- Record real deployed-provider incident capture, representative review outcomes and user-approved blinded Astra search pilot, with per-capability mean/median metrics, latency/request budgets and preserved limitations.
+
+### Fixed
+- Prioritize bounded publication-type recovery with title hints, never title-based eligibility; expose unattempted/confirmed counts. Real source metadata recovered qualifying reviews without increasing lookup budgets.
+- Normalize optional positive signs in source/digest numeric tokens. A real captured review failed on `+3.3` versus `3.3` and `9.6` versus `+9.6`; negative signs, absent magnitudes, arithmetic restrictions and semantic verification remain enforced.
+
+### Added
+
+- Review attempts expose typed stage/recovery and metadata-only traces. Explicit local CLI captures retain decoded calls; operational source templates never become scientific reviews, and unavailable placeholders preserve current valid reviews (#32).
+- Search hard constraints require user confirmation; model hints/refinement cannot create bans. Bounded complementary queries, publication metadata recovery and retrieval accounting preserve legacy plans and disclose coverage limits (#31).
 
 - A positive verdict (must/should/could-read) on a Today-feed paper now auto-materializes it into the Zotero Inbox (`materialize_feed_verdict`) — previously the verdict only labelled it and the paper never reached Zotero. `dont_read` never adds; the Zotero add is best-effort and surfaced in the UI.
 - That materialization now also stamps the user's `label:<priority>` ground-truth tag on the new Zotero item (threaded through `review.materialize_row`), so the verdict set in Today lands as a Zotero tag even while Zotero stays open — the standalone `zotero_set_label_tag` refuses then.

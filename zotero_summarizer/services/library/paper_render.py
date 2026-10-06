@@ -55,7 +55,10 @@ def _compute_renderer_rev() -> str:
     invalidates cached artifacts automatically (the cache key folds this in)."""
     digest = hashlib.sha256()
     digest.update(Path(__file__).read_bytes())
-    for module in (_paper_read_brief, _paper_docling, _paper_read_html, _paper_read_meta, _paper_read_pdf, _paper_read_tex):
+    from zotero_summarizer.services.library import _source_admission, _auth_envelope
+
+    for module in (_paper_read_brief, _paper_docling, _paper_read_html, _paper_read_meta, _paper_read_pdf,
+                   _paper_read_tex, _source_admission, _auth_envelope):
         digest.update(Path(module.__file__).read_bytes())
     return digest.hexdigest()[:8]
 
@@ -65,13 +68,14 @@ def _compute_renderer_rev() -> str:
 _RENDERER_REV = _compute_renderer_rev()
 
 
-def _state_path(item_key: str) -> Path:
+def _state_path(item_key: str, *, root: Path | None = None) -> Path:
     if (
         not isinstance(item_key, str) or not item_key.strip() or item_key in {".", ".."}
         or any(c in item_key for c in "/\\\0")
     ):
         raise APIError(error="validation_error", message="Invalid paper item key", status_code=422)
-    path = settings().paper_render_dir.resolve() / item_key / _STATE_FILENAME
+    directory = root if root is not None else settings().paper_render_dir
+    path = directory.resolve() / item_key / _STATE_FILENAME
     # Reject links to sibling items too, not just links outside the configured root.
     if any(p.is_symlink() for p in (path.parent, path, path.with_suffix(".tmp"))):
         raise APIError(error="validation_error", message="Paper state symlinks are not allowed", status_code=422)
@@ -367,6 +371,8 @@ def build_paper_read_for_pdf(
     zotero_detail: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a paper-read artifact using the application's selected PDF parser."""
+    from zotero_summarizer.services.library._source_admission import admit_render_sources
+
     pdf_path = pdf_path.expanduser().resolve()
     directory = _paper_directory(pdf_path)
     source_dir = directory / "source"
@@ -385,18 +391,15 @@ def build_paper_read_for_pdf(
             content = _paper_read_tex.parse_tex_source(source_dir, figures_dir)
             source_tier = "local_tex" if downloaded_source is None else "arxiv_tex"
             content["n_pages"] = pdf_content["n_pages"]
-            # Q&A + section rendering use the cleaner PDF extraction, not noisy TeX
-            # (cleaned TeX leaks math/markup). PDF body text grounds comprehensive
-            # Q&A on TeX papers; PDF sections render as the readable "brief" body.
-            content["qa_text"] = pdf_content.get("full_text") or ""
-            content["render_sections"] = pdf_content.get("sections") or []
-            # P0: TeX figure resolution often fails → fall back to PDF region crops
-            if not [f for f in content.get("figures") or [] if f.get("name")]:
+            admit_render_sources(content, pdf_content)
+            # Only an admitted PDF can supply fallback figures.
+            if not content.get('qa_diagnostic') and not [f for f in content.get("figures") or [] if f.get("name")]:
                 pdf_figs = _paper_read_pdf.extract_pdf_figures(pdf_path, figures_dir)
                 if pdf_figs:
                     content["figures"] = pdf_figs
         else:
             content = pdf_content
+            admit_render_sources(content, pdf_content)
             content["figures"] = _paper_read_pdf.extract_pdf_figures(pdf_path, figures_dir)
             source_tier = "pdf"
 

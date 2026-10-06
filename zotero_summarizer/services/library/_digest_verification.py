@@ -22,6 +22,10 @@ class _Checks(BaseModel):
     checks: list[_Check] = Field(default_factory=list)
 
 
+class DigestSourceRejected(ValueError):
+    """A well-formed generated digest failed original-source grounding."""
+
+
 class DigestVerifierUnavailable(ValueError):
     """The verifier produced no valid contract; distinct from a factual reject."""
 
@@ -81,7 +85,7 @@ def _claims(digest: PaperDigest) -> list[str]:
 def _unsupported_literals(claims: list[str], paper_text: str) -> list[str]:
     def numbers(text: str) -> set[str]:
         return {
-            re.sub(r"\s*(?:%|percent)$", "", value.casefold()).replace(",", "")
+            re.sub(r"\s*(?:%|percent)$", "", value.casefold()).replace(",", "").removeprefix("+")
             for value in _NUMBER_RE.findall(text)
         }
 
@@ -120,11 +124,12 @@ def verify_digest(
     digest: PaperDigest, paper_text: str, llm: Any, *, research_goals: str = "",
 ) -> None:
     from zotero_summarizer.services.faithbench._corpus import chunk_text
+    from zotero_summarizer.services.library._review_attempt import observed_client
 
     claims = _claims(digest)
     unsupported = _unsupported_literals(claims, paper_text)
     if unsupported:
-        raise ValueError(f"Digest contains source-absent literals: {unsupported[:3]}")
+        raise DigestSourceRejected(f"Digest contains source-absent literals: {unsupported[:3]}")
     passages = chunk_text(paper_text)
     prompt = _PROMPT.format(
         claims=untrusted_input("\n".join(f"[{i}] {claim}" for i, claim in enumerate(claims))),
@@ -133,7 +138,7 @@ def verify_digest(
     )
     for attempt in range(2):
         try:
-            raw = llm.pydantic_prompt(prompt=prompt, pydantic_model=_Checks)
+            raw = observed_client(llm, 'verifier').pydantic_prompt(prompt=prompt, pydantic_model=_Checks)
             parsed = _parse_checks(raw, len(claims), passages, paper_text)
             break
         except ValueError as exc:
@@ -142,4 +147,4 @@ def verify_digest(
             prompt += "\nYour previous verification was invalid: " + str(exc) + ". Return all indices with valid evidence IDs in JSON."
     failed = [claims[check.index] for check in parsed.checks if not check.supported]
     if failed:
-        raise ValueError(f"Digest contains unsupported fields: {failed[:3]}")
+        raise DigestSourceRejected(f"Digest contains unsupported fields: {failed[:3]}")

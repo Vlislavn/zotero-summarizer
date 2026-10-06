@@ -84,6 +84,7 @@ class OpenAlexSearchHit:
     is_oa: bool = False
     is_retracted: bool = False
     source_rank: int = 0
+    publication_types: list[str] = field(default_factory=list)
 
 
 _RATE_LIMITER = RateLimiter(_RATE_LIMIT_PER_SEC)
@@ -166,7 +167,7 @@ class OpenAlexClient:
             param_key: query[:2000] if semantic else query,
             "per_page": max(1, min(per_page, 50)),
             "select": "id,doi,title,display_name,publication_year,authorships,"
-            "primary_location,abstract_inverted_index,cited_by_count,is_retracted,open_access",
+            "primary_location,abstract_inverted_index,cited_by_count,is_retracted,open_access,type",
         }
         payload = self._get("/works", params=params)
         if not payload:
@@ -392,6 +393,7 @@ def _search_hit_from_payload(raw: dict[str, Any], *, source_rank: int) -> OpenAl
         is_oa=bool((raw.get("open_access") or {}).get("is_oa")),
         is_retracted=bool(raw.get("is_retracted")),
         source_rank=source_rank,
+        publication_types=[raw["type"]] if isinstance(raw.get("type"), str) and raw["type"].strip() else [],
     )
 
 

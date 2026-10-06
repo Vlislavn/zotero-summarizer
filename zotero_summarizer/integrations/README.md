@@ -123,3 +123,8 @@ Stored-attachment names strip separators and non-printable Unicode characters.
 Known PDF/PNG extensions are normalized and reserved before the 120-character
 limit; empty, `.` and `..` stems use `fulltext` plus the content-type extension.
 The same sanitized name is used for the copied file and SQLite `storage:` path.
+
+Search metadata preserves Europe PMC `pubTypeList.pubType` and OpenAlex work
+`type` as publication-type lists (unknown/malformed values stay empty). These are
+source metadata, not prose-derived methodology classifications. OpenAlex search
+requests include `type` in the selected fields.

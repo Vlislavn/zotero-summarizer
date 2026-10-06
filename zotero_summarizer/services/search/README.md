@@ -166,17 +166,11 @@ marks it cancelled, and prevents in-flight review saves from recreating it.
 
 ## Deferred (ponytail seams, known ceilings)
 
-Parsed include/exclude terms and study types are executable QueryPlan fields.
-After source union/dedup, every channel (including semantic/library hits) obeys
-the same title/abstract gate: every required phrase, no excluded phrase, and any
-requested study-type phrase. Matching is case-insensitive and whole-token, with
-punctuation normalized; missing metadata cannot establish a required match.
-This is literal filtering, not semantic confirmation of a study's methodology.
-The plan panel exposes these local constraints. OpenAlex lexical/Europe PMC use
-Boolean constraints and synonym alternatives; semantic channels receive explicit
-constraints in prose. arXiv retains its precision/recall queries and relies on
-the local gate, as does Crossref's broad metadata retrieval. Refinement drop terms
-constrain subsequent fetches but cannot override an explicit required term.
+Only user-confirmed restrictions gate new searches. Model-proposed restrictions
+remain visible suggestions, not filters; unknown-origin legacy plans retain their
+old literal behavior until explicitly replaced. Semantic queries describe the
+information need without appended filter instructions. Refinement retains domain,
+optional terms and authority; dropped concepts remain advisory.
 
 OA PDF acquisition explicitly passes the selected `Settings.pdf_cache_dir`
 (`data/pdfs/`), shared with Library acquisition only within the same project.
@@ -193,3 +187,53 @@ OA PDF acquisition explicitly passes the selected `Settings.pdf_cache_dir`
 - **bioRxiv/medRxiv**: not a dedicated channel — OpenAlex + Europe PMC both index
   bioRxiv/medRxiv preprints, and Crossref carries their DOIs, so the coverage is
   already federated. Add a dedicated leaf only if a gap shows up in a real run.
+
+## Constraint authority
+
+New parsed restrictions are `model_proposed`, shown as confirmation-required plan
+rows, not eligibility gates. The screen request may supply `constraints` with
+`must_include`, `must_not_include`, and `study_types` arrays; these are explicitly
+`user_confirmed`. Exact phrase gates still apply for includes/excludes. Confirmed
+types require `Candidate.publication_types`. Europe PMC's `pubTypeList.pubType`
+and OpenAlex's `type` are retained and merged across identifier families. Broad
+`article`/`Journal Article` metadata does not establish a review. Under an explicit
+type filter, inadequate metadata is recovered by exact DOI via Europe PMC before
+filtering (online only). `ZS_SEARCH_TYPE_LOOKUPS` defaults to 5, accepts 0–15, and
+fails on invalid configuration. Requested-type whole-token phrases in titles
+(case/space/hyphen normalized) prioritize this bounded exact-DOI lookup only;
+they never establish eligibility. Both priority groups retain original order.
+Adequate requested-type metadata skips lookup. Recovery accounting records
+`unattempted` eligible unknowns and `confirmed` newly established requested types;
+empty hits remain unknown, not evidence of HTTP failure. Remaining unknowns are disclosed, not inferred
+from titles/abstracts. Existing saved plans without origin remain `legacy_unknown` and retain
+literal filtering; they are not automatically migrated. Refinement drop terms
+are advisory and never become exclusions. Semantic payloads state the information
+need without Boolean/filter instructions.
+
+The plan persists observed per-source accounting before constraint removal:
+observations, contributing families, duplicate observations, accepted families,
+constraint rejections and unknown-type rejections. A cross-source family counts
+once under each contributing source, so source totals are not globally additive.
+Empty channels are not evidence of provider availability or a complete search.
+The plan discloses scholarly-source limits for handbooks/official guidance.
+
+## Complementary retrieval and receipts
+
+New plans keep one raw/tight pass and bounded domain-anchored concept groups.
+Aliases and optional `related_terms` are separate from core concepts and mandatory
+constraints; `domain` is a model proposal, never a claim of regulatory validity.
+OpenAlex receives lexical text, Europe PMC grouped Boolean alternatives, arXiv
+field-scoped terms. Each source's variants divide its existing quota; OpenAlex's
+existing two-lexical-pass cap remains. No additional provider framework.
+
+Accounting snapshots observations before mutable family merging. Every scheduled
+variant records its query, allocation, observations and state, including zero hits.
+Best-effort leaves do not distinguish transport failure from a genuine empty
+result: those states stay `unknown`, never successful. Source family counts are
+cross-source attributed (not globally additive); type-unknown and other rejection
+counts survive persistence. Refinement stores its round's accounting separately.
+
+Simplification check: reuse provider search leaves, identifier dedup, session
+serialization and existing plan display; no competing retrieval/ranking loop.
+
+Fresh semantic/library queries use the raw user topic and questions, not the model's expanded canonical restatement. The executable two-pass lexical plan covers all bounded concepts/acronyms in its broad OR pass. A model-proposed domain absent from the raw topic is disclosed, not a mandatory anchor; unspecified context asks the user to refine the existing topic. Metadata for a broad Review does not certify a Systematic Review: request-relative exact-DOI recovery runs before unconfirmed-type exclusion.

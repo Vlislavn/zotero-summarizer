@@ -77,6 +77,7 @@ def _merge_family(members: list[Candidate]) -> Candidate:
         preferred.cited_by_count = (
             preferred.cited_by_count if preferred.cited_by_count is not None else m.cited_by_count
         )
+        preferred.publication_types = list(dict.fromkeys(preferred.publication_types + m.publication_types))
         preferred.quality = preferred.quality or m.quality
         preferred.coverage = preferred.coverage or m.coverage
         preferred.peer_review = preferred.peer_review or m.peer_review

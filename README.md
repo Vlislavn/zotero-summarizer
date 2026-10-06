@@ -16,6 +16,23 @@ keep/trash decisions train the model, so tomorrow's slate is sharper.
 the model learns from how you triage). The app owns current decisions and their history;
 Zotero remains the PDF/citation surface and a synced representation of approved tags/notes.
 
+## Review recovery and search constraints
+
+Deep review rejects demonstrated access/error/login templates before model calls.
+Failures show their stage and recovery separately from scientific quality; a failed
+attempt or missing-source placeholder does not replace a current valid review.
+`verify-deep-review --capture-local` explicitly saves sensitive decoded diagnostics
+under `data/`; do not share them. It performs no Zotero writes and disables thinking
+for its diagnostic calls. See [library](zotero_summarizer/services/library/README.md)
+and [CLI](zotero_summarizer/cli/README.md) contracts.
+
+Search's folded explicit constraints are user-owned. Model proposals are visible,
+not hard gates; inferred refinement exclusions cannot silently remove results.
+Confirmed publication types require source metadata, with bounded exact-DOI recovery;
+unconfirmed metadata stays unknown. Legacy saved plans retain their original filters.
+The plan discloses domain context, source accounting and scholarly coverage limits.
+See [search](zotero_summarizer/services/search/README.md).
+
 ## Requirements
 
 - **Python 3.10+** and **[uv](https://docs.astral.sh/uv/getting-started/installation/)**

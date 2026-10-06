@@ -63,7 +63,7 @@ function Refinements({ rounds }) {
         <div key={r.round} className="text-slate-700">
           <span className="text-slate-500">Round {r.round}:</span>{' '}
           {(r.add_concepts || []).length > 0 && <>added <span className="font-medium">{(r.add_concepts || []).join(', ')}</span></>}
-          {(r.drop_terms || []).length > 0 && <> · dropped <span className="font-medium">{(r.drop_terms || []).join(', ')}</span></>}
+          {(r.drop_terms || []).length > 0 && <> · de-emphasized (not excluded) <span className="font-medium">{(r.drop_terms || []).join(', ')}</span></>}
           {typeof r.new_candidates === 'number' && <span className="text-slate-500"> (+{r.new_candidates} new)</span>}
         </div>
       ))}
@@ -201,6 +201,7 @@ export default function Search() {
   const [query, setQuery] = useState(saved.q || '');
   const [questions, setQuestions] = useState(saved.qs || '');
   const [session, setSession] = useState(null);
+  const [constraints, setConstraints] = useState({ must_include: "", must_not_include: "", study_types: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   // Target Zotero collection for per-result "Add to library" ('' = server "Inbox").
@@ -273,7 +274,10 @@ export default function Search() {
     setSession(null);
     try {
       const qs = questions.split('\n').map((q) => q.trim()).filter(Boolean);
-      const sess = await screenApi({ query: query.trim(), questions: qs });
+      const confirmed = Object.fromEntries(Object.entries(constraints).map(([key, value]) =>
+        [key, value.split('\n').map((term) => term.trim()).filter(Boolean)]));
+      const sess = await screenApi({ query: query.trim(), questions: qs,
+        ...(Object.values(confirmed).some((values) => values.length) ? { constraints: confirmed } : {}) });
       savedIdRef.current = sess.id;
       setSession(sess);
       if (sess.status === 'reviewing') pollUntilDone(sess.id);  // auto deep-review started server-side
@@ -282,7 +286,7 @@ export default function Search() {
     } finally {
       setLoading(false);
     }
-  }, [query, questions, pollUntilDone]);
+  }, [query, questions, constraints, pollUntilDone]);
 
   const reviewing = session?.status === 'reviewing' && !error;
   // Doherty: name the honest stage. During agentic rounds refinements grow but no
@@ -307,6 +311,18 @@ export default function Search() {
           placeholder="Optional — one specific question per line"
           value={questions} onChange={(e) => setQuestions(e.target.value)}
         />
+        <details className="text-[12px]">
+          <summary>Explicit constraints (optional)</summary>
+          <p>Only these confirmed filters are mandatory. One exact phrase per line; types require source metadata.
+            Natural-language restrictions in the topic are proposals: confirm them here and search again.</p>
+          {Object.entries({ must_include: 'Required exact phrases', must_not_include: 'Excluded exact phrases',
+            study_types: 'Only publication types' }).map(([key, label]) => (
+            <label key={key} className="block">{label}
+              <textarea aria-label={label} rows={2} className="block border rounded p-1 w-full"
+                value={constraints[key]} onChange={(e) => setConstraints({ ...constraints, [key]: e.target.value })} />
+            </label>
+          ))}
+        </details>
         <button
           type="submit" disabled={loading || !query.trim()}
           className="justify-self-start px-4 py-1.5 rounded-lg bg-slate-900 text-white text-[13px] disabled:opacity-40"

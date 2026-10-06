@@ -10,6 +10,7 @@ import AuthorByline from '../components/AuthorByline.jsx';
 import LinksRow from '../components/paper/LinksRow.jsx';
 import AbstractBlock from '../components/paper/PaperDetailView/AbstractBlock.jsx';
 import PaperReview from '../components/paper/review/PaperReview.jsx';
+import ReviewFailure from '../components/paper/ReviewFailure.jsx';
 import PaperFigures from '../components/library/PaperFigures.jsx';
 import SectionMap from '../components/paper/review/SectionMap.jsx';
 import StoryToc from '../components/paper/review/StoryToc.jsx';
@@ -95,9 +96,7 @@ function ReviewZone({ deep, runner, sectionOverlay }) {
           </button>
         )
       )}
-      {status.status === 'error' && status.error && (
-        <div className="text-[12px] text-rose-700">Review failed: {status.error}</div>
-      )}
+      <ReviewFailure status={status} />
       {online && status.status === 'unavailable' && status.error && (
         <div className="text-[12px] text-amber-800" role="status">Review status unavailable: {status.error}</div>
       )}

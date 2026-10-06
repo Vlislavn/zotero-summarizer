@@ -16,6 +16,15 @@ function setup() {
   return { client, onDone, wrapper };
 }
 
+it('preserves the server diagnostic without inferring authentication from error prose', async () => {
+  const { wrapper } = setup();
+  const diagnostic = { code: 'digest_source_rejected', stage: 'verification', recovery: 'Inspect source' };
+  fetchDeepReviewStatus.mockResolvedValue({ status: 'error', error: 'Model said HTTP 403', diagnostic });
+  const { result } = renderHook(() => useDeepReviewRunner('A'), { wrapper });
+  await waitFor(() => expect(result.current.status.diagnostic).toEqual(diagnostic));
+  expect(result.current.running).toBe(false);
+});
+
 it('stops the spinner on polling failure and resumes the same job on explicit retry', async () => {
   const { client, onDone, wrapper } = setup();
   fetchDeepReviewStatus.mockResolvedValue({ status: 'running' });

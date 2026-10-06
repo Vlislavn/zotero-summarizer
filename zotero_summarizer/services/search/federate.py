@@ -12,6 +12,7 @@ exception from a channel propagates (fail-fast), it is not swallowed here.
 """
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -57,6 +58,7 @@ def _europepmc_channel(query: str, quota: int, at: str) -> list[Candidate]:
         Candidate(
             title=h.title, abstract=h.abstract, doi=h.doi, pmid=h.pmid, pmcid=h.pmcid,
             authors=h.authors, year=h.year, venue=h.venue, is_open_access=h.is_open_access,
+            publication_types=list(h.publication_types),
         )
         for h in hits
     ]
@@ -72,6 +74,7 @@ def _openalex_channel(client: Any, query: str, quota: int, at: str, *, semantic:
             title=h.title, abstract=h.abstract, doi=h.doi, openalex_id=h.openalex_id,
             authors=h.authors, year=h.year, venue=h.venue, is_open_access=h.is_oa,
             is_retracted=h.is_retracted, cited_by_count=h.cited_by_count,
+            publication_types=list(h.publication_types),
         )
         for h in hits
     ]
@@ -153,7 +156,11 @@ def _matches_constraints(candidate: Candidate, plan: Any) -> bool:
 
     return (all(contains(term) for term in plan.must_include)
             and not any(contains(term) for term in plan.must_not_include)
-            and (not plan.study_types or any(contains(term) for term in plan.study_types)))
+            and (not plan.study_types or (
+                any(contains(term) for term in plan.study_types)
+                if plan.constraint_origin == "legacy_unknown" else
+                bool(set(term.casefold() for term in plan.study_types)
+                     & set(term.casefold() for term in candidate.publication_types)))))
 
 
 def federate(
@@ -174,7 +181,8 @@ def federate(
     the pool. OpenAlex lexical is capped at 2 passes (keyless polite-pool budget)."""
     at = now_iso_z()
     tasks: list[Callable[[], list[Candidate]]] = []
-    def add_variant_tasks(queries: list[str], run: Callable[[str, int], list[Candidate]]) -> None:
+    requests: list[dict[str, Any]] = []
+    def add_variant_tasks(source: str, queries: list[str], run: Callable[[str, int], list[Candidate]]) -> None:
         if not queries:
             return
         allocations = [quota // len(queries)] * len(queries)
@@ -183,39 +191,54 @@ def federate(
         for query, limit in zip(queries, allocations):
             if limit:
                 tasks.append(lambda q=query, n=limit: run(q, n))
+                requests.append({"source": source, "query": query, "allocation": limit})
 
     add_variant_tasks(
-        _variant_queries(plan.arxiv_variants, plan.arxiv),
+        "arxiv", _variant_queries(plan.arxiv_variants, plan.arxiv),
         lambda q, n: _arxiv_channel(q, n, at),
     )
     add_variant_tasks(
-        _variant_queries(plan.europepmc_variants, plan.europepmc),
+        "europepmc", _variant_queries(plan.europepmc_variants, plan.europepmc),
         lambda q, n: _europepmc_channel(q, n, at),
     )
     add_variant_tasks(
-        _variant_queries(plan.openalex_lexical_variants, plan.openalex_lexical, cap=2),
+        "openalex", _variant_queries(plan.openalex_lexical_variants, plan.openalex_lexical, cap=2),
         lambda q, n: _openalex_channel(openalex_client, q, n, at, semantic=False),
     )
-    tasks.append(lambda: _openalex_channel(openalex_client, plan.openalex_semantic, quota, at, semantic=True))
+    add_variant_tasks("openalex", [plan.openalex_semantic] if plan.openalex_semantic else [],
+                      lambda q, n: _openalex_channel(openalex_client, q, n, at, semantic=True))
     if plan.crossref:
-        tasks.append(lambda: _crossref_channel(plan.crossref, quota, at, crossref_mailto))
+        add_variant_tasks("crossref", [plan.crossref], lambda q, n: _crossref_channel(q, n, at, crossref_mailto))
     if plan.semantic_scholar:
-        tasks.append(lambda: _semantic_scholar_channel(plan.semantic_scholar, quota, at))
+        add_variant_tasks("semantic_scholar", [plan.semantic_scholar],
+                          lambda q, n: _semantic_scholar_channel(q, n, at))
     if plan.openreview and openreview_client is not None:
-        tasks.append(lambda: _openreview_channel(
-            plan.openreview, or_client=openreview_client, openalex_client=openalex_client, quota=quota, at=at
-        ))
+        add_variant_tasks("openreview", [plan.openreview], lambda q, n: _openreview_channel(
+            q, or_client=openreview_client, openalex_client=openalex_client, quota=n, at=at))
     if library_finder is not None:
         lib_query = plan.library_expanded or plan.library_raw
-        tasks.append(lambda: _stamp(
-            library_finder(lib_query), source="library", variant=lib_query, at=at
-        ))
+        add_variant_tasks("library", [lib_query], lambda q, n: _stamp(
+            library_finder(q)[:n], source="library", variant=q, at=at))
 
-    with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
-        channel_results = [f.result() for f in [pool.submit(t) for t in tasks]]
+    channel_results = []
+    if tasks:
+        with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
+            channel_results = [f.result() for f in [pool.submit(t) for t in tasks]]
+    for request, results in zip(requests, channel_results):
+        request.update(observations=len(results), status="observed" if results else "unknown")
 
     unioned = [cand for channel in channel_results for cand in channel]
-    return [candidate for candidate in to_version_families(unioned) if _matches_constraints(candidate, plan)]
+    from zotero_summarizer.services.search._accounting import account_retrieval
+
+    observed_counts = Counter(p.source for candidate in unioned for p in candidate.provenance)
+    families = to_version_families(unioned)
+    from zotero_summarizer.services.search._publication_types import recover_types
+
+    recovery = recover_types(families, plan)
+    accepted = [candidate for candidate in families if _matches_constraints(candidate, plan)]
+    plan.retrieval_accounting = account_retrieval(observed_counts, families, accepted, plan, requests)
+    plan.retrieval_accounting["type_recovery"] = recovery
+    return accepted
 
 
 __all__ = ["federate", "LibraryFinder"]

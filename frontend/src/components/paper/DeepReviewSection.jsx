@@ -3,6 +3,7 @@ import useDeepReviewRunner from '../../hooks/useDeepReviewRunner.js';
 import Spinner from '../ui/Spinner.jsx';
 import { FullTextAccessNotice } from '../library/shared.jsx';
 import PaperReview from './review/PaperReview.jsx';
+import ReviewFailure from './ReviewFailure.jsx';
 
 // "92" -> "1m 32s", "8" -> "8s". Used for the live elapsed + ETA readout so the
 // running review reports real progress instead of a fixed "~1–2 min" guess.
@@ -113,9 +114,7 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
           )}
         </div>
       )}
-      {status.status === 'error' && status.error && (
-        <div className="text-[12px] text-rose-700">Deep review failed: {status.error}</div>
-      )}
+      <ReviewFailure status={status} label="Deep review failed" />
       {online && status.status === 'unavailable' && status.error && (
         <div className="text-[12px] text-amber-800" role="status">Review status unavailable: {status.error}</div>
       )}

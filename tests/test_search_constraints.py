@@ -37,7 +37,8 @@ def test_federation_enforces_constraints_even_when_source_ignores_them(monkeypat
 
 
 def test_agentic_drop_cannot_remove_an_explicit_must_include():
-    delta = _delta_intent(_intent(), ["immune response"], ["human", "off topic"])
+    delta = _delta_intent(_intent(), ["immune response"])
     assert delta.must_include == ["human"]
     assert "human" not in delta.must_not_include
-    assert "off topic" in build_query_plan(delta).europepmc
+    assert "off topic" not in build_query_plan(delta).europepmc
+    assert delta.must_not_include == ["mouse"]

@@ -16,10 +16,18 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from zotero_summarizer.domain import normalize_arxiv_id, normalize_doi
 
+class ConfirmedConstraints(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, strict=True, extra="forbid")
+    must_include: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(default_factory=list, max_length=10)
+    must_not_include: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(default_factory=list, max_length=10)
+    study_types: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(default_factory=list, max_length=10)
+
+
 class ScreenRequest(BaseModel):
     """Bounded user input shared by HTTP, screening and persisted review entry points."""
 
     model_config = ConfigDict(str_strip_whitespace=True, strict=True)
+    constraints: ConfirmedConstraints | None = None
     query: str = Field(min_length=1, max_length=4000, description="Natural-language research topic")
     questions: list[Annotated[str, Field(min_length=1, max_length=1000)]] = Field(default_factory=list, max_length=10)
 
@@ -55,6 +63,7 @@ class Candidate:
     url: str = ""
     is_open_access: bool = False
     is_retracted: bool = False
+    publication_types: list[str] = field(default_factory=list)
     version_type: str = "unknown"
     provenance: list[Provenance] = field(default_factory=list)
     # Derived downstream:
@@ -78,6 +87,9 @@ class Candidate:
     candidate_id: str = ""             # persisted address, independent of later metadata enrichment
 
     def __post_init__(self) -> None:
+        if not isinstance(self.publication_types, list) or any(
+                not isinstance(term, str) or not term.strip() for term in self.publication_types):
+            raise ValueError("Publication types must be a list of nonempty metadata strings")
         self.doi = normalize_doi(self.doi) if self.doi else ""
         self.arxiv_id = normalize_arxiv_id(self.arxiv_id) if self.arxiv_id else ""
         self.pmid = (self.pmid or "").strip()
@@ -118,6 +130,10 @@ class SearchIntent:
     canonical_question: str = ""
     concepts: list[str] = field(default_factory=list)
     synonyms: list[str] = field(default_factory=list)
+    related_terms: list[str] = field(default_factory=list)
+    domain: str = ""
+    constraint_origin: str = "legacy_unknown"
+    pending_constraints: dict[str, list[str]] = field(default_factory=dict)
     must_include: list[str] = field(default_factory=list)
     must_not_include: list[str] = field(default_factory=list)
     study_types: list[str] = field(default_factory=list)
@@ -125,6 +141,15 @@ class SearchIntent:
     # False when the LLM parse failed and we fell back to the raw query — so a
     # degraded plan is visible in the UI, never silently passed off as planned.
     parse_ok: bool = True
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.domain, str):
+            raise ValueError("Search domain must be a string")
+        if not isinstance(self.related_terms, list) or any(
+                not isinstance(term, str) or not term.strip() for term in self.related_terms):
+            raise ValueError("Related terms must be a list of nonempty strings")
+        if self.constraint_origin not in {"legacy_unknown", "model_proposed", "user_confirmed"}:
+            raise ValueError("Unknown constraint authority")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -140,6 +165,7 @@ class QueryPlan:
     """Per-source query strings (spec §13.1). Shown to the user AS the plan —
     not a single reformulated query."""
 
+    retrieval_accounting: dict[str, Any] = field(default_factory=dict)
     library_raw: str = ""
     library_expanded: str = ""
     openalex_lexical: str = ""
@@ -155,6 +181,9 @@ class QueryPlan:
     openalex_lexical_variants: list[str] = field(default_factory=list)
     europepmc_variants: list[str] = field(default_factory=list)
     arxiv_variants: list[str] = field(default_factory=list)
+    constraint_origin: str = "legacy_unknown"
+    pending_constraints: dict[str, list[str]] = field(default_factory=dict)
+    domain_note: str = ""
     must_include: list[str] = field(default_factory=list)
     must_not_include: list[str] = field(default_factory=list)
     study_types: list[str] = field(default_factory=list)
@@ -183,7 +212,17 @@ class QueryPlan:
         rows.append(("openreview", self.openreview))
         for name in ("must_include", "must_not_include", "study_types"):
             if values := getattr(self, name):
-                rows.append((f"local {name} (title/abstract)", "; ".join(values)))
+                rows.append((f"local {name} (" + ("source metadata" if name == "study_types" and self.constraint_origin != "legacy_unknown" else "title/abstract") + ")", "; ".join(values)))
+        for source, counts in self.retrieval_accounting.items():
+            rows.append((f"retrieval {source}", "; ".join(f"{key}: {value}" for key, value in counts.items())))
+        rows.append(("constraint authority", self.constraint_origin))
+        if self.domain_note:
+            rows.append(("domain context", self.domain_note))
+        for name, values in self.pending_constraints.items():
+            if values:
+                rows.append((f"confirmation required: {name}", "; ".join(values)))
+        rows.append(("coverage", "Scholarly sources only; handbooks and official guidance may be missing. "
+                     "Search the relevant official publisher separately. Missing publication-type metadata is unknown."))
         return [{"source": s, "query": q} for s, q in rows if q]
 
 
