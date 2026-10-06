@@ -148,6 +148,18 @@ def test_default_note_preserves_long_paper_specific_fields():
     assert 'Omitted over-budget text' not in note
 
 
+def test_default_note_retains_all_distinct_list_values():
+    findings = [f'Distinct finding {i} preserves a limitation.' for i in range(8)]
+    sections = [f'Section {i}: original evidence.' for i in range(8)]
+    tags = [f'topic-{i}' for i in range(8)]
+    summary = SummarizeResponse(relevance_score=4, executive_summary='Overview.', triage_rationale='Fit.',
+                               key_findings=findings, key_sections_to_read=sections, tags=tags)
+    note = build_triage_note_html('T', summary)
+    for value in [*findings, *sections, *tags]:
+        assert html.escape(value) in note
+    assert 'Shortened' not in note
+
+
 def test_empty_list_and_invalid_budgets():
     summary = SummarizeResponse(relevance_score=4, executive_summary='Overview.',
                                triage_rationale='Fit.', key_findings=[' '] * 7)

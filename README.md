@@ -33,6 +33,11 @@ Full reviews keep contribution, caveats and findings together before folded asse
 Goal evidence remains accessible without repeated summaries; approved Zotero notes use
 persisted paper-specific content. See [usage](docs/usage.md#reading-reviews-and-zotero-notes)
 for optional long-field budgets and the separate native/user acceptance boundaries.
+Saved findings, reading hints and tags are not silently list-capped. Independent
+preservation/mutation tests run without private inputs. Frozen real-review browser
+replays require `ZS_REVIEW_ACCEPTANCE_MANIFEST=/path/to/frozen-input.json`; without
+that explicit input they skip, not pass. They check literal retention, not scientific
+truth, subjective usability or native Zotero persistence.
 
 Search's folded explicit constraints are user-owned. Model proposals are visible,
 not hard gates; inferred refinement exclusions cannot silently remove results.

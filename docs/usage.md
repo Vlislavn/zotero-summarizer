@@ -15,7 +15,8 @@ unretrieved goals are different states. Smaller cards keep their compact disclos
 Approved triage notes retain saved summaries across restarts and include available
 methods, findings, relevance, uncertainty and optional implementation/impact sections.
 A blank rationale falls back to a usable overview, not a generic placeholder. Full
-paper-specific text is retained by default. If an explicit renderer word budget is
+paper-specific text and all saved findings, reading hints and tags are retained by
+default, without a silent six-item limit. If an explicit renderer word budget is
 used, oversized fields show an omission notice; consult the full saved summary rather
 than treating that notice as evidence of absence.
 Raw summary data and exact artifact URLs are retained. Native-editor round trips and

@@ -39,7 +39,10 @@ note_analyzer  : interpret user-written Zotero notes as golden labels
 Triage headlines select the first nonblank rationale or overview, including Unicode
 whitespace. Optional controversies, impact, implementation and unknowns are rendered.
 The raw persisted response is unchanged. By default, paper-specific text is retained
-in full. Optional renderer keyword budgets keep a complete field or show an explicit
+in full, including every nonblank finding, reading hint and tag; lists have no silent
+six-item cap. Independent preservation tests check saved text and association loss,
+with targeted corruptions rejected. These are not native-editor or scientific-truth
+certification. Optional renderer keyword budgets keep a complete field or show an explicit
 omission notice: they never guess a sentence boundary. Exact artifact URLs remain
 intact. These opt-in budgets are not a validated 300–600-word whole-note target;
 long-field omission can reduce usefulness and needs native-editor/user acceptance

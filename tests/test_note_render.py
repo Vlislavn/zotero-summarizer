@@ -151,15 +151,13 @@ def test_note_escapes_html_in_user_supplied_strings():
     assert "<b>Title</b>" not in fallback and "&lt;b&gt;Title&lt;/b&gt;" in fallback
 
 
-def test_note_caps_findings_at_six():
-    s = _summary(
-        key_findings=["one", "two", "three", "four", "five", "six", "seven"],
-    )
-    html = build_triage_note_html("T", s)
-    li_count = html.count("<li>")
-    assert li_count == 8  # six findings + two reading sections
-    assert "six" in html
-    assert "seven" not in html
+def test_note_preserves_findings_beyond_six():
+    findings = ["one", "two", "three", "four", "five", "six", "seven"]
+    summary = _summary(key_findings=findings)
+    html = build_triage_note_html("T", summary)
+    assert html.count("<li>") == len(findings) + len(summary.key_sections_to_read)
+    for finding in findings:
+        assert f"<li>{finding}</li>" in html
 
 
 def test_delayed_materialization_restores_summary_and_marks_legacy_fallback():

@@ -1,10 +1,8 @@
 """Zotero-renderable note HTML builders (triage / verdict / digest).
 
-Zotero's TinyMCE editor silently strips most HTML — no CSS, no <div>, no <h1>.
-These builders use ONLY <h2>, <p>, <ul>/<li>, <strong>, <em>, so they are the
-single source of truth for note markup. Each note is led by an HTML-comment
-provenance marker that survives TinyMCE round-trips (verified against the
-user's prior agent notes).
+Builders use simple headings, paragraphs, lists and inline emphasis.
+Each note carries a writer-ownership marker. Native editors may canonicalize
+markup; actual save/reopen compatibility is checked separately from rendering.
 """
 from __future__ import annotations
 
@@ -110,18 +108,16 @@ def build_triage_note_html(
         if kept:
             parts += ["<h2>Method and code</h2>", "<ul>" + "".join(
                 f"<li>{html.escape(value)}</li>" for value in kept) + "</ul>"]
-    for heading, values, limit in (
-        ("Key findings", summary.key_findings, 6),
-        ("What to read", summary.key_sections_to_read, 6),
+    for heading, values in (
+        ("Key findings", summary.key_findings),
+        ("What to read", summary.key_sections_to_read),
     ):
         kept = [_bounded_note_text(str(value), list_word_budget)
-                for value in values if str(value).strip()][:limit]
-        if kept and sum(bool(str(value).strip()) for value in values) > limit:
-            kept[-1] += " Shortened; see the full saved summary."
+                for value in values if str(value).strip()]
         if kept:
             parts += [f"<h2>{heading}</h2>", "<ul>" + "".join(
                 f"<li>{html.escape(value)}</li>" for value in kept) + "</ul>"]
-    tags_preview = ", ".join(html.escape(t) for t in (summary.tags or [])[:6]) or "—"
+    tags_preview = ", ".join(html.escape(t) for t in (summary.tags or [])) or "—"
     footer_bits = [
         f"score {summary.composite_relevance_score:.1f}",
         f"goal: {html.escape(summary.matched_goal or '—')}",
