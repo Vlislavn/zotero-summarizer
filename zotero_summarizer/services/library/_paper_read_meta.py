@@ -80,7 +80,12 @@ def qa_body_text(artifact: dict[str, Any]) -> str:
     ``qa_text`` is the clean PDF extraction persisted for TeX papers (whose own
     ``full_text`` is noisy ``_clean_tex`` output); PDF-tier papers fall back to
     their ``full_text`` (same extraction)."""
-    return str(artifact.get("qa_text") or artifact.get("full_text") or "")
+    from zotero_summarizer.services.library._source_admission import admit_source
+
+    text = str((artifact.get("qa_text") if "qa_text" in artifact else artifact.get("full_text")) or "")
+    if text.strip():
+        admit_source(text)
+    return text
 
 
 def artifact_text(

@@ -44,6 +44,7 @@ class EuropePmcHit:
     year: int | None = None
     venue: str = ""
     is_open_access: bool = False
+    publication_types: list[str] = field(default_factory=list)
 
 
 def _hit_from_result(res: dict) -> EuropePmcHit | None:
@@ -58,7 +59,11 @@ def _hit_from_result(res: dict) -> EuropePmcHit | None:
     author_string = (res.get("authorString") or "").strip().rstrip(".")
     authors = [a.strip() for a in author_string.split(",") if a.strip()]
     venue = ((res.get("journalInfo") or {}).get("journal") or {}).get("title") or ""
+    type_list = res.get("pubTypeList")
+    types = type_list.get("pubType") if isinstance(type_list, dict) else None
     return EuropePmcHit(
+        publication_types=[v.strip() for v in types if isinstance(v, str) and v.strip()]
+        if isinstance(types, list) else [],
         title=title,
         abstract=abstract,
         doi=(res.get("doi") or "").strip(),

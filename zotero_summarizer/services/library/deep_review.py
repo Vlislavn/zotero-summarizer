@@ -49,6 +49,7 @@ from zotero_summarizer.services.library import (
     _map_reduce,
     quality_review,
     reading_queue,
+    _review_attempt,
 )
 # Cache primitives are re-exported here as the public seam.
 from zotero_summarizer.services.library._review_cache import (  # noqa: F401
@@ -110,6 +111,8 @@ def _trim_jobs_locked() -> None:
 
 def _set_job(item_key: str, **fields: Any) -> None:
     """Merge ``fields`` into ``_JOBS[item_key]`` and trim finished jobs (lock-guarded)."""
+    if fields.get('status') in {'ready', 'error'}:
+        fields['attempt'] = _review_attempt.current_metadata()
     with _LOCK:
         job = _JOBS.get(item_key) or {}
         job.update(fields)
@@ -126,21 +129,20 @@ def _set_job_progress(item_key: str, progress: dict[str, Any]) -> None:
 
 
 def status(item_key: str | None = None) -> dict[str, Any]:
-    """Poll payload ``{status, total, completed, error, started_at, progress}``.
-
-    A keyed query reports that paper's job. Aggregate queries report running when
-    any review is active; otherwise errors reflect the latest finished attempt."""
+    """Keyed attempt status; aggregate errors reflect only the latest finished job."""
     with _LOCK:
         if item_key is not None:
             job = _JOBS.get(item_key)
             if job is None:
                 return {"status": "idle", "total": 0, "completed": 0, "error": None,
-                        "started_at": None, "progress": {}}
+                        "started_at": None, "progress": {}, "diagnostic": None}
             return {
                 "status": str(job.get("status") or "idle"),
                 "total": 1,
                 "completed": int(job.get("completed") or 0),
                 "error": job.get("error"),
+                "attempt": job.get("attempt"),
+                "diagnostic": job.get("diagnostic") if job.get("status") == "error" else None,
                 "started_at": job.get("started_at"),
                 "progress": _deep_review_progress.live_progress(job),
             }
@@ -163,6 +165,8 @@ def status(item_key: str | None = None) -> dict[str, Any]:
         "total": len(jobs),
         "completed": completed,
         "error": error,
+        "attempt": latest.get("attempt") if not running else None,
+        "diagnostic": latest.get("diagnostic") if error else None,
         "started_at": min((j.get("started_at") for j in jobs if j.get("started_at")), default=None),
         "progress": _deep_review_progress.live_progress(running[0]) if running else {},
     }
@@ -389,17 +393,13 @@ def _resolve_items(top_k: int, item_keys: list[str] | None, overrides: dict[str,
     ]
 
 
+@_review_attempt.tracked_worker
 def _review_worker(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str) -> None:
-    """Pool task: review ONE paper, persist it, and settle THIS item's job. A failure
-    is recorded on the item's job (with the connectivity hint) and never touches another
-    paper's review (per-item boundary)."""
+    """Review and settle one item without affecting another item's cache or job."""
     item_key = str(item["item_key"])
     kwargs = {k: v for k, v in ctx.items() if not k.startswith("_")}
     acquired = None
     try:
-        # Per-paper button: fetch a PDF first (arXiv/OA/PMC → browser session) for a pick
-        # with no Zotero attachment, then review FROM it. A failure here propagates to the
-        # per-item boundary below (recorded as the item's error), never silently swallowed.
         if ctx.get("_acquire_missing") and not item.get("pdf_path"):
             from zotero_summarizer.services.library import _pdf_acquire
             _set_job_progress(item_key, {"phase": "acquire", "phase_label": "Fetching full text…"})
@@ -421,18 +421,18 @@ def _review_worker(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str)
                 entry["acquired_pdf"] = item["acquired_pdf"]
             if acquired is not None and not item.get("pdf_path"):
                 entry["acquire_outcome"] = acquired.outcome
-                # Only an attempted, gated fetch gets a sign-in action. Missing
-                # browser support is a separate outcome consumed by the UI.
                 if acquired.needs_login:
                     entry["needs_login"] = True
                     entry["login_url"] = acquired.login_url
-            _write_one(item_key, entry)
-            _try_rebuild_render(item_key)
-        _set_job(item_key, status="ready", completed=1, progress={}, error=None)
+            if _review_attempt.publishable_entry(entry, get_current_review(item_key), acquired):
+                _write_one(item_key, entry)
+                _try_rebuild_render(item_key)
+        _set_job(item_key, status="ready", completed=1, progress={}, error=None, diagnostic=None)
     except Exception as exc:  # noqa: BLE001 — per-item background boundary
         LOGGER.warning("deep_review failed item=%s: %s", item_key, exc)
-        hint = _deep_review_errors.summarize_errors([f"{type(exc).__name__}: {exc}"], ctx.get("_provider"))
-        _set_job(item_key, status="error", completed=1, progress={}, error=hint)
+        _set_job(item_key, status="error", completed=1, progress={},
+                 **_deep_review_errors.failure_fields(
+                     exc, ctx.get("_provider"), phase=status(item_key)['progress'].get('phase')))
 
 
 def _submit(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str) -> None:

@@ -24,3 +24,16 @@ Validation errors expose only field locations and error types; integration error
 use fixed messages so rejected secrets and local paths are never echoed. Partial
 frontend builds keep SPA navigation available; missing assets/public files and
 both `/api` and unknown `/api/*` requests return 404.
+
+Deep-review status remains a transparent per-item service payload: `error` is
+unchanged; additive `diagnostic` exposes only code/stage/recovery and `attempt`
+contains redacted hashes/counts. Model prose never determines HTTP/auth status.
+There is no API switch for sensitive capture; that consent lives only in the CLI.
+
+Search screening accepts optional `constraints` arrays (`must_include`,
+`must_not_include`, `study_types`), each at most ten nonblank 200-character values.
+Supplying these fields is user confirmation, not model extraction. Search plan
+JSON includes `constraint_origin`, `pending_constraints`, and observed
+`retrieval_accounting`; old saved plans remain visibly legacy.
+
+Review diagnostics classify generation, verification and operational source failure from actual boundaries. Source-unavailable ready jobs are not verified reviews; confirmed search types remain unconfirmed until supported source metadata exists.

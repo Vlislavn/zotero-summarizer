@@ -26,7 +26,7 @@ from zotero_summarizer.services._common import settings, state
 from zotero_summarizer.services.search import session as session_store
 from zotero_summarizer.services.search import require_online
 from zotero_summarizer.services.search._fulltext import acquire_full_text
-from zotero_summarizer.services.search._models import Candidate, ResearchSession, ScreenRequest
+from zotero_summarizer.services.search._models import Candidate, ResearchSession, ScreenRequest, ConfirmedConstraints
 from zotero_summarizer.services.search._relevance import attach_relevance
 from zotero_summarizer.services.search._targeted_review import targeted_review
 from zotero_summarizer.services.search.federate import LibraryFinder, federate
@@ -108,13 +108,19 @@ def default_deps() -> SearchDeps:
     )
 
 
-def run_screen(raw_query: str, questions: list[str], *, deps: SearchDeps) -> ResearchSession:
+def run_screen(raw_query: str, questions: list[str], *, deps: SearchDeps, constraints: ConfirmedConstraints | None = None) -> ResearchSession:
     """Phase 1: intent → plan → federate → score → rank → persist. Returns a saved
     ``ResearchSession`` with candidates ordered by the constrained contract."""
     request = ScreenRequest(query=raw_query, questions=questions)
     raw_query, questions = request.query, request.questions
     require_online()
     intent = parse_intent(raw_query, questions, llm=deps.llm)
+    if constraints is not None:
+        intent.pending_constraints = {name: list(getattr(intent, name))
+                                      for name in ("must_include", "must_not_include", "study_types")}
+        for name, values in constraints.model_dump().items():
+            setattr(intent, name, values)
+        intent.constraint_origin = "user_confirmed"
     plan = build_query_plan(intent)
     candidates = federate(
         plan, openalex_client=deps.openalex_client,

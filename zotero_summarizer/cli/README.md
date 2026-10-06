@@ -138,3 +138,21 @@ persists a valid ML-only choice that can later be changed in Settings.
 `migrate-verdicts-to-zotero` plans from the full verdict snapshot, without the old
 5000-row cutoff. Dry-run and apply use the same list; library-only checks, connector
 guard, idempotent tag comparison and the single batch backup remain unchanged.
+
+### Local review attempt capture
+
+`verify-deep-review --item-key KEY` uses the production strategy dispatcher,
+including map/reduce and the original-source verifier, in read-only/no-Zotero-note
+mode. Each explicit CLI attempt writes hash/count diagnostics to
+`Settings.data_dir/deep_review_attempts/<random-id>/attempt.json`, including pipeline failures.
+Provider/model names, effective config identity, strategy/budget and the selected
+PDF fingerprint (when present) identify the new attempt, not a historical replay.
+Add `--capture-local` only with explicit local consent to retain sensitive actual
+prompts and decoded client-returned values. Originals, generated notes, correction
+and verifier events are distinct. The schema labels values as decoded, not raw
+HTTP transport. Captures use private directory/file modes, are not uploaded and
+contain no serialized provider/client configuration or transport cookies/headers.
+Default events contain hashes/counts only. No online accuracy claim follows from
+these traces; stage counts are instrumentation, not review-success scores.
+
+Diagnostic CLI source reads reuse the single-component/no-symlink paper-state guard. Admission happens before provider construction. Legacy full_text is explicitly labelled unverified legacy scope; empty sources retain local failure diagnostics. Diagnostic calls disable thinking without changing app routing.

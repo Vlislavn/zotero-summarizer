@@ -10,11 +10,14 @@ def test_empty_extraction_fails_job_instead_of_caching_ready_review(monkeypatch,
     config = _default_goals_config()
     _wire(monkeypatch, config, reader=_StubReader({"EMPTY": _detail()}), extractor=_StubExtractor(" \n "))
 
+    deep_review._set_job('EMPTY', status='running', progress={})  # Mirror _submit's job registration.
     _run([{"item_key": "EMPTY", "title": "No text"}])
 
     status = deep_review.status("EMPTY")
     assert status["status"] == "error"
     assert "PDF extraction returned no text" in status["error"]
+    assert status['diagnostic']['stage'] == 'extract'
+    assert status['diagnostic']['code'] == 'extraction_failed'
     assert _review_cache.get_cached_review("EMPTY") is None
 
 

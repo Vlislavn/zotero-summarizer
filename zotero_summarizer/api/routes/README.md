@@ -1,5 +1,10 @@
 # api/routes — HTTP endpoints (thin)
 
+Search screen optionally accepts confirmed `constraints` (required/excluded phrases
+and publication types). Missing constraints never authorize model-imposed filters;
+legacy sessions disclose unknown origin. Review status adds typed stage/recovery
+and metadata-only attempt diagnostics without exposing sensitive capture through HTTP.
+
 `POST /api/golden/verdict` checks a new positive feed verdict for a current,
 usable full-text review **before** writing its label. Missing/empty/failed
 reviews return HTTP 409 `review_required`; negative verdicts remain immediate.

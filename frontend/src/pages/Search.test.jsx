@@ -85,3 +85,30 @@ it('keeps Search usable when session storage throws a SecurityError', async () =
   expect(await screen.findByRole('heading', { name: 'Targeted Search' })).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Search' }).disabled).toBe(true);
 });
+
+it('sends only explicitly confirmed constraints, not restrictions inferred from the topic', async () => {
+  const requests = [];
+  vi.stubGlobal('fetch', vi.fn(async (path, options = {}) => {
+    if (path === '/api/search/screen') {
+      requests.push(JSON.parse(options.body));
+      return new Response(JSON.stringify({ id: 'confirmed', status: 'reviewed', candidates: [], plan: { display: [
+        { source: 'confirmation required: study_types', query: 'review' },
+        { source: 'retrieval europepmc', query: 'observations: 0; status: unknown' },
+      ] } }));
+    }
+    return new Response(JSON.stringify({ items: [] }));
+  }));
+  render(<Search />);
+  fireEvent.change(screen.getByPlaceholderText(/e.g. LLM agents/), { target: { value: 'Only reviews about devices' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+  await waitFor(() => expect(requests).toHaveLength(1));
+  expect(requests[0]).toEqual({ query: 'Only reviews about devices', questions: [] });
+  fireEvent.change(screen.getByLabelText('Only publication types'), { target: { value: ' Review\n\n' } });
+  fireEvent.change(screen.getByLabelText('Excluded exact phrases'), { target: { value: 'animal' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+  await waitFor(() => expect(requests).toHaveLength(2));
+  expect(requests[1].constraints).toEqual({ must_include: [], must_not_include: ['animal'], study_types: ['Review'] });
+  fireEvent.click(screen.getByText('Query plan (per source)'));
+  expect(screen.getByText('observations: 0; status: unknown')).toBeTruthy();
+  expect(screen.getByText('confirmation required: study_types')).toBeTruthy();
+});

@@ -4,10 +4,10 @@
 import { request } from './client.js';
 
 /** POST /api/search/screen — topic -> ranked, deduped candidates (a ResearchSession). */
-export async function screen({ query, questions = [] }) {
+export async function screen({ query, questions = [], constraints }) {
   return request('/api/search/screen', {
     method: 'POST',
-    body: JSON.stringify({ query, questions }),
+    body: JSON.stringify({ query, questions, ...(constraints ? { constraints } : {}) }),
   });
 }
 

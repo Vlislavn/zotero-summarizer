@@ -75,6 +75,9 @@ def digest_for_strategy(
     ``response_format`` (decoder-level JSON Schema) is forwarded to the rank/prefix
     assess_digest call; map_reduce's reduce reuses assess_digest and gets it too. Errors
     propagate to deep_review's per-item boundary (never a fabricated review)."""
+    from zotero_summarizer.services.library._source_admission import admit_source
+
+    admit_source(full_text)
     strategy = config.quality_review.chunk_strategy
     if strategy == "map_reduce":
         return map_reduce_digest(
@@ -109,15 +112,20 @@ def map_reduce_digest(
     note, otherwise partial coverage fails before reduction. ``response_format`` is forwarded
     to the reduce's assess_digest when the reduce provider supports structured output. Errors
     propagate (caught at deep_review's per-item boundary)."""
+    from zotero_summarizer.services.library._source_admission import admit_source
+    from zotero_summarizer.services.library._review_attempt import observed_client
+
+    admit_source(full_text)
+    recorded_map = observed_client(map_llm, 'map')
     chunks = split_chunks(full_text, chunk_chars)
     if not chunks:
         raise ValueError("map_reduce_digest: empty paper text")
 
     if sub_concurrency > 1 and len(chunks) > 1:
         with ThreadPoolExecutor(max_workers=sub_concurrency) as pool:
-            notes = list(pool.map(lambda chunk: _map_chunk(map_llm, chunk), chunks))
+            notes = list(pool.map(lambda chunk: _map_chunk(recorded_map, chunk), chunks))
     else:
-        notes = [_map_chunk(map_llm, chunk) for chunk in chunks]
+        notes = [_map_chunk(recorded_map, chunk) for chunk in chunks]
 
     combined = "\n\n".join(f"[chunk {i + 1}/{len(notes)}]\n{note}" for i, note in enumerate(notes))
     extra = {"response_format": response_format} if response_format else {}

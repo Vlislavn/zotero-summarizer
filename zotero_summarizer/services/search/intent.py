@@ -33,6 +33,8 @@ Return ONE JSON object with these keys:
 - "concepts": 3-8 core concept phrases (lowercase noun phrases).
 - "synonyms": a FLAT array of alternative terms / acronyms (max 8 strings; do \
 NOT nest objects).
+- "related_terms": optional related identifiers or broader concepts, separate from aliases (max 8).
+- "domain": the research domain supplied by the topic, or an empty string; never invent regulatory validity.
 - "must_include": terms that MUST appear (empty array if none obvious).
 - "must_not_include": terms to exclude (empty array if none).
 - "study_types": relevant study/paper types if the topic implies them (e.g. \
@@ -73,7 +75,7 @@ def parse_intent(raw_query: str, questions: list[str], *, llm: Any) -> SearchInt
     questions = [q.strip() for q in (questions or []) if q and q.strip()]
     fallback = SearchIntent(
         raw_query=raw, canonical_question=raw, concepts=[raw] if raw else [],
-        questions=questions, parse_ok=False,
+        questions=questions, parse_ok=False, constraint_origin="model_proposed",
     )
     if not raw:
         return fallback
@@ -97,9 +99,12 @@ def parse_intent(raw_query: str, questions: list[str], *, llm: Any) -> SearchInt
         return fallback
     return SearchIntent(
         raw_query=raw,
+        constraint_origin="model_proposed",
         canonical_question=canonical,
         concepts=_as_str_list(parsed.get("concepts")) or [raw],
-        synonyms=_as_str_list(parsed.get("synonyms")),
+        synonyms=_as_str_list(parsed.get("synonyms"))[:8],
+        related_terms=_as_str_list(parsed.get("related_terms"))[:8],
+        domain=parsed.get("domain", "") if isinstance(parsed.get("domain", ""), str) else "",
         must_include=_as_str_list(parsed.get("must_include")),
         must_not_include=_as_str_list(parsed.get("must_not_include")),
         study_types=_as_str_list(parsed.get("study_types")),
@@ -147,7 +152,7 @@ def _constrained_lexical(query: str, intent: SearchIntent) -> str:
         query = "(" + " OR ".join([f"({query})", *(quoted(term) for term in intent.synonyms)]) + ")"
     clauses = [f"({query})"]
     clauses.extend(quoted(term) for term in intent.must_include)
-    if intent.study_types:
+    if intent.study_types and intent.constraint_origin == "legacy_unknown":
         clauses.append("(" + " OR ".join(quoted(term) for term in intent.study_types) + ")")
     constrained = " AND ".join(clauses)
     for term in intent.must_not_include:
@@ -161,6 +166,13 @@ def build_query_plan(intent: SearchIntent) -> QueryPlan:
     expanded channels get the canonical paragraph. Each lexical source also carries
     a tight quoted-phrase variant (``*_variants``, tight-first) so federation issues
     a precision pass alongside the broad bag — the reranker re-sorts the union."""
+    pending = dict(intent.pending_constraints)
+    if intent.constraint_origin == "model_proposed":
+        from dataclasses import replace
+
+        pending.update({name: list(getattr(intent, name))
+                        for name in ("must_include", "must_not_include", "study_types")})
+        intent = replace(intent, must_include=[], must_not_include=[], study_types=[])
     concepts = intent.concepts or ([intent.raw_query] if intent.raw_query else [])
     lexical = " ".join(concepts[:6]).strip() or intent.raw_query
     arxiv_bag = " ".join(concepts[:5]).strip() or intent.raw_query
@@ -169,14 +181,27 @@ def build_query_plan(intent: SearchIntent) -> QueryPlan:
     if concepts:
         expanded = (expanded + " " + " ".join(concepts[:6])).strip()
     semantic = intent.canonical_question or intent.raw_query
-    for name, values in (("Alternative terms", intent.synonyms), ("Required terms", intent.must_include),
-                         ("Exclude", intent.must_not_include), ("Study types (any)", intent.study_types)):
-        if values:
-            semantic += f". {name}: " + "; ".join(values)
-            expanded += f". {name}: " + "; ".join(values)
-    variants = [_constrained_lexical(query, intent) for query in _variants(tight, lexical)]
+    domain_note = ""
+    if intent.constraint_origin == "legacy_unknown":
+        variants = [_constrained_lexical(query, intent) for query in _variants(tight, lexical)]
+        europe_variants = variants
+        arxiv_variants = _variants(tight, arxiv_bag)
+    else:
+        from zotero_summarizer.services.search._queries import complementary_queries, supplied_domain
+
+        variants, europe_variants, arxiv_variants = complementary_queries(intent, tight)
+        domain = supplied_domain(intent)
+        domain_note = (f"Supplied in topic: {domain}" if domain else
+                       f"Proposed, not a mandatory anchor: {intent.domain}" if intent.domain else
+                       "No domain supplied; refine the topic if context needs disambiguation")
+        # Raw user need, not the model's expanded canonical question, owns semantic scope.
+        semantic = " ".join([intent.raw_query, *intent.questions]).strip()
+        expanded = semantic
     lexical = _constrained_lexical(lexical, intent)
     return QueryPlan(
+        constraint_origin=intent.constraint_origin,
+        pending_constraints=pending,
+        domain_note=domain_note,
         library_raw=intent.raw_query,
         library_expanded=expanded,
         openalex_lexical=lexical,
@@ -187,8 +212,8 @@ def build_query_plan(intent: SearchIntent) -> QueryPlan:
         semantic_scholar=semantic,
         openreview=semantic,
         openalex_lexical_variants=variants,
-        europepmc_variants=variants,
-        arxiv_variants=_variants(tight, arxiv_bag),
+        europepmc_variants=europe_variants,
+        arxiv_variants=arxiv_variants,
         must_include=list(intent.must_include), must_not_include=list(intent.must_not_include),
         study_types=list(intent.study_types),
     )

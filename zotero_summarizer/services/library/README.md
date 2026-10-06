@@ -1,5 +1,10 @@
 # services/library — Stage-2 reading + feed review
 
+Numeric literal preflight treats an optional leading positive sign symmetrically:
+`+x` and `x` denote the same positive value. Negative signs and changed/absent
+values remain distinct; endpoint-only arithmetic is not source evidence. Every
+accepted numeric field still passes the existing semantic verifier.
+
 **Feed Add gate:** `review_eligibility` accepts only a current review with a
 paper-specific digest (not a quality badge, failed job, missing-PDF/login
 placeholder, or empty cache entry). `review_materialize.materialize_row` checks it before reserving a Zotero
@@ -58,7 +63,7 @@ before any digest call; these errors never manufacture a skip review. The numeri
 guard, claim fields (including `read_why`), passage checks and retry bounds are
 unchanged. Original-source verification may increase map-reduce verifier context;
 provider context limits/latency and the historical #34 incident require live
-evidence. This does not classify HTTP error pages or change Today/Fair ranking.
+evidence. This does not change Today/Fair ranking; source admission is documented below.
 `tests/test_review_source_boundary.py` exercises production verification through
 parallel empty/exception map results, malformed-verifier fallback before/after
 correction, and over-budget rank/prefix dispatch. Scripted semantic verdicts test
@@ -418,3 +423,46 @@ unrelated failures do not mask a newer successful review.
 Cached empty digests without `needs_pdf` are stale and recomputed; legitimate
 no-PDF entries remain current. Dense goal-encoder inference failures disable only
 that retrieval leg so an available BM25 leg can still produce a result.
+
+## Source admission and attempt diagnostics
+
+`_source_admission` checks the untruncated original before strategy dispatch or
+standalone digest generation (`verification_text` wins over generated notes).
+It recognizes only complete operational envelopes: a denial heading plus a
+matching edge-provider reference/issuer URL, or an XML Error root with Code,
+Message and RequestId. Words, paper length, title and numeric HTTP occurrence
+are not classifiers; mixed/quoted/partial academic text remains eligible.
+Unknown templates are deliberately not rejected by guessing. These predicates
+identify document format, not an observed HTTP status or a need to authenticate.
+
+Rendering admits the selected PDF/TeX presentation first, independently of the
+PDF Q&A extraction. A valid TeX presentation survives an operational PDF body;
+that body/its sections are removed from Q&A, with `qa_diagnostic`. Explicit empty
+Q&A cannot fall back to TeX. Cached operational Q&A bodies fail at the same gate.
+
+Per-item status preserves `error` and adds `diagnostic` (code/stage/recovery) and
+`attempt` (hashes, character counts and per-stage call counts only). APIError
+identity survives projection without arbitrary details/transport metadata.
+`DigestSourceRejected` remains a ValueError, distinguished from
+`DigestVerifierUnavailable`; numerical/semantic guards and correction bounds
+are unchanged. Successful attempts clear old diagnostics; failures do not write
+reviews or labels or overwrite an earlier valid review.
+
+`_review_attempt` is attempt-local, not a second job machine. Default workers
+retain no source/prompt/response body. Explicit `verify-deep-review --capture-local`
+records originals, selected text/generated notes, generator/verifier prompts,
+correction and decoded client-returned values under Settings' data directory.
+These are NOT raw transport responses. No client config, credentials, cookies or
+HTTP headers are collected; do not share sensitive captures. No UI/API capture
+switch, upload, automatic sensitive capture or Zotero note writes exists.
+
+Whole authentication-control scaffolding is rejected only when all visible labels
+are authentication controls (HTML additionally requires one form and a password
+input). Academic prose or quoted forms are not rejected. This does not infer HTTP
+status or institution login requirements. Source-unavailable completion remains
+`ready` operationally, but attempt terminal metadata reports `source_unavailable`,
+`counts_as_verified_review: false`, and observed acquisition outcome (otherwise
+`not_observed`). A placeholder cannot replace a current usable review; stale or
+unusable prior entries do not block the normal placeholder cache update.
+
+Generation schema failures retain ValueError compatibility but report generation origin; SDK/HTTP transport failures report their actual generator/verifier boundary, not model-written access claims. The supplied-source rule applies even to custom digest templates. Admission/form-parser sources participate in review and render fingerprints.

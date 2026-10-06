@@ -94,25 +94,24 @@ def refine_once(sess: ResearchSession, *, llm: Any) -> dict[str, list[str]]:
     }
 
 
-def _delta_intent(base: SearchIntent, add_concepts: list[str], drop_terms: list[str]) -> SearchIntent:
+def _delta_intent(base: SearchIntent, add_concepts: list[str]) -> SearchIntent:
     """A focused intent for the delta federation: fetch the NEW concepts (lexical
     channels), anchored to the original question + new facets (semantic channel).
 
-    ``drop_terms`` steer the delta AWAY (unless explicitly required) — they do
-    NOT retroactively remove already-fetched candidates;
-    the constrained rank already sinks off-topic hits by low ``query_score``."""
-    required = {term.casefold() for term in base.must_include}
-    drop_terms = [term for term in drop_terms if term.casefold() not in required]
+    Proposed drops stay in round telemetry; this boundary accepts no model exclusions."""
     canonical = base.canonical_question or base.raw_query
     if add_concepts:
         canonical = (canonical + " " + " ".join(add_concepts)).strip()
     return SearchIntent(
         raw_query=base.raw_query,
+        constraint_origin=base.constraint_origin,
+        pending_constraints=dict(base.pending_constraints),
         canonical_question=canonical,
         concepts=list(add_concepts),
         synonyms=base.synonyms,
+        related_terms=list(base.related_terms), domain=base.domain,
         must_include=list(base.must_include),
-        must_not_include=list(dict.fromkeys(base.must_not_include + drop_terms)),
+        must_not_include=list(base.must_not_include),
         study_types=base.study_types,
         questions=base.questions,
     )
@@ -146,8 +145,7 @@ def run_agentic_rounds(session_id: str, *, deps: Any, max_rounds: int = 2) -> Re
             LOGGER.info("targeted_search.refine: round %d proposed no changes; converged", rnd)
             break
 
-        previous_drops = [term for row in sess.refinements for term in row["drop_terms"]]
-        delta_plan = build_query_plan(_delta_intent(sess.intent, add, previous_drops + drop))
+        delta_plan = build_query_plan(_delta_intent(sess.intent, add))
         new_cands = federate(
             delta_plan, openalex_client=deps.openalex_client,
             library_finder=deps.library_finder, quota=deps.quota,
@@ -164,6 +162,7 @@ def run_agentic_rounds(session_id: str, *, deps: Any, max_rounds: int = 2) -> Re
         sess.refinements.append({
             "round": rnd, "add_concepts": add, "drop_terms": drop,
             "new_candidates": added, "pool_size": len(unioned),
+            "retrieval_accounting": delta_plan.retrieval_accounting,
         })
         sess = session_store.save_merge(sess)
         LOGGER.info("targeted_search.refine: round %d +%d new (pool=%d)", rnd, added, len(unioned))

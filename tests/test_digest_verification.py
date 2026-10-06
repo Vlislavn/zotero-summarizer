@@ -66,6 +66,29 @@ def test_literal_guard_handles_ranges_without_inventing_negative_numbers():
     assert not _unsupported_literals(["implementation[0]: no numeric claim"], "paper text")
 
 
+@pytest.mark.parametrize('claim,source', [
+    ('+3.3%', '3.3%'), ('1.5 percent', '+1.5%'),
+    ('9.6 points', '83.9 (+9.6)'), ('+1,200', '1200'),
+])
+def test_literal_guard_normalizes_optional_positive_sign(claim, source):
+    assert not _unsupported_literals(['finding: ' + claim], source)
+
+
+@pytest.mark.parametrize('claim,source', [
+    ('-9.6', '+9.6'), ('+9.6', '-9.6'), ('9.7', '+9.6'),
+    ('9.6', '74.3 to 83.9'),
+])
+def test_positive_sign_normalization_preserves_value_and_arithmetic_guard(claim, source):
+    assert _unsupported_literals(['finding: ' + claim], source)
+
+
+def test_positive_sign_preflight_still_requires_semantic_support():
+    verifier = _Verifier(supported=False)
+    with pytest.raises(ValueError, match='unsupported fields'):
+        verify_digest(_digest('Accuracy improved by +3.3%.'), 'The result improved by 3.3%.', verifier)
+    assert verifier.calls == 1
+
+
 def test_verifier_checks_claim_fields_not_reviewer_metadata():
     fields = {claim.partition(":")[0] for claim in _claims(_digest())}
     assert "tldr" in fields

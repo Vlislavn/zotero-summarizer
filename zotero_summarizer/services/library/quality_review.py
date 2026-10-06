@@ -32,23 +32,30 @@ _STRICT_RETRY_SUFFIX = (
 )
 
 
+class DigestGenerationFailed(ValueError):
+    """A returned digest cannot satisfy the publication schema."""
+
+
 def _coerce_digest(raw: Any) -> PaperDigest:
     """Build a ``PaperDigest`` from an LLM reply, salvaging prose-embedded/fenced JSON.
     Raises ``ValidationError``/``ValueError`` when the reply can't yield a valid digest."""
-    digest = raw if isinstance(raw, PaperDigest) else PaperDigest.model_validate(extract_json_blob(to_text(raw)))
+    try:
+        digest = raw if isinstance(raw, PaperDigest) else PaperDigest.model_validate(extract_json_blob(to_text(raw)))
+    except ValueError as exc:
+        raise DigestGenerationFailed(str(exc)) from exc
     required = {
         "read_decision", "read_why", "read_parts", "skip_parts",
         "estimated_read_minutes", "original_value", "writing_friction", "writing_reasons",
     }
     if not required <= digest.model_fields_set:
-        raise ValueError("digest omitted required reading or writing assessment")
+        raise DigestGenerationFailed("digest omitted required reading or writing assessment")
     if digest.read_decision not in {"read", "skim", "skip"}:
-        raise ValueError("digest reading action must be read, skim or skip")
+        raise DigestGenerationFailed("digest reading action must be read, skim or skip")
     if digest.read_decision in {"read", "skim"}:
         if not digest.read_why.strip() or not any(part.strip() for part in digest.read_parts):
-            raise ValueError("read/skim requires a reason and exact target")
+            raise DigestGenerationFailed("read/skim requires a reason and exact target")
         if not digest.original_value.strip() or not (digest.estimated_read_minutes or 0) > 0:
-            raise ValueError("read/skim requires original-only value and positive minutes")
+            raise DigestGenerationFailed("read/skim requires original-only value and positive minutes")
     return digest
 
 
@@ -56,12 +63,14 @@ def _verify_generated_digest(
     digest: PaperDigest, text: str, verifier: Any, generator: Any, goals: str,
 ) -> None:
     from zotero_summarizer.services.library._digest_verification import verify_digest
+    from zotero_summarizer.services.library._review_attempt import record
 
     try:
         verify_digest(digest, text, verifier, research_goals=goals)
     except DigestVerifierUnavailable:
         if verifier is generator:
             raise
+        record('verifier_fallback', {'availability': 'generator_fallback'}, kind='identity')
         verify_digest(digest, text, generator, research_goals=goals)
 
 # Fallback when goals.yaml has no `prompts.paper_digest`. A referee-grade digest
@@ -156,6 +165,11 @@ def assess_digest(
     a no-op fall-through to the prompt-level path when None. ``verification_text``
     supplies original paper text when generation uses map notes; otherwise the
     selected generation text is also the verification source."""
+    from zotero_summarizer.services.library._source_admission import admit_source
+    from zotero_summarizer.services.library._review_attempt import identity, observed_client, record
+
+    record('config', identity(config.model_dump_json()), kind='identity')
+    admit_source(full_text if verification_text is None else verification_text)
     template = config.prompts.paper_digest or _DEFAULT_DIGEST_PROMPT
     cap = int(max_chars if max_chars is not None else config.quality_review.max_text_chars)
     # Budget-aware selection instead of a blind prefix slice. ``full_text`` here is
@@ -167,10 +181,17 @@ def assess_digest(
     # ``prefix`` bypasses ranking for the naive-truncate A/B baseline.
     text = full_text[:cap] if prefix else select_review_text([], full_text, budget=cap)
     source_text = text if verification_text is None else verification_text
+    record('generated_notes' if verification_text is not None else 'selected_original', text)
     if not text.strip() or not source_text.strip():
         raise ValueError("Digest assessment requires non-empty source text")
     goals = "; ".join(g for g in (config.research_goals or []) if str(g).strip()) or "(not specified)"
-    prompt = UNTRUSTED_INPUT_RULE + "\n\n" + template.format(
+    supplied_source_rule = (
+        "The original source is already supplied. Acquisition and authentication are operational "
+        "states owned by the caller, not scientific claims to invent in the digest. "
+        "Review the supplied evidence; do not claim it was never retrieved. "
+        "Source-stated limitations of external resources may still be reported faithfully.\n\n"
+    )
+    prompt = UNTRUSTED_INPUT_RULE + "\n\n" + supplied_source_rule + template.format(
         title=untrusted_input(title or "Untitled"), full_text=untrusted_input(text),
         research_goals=untrusted_input(goals),
     )
@@ -188,9 +209,11 @@ def assess_digest(
     # parse failure rare on a supporting endpoint, but the retry still re-asks with it.
     extra = {"response_format": response_format} if response_format else {}
     try:
-        digest = _coerce_digest(llm.pydantic_prompt(prompt=prompt, pydantic_model=PaperDigest, **extra))
+        digest = _coerce_digest(observed_client(llm, 'generator').pydantic_prompt(prompt=prompt, pydantic_model=PaperDigest, **extra))
     except ValueError:
-        retry = llm.pydantic_prompt(prompt=prompt + _STRICT_RETRY_SUFFIX, pydantic_model=PaperDigest, **extra)
+        retry = observed_client(llm, 'generator_parse_retry').pydantic_prompt(
+            prompt=prompt + _STRICT_RETRY_SUFFIX, pydantic_model=PaperDigest, **extra,
+        )
         digest = _coerce_digest(retry)
     digest = digest.model_copy(update={"basis": "full_text"})
     verifier = verifier_llm or llm
@@ -199,7 +222,7 @@ def assess_digest(
     except DigestVerifierUnavailable:
         raise
     except ValueError as exc:
-        correction = llm.pydantic_prompt(
+        correction = observed_client(llm, 'correction').pydantic_prompt(
             prompt=(
                 prompt + "\n\nThe previous digest failed source verification: "
                 + str(exc) + "\nReturn a corrected, fully source-grounded JSON digest only."
