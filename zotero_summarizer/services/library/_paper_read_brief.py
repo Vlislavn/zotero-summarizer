@@ -174,11 +174,8 @@ def _gauge_html(band: str, agreed: int, total: int) -> str:
 
 
 def _goal_board_html(goals: list[dict[str, Any]]) -> str:
-    """6-cell board — the SINGLE home of per-goal relevance. A HIT-and-relevant cell
-    is "stained" (eosin wash) and binds its summary (the claim) to its supporting
-    quote (the evidence) via the hematoxylin tether rail; the quote is surfaced
-    inline so the binding reads at a glance (Uniform Connectedness). Miss / not-
-    retrieved cells stay "unstained" — tissue that didn't take the stain."""
+    """Single home of goal states and sections, with all quotes behind Evidence.
+    Full goal labels remain available even when the board abbreviates them."""
     cells = ""
     summaries: dict[str, dict[str, Any]] = {}
     for g in goals:
@@ -188,7 +185,7 @@ def _goal_board_html(goals: list[dict[str, Any]]) -> str:
         is_hit = state == "hit" and bool(g.get("relevant")) and not bool(g.get("abstained"))
         extra, has_ev = "", ""
         if state == "hit":
-            why = ("grounded summary withheld" if not str(g.get("summary") or "").strip()
+            why = ("grounded summary withheld" if g.get("abstained") or not str(g.get("summary") or "").strip()
                    else "Relevant to this goal" if is_hit else "Evidence did not support this goal")
             _collect_goal_summary(summaries, g)
             secs = ", ".join(_h(s) for s in (g.get("key_sections") or []) if str(s).strip())
@@ -197,19 +194,18 @@ def _goal_board_html(goals: list[dict[str, Any]]) -> str:
                 extra += f'<div class="g-sec">Read for you: {secs}</div>'
             if quotes:
                 has_ev = " has-evidence"
-                extra += f'<div class="g-quote">“{_h(quotes[0])}”</div>'
-                if len(quotes) > 1:
-                    extra += '<details><summary>More evidence</summary>'
-                    extra += ''.join(f'<div class="g-quote">“{_h(quote)}”</div>' for quote in quotes[1:])
-                    extra += '</details>'
+                extra += '<details><summary>Evidence</summary>'
+                extra += ''.join(f'<div class="g-quote">“{_h(quote)}”</div>' for quote in quotes)
+                extra += '</details>'
         elif state == "miss":
             why = "not addressed in this paper"
         else:
             why = "retrieval degraded — not assessed"
         stain = "stained" if is_hit else "unstained"
-        state_label = "○ not supported" if state == "hit" and not is_hit else _STATE_LABEL.get(state, state)
+        state_label = ("○ abstained" if state == "hit" and g.get("abstained") else
+                       "○ not supported" if state == "hit" and not is_hit else _STATE_LABEL.get(state, state))
         cells += (
-            f'<div class="gcell state-{state} {stain}{has_ev}">'
+            f'<div class="gcell state-{_h(state)} {stain}{has_ev}" title="{_h(g.get("goal", ""))}">'
             f'<div class="g-label">{_h(_short_goal(g.get("goal", "")))}</div>'
             f'<div class="g-state">{_h(state_label)}</div>'
             f'<div class="g-bar" role="meter" aria-label="{_h(_short_goal(g.get("goal", "")))} relevance" '

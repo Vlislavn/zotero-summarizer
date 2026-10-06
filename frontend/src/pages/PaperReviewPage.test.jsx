@@ -30,13 +30,13 @@ it('keeps Generate disabled and does not claim a review failed on an offline rel
   </MemoryRouter></QueryClientProvider>);
 
   expect((await screen.findByRole('button', { name: 'Generate review' })).disabled).toBe(true);
-  expect(document.querySelector('main').parentElement.className).toContain('lg:grid-cols-[minmax(0,1fr)_20rem]');
+  expect(document.querySelector('main').parentElement.className).toContain('xl:grid-cols-[minmax(0,1fr)_20rem]');
   await screen.findByText(/Offline — cached reviews remain readable/);
   expect(screen.queryByText(/Review failed/)).toBeNull();
   client.clear();
 });
 
-it('the paper badge counts supported goals, not merely retrieved passages', async () => {
+it('the single relevance heading counts supported goals, not merely retrieved passages', async () => {
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
   vi.stubGlobal('fetch', vi.fn(async (path) => {
     const goals = [
@@ -55,8 +55,8 @@ it('the paper badge counts supported goals, not merely retrieved passages', asyn
     <Routes><Route path="/paper/:itemKey" element={<PaperReviewPage />} /></Routes>
   </MemoryRouter></QueryClientProvider>);
 
-  expect(await screen.findByText('◎ 2/3 goals')).toBeTruthy();
-  expect(screen.getByText('Relevance — 2 of 3 goals addressed')).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: 'Relevance — 2 of 3 goals addressed' })).toBeTruthy();
+  expect(screen.queryByText('◎ 2/3 goals')).toBeNull();
   client.clear();
 });
 

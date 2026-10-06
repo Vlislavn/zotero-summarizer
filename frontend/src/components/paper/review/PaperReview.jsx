@@ -38,16 +38,17 @@ function critiqueIsTentative(q = {}) {
 // language, reading-grade type, flat hierarchy (Common Region / Uniform
 // Connectedness: hairline dividers + whitespace, not nested boxes). Reads the
 // SAME as the standalone presentation.html (briefModel mirrors the server).
-export default function PaperReview({ deep, compact = false, flat = false, sectionOverlay = null }) {
+export default function PaperReview({ deep, compact = false, flat: requestedFlat = false, sectionOverlay = null }) {
   if (!deep) return null;
-  const digest = deep.digest || null;
+  const flat = requestedFlat && !compact;
+  const digest = deep.digest && Object.keys(deep.digest).length ? deep.digest : null;
   const quality = deep.quality || null;
   const goals = deep.goal_summaries || [];
 
   // Legacy cache (pre-digest): show the old grade, nudge a re-run.
   if (!digest && quality && quality.grade && !goals.length) {
     return (
-      <div className="text-[13px] text-slate-600">
+      <div className={`text-[13px] text-slate-600 ${flat ? 'review-reading' : ''}`}>
         <Chip tone={gradeTone(quality.grade)}>Quality {quality.grade}</Chip>
         {quality.verdict ? <span className="ml-2">{quality.verdict}</span> : null}
         <div className="mt-1 text-[11px] text-slate-400">Older review — re-run for the new digest.</div>
@@ -115,26 +116,12 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
         <p className="text-[14px] leading-relaxed text-slate-800 max-w-[66ch]">{tldr}</p>
       )}
       {quality && !isNonPaper && <QualityDetails quality={quality} band={band} />}
-      {/* Decision-relevant findings stay visible; the long reference digest folds on
-          the full page (Scim: keep the salient signal up top, collapse the rest —
-          one click, not a wall). The compact card keeps it inline (it's already one
-          disclosure deep, so a second fold would cost two clicks). */}
-      {flat && digest && (digest.key_findings || []).filter(Boolean).length > 0 && (
-        <div>
-          <SectionLabel>Key findings</SectionLabel>
-          <div className="mt-1.5"><Bullets items={digest.key_findings} /></div>
-        </div>
-      )}
-      {digest && (flat ? (
-        <Disclosure summary="Full digest — methods, limitations, impact…">
-          <div className="mt-1.5"><DigestRows digest={digest} /></div>
-        </Disclosure>
-      ) : (
+      {digest && (
         <div>
           <SectionLabel>Full digest</SectionLabel>
           <div className="mt-1.5"><DigestRows digest={digest} /></div>
         </div>
-      ))}
+      )}
       {compact && (deep.reviewed_at || deep.zotero_note_written) && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
           {deep.reviewed_at && <span title={formatShortDate(deep.reviewed_at)}>reviewed {timeAgo(deep.reviewed_at)}</span>}
@@ -145,11 +132,11 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
   );
 
   return (
-    <div className="review-prose text-slate-800">
+    <div className={`review-prose text-slate-800 ${flat && !compact ? 'review-reading' : ''}`}>
       {/* Code repository, pulled to the very top (the first thing you want when
           deciding to reproduce). Full surfaces only — the compact Library card
           stays clean. Older cached reviews have no code_link → renders nothing. */}
-      {!compact && deep.code_link && <CodeLink codeLink={deep.code_link} />}
+      {!compact && !flat && deep.code_link && <CodeLink codeLink={deep.code_link} />}
 
       {/* Verdict banner — the single loud element (Von Restorff). In the compact
           Library card every signal is a chip on this ONE row (grade + band +
@@ -192,6 +179,36 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
           sections immediately below it, "Relevance to your goals" + "Quality —
           {band}", which carry the same numbers with their own labels.) */}
       <div className="mt-2 divide-y divide-slate-200/60">
+        {flat && !compact ? <>
+          <Section label="Contribution">
+            {tldr ? <p>{tldr}</p> : <p>Contribution not recorded in this saved review.</p>}
+            {isNonPaper && <p>Not a research paper — reviewed for relevance only; scientific quality criteria don't apply.</p>}
+          </Section>
+          <Section label="Caveats and coverage">
+            {deep.code_link && <CodeLink codeLink={deep.code_link} />}
+            {quality && !isNonPaper && <QualityHeadline quality={quality} band={band} flagLoc={flagLoc} missLoc={missLoc} />}
+            <dl><KeyVal label="Weakness" tone="neg">{digest?.key_weakness}</KeyVal></dl>
+            {quality && !isNonPaper && <MaterialClaims quality={quality} />}
+            {!quality && <p>Assessment and source coverage not recorded in this saved review.</p>}
+          </Section>
+          <Section label="Findings and applicability">
+            <Bullets items={digest?.key_findings} />
+            {goals.length > 0 && <><SectionLabel level={3}>{`Relevance — ${nHitGoals} of ${goals.length} goals addressed`}</SectionLabel>
+              <GoalBoard goals={goals} goalLoc={goalLoc} /></>}
+          </Section>
+          <Section label="Methods and limitations">
+            <dl><KeyVal label="Methods">{digest?.methods}</KeyVal>
+              <KeyVal label="Limitations">{digest?.limitations}</KeyVal></dl>
+            {!digest?.methods && !digest?.limitations && <p>Methods and limitations not recorded in this saved review.</p>}
+          </Section>
+          <Section label="Assessment and reference">
+            <Disclosure summary="Full digest and assessment">
+              {digest && <DigestRows digest={digest} exclude={['key_findings', 'read_why', 'methods', 'limitations', 'key_weakness']} />}
+              {quality && !isNonPaper && <QualityDetails quality={quality} band={band} hideMaterial />}
+            </Disclosure>
+          </Section>
+        </> : <>
+
         {/* compact (Library row card): the per-goal board is the biggest block and
             is reachable in the new-tab brief — drop it, keep the decision spine. */}
         {!compact && goals.length > 0 && (
@@ -218,6 +235,7 @@ export default function PaperReview({ deep, compact = false, flat = false, secti
             {flat ? detailsInner : <Disclosure summary="Details">{detailsInner}</Disclosure>}
           </Section>
         )}
+        </>}
       </div>
 
       {!compact && (deep.reviewed_at || deep.zotero_note_written || deep.zotero_note_error) && (
@@ -317,15 +335,15 @@ function GoalTile({ g, sections }) {
   const secs = (g?.key_sections || []).filter(Boolean).join(', ');
   const quotes = (g?.supporting_quotes || []).map((q) => String(q || '').trim()).filter(Boolean);
   let why;
-  if (state === 'hit') why = !String(g?.summary || '').trim() ? 'grounded summary withheld'
+  if (state === 'hit') why = g?.abstained || !String(g?.summary || '').trim() ? 'grounded summary withheld'
     : supported ? 'Relevant to this goal' : 'Evidence did not support this goal';
   else if (state === 'miss') why = 'not addressed in this paper';
   else why = 'retrieval degraded — not assessed';
   const tone = state === 'hit' && !supported ? TILE_STATE.miss : TILE_STATE[state] || TILE_STATE.not_retrieved;
   return (
     <div className={`rounded-md border border-slate-200/70 border-l-[3px] bg-white/50 p-2.5 ${tone}`}>
-      <div className="text-[12px] font-semibold text-slate-800 leading-snug">{shortGoal(g?.goal)}</div>
-      <div className="mt-0.5 text-[11px] text-slate-400">{state === 'hit' && !supported ? '○ not supported' : STATE_LABEL[state] || state}</div>
+      <div className="text-[12px] font-semibold text-slate-800 leading-snug">{g?.goal}</div>
+      <div className="mt-0.5 text-[11px] text-slate-400">{state === 'hit' && g?.abstained ? '○ abstained' : state === 'hit' && !supported ? '○ not supported' : STATE_LABEL[state] || state}</div>
       <div className="my-1.5 h-1 rounded-full bg-slate-200/80 overflow-hidden" role="meter"
         aria-label={`${shortGoal(g?.goal)} relevance`} aria-valuemin={0} aria-valuemax={3}
         aria-valuenow={Math.max(0, Math.min(3, score))}>
@@ -361,7 +379,7 @@ function uniqueGoalFindings(goals) {
     if (goal?.retrieval_state !== 'hit') continue;
     for (const sentence of String(goal.summary || '').trim().split(/(?<=[.!?])\s+/)) {
       const text = sentence.trim();
-      let key = text.toLocaleLowerCase().replace(/\s+/g, ' ').replace(/[.!]+$/g, '').trim();
+      let key = text.toLocaleLowerCase().replace(/\s+/g, ' ').trim();
       const symbols = text.match(/\b[A-Za-z]{1,5}(?:\d+|\s*=\s*\d[\d.,]*)/g) || [];
       if (text !== text.toLocaleUpperCase()) symbols.push(...(text.match(/\b[A-Z]{2,}\b/g) || []));
       if (symbols.length) key += `|${symbols.map((s) => s.replace(/\s+/g, '')).join('|')}`;
@@ -399,17 +417,23 @@ function GoalBoard({ goals, goalLoc }) {
   const isHit = (g) => String(g?.retrieval_state || 'not_retrieved') === 'hit';
   const addressed = goals.filter(isHit);
   const rest = goals.filter((g) => !isHit(g));
+  const findingTexts = new Set(uniqueGoalFindings(addressed).map(f => f.text));
+  const originals = [...new Set(goals.map(g => String(g.summary || '').trim()))]
+    .filter(text => text && !findingTexts.has(text));
   const grid = (items) => (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+    <div className="goal-board-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
       {items.map((g, i) => <GoalTile key={i} g={g} sections={goalLoc?.get(g?.goal)} />)}
     </div>
   );
-  if (!addressed.length) return grid(goals);
   return (
     <div className="space-y-2">
-      {grid(addressed)}
+      {grid(addressed.length ? addressed : goals)}
       <GoalFindings goals={addressed} />
-      {rest.length > 0 && (
+      {originals.length > 0 && <Disclosure summary="Original goal summaries">
+        <dl>{originals.map((text, i) => <KeyVal key={i}
+          label={goals.filter(g => String(g.summary || '').trim() === text).map(g => g.goal).join('; ')}>{text}</KeyVal>)}</dl>
+      </Disclosure>}
+      {addressed.length > 0 && rest.length > 0 && (
         <details className="group">
           <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden text-[11px] font-semibold text-slate-400 hover:text-slate-600">
             {rest.length} other goal{rest.length > 1 ? 's' : ''} not addressed ▾
@@ -447,11 +471,11 @@ function QualityHeadline({ quality, band, flagLoc, missLoc }) {
           recognized standard was applied to THIS paper type, how many applicable items
           it met, and which critical ones are missing (each is a grounded checklist item
           in the full checklist below). */}
-      {applicable > 0 && (
+      {(applicable > 0 || missing.length > 0) && (
         <div>
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[13px]">
             {standard && <span className="font-semibold text-slate-900">{standard}</span>}
-            <span className="text-slate-700">{met}/{applicable} applicable items met</span>
+            <span className="text-slate-700">{applicable > 0 ? `${met}/${applicable} applicable items met` : 'Checklist coverage unavailable'}</span>
             {ptype && (
               <Chip
                 tone={uncertainType ? 'amber' : 'slate'}
@@ -490,7 +514,7 @@ function QualityHeadline({ quality, band, flagLoc, missLoc }) {
             )}
           </div>
           <ul className="list-disc pl-5 text-[13px] leading-relaxed text-rose-800 space-y-0.5">
-            {redFlags.slice(0, 3).map((x, i) => {
+            {redFlags.map((x, i) => {
               const loc = flagLoc?.get(String(x).trim());
               return (
                 <li key={i}>
@@ -509,7 +533,16 @@ function QualityHeadline({ quality, band, flagLoc, missLoc }) {
 // The EXPLANATION half, inside the "Details" disclosure: how the grade was reached
 // (method clause), the decisive signals, overstated claims, the full rubric, and
 // the legend. Flattened — no nested disclosure (we are already inside one).
-function QualityDetails({ quality, band }) {
+function MaterialClaims({ quality }) {
+  const items = (quality.overstatements || []).filter(Boolean);
+  if (!items.length) return null;
+  return <div className="mt-2">
+    <SectionLabel level={3}>Overstated claims · model judgment{critiqueIsTentative(quality) ? ' · low confidence, verify' : ''}</SectionLabel>
+    <Bullets items={items} />
+  </div>;
+}
+
+function QualityDetails({ quality, band, hideMaterial = false }) {
   const overs = (quality.overstatements || []).map((x) => String(x || '').trim()).filter(Boolean);
   const agreed = Number(quality.passes_agreed) || 0;
   const total = Number(quality.passes_total) || 0;
@@ -537,13 +570,13 @@ function QualityDetails({ quality, band }) {
         </div>
       )}
 
-      {overs.length > 0 && (
+      {!hideMaterial && overs.length > 0 && (
         <div>
           <div className="mb-1 text-[11px] uppercase tracking-[0.06em] font-semibold text-amber-600">
             Overstated claims <span className="font-normal normal-case tracking-normal text-amber-500">· model judgment</span>
           </div>
           <ul className="list-disc pl-5 text-[13px] leading-relaxed text-slate-700 space-y-0.5">
-            {overs.slice(0, 3).map((x, i) => <li key={i}>{x}</li>)}
+            {overs.map((x, i) => <li key={i}>{x}</li>)}
           </ul>
         </div>
       )}
@@ -594,7 +627,8 @@ function RubricMark({ value }) {
 
 // The structured digest, behind the "Full digest" disclosure. Rendered ONCE
 // (the old DigestBlock + iframe both showed it). Reading-scale KeyVal rows.
-function DigestRows({ digest: d }) {
+function DigestRows({ digest, exclude = [] }) {
+  const d = Object.fromEntries(Object.entries(digest).filter(([key]) => !exclude.includes(key)));
   const p = d.parameters || {};
   return (
     <dl className="space-y-2">

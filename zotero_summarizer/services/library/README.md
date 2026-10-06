@@ -467,4 +467,10 @@ status or institution login requirements. Source-unavailable completion remains
 `not_observed`). A placeholder cannot replace a current usable review; stale or
 unusable prior entries do not block the normal placeholder cache update.
 
+Goal evidence in the HTML brief is folded by default, matching the interactive
+review: every quote, goal label and section remains available under Evidence.
+Explicit abstention differs from unsupported evidence and failed retrieval.
+Library materialization reuses the triage renderer's actual fallback/size metrics;
+priority overrides copy the persisted summary rather than mutating it.
+
 Generation schema failures retain ValueError compatibility but report generation origin; SDK/HTTP transport failures report their actual generator/verifier boundary, not model-written access claims. The supplied-source rule applies even to custom digest templates. Admission/form-parser sources participate in review and render fingerprints.

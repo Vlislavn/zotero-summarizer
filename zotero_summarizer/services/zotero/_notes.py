@@ -1,14 +1,13 @@
 """Zotero-renderable note HTML builders (triage / verdict / digest).
 
-Zotero's TinyMCE editor silently strips most HTML — no CSS, no <div>, no <h1>.
-These builders use ONLY <h2>, <p>, <ul>/<li>, <strong>, <em>, so they are the
-single source of truth for note markup. Each note is led by an HTML-comment
-provenance marker that survives TinyMCE round-trips (verified against the
-user's prior agent notes).
+Builders use simple headings, paragraphs, lists and inline emphasis.
+Each note carries a writer-ownership marker. Native editors may canonicalize
+markup; actual save/reopen compatibility is checked separately from rendering.
 """
 from __future__ import annotations
 
 import html
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -53,6 +52,18 @@ def build_provenance_comment(
     return f"<!-- {';'.join(fields)} -->"
 
 
+def _bounded_note_text(value: str, word_budget: int | None) -> str:
+    """Keep a whole field or disclose its omission; never guess sentence boundaries."""
+    value = value.strip()
+    if word_budget is None or len(value.split()) <= word_budget:
+        return value
+    return "Omitted over-budget text; see the full saved summary."
+
+
+def _triage_verdict(summary: SummarizeResponse) -> str:
+    return summary.triage_rationale.strip() or summary.executive_summary.strip()
+
+
 def build_triage_note_html(
     title: str,
     summary: SummarizeResponse,
@@ -61,42 +72,52 @@ def build_triage_note_html(
     surprise_score: float | None = None,
     run_id: str | None = None,
     include_provenance: bool = True,
+    text_word_budget: int | None = None,
+    list_word_budget: int | None = None,
 ) -> str:
     """Render the persisted triage artifact as a self-sufficient Zotero note."""
+    if any(budget is not None and budget < 1 for budget in (text_word_budget, list_word_budget)):
+        raise ValueError("note word budgets must be positive")
     glyph = _PRIORITY_GLYPH.get(summary.reading_priority, "•")
     priority_label = summary.reading_priority.replace("_", " ").title()
-    verdict = (summary.triage_rationale or summary.executive_summary or "").strip()
+    verdict = _triage_verdict(summary)
     if not verdict:
         verdict = f"Triaged paper: {title or 'Untitled'}."
     parts = [build_provenance_comment(run_id=run_id)] if include_provenance else []
     parts += [f"<h2>{html.escape(glyph)} {html.escape(priority_label)}</h2>",
-              f"<p>{html.escape(verdict)}</p>"]
+              f"<p>{html.escape(_bounded_note_text(verdict, text_word_budget))}</p>"]
     text_sections = (
         ("What this paper is about", summary.executive_summary),
         ("Approach / methods", summary.methods),
         ("Why it matters to my work", summary.relevance_to_research),
         ("Limitations / uncertainty", summary.limitations),
+        ("Controversies", summary.controversial_points),
+        ("Impact", summary.industry_academy_impact),
+        ("Unknown unknowns", summary.unknown_unknowns),
+        ("Implementation", summary.implementation_quickstart),
     )
     for heading, value in text_sections:
         if value and value.strip():
-            parts += [f"<h2>{heading}</h2>", f"<p>{html.escape(value.strip())}</p>"]
+            parts += [f"<h2>{heading}</h2>", f"<p>{html.escape(_bounded_note_text(value, text_word_budget))}</p>"]
     method = summary.method_and_code
     if method is not None:
         details = [method.what_it_does, method.what_is_new, *method.how_it_works,
-                   method.evaluation, method.how_i_could_use_it, *method.artifacts]
-        kept = [value.strip() for value in details if value.strip()]
+                   method.evaluation, method.how_i_could_use_it]
+        kept = [_bounded_note_text(value, list_word_budget) for value in details if value.strip()]
+        kept.extend(method.artifacts)
         if kept:
             parts += ["<h2>Method and code</h2>", "<ul>" + "".join(
                 f"<li>{html.escape(value)}</li>" for value in kept) + "</ul>"]
-    for heading, values, limit in (
-        ("Key findings", summary.key_findings, 6),
-        ("What to read", summary.key_sections_to_read, 6),
+    for heading, values in (
+        ("Key findings", summary.key_findings),
+        ("What to read", summary.key_sections_to_read),
     ):
-        kept = [str(value).strip() for value in values if str(value).strip()][:limit]
+        kept = [_bounded_note_text(str(value), list_word_budget)
+                for value in values if str(value).strip()]
         if kept:
             parts += [f"<h2>{heading}</h2>", "<ul>" + "".join(
                 f"<li>{html.escape(value)}</li>" for value in kept) + "</ul>"]
-    tags_preview = ", ".join(html.escape(t) for t in (summary.tags or [])[:6]) or "—"
+    tags_preview = ", ".join(html.escape(t) for t in (summary.tags or [])) or "—"
     footer_bits = [
         f"score {summary.composite_relevance_score:.1f}",
         f"goal: {html.escape(summary.matched_goal or '—')}",
@@ -110,6 +131,18 @@ def build_triage_note_html(
     parts.append(f"<p><em>{' · '.join(footer_bits)}</em></p>")
 
     return "".join(parts)
+
+
+def triage_note_metrics(note_html: str, summary: SummarizeResponse) -> dict[str, Any]:
+    """Measure the same rendered projection sent to the writer."""
+    text = " ".join(html.unescape(re.sub(r"<[^>]+>", " ", note_html)).split())
+    return {
+        "characters": len(text),
+        "html_characters": len(note_html),
+        "words": len(text.split()),
+        "sections": note_html.count("<h2>"),
+        "generic_fallback": not _triage_verdict(summary),
+    }
 
 
 # Marker for the single "your verdict" note on an item (upsert, no duplicates).
