@@ -11,6 +11,9 @@ The 2026-08-27 experiment used the dirty worktree. Runtime artifacts remain in
 gitignored `data/issue_runs/23/`; no generated docs or third-party code are
 committed.
 
+Any rerun requires an explicitly user-configured chat-compatible provider and
+model; there is no default hosted backend. Keep credentials out of reports.
+
 ## CAPA and evidence
 
 | Finding | Evidence | Disposition |
@@ -19,7 +22,7 @@ committed.
 | Source-only parsing works | Completed in 2.95 s / 94 MB with 2,585 components, 4,539 edges, and 246 leaves. | Useful only as an experiment input. |
 | Call graph is unsound | A nested frontend `get` helper received 600 callers; it also invented Python/frontend and reverse-layer edges while the import-policy check passed. | Require scoped symbol resolution and zero false layer edges. |
 | LLM errors report false success | Deliberate 401s produced arbitrary `batch_N` groups while the CLI printed `Clustering done`. | Require a nonzero exit and no fallback graph. |
-| Successful clustering is unreadable | GPT-OSS-120B produced 41 flat, duplicated groups with no children. The run used at least 10,001 observable tokens. | Require 8–15 coherent groups and a hierarchy. |
+| Successful clustering is unreadable | The explicitly user-configured model produced 41 flat, duplicated groups with no children. The run used at least 10,001 observable tokens. | Require 8–15 coherent groups and a hierarchy. |
 | Incremental impact explodes | One class-docstring edit expanded to 366 affected components and 13 regenerations, then stalled for five minutes without a receipt. | Require bounded impact matching the changed component. |
 
 Owner for containment/corrective action: repository maintainer. Upstream owns

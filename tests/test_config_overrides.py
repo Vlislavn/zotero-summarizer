@@ -159,7 +159,7 @@ def test_read_config_auto_derives_num_ctx_for_local_providers(tmp_path: Path) ->
               base_url: https://remote.example/v1
               api_key_env: DUMMY
           default: {provider: local, model: qwen3:8b}
-          deep_review: {provider: api, model: GPT-OSS-120B}
+          deep_review: {provider: api, model: remote-model}
         """,
         encoding="utf-8",
     )

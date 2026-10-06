@@ -1,12 +1,12 @@
 """LLM disease-NER baseline for GLiNER2 Phase-0 probe 0b — the decision-relevant
-'against what': can a hosted LLM (api.kather.ai) beat the 205M GLiNER2 encoder at
+'against what': can a hosted LLM (caller-configured endpoint) beat the 205M GLiNER2 encoder at
 zero-shot disease NER, on the SAME real BC5CDR sentences and the SAME grader? This
 is the crux of the whole thesis (small encoder replacing an LLM). Reuses the pure
 graders + loader from bench_gliner2 (no duplication).
 
 Run (key from .env):
   export CUSTOM_API_KEY="$(grep -E '^CUSTOM_API_KEY=' .env | cut -d= -f2-)"
-  uv run python tools/bench_llm_ner.py --model GPT-OSS-120B --limit 100 --concurrency 4
+  uv run python tools/bench_llm_ner.py --base-url "$CUSTOM_BASE_URL" --model "$BENCH_MODEL" --limit 100 --concurrency 4
 """
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def llm_diseases(base_url: str, key: str, model: str, sentence: str) -> set[str]
     req = urllib.request.Request(
         base_url.rstrip("/") + "/chat/completions", data=body,
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 — configured kather endpoint
+    with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 — caller-configured endpoint
         content = json.load(resp)["choices"][0]["message"].get("content") or ""
     m = re.search(r"\{.*\}", content, re.S)
     if not m:
@@ -51,8 +51,8 @@ def llm_diseases(base_url: str, key: str, model: str, sentence: str) -> set[str]
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--model", default="GPT-OSS-120B")
-    ap.add_argument("--base-url", default="https://api.kather.ai/v1")
+    ap.add_argument("--model", required=True)
+    ap.add_argument("--base-url", required=True)
     ap.add_argument("--key-env", default="CUSTOM_API_KEY")
     ap.add_argument("--limit", type=int, default=100)
     ap.add_argument("--concurrency", type=int, default=4)

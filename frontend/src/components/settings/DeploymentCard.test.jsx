@@ -18,7 +18,7 @@ const DATA = {
     { id: 'environment', status: 'ready', message: 'App environment is writable' },
     { id: 'zotero', status: 'ready', message: 'Zotero metadata is readable' },
     { id: 'llm_inference', status: 'needs_action', message: 'Inference failed',
-      detail: 'kather/sota timeout', recovery: { label: 'Retry inference' } },
+      detail: 'configured provider/model timeout', recovery: { label: 'Retry inference' } },
     { id: 'optional_extras', status: 'unavailable', message: 'Browser automation is optional' },
   ],
 };

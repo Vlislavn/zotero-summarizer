@@ -2,14 +2,14 @@
 schema extraction). There is no independent params gold, so the decision-relevant
 question is: can the 205M GLiNER2 encoder (extract_json) reproduce the extraction
 of the deep-review LLM it would replace? This runs the SAME 6-field schema through
-a hosted LLM (api.kather.ai) on the SAME gold abstracts, joins the encoder output
+a hosted LLM (caller-configured endpoint) on the SAME gold abstracts, joins the encoder output
 persisted by ``bench_gliner2.py --probes params``, and reports per-field agreement
 + over-emission + abstention (reusing the pure graders in _gliner2_lib).
 
 Run (encoder side first, then this):
   uv run python tools/bench_gliner2.py --probes params --dump-raw 1
   export CUSTOM_API_KEY="$(grep -E '^CUSTOM_API_KEY=' .env | cut -d= -f2-)"
-  uv run python tools/bench_llm_params.py --model GLM-5.2-FP8 --max-chars 2000
+  uv run python tools/bench_llm_params.py --base-url "$CUSTOM_BASE_URL" --model "$BENCH_MODEL" --max-chars 2000
 """
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def llm_params(base_url: str, key: str, model: str, text: str) -> dict:
     req = urllib.request.Request(
         base_url.rstrip("/") + "/chat/completions", data=body,
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=180) as resp:  # noqa: S310 — configured kather endpoint
+    with urllib.request.urlopen(req, timeout=180) as resp:  # noqa: S310 — caller-configured endpoint
         content = json.load(resp)["choices"][0]["message"].get("content") or ""
     m = re.search(r"\{.*\}", content, re.S)
     if not m:
@@ -71,8 +71,8 @@ def _encoder_abstain(out_dir: Path) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--model", default="GLM-5.2-FP8")
-    ap.add_argument("--base-url", default="https://api.kather.ai/v1")
+    ap.add_argument("--model", required=True)
+    ap.add_argument("--base-url", required=True)
     ap.add_argument("--key-env", default="CUSTOM_API_KEY")
     ap.add_argument("--gold", default="data/paper_quality_bench/gold_v1.jsonl")
     ap.add_argument("--max-chars", type=int, default=2000)

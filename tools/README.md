@@ -13,8 +13,8 @@ Prestige validation uses the shared ZIP/legacy-joblib artifact resolver.
 | `mlx-deep-review.sh` | launch the local MLX server (Qwen3.6-35B) foreground with a RAM gate before pointing `deep_review` at it. **Never** run on a loaded box (22 GB weights). |
 | `bench_gliner2.py` | **Phase-0 go/no-go for GLiNER2** (Fastino zero-shot encoder, `--extra entities`) BEFORE any product wiring: `--probes` selects `type` (0a: paper-type classification vs `gold_v1`, baseline = LLM type accuracy from `bench_paper_quality.py`), `ner` (0b: disease NER; `--ner-dataset bc5cdr` streams the real BC5CDR test set, the inline fixture is a wiring floor only), `params` (0c: `extract_json` of the 6 `PaperParameters` fields on the gold abstracts + an abstention check — persists `params_encoder.jsonl` for the agreement join). Leaf tool (no product import). `--selfcheck` validates the logic with no model download. |
 | `_gliner2_lib.py` | model-free pure graders (stats, NER set-F1, PaperParameters parse/agreement) shared by `bench_gliner2` + the two LLM baselines so both sides score with the SAME grader. stdlib only; unit-checked by `bench_gliner2 --selfcheck`. |
-| `bench_llm_ner.py` | the LLM 'against what' for `bench_gliner2` 0b: hosted-LLM (api.kather.ai) zero-shot disease NER on the SAME BC5CDR sentences + SAME grader — the 205M-encoder-vs-LLM head-to-head. Needs `CUSTOM_API_KEY`. |
-| `bench_llm_params.py` | the LLM baseline + agreement scorer for `bench_gliner2` 0c: runs the SAME 6-field schema through a hosted LLM (api.kather.ai) on the same gold abstracts, joins `params_encoder.jsonl`, reports per-field presence/value agreement + encoder over-emission + abstention (no independent params gold exists → agreement-with-the-incumbent-LLM is the decision metric). Needs `CUSTOM_API_KEY`. |
+| `bench_llm_ner.py` | the LLM 'against what' for `bench_gliner2` 0b: hosted-LLM (caller-configured endpoint) zero-shot disease NER on the SAME BC5CDR sentences + SAME grader — the 205M-encoder-vs-LLM head-to-head. Requires `--base-url`, `--model`, and the key named by `--key-env` (default `CUSTOM_API_KEY`). |
+| `bench_llm_params.py` | the LLM baseline + agreement scorer for `bench_gliner2` 0c: runs the SAME 6-field schema through a hosted LLM (caller-configured endpoint) on the same gold abstracts, joins `params_encoder.jsonl`, reports per-field presence/value agreement + encoder over-emission + abstention (no independent params gold exists → agreement-with-the-incumbent-LLM is the decision metric). Requires `--base-url`, `--model`, and the key named by `--key-env` (default `CUSTOM_API_KEY`). |
 | `eval_goal_embedder.py` | offline eval of the goal-similarity embedder. |
 | `eval_slate_blend.py` | offline eval of the Today-slate ranking blend. |
 | `eval_temporal_objective.py` | offline eval of the temporal-split training objective; reuses production's aligned training matrix and train-only engagement-column rebuild for shuffled folds and both temporal objectives. |
@@ -38,3 +38,16 @@ oracle leakage and incomplete acceptance criteria remain tracked as A163.
 `eval_prompt_variant.py` compares existing faithbench reports without model work.
 An unmeasured (`null`) trap rate blocks comparison, even if another QA condition
 has a measured rate; missing safety evidence is never treated as zero or dropped.
+
+Published benchmarks do not assume a private deployment or served-model alias.
+Pass exact model IDs supported by your own endpoint: `bench_llm_ner.py` and
+`bench_llm_params.py` require `--base-url` and `--model`; `bench_openreview_judge.py`
+requires `--judge-model` even for cache reports; `eval_chunking.py` requires it only
+with `--faithfulness`. `eval_small_models.py` requires `--models` and reads
+`CUSTOM_BASE_URL`; `bench_search_relevance.py --judges MODEL_ID [MODEL_ID ...]`
+selects existing label caches without contacting a model.
+
+The sweep requires `PAPERS`, `REF_PROVIDER`, and `REF_MODEL`. Its default is the
+remote budget phase only. Local phases (`PHASES=2` or `both`) additionally require
+explicit `CANDIDATES` and `CANDIDATE_PROVIDER`; no local model is selected implicitly.
+Provider names refer to caller-owned saved configuration; this does not rename it.

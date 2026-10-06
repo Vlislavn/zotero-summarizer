@@ -1,8 +1,7 @@
 """Deep-review model tiering: the known-cheap sub-calls ride the light (feed)
 client, the goal summaries stay on the strong deep_review model.
 
-SOTA static per-identity tiering (claude-code `model-tier-routing`) — routing is
-keyed on the identity of the sub-task, not a difficulty estimate. This exercises
+Routing uses the identity of the sub-task, not a difficulty estimate. This exercises
 ``_deep_review_layers.extra_layers`` directly so it stays small + self-contained.
 """
 from __future__ import annotations

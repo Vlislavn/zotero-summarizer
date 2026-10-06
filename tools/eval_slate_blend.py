@@ -349,7 +349,7 @@ def main(argv: list[str] | None = None) -> None:
     # Reuse the already-loaded goal (embedded) + quals (grade/band). The QF dims come from
     # each row's stored payload — no extra embed. A2's absolute grade anchor means a grade-D
     # row's key is 0 regardless of topicality (the directive), so its whole-cohort AUC is
-    # dominated by the ~71% unreviewed rows (q=prior) — read it alongside the P2 replay.
+    # sensitive to unreviewed rows (q=prior); interpret it alongside the replay.
     payloads = [parse_payload(r) for r in rows]
     rel_raw = [row_relevance_score(p) for p in payloads]
     rel_known = sorted(v for v in rel_raw if v is not None)

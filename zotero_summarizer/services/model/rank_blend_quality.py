@@ -1,12 +1,10 @@
 """Quality-FIRST order key: quality leads, topicality soft-gates.
 
-The SOTA re-rank for the user's directive — *"a high-quality paper a little bit
-off-topic beats a poor-quality paper on-topic."* Kept as a SEPARATE module from
+An optional quality-first ordering policy, kept separate from
 ``rank_blend`` (the shipped relevance×goal×prestige blend, unchanged as the
 control arm) so the two are byte-independent and A/B-able behind one flag.
 
-Pattern (card PAT-DualOptimization_jobrec-001): de-conflate *qualification*
-(quality) from *preference* (topicality). Quality LEADS the key; topicality is a
+Separate quality from topicality. Quality leads the key; topicality is a
 FLOORED multiplicative gate (never a hard drop, never a small additive term the
 topic axis swamps — that was the shipped ±0.06 failure). The key:
 
@@ -14,21 +12,17 @@ topic axis swamps — that was the shipped ±0.06 failure). The key:
 
 * ``q`` — unified quality ∈ [0,1], the LEAD. Grade-primary when the paper was
   deep-reviewed (A=1.0 / B=0.75 / C=0.4 / D=0.0), ``flag`` band caps it ≤ 0.25.
-  Unreviewed (the ~71% with only an abstract): a dims prior from the LLM's
+  Unreviewed papers use a dims prior from the LLM's
   rigor+evidence, SHRUNK to [0.25, 0.75] so an abstract-only guess never
   out-ranks a reviewed A nor sinks below the flag cap; no dims → 0.5
   (not-assessed = typical). ``q`` is NOT cohort-normed — the A..D anchors are
   absolute, so a whole-cohort of C-papers stays mid, not stretched to fill [0,1].
 * ``t`` — topicality ∈ [0,1]: ``0.6·norm(goal_sim) + 0.4·(goal_alignment−1)/4``,
   per-row renormalized over whichever topical signals are present. goal_sim is
-  cohort min-maxed (the ranking lever, blind-judge Spearman 0.72); goal_alignment
+  cohort min-maxed; goal_alignment
   is the LLM's 1-5 dim, absolute. Neither present → t=0.5 (neutral).
 * gate ``0.5 + 0.5·t`` ∈ [0.5, 1.0]: even a fully off-topic paper keeps HALF its
-  quality — the "soft" in soft-gate. This is why relevance_score is deliberately
-  ABSENT from the lead: de-leaked (2026-07-07, kept=42 firewall) its AUC is 0.634,
-  the WEAKEST of the three signals, NOT the 0.852 head an earlier leaked eval
-  implied. corpus_affinity (the inverted 0.268 axis) and prestige (orthogonal to
-  quality, ρ≈−0.25) are out entirely.
+  quality. Relevance, corpus affinity and prestige do not define this quality-first key.
 
 Provable invariant (pinned by ``__main__`` + ``tests/test_rank_blend_quality.py``):
 a grade-A off-topic paper always out-ranks a grade-D on-topic one —

@@ -33,7 +33,7 @@ function setViewport({ desktop }) {
 const items = [
   { item_key: 'K1', title: 'First paper', authors: 'Ada', has_pdf: true, relevance_score: 4.5 },
   { item_key: 'K2', title: 'Second paper', authors: 'Grace', has_pdf: false, relevance_score: 4.1 },
-  { item_key: 'K3', title: 'Third paper', authors: 'Katherine', has_pdf: true, relevance_score: 3.9 },
+  { item_key: 'K3', title: 'Third paper', authors: 'Third Author', has_pdf: true, relevance_score: 3.9 },
 ];
 
 function renderView(props = {}) {

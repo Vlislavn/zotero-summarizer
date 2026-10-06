@@ -1,22 +1,15 @@
 """REAL eval: an independent BLIND relevance judge → non-circular NDCG@10 / precision@10.
 
-The offline arm eval (``bench_openreview_rank.py``) used the cross-encoder ``query_score``
-as BOTH the ranking key AND the relevance guardrail — circular, so its "0.007 relevance
-cost" was near-tautological. This adds the plan's missing instrument: a pinned LLM judge
-that scores topical relevance from ONLY the topic + title + abstract, never seeing
-venue / tier / source / query_score / rank (the mira "sees-both-lists" grader
-anti-pattern). Its labels feed real NDCG@10 / precision@10 that the arms compete on.
-
-  Ref: are/pinned-judge-model (fully-qualified pinned id, recorded per run)
-       are/hard-before-soft-judge (deterministic first; here a cheap cache before any call)
-       mira/grader-anti-patterns (judge must NOT see the signal it is validating)
+A caller-selected, pinned judge scores topical relevance from only the topic,
+title and abstract. It never sees the ranking key, venue, tier or source.
+Cached labels support independent NDCG@10 and precision@10 comparisons.
 
 One call per query over the union of each arm's top-15 (batched; graded 0..3), cached to
 ``data/bench/openreview_relevance_labels.json`` so re-runs are free. Remote endpoint
 (``CUSTOM_BASE_URL``) — no local memory cost.
 
-    uv run --env-file <.env> python tools/bench_openreview_judge.py          # judge (cached) + report
-    uv run python tools/bench_openreview_judge.py --report-only              # metrics from cache, no LLM
+    uv run --env-file <.env> python tools/bench_openreview_judge.py --judge-model "$JUDGE_MODEL"
+    uv run python tools/bench_openreview_judge.py --report-only --judge-model "$JUDGE_MODEL"
 """
 from __future__ import annotations
 
@@ -47,7 +40,7 @@ UNION_K = 15              # judge the union of each arm's top-15 (covers every a
 MAX_ABSTRACT_CHARS = 1000  # cap per-paper prompt size
 
 
-# ---------------------------------------------------------------- RRF arm (SOTA baseline)
+# ---------------------------------------------------------------- RRF control arm
 
 def rank_rrf(cands, pr, k=60, w=1.0):
     """Reciprocal Rank Fusion of a relevance list (query_score) with a sparse quality
@@ -272,7 +265,7 @@ def report(rows, store) -> None:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--pool", type=Path, default=POOL_PATH)
-    ap.add_argument("--judge-model", default="GPT-OSS-120B",
+    ap.add_argument("--judge-model", required=True,
                     help="pinned, recorded judge id (must be WARM on the endpoint)")
     ap.add_argument("--env-file", type=Path, help="dotenv with CUSTOM_BASE_URL/CUSTOM_API_KEY")
     ap.add_argument("--refresh", action="store_true", help="re-judge from scratch (ignore cache)")

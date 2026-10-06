@@ -27,11 +27,8 @@ class ExtraLayersCtx:
     config: Any
     prestige: dict[str, Any] | None
     prestige_floor_value: float | None
-    # Cheap tier for the known-trivial sub-calls (rubric yes/no, overstatement,
-    # self-verify, section one-liners) — the digest's strong reasoning model is
-    # wasted on them (SOTA static per-identity tiering, claude-code model-tier-routing).
-    # ponytail: rides the feed model (llm_map); add a dedicated deep_review.light_model
-    # config only if a user needs feed != sub-call model. None → falls back to `llm`.
+    # Use the feed client for rubric/verification and section sub-calls.
+    # None preserves the digest-client fallback.
     llm_light: Any = None
     reporter: Any = None
     lean_tier: bool = False

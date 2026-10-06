@@ -161,7 +161,7 @@ def judge_faithfulness(digest_text: str, full_text: str, *, judge_llm: Any, judg
         d = _json.loads(resp.read())
     secs = round(time.time() - t0, 1)
     msg = d["choices"][0]["message"]
-    # Reasoning models (e.g. GPT-OSS-120B): the thinking phase can eat the WHOLE max_tokens
+    # Reasoning models (with a separate thinking phase): the thinking phase can eat the WHOLE max_tokens
     # budget → ``content`` is None/"" and the answer lives in ``reasoning_content``. I/O BOUNDARY:
     # an empty content is an undecidable judge call (not a crash) — read reasoning_content as the
     # fallback; if both are empty, score None (surfaced), never fabricated.
@@ -180,7 +180,7 @@ def judge_faithfulness(digest_text: str, full_text: str, *, judge_llm: Any, judg
             "note": (j.get("note") or "")[:160], "secs": secs, "judge": judge_model}
 
 
-def main() -> int:
+def _parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="A/B deep-review chunking strategies (coverage vs cost)")
     ap.add_argument("--papers", type=int, default=2, help="How many cached papers to A/B")
     ap.add_argument("--chunk-chars", default="8000",
@@ -195,12 +195,19 @@ def main() -> int:
     ap.add_argument("--faithfulness", action="store_true",
                     help="ALSO run an LLM faithfulness judge (digest claims vs source) per strategy. "
                          "Closes GAP §G8 (the real quality measure the coverage metric can't be).")
-    ap.add_argument("--judge-model", default="GPT-OSS-120B",
-                    help="Faithfulness judge model on the CUSTOM_BASE_URL endpoint. Default GPT-OSS-120B.")
+    ap.add_argument("--judge-model",
+                    help="Explicit served model ID on the CUSTOM_BASE_URL endpoint; required with --faithfulness.")
     ap.add_argument("--judge-max-tokens", type=int, default=8192,
                     help="Judge max_tokens (reasoning models need room for thinking+output; 1024 "
                          "left content=None on some calls). Default 8192.")
     args = ap.parse_args()
+    if args.faithfulness and not args.judge_model:
+        ap.error("--faithfulness requires --judge-model")
+    return args
+
+
+def main() -> int:
+    args = _parse_args()
     # Parse chunk-chars as a sweep list (single int → one-element list). A sweep A/Bs which
     # chunk SIZE wins on coverage/cost — the dimension `map_chunk_chars=8000` was a GUESS on.
     chunk_sizes = [int(x.strip()) for x in args.chunk_chars.split(",") if x.strip()]

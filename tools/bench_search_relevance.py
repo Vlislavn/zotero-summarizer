@@ -1,12 +1,10 @@
 """Phase 0 of the relevance-signal workstream: HONEST per-query relevance metrics for the
 Targeted Search reranker, using the cached dual-judge labels (no LLM, no network, no model).
 
-Codex (gpt-5.6-sol) demolished the pooled Spearman(query_score, rel)=0.443 as the WRONG
-statistic — pooled over 341 pairs it mixes each query's separate score scale. This computes
-the right ones, MACRO per-query and PER-JUDGE (the two judges are correlated measurements,
-never one averaged truth):
+Compute macro per-query and per-judge metrics rather than mixing separate query
+score scales or treating correlated judges as a single averaged truth:
 
-  - score-only NDCG@10 / P@10          (deployed key == score-only here: quality is 0/912)
+  - score-only NDCG@10 / P@10
   - pairwise concordance (tie-aware)   (frac of distinct-rel pairs ordered right by query_score)
   - top-10 harmful inversions          (rel_i < rel_j yet i ranked above j, both in top-10)
   - buried-relevant                    (rel>=2 outside top-10 while a rel<=1 sits inside)
@@ -18,10 +16,11 @@ already high, the "weak reranker / mixed buckets" story is a statistical artifac
 nothing on the mechanism. What headroom EXISTS shows up as buried-relevant + mid-rank
 concordance, which only a better model / input can fix (L2), not the bucket width (L1).
 
-    uv run python tools/bench_search_relevance.py
+    uv run python tools/bench_search_relevance.py --judges "$JUDGE_MODEL"
 """
 from __future__ import annotations
 
+import argparse
 import json
 import statistics
 import sys
@@ -32,7 +31,6 @@ from bench_openreview_rank import _load  # noqa: E402
 from bench_openreview_judge import ndcg_at_k, precision_at_k  # noqa: E402  (reuse the graded metrics)
 
 POOL = Path("data/bench/openreview_pool.json")
-JUDGES = ("GPT-OSS-120B", "gemma-4-31B-it")
 REL = 2  # rel>=REL counts as "relevant"
 
 
@@ -140,7 +138,7 @@ def report_for(rows, judge: str) -> None:
         if m3 is not None and m3 < 0.5:
             low_rel3.append((m3, q))
 
-    print(f"\n{'='*72}\njudge = {judge}  (score-only order; deployed key == this, quality 0/912)\n{'='*72}")
+    print(f"\n{'='*72}\njudge = {judge}  (score-only order)\n{'='*72}")
     print(f"{'cov':>9} | {'n':>2} | {'NDCG@10':>13} | {'P@10':>6} | {'concord':>7} | {'inv10':>5} | {'buried':>6}")
     for cov in ("ml", "partial", "clinical"):
         v = per_cov.get(cov)
@@ -167,14 +165,15 @@ def report_for(rows, judge: str) -> None:
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--judges", nargs="+", required=True, help="Model IDs identifying existing label caches")
+    args = ap.parse_args()
     if not POOL.exists():
         print(f"no pool at {POOL}")
         return 2
     rows = _load(POOL)
-    for judge in JUDGES:
+    for judge in args.judges:
         report_for(rows, judge)
-    print("\n(quality/goal_sim are 0/912 on this pool, so deployed ε=0.05 == score-only; "
-          "L1 bucketing is inert here. Headroom, if any, is buried-relevant + concordance → L2/input.)")
     return 0
 
 

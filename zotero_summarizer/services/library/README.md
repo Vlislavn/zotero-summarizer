@@ -1,5 +1,8 @@
 # services/library — Stage-2 reading + feed review
 
+Public documentation describes grounding contracts and regression controls;
+private provider-specific evaluation narratives stay outside the shared source.
+
 Numeric literal preflight treats an optional leading positive sign symmetrically:
 `+x` and `x` denote the same positive value. Negative signs and changed/absent
 values remain distinct; endpoint-only arithmetic is not source evidence. Every
@@ -254,8 +257,7 @@ collapsed by default. A failed layer degrades to no panel, never blocking the di
 known-cheap sub-calls — `quality_eval`'s rubric/overstatement/self-verify and the section one-liners —
 ride the **feed** client (`llm_map`), routed via `ExtraLayersCtx.llm_light`; goal summaries stay on the
 strong model (measure before downgrading). Falls back to the digest model when no distinct feed model is
-set. This is the SOTA static per-identity tiering pattern (claude-code `model-tier-routing`), not a
-difficulty router — no new config, reuses the existing `feed` stage.
+set. Routing follows task identity and reuses the existing `feed` stage.
 
 | file | responsibility |
 |---|---|

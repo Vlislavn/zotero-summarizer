@@ -30,7 +30,7 @@ Usage (from repo root, with .env sourced):
   uv run python tools/bench_deep_review.py \
       --reference-provider remote --reference-model <model> \
       --candidate-provider default --candidate-model qwen3:8b \
-      --papers 4NIMLFMV,QRPEWC69,R2HRV4JA,YJQWHD6X --max-text-chars 60000
+      --papers "$PAPER_KEYS" --max-text-chars 60000
 """
 from __future__ import annotations
 

@@ -39,8 +39,7 @@ FUZZY_MATCH_RATIO = 0.8
 # Answer-support: fraction of the ANSWER's distinct content tokens that must be
 # present in the quote (order-free). 0.85 admits rewording/reordering of the
 # quoted evidence (the universal answer shape) while any hallucinated token
-# (number, name, verb not in the quote) fails the band. Tuned + verified against
-# real kather/sota Q&A answers vs hallucinated controls, 2026-09-11.
+# (number, name, verb not in the quote) fails the band.
 ANSWER_COVER_RATIO = 0.85
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -108,11 +107,8 @@ def answer_is_supported_by_quote(answer: Any, quote: Any) -> bool:
       the model's own words AROUND that text ("SLIM is the framework that
       separates … tools" vs the quote's "SLIM (Simple Lightweight Information
       Management), a simple framework that separates …"). Demanding a verbatim
-      answer span rejected every such answer and collapsed Q&A into 100%
-      spurious abstentions (measured live on kather/sota, 2026-09-11), because
-      no non-trivial rewording of a sentence is ever a contiguous subsequence
-      of it. Distinct-token coverage still rejects any answer introducing
-      content absent from the quote.
+      answer span can reject grounded rewording. Distinct-token coverage still
+      rejects any answer introducing content absent from the quote.
     """
     answer_tokens = _content_tokens(str(answer or ""))
     quote_tokens = _content_tokens(str(quote or ""))

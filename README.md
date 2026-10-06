@@ -22,7 +22,10 @@ Deep review rejects demonstrated access/error/login templates before model calls
 Failures show their stage and recovery separately from scientific quality; a failed
 attempt or missing-source placeholder does not replace a current valid review.
 `verify-deep-review --capture-local` explicitly saves sensitive decoded diagnostics
-under `data/`; do not share them. It performs no Zotero writes and disables thinking
+under `data/`; do not share them. Public source, issues and PRs must not include
+private infrastructure identities, personal paths, library screenshots or private
+evaluation artifacts. Use portable examples and explicitly configured routes.
+It performs no Zotero writes and disables thinking
 for its diagnostic calls. See [library](zotero_summarizer/services/library/README.md)
 and [CLI](zotero_summarizer/cli/README.md) contracts.
 

@@ -1,6 +1,8 @@
 # Zotero Summarizer frontend
 
 React 18 + Vite 5 + Tailwind 3, served by FastAPI at the app root.
+Public tests use generic provider/model fixtures; private deployment identities
+and live-library screenshots do not belong in the shared source.
 
 ```bash
 cd frontend

@@ -4,32 +4,40 @@
 #
 # Runs the config matrix ONE config at a time as separate bench processes (RAM
 # released between), each persisted under data/deep_review_sweep/runs/<id>/ with a
-# headline in runs-index.jsonl. Phase 1 (cloud sota text-budget sweep) is memory-
-# safe and runs unconditionally; Phase 2 (local models) is gated on a fresh
+# headline in runs-index.jsonl. Phase 1 (cloud reference text-budget sweep) is memory-
+# safe and is selected by default; Phase 2 (local models) is gated on a fresh
 # free-physical-% check before EACH config and the bench's own in-process tripwire
 # (free-phys% + swap-growth) aborts mid-run if the box starts thrashing.
 #
 # Usage (foreground, supervised, box should be idle for Phase 2):
-#   tools/sweep_deep_review.sh                 # full sweep
+#   PAPERS="$PAPER_KEYS" REF_PROVIDER="$PROVIDER_NAME" REF_MODEL="$BENCH_MODEL" tools/sweep_deep_review.sh
 #   PHASES=1 tools/sweep_deep_review.sh        # cloud budget sweep only (always safe)
-#   PHASES=2 tools/sweep_deep_review.sh        # local model sweep only
-#   PAPERS=4NIMLFMV,QRPEWC69 tools/sweep_deep_review.sh   # fewer papers / faster
+#   PHASES=2 CANDIDATE_PROVIDER="$LOCAL_PROVIDER" CANDIDATES="$LOCAL_MODELS" tools/sweep_deep_review.sh
+#   PAPERS="$PAPER_KEYS" tools/sweep_deep_review.sh   # fewer papers / faster
 #
 # Env overrides: PAPERS, REF_PROVIDER, REF_MODEL, LEAN (local budget chars),
-# FULL (sota full budget), MIN_FREE_PCT (skip a local config below this free-phys%),
-# CANDIDATES (space-separated local ollama models), PHASES (1|2|both).
+# FULL (reference full budget), MIN_FREE_PCT (skip a local config below this free-phys%),
+# CANDIDATES (space-separated local models), CANDIDATE_PROVIDER, PHASES (1|2|both; default 1).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 set -a; . ./.env 2>/dev/null || true; set +a
 
-PAPERS="${PAPERS:-4NIMLFMV,QRPEWC69,R2HRV4JA,YJQWHD6X}"
-REF_PROVIDER="${REF_PROVIDER:-kather}"
-REF_MODEL="${REF_MODEL:-sota}"
+: "${PAPERS:?Set PAPERS to comma-separated paper keys}"
+: "${REF_PROVIDER:?Set REF_PROVIDER to your configured provider name}"
+: "${REF_MODEL:?Set REF_MODEL to the served model ID}"
 LEAN="${LEAN:-12000}"          # local lean tier (production); 60k thrashed the box
-FULL="${FULL:-60000}"         # sota full-tier reference budget
+FULL="${FULL:-60000}"         # full-tier reference budget
 MIN_FREE_PCT="${MIN_FREE_PCT:-12}"
-CANDIDATES="${CANDIDATES:-qwen3.5:0.8b qwen3.5:4b qwen3.5:4b-mxfp8}"  # lightest first
-PHASES="${PHASES:-both}"
+CANDIDATES="${CANDIDATES:-}"  # caller-selected models, lightest first
+PHASES="${PHASES:-1}"
+case "$PHASES" in
+  1) ;;
+  2|both)
+    : "${CANDIDATES:?Set CANDIDATES explicitly for the local sweep}"
+    : "${CANDIDATE_PROVIDER:?Set CANDIDATE_PROVIDER to your local provider name}"
+    ;;
+  *) echo "PHASES must be 1, 2, or both" >&2; exit 2 ;;
+esac
 
 mem_gate() {  # exit 0 if safe to start a local gen, 1 otherwise; prints status
   python3 - "$MIN_FREE_PCT" <<'PY'
@@ -53,23 +61,23 @@ run() {  # run <run-name> <extra bench args...>
 }
 
 if [ "$PHASES" = "1" ] || [ "$PHASES" = "both" ]; then
-  echo "=== PHASE 1: sota text-budget sweep (cloud — memory-safe) — does a smaller budget hold quality? ==="
-  run "sota_budget_${LEAN}" \
+  echo "=== PHASE 1: reference text-budget sweep (cloud — memory-safe) — does a smaller budget hold quality? ==="
+  run "reference_budget_${LEAN}" \
       --reference-provider "$REF_PROVIDER" --reference-model "$REF_MODEL" --reference-thinking on --reference-max-chars "$FULL" \
       --candidate-provider "$REF_PROVIDER" --candidate-model "$REF_MODEL" --candidate-thinking on --candidate-max-chars "$LEAN"
-  run "sota_budget_30000" \
+  run "reference_budget_30000" \
       --reference-provider "$REF_PROVIDER" --reference-model "$REF_MODEL" --reference-thinking on --reference-max-chars "$FULL" \
       --candidate-provider "$REF_PROVIDER" --candidate-model "$REF_MODEL" --candidate-thinking on --candidate-max-chars 30000
 fi
 
 if [ "$PHASES" = "2" ] || [ "$PHASES" = "both" ]; then
-  echo; echo "=== PHASE 2: local model sweep @ ${LEAN} chars (sota@${LEAN} reference, both digest thinking-on) ==="
+  echo; echo "=== PHASE 2: local model sweep @ ${LEAN} chars (reference@${LEAN} reference, both digest thinking-on) ==="
   for M in $CANDIDATES; do
     safe_name="local_$(echo "$M" | tr ':.' '__')_${LEAN}"
     if mem_gate; then
       run "$safe_name" \
         --reference-provider "$REF_PROVIDER" --reference-model "$REF_MODEL" --reference-thinking on --reference-max-chars "$LEAN" \
-        --candidate-provider default --candidate-model "$M" --candidate-thinking on --candidate-max-chars "$LEAN"
+        --candidate-provider "$CANDIDATE_PROVIDER" --candidate-model "$M" --candidate-thinking on --candidate-max-chars "$LEAN"
     else
       echo "  SKIP ${M} — free-phys below ${MIN_FREE_PCT}% (box loaded). Free RAM / close apps, then re-run; resume is automatic."
     fi

@@ -34,7 +34,7 @@ DISCIPLINE (mirrors ``tools/bench_deep_review.py`` / ``tools/bench_paper_quality
 
 Usage (from repo root, with .env sourced):
   uv run python tools/eval_self_consistency.py \
-      --papers 4NIMLFMV,QRPEWC69,R2HRV4JA --sweep 1,3,5,7 --tolerance 0.1
+      --papers "$PAPER_KEYS" --sweep 1,3,5,7 --tolerance 0.1
 """
 from __future__ import annotations
 

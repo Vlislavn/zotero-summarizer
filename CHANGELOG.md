@@ -10,8 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
-### Added
-- Record real deployed-provider incident capture, representative review outcomes and user-approved blinded Astra search pilot, with per-capability mean/median metrics, latency/request budgets and preserved limitations.
+### Changed
+- Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
 - Prioritize bounded publication-type recovery with title hints, never title-based eligibility; expose unattempted/confirmed counts. Real source metadata recovered qualifying reviews without increasing lookup budgets.
@@ -72,7 +72,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 - Reconciled the 2026-10-05 functional audit against verified regressions; retained five partial #25 findings. Removed stale Markdown-sidecar output claims from render configuration and triage documentation (no behavior change).
 
-- Library Q&A abstained on 100% of real questions (measured live on kather/sota): the `answer_is_supported_by_quote` guard required the ANSWER to be a verbatim token-span of its quote, but real answers are the model's own words AROUND the quoted evidence — no non-trivial rewording of a sentence is a contiguous subsequence of it, so every grounded answer was discarded. The gate now also accepts order-free coverage: ≥85% (`ANSWER_COVER_RATIO`) of the answer's distinct content tokens must occur in the quote (in `qa.py`, alternately in the already-grounded context — the quote stays the required grounded pointer), which still rejects any hallucinated token; verbatim-span acceptance and all floors unchanged. Regression tests pin the reworded-answer pass and the hallucinated-token rejection (`tests/test_grounding.py`, `tests/test_library_qa.py`).
+- Q&A support accepts grounded rewording using order-free content-token coverage while retaining required grounded quotes and verbatim-span acceptance. Regression tests preserve rejection of source-absent content.
 - Same sweep root-caused two more false-abstention classes from PDF-extraction artifacts: line-end word breaks (`re-\ntrieval` vs the model's `retrieval`) and typographic punctuation (`LLM’s` vs `LLM's`). The grounding contract now normalizes quote and context symmetrically (`_dehyphenate` + apostrophe/quote folding in `_match_normalize`) before matching, fixing both classes without loosening either strictness level — hallucinated content still fails. Verified live: 4/5 probe questions on a 98k-char paper now answer where the answer is inside the 60k context cap; residual abstentions are genuine (answer past the cap, or not in the paper).
 - Deep review no longer polls forever when an OpenAI-compatible response stalls: the shared client factory now applies `SUMMARY_TIMEOUT_SECONDS` to transport reads, allowing the existing worker error boundary to terminate the job and drain queued reviews.
 - Author bylines no longer claim `h=0` when OpenAlex returns authors without resolvable IDs. Unknown/zero max h-index is now `None`, ignored as prestige evidence, and hidden for historical rows.
@@ -149,7 +149,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 - **Code-repo detection now catches GitHub links hidden in PDF hyperlink annotations.** A URL that's only a clickable annotation over text like "our code" (never in the extracted visible text) was invisible to the code-link regex. `_paper_read_pdf.extract_link_uris` harvests annotation URIs (as `content['link_uris']`, kept out of `full_text`) and the deep-review code-link layer appends them before `find_code_link`, so the repo now shows (may render `unverified`/grey — no availability phrase — still found). Harvested URIs with embedded whitespace/newlines are rejected (a crafted annotation could otherwise smuggle a fake "code available at …" phrase that outranks the real repo — injection defense).
 
-- **Deep-review speed: cheap sub-calls now ride the feed model.** The rubric yes/no checks, overstatement, self-verify and section one-liners are known-cheap by task identity, so they route to the already-built feed client (`llm_map`) instead of the expensive deep_review reasoning model; the digest and goal summaries stay on the strong model. SOTA static per-identity tiering (claude-code `model-tier-routing`), no new config — reuses the `feed` stage. Add `deep_review.light_model` later only if feed ≠ desired sub-call model.
+- **Deep-review speed: cheap sub-calls now ride the feed model.** The rubric yes/no checks, overstatement, self-verify and section one-liners are known-cheap by task identity, so they route to the already-built feed client (`llm_map`) instead of the expensive deep_review reasoning model; the digest and goal summaries stay on the strong model. Task-specific routing reuses the `feed` stage without new configuration. Add `deep_review.light_model` later only if feed ≠ desired sub-call model.
 - **Digest reasoning now follows the provider's `thinking_effort`** instead of a hard-coded `enable_thinking=True`. New `ProviderConfig.thinking_on` (True unless `thinking_effort: off`) drives the 4 digest sites (deep_review, verify CLI, setup profiles, calibration). Digest still reasons by default (measured NEEDED); set `thinking_effort: off` on the deep_review provider to disable it — no separate toggle.
 
 ### Fixed

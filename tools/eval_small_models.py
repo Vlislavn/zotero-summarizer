@@ -1,35 +1,15 @@
-"""Small-model class sweep on a remote endpoint — a clean proxy for local small models.
+"""Compare caller-selected small models on a remote OpenAI-compatible endpoint.
 
-WHY THIS EXISTS
----------------
-The user's local 0.8b/2b models could NOT be measured directly: a parallel 26.5GB
-experiment is resident and any local load would contend for RAM (the lesson in
-memory `controlled_latency_comparison.md` — never conclude from a swap-contaminated
-run). So instead of touching local memory we sweep SMALL models *on the remote
-remote endpoint* — they are a SMALLEST-CLASS PROXY of the same family a user would
-run locally (gemma-E2B ≈ a local 2b instruct, gemma-E4B ≈ a local 4b, glm-flash ≈
-a small fast instruct). The remote reference (GPT-OSS-120B) anchors the top.
+Remote quality is a proxy for same-class local quality, not proof of local
+performance. Remote latency includes network and serving allocation overhead;
+report cold/warm measurements separately rather than extrapolating absolutes.
 
-WHAT EXTRAPOLATES vs WHAT DOESN'T
----------------------------------
-  QUALITY  (digest_completeness, late_recall, format_ok) → extrapolates cleanly.
-           A 2b model's quality gap vs a 120b is roughly class-intrinsic, not
-           host-intrinsic, so the small-API rank-order is a defensible prior for
-           the same-class local rank-order.
-  LATENCY  → only the PATTERN extrapolates (cold > warm; on-demand scheduling),
-           NOT the absolutes — every remote call carries a network round-trip the
-           local model doesn't. We report cold vs warm separately and label the
-           absolutes API-bound. Never ratio these against local numbers.
+Controlled comparison: same paper, prompt, text budget, and warmup/sample counts.
+Per-family token budgets allow reasoning models to finish the same output schema.
+Set CUSTOM_BASE_URL and CUSTOM_API_KEY for your endpoint; exact served model IDs
+must be supplied explicitly. This tool does not launch local model weights.
 
-CONTROLLED COMPARISON (the load-bearing discipline)
----------------------------------------------------
-Same paper, same prompt, same max_chars budget, warmed (warmups before sampling).
-max_tokens is PER-FAMILY (reasoning models get a roomier budget — see below), NOT a
-shared invariant: forcing one budget undercounts reasoning models (measured:
-GPT-OSS 0.25→1.00 at 2048→8192). One variable: the model. This is the apples-to-apples
-discipline that caught the earlier "0.8b 4x faster" error (1-word local vs 80-word API).
-
-    KMP_DUPLICATE_LIB_OK=TRUE uv run python tools/eval_small_models.py --papers 1
+    uv run python tools/eval_small_models.py --models "$BENCH_MODEL" --papers 1
 """
 from __future__ import annotations
 
@@ -39,18 +19,6 @@ from statistics import mean
 from time import perf_counter
 from typing import Any
 
-# Candidate "small / adjacent class" remote models, ordered small → reference.
-# E2B/E4B = gemma "Edge" 2B/4B (the closest thing the endpoint serves to a local 0.8b-4b);
-# 26B-A4B = MoE 26B with 4B active (small-active class); glm-flash = small fast chat;
-# qwen3.6-27b = mid; GPT-OSS-120B = the measured reference anchor (2.7s real task).
-DEFAULT_MODELS = [
-    "gemma-4-E2B-it",
-    "gemma-4-E4B-it",
-    "glm-4.7-flash",
-    "gemma-4-26B-A4B-it",
-    "qwen3.6-27b",
-    "GPT-OSS-120B",
-]
 # Per-family max_tokens — NOT one shared budget. A reasoning model (GPT-OSS / qwen3.6)
 # spends tokens on an internal thinking phase before emitting the digest, so it needs a
 # ROOMIER budget to produce the SAME 7-field output a chat model makes in fewer tokens.
@@ -184,7 +152,7 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Sweep small remote models as a local-small-model proxy")
-    ap.add_argument("--models", nargs="+", default=DEFAULT_MODELS, help="remote model ids (small → reference)")
+    ap.add_argument("--models", nargs="+", required=True, help="remote model ids (small → reference)")
     ap.add_argument("--papers", type=int, default=1, help="cached papers to test on")
     ap.add_argument("--max-chars", type=int, default=None, help="digest text budget (default: config max_text_chars)")
     ap.add_argument("--warmups", type=int, default=_DEFAULT_WARMUPS)

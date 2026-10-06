@@ -66,12 +66,6 @@ def test_strict_default_unchanged_for_safety_critical_callers():
 
 
 def test_answer_support_accepts_reworded_answer_from_verbatim_quote():
-    # Regression (2026-09-11): the strict extractive bar required the ANSWER to be a
-    # contiguous token span of the quote, but real answers are the model's own words
-    # AROUND the quoted evidence — so every non-trivial rewording was rejected and the
-    # product Q&A collapsed into 100% spurious abstentions (measured live on
-    # kather/sota). Order-free token coverage must pass while still requiring the
-    # answer's content to come from the quote.
     quote = ("Then, we introduce SLIM (Simple Lightweight Information Management), a simple "
              "framework that separates retrieval into distinct search and browse tools, and "
              "periodically summarizes the trajectory, keeping context concise.")

@@ -69,7 +69,9 @@ RSS, uncached PDF, library acquisition, and Search network boundaries; the LLM-c
 else all N — NOT the triage knob, so a remote batch isn't throttled by the local-RAM cap)
 and `deep_review_sub_concurrency` (within-review rubric/goal sub-calls) — all local→serial,
 shared so the daemon, deep-review job, and `verify-deep-review` CLI never drift),
-`_adapters` (`build_llm`: OpenAI-compatible client via OnPrem — threads the
+`_adapters` uses the installed dependency, or an explicitly configured `ONPREM_PATH`
+source checkout; it never guesses a developer checkout location.
+(`build_llm`: OpenAI-compatible client via OnPrem — threads the
 configured request timeout and per-provider `temperature` (default 0, deterministic);
 registers the completion guard before OnPrem discards finish reason/token usage;
 `build_pdf_extractor`.

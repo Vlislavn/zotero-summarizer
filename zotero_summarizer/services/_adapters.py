@@ -16,10 +16,9 @@ def _load_onprem() -> tuple[Any, Any]:
         return LLM, load_single_document
     except ImportError:
         configured = os.getenv("ONPREM_PATH", "").strip()
-        if configured:
-            repo_path = Path(configured).expanduser()
-        else:
-            repo_path = Path(__file__).resolve().parents[2] / "from GH" / "onprem"
+        if not configured:
+            raise
+        repo_path = Path(configured).expanduser()
         if str(repo_path) not in sys.path:
             sys.path.insert(0, str(repo_path))
         from onprem.llm import LLM

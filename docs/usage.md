@@ -327,8 +327,8 @@ You set the **secret** rows by hand; the **path** rows are written for you by th
 |---|---|---|
 | `OPENAI_API_KEY` | yes (the one secret) | API key for the primary LLM. This is the value the wizard collects *by name* — you set it here yourself. (Use whatever name your provider profile's `api_key_env` points at.) |
 | `OPENAI_API_BASE` | no | Optional OpenAI-compatible base URL when your provider profile references `${OPENAI_API_BASE}`; otherwise the base URL lives in the provider profile in `goals.yaml` |
-| `PDF_ROOT` | app-managed | Your Zotero PDF storage, e.g. `/Users/you/Zotero/storage` — written by the setup flow; blank → defaults to your home dir |
-| `ZOTERO_DATA_DIR` | app-managed | Your Zotero data dir, e.g. `/Users/you/Zotero` — written by the setup flow; blank → defaults to `~/Zotero` |
+| `PDF_ROOT` | app-managed | Your Zotero PDF storage, e.g. `~/Zotero/storage` — written by the setup flow; blank → defaults to your home dir |
+| `ZOTERO_DATA_DIR` | app-managed | Your Zotero data dir, e.g. `~/Zotero` — written by the setup flow; blank → defaults to `~/Zotero` |
 | `CUSTOM_BASE_URL` / `CUSTOM_API_KEY` | no | Optional second provider for the *Today* "Triage backlog" drain (a stronger model for the freshest papers). Leave blank to skip |
 | `SUMMARY_TIMEOUT_SECONDS` | no | Per-request OpenAI-compatible LLM timeout and whole-triage summary deadline (default 420) |
 | `TRIAGE_JOB_CONCURRENCY` | no | Parallel triage jobs (default 4, max 16) |
