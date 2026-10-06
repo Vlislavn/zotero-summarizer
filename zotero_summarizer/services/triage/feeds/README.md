@@ -1,8 +1,12 @@
 # services/triage/feeds — the RSS daemon
 
-Turns unread app-RSS items into scored `processed_feed_items` rows and, once
-per day, materializes the best 1-2 directly into the Zotero Inbox. The package
-is a facade (`__init__.py`); each concern lives in a private sub-module.
+Turns unread app-RSS items into scored `processed_feed_items` rows and an
+advisory Today slate. Zotero Inbox materialization requires an explicit user
+Add/positive verdict after review. The package is a facade (`__init__.py`);
+each concern lives in a private sub-module.
+
+Automatic brief rendering publishes presentation HTML, audit JSON and figures;
+it does not create Markdown sidecars.
 
 Two reader roles per tick: the triage SOURCE is `AppRssReader` (the app-owned
 `rss_feeds`/`rss_items` pool, refreshed in rotation each tick); Zotero-library
@@ -19,7 +23,8 @@ run_daemon_loop ─every N s→ run_daemon_tick (_tick)
    resolve due outcomes (_outcomes, ZoteroReader) → user_feedback
         once/day ▼
    run_daily_selection (_daily): rank top 1-2 (+black-swan), no Zotero Add
-        → full-text refine → materialize into Inbox → schedule outcome check
+        → full-text refine → advisory picks
+   explicit reviewed Add/positive verdict → Inbox → schedule outcome check
 ```
 
 | file | responsibility |

@@ -154,7 +154,7 @@ def _auto_review_slate(tick_id: str) -> None:
 
 
 def _auto_render_slate(tick_id: str) -> None:
-    """Build the full, heavy paper RENDER (notes.md / presentation.html / figures) for the
+    """Build the full paper brief (presentation HTML / audit JSON / figures) for the
     TOP-``render_on_tick_k`` Today feed papers, so a top feed paper opens with the same brief
     as a library item. Renders only keys with a current review contract (so the
     brief folds the cached review in, one tick after ``_auto_review_slate``, never racing it)

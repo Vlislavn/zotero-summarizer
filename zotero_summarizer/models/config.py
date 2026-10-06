@@ -137,7 +137,7 @@ class QualityReviewConfig(BaseModel):
     # their PDFs are fetchable. 0 disables. See services/triage/feeds/_tick.py.
     auto_on_tick_k: int = Field(default=10, ge=0, le=20)
     # How many of the TOP Today feed papers (by composite rank) also get the full,
-    # heavy paper RENDER (notes.md / presentation.html / figures) per daemon tick —
+    # paper brief (presentation HTML / audit JSON / figures) per daemon tick —
     # built in-place from the already-cached in-place review + cached PDF (no extra LLM),
     # so a top feed paper opens with the same beautiful brief as a library item. Renders
     # only keys already reviewed (one tick after the review, no race) + skips already-
