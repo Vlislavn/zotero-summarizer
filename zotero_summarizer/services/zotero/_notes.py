@@ -54,15 +54,10 @@ def build_provenance_comment(
     return f"<!-- {';'.join(fields)} -->"
 
 
-# Provisional per-field budgets, not an empirically validated whole-note limit.
-TRIAGE_TEXT_WORD_BUDGET = 120
-TRIAGE_LIST_WORD_BUDGET = 60
-
-
-def _bounded_note_text(value: str, word_budget: int) -> str:
+def _bounded_note_text(value: str, word_budget: int | None) -> str:
     """Keep a whole field or disclose its omission; never guess sentence boundaries."""
     value = value.strip()
-    if len(value.split()) <= word_budget:
+    if word_budget is None or len(value.split()) <= word_budget:
         return value
     return "Omitted over-budget text; see the full saved summary."
 
@@ -79,11 +74,11 @@ def build_triage_note_html(
     surprise_score: float | None = None,
     run_id: str | None = None,
     include_provenance: bool = True,
-    text_word_budget: int = TRIAGE_TEXT_WORD_BUDGET,
-    list_word_budget: int = TRIAGE_LIST_WORD_BUDGET,
+    text_word_budget: int | None = None,
+    list_word_budget: int | None = None,
 ) -> str:
     """Render the persisted triage artifact as a self-sufficient Zotero note."""
-    if text_word_budget < 1 or list_word_budget < 1:
+    if any(budget is not None and budget < 1 for budget in (text_word_budget, list_word_budget)):
         raise ValueError("note word budgets must be positive")
     glyph = _PRIORITY_GLYPH.get(summary.reading_priority, "•")
     priority_label = summary.reading_priority.replace("_", " ").title()

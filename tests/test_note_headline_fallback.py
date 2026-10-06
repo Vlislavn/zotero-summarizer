@@ -65,7 +65,7 @@ def test_unbroken_overbudget_sentence_is_explicitly_omitted():
     sentence = ' '.join(['qualified'] * 130) + '.'
     summary = SummarizeResponse(relevance_score=4, executive_summary="Overview.", triage_rationale="Fit.", methods=sentence,
                                key_findings=[sentence])
-    note = build_triage_note_html('T', summary)
+    note = build_triage_note_html('T', summary, text_word_budget=120, list_word_budget=60)
     assert 'qualified' not in note
     assert 'Omitted over-budget text; see the full saved summary.' in note
 
@@ -137,6 +137,15 @@ def test_budget_cannot_publish_an_abbreviation_prefix(text):
     assert _bounded_note_text(text, 6) == 'Omitted over-budget text; see the full saved summary.'
     assert _bounded_note_text(text, len(text.split())) == text
     assert _bounded_note_text(text, len(text.split()) + 1) == text
+
+
+def test_default_note_preserves_long_paper_specific_fields():
+    sentence = ' '.join(['qualified'] * 130) + '.'
+    summary = SummarizeResponse(relevance_score=4, executive_summary='Overview.',
+                               triage_rationale='Fit.', methods=sentence, key_findings=[sentence])
+    note = build_triage_note_html('T', summary)
+    assert note.count(sentence) == 2
+    assert 'Omitted over-budget text' not in note
 
 
 def test_empty_list_and_invalid_budgets():

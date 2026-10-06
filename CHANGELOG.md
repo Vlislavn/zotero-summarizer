@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Retain long paper-specific note fields by default. Whole-field omission budgets are explicit renderer opt-ins only, pending usefulness validation; no unmeasured shortening policy is enabled in materialization.
 - Reorder full reviews around contribution, caveats and findings; fold assessment and goal evidence without losing source text. Improve triage-note fallback, optional sections and materialization metrics; retain explicit native/user acceptance gates.
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 

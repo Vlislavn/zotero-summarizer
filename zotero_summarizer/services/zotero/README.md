@@ -38,11 +38,12 @@ note_analyzer  : interpret user-written Zotero notes as golden labels
 
 Triage headlines select the first nonblank rationale or overview, including Unicode
 whitespace. Optional controversies, impact, implementation and unknowns are rendered.
-The raw persisted response is unchanged. Provisional per-field word budgets (120 for
-prose, 60 for list items; renderer keyword overrides) keep a complete field or show an
-explicit omission notice: they never guess a sentence boundary. Exact artifact URLs
-remain intact. These are not a validated 300–600-word whole-note target; long-field
-omission can reduce usefulness and needs native-editor/user acceptance. Shared metrics
+The raw persisted response is unchanged. By default, paper-specific text is retained
+in full. Optional renderer keyword budgets keep a complete field or show an explicit
+omission notice: they never guess a sentence boundary. Exact artifact URLs remain
+intact. These opt-in budgets are not a validated 300–600-word whole-note target;
+long-field omission can reduce usefulness and needs native-editor/user acceptance
+before being enabled by an application caller. Shared metrics
 report rendered characters, HTML characters, words, headings and actual headline fallback.
 
 `pending.list_pending_changes` accepts an optional `item_key` filter, pushed

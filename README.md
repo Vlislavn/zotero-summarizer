@@ -32,7 +32,7 @@ and [CLI](zotero_summarizer/cli/README.md) contracts.
 Full reviews keep contribution, caveats and findings together before folded assessment.
 Goal evidence remains accessible without repeated summaries; approved Zotero notes use
 persisted paper-specific content. See [usage](docs/usage.md#reading-reviews-and-zotero-notes)
-for long-field omission notices and the separate native/user acceptance boundaries.
+for optional long-field budgets and the separate native/user acceptance boundaries.
 
 Search's folded explicit constraints are user-owned. Model proposals are visible,
 not hard gates; inferred refinement exclusions cannot silently remove results.
