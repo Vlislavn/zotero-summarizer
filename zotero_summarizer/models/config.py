@@ -17,6 +17,9 @@ from zotero_summarizer.models.providers import (
 )
 
 
+MIN_MAP_CHUNK_CHARS = 1000
+
+
 __all__ = [
     "LLMConfig",
     "PromptOverrides",
@@ -245,7 +248,7 @@ class QualityReviewConfig(BaseModel):
     # mid-range default; only matters when chunk_strategy=map_reduce (rank ignores it). Capped by
     # the MAP model's num_ctx if map_reduce is enabled with a small local map model.
     map_chunk_chars: int = Field(
-        default=8000, ge=1000
+        default=8000, ge=MIN_MAP_CHUNK_CHARS
     )  # chunk size for the map_reduce map step
     # Auto QUALITY GATE (precision mode) — quality as a HARD filter, not an additive
     # bonus. A bad-quality paper on-topic is hidden (dont_read, source=auto_quality,

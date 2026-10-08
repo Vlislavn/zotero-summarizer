@@ -163,9 +163,53 @@ request: timeouts/cancellation may take longer than the configured deadline,
 and the current call may still incur cost. For a forcibly bounded local stop,
 process isolation is required. No detached thread is declared terminal here.
 
-**Boundaries:** imports `model/` (gate), `zotero/` (pending), and shared
-scoring; standard services rules.
+Refinement validates JSON against `RefinedSummary`. Its single existing repair
+attempt receives that model's canonical JSON schema and the actual parse/validation
+error, rather than a duplicate key list. Repair preserves the analysis; invalid
+repair still raises. Field normalization, source constraints and call budgets
+are unchanged; valid output never triggers repair.
+
+The default refinement prompt preserves source evidence status in each finding
+and overview: measured/observed results remain distinct from retrospective
+simulations, projections and hypothetical/theoretical outcomes. Conditional
+wording, population/experiment scope and author attribution stay visible;
+correlation is not rewritten as causation. Custom `prompts.refine` overrides
+replace this default. Prompt-contract tests check instruction presence and
+rendering only; source-grounded live review must validate actual faithfulness.
+
+Long full-text inputs reuse the library's source-safe mapper and the existing
+`quality_review.map_chunk_chars` setting instead of two unbounded halves. Maps
+run sequentially with cancellation checks; only explicit output truncation is
+subdivided down to the existing minimum work size. Empty or exhausted segments
+still fail before refinement. Generated notes remain derived context, not original
+source evidence; numerical scoring, providers and output-token limits are unchanged.
+
+Refinement receives the trusted UTC runtime date and distinguishes experimental
+phases, author interpretations, conditional outcomes and proposed adaptations.
+Study safeguards and measurement uncertainty associations must be source-explicit.
+When a triage model's proposed priority differs from composite mapping, the response
+labels the computed priority as authoritative and retains the model assessment as
+its pre-mapping explanation. This does not change scores or promote suggestions.
+
+**Boundaries:** imports `model/` (gate), `zotero/` (pending), the library's existing
+source mapper, and shared scoring; standard services rules.
 
 `triage_jobs.list_triage_jobs(active_only=True)` queries persisted `running` and
 `cancelling` rows before applying the display limit, so status readers can find
 an older active job after many newer terminal jobs have accumulated.
+
+Refinement's private `_json_output` boundary validates whole JSON directly, or
+scans balanced outer objects/arrays in narrative text using the standard JSON
+parser and the supplied model contract. Nested examples are not candidates.
+Exactly one schema-valid decoded root is required; identical decoded repeats
+are allowed, differing valid roots are ambiguous and use the same single repair
+attempt (invalid repair propagates). The shared `extract_json_blob` and decoded
+output capture/telemetry are unchanged. Candidate spans do not overlap: scanning
+and decoding work is bounded by input characters, without suffix retries or regex.
+
+Triage receives the complete canonical `RefinedSummary` JSON inside the existing
+untrusted summary boundary, not an executive-only excerpt. Methods, findings,
+limitations and optional artifacts remain available without new calls or scoring
+changes. Default refinement preserves conditional effect directions and Results
+exceptions, failed versus absent validation, and repository versus reproducibility
+evidence. Instruction-presence tests are not scientific-faithfulness evaluations.

@@ -19,7 +19,7 @@ services/ ─calls→ integrations/ ─talks to→  Zotero DB | PDFs | LLM API |
 | `zotero_write.py` | `ZoteroWriter`: WAL-consistent backup and apply dispatcher. An explicit transaction encloses per-row savepoints; lock errors roll back the entire batch before retry, invalid rows return individual failures, and unexpected errors propagate. WAL setup failures are not swallowed. Backup pruning follows a successful write. |
 | `_zotero_write_items.py` · `_zotero_write_feed.py` · `_zotero_write_fields.py` · `_zotero_write_attachments.py` · `_zotero_write_tags.py` · `_zotero_write_collections.py` | writer mixins (item creation/materialization · idempotent feed-read bookkeeping · `set_field` single-field upsert e.g. Call Number · native imported_url attachment · tag/note helpers · collections) |
 | `_zotero_write_common.py` | `ZoteroWriteError` + LOGGER + `resolve_user_library_item_id` — the single guard every write that targets an item by key routes through, scoping resolution to `type='user'` so a feed item's key can never be mutated/parented into the user library (`required=False` for the best-effort batch remove). Mirrors `_USER_LIBRARY_ID_SELECT` on the read side (leaf) |
-| `pdf.py` · `pdf_fetch.py` | extract local PDFs; fetch OA PDFs with size/timeout/magic caps. Automatic destinations/redirects use the shared public-IP pinning boundary; proxy env is ignored. Cached paths remain usable offline. |
+| `pdf.py` · `pdf_fetch.py` | extract local PDFs as plain analysis text using OnPrem's existing `pdf_markdown=False` backend; fetch OA PDFs with size/timeout/magic caps. Automatic destinations/redirects use the shared public-IP pinning boundary; proxy env is ignored. Cached paths remain usable offline. |
 | `browser_fetch.py` | Institutional-access PDF acquisition with an optional Patchright/Playwright Chromium browser and persistent login profile. Native response interception reads bounded CDP streams, preserves HTML/JS/cookies, and follows citation metadata plus Download PDF links; no unbounded context-request or response-body API. PDF bytes are identified by magic even when the main document has a wrong MIME type. Declared-but-unavailable PDFs do not become rendered paywall stubs. Web articles without declared PDFs can use bounded streamed print output; `render_article_pdf` uses an ephemeral context and a distinct `render:` cache key. Browser sessions share the public-only proxy and one lock; `channel` selects Chrome/bundled Chromium. Optional cookie-store import and headed login readiness remain here. Missing dependency/non-PDF returns `None`; oversized bodies and unexpected acquisition errors propagate. |
 | `llm.py` | `LLMClient` protocol + `InstrumentedLLMClient`: logging and capability-gated JSON Schema constraints for every Pydantic call. Reuses `build_response_format`; explicit per-call formats take precedence and plain prompts stay unconstrained. |
 | `llm_callbacks.py` | Completion metadata guard, registered by the shared OnPrem builder: logs actual token usage and finish reason without response text. `length` raises before parsing, so truncated reasoning/JSON cannot be mistaken for a factual error and regenerated with the same exhausted budget. |
@@ -112,6 +112,10 @@ user edits; callers must reuse a reserved key only for the same creation intent.
 Queued feed-read writes verify both item and feed-library IDs and preserve an
 existing read timestamp. Note insertion deduplicates identical visible HTML;
 upsert requires a marker in its HTML and matches it literally among live notes.
+Note add/upsert stores Zotero's native `<div class="zotero-note znv1">` envelope
+so the native loader treats fragments as HTML, not escaped legacy plain text.
+Existing native envelopes stay unchanged; exact legacy-fragment replay remains
+idempotent without rewriting it. This does not auto-migrate existing user notes.
 Tag removal deletes all matching case variants linked to the selected item,
 using the existing SQLite `lower` matching semantics. It does not delete the
 shared tag records or links belonging to other items. A one-row lookup is still
@@ -128,3 +132,45 @@ Search metadata preserves Europe PMC `pubTypeList.pubType` and OpenAlex work
 `type` as publication-type lists (unknown/malformed values stay empty). These are
 source metadata, not prose-derived methodology classifications. OpenAlex search
 requests include `type` in the selected fields.
+
+Ownership matching for note upserts is structural, never a substring search.
+The final meaningful paragraph's metadata suffix (separated by ` · `) wins
+against earlier comments/body mentions; malformed or duplicate fields fail safe.
+Triage requires version, generated_at and source; verdict, digest and user_note
+retain their actual version-1 two-field protocol. Percent-encoded type names
+are not decoded. Leading real legacy HTML metadata comments remain supported;
+escaped comments and code/quotation blocks do not establish ownership.
+Removing a native editor's footer leaves its comment-free note unowned. No
+migration or rewriting of unrelated notes is performed.
+
+Envelope fixtures use real legacy ownership comments, not bare body markers.
+Digest metadata remains the final meaningful paragraph after strengths/weaknesses,
+so comment-stripped native notes retain ownership without broadening adoption.
+Ownership, replay and manual-note isolation are covered by
+`tests/test_note_ownership.py`, `tests/test_zotero_audit_boundaries.py` and
+`tests/test_zotero_note_envelope.py`. Native acceptance receipts remain private.
+
+CompletionGuard raises typed `LLMOutputTruncated(RuntimeError)` only for observed `length`; metadata-only logs and its diagnostic message remain unchanged.
+
+Analysis-source serialization correction (CAPA: proven for the checked PDF):
+
+```
+Same PDF -> OnPrem Markdown -> interleaved signed uncertainty -> analysis input
+         -> OnPrem plain    -> intact upper/lower signed text -> analysis input
+Presentation PDF parser / HTML rendering: separate path, unchanged
+```
+
+The adapter uses `load_single_document(path, pdf_markdown=False)` for analysis.
+Markdown conversion can interleave signs and superscript/subscript fragments;
+this boundary reuses the existing plain backend rather than patching individual
+measurements or changing presentation parsing. No universal mathematical-layout
+guarantee is implied; primary evidence still needs checking.
+
+Callers consume strings: deep review, triage summarization, search full text,
+and the faithbench corpus; QA consumes the extracted raw body. No Markdown
+schema is required at this boundary. Presentation retains its own PDF parser.
+Prevention: `tests/test_pdf_analysis_text.py` checks the exact loader flag,
+page joining, and the real OnPrem backend on an original generated PDF with
+signed superscript/subscript uncertainty, title/Methods text and a URL.
+Source-length-dependent budgets must use the new extracted length, not old
+Markdown counts. Prompts, settings, limits and models are unchanged.

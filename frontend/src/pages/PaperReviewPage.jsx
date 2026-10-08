@@ -309,7 +309,7 @@ export default function PaperReviewPage() {
       </div>
 
       {/* Mobile jumps to the same editor; it must not overwrite an unseen draft. */}
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 px-4 py-2 backdrop-blur lg:hidden">
+      <div className="mt-4 border-t border-slate-200 bg-white/95 px-4 py-2 lg:hidden">
         <a href="#paper-actions" className="block rounded-lg bg-teal-700 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-teal-800">
           Your verdict
         </a>

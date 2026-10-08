@@ -10,6 +10,7 @@ import html
 import re
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import quote
 
 from zotero_summarizer.models import SummarizeResponse
 
@@ -39,8 +40,8 @@ def build_provenance_comment(
     grep notes by run_id, model, or version.
     """
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    safe_run = (run_id or "").replace("-->", "").replace("<!--", "")
-    safe_source = source.replace("-->", "").replace("<!--", "")
+    safe_run = quote(run_id or "", safe="").replace("--", "%2D%2D")
+    safe_source = quote(source, safe="").replace("--", "%2D%2D")
     fields = [
         f"{NOTE_PROVENANCE_NAMESPACE}:note_type=triage",
         f"version={int(version)}",
@@ -83,7 +84,8 @@ def build_triage_note_html(
     verdict = _triage_verdict(summary)
     if not verdict:
         verdict = f"Triaged paper: {title or 'Untitled'}."
-    parts = [build_provenance_comment(run_id=run_id)] if include_provenance else []
+    provenance = build_provenance_comment(run_id=run_id) if include_provenance else ""
+    parts = [provenance] if provenance else []
     parts += [f"<h2>{html.escape(glyph)} {html.escape(priority_label)}</h2>",
               f"<p>{html.escape(_bounded_note_text(verdict, text_word_budget))}</p>"]
     text_sections = (
@@ -128,6 +130,9 @@ def build_triage_note_html(
             footer_bits.append(f"🦢 surprise {surprise_score:.2f}")
         else:
             footer_bits.append("🦢 surprise pick")
+    if provenance:
+        metadata = provenance.removeprefix("<!-- ").removesuffix(" -->")
+        footer_bits.append(html.escape(metadata))
     parts.append(f"<p><em>{' · '.join(footer_bits)}</em></p>")
 
     return "".join(parts)
@@ -158,6 +163,7 @@ def build_verdict_note_html(user_priority: str, comment: str) -> str:
         f"<!-- {VERDICT_NOTE_MARKER};version=1 -->"
         f"<h2>{html.escape(glyph)} {html.escape(label)}</h2>"
         f"<p>{body}</p>"
+        f"<p><em>{VERDICT_NOTE_MARKER};version=1</em></p>"
     )
 
 
@@ -175,7 +181,8 @@ def build_user_note_html(note: str) -> str:
     """
     paras = [html.escape(p.strip()) for p in (note or "").split("\n\n") if p.strip()]
     body = "".join(f"<p>{p}</p>" for p in paras) or "<p></p>"
-    return f"<!-- {USER_NOTE_MARKER};version=1 --><h2>📝 My notes</h2>{body}"
+    return (f"<!-- {USER_NOTE_MARKER};version=1 --><h2>📝 My notes</h2>{body}"
+            f"<p><em>{USER_NOTE_MARKER};version=1</em></p>")
 
 
 # Marker for the single "deep digest" note on an item (upsert, no duplicates).
@@ -233,9 +240,9 @@ def build_digest_note_html(digest: Any) -> str:
         f"sound {digest.soundness} · nov {digest.novelty} · sig {digest.significance} · "
         f"repro {digest.reproducibility} · clarity {digest.clarity}"
     )
-    parts.append(f"<p><em>{qline}</em></p>")
     if getattr(digest, "key_strength", ""):
         parts.append(f"<p><em>+ {e(digest.key_strength)}</em></p>")
     if getattr(digest, "key_weakness", ""):
         parts.append(f"<p><em>− {e(digest.key_weakness)}</em></p>")
+    parts.append(f"<p><em>{qline} · {DIGEST_NOTE_MARKER};version=1</em></p>")
     return "".join(parts)

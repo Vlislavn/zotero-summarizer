@@ -173,7 +173,9 @@ def test_pipeline_stop_after_first_llm_call_prevents_more_calls(monkeypatch, tex
     else:
         result = summarization.run_pipeline(request)
         assert result.executive_summary == "grounded summary" and result.relevance_score == 3
-        assert llm.prompt.call_count == (3 if len(text) > 80000 else 1)
+        from zotero_summarizer.services.library._map_reduce import split_chunks
+        maps = len(split_chunks(text, config.quality_review.map_chunk_chars)) if len(text) > 80000 else 0
+        assert llm.prompt.call_count == maps + 1
         llm.pydantic_prompt.assert_called_once()
 
 

@@ -11,11 +11,22 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Fold goal findings without losing originals; disclose saved source basis and unknown reviewed extent. Factor literal warning frames into one introduction with expanded scope/context, qualifiers and source links; retain original wording. Compact cards remain unchanged.
 - Retain long paper-specific note fields by default. Whole-field omission budgets are explicit renderer opt-ins only, pending usefulness validation; no unmeasured shortening policy is enabled in materialization.
 - Reorder full reviews around contribution, caveats and findings; fold assessment and goal evidence without losing source text. Improve triage-note fallback, optional sections and materialization metrics; retain explicit native/user acceptance gates.
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Extract analysis text through the existing plain-PDF backend, avoiding Markdown transformations that can interleave signed superscripts/subscripts. Include the adapter fingerprint in review identity; presentation parsing stays separate and generated-PDF regressions preserve uncertainty order.
+- Reuse bounded source mapping for long triage inputs; subdivide only explicitly truncated maps to the existing minimum, checking cancellation between calls. Keep token limits, models and numerical scoring unchanged; exhausted or empty segments still fail.
+- Identify note ownership structurally, not from marker-like body text. Keep digest metadata last so comment-free native notes remain updatable; protect manual and cross-kind notes.
+- Ground refinement's date, experimental phases, study safeguards and uncertainty associations. Distinguish computed final priority from the model's pre-mapping proposal without losing its explanation or changing scores.
+- Pass complete typed refinement evidence to triage; preserve conditional effect directions, Results exceptions and validation/reproducibility distinctions in the default refinement prompt. Existing calls, routing and numerical scoring are unchanged.
+- Store note add/upsert HTML in Zotero's native envelope so its loader preserves sections instead of displaying escaped markup. Reuse existing envelopes and keep exact legacy replay idempotent without auto-migrating user notes.
+- Preserve ownership metadata as note text across native editor save/reopen; reuse footers, retain legacy comments and protect unrelated manual notes. Comments alone are not a durable ownership boundary.
+- Validate complete, unambiguous typed refinement JSON instead of selecting a leading unrelated object. The single repair receives the canonical schema and validation errors; differing valid roots fail safely.
+- Preserve observed versus simulated/projected outcomes, conditional scope and author attribution in refinement findings and overview; do not promote correlation to causality.
+- Put contribution before recommendations on full reviews, qualify exact overstated findings once, fold goal reasons with evidence, and keep the mobile verdict link in document flow rather than covering text.
 - Preserve every saved finding, reading hint and tag instead of silently capping lists at six; add eight-item regressions.
 - Prioritize bounded publication-type recovery with title hints, never title-based eligibility; expose unattempted/confirmed counts. Real source metadata recovered qualifying reviews without increasing lookup budgets.
 - Normalize optional positive signs in source/digest numeric tokens. A real captured review failed on `+3.3` versus `3.3` and `9.6` versus `+9.6`; negative signs, absent magnitudes, arithmetic restrictions and semantic verification remain enforced.

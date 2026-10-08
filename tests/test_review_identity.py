@@ -22,3 +22,19 @@ def test_review_identity_changes_with_pdf_model_config_or_focus(tmp_path, monkey
     changed.research_goals = ["different goal"]
     assert identity(changed)["generation_sha256"] != original["generation_sha256"]
     assert identity(focus="methods only")["generation_sha256"] != original["generation_sha256"]
+
+
+def test_generation_identity_tracks_analysis_extractor_code(tmp_path, monkeypatch):
+    from zotero_summarizer.integrations import pdf as extractor
+    source = tmp_path / "pdf.py"
+    source.write_text("analysis extraction version one")
+    monkeypatch.setattr(extractor, "__file__", str(source))
+    _review_identity._generation_sources.cache_clear()
+    try:
+        first = _review_identity._generation_sources()
+        source.write_text("analysis extraction version two")
+        _review_identity._generation_sources.cache_clear()
+        second = _review_identity._generation_sources()
+        assert first["pdf.py"] != second["pdf.py"]
+    finally:
+        _review_identity._generation_sources.cache_clear()

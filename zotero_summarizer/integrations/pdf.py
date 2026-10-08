@@ -16,7 +16,7 @@ class OnPremPdfExtractor:
         self._load_single_document = load_single_document
 
     def extract_text(self, pdf_path: str | Path) -> str:
-        docs = self._load_single_document(str(pdf_path), pdf_markdown=True)
+        docs = self._load_single_document(str(pdf_path), pdf_markdown=False)
         parts = []
         for doc in docs:
             text = getattr(doc, "page_content", None)

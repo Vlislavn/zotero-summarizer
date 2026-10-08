@@ -8,6 +8,10 @@ from langchain_core.outputs import LLMResult
 from .llm import LOGGER
 
 
+class LLMOutputTruncated(RuntimeError):
+    """The provider explicitly reported an exhausted output budget."""
+
+
 class CompletionGuard(BaseCallbackHandler):
     raise_error = True
     run_inline = True
@@ -22,7 +26,7 @@ class CompletionGuard(BaseCallbackHandler):
                     reason, usage.get("prompt_tokens"), usage.get("completion_tokens"),
                 )
                 if reason == "length":
-                    raise RuntimeError(
+                    raise LLMOutputTruncated(
                         "LLM response exhausted its output token limit (finish_reason=length). "
                         "Reduce thinking effort or increase the provider's max_tokens; "
                         "the incomplete response was not accepted."

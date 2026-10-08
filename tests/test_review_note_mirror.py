@@ -20,7 +20,10 @@ def _note(zdb):
     with closing(sqlite3.connect(zdb)) as conn:
         rows = conn.execute("SELECT note FROM itemNotes").fetchall()
     assert len(rows) == 1
-    return rows[0][0]
+    native = rows[0][0]
+    prefix = '<div class="zotero-note znv1">'
+    assert native.startswith(prefix) and native.endswith('</div>')
+    return native[len(prefix):-len('</div>')]
 
 
 @pytest.mark.parametrize("operation,value", [("set", "new <note>"), ("delete", None)])

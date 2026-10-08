@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from typing import Any
 
 from zotero_summarizer.integrations._zotero_write_common import (  # noqa: F401
@@ -13,6 +14,84 @@ from zotero_summarizer.integrations._zotero_write_common import (  # noqa: F401
     resolve_user_library_item_id,
 )
 from zotero_summarizer.storage.repositories import table_columns
+
+
+def _native_note_html(fragment: str) -> str:
+    if re.fullmatch(r'<div class="zotero-note znv[0-9]+">[\s\S]*</div>', fragment):
+        return fragment
+    return '<div class="zotero-note znv1">' + fragment + '</div>'
+
+
+class _OwnershipHTML(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.stack = []
+        self.paragraphs = []
+        self.current = None
+        self.comments = []
+        self.tail = ""
+
+    def handle_starttag(self, tag, attrs):
+        if tag not in {"br", "img", "hr", "input", "meta", "link"}:
+            self.stack.append(tag)
+        if tag == "p":
+            self.current = ["<invalid>"] if any(t in {"pre", "code", "blockquote"} for t in self.stack) else []
+        elif tag not in {"div", "em", "span", "strong", "br"} and self.current is not None:
+            self.current.append("<invalid>")
+
+    def handle_endtag(self, tag):
+        if tag == "p" and self.current is not None:
+            text = "".join(self.current).strip()
+            if text:
+                self.paragraphs.append(text)
+                self.tail = ""
+            self.current = None
+        if tag in self.stack:
+            del self.stack[self.stack.index(tag):]
+
+    def handle_data(self, data):
+        if self.current is not None:
+            self.current.append(data)
+        elif data.strip():
+            self.tail += data
+
+    def handle_comment(self, data):
+        if not self.paragraphs and not self.tail and all(tag == "div" for tag in self.stack):
+            self.comments.append(data.strip())
+
+
+def _metadata_marker(text: str, *, footer: bool) -> str | None:
+    fields = text.split(";")
+    pairs = [field.split("=", 1) for field in fields]
+    if any(len(pair) != 2 or not pair[1] for pair in pairs):
+        return None
+    values = dict(pairs)
+    if len(values) != len(pairs) or not re.fullmatch(r"zs:note_type=[a-z_]+", fields[0]):
+        return None
+    if not re.fullmatch(r"[1-9][0-9]*", values.get("version", "")):
+        return None
+    if footer:
+        kind = values["zs:note_type"]
+        if kind == "triage":
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", values.get("generated_at", "")):
+                return None
+            if not values.get("source"):
+                return None
+        elif kind not in {"verdict", "digest", "user_note"} or values["version"] != "1":
+            return None
+    return fields[0]
+
+
+def _owns_note(note: str, marker: str) -> bool:
+    parser = _OwnershipHTML()
+    parser.feed(note)
+    parser.close()
+    footer = parser.paragraphs[-1].rsplit(" · ", 1)[-1] if parser.paragraphs else ""
+    if footer.startswith("zs:note_type="):
+        return not parser.tail and _metadata_marker(footer, footer=True) == marker
+    owners = {_metadata_marker(comment, footer=False) for comment in parser.comments}
+    owners.discard(None)
+    return owners == {marker}
 
 
 class ZoteroTagMixin:
@@ -66,10 +145,12 @@ class ZoteroTagMixin:
         note_html = str(payload.get("note_html") or "").strip()
         if not note_html:
             raise ZoteroWriteError("Note payload is empty")
+        fragment = note_html
+        note_html = _native_note_html(fragment)
         existing = conn.execute(
-            "SELECT itemID FROM itemNotes WHERE parentItemID = ? AND note = ? "
+            "SELECT itemID FROM itemNotes WHERE parentItemID = ? AND note IN (?, ?) "
             "AND itemID NOT IN (SELECT itemID FROM deletedItems) LIMIT 1",
-            (parent_item_id, note_html),
+            (parent_item_id, note_html, fragment),
         ).fetchone()
         if existing is not None:
             return  # Replaying the same visible note has already delivered its content.
@@ -153,14 +234,16 @@ class ZoteroTagMixin:
             raise ZoteroWriteError("Note payload is empty")
         if not marker or marker not in note_html:
             raise ZoteroWriteError("Upsert note requires a marker present in its HTML")
+        note_html = _native_note_html(note_html)
 
         parent_item_id = resolve_user_library_item_id(conn, item_key)
 
         existing = conn.execute(
-            "SELECT itemID FROM itemNotes WHERE parentItemID = ? AND instr(note, ?) > 0 "
-            "AND itemID NOT IN (SELECT itemID FROM deletedItems) LIMIT 1",
-            (parent_item_id, marker),
-        ).fetchone()
+            "SELECT itemID, note FROM itemNotes WHERE parentItemID = ? "
+            "AND itemID NOT IN (SELECT itemID FROM deletedItems)",
+            (parent_item_id,),
+        ).fetchall()
+        existing = next((row for row in existing if _owns_note(row["note"], marker)), None)
         if existing is None:
             self._apply_note_change(
                 conn,

@@ -131,19 +131,8 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
     </div>
   );
 
-  return (
-    <div className={`review-prose text-slate-800 ${flat && !compact ? 'review-reading' : ''}`}>
-      {/* Code repository, pulled to the very top (the first thing you want when
-          deciding to reproduce). Full surfaces only — the compact Library card
-          stays clean. Older cached reviews have no code_link → renders nothing. */}
-      {!compact && !flat && deep.code_link && <CodeLink codeLink={deep.code_link} />}
-
-      {/* Verdict banner — the single loud element (Von Restorff). In the compact
-          Library card every signal is a chip on this ONE row (grade + band +
-          red-flag count), each hide-when-empty, so the glance is pre-attentive
-          (colour carries the verdict) and the gloss/coverage/flag-text all move
-          into Details. Full surfaces keep the labelled "Quality {grade}" chip. */}
-      <div className={`rounded-lg border-l-[3px] px-3.5 py-3 ${VERDICT_ACCENT[verdict.key] || VERDICT_ACCENT.skip}`}>
+  const recommendation = (
+    <div className={`rounded-lg border-l-[3px] px-3.5 py-3 ${VERDICT_ACCENT[verdict.key] || VERDICT_ACCENT.skip}`}>
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-display text-[22px] font-light tracking-tight text-slate-900">{verdict.label}</span>
           {digest?.estimated_read_minutes != null && <Chip tone="slate">{digest.estimated_read_minutes} min</Chip>}
@@ -174,6 +163,21 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
           </p>
         )}
       </div>
+  );
+
+  return (
+    <div className={`review-prose text-slate-800 ${flat && !compact ? 'review-reading' : ''}`}>
+      {/* Code repository, pulled to the very top (the first thing you want when
+          deciding to reproduce). Full surfaces only — the compact Library card
+          stays clean. Older cached reviews have no code_link → renders nothing. */}
+      {!compact && !flat && deep.code_link && <CodeLink codeLink={deep.code_link} />}
+
+      {/* Verdict banner — the single loud element (Von Restorff). In the compact
+          Library card every signal is a chip on this ONE row (grade + band +
+          red-flag count), each hide-when-empty, so the glance is pre-attentive
+          (colour carries the verdict) and the gloss/coverage/flag-text all move
+          into Details. Full surfaces keep the labelled "Quality {grade}" chip. */}
+      {!flat && recommendation}
 
       {/* (The Rigor·Relevance summary spine was removed — it restated the two
           sections immediately below it, "Relevance to your goals" + "Quality —
@@ -184,17 +188,19 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
             {tldr ? <p>{tldr}</p> : <p>Contribution not recorded in this saved review.</p>}
             {isNonPaper && <p>Not a research paper — reviewed for relevance only; scientific quality criteria don't apply.</p>}
           </Section>
+          {recommendation}
           <Section label="Caveats and coverage">
+            <p>Saved source basis — quality: {quality?.basis || 'not recorded'}; digest: {digest?.basis || 'not recorded'}. Reviewed extent not recorded.</p>
             {deep.code_link && <CodeLink codeLink={deep.code_link} />}
-            {quality && !isNonPaper && <QualityHeadline quality={quality} band={band} flagLoc={flagLoc} missLoc={missLoc} />}
+            {quality && !isNonPaper && <QualityHeadline quality={quality} band={band} flagLoc={flagLoc} missLoc={missLoc} critiqueViews />}
             <dl><KeyVal label="Weakness" tone="neg">{digest?.key_weakness}</KeyVal></dl>
             {quality && !isNonPaper && <MaterialClaims quality={quality} />}
             {!quality && <p>Assessment and source coverage not recorded in this saved review.</p>}
           </Section>
           <Section label="Findings and applicability">
-            <Bullets items={digest?.key_findings} />
+            <Bullets items={digest?.key_findings?.filter(text => !(quality && !isNonPaper && (quality.overstatements || []).filter(Boolean).includes(text)))} />
             {goals.length > 0 && <><SectionLabel level={3}>{`Relevance — ${nHitGoals} of ${goals.length} goals addressed`}</SectionLabel>
-              <GoalBoard goals={goals} goalLoc={goalLoc} /></>}
+              <GoalBoard goals={goals} goalLoc={goalLoc} foldReasons /></>}
           </Section>
           <Section label="Methods and limitations">
             <dl><KeyVal label="Methods">{digest?.methods}</KeyVal>
@@ -327,7 +333,7 @@ function SectionAnchor({ section }) {
   );
 }
 
-function GoalTile({ g, sections }) {
+function GoalTile({ g, sections, foldReason }) {
   const state = String(g?.retrieval_state || 'not_retrieved');
   const supported = isSupportedGoal(g);
   const score = Number(g?.score) || 0;
@@ -349,7 +355,7 @@ function GoalTile({ g, sections }) {
         aria-valuenow={Math.max(0, Math.min(3, score))}>
         <span className="block h-full bg-teal-500" style={{ width: `${width}%` }} />
       </div>
-      <div className="text-[12px] leading-relaxed text-slate-600">{why}</div>
+      {!foldReason && <div className="text-[12px] leading-relaxed text-slate-600">{why}</div>}
       {state === 'hit' && (sections?.length ? (
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
           <span className="text-[11px] text-slate-400">In</span>
@@ -358,11 +364,12 @@ function GoalTile({ g, sections }) {
       ) : secs ? (
         <div className="mt-1.5 text-[11px] text-slate-400">Read for you: {secs}</div>
       ) : null)}
-      {state === 'hit' && quotes.length > 0 && (
+      {(foldReason || (state === 'hit' && quotes.length > 0)) && (
         <details className="mt-1 group">
           <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden rounded text-[11px] font-semibold text-teal-600 hover:text-teal-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 focus-visible:ring-offset-1">
             evidence
           </summary>
+          {foldReason && <div className="text-[12px] leading-relaxed text-slate-600">{why}</div>}
           {quotes.map((quote, i) => <blockquote key={`${i}-${quote}`}
             className="mt-1 border-l-2 border-teal-300 pl-2 text-[11px] italic text-slate-500 leading-relaxed">
             “{quote}”
@@ -395,25 +402,35 @@ function uniqueGoalFindings(goals) {
 function GoalFindings({ goals }) {
   const findings = uniqueGoalFindings(goals);
   if (!findings.length) return null;
-  const item = (finding, index) => {
-    const words = finding.text.split(/\s+/);
-    return <li key={`${index}-${finding.text}`} className="mb-2 break-words">
-      <strong className="text-slate-700">For: {finding.goals.join('; ')}</strong>
-      <p className="text-slate-600">{words.slice(0, 30).join(' ')}{words.length > 30 ? '…' : ''}</p>
-      {words.length > 30 && <details><summary className="cursor-pointer text-teal-700 focus-visible:ring-2">Full finding</summary>
-        <p>{finding.text}</p></details>}
-    </li>;
+  const items = (selected) => {
+    const groups = new Map();
+    for (const finding of selected) {
+      const key = JSON.stringify(finding.goals);
+      if (!groups.has(key)) groups.set(key, { goals: finding.goals, findings: [] });
+      groups.get(key).findings.push(finding);
+    }
+    return [...groups.entries()].map(([key, group]) => <div key={key} className="mb-2 break-words">
+      <strong className="text-slate-700">For: {group.goals.join('; ')}</strong>
+      <ul className="list-disc pl-5">{group.findings.map(finding => {
+        const words = finding.text.split(/\s+/);
+        return <li key={finding.text} className="mb-2">
+          <p className="text-slate-600">{words.slice(0, 30).join(' ')}{words.length > 30 ? '…' : ''}</p>
+          {words.length > 30 && <details><summary className="cursor-pointer text-teal-700 focus-visible:ring-2">Full finding</summary>
+            <p>{finding.text}</p></details>}
+        </li>;
+      })}</ul>
+    </div>);
   };
-  return <div className="text-xs"><ul className="list-disc pl-5">{findings.slice(0, 3).map(item)}</ul>
+  return <div className="text-xs">{items(findings.slice(0, 3))}
     {findings.length > 3 && <details><summary className="cursor-pointer text-teal-700 focus-visible:ring-2">
-      {findings.length - 3} more findings</summary><ul className="list-disc pl-5">{findings.slice(3).map((f, i) => item(f, i + 3))}</ul></details>}
+      {findings.length - 3} more findings</summary>{items(findings.slice(3))}</details>}
   </div>;
 }
 
 // Show located evidence first, including evidence against relevance. Retrieval
 // misses and degraded goals stay behind one disclosure; if none are located,
 // show them all so the section isn't empty.
-function GoalBoard({ goals, goalLoc }) {
+function GoalBoard({ goals, goalLoc, foldReasons = false }) {
   const isHit = (g) => String(g?.retrieval_state || 'not_retrieved') === 'hit';
   const addressed = goals.filter(isHit);
   const rest = goals.filter((g) => !isHit(g));
@@ -422,13 +439,13 @@ function GoalBoard({ goals, goalLoc }) {
     .filter(text => text && !findingTexts.has(text));
   const grid = (items) => (
     <div className="goal-board-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-      {items.map((g, i) => <GoalTile key={i} g={g} sections={goalLoc?.get(g?.goal)} />)}
+      {items.map((g, i) => <GoalTile key={i} g={g} sections={goalLoc?.get(g?.goal)} foldReason={foldReasons} />)}
     </div>
   );
   return (
     <div className="space-y-2">
       {grid(addressed.length ? addressed : goals)}
-      <GoalFindings goals={addressed} />
+      <Disclosure summary="Goal findings"><GoalFindings goals={addressed} /></Disclosure>
       {originals.length > 0 && <Disclosure summary="Original goal summaries">
         <dl>{originals.map((text, i) => <KeyVal key={i}
           label={goals.filter(g => String(g.summary || '').trim() === text).map(g => g.goal).join('; ')}>{text}</KeyVal>)}</dl>
@@ -448,7 +465,7 @@ function GoalBoard({ goals, goalLoc }) {
 // The DECISION half of the quality read, shown by default: the band gloss + the
 // loud red-flags callout (the only semantic box). Everything that explains HOW the
 // band was reached moves to QualityDetails, behind the one "Details" disclosure.
-function QualityHeadline({ quality, band, flagLoc, missLoc }) {
+function QualityHeadline({ quality, band, flagLoc, missLoc, critiqueViews = false }) {
   const redFlags = (quality.red_flags || []).map((x) => String(x || '').trim()).filter(Boolean);
   // Derived so the gloss never says "No red flags" while the box below lists some.
   const gloss = bandGloss(band, redFlags.length > 0);
@@ -513,7 +530,7 @@ function QualityHeadline({ quality, band, flagLoc, missLoc }) {
               <span className="text-[10px] font-semibold text-amber-600" title="Self-consistency runs disagreed or confidence was low — treat as a prompt to check, not a finding">· low confidence, verify</span>
             )}
           </div>
-          <ul className="list-disc pl-5 text-[13px] leading-relaxed text-rose-800 space-y-0.5">
+          {critiqueViews ? <CritiqueViews flags={redFlags} locations={flagLoc} rubric={quality.rubric} /> : <ul className="list-disc pl-5 text-[13px] leading-relaxed text-rose-800 space-y-0.5">
             {redFlags.map((x, i) => {
               const loc = flagLoc?.get(String(x).trim());
               return (
@@ -523,11 +540,69 @@ function QualityHeadline({ quality, band, flagLoc, missLoc }) {
                 </li>
               );
             })}
-          </ul>
+          </ul>}
         </div>
       )}
     </div>
   );
+}
+
+function sharedPrefix(left, right) {
+  const first = left.split(/\s+/);
+  const second = right.split(/\s+/);
+  let size = 0;
+  while (size < first.length && first[size] === second[size]) size++;
+  return size > 1 ? first.slice(0, size).join(' ') : '';
+}
+
+function sharedWordFrame(prefix, texts, rubric) {
+  const intro = prefix.split(/\s+/);
+  for (const term of Object.keys(rubric || {})) {
+    const rows = texts.map(text => {
+      const words = text.split(/\s+/);
+      const position = words.indexOf(term, intro.length);
+      if (position < 0 || words.indexOf(term, position + 1) >= 0) return null;
+      return { modifier: words.slice(intro.length, position).join(' '),
+        suffix: words.slice(position + 1).join(' ') };
+    });
+    if (rows.every(Boolean)) return { term, rows };
+  }
+  return null;
+}
+
+function CritiqueViews({ flags, locations, rubric }) {
+  const groups = [];
+  for (const text of flags) {
+    const previous = groups.at(-1);
+    const prefix = previous && sharedPrefix(previous.prefix, text);
+    if (prefix && text !== prefix && !previous.texts.includes(prefix)) {
+      previous.prefix = prefix;
+      previous.texts.push(text);
+    } else groups.push({ prefix: text, texts: [text] });
+  }
+  const link = text => {
+    const section = locations?.get(text);
+    return section && <span className="ml-1.5 align-middle"><SectionAnchor section={section} /></span>;
+  };
+  return <ul className="list-disc pl-5 text-[13px] leading-relaxed text-rose-800 space-y-2">
+    {groups.map(({ prefix, texts }, index) => {
+      const frame = texts.length > 1 && sharedWordFrame(prefix, texts, rubric);
+      return <li key={index}>
+      {prefix}{frame && ` … ${frame.term}`}{texts.length === 1 && link(texts[0])}
+      {texts.length > 1 && <>
+        <div className="mt-1 space-y-2 pl-2 border-l border-rose-200">
+          {frame && <p className="text-[12px] font-medium">Scope / context · original wording</p>}
+          {texts.map((text, i) => <p key={i}>
+            {frame ? <><span data-frame-modifier>{frame.rows[i].modifier}</span>{frame.rows[i].modifier && ' '}
+              <span aria-label={`shared term: ${frame.term}`}>…</span>{' '}<span data-frame-suffix>{frame.rows[i].suffix}</span></>
+              : text.split(/\s+/).slice(prefix.split(/\s+/).length).join(' ')}{link(text)}</p>)}
+        </div>
+        <Disclosure summary="Original wording"><ul className="list-disc pl-5">
+          {texts.map((text, i) => <li key={i}>{text}</li>)}
+        </ul></Disclosure>
+      </>}
+    </li>; })}
+  </ul>;
 }
 
 // The EXPLANATION half, inside the "Details" disclosure: how the grade was reached

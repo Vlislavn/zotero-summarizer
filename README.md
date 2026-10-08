@@ -33,6 +33,15 @@ Full reviews keep contribution, caveats and findings together before folded asse
 Goal evidence remains accessible without repeated summaries; approved Zotero notes use
 persisted paper-specific content. See [usage](docs/usage.md#reading-reviews-and-zotero-notes)
 for optional long-field budgets and the separate native/user acceptance boundaries.
+App-owned notes carry visible ownership metadata because native editors discard
+HTML comments. Keep that metadata to retain same-note updates; unrelated manual
+notes remain unowned. Note writes use Zotero's native HTML envelope; existing
+notes are not automatically migrated. Refinement validates an unambiguous complete typed JSON root,
+uses the canonical schema for its single repair, and preserves source outcome status
+(observed versus simulated/projected) rather than presenting every result as measured.
+Long-source mapping uses bounded work units with narrow truncation recovery; exhausted
+segments still fail. Computed priorities are distinguished from the model's pre-mapping
+proposal without changing numerical scoring. Marker-like text alone cannot own a note.
 Saved findings, reading hints and tags are not silently list-capped. Independent
 preservation/mutation tests run without private inputs. Frozen real-review browser
 replays require `ZS_REVIEW_ACCEPTANCE_MANIFEST=/path/to/frozen-input.json`; without

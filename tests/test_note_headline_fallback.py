@@ -110,7 +110,8 @@ def test_four_note_types_upsert_twice_preserve_manual_note_and_keys(tmp_path):
     assert len(snapshots[1]) == 5
     assert ('MANUAL', '<p>My unmarked personal text.</p>') in snapshots[1]
     for marker, body in notes.items():
-        assert sum(text == body and marker in text for _, text in snapshots[1]) == 1
+        expected = '<div class="zotero-note znv1">' + body + '</div>'
+        assert sum(text == expected and marker in text for _, text in snapshots[1]) == 1
 
 
 def test_sentence_budget_does_not_split_decimal_or_source_url():

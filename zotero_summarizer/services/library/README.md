@@ -2,6 +2,9 @@
 
 Public documentation describes grounding contracts and regression controls;
 private provider-specific evaluation narratives stay outside the shared source.
+Generation identity includes the analysis PDF adapter's source fingerprint, so
+extraction changes invalidate cached reviews rather than silently certifying an
+old representation. Presentation parsing retains its separate identity.
 
 Numeric literal preflight treats an optional leading positive sign symmetrically:
 `+x` and `x` denote the same positive value. Negative signs and changed/absent
@@ -474,3 +477,7 @@ Library materialization reuses the triage renderer's actual fallback/size metric
 priority overrides copy the persisted summary rather than mutating it.
 
 Generation schema failures retain ValueError compatibility but report generation origin; SDK/HTTP transport failures report their actual generator/verifier boundary, not model-written access claims. The supplied-source rule applies even to custom digest templates. Admission/form-parser sources participate in review and render fingerprints.
+
+The HTML brief folds goal findings behind one native disclosure, retains original goal summaries and all quotes, and reports saved quality/digest source basis separately from unrecorded reviewed extent.
+
+Map output truncation alone subdivides the failing source chunk sequentially with the existing 200-character overlap. Work sizes halve down to the shared 1000-character floor; exhausted-floor, cancellation, empty-note and other errors propagate. Segment-labelled notes remain generation context, never verification source.
