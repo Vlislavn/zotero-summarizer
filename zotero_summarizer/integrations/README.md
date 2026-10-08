@@ -20,7 +20,10 @@ services/ ─calls→ integrations/ ─talks to→  Zotero DB | PDFs | LLM API |
 | `_zotero_write_items.py` · `_zotero_write_feed.py` · `_zotero_write_fields.py` · `_zotero_write_attachments.py` · `_zotero_write_tags.py` · `_zotero_write_collections.py` | writer mixins (item creation/materialization · idempotent feed-read bookkeeping · `set_field` single-field upsert e.g. Call Number · native imported_url attachment · tag/note helpers · collections) |
 | `_zotero_write_common.py` | `ZoteroWriteError` + LOGGER + `resolve_user_library_item_id` — the single guard every write that targets an item by key routes through, scoping resolution to `type='user'` so a feed item's key can never be mutated/parented into the user library (`required=False` for the best-effort batch remove). Mirrors `_USER_LIBRARY_ID_SELECT` on the read side (leaf) |
 | `pdf.py` · `pdf_fetch.py` | extract local PDFs as plain analysis text using OnPrem's existing `pdf_markdown=False` backend; fetch OA PDFs with size/timeout/magic caps. Automatic destinations/redirects use the shared public-IP pinning boundary; proxy env is ignored. Cached paths remain usable offline. |
-| `browser_fetch.py` | Institutional-access PDF acquisition with an optional Patchright/Playwright Chromium browser and persistent login profile. Native response interception reads bounded CDP streams, preserves HTML/JS/cookies, and follows citation metadata plus Download PDF links; no unbounded context-request or response-body API. PDF bytes are identified by magic even when the main document has a wrong MIME type. Declared-but-unavailable PDFs do not become rendered paywall stubs. Web articles without declared PDFs can use bounded streamed print output; `render_article_pdf` uses an ephemeral context and a distinct `render:` cache key. Browser sessions share the public-only proxy and one lock; `channel` selects Chrome/bundled Chromium. Optional cookie-store import and headed login readiness remain here. Missing dependency/non-PDF returns `None`; oversized bodies and unexpected acquisition errors propagate. |
+| `browser_fetch.py` | Institutional-access PDF acquisition with optional Patchright/Playwright Chromium and a persistent login profile. Bounded decoded CDP streams preserve HTML/JS/cookies and follow citation metadata plus Download PDF links; PDF bytes are identified by magic even with a wrong MIME type. A declared-but-unavailable scholarly PDF does not become a rendered paywall stub. HTML-only article review uses bounded text-only snapshots, not Chromium printing. The canonical `article_snapshot_path(url, cache_dir)` identifies only those derivatives: they use `cache_dir/article-snapshots/<full SHA-256(raw URL)>.pdf`; captured publisher PDFs from either browser entrypoint use the unchanged root-level `cache_dir/<first 16 hex SHA-256(raw URL)>.pdf` key. Persistent snapshots are reused only with `render_fallback=True`, after the source-PDF cache check. Legacy prefixed root-level snapshot files remain untouched; there is no alias, migration, or deletion. See the [browser article memory boundary](../../docs/browser-article-memory-boundary.md). Browser sessions share the public-only proxy and one lock; `channel` selects Chrome/bundled Chromium. Optional cookie-store import and headed login readiness remain here. Missing dependency/non-PDF returns `None`; oversized bodies and unexpected acquisition errors propagate. |
+| [`_browser_response.py`](./_browser_response.py) | Bounded decoded Fetch/CDP response capture and proxy authentication. A captured PDF requires actual `%PDF-` bytes within `max_bytes`, independent of MIME; a typed missing-PDF status is recorded only when the main-frame response declares `application/pdf` and returns HTTP 400+ (except 407). |
+| [`_browser_article.py`](./_browser_article.py) | Complete admitted-scope `document.body` text-node collection in a CDP isolated world, in ≤8 KiB UTF-8 chunks with text-byte, DOM-node and deadline limits. It does not collect images, layout, CSS-generated content, embedded frames, or shadow trees. Mutation, partial traversal, invalid/empty text, or exhausted limits fail closed rather than returning a prefix. |
+| [`_article_pdf.py`](./_article_pdf.py) | Bounded fixed-layout text-only PDF writer with source/page/output caps and a text round-trip check. Uses PyMuPDF's built-in Helvetica and `cjk` fallback, subset by PyMuPDF itself; no `fontTools` import or dependency. PDF Subject is `Text-only conversion; original visual layout is not preserved.` |
 | `llm.py` | `LLMClient` protocol + `InstrumentedLLMClient`: logging and capability-gated JSON Schema constraints for every Pydantic call. Reuses `build_response_format`; explicit per-call formats take precedence and plain prompts stay unconstrained. |
 | `llm_callbacks.py` | Completion metadata guard, registered by the shared OnPrem builder: logs actual token usage and finish reason without response text. `length` raises before parsing, so truncated reasoning/JSON cannot be mistaken for a factual error and regenerated with the same exhausted budget. |
 | `llm_anthropic.py` | `AnthropicLLMClient`: native Anthropic messages-API client implementing the same `LLMClient` protocol (`.prompt` / `.pydantic_prompt`). Lazy `import anthropic`. Optional `thinking_budget` (set from the provider's `thinking_effort`) enables extended thinking — passes `thinking={type:enabled,budget_tokens}` and clamps `max_tokens` up to `budget+1024` (the API requires `max_tokens > budget`); `None` keeps thinking off. Temperature is never sent (Opus 4.x rejects it). |
@@ -52,7 +55,11 @@ unrelated background DNS requests cannot invalidate a fetched paper. Initial
 article DNS failures still raise; non-public addresses remain blocked and fatal.
 Other proxy worker errors are rethrown before publication; navigation/DOM/transport
 errors no longer become an empty PDF result. This is an egress restriction, not
-a browser sandbox or a decoded/rendered-body memory bound (A111 remains open).
+a browser sandbox or process-RAM limit. Article byte/node/page caps do not bound
+native browser, JavaScript, image, or library transient allocations. The final
+synthetic-origin live receipt (`data/a111-live-final-provenance/summary.md`) has
+18 passed, 0 skipped, 217 CDP calls and zero `Page.printToPDF`; it is path/contract
+proof, not a Chromium/OS RSS bound.
 Login navigation/close failures return an explicit failed result and never create
 the completion marker. An existing marker is retained; it records a completed
 flow, not proof that authentication is currently valid. Blank login URLs still
@@ -79,11 +86,16 @@ replacement, including when the browser is absent or acquisition raises.
 Browser body reads request at most 64,000 bytes or the remaining limit plus one
 detection byte; rejected chunks never enter the accumulated body and stream
 handles close on success/error. Fetch interception covers the main document and
-PDF responses at the header stage, before the driver can collect an entire body.
-Non-PDF HTML is fulfilled with its decoded bytes so scripts and session cookies
-still work. Print output uses CDP `ReturnAsStream`, not `page.pdf()`'s internal
-unbounded concatenation. This bounds transferred/accumulated body bytes, not
-Chromium's DOM, image-decoding or PDF-rendering working memory.
+PDF responses before the driver collects a complete body. Non-PDF HTML is
+fulfilled with its decoded bytes so scripts and session cookies still work. For
+HTML-only article output, the selected main-document response is capped before
+fulfillment; a CDP isolated-world walk either completes the admitted `document.body`
+text scope under byte/node/time and mutation checks or fails closed. It does not
+return a clipped prefix or collect visual/generated/embedded content. A fixed
+PyMuPDF text layout writes to a bounded PDF sink; `Page.printToPDF` is not used.
+Main-document and text/output caps do not limit subresource traffic, all browser
+network activity, or Chromium's DOM, JavaScript, image-decoding, or rendering
+memory. See the [article memory boundary](../../docs/browser-article-memory-boundary.md).
 Both Fetch request and response stages are enabled: the request stage is needed
 for authenticated-proxy challenges. Only the exact session proxy receives its
 ephemeral credentials, once per request; origin/foreign/repeated challenges are

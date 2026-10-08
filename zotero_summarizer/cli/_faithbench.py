@@ -22,6 +22,30 @@ def _print_progress(message: str) -> None:
     print(f"  {message}", flush=True)
 
 
+def _resolve_build_window_budget(args: argparse.Namespace) -> int:
+    """Resolve the build budget without loading Settings or mutating the environment."""
+    from dotenv import dotenv_values
+    from zotero_summarizer.settings import default_project_root
+    from zotero_summarizer.services.faithbench._constants import (
+        QA_MAX_BUILDER_WINDOWS_ENV,
+        resolve_qa_max_builder_windows,
+    )
+
+    if args.max_builder_windows is not None:
+        return resolve_qa_max_builder_windows(args.max_builder_windows)
+    if QA_MAX_BUILDER_WINDOWS_ENV in os.environ:
+        return resolve_qa_max_builder_windows(environment=os.environ)
+
+    project_root = (
+        Path(args.project_root).expanduser().resolve()
+        if args.project_root
+        else default_project_root()
+    )
+    env_file = project_root / ".env"
+    environment = dotenv_values(env_file) if env_file.is_file() else {}
+    return resolve_qa_max_builder_windows(environment=environment)
+
+
 def _validate_faithbench_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
     """Parse valid execution options before Settings, files or provider construction."""
     from zotero_summarizer.services.faithbench import RunOptions
@@ -30,6 +54,10 @@ def _validate_faithbench_args(args: argparse.Namespace, parser: argparse.Argumen
         for name, minimum in (("n_papers", 2), ("qa_per_paper", 1), ("traps_per_paper", 1)):
             if getattr(args, name) < minimum:
                 parser.error(f"--{name.replace('_', '-')} must be at least {minimum}")
+        try:
+            args.max_builder_windows = _resolve_build_window_budget(args)
+        except ValueError as exc:
+            parser.error(str(exc))
     elif args.faithbench_command == "run":
         try:
             args.run_options = RunOptions(
@@ -119,6 +147,7 @@ def _faithbench_build(args: argparse.Namespace) -> int:
         builder_llm=builder_llm,
         qa_per_paper=args.qa_per_paper,
         traps_per_paper=args.traps_per_paper,
+        max_builder_windows=args.max_builder_windows,
         progress_cb=_print_progress,
     )
 
@@ -138,6 +167,7 @@ def _faithbench_build(args: argparse.Namespace) -> int:
         config={
             "n_papers": args.n_papers, "qa_per_paper": args.qa_per_paper,
             "traps_per_paper": args.traps_per_paper,
+            "max_builder_windows": args.max_builder_windows,
         },
     )
     bench_path = _dataset.benchmark_path(faithbench_dir, version)
@@ -335,6 +365,9 @@ def register_faithbench(subparsers) -> None:
         DEFAULT_N_PAPERS,
         DEFAULT_QA_PER_PAPER,
         DEFAULT_TRAPS_PER_PAPER,
+        DEFAULT_QA_MAX_BUILDER_WINDOWS,
+        MAX_QA_BUILDER_WINDOWS,
+        QA_MAX_BUILDER_WINDOWS_ENV,
     )
 
     fb = subparsers.add_parser(
@@ -352,6 +385,12 @@ def register_faithbench(subparsers) -> None:
     build.add_argument("--n-papers", type=int, default=DEFAULT_N_PAPERS)
     build.add_argument("--qa-per-paper", type=int, default=DEFAULT_QA_PER_PAPER)
     build.add_argument("--traps-per-paper", type=int, default=DEFAULT_TRAPS_PER_PAPER)
+    build.add_argument(
+        "--max-builder-windows", type=int, default=None,
+        help=(f"Maximum source windows per paper (1-{MAX_QA_BUILDER_WINDOWS}). Precedence: "
+              f"this option, {QA_MAX_BUILDER_WINDOWS_ENV}, then "
+              f"{DEFAULT_QA_MAX_BUILDER_WINDOWS}."),
+    )
     build.add_argument("--papers", default=None, help="Comma-separated Zotero item keys (overrides selection).")
     build.add_argument("--collection", default=None, help="Restrict selection to a collection key.")
     build.add_argument("--tag", default=None, help="Restrict selection to a tag.")

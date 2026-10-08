@@ -38,3 +38,27 @@ def test_generation_identity_tracks_analysis_extractor_code(tmp_path, monkeypatc
         assert first["pdf.py"] != second["pdf.py"]
     finally:
         _review_identity._generation_sources.cache_clear()
+
+
+def test_generation_identity_tracks_section_summary_verifier_code(tmp_path, monkeypatch):
+    from zotero_summarizer.services.library import _paper_section_summaries
+
+    source = tmp_path / "_paper_section_summaries.py"
+    source.write_text("verifier version one")
+    monkeypatch.setattr(_paper_section_summaries, "__file__", str(source))
+    monkeypatch.setattr(_review_identity, "settings", lambda: SimpleNamespace(summary_timeout_seconds=30))
+    config = _default_goals_config()
+    _review_identity._generation_sources.cache_clear()
+    try:
+        first = _review_identity.build_review_identity(
+            config=config, pdf_path="", source_kind="override", focus_prompt="",
+        )
+        source.write_text("verifier version two")
+        _review_identity._generation_sources.cache_clear()
+        second = _review_identity.build_review_identity(
+            config=config, pdf_path="", source_kind="override", focus_prompt="",
+        )
+
+        assert first["generation_sha256"] != second["generation_sha256"]
+    finally:
+        _review_identity._generation_sources.cache_clear()

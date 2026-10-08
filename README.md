@@ -48,6 +48,13 @@ replays require `ZS_REVIEW_ACCEPTANCE_MANIFEST=/path/to/frozen-input.json`; with
 that explicit input they skip, not pass. They check literal retention, not scientific
 truth, subjective usability or native Zotero persistence.
 
+When web-article review is enabled, HTML-only pages can be reviewed from a bounded,
+text-only extraction of the selected main document's body text—not a page facsimile.
+Images, layout, CSS-generated content, embedded frames, and shadow trees are outside
+that scope; incomplete or over-budget extraction fails rather than clipping a prefix.
+An unavailable declared scholarly PDF is not replaced by a paywall snapshot. See the
+[browser article memory boundary](docs/browser-article-memory-boundary.md).
+
 Search's folded explicit constraints are user-owned. Model proposals are visible,
 not hard gates; inferred refinement exclusions cannot silently remove results.
 Confirmed publication types require source metadata, with bounded exact-DOI recovery;
@@ -156,12 +163,15 @@ uv run zotero-summarizer migrate          # init / upgrade the local databases (
 uv run zotero-summarizer prefetch-models  # download ML models for offline use (--check = status)
 uv run zotero-summarizer feeds serve      # optional feed triage and in-place slate reviews (no automatic Zotero Add)
 uv run zotero-summarizer goldenset train-classifier  # retrain the relevance gate on your labels
+uv run zotero-summarizer faithbench build --max-builder-windows 64  # larger QA-source budget; more builder calls
 ```
 
 ## Going further
 
 - **[docs/usage.md](docs/usage.md)** — the daemon, how the model learns from your labels,
-  offline / air-gapped use, the safety model, and the full config reference.
+  offline / air-gapped use, the safety model, and the full config reference. Faithbench QA
+  builds cover contiguous 6,000-character windows (32 per paper by default); its CLI/env
+  budget and increased call cost are documented there.
 - **[Research-feed evaluation evidence](docs/issue-evidence-research-feed.md)** — why the current
   30-paper fixture is unscorable for production inclusion quality (not a 0%-precision result).
 - **[docs/architecture.md](docs/architecture.md)** — how it works, the layering rules, and

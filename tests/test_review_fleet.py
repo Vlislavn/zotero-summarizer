@@ -55,7 +55,7 @@ def test_upsert_replaces_existing_key(_store_path):
 
 def test_upsert_preserves_other_keys(_store_path):
     verdict_store.upsert("A", {"proposed": "must_read"})
-    verdict_store.upsert("B", {"proposed": "skip"})
+    verdict_store.upsert("B", {"proposed": "dont_read"})
     assert set(verdict_store.read_all()) == {"A", "B"}
 
 
@@ -109,6 +109,46 @@ def test_write_is_atomic_no_tmp_left_behind(_store_path):
     verdict_store.upsert("A", {"proposed": "must_read"})
     assert _store_path.exists()
     assert not _store_path.with_suffix(".tmp").exists()
+
+
+def test_queue_rejects_boolean_current_version_but_preserves_valid_integer_neighbor():
+    from zotero_summarizer.services.library import _ranking
+
+    review = {"review_identity": {"source_sha256": "pdf", "generation_sha256": "review-v1"}}
+    identity = verdict_store.review_fingerprint(review)
+    invalid = {
+        "proposed": "must_read",
+        "confidence": 0.85,
+        "proposal_version": True,
+        "review_identity_sha256": identity,
+    }
+    valid = {
+        "proposed": "should_read",
+        "confidence": 0.7,
+        "proposal_version": verdict_store.PROPOSAL_VERSION,
+        "review_identity_sha256": identity,
+        "review_identity": review["review_identity"],
+        "provenance_metadata": {"source": "cached_review"},
+    }
+
+    assert verdict_store.proposal_matches_review(invalid, review) is False
+    assert verdict_store.proposal_matches_review(valid, review) is True
+    unread, handled = _ranking._build_recs(
+        [{"item_key": "BAD"}, {"item_key": "GOOD"}],
+        cached={},
+        verdict_priority={},
+        reviews={"BAD": review, "GOOD": review},
+        proposed_verdicts={"BAD": invalid, "GOOD": valid},
+    )
+
+    by_key = {row["item_key"]: row for row in unread}
+    assert by_key["BAD"]["proposed_verdict"] is None
+    assert by_key["GOOD"]["proposed_verdict"] == valid
+    assert by_key["GOOD"]["proposed_verdict"]["review_identity"] == review["review_identity"]
+    assert by_key["GOOD"]["proposed_verdict"]["provenance_metadata"] == {
+        "source": "cached_review"
+    }
+    assert handled == []
 
 
 # ===========================================================================

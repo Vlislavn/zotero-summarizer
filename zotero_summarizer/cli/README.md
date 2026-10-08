@@ -33,7 +33,7 @@ main() = parse args → validate command budgets → install Settings → dispat
 | `_goldenset_classify.py` · `_goldenset_predict.py` | the heavier classify/predict/analyze commands (`classify-llm` runs any OpenAI-compatible model) |
 | `_goldenset_migrate.py` | `migrate-verdicts-to-zotero` — one-time transfer of in-app verdicts (`label_verdicts`) into Zotero `label:<priority>` tags (`--dry-run`, idempotent, library items only, single batch backup) |
 | `_goldenset_setup_colors.py` | `setup-tag-colors` — prints the one-time Zotero setup (colors + number keys 1-4 for the four `label:<priority>` tags) for native keypress labeling. Non-destructive (prints the plan; writes nothing into your synced Zotero settings); `--json` for machine output |
-| `_faithbench.py` | `faithbench build/run/judge/report` — faithfulness mini-benchmark of the deep_review-stage model (span-verified QA + traps + review-claim grounding). Build stages the review CSV before publishing the immutable benchmark file as its version marker; QA runs require explicit approval of every generated review-CSV row and bind that CSV hash into the manifest. `run` is resumable via `--run-id` and takes `--provider/--model` to sweep a model for THIS run only (no goals.yaml edit; recorded in the manifest); `judge` uses the pinned remote judge (`CUSTOM_BASE_URL`/`CUSTOM_API_KEY`). See `services/faithbench/README.md` |
+| `_faithbench.py` | `faithbench build/run/judge/report` — faithfulness mini-benchmark of the deep_review-stage model (span-verified QA + traps + review-claim grounding). Build stages the review CSV before publishing the immutable benchmark file as its version marker; QA runs require explicit approval of every generated review-CSV row and bind that CSV hash into the manifest. `build --max-builder-windows` bounds contiguous 6,000-character source windows per paper; its CLI/env/default precedence, preflight behavior and cost are documented below. `run` is resumable via `--run-id` and takes `--provider/--model` to sweep a model for THIS run only (no goals.yaml edit; recorded in the manifest); `judge` uses the pinned remote judge (`CUSTOM_BASE_URL`/`CUSTOM_API_KEY`). See `services/faithbench/README.md` |
 | `_research_feed.py` | `research-feed run --from … --to … [--venue …]`: bounded weekly JSON+Markdown; generates missing cards through existing deep review unless `--cached-only`; Zotero stays dry-run unless `--queue-zotero` is explicit. |
 
 Handlers use lazy imports inside the function bodies to keep CLI startup fast.
@@ -46,7 +46,12 @@ I/O. Builds need at least two papers and positive QA/trap counts; runs need posi
 repetitions and optional QA limits, nonempty duplicate-free conditions/tracks from
 the supported names. `--limit` requires the QA track. Parsed `RunOptions` are reused
 by the handler with only provider concurrency applied afterward; invalid input
-exits with argparse status 2, not a successful zero-work run.
+exits with argparse status 2, not a successful zero-work run. For builds,
+`--max-builder-windows` accepts 1–256; precedence is explicit CLI option > shell
+`ZS_FAITHBENCH_QA_MAX_BUILDER_WINDOWS` > the selected project's `.env` value for
+that key > default (32). The effective per-paper budget is recorded in benchmark
+metadata, and every selected paper is preflighted before the first builder inference
+call. Each additional 6,000-character window adds a builder request and cost.
 Run records its QA limit and binds the benchmark hash to the exact parsed bytes;
 resume refuses a changed limit. Judge/report reject a missing/malformed or changed
 benchmark SHA before judging/publication. Report owns artifact loading, not a second

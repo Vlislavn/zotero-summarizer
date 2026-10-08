@@ -136,7 +136,9 @@ class _Page:
         self._nav_pdf_bytes = nav_pdf_bytes
         self._dl_hrefs = dl_hrefs or []    # on-page "Download PDF" anchors
         self._cdp = None
+        self._cdps = []
         self._print_body = b""
+        self._runtime_results = []
 
     def goto(self, url, **_kw):
         if self._cdp:
@@ -164,11 +166,14 @@ class _Ctx:
         pass
 
     def new_page(self):
+        self._page.context = self
         return self._page
 
     def new_cdp_session(self, page):
-        page._cdp = _CDP(self.request, page)
-        return page._cdp
+        session = _CDP(self.request, page)
+        page._cdp = session
+        page._cdps.append(session)
+        return session
 
     def close(self):
         pass
@@ -195,6 +200,14 @@ class _CDP:
             if isinstance(self.stream, Exception):
                 raise self.stream
             return {"stream": "body"}
+        if method == "Page.createIsolatedWorld":
+            return {"executionContextId": 73}
+        if method == "Runtime.evaluate":
+            if ".cleanup()" in params["expression"]:
+                return {"result": {"type": "boolean", "value": True}}
+            if not self.page._runtime_results:
+                raise AssertionError("no fake isolated-world article chunk remains")
+            return {"result": {"type": "object", "value": self.page._runtime_results.pop(0)}}
         if method == "Fetch.takeResponseBodyAsStream":
             if isinstance(self.stream, Exception):
                 raise self.stream
@@ -207,6 +220,9 @@ class _CDP:
         if method == "Fetch.failRequest":
             self.aborted = True
         return {}
+
+    def detach(self):
+        self.calls.append(("detach", None))
 
     def navigate(self, url):
         response = self.request._table.get(url, _Resp(b"<html>page</html>"))
@@ -244,11 +260,12 @@ def test_declared_pdf_is_captured_by_browser_navigation(tmp_path):
     pdf_url = "https://www.nature.com/articles/s41746-x.pdf"
     req = _Req({landing: _Resp(b"<html>landing</html>")})
     pw = _PW(_Ctx(req, _Page(meta_url=pdf_url, nav_pdf_url=pdf_url, nav_pdf_bytes=_PDF)))
-    body = browser_fetch._drive_browser(
+    output = browser_fetch._drive_browser(
         browser_fetch._BrowserLib(lambda: pw, RuntimeError), landing, tmp_path / "prof",
         timeout=5.0, max_bytes=10_000_000, headless=True,
     )
-    assert body == _PDF  # navigated to the PDF and captured it, not b""
+    assert output.body == _PDF  # navigated to the PDF and captured it, not an empty result
+    assert output.is_rendered_text is False
 
 
 def test_download_pdf_link_used_when_citation_meta_redirects(tmp_path):
@@ -264,11 +281,93 @@ def test_download_pdf_link_used_when_citation_meta_redirects(tmp_path):
         real: _Resp(_PDF, ok=True, ctype="application/pdf"),  # the real PDF
     })
     page = _Page(meta_url=trap, nav_pdf_url=None, dl_hrefs=[real])  # nav streams nothing
-    body = browser_fetch._drive_browser(
+    output = browser_fetch._drive_browser(
         browser_fetch._BrowserLib(lambda: _PW(_Ctx(req, page)), RuntimeError), landing, tmp_path / "prof",
         timeout=5.0, max_bytes=20_000_000, headless=True,
     )
-    assert body == _PDF  # followed the Download-PDF link after the meta trap failed
+    assert output.body == _PDF  # followed the Download-PDF link after the meta trap failed
+    assert output.is_rendered_text is False
+
+
+def test_render_fallback_uses_complete_dom_text_without_printing(tmp_path, monkeypatch):
+    """The HTML/JS document is captured as bounded text; late script text survives."""
+    landing = "https://blog.example/article"
+    page = _Page()
+    page._print_body = _PDF
+    page._runtime_results = [
+        {"text": "Article body before hydration. ", "status": "more", "done": False, "nodes": 2},
+        {"text": "Late-JS-SENTINEL from hydrated article.", "status": "complete", "done": True, "nodes": 4},
+    ]
+    ctx = _Ctx(_Req({landing: _Resp(b"<html>landing</html>")}), page)
+    observed = {}
+
+    snapshot_pdf = b"%PDF-1.7\ntext snapshot"
+
+    def observe_text(text, *, max_bytes):
+        observed.update(text=text, max_bytes=max_bytes)
+        return snapshot_pdf
+
+    monkeypatch.setattr(browser_fetch, "article_text_limit", lambda max_bytes: max_bytes)
+    monkeypatch.setattr(browser_fetch, "render_text_pdf", observe_text, raising=False)
+    output = browser_fetch._drive_browser(
+        browser_fetch._BrowserLib(lambda: _PW(ctx), RuntimeError), landing, tmp_path / "profile",
+        timeout=5.0, max_bytes=1_000, headless=True, render_fallback=True,
+    )
+
+    methods = [method for session in page._cdps for method, _ in session.calls]
+    assert "Page.printToPDF" not in methods
+    assert observed == {
+        "text": "Article body before hydration. Late-JS-SENTINEL from hydrated article.",
+        "max_bytes": 1_000,
+    }
+    assert output == browser_fetch._BrowserOutput(snapshot_pdf, is_rendered_text=True)
+
+
+def test_dom_collector_reads_isolated_bounded_utf8_chunks_and_detaches():
+    page = _Page()
+    ctx = _Ctx(_Req({}), page)
+    ctx.new_page()
+    page._runtime_results = [
+        {"text": "Genome 🧬 article.", "status": "complete", "done": True, "nodes": 3},
+    ]
+    page.content = page.inner_text = page.evaluate = lambda *_a, **_k: pytest.fail("unsafe page API used")
+
+    text = browser_fetch.collect_article_text(page, max_bytes=100, timeout=2.0)
+
+    assert text == "Genome 🧬 article."
+    calls = page._cdps[0].calls
+    world = next(params for method, params in calls if method == "Page.createIsolatedWorld")
+    evaluate = next(params for method, params in calls if method == "Runtime.evaluate")
+    assert world["worldName"]
+    assert evaluate["contextId"] == 73 and 0 < evaluate["timeout"] <= 2_000
+    assert calls[-1] == ("detach", None)
+
+
+@pytest.mark.parametrize(
+    "chunks,cap,message",
+    [
+        ([{"text": "prefix", "status": "more"}, {"text": "", "status": "overbudget"}], 20, "exceeds max_bytes"),
+        ([{"text": "🧬", "status": "more"}], 3, "exceeds max_bytes"),
+        ([{"text": "partial", "status": "incomplete"}], 100, "node budget"),
+        ([{"text": "", "status": "empty"}], 100, "no extractable text"),
+    ],
+)
+def test_dom_collector_never_returns_prefix_or_unbounded_text(chunks, cap, message):
+    page = _Page()
+    ctx = _Ctx(_Req({}), page)
+    ctx.new_page()
+    page._runtime_results = [
+        {**chunk, "done": chunk["status"] in {"complete", "empty"}, "nodes": 1} for chunk in chunks
+    ]
+
+    with pytest.raises(ValueError, match=message):
+        browser_fetch.collect_article_text(page, max_bytes=cap, timeout=2.0)
+
+
+@pytest.mark.parametrize("timeout", [0, float("inf"), float("nan")])
+def test_dom_collector_rejects_invalid_work_budget(timeout):
+    with pytest.raises(ValueError, match="timeout"):
+        browser_fetch.collect_article_text(_Page(), max_bytes=100, timeout=timeout)
 
 
 def test_channel_and_no_viewport_threaded_to_launch(tmp_path):

@@ -34,6 +34,12 @@ label the computed final priority separately when the model proposed another tie
 Native-editor round trips and human/proxy read/skip sufficiency remain separate
 acceptance checks; passing preservation does not establish scientific correctness.
 
+Ask Paper uses deterministic metadata only for affirmative whole-paper figure-count
+phrasing; scoped, uncertain, table-only, combined, or unmatched count questions fall
+through to grounded Q&A. The paper artifact stores `figures_count`, not a table
+count; focused Q&A and freshness routing tests passed (39), but live natural-language
+scope accuracy is not measured.
+
 ## First-run setup
 
 There's nothing to copy and nothing to migrate by hand. On the first `serve` (or `setup`),
@@ -181,8 +187,13 @@ https://hackernoon.com/tagged/ai/feed
 
 They use generic RSS identity/dedup and the same rank/slate. Only the triage rubric
 changes: concrete architecture, implementation, failures, measurements and reusable
-steps score well; promotion, SEO and unsupported trend claims do not. Selected posts
-continue through the existing web-article render/review rung.
+steps score well; promotion, SEO and unsupported trend claims do not. When
+web-article review is enabled, HTML-only articles use a bounded, text-only extraction
+of the selected main document's body text—not a visual/page facsimile. Images, layout,
+CSS-generated content, embedded frames, and shadow trees are outside that scope;
+incomplete or over-budget extraction fails instead of clipping a prefix. Unavailable
+declared scholarly PDFs are not substituted with paywall snapshots. Direct and authenticated
+PDF downloads remain unchanged. See the [browser article memory boundary](browser-article-memory-boundary.md).
 
 Operational caveat (verified 2026-08-29): HackerNoon documents tag RSS, but the
 narrow `ai-agents` and `agentic-ai` paths return Cloudflare 403. The broader
@@ -393,6 +404,28 @@ have working defaults — leave them until you need them. `quality_review.shadow
 
 All app state (the two SQLite DBs, your golden dataset, logs, ML artifacts) lives under
 `data/` (gitignored).
+
+## Faithbench QA builder coverage
+
+`faithbench build` examines source text in contiguous, non-overlapping 6,000-character
+windows. The default is 32 windows per paper (192,000 source characters); the maximum
+is 256 (1,536,000 characters). Set the per-build limit with either the CLI option or
+the builder-specific environment variable:
+
+```bash
+uv run zotero-summarizer faithbench build --max-builder-windows 64
+ZS_FAITHBENCH_QA_MAX_BUILDER_WINDOWS=64 uv run zotero-summarizer faithbench build
+```
+
+Precedence is explicit `--max-builder-windows` > shell
+`ZS_FAITHBENCH_QA_MAX_BUILDER_WINDOWS` > the selected project's `.env` value for
+that key > default (32). The CLI validates the setting before loading project settings
+or constructing a provider. Before the first builder inference call, the build preflights every selected
+paper; if any paper exceeds the configured per-paper budget, the build fails without
+making builder calls. The effective limit is stored in benchmark metadata. Each
+additional window adds a builder call, so a higher limit costs more. This bound
+ensures contiguous source coverage only for admitted inputs; it does not prove QA
+semantic accuracy. Generated QA and traps still require human review and approval.
 
 ## Command reference
 

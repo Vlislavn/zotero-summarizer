@@ -57,7 +57,7 @@ def test_library_cache_roundtrip_is_isolated_between_projects(tmp_path):
     set_context(AppContext(settings=one))
     _review_cache._write_one("KEY", {"title": "one"})
     reading_queue._write_cache("gate", {"KEY": {"score": 4}})
-    verdict_store.upsert("KEY", {"priority": "must_read"})
+    verdict_store.upsert("KEY", {"proposed": "must_read"})
     set_context(AppContext(settings=two))
     assert _review_cache._read_all() == {}
     assert reading_queue._read_cache("gate") == {}
@@ -66,7 +66,7 @@ def test_library_cache_roundtrip_is_isolated_between_projects(tmp_path):
     set_context(AppContext(settings=one))
     assert _review_cache.get_cached_review("KEY") == {"title": "one"}
     assert reading_queue._read_cache("gate") == {"KEY": {"score": 4}}
-    assert verdict_store.read_all() == {"KEY": {"priority": "must_read"}}
+    assert verdict_store.read_all() == {"KEY": {"proposed": "must_read"}}
 
 
 def test_model_loading_and_tuning_follow_runtime_root(tmp_path, monkeypatch):

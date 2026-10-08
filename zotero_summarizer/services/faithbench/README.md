@@ -108,7 +108,7 @@ or process-memory limit. Regression tests capture the actual prompts in producti
 Q&A, benchmark Q&A and both claim-judge templates.
 
 ```
-zotero-summarizer faithbench build  [--n-papers 8] [--qa-per-paper 5] [--traps-per-paper 2] ...
+zotero-summarizer faithbench build  [--n-papers 8] [--qa-per-paper 5] [--traps-per-paper 2] [--max-builder-windows 32] ...
 zotero-summarizer faithbench run    [--benchmark latest] [--run-id ID] [--runs 1]
                                     [--conditions full_text,retrieval] [--tracks qa,claims] ...
 zotero-summarizer faithbench judge  --run-id ID [--judge-model ...] [--force]
@@ -130,14 +130,27 @@ an explicit positive smoke limit remains supported. If the selected/validated
 trials have no trap or answerable denominator, those rates are JSON `null` /
 Markdown `N/A (unmeasured)`, including the master headline, never a measured 0%.
 
-QA generation fully covers papers up to 18,000 characters using up to three
-6,000-character windows; longer papers use bounded evenly-spaced samples including
-both ends. Three windows are an explicit cost ceiling, not a promise to inspect
-every character of a long paper; factual passages in the gaps can be missed.
-Query-ranked chunks cannot safely replace this build-time sampling because the
-questions are created from those excerpts and do not exist before selection.
-The short-paper suffix and integer-spacing end-point omissions are removed
-without increasing that ceiling.
+QA generation partitions admitted paper text into contiguous, non-overlapping
+6,000-character windows, covering every source character. The default budget is
+32 windows per paper (192,000 source characters); configure `--max-builder-windows`
+from 1 to 256, or set `ZS_FAITHBENCH_QA_MAX_BUILDER_WINDOWS` (maximum 1,536,000
+source characters). Precedence is CLI option > shell environment > the selected
+project's `.env` value > default (32).
+The effective per-paper limit is recorded in benchmark metadata. Every window adds
+a builder request, so increasing the limit increases calls and cost.
+
+The CLI resolves and validates the budget before Settings or provider construction.
+Before making any builder call, `build_items` checks every selected paper against
+the configured limit; one over-budget paper rejects the build before work starts.
+For example:
+
+```bash
+uv run zotero-summarizer faithbench build --max-builder-windows 64
+ZS_FAITHBENCH_QA_MAX_BUILDER_WINDOWS=64 uv run zotero-summarizer faithbench build
+```
+
+A larger window budget improves source coverage opportunity, not QA semantic
+accuracy. Human review and approval of generated QA/trap rows remain required.
 
 ## Iterating cheaply (never re-run the full grind)
 

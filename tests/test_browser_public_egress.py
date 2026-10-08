@@ -43,9 +43,11 @@ def test_persistent_browser_has_no_direct_network_route(tmp_path, monkeypatch):
     url = "https://paper.example/article"
     pw = _PW(_Ctx(_Req({url: _Resp(_PDF)}), _Page()))
 
-    assert browser_fetch._drive_browser(
+    result = browser_fetch._drive_browser(
         browser_fetch._BrowserLib(lambda: pw, RuntimeError), url, tmp_path, 5, 1000, True,
-    ) == _PDF
+    )
+    assert result.body == _PDF
+    assert result.is_rendered_text is False
 
     assert pw.launch_kwargs["proxy"]["server"].startswith("http://127.0.0.1:")
     assert "--proxy-bypass-list=<-loopback>" in pw.launch_kwargs["args"]

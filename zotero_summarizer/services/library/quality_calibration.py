@@ -15,6 +15,12 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
+from pydantic import ValidationError
+
+from zotero_summarizer.domain import READING_PRIORITY_VALUES
+from zotero_summarizer.models.triage import ProposedVerdict
+from zotero_summarizer.services._common import LOGGER
+
 # Below this many matched pairs, kappa is too noisy to present as validation (honest
 # floor — Landis-Koch bands are meaningless on a handful of samples).
 _MIN_PAIRS = 20
@@ -36,6 +42,27 @@ def cohen_kappa(a: list[str], b: list[str]) -> float | None:
     return round((po - pe) / (1.0 - pe), 3)
 
 
+def _matched_pairs(proposals: dict[str, Any], labels: dict[str, str]) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    for item_key, raw_proposal in proposals.items():
+        if item_key not in labels:
+            continue
+        human_label = labels[item_key]
+        if not isinstance(human_label, str) or human_label not in READING_PRIORITY_VALUES:
+            continue
+        try:
+            proposal = ProposedVerdict.model_validate(raw_proposal, strict=True)
+        except ValidationError as exc:
+            LOGGER.warning(
+                "excluding malformed proposal from calibration for %s (%d validation errors)",
+                item_key,
+                exc.error_count(),
+            )
+            continue
+        pairs.append((proposal.proposed, human_label))
+    return pairs
+
+
 def compute_proposal_calibration(
     *, proposals: dict[str, Any] | None = None, labels: dict[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -50,11 +77,7 @@ def compute_proposal_calibration(
         from zotero_summarizer.services.library import reading_queue
         labels = reading_queue._verdict_priorities()
 
-    pairs = [
-        (str((proposals[k] or {}).get("proposed") or ""), labels[k])
-        for k in proposals
-        if k in labels and labels[k] and (proposals[k] or {}).get("proposed")
-    ]
+    pairs = _matched_pairs(proposals, labels)
     n = len(pairs)
     pred = [p for p, _ in pairs]
     human = [h for _, h in pairs]

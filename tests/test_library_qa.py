@@ -313,6 +313,103 @@ def test_named_section_count_question_falls_through_to_llm(tmp_path, monkeypatch
     assert llm.prompts
 
 
+def test_opening_paragraph_count_does_not_use_whole_paper_metadata(tmp_path, monkeypatch):
+    pdf = tmp_path / "p.pdf"
+    pdf.write_bytes(b"%PDF-fake")
+    llm = _LLM(answer="42 references")
+    _fake_state(tmp_path, pdf, _Extractor(), llm, monkeypatch)
+
+    out = qa.ask_paper("KEY1", "In the opening paragraph, how many references are cited?")
+
+    assert out["answer"] != "42 references", f"scoped question received global metadata: {out}"
+    assert out["mode"] != "metadata"
+    assert llm.prompts
+
+
+@pytest.mark.parametrize("question", [
+    "How many citations does the Discussion passage contain?",
+    "How many figures are shown in the caption for Figure 2?",
+    "How many references are listed in Appendix B?",
+    "How many references are cited on page 7?",
+    "How many tables appear in this quoted passage: 'the selected paragraph'?",
+    "How many references are in the selected subset of studies?",
+    "How many citations are in paragraph 2 of the new Nereid section?",
+    "How many tables does the paragraph on page 4 of Appendix Z cite?",
+    "How many references are cited?",
+])
+def test_scoped_count_questions_use_grounded_qa(tmp_path, monkeypatch, question):
+    pdf = tmp_path / "p.pdf"
+    pdf.write_bytes(b"%PDF-fake")
+    llm = _LLM(answer="42 references")
+    _fake_state(tmp_path, pdf, _Extractor(), llm, monkeypatch)
+
+    out = qa.ask_paper("KEY1", question)
+
+    assert out["mode"] != "metadata", question
+    assert llm.prompts
+    assert out["abstained"] is True
+    assert out["answer"] is None
+
+
+@pytest.mark.parametrize("question", [
+    "How many tables does this paper contain?",
+    "How many figures and tables are in this paper?",
+])
+def test_table_count_requests_fall_through_to_grounded_qa(tmp_path, monkeypatch, question):
+    pdf = tmp_path / "p.pdf"
+    pdf.write_bytes(b"%PDF-fake")
+    llm = _LLM(answer="ImageNet")
+    _fake_state(tmp_path, pdf, _Extractor(), llm, monkeypatch)
+    paper_text = PAPER_TEXT + " Prior work's protocol appears in Table 1."
+    artifact = {
+        "title": "GlassNet",
+        "n_pages": 12,
+        "figures": [{"name": f"figure-{number}.png"} for number in range(1, 4)],
+        "figures_count": 3,
+        "references_count": 42,
+        "sections_count": 8,
+        "outputs": {},
+        "full_text": paper_text,
+    }
+    monkeypatch.setattr(qa.paper_render, "build_paper_read", lambda item_key: artifact)
+    monkeypatch.setattr(
+        qa.paper_render, "artifact_text", lambda value, max_chars: value["full_text"][:max_chars]
+    )
+
+    out = qa.ask_paper("KEY1", question)
+
+    assert out["mode"] == "comprehensive", f"resource total cannot stand in for tables: {out}"
+    assert out["model"] == "local-35b"
+    assert llm.prompts and "Table 1" in llm.prompts[0]
+    assert out["answer"] != "3 figures/tables"
+
+
+@pytest.mark.parametrize(("question", "answer"), [
+    ("How many pages are in the paper?", "12 pages"),
+    ("How many figures are in the whole paper?", "3 figures"),
+    ("How many references does this paper cite?", "42 references"),
+    ("How many references are cited in the paper?", "42 references"),
+    ("How many figures are included in the paper?", "3 figures"),
+    ("What is the number of sections in the entire paper?", "8 sections"),
+])
+def test_explicit_whole_paper_counts_remain_deterministic(tmp_path, monkeypatch, question, answer):
+    pdf = tmp_path / "p.pdf"
+    pdf.write_bytes(b"%PDF-fake")
+    llm = _LLM()
+    _fake_state(tmp_path, pdf, _Extractor(), llm, monkeypatch)
+
+    out = qa.ask_paper("KEY1", question)
+
+    assert out["answer"] == answer
+    assert out["mode"] == "metadata"
+    assert out["model"] == "deterministic-metadata"
+    assert set(out) == {
+        "answer", "abstained", "quote", "chunks_used", "latency_seconds", "model",
+        "item_key", "question", "mode", "evidence_handle", "citation",
+    }
+    assert not llm.prompts
+
+
 def test_ask_paper_boundary_errors(tmp_path, monkeypatch):
     pdf = tmp_path / "p.pdf"
     pdf.write_bytes(b"%PDF-fake")

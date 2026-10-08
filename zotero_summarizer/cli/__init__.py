@@ -23,9 +23,15 @@ def apply_offline_env() -> bool:
     from dotenv import load_dotenv
     from zotero_summarizer.settings import default_project_root
 
+    # This bootstrap reads the default root, not necessarily the project selected by a CLI
+    # command. Keep its .env value from masquerading as an inherited shell override.
+    budget_env = "ZS_FAITHBENCH_QA_MAX_BUILDER_WINDOWS"
+    shell_set_budget = budget_env in os.environ
     env = default_project_root() / ".env"
     if env.exists():
         load_dotenv(env, override=False)
+    if not shell_set_budget:
+        os.environ.pop(budget_env, None)
     val = (os.getenv("ZS_OFFLINE") or "").strip().lower()
     offline = val in ("1", "true", "yes", "on") or (os.getenv("HF_HUB_OFFLINE") or "").strip() == "1"
     if offline:

@@ -11,12 +11,21 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
+- Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.
 - Fold goal findings without losing originals; disclose saved source basis and unknown reviewed extent. Factor literal warning frames into one introduction with expanded scope/context, qualifiers and source links; retain original wording. Compact cards remain unchanged.
 - Retain long paper-specific note fields by default. Whole-field omission budgets are explicit renderer opt-ins only, pending usefulness validation; no unmeasured shortening policy is enabled in materialization.
 - Reorder full reviews around contribution, caveats and findings; fold assessment and goal evidence without losing source text. Improve triage-note fallback, optional sections and materialization metrics; retain explicit native/user acceptance gates.
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
+- Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
+- A124: verify section one-liners in a second batch against the same first 700 source characters (up to 24 sections); omit unsupported summaries. Scripted checks do not establish live semantic accuracy.
+- A136: use figure metadata only for affirmative whole-paper figure-count wording; route scoped, uncertain, table-only, combined, and unmatched counts to grounded Q&A. Live scope accuracy is unmeasured.
+- A142: validate persisted and injected review-fleet proposals; skip malformed rows, retain valid neighbors, and calibrate only valid human/proposal pairs.
+- A176: cover admitted Faithbench text with contiguous 6,000-character windows; default 32, maximum 256, with preflight rejection above budget and the effective limit recorded in metadata.
+- FaithBench build resolves window budgets as CLI > shell environment > selected-project `.env` > default before provider setup; warning-call assertions are isolated from root-logger propagation.
 - Extract analysis text through the existing plain-PDF backend, avoiding Markdown transformations that can interleave signed superscripts/subscripts. Include the adapter fingerprint in review identity; presentation parsing stays separate and generated-PDF regressions preserve uncertainty order.
 - Reuse bounded source mapping for long triage inputs; subdivide only explicitly truncated maps to the existing minimum, checking cancellation between calls. Keep token limits, models and numerical scoring unchanged; exhausted or empty segments still fail.
 - Identify note ownership structurally, not from marker-like body text. Keep digest metadata last so comment-free native notes remain updatable; protect manual and cross-kind notes.
