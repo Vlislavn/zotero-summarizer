@@ -156,12 +156,15 @@ uv run zotero-summarizer migrate          # init / upgrade the local databases (
 uv run zotero-summarizer prefetch-models  # download ML models for offline use (--check = status)
 uv run zotero-summarizer feeds serve      # optional feed triage and in-place slate reviews (no automatic Zotero Add)
 uv run zotero-summarizer goldenset train-classifier  # retrain the relevance gate on your labels
+uv run zotero-summarizer faithbench build --max-builder-windows 64  # larger QA-source budget; more builder calls
 ```
 
 ## Going further
 
 - **[docs/usage.md](docs/usage.md)** — the daemon, how the model learns from your labels,
-  offline / air-gapped use, the safety model, and the full config reference.
+  offline / air-gapped use, the safety model, and the full config reference. Faithbench QA
+  builds cover contiguous 6,000-character windows (32 per paper by default); its CLI/env
+  budget and increased call cost are documented there.
 - **[Research-feed evaluation evidence](docs/issue-evidence-research-feed.md)** — why the current
   30-paper fixture is unscorable for production inclusion quality (not a 0%-precision result).
 - **[docs/architecture.md](docs/architecture.md)** — how it works, the layering rules, and

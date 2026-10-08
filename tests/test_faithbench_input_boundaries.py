@@ -1,5 +1,6 @@
 """Benchmark budgets and safety cohorts fail before provider work or publication."""
 import json
+import os
 from unittest.mock import Mock
 
 import pytest
@@ -7,7 +8,7 @@ import pytest
 from zotero_summarizer.cli import main
 from zotero_summarizer.cli import _faithbench
 from zotero_summarizer.services.faithbench._build_qa import build_items, _windows
-from zotero_summarizer.services.faithbench._constants import QA_MAX_WINDOWS, QA_WINDOW_CHARS
+from zotero_summarizer.services.faithbench._constants import QA_WINDOW_CHARS
 from zotero_summarizer.services.faithbench._corpus import select_papers
 from zotero_summarizer.services.faithbench._runner import RunInputs, RunOptions, RunPaths, run_benchmark
 from zotero_summarizer.settings import Settings
@@ -66,6 +67,128 @@ def test_selection_rejects_invalid_budget_without_reader_or_files(tmp_path, n_pa
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize("value", ["not-an-integer", "1_0", "", "0", "-1", "257"])
+def test_invalid_builder_window_environment_fails_before_settings_or_dispatch(
+    monkeypatch, capsys, value
+):
+    load, handler = Mock(), Mock(return_value=0)
+    monkeypatch.setattr(Settings, "load", load)
+    monkeypatch.setattr(_faithbench, "_faithbench_build", handler)
+    monkeypatch.setenv("ZS_FAITHBENCH_QA_MAX_BUILDER_WINDOWS", value)
+
+    with pytest.raises(SystemExit) as error:
+        main(["faithbench", "build"])
+
+    assert error.value.code == 2
+    assert "ZS_FAITHBENCH_QA_MAX_BUILDER_WINDOWS" in capsys.readouterr().err
+    load.assert_not_called()
+    handler.assert_not_called()
+
+
+def test_builder_window_cli_option_overrides_environment_before_dispatch(monkeypatch):
+    handler = Mock(return_value=0)
+    monkeypatch.setattr(_faithbench, "_faithbench_build", handler)
+    monkeypatch.setenv("ZS_FAITHBENCH_QA_MAX_BUILDER_WINDOWS", "3")
+
+    assert main(["faithbench", "build", "--max-builder-windows", "4"]) == 0
+
+    assert handler.call_args.args[0].max_builder_windows == 4
+
+
+WINDOW_BUDGET_ENV = "ZS_FAITHBENCH_QA_MAX_BUILDER_WINDOWS"
+
+
+def test_window_budget_resolver_accepts_environment_override_without_mutating_process_env(monkeypatch):
+    from zotero_summarizer.services.faithbench._constants import resolve_qa_max_builder_windows
+
+    monkeypatch.setenv(WINDOW_BUDGET_ENV, "7")
+    selected_project_env = {WINDOW_BUDGET_ENV: "64"}
+
+    assert resolve_qa_max_builder_windows(environment=selected_project_env) == 64
+    assert os.environ[WINDOW_BUDGET_ENV] == "7"
+    assert selected_project_env[WINDOW_BUDGET_ENV] == "64"
+
+
+def _selected_project_with_window_budget(tmp_path, value):
+    project_root = tmp_path / "alternate-project"
+    project_root.mkdir()
+    (project_root / ".env").write_text(f"{WINDOW_BUDGET_ENV}={value}\n", encoding="utf-8")
+    return project_root
+
+
+def test_offline_startup_does_not_promote_default_project_budget_to_shell(monkeypatch, tmp_path):
+    from zotero_summarizer import settings as settings_module
+    from zotero_summarizer.cli import apply_offline_env
+
+    default_root = tmp_path / "default-project"
+    default_root.mkdir()
+    (default_root / ".env").write_text(f"{WINDOW_BUDGET_ENV}=64\n", encoding="utf-8")
+    monkeypatch.setattr(settings_module, "default_project_root", lambda: default_root)
+    monkeypatch.delenv(WINDOW_BUDGET_ENV, raising=False)
+
+    apply_offline_env()
+
+    assert WINDOW_BUDGET_ENV not in os.environ
+
+
+def test_selected_project_env_sets_builder_window_budget_before_settings(monkeypatch, tmp_path):
+    project_root = _selected_project_with_window_budget(tmp_path, "64")
+    load, handler = Mock(), Mock(return_value=0)
+    monkeypatch.delenv(WINDOW_BUDGET_ENV, raising=False)
+    monkeypatch.setattr(Settings, "load", load)
+    monkeypatch.setattr(_faithbench, "_faithbench_build", handler)
+
+    assert main(["faithbench", "build", "--project-root", str(project_root)]) == 0
+
+    assert handler.call_args.args[0].max_builder_windows == 64
+    load.assert_called_once_with(project_root=str(project_root))
+
+
+@pytest.mark.parametrize("value", ["0", "garbage"])
+def test_invalid_selected_project_window_budget_fails_before_settings_or_dispatch(
+    monkeypatch, capsys, tmp_path, value
+):
+    project_root = _selected_project_with_window_budget(tmp_path, value)
+    load, handler = Mock(), Mock(return_value=0)
+    monkeypatch.delenv(WINDOW_BUDGET_ENV, raising=False)
+    monkeypatch.setattr(Settings, "load", load)
+    monkeypatch.setattr(_faithbench, "_faithbench_build", handler)
+
+    with pytest.raises(SystemExit) as error:
+        main(["faithbench", "build", "--project-root", str(project_root)])
+
+    assert error.value.code == 2
+    assert WINDOW_BUDGET_ENV in capsys.readouterr().err
+    load.assert_not_called()
+    handler.assert_not_called()
+
+
+def test_builder_window_shell_environment_overrides_selected_project_env(monkeypatch, tmp_path):
+    project_root = _selected_project_with_window_budget(tmp_path, "64")
+    handler = Mock(return_value=0)
+    monkeypatch.setenv(WINDOW_BUDGET_ENV, "7")
+    monkeypatch.setattr(_faithbench, "_faithbench_build", handler)
+
+    assert main(["faithbench", "build", "--project-root", str(project_root)]) == 0
+
+    assert handler.call_args.args[0].max_builder_windows == 7
+
+
+def test_builder_window_cli_option_ignores_invalid_selected_project_env(monkeypatch, tmp_path):
+    project_root = _selected_project_with_window_budget(tmp_path, "garbage")
+    load, handler = Mock(), Mock(return_value=0)
+    monkeypatch.delenv(WINDOW_BUDGET_ENV, raising=False)
+    monkeypatch.setattr(Settings, "load", load)
+    monkeypatch.setattr(_faithbench, "_faithbench_build", handler)
+
+    assert main([
+        "faithbench", "build", "--project-root", str(project_root), "--max-builder-windows", "64"
+    ]) == 0
+
+    assert handler.call_args.args[0].max_builder_windows == 64
+    load.assert_called_once_with(project_root=str(project_root))
+
+
 @pytest.mark.parametrize("kwargs", [
     {"qa_per_paper": 0}, {"qa_per_paper": -1}, {"qa_per_paper": True},
     {"traps_per_paper": 0}, {"traps_per_paper": -1},
@@ -104,17 +227,16 @@ def test_run_refuses_single_cohort_legacy_benchmark_before_llm(tmp_path, kind):
     assert not paths.run_dir.exists()
 
 
-@pytest.mark.parametrize("size", [QA_WINDOW_CHARS + 1, 11_999, 17_999, 18_000, 50_003])
-def test_qa_windows_cover_short_papers_and_include_both_ends_when_sampled(size):
+@pytest.mark.parametrize("size", [QA_WINDOW_CHARS + 1, 11_999, 17_999, 18_000, 18_001, 24_001, 50_003, 60_001])
+def test_qa_windows_cover_source_with_bounded_contiguous_windows(size):
     # Unique characters make coverage/position independent of the implementation's formula.
     text = "".join(chr(0x1000 + index) for index in range(size))
-    windows = _windows(text)
-    assert len(windows) <= QA_MAX_WINDOWS
+    windows = list(_windows(text))
+    assert len(windows) == (size + QA_WINDOW_CHARS - 1) // QA_WINDOW_CHARS
     assert all(0 < len(window) <= QA_WINDOW_CHARS for window in windows)
     assert windows[0] == text[:QA_WINDOW_CHARS]
-    assert windows[-1] == text[-QA_WINDOW_CHARS:]
-    if size <= QA_MAX_WINDOWS * QA_WINDOW_CHARS:
-        assert set("".join(windows)) == set(text)
+    assert windows[-1] == text[(len(windows) - 1) * QA_WINDOW_CHARS:]
+    assert "".join(windows) == text
 
 
 def test_smoke_run_without_selected_traps_reports_unmeasured_not_zero(tmp_path):
@@ -152,6 +274,7 @@ def test_valid_cli_build_and_run_use_the_requested_budget(tmp_path, monkeypatch)
     from zotero_summarizer.services.setup import bootstrap
 
     monkeypatch.setenv("PDF_ROOT", str(tmp_path / "pdfs"))
+    monkeypatch.setenv("ZS_FAITHBENCH_QA_MAX_BUILDER_WINDOWS", "4")
     settings = Settings.load(project_root=tmp_path)
     settings.env_path.write_text(f"PDF_ROOT={tmp_path / 'pdfs'}\nZOTERO_DATA_DIR={tmp_path / 'zotero'}\n")
     bootstrap.bootstrap_phase0(settings)
@@ -174,6 +297,7 @@ def test_valid_cli_build_and_run_use_the_requested_budget(tmp_path, monkeypatch)
                  "--n-papers", "2", "--qa-per-paper", "1", "--traps-per-paper", "1"]) == 0
     meta, items = load_benchmark(settings.faithbench_dir / "benchmark_v1.jsonl")
     assert [paper.item_key for paper in meta.papers] == ["A", "B"]
+    assert meta.config["max_builder_windows"] == 4
     assert len(items) == 4 and {item.kind for item in items} == {"qa", "trap"}
     assert reader.get_item_detail.call_count == extractor.extract_text.call_count == 2
     assert (settings.faithbench_dir / "benchmark_v1.review.csv").exists()

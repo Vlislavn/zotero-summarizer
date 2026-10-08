@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from zotero_summarizer.services._common import extract_json_blob, to_text
 from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
@@ -21,8 +21,8 @@ from zotero_summarizer.services.faithbench._constants import (
     DEFAULT_QA_PER_PAPER,
     DEFAULT_TRAPS_PER_PAPER,
     MAX_GOLD_SPAN_CHARS,
-    QA_MAX_WINDOWS,
     QA_WINDOW_CHARS,
+    resolve_qa_max_builder_windows,
 )
 from zotero_summarizer.services.faithbench._corpus import (
     PaperRecord,
@@ -59,18 +59,30 @@ _QA_GENERATION_PROMPT = (
 # ---------------------------------------------------------------------------
 
 
-def _windows(text: str) -> list[str]:
-    """Cover short papers; sample longer ones evenly, including both ends."""
-    if len(text) <= QA_WINDOW_CHARS:
-        return [text]
-    # ponytail: three bounded windows; increase the explicit budget for denser long-paper sampling.
-    count = min(QA_MAX_WINDOWS, (len(text) + QA_WINDOW_CHARS - 1) // QA_WINDOW_CHARS)
-    starts = ((len(text) - QA_WINDOW_CHARS) * i // (count - 1) for i in range(count))
-    return [text[start: start + QA_WINDOW_CHARS] for start in starts]
+def _validate_qa_source_size(text: str, max_builder_windows: int) -> None:
+    max_source_chars = max_builder_windows * QA_WINDOW_CHARS
+    if len(text) > max_source_chars:
+        raise ValueError(
+            f"faithbench QA source ({len(text)} chars) exceeds configured QA builder work limit "
+            f"({max_builder_windows} source windows / {max_source_chars} source chars)"
+        )
+
+
+def _windows(text: str, max_builder_windows: int | None = None) -> Iterator[str]:
+    """Yield bounded, non-overlapping windows covering the complete source."""
+    limit = resolve_qa_max_builder_windows(max_builder_windows)
+    _validate_qa_source_size(text, limit)
+    for start in range(0, len(text), QA_WINDOW_CHARS):
+        yield text[start: start + QA_WINDOW_CHARS]
 
 
 def generate_candidates(
-    llm: Any, *, title: str, text: str, per_window: int
+    llm: Any,
+    *,
+    title: str,
+    text: str,
+    per_window: int,
+    max_builder_windows: int | None = None,
 ) -> list[dict[str, Any]]:
     """Ask the builder LLM for candidate QA pairs over each window.
 
@@ -79,7 +91,7 @@ def generate_candidates(
     builder response only shrinks the candidate pool, never corrupts it).
     """
     candidates: list[dict[str, Any]] = []
-    for window in _windows(text):
+    for window in _windows(text, max_builder_windows=max_builder_windows):
         prompt = _QA_GENERATION_PROMPT.format(
             title=untrusted_input(title), window=untrusted_input(window), n=per_window)
         raw = to_text(llm.prompt(prompt))
@@ -242,6 +254,7 @@ def build_items(
     builder_llm: Any,
     qa_per_paper: int = DEFAULT_QA_PER_PAPER,
     traps_per_paper: int = DEFAULT_TRAPS_PER_PAPER,
+    max_builder_windows: int | None = None,
     progress_cb: Callable[[str], None] | None = None,
 ) -> list[QAItem | TrapItem]:
     """Generate + gate QA for every paper, then add traps. Pure orchestration —
@@ -252,10 +265,15 @@ def build_items(
     for name, value in (("qa_per_paper", qa_per_paper), ("traps_per_paper", traps_per_paper)):
         if type(value) is not int or value < 1:
             raise ValueError(f"{name} must be a positive integer")
+    max_builder_windows = resolve_qa_max_builder_windows(max_builder_windows)
+    for paper in papers:
+        _validate_qa_source_size(paper.text, max_builder_windows)
+
     qa_by_paper: dict[str, list[QAItem]] = {}
     for paper in papers:
         candidates = generate_candidates(
-            builder_llm, title=paper.title, text=paper.text, per_window=qa_per_paper
+            builder_llm, title=paper.title, text=paper.text, per_window=qa_per_paper,
+            max_builder_windows=max_builder_windows,
         )
         verified = verify_candidates(candidates, paper=paper, max_keep=qa_per_paper)
         qa_by_paper[paper.item_key] = verified

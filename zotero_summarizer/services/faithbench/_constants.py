@@ -9,6 +9,9 @@ id must be one the judge endpoint actually serves (checked against
 """
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
+
 # --- judge / builder endpoint (OpenAI-compatible, remote) -------------------
 # Env var NAMES (never values). The same endpoint serves the QA builder and
 # the equivalence judge; both default to the pinned model below.
@@ -28,8 +31,36 @@ DEFAULT_QA_PER_PAPER = 5
 DEFAULT_TRAPS_PER_PAPER = 2
 MIN_PAPER_CHARS = 10_000          # papers shorter than this are skipped
 MAX_GOLD_SPAN_CHARS = 120         # candidate answers longer than this are dropped
-QA_WINDOW_CHARS = 6_000           # text window size fed to the QA builder
-QA_MAX_WINDOWS = 3                # evenly-spaced windows per paper
+QA_WINDOW_CHARS = 6_000           # source excerpt cap; title/instructions add prompt overhead
+DEFAULT_QA_MAX_BUILDER_WINDOWS = 32
+MAX_QA_BUILDER_WINDOWS = 256      # explicit per-paper upper bound (1,536,000 source chars)
+QA_MAX_BUILDER_WINDOWS_ENV = "ZS_FAITHBENCH_QA_MAX_BUILDER_WINDOWS"
+
+
+def resolve_qa_max_builder_windows(
+    value: int | None = None,
+    *,
+    environment: Mapping[str, str | None] | None = None,
+) -> int:
+    """Resolve and validate the bounded QA source-window work limit."""
+    source = "--max-builder-windows"
+    if value is None:
+        env = os.environ if environment is None else environment
+        configured = env.get(QA_MAX_BUILDER_WINDOWS_ENV)
+        if configured is None:
+            value = DEFAULT_QA_MAX_BUILDER_WINDOWS
+        else:
+            source = QA_MAX_BUILDER_WINDOWS_ENV
+            normalized = configured.strip()
+            digits = normalized[1:] if normalized.startswith(("+", "-")) else normalized
+            if not digits or not digits.isascii() or not digits.isdecimal():
+                raise ValueError(
+                    f"{source} must be an integer from 1 to {MAX_QA_BUILDER_WINDOWS}"
+                )
+            value = int(normalized)
+    if type(value) is not int or not 1 <= value <= MAX_QA_BUILDER_WINDOWS:
+        raise ValueError(f"{source} must be an integer from 1 to {MAX_QA_BUILDER_WINDOWS}")
+    return value
 
 # --- run (model under test) --------------------------------------------------
 CHUNK_CHARS = 1_200               # retrieval condition: chunk size

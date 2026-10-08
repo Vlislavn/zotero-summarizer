@@ -20,6 +20,9 @@ import hashlib
 import threading
 from typing import Any
 
+from pydantic import ValidationError
+
+from zotero_summarizer.models.triage import ProposedVerdict
 from zotero_summarizer.services._common import LOGGER, now_iso_z, settings, write_json_atomic
 from zotero_summarizer.services.library._review_cache import _quarantine_corrupt_cache
 
@@ -32,12 +35,29 @@ def _cache_path():
     return settings().model_dir / _CACHE_FILENAME
 
 
-def read_all() -> dict[str, Any]:
-    """Every stored proposal as ``{item_key: proposed_verdict_dict}``.
+def _valid_proposals(proposals: dict[str, Any]) -> dict[str, Any]:
+    valid: dict[str, Any] = {}
+    for item_key, proposal in proposals.items():
+        try:
+            ProposedVerdict.model_validate(proposal, strict=True)
+        except ValidationError as exc:
+            LOGGER.warning(
+                "skipping invalid review-fleet proposal for %s (%d validation errors)",
+                item_key,
+                exc.error_count(),
+            )
+            continue
+        valid[item_key] = proposal
+    return valid
 
-    ``{}`` when absent or corrupt. Corrupt bytes are moved aside with a warning;
-    proposals are regenerable suggestions, so a damaged sidecar must not disable
-    reading-queue access."""
+
+def read_all() -> dict[str, Any]:
+    """Valid stored proposals as ``{item_key: proposed_verdict_dict}``.
+
+    ``{}`` when absent or corrupt. Invalid proposal rows are logged and skipped
+    without discarding valid neighbors; corrupt file bytes are quarantined with a
+    warning. Proposals are regenerable suggestions, so a damaged sidecar must not
+    disable reading-queue access."""
     with _CACHE_LOCK:
         path = _cache_path()
         if not path.exists():
@@ -53,7 +73,7 @@ def read_all() -> dict[str, Any]:
             backup = _quarantine_corrupt_cache(path)
             LOGGER.warning("quarantined invalid review-fleet verdict envelope to %s", backup)
             return {}
-        return proposals
+        return _valid_proposals(proposals)
 
 
 def _write_all(proposals: dict[str, Any]) -> None:
@@ -68,6 +88,7 @@ def upsert(item_key: str, proposal: dict[str, Any]) -> None:
     (``tmp.replace`` is atomic)."""
     if not item_key:
         raise ValueError("upsert requires a non-empty item_key")
+    ProposedVerdict.model_validate(proposal, strict=True)
     with _CACHE_LOCK:
         proposals = read_all()
         proposals[item_key] = proposal
@@ -92,11 +113,17 @@ def proposal_matches_review(proposal: Any, review: Any) -> bool:
     """Accept a suggestion only for the review identity that produced it."""
     if not isinstance(proposal, dict) or not isinstance(review, dict):
         return False
+    try:
+        validated = ProposedVerdict.model_validate(proposal, strict=True)
+    except ValidationError:
+        return False
     identity = review_fingerprint(review)
     if not identity:
         return False
-    return (proposal.get("proposal_version") == PROPOSAL_VERSION
-            and proposal.get("review_identity_sha256") == identity)
+    return (
+        validated.proposal_version == PROPOSAL_VERSION
+        and validated.review_identity_sha256 == identity
+    )
 
 
 def review_fingerprint(review: dict[str, Any]) -> str:

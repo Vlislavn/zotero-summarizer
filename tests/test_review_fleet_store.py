@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from zotero_summarizer.services.library.review_fleet import verdict_store
 
@@ -137,3 +138,99 @@ def test_read_all_tolerates_missing_proposals_envelope_key(store_dir):
     ``read_all`` returns ``payload.get('proposals') or {}``)."""
     store_dir.write_text(json.dumps({"updated_at": "2026-06-16T00:00:00Z"}), encoding="utf-8")
     assert verdict_store.read_all() == {}
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [None, True, 7, [], "not-a-proposal", {"proposed": "skip"}],
+    ids=["none", "bool", "int", "list", "string", "invalid-enum"],
+)
+def test_read_all_skips_malformed_proposal_rows_without_quarantining_neighbors(
+    store_dir, monkeypatch, malformed
+):
+    # Startup can disable propagation; assert the read boundary's warning call directly.
+    warning_calls = []
+
+    def record_warning(message, item_key, error_count):
+        warning_calls.append((message, item_key, error_count))
+
+    monkeypatch.setattr(verdict_store.LOGGER, "propagate", False)
+    monkeypatch.setattr(verdict_store.LOGGER, "warning", record_warning)
+    valid = _proposal("must_read")
+    original_bytes = json.dumps(
+        {"updated_at": "2026-10-08T00:00:00Z", "proposals": {"BAD": malformed, "GOOD": valid}}
+    ).encode("utf-8")
+    store_dir.write_bytes(original_bytes)
+
+    assert verdict_store.read_all() == {"GOOD": valid}
+
+    assert store_dir.read_bytes() == original_bytes
+    assert not store_dir.with_name(store_dir.name + ".corrupt").exists()
+    assert len(warning_calls) == 1
+    assert warning_calls[0][:2] == (
+        "skipping invalid review-fleet proposal for %s (%d validation errors)",
+        "BAD",
+    )
+    assert warning_calls[0][2] > 0
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("confidence", True),
+        ("proposal_version", True),
+        ("confidence", "0.7"),
+        ("proposal_version", "1"),
+    ],
+    ids=["boolean-confidence", "boolean-version", "string-confidence", "string-version"],
+)
+def test_read_all_rejects_coercible_numeric_metadata_and_preserves_raw_valid_row(
+    store_dir, field, value
+):
+    review_identity = {"source_sha256": "pdf", "generation_sha256": "review-v1"}
+    valid = {
+        **_proposal("must_read", confidence=0.7),
+        "proposal_version": verdict_store.PROPOSAL_VERSION,
+        "review_identity_sha256": verdict_store.review_fingerprint(
+            {"review_identity": review_identity}
+        ),
+        "review_identity": review_identity,
+        "provenance_metadata": {"source": "cached_review"},
+    }
+    malformed = {
+        **_proposal("must_read"),
+        "proposal_version": verdict_store.PROPOSAL_VERSION,
+        "review_identity_sha256": valid["review_identity_sha256"],
+        field: value,
+    }
+    original_bytes = json.dumps(
+        {"updated_at": "2026-10-08T00:00:00Z", "proposals": {"BAD": malformed, "GOOD": valid}}
+    ).encode("utf-8")
+    store_dir.write_bytes(original_bytes)
+
+    result = verdict_store.read_all()
+    assert result == {"GOOD": valid}
+    assert "review_identity" in result["GOOD"]
+    assert "provenance_metadata" in result["GOOD"]
+    assert store_dir.read_bytes() == original_bytes
+    assert not store_dir.with_name(store_dir.name + ".corrupt").exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("confidence", True),
+        ("proposal_version", True),
+        ("confidence", "0.7"),
+        ("proposal_version", "1"),
+    ],
+    ids=["boolean-confidence", "boolean-version", "string-confidence", "string-version"],
+)
+def test_upsert_rejects_coercible_numeric_metadata_without_writing(store_dir, field, value):
+    proposal = _proposal()
+    proposal[field] = value
+
+    with pytest.raises(ValidationError):
+        verdict_store.upsert("BAD", proposal)
+
+    assert not store_dir.exists()

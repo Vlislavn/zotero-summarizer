@@ -37,17 +37,22 @@ LOGGER = logging.getLogger(__name__)
 
 MODES = ("comprehensive", "retrieval", "full_text")
 
-# A "how many" question scoped to a figure, table, numbered section, or common
-# named section is NOT a whole-document count — let the LLM answer from text.
-_NAMED_SECTION = (
-    r"abstract|introduction|intro|background|related\s+(?:work|literature)|"
-    r"literature\s+review|methods?|materials\s+and\s+methods|results?|"
-    r"discussion|conclusions?|limitations?|appendix|supplement(?:ary)?\s+material"
+# Affirmative whole-paper count grammar only; all other phrasing falls through to grounded Q&A.
+_COUNT_RESOURCE = (
+    r"pages?|figures? and tables?|tables? and figures?|"
+    r"figures?|tables?|references?|citations?|sections?|papers cited"
 )
-_SCOPED_REF_RE = re.compile(
-    rf"\b(?:figure|fig|table|tbl|section|sec|eq|equation|appendix)\.?\s*\d"
-    rf"|\b(?:in|within|from|does|do)\s+(?:the\s+)?(?:{_NAMED_SECTION})\b",
-    re.IGNORECASE,
+_PAPER_SCOPE = r"(?:the|this) (?:(?:whole|entire) )?(?:paper|document)"
+_WHOLE_PAPER_COUNT_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        rf"how many (?P<resource>{_COUNT_RESOURCE}) (?:are|were) (?:there )?(?:in|throughout) {_PAPER_SCOPE}",
+        rf"how many (?P<resource>{_COUNT_RESOURCE}) (?:are|were) (?:included|listed) (?:in|throughout) {_PAPER_SCOPE}",
+        rf"how many (?P<resource>references?|citations?) (?:are|were) (?:cited|listed) (?:in|throughout) {_PAPER_SCOPE}",
+        rf"how many (?P<resource>{_COUNT_RESOURCE}) (?:does|did) {_PAPER_SCOPE} (?:have|contain|include)",
+        rf"how many (?P<resource>references?|citations?) (?:does|did) {_PAPER_SCOPE} (?:cite|include|contain)",
+        rf"(?:what is )?(?:the )?number of (?P<resource>{_COUNT_RESOURCE}) (?:in|throughout) {_PAPER_SCOPE}",
+    )
 )
 
 def ask_paper(
@@ -151,26 +156,26 @@ def _with_evidence(payload: dict[str, Any], artifact: dict[str, Any]) -> dict[st
 
 
 def _answer_from_artifact_counts(artifact: dict[str, Any], question: str) -> dict[str, Any] | None:
-    """Deterministic answer for true whole-document count questions only.
-
-    Questions scoped to a specific figure/table/section (e.g. "how many
-    references does Figure 3 cite?") are NOT whole-document totals → fall through
-    to the LLM rather than returning a confident wrong global count."""
-    q = (question or "").casefold()
-    if "how many" not in q and "number of" not in q:
+    """Answer only explicitly whole-paper counts; leave uncertain scope to grounded Q&A."""
+    normalized = " ".join((question or "").casefold().split()).rstrip("?.!")
+    match = None
+    for pattern in _WHOLE_PAPER_COUNT_PATTERNS:
+        match = pattern.fullmatch(normalized)
+        if match is not None:
+            break
+    if match is None:
         return None
-    if _SCOPED_REF_RE.search(question or ""):
-        return None
-    if "page" in q:
+    resource = match.group("resource")
+    if resource.startswith("page"):
         n = int(artifact.get("n_pages") or 0)
         return _metadata_payload(f"{n} pages", f"Pages: {n}")
-    if "figure" in q or "figures" in q or "table" in q or "tables" in q:
+    if resource in {"figure", "figures"}:
         n = int(artifact.get("figures_count") or 0)
-        return _metadata_payload(f"{n} figures/tables", f"Figures: {n}")
-    if "reference" in q or "references" in q or "citation" in q or "citations" in q or "papers cited" in q:
+        return _metadata_payload(f"{n} figures", f"Figures: {n}")
+    if resource.startswith(("reference", "citation", "papers")):
         n = int(artifact.get("references_count") or 0)
         return _metadata_payload(f"{n} references", f"References: {n}")
-    if "section" in q or "sections" in q:
+    if resource.startswith("section"):
         n = int(artifact.get("sections_count") or len(artifact.get("sections") or []))
         return _metadata_payload(f"{n} sections", f"Sections: {n}")
     return None
