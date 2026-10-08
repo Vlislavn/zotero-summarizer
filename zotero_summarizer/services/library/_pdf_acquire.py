@@ -39,6 +39,17 @@ def _proxied_url(ua: Any, url: str, doi: str) -> str:
     return f"{prefix}{target}" if prefix else target
 
 
+def _browser_result(path: Path, source: str, source_url: str, cache_dir: Path) -> AcquireResult:
+    """Classify text snapshots only by their canonical cache path."""
+    web_article = path == browser_fetch.article_snapshot_path(source_url, cache_dir)
+    result_source = "web_article" if web_article else source
+    outcome = "acquired_web_article" if web_article else f"acquired_{source}"
+    return AcquireResult(
+        path=path, web_article=web_article, source=result_source,
+        source_url=source_url, outcome=outcome,
+    )
+
+
 def acquire_for_item(item_key: str, reader: Any = None) -> AcquireResult:
     """Read the item's detail and acquire a reviewable PDF — the single-key entry
     point for the per-paper deep-review path (the fleet inlines the equivalent over a
@@ -86,6 +97,7 @@ def _browser_acquire(
     config = get_state().app_state.config
     qr, ua = config.quality_review, config.university_access
     proxied = _proxied_url(ua, url, doi)
+    cache_dir = settings().pdf_cache_dir
     web_articles = bool(getattr(qr, "review_web_articles", False))
     if ua.enabled and scholarly and proxied:
         profile = _profile_dir(ua)
@@ -93,38 +105,30 @@ def _browser_acquire(
         channel = str(getattr(ua, "browser_channel", "") or "")
         for source, candidate in _dedupe_sources([*sources, ("browser", proxied)]):
             path = browser_fetch.fetch_pdf_via_browser(
-                candidate, profile_dir=profile, cache_dir=settings().pdf_cache_dir,
+                candidate, profile_dir=profile, cache_dir=cache_dir,
                 timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes, headless=ua.headless,
                 cookie_browser=cb, channel=channel,
                 render_fallback=(web_articles and candidate == proxied),
             )
             if path is not None:
-                return AcquireResult(
-                    path=path, source=source, source_url=candidate,
-                    outcome=f"acquired_{source}",
-                )
+                return _browser_result(path, source, candidate, cache_dir)
         if allow_headed_fallback and ua.headless:
             path = browser_fetch.fetch_pdf_via_browser(
-                proxied, profile_dir=profile, cache_dir=settings().pdf_cache_dir,
+                proxied, profile_dir=profile, cache_dir=cache_dir,
                 timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes, headless=False,
                 cookie_browser=cb, channel=channel, render_fallback=web_articles,
             )
             if path is not None:
-                return AcquireResult(
-                    path=path, source="browser", source_url=proxied,
-                    outcome="acquired_browser",
-                )
+                return _browser_result(path, "browser", proxied, cache_dir)
         LOGGER.info("browser PDF fetch yielded nothing for %s → needs_library_login", item_key)
         return AcquireResult(path=None, needs_login=True, login_url=proxied, outcome="needs_login")
     if web_articles and not scholarly and _is_web_article(url):
         rendered = browser_fetch.render_article_pdf(
-            url, cache_dir=settings().pdf_cache_dir, timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes
+            url, cache_dir=cache_dir, timeout=ua.fetch_timeout_secs, max_bytes=qr.max_pdf_bytes
         )
         if rendered is not None:
-            return AcquireResult(
-                path=rendered, web_article=True, source="web_article",
-                source_url=url, outcome="acquired_web_article",
-            )
+            return _browser_result(rendered, "browser", url, cache_dir)
+        return AcquireResult(path=None, outcome="fetch_failed")
     return AcquireResult(path=None, outcome="fetch_failed" if sources else "no_oa_source")
 
 

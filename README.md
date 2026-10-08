@@ -48,6 +48,13 @@ replays require `ZS_REVIEW_ACCEPTANCE_MANIFEST=/path/to/frozen-input.json`; with
 that explicit input they skip, not pass. They check literal retention, not scientific
 truth, subjective usability or native Zotero persistence.
 
+When web-article review is enabled, HTML-only pages can be reviewed from a bounded,
+text-only extraction of the selected main document's body text—not a page facsimile.
+Images, layout, CSS-generated content, embedded frames, and shadow trees are outside
+that scope; incomplete or over-budget extraction fails rather than clipping a prefix.
+An unavailable declared scholarly PDF is not replaced by a paywall snapshot. See the
+[browser article memory boundary](docs/browser-article-memory-boundary.md).
+
 Search's folded explicit constraints are user-owned. Model proposals are visible,
 not hard gates; inferred refinement exclusions cannot silently remove results.
 Confirmed publication types require source metadata, with bounded exact-DOI recovery;

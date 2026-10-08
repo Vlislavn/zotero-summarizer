@@ -187,8 +187,13 @@ https://hackernoon.com/tagged/ai/feed
 
 They use generic RSS identity/dedup and the same rank/slate. Only the triage rubric
 changes: concrete architecture, implementation, failures, measurements and reusable
-steps score well; promotion, SEO and unsupported trend claims do not. Selected posts
-continue through the existing web-article render/review rung.
+steps score well; promotion, SEO and unsupported trend claims do not. When
+web-article review is enabled, HTML-only articles use a bounded, text-only extraction
+of the selected main document's body text—not a visual/page facsimile. Images, layout,
+CSS-generated content, embedded frames, and shadow trees are outside that scope;
+incomplete or over-budget extraction fails instead of clipping a prefix. Unavailable
+declared scholarly PDFs are not substituted with paywall snapshots. Direct and authenticated
+PDF downloads remain unchanged. See the [browser article memory boundary](browser-article-memory-boundary.md).
 
 Operational caveat (verified 2026-08-29): HackerNoon documents tag RSS, but the
 narrow `ai-agents` and `agentic-ai` paths return Cloudflare 403. The broader

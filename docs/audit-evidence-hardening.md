@@ -1,6 +1,62 @@
-# Audit evidence hardening — final verification receipt
+# Audit evidence hardening — #25 local acceptance record
 
-**Scope:** A124, A136, A142 and A176 only; A111 remains outside this repair. This checkpoint records source/test findings and final V2 runner evidence. The canonical primary receipt is `data/audit-final-v2/summary.md`; the earlier 2026-10-08 pending serial/selected-`.env` checkpoint is retained below as historical. Historical source comparisons use base `7a9ffc7`.
+## Local acceptance — 2026-10-08 (prepared before publication)
+
+All five formerly partial GitHub #25 medium findings (A111, A124, A136, A142,
+A176) are verified complete in the current code: **42/42 medium findings**.
+This is a local acceptance report prepared before publication; remote review,
+merge, and issue-closure state is maintained in the GitHub issue/PR, not copied
+into this report. The local issue-body draft is
+`data/a111-release-gates/issue25-body.md`; this pass did not edit GitHub and
+asserts no PR number. Suggested title: **functional audit Medium findings
+complete (42/42)**.
+
+| Finding | Verified resolution and limit |
+|---|---|
+| **A111** | Article acquisition removes opaque print/body materialization and uses bounded main-document capture, complete admitted `document.body` text collection, and a bounded text-only PDF sink. Over-budget, mutated, invalid, or incomplete work fails closed; there is no prefix success. Live synthetic-origin run: 18 passed/0 skipped, 217 CDP calls/0 `Page.printToPDF`; this is not a Chromium/OS RSS guarantee. |
+| **A124** | Two batched calls check section summaries against the same first 700 source characters (up to 24 nonempty sections); unsupported summaries are omitted. Focused suite: 23 passed. No live semantic-accuracy claim. |
+| **A136** | Only affirmative whole-paper figure-count wording uses metadata; other scopes route to grounded Q&A. Focused Q&A/freshness suite: 39 passed. No live natural-language accuracy claim. |
+| **A142** | Proposal reads/upserts validate typed rows, skip malformed entries while retaining valid neighbors, preserve/quarantine corrupt whole files, and calibration uses valid proposal/human pairs. Focused strict-boundary suite: 74 passed. |
+| **A176** | All admitted text is partitioned into contiguous 6,000-character windows; 32 default/256 maximum, all-paper preflight before builder calls, selected-project `.env` precedence and frozen effective budget. Focused FaithBench suite: 93 passed. This is a work bound, not an accuracy claim. |
+
+### Final release receipts
+
+Primary receipts: `data/a111-release-gates/summary.md` and
+`data/a111-live-final-provenance/summary.md`.
+
+| Gate | Actual result |
+|---|---|
+| Pre-commit | **9/9 hooks passed** |
+| Focused article/browser/PDF/egress tests | **231 passed, 30 skipped** |
+| Full forked suite | **4,246 passed, 39 skipped, 0 failed** |
+| Full serial suite | **4,244 passed, 39 skipped, 2 failed**; exact baseline set, no new failure |
+| CLI smoke/help | Exit 0; `route_count: 117` |
+| Live synthetic-origin browser | **18 passed, 0 skipped**; **217 CDP calls**, **0 `Page.printToPDF`**; Chrome 154 and bundled Chromium 148 |
+
+Serial baseline failures are
+`tests/test_review_fleet.py::test_read_all_quarantines_corrupt_file_without_losing_bytes`
+and `tests/test_startup_boundaries.py::test_startup_rss_failure_is_logged_without_unretrieved_task`.
+A captured 4,096-byte genuine PDF was byte-identically retained in the raw-URL
+cache under an 8-byte text budget, without a text-writer call or snapshot; its
+provenance remains `web_article=False`, `source="browser"`. Only equality with the
+canonical `article_snapshot_path(source_url, cache_dir)` under
+`article-snapshots/` marks a text snapshot `web_article=True`. Legacy root-level
+cache files are retained and not reclassified. The full-Unicode fixture round-trip
+passed; Greek/Russian glyphs were visually read as clean. Article PDFs are a
+bounded text projection of the admitted body DOM, not the original visual page.
+
+The source, page, DOM-work, and output budgets fail closed instead of clipping a
+prefix; built-in Helvetica/`cjk` fonts are used and unsupported glyphs fail closed.
+Sampled live guard values were peak tree RSS **726,499,328 bytes**, minimum free
+RAM **46%**, and swap growth **0 bytes**. These are run observations, not a
+Chromium/OS memory ceiling. A124/A136 semantic accuracy was not measured.
+
+## Historical final V2 checkpoint — 2026-10-08 (before A111 closure)
+
+**Scope at that checkpoint:** A124, A136, A142 and A176; A111 remained outside
+that repair. The earlier V2 runner receipt is `data/audit-final-v2/summary.md`;
+the earlier pending serial/selected-`.env` checkpoint remains historical. Source
+comparisons used base `7a9ffc7`.
 
 ```text
 original paper / persisted proposal
@@ -14,7 +70,7 @@ original paper / persisted proposal
             32-window default, 256 maximum; over-budget input → fail before any builder call
 ```
 
-## Implementation and evidence status
+## Earlier V2 implementation and evidence status
 
 | Finding | Current source receipt | Status and limit |
 |---|---|---|
@@ -45,7 +101,7 @@ The original-source distinction and fail-closed ordering are supported patterns,
 
 A keyless, date-sorted public-source sweep was inspected on 2026-10-08. [`shekhar871/ayurveda-ai`, `59fdcd32`](https://github.com/shekhar871/ayurveda-ai) is MIT-licensed; `src/agents/citation_verifier.py#L14-L23` checks citation identifiers/ranges, not claim entailment. [`Aletheore/Aletheore`, `ef461790`](https://github.com/Aletheore/Aletheore) has repository license `NOASSERTION`; `src/aletheore/citation_verifier.py#L40-L71` is a citation parser, not paper-claim support. Recent preprints [`arXiv:2609.14245v1`](https://arxiv.org/abs/2609.14245v1), [`2608.30145v1`](https://arxiv.org/abs/2608.30145v1), and [`2608.10627v1`](https://arxiv.org/abs/2608.10627v1) discuss source-span attribution, scope normalization, and decomposition risks. They inform design only; peer review/full-text evidence was not established here, and none is a measured Zotero result.
 
-## Latest runner receipt — 2026-10-08 final V2
+## Historical runner receipt — 2026-10-08 final V2 (before A111 closure)
 
 Historical first checkpoint (superseded, retained for chronology): focused eight-module selection **229 passed**; pre-commit **9/9 hooks passed**; preliminary forked suite **4,128 passed, 32 skipped, 0 failed**; preliminary serial suite **4,120 passed, 32 skipped, 8 failed** (two baseline plus six logging assertions); selected-project `.env` recheck was then pending. CAPA identified the logging assertion issue; the corrected final run below is authoritative.
 

@@ -4,11 +4,13 @@ This is the exhaustive audit ledger for the repository. It separates observable
 product functionality from implementation abstractions so that a passing helper
 test is never mistaken for a working user flow.
 
-Snapshot date: 2026-09-05.
+Snapshot date: 2026-10-08.
 
-### Latest verification — 2026-10-08 (final V2)
+### Latest verification — 2026-10-08 (local acceptance; pre-publication)
 
-Canonical primary receipt: `data/audit-final-v2/summary.md`. Pre-commit: **9/9 hooks passed**; focused: **406 passed**, plus **8 selected-project `.env` assertions**. Full forked: **4,135 passed, 32 skipped, 0 failed**; full serial: **4,133 passed, 32 skipped, 2 failed**, exactly the unchanged baseline logging-node set and no new failures. CLI/parser/smoke passed (`route_count: 117`); no live model/Zotero calls. A111 remains open; live semantic accuracy for A124/A136 was not measured.
+Primary receipts: `data/a111-release-gates/summary.md` and `data/a111-live-final-provenance/summary.md`. GitHub #25's **42/42 medium findings are verified complete in code**; documentation and local issue-body preparation are complete. This is a local acceptance report prepared before publication; remote review, merge, and issue-closure state is maintained in the GitHub issue/PR rather than duplicated here. Suggested issue title: **functional audit Medium findings complete (42/42)**. Pre-commit: **9/9 hooks passed**; focused: **231 passed, 30 skipped**; full forked: **4,246 passed, 39 skipped, 0 failed**; full serial: **4,244 passed, 39 skipped, 2 failed**, with exactly the same two baseline failures. CLI smoke/help passed (`route_count: 117`).
+
+Live synthetic-origin browser proof: **18 passed, 0 skipped**, **217 CDP calls**, **0 `Page.printToPDF` calls**, with installed Chrome 154 and bundled Chromium 148. A captured 4,096-byte genuine PDF is preserved byte-for-byte in the raw-URL PDF cache and remains `web_article=False`/`source="browser"`; only the canonical `article_snapshot_path` under `article-snapshots/` is classified as a text snapshot. The complete admitted main-frame `document.body` text scope is converted with built-in fonts and bounded source/page/node/time/output budgets or fails closed—never a budget-clipped prefix. Greek/Russian glyphs in the rendered PDF were visually checked clean. This is a text projection, not the original visual page, and neither sampled guard RSS nor transfer/output bounds establish a Chromium/OS RSS ceiling. A124/A136 scripted structural checks are not live semantic-accuracy claims.
 
 ### Historical verification — 2026-10-05
 
@@ -4669,7 +4671,7 @@ batching, verdict-comment delivery must also consult current intent.
 | A108 | F06, F18 | high | `fetch_fulltext_for_items()` does not deduplicate item keys before constructing external mutations. Two input rows for key `A` generated two `add_attachment` changes and reported `attached=2`; the real writer gives each a fresh attachment key, so duplicate upstream IDs create duplicate PDF attachments and sync both to Zotero. | fixed: common engine deduplicates before acquisition/progress/change construction; any existing-PDF flag wins; one-outcome/one-change and mutation regressions |
 | A109 | F18 | medium | Full-text acquisition returns typed `offline_uncached` and `browser_extra_unavailable` rows, but `_summary()` counts neither in any aggregate. The Library UI computes “unavailable” only from `no_oa_source + needs_login + failed_count`; a batch containing those two unavailable outcomes reported every displayed aggregate as zero and would misleadingly say “0 unavailable.” | fixed: shared outcome-based UI count; four partial counters removed; result/request failures surfaced; page regressions |
 | A110 | F06, F18 | low | `_safe_attachment_filename()` promises to remove control characters and force the content-type extension, but removes only slash/backslash/NUL and truncates after appending. A newline survived in `bad\nname.pdf`, while a long PDF name was truncated to 120 characters without `.pdf`; resulting Zotero attachment filenames can be malformed or lose the extension the contract says is guaranteed. | fixed: printable-only names; suffix reserved before truncation; constant fallback parameter removed; real SQLite/file regressions |
-| A111 | F18, F29 | medium | The browser paths enforce `max_bytes` only after calling Playwright `response.body()`/`page.pdf()`, which materialise the entire attacker-controlled response/render in memory. Unlike the streaming HTTP rung, the advertised size cap cannot prevent memory exhaustion; it only rejects the already-allocated bytes afterward. | partial: bounded response/print transfer verified in Chromium and Chrome; native rendering still allocates the PDF before its stream exists |
+| A111 | F18, F29 | medium | The browser paths enforce `max_bytes` only after calling Playwright `response.body()`/`page.pdf()`, which materialise the entire attacker-controlled response/render in memory. Unlike the streaming HTTP rung, the advertised size cap cannot prevent memory exhaustion; it only rejects the already-allocated bytes afterward. | fixed structurally: article acquisition no longer uses opaque `response.body()`/`page.pdf()` or `Page.printToPDF`; bounded response capture feeds a controlled, complete-or-fail `document.body` text producer and bounded text-PDF sink. Live: 18 passed/0 skipped, 217 CDP calls/0 print calls; genuine PDFs retain raw bytes/path and `web_article=False`, while only canonical `article_snapshot_path` results are text snapshots. This is not a Chromium/OS RSS guarantee; the output is a text projection, not the original visual page. |
 | A112 | F19, F21, F22, F29 | high | Paper-render state paths concatenate route/request `item_key` without validation. A real `POST /api/library/render/%2E%2E/build` reached `start_build(item_key="..")`; its background error handler wrote `paper_read.json` one directory above `paper_render_dir`. Ask and review-fleet request models likewise accept `item_key=".."`; their flows reach artifact/render helpers through `ensure_artifact()` or deep-review settle. Encoded path or JSON input can therefore escape the per-item state root and overwrite/read another app-state filename. | fixed: shared state-path guard rejects traversal and existing item/state/temp symlinks; build/Ask/fleet regressions verify rejection before work |
 | A113 | F19, F29 | medium | `presentation_path()` trusts the absolute `outputs.presentation` stored in `paper_read.json`, unlike `source_pdf_path()` which validates allowed roots. A completed state pointing at an HTML file outside the artifact/PDF roots was accepted and would be served inline by the API; corrupted or migrated state can turn this into arbitrary local-file disclosure for any file the process can read. | fixed: shared resolved-root validation for presentation/PDF/figures and attachment enumeration; HTTP and symlink regressions |
 | A114 | F19, F21 | high | Artifact/Q&A freshness does not reliably identify PDF content. `_pdf_key()` uses integer-second mtime plus size, so replacing `AAAA` with same-size `BBBB` in the same second produced an identical key. `render_paper()` does not compare the persisted key with the current PDF, while Q&A's independent `_TEXT_CACHE` key is only `(path, integer mtime)` and omits even size/extractor. Both brief and answers can therefore use text from an older document while reporting the current extraction version. | fixed: streamed source-path/content identity; status and Q&A validate current artifact; second Q&A extraction/cache removed |
@@ -4791,3 +4793,42 @@ are audit outputs, not implicit authorization to mutate production behaviour;
 fixing them at shared roots with focused regression tests is a separate
 implementation phase. Environment failures are reproduced and isolated rather
 than silently waived.
+
+### 2026-10-08 — A111 and GitHub #25 local acceptance report
+
+All **42/42** medium entries are verified complete in the current code. The five
+previously partial IDs are A111, A124, A136, A142 and A176. A111 is resolved by
+removing the opaque browser print/body-materialization path for articles and
+using bounded main-document capture, complete admitted `document.body` text
+collection, and a bounded text-only PDF writer. Incomplete, changed, invalid, or
+over-budget input fails closed; no silent prefix or original-visual-page claim
+is made. A Chromium/OS RSS ceiling is explicitly **not** claimed.
+
+The provenance boundary is exact: genuine captured PDFs remain byte-identical
+in the raw-URL PDF cache with `web_article=False` and `source="browser"`; text
+snapshots live under `article-snapshots/<SHA-256(raw URL)>.pdf`, and only a path
+equal to `article_snapshot_path(url, cache_dir)` is classified as `web_article=True`.
+Legacy root-level cache files remain untouched and are not migrated or
+reclassified. The Unicode fixture retains its complete text; Greek/Russian PDF
+glyphs were visually reviewed clean. The derivative contains admitted body DOM
+text, not the source page's visual layout, CSS-generated content, frames, or
+shadow trees.
+
+Release receipts: pre-commit **9/9**; focused **231 passed, 30 skipped**; forked
+**4,246 passed, 39 skipped, 0 failed**; serial **4,244 passed, 39 skipped, 2
+failed**, with the unchanged baseline nodes `test_read_all_quarantines_corrupt_file_without_losing_bytes`
+and `test_startup_rss_failure_is_logged_without_unretrieved_task`; CLI smoke/help
+reported **117 routes**. The separate synthetic-origin live run was **18 passed,
+0 skipped**, with **217 CDP calls** and **0 `Page.printToPDF`** calls on Chrome 154
+and bundled Chromium 148. Sampled guard peak tree RSS was 726,499,328 bytes, minimum
+free RAM 46%, and swap growth 0 bytes; these are run measurements, not resource
+limits. A124/A136 are structurally covered but have no live semantic-accuracy
+claim. Receipts: `data/a111-release-gates/summary.md` and
+`data/a111-live-final-provenance/summary.md`.
+
+This local acceptance report was prepared before publication. Remote review,
+merge, and issue-closure state is maintained in the GitHub issue/PR rather than
+here, so the report remains an accurate code-verification snapshot after
+publication. Suggested issue title: **functional audit Medium findings complete
+(42/42)**. The local issue-body draft is
+`data/a111-release-gates/issue25-body.md`; no PR number is asserted.
