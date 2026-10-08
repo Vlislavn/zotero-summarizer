@@ -150,6 +150,8 @@ def brief_html(
     return (
         '\n  <section class="brief fade-in focus-in">\n'
         f'    {verdict}\n'
+        f'    <p>Saved source basis — quality: {_h((quality or {}).get("basis") or "not recorded")}; '
+        f'digest: {_h((digest or {}).get("basis") or "not recorded")}. Reviewed extent not recorded.</p>\n'
         f'    {gauge}\n'
         f'    {board}\n  </section>'
     )
@@ -213,7 +215,11 @@ def _goal_board_html(goals: list[dict[str, Any]]) -> str:
             f'<span style="width:{width}%"></span></div>'
             f'<div class="g-why">{_h(why)}</div>{extra}</div>'
         )
-    return f'<div class="goal-board">{cells}</div>{_goal_summaries_html(summaries)}'
+    originals = dict.fromkeys(str(g.get("summary") or "").strip() for g in goals)
+    original_html = ''.join(f'<p>{_h(text)}</p>' for text in originals if text)
+    if original_html:
+        original_html = '<details><summary>Original goal summaries</summary>' + original_html + '</details>'
+    return f'<div class="goal-board">{cells}</div>{_goal_summaries_html(summaries)}{original_html}'
 
 
 def _collect_goal_summary(summaries: dict[str, dict[str, Any]], goal: dict[str, Any]) -> None:
@@ -258,7 +264,7 @@ def _goal_summaries_html(summaries: dict[str, dict[str, Any]]) -> str:
     if overflow:
         result += ('<details class="goal-summary-more"><summary>More goal findings</summary>'
                    '<ul class="goal-summary-list">' + ''.join(overflow) + '</ul></details>')
-    return result
+    return '<details><summary>Goal findings</summary>' + result + '</details>'
 
 
 def _question_lookup() -> dict[str, str]:

@@ -10,10 +10,13 @@ that decides which wins on coverage-per-cost.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, NamedTuple
 
+from zotero_summarizer.integrations.llm_callbacks import LLMOutputTruncated
 from zotero_summarizer.models import GoalsConfig, PaperDigest
+from zotero_summarizer.models.config import MIN_MAP_CHUNK_CHARS
 from zotero_summarizer.services._common import to_text
 from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.library import quality_review
@@ -38,9 +41,24 @@ def split_chunks(text: str, chunk_chars: int, *, overlap: int = 200) -> list[str
     return [c for c in chunks if c.strip()]
 
 
-def _map_chunk(map_llm: Any, chunk: str) -> str:
+def _map_chunk(map_llm: Any, chunk: str, *, check_cancelled: Callable[[], None] | None = None) -> str:
+    if check_cancelled is not None:
+        check_cancelled()
     prompt = UNTRUSTED_INPUT_RULE + "\n\n" + DEFAULT_MAP_PROMPT.format(chunk=untrusted_input(chunk))
-    note = to_text(map_llm.prompt(prompt)).strip()
+    try:
+        note = to_text(map_llm.prompt(prompt)).strip()
+    except LLMOutputTruncated:
+        if len(chunk) <= MIN_MAP_CHUNK_CHARS:
+            raise
+        size = max(MIN_MAP_CHUNK_CHARS, len(chunk) // 2)
+        segments = split_chunks(chunk, size)
+        notes = [_map_chunk(map_llm, segment, check_cancelled=check_cancelled) for segment in segments]
+        return "\n\n".join(
+            f"[segment {i + 1}/{len(notes)} — generation notes, not original source]\n{note}"
+            for i, note in enumerate(notes)
+        )
+    if check_cancelled is not None:
+        check_cancelled()
     if not note:
         raise ValueError("map_reduce_digest: empty chunk summary")
     return note

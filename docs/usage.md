@@ -10,7 +10,10 @@ Full paper reviews lead with contribution and visible material caveats. Findings
 methods and limitations stay together; the rubric and secondary reference fields
 are under **Full digest and assessment**. **Evidence** retains source quotes, and
 **Original goal summaries** retains full supplied text. Abstained, unsupported and
-unretrieved goals are different states. Smaller cards keep their compact disclosure.
+unretrieved goals are different states. Goal findings remain under their own disclosure;
+shared caveat wording has one introduction with all distinct scope/context visible.
+Saved source basis is explicit; checklist coverage is not reviewed-source extent.
+Smaller cards keep their compact disclosure.
 
 Approved triage notes retain saved summaries across restarts and include available
 methods, findings, relevance, uncertainty and optional implementation/impact sections.
@@ -19,8 +22,17 @@ paper-specific text and all saved findings, reading hints and tags are retained 
 default, without a silent six-item limit. If an explicit renderer word budget is
 used, oversized fields show an omission notice; consult the full saved summary rather
 than treating that notice as evidence of absence.
-Raw summary data and exact artifact URLs are retained. Native-editor round trips and
-human read/skip sufficiency remain separate acceptance checks.
+Raw summary data and exact artifact URLs are retained. App-owned note footers also
+contain visible ownership metadata: native editors discard comments, so removing
+that footer loses same-note identification. Unrelated manual notes are not adopted.
+The SQLite adapter stores notes in Zotero's native HTML envelope so headings and
+lists remain HTML instead of being escaped as legacy plain text. Existing notes
+are not automatically migrated. Ownership requires structural provenance, not an
+ordinary paragraph mentioning a marker. Long sources reuse bounded mapping; only
+explicitly truncated work is subdivided, never accepted as partial output. Notes
+label the computed final priority separately when the model proposed another tier.
+Native-editor round trips and human/proxy read/skip sufficiency remain separate
+acceptance checks; passing preservation does not establish scientific correctness.
 
 ## First-run setup
 

@@ -305,3 +305,23 @@ Targeted Search's folded explicit constraints are forwarded through `searchApi`
 only when supplied; the natural-language topic alone never submits confirmed
 filters. The existing plan panel shows confirmation proposals and unknown
 zero-result retrieval states.
+
+The flat full review leads with Contribution before recommendation/grade/rationale;
+compact and legacy assessment presentation is unchanged. Exact key-finding strings
+also present as overstated claims appear only in the explicitly qualified critique
+panel; near-paraphrases remain untouched. Goal reasons live inside the native
+Evidence disclosure, while states, citations and quotes remain available. The
+mobile verdict-editor link stays in document flow rather than covering prose.
+
+Non-paper findings stay visible when the scientific overstated-claims panel is
+suppressed; exact-repeat exclusion applies only when that replacement renders.
+
+Full-page caveats factor only exact contiguous shared introductions in adjacent
+warnings. Complete suffixes remain initially visible with their own source links;
+joining each prefix and suffix reconstructs the original warning. Internal words,
+negations and scope are never deleted or inferred equivalent from a criterion or
+approximate location. Original wording is retained for audit. Identical goal sets
+share one finding heading. No semantic classifier, rewritten summary, rubric or
+scoring change is introduced; compact presentation remains unchanged.
+
+Full reading views fold goal findings into one native disclosure; states and citations remain visible. Saved quality/digest source basis is shown literally, with reviewed extent explicitly unrecorded. Rubric-literal warning frames preserve each modifier, complete suffix, and original wording.

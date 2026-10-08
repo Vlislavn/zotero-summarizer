@@ -40,3 +40,5 @@ the policy's reason without a second confidence/action field.
 types are also used by `research_feed.parse_run_budgets` at CLI/service entry:
 shortlist 1–100, cards 1–20, source rows 1–5,000 and wait timeout 1–86,400 seconds.
 Only omitted shortlist/card overrides use profile defaults; zero is not omission.
+
+`MIN_MAP_CHUNK_CHARS` is the shared 1000-character validation/recovery floor; the 8000-character default is unchanged.

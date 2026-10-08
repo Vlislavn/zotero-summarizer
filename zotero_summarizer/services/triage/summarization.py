@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Event
 from time import perf_counter
@@ -20,6 +22,7 @@ from zotero_summarizer.services import corpus
 from zotero_summarizer.services.model import scoring
 from zotero_summarizer.services.triage.prompts import DEFAULT_REFINE_PROMPT, DEFAULT_TRIAGE_PROMPT
 from zotero_summarizer.services.triage._execution import check_cancelled
+from zotero_summarizer.services.triage._json_output import parse_typed_output
 from zotero_summarizer.services._common import (
     LOGGER,
     build_log_prefix,
@@ -67,6 +70,7 @@ def _build_refine_prompt(config: GoalsConfig, req: SummarizeRequest, paper_text:
         research_goals="\n".join(f"- {g}" for g in config.research_goals),
         summary_structure="\n".join(f"- {s}" for s in config.summary_structure),
         output_language=config.output_language,
+        current_date=datetime.now(timezone.utc).date().isoformat(),
     )
 
 
@@ -87,7 +91,7 @@ def _build_triage_prompt(
         reading_priority_scale="\n".join(f"{key}: {desc}" for key, desc in config.reading_priority_scale.items()),
         title=req.title,
         doi=req.doi or "N/A",
-        summary=refined.executive_summary,
+        summary=json.dumps(refined.model_dump(mode="json"), ensure_ascii=False),
         corpus_context=corpus.build_corpus_context_text(corpus_context),
         corpus_affinity=f"{corpus_context.get('affinity_score', 0.0):.3f}",
         matched_goal=corpus_context.get("matched_goal", ""),
@@ -247,21 +251,21 @@ def _refine_with_retry(
     refined_text = to_text(llm.prompt(refine_prompt))
     check_cancelled(cancel_event)
     try:
-        return RefinedSummary.model_validate(extract_json_blob(refined_text))
-    except ValueError:
+        return parse_typed_output(refined_text, RefinedSummary)
+    except ValueError as exc:
         LOGGER.warning("%s refine JSON parse failed, retrying", prefix)
         retry_prompt = (
-            "The following text contains a research analysis. Return a single valid JSON "
-            "object with keys: executive_summary, should_deep_read, key_sections_to_read, "
-            "relevance_to_research, controversial_points, industry_academy_impact, "
-            "unknown_unknowns, implementation_quickstart, key_findings, methods, limitations, "
-            "method_and_code. "
-            "Return ONLY the JSON, no other text.\n\n" + refined_text
+            "The following text contains a research analysis. Repair its JSON structure "
+            "and field types to match the schema, preserving the analysis without adding facts. "
+            "Return ONLY a single valid JSON object, no other text.\n\nJSON schema:\n"
+            + json.dumps(RefinedSummary.model_json_schema(), ensure_ascii=False)
+            + "\n\nValidation error:\n" + str(exc)
+            + "\n\nOriginal output:\n" + refined_text
         )
         check_cancelled(cancel_event)
         retry_text = to_text(llm.prompt(retry_prompt))
         check_cancelled(cancel_event)
-        return RefinedSummary.model_validate(extract_json_blob(retry_text))
+        return parse_typed_output(retry_text, RefinedSummary)
 
 
 def _run_triage(
@@ -306,7 +310,11 @@ def _assemble_summary_response(
         composite_relevance_score=composite_score,
         reading_priority=mapped_priority,
         tags=triage.tags,
-        triage_rationale=triage.rationale,
+        triage_rationale=(triage.rationale if triage.reading_priority == mapped_priority else
+                          f"Final priority: {mapped_priority.replace('_', ' ')} from composite score "
+                          f"{composite_score:.2f}. The triage model proposed "
+                          f"{triage.reading_priority.replace('_', ' ')} before composite mapping; "
+                          f"its assessment follows, not the final ranking decision. {triage.rationale}"),
         triage_dimensions=triage.dimensions,
         triage_confidence=triage.confidence,
         corpus_affinity_score=float(corpus_context.get("affinity_score", 0.0)),
@@ -355,24 +363,18 @@ def run_pipeline(
 
     max_direct_chars = 80_000
     if len(raw_text) > max_direct_chars:
-        log_context(prefix, "text too long (%d chars), splitting into 2 chunks", len(raw_text))
-        mid = len(raw_text) // 2
-        break_pos = raw_text.rfind("\n\n", mid - 2000, mid + 2000)
-        if break_pos == -1:
-            break_pos = mid
-        chunk1, chunk2 = raw_text[:break_pos], raw_text[break_pos:]
-        summary_prompt = (
-            "Summarize the following chunk of an academic paper. "
-            "Cover: main claims, methodology, results with numbers, limitations. "
-            "Be thorough and factual.\n\n{text}"
-        )
-        log_context(prefix, "chunk 1 summary started chars=%d", len(chunk1))
-        s1 = to_text(llm.prompt(summary_prompt.format(text=chunk1)))
-        check_cancelled(cancel_event)
-        log_context(prefix, "chunk 2 summary started chars=%d", len(chunk2))
-        s2 = to_text(llm.prompt(summary_prompt.format(text=chunk2)))
-        check_cancelled(cancel_event)
-        paper_text = f"[Part 1 summary]\n{s1}\n\n[Part 2 summary]\n{s2}"
+        from zotero_summarizer.services.library._map_reduce import _map_chunk, split_chunks
+
+        chunks = split_chunks(raw_text, config.quality_review.map_chunk_chars)
+        log_context(prefix, "long source chars=%d chunks=%d", len(raw_text), len(chunks))
+        notes = []
+        for index, chunk in enumerate(chunks, 1):
+            check_cancelled(cancel_event)
+            log_context(prefix, "chunk %d/%d started chars=%d", index, len(chunks), len(chunk))
+            notes.append(_map_chunk(llm, chunk, check_cancelled=lambda: check_cancelled(cancel_event)))
+            check_cancelled(cancel_event)
+        paper_text = "\n\n".join(f"[chunk {index}/{len(notes)}]\n{note}"
+                                  for index, note in enumerate(notes, 1))
     else:
         paper_text = raw_text
 

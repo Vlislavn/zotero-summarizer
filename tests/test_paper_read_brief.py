@@ -104,14 +104,14 @@ def test_goal_summaries_deduplicate_without_losing_goal_evidence():
     ]
 
     html = brief.brief_html(CONTENT, quality=QUALITY, goal_summaries=goals)
-    visible_board = html.split('<details class="goal-summary-more">')[0]
+    visible_board = html.split('<summary>Goal findings</summary>', 1)[1].split('<details class="goal-summary-more">')[0]
     visible_summaries = re.findall(r'<li class="goal-summary-item">.*?</li>', visible_board, re.DOTALL)
     visible_text = [re.search(r'<p class="goal-summary-text">(.*?)</p>', item, re.DOTALL).group(1)
                     for item in visible_summaries]
 
     assert len(visible_summaries) <= 3
     assert sum(len(text.replace("…", "").split()) for text in visible_text) <= 90
-    assert html.count(shared) == 1  # repeated sentence + punctuation/case variant are shown once
+    assert visible_board.count(shared) == 1  # finding dedup does not delete original summaries
     assert "For: Goal Alpha: clinical workflow; Goal Beta: model safety" in html
     assert "Goal Gamma: reader outcomes" in html  # same quote does not merge distinct summaries
     assert "goal-summary-more" in html and "finding69" in html and "Goal Zeta: final finding" in html
@@ -317,3 +317,13 @@ def test_single_quote_is_also_closed_and_empty_legacy_adds_no_disclosure():
         assert cell.find('details') is None
     assert cells[1].find('div[@class="g-state"]').text == '⚠ not retrieved'
     assert cells[2].find('div[@class="g-state"]').text == '○ not addressed'
+
+
+def test_saved_source_basis_and_folded_findings_preserve_originals():
+    quality = {**QUALITY, "basis": "full_text"}
+    digest = {**DIGEST, "basis": "abstract"}
+    html = brief.brief_html(CONTENT, quality=quality, digest=digest, goal_summaries=GOALS)
+    assert "Saved source basis — quality: full_text; digest: abstract. Reviewed extent not recorded." in html
+    assert '<details><summary>Goal findings</summary>' in html
+    assert '<details><summary>Original goal summaries</summary>' in html
+    assert GOALS[0]["summary"] in html

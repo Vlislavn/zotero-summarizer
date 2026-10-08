@@ -31,6 +31,7 @@ def _source_sha(path: str) -> str:
 
 @lru_cache(maxsize=1)
 def _generation_sources() -> dict[str, str]:
+    from zotero_summarizer.integrations import pdf as analysis_extractor
     from zotero_summarizer.services.library import (
         _deep_review_layers, _map_reduce, _paper_goal_summaries,
         _paper_section_summaries, _source_admission, _auth_envelope, paper_type, quality_eval, quality_review,
@@ -38,7 +39,7 @@ def _generation_sources() -> dict[str, str]:
     from zotero_summarizer.services.library.review_fleet import propose
 
     modules = (
-        _deep_review_layers, _map_reduce, _paper_goal_summaries,
+        analysis_extractor, _deep_review_layers, _map_reduce, _paper_goal_summaries,
         _paper_section_summaries, _source_admission, _auth_envelope, paper_type, quality_eval, quality_review, propose,
     )
     paths = [Path(inspect.getfile(PaperDigest)), *(Path(module.__file__) for module in modules)]
