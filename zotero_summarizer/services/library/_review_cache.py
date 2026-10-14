@@ -23,7 +23,7 @@ def _cache_path():
     return settings().model_dir / _CACHE_FILENAME
 
 
-def _read_all() -> dict[str, Any]:
+def _read_all(*, readonly: bool = False) -> dict[str, Any]:
     path = _cache_path()
     with _CACHE_LOCK:
         if not path.exists():
@@ -31,11 +31,15 @@ def _read_all() -> dict[str, Any]:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            if readonly:
+                raise ValueError("Invalid deep-review cache bytes") from exc
             backup = _quarantine_corrupt_cache(path)
             LOGGER.warning("quarantined corrupt deep-review cache to %s (%s)", backup, exc)
             return {}
         reviews = payload.get("reviews") if isinstance(payload, dict) else None
         if not isinstance(reviews, dict):
+            if readonly:
+                raise ValueError("Invalid deep-review cache envelope")
             backup = _quarantine_corrupt_cache(path)
             LOGGER.warning("quarantined invalid deep-review cache envelope to %s", backup)
             return {}
@@ -80,6 +84,21 @@ def get_cached_review(item_key: str) -> dict[str, Any] | None:
         return entry
     return {**entry, "digest": digest, "model_read_decision": entry.get("model_read_decision", raw),
             "reading_policy_flags": list(dict.fromkeys([*entry.get("reading_policy_flags", []), *flags]))}
+
+
+def export_review_audit(item_key: str) -> dict[str, Any] | None:
+    """Return exact cached digest/evidence: no provider, projection, repair or write."""
+    from zotero_summarizer.services.library._digest_audit import cached_audit_status
+
+    entry = _read_all(readonly=True).get(item_key)
+    if entry is None:
+        return None
+    if not isinstance(entry, dict):
+        raise ValueError("Invalid deep-review cache entry")
+    status, reason = cached_audit_status(entry)
+    return {"item_key": item_key, "digest": entry.get("digest"),
+            "audit_status": status, "reason": reason,
+            "verification_audit": entry.get("verification_audit") if status == "available" else None}
 
 
 def review_is_current(entry: dict[str, Any] | None, item_key: str = "") -> bool:
@@ -132,6 +151,6 @@ def copy_review(src_key: str, dst_key: str) -> bool:
 
 __all__ = [
     "_cache_path", "_read_all", "_write_all", "_write_one",
-    "REVIEW_CONTRACT_VERSION", "get_cached_review", "get_current_review",
+    "REVIEW_CONTRACT_VERSION", "get_cached_review", "get_current_review", "export_review_audit",
     "review_is_current", "cached_review_keys", "current_review_keys", "current_reviews", "copy_review",
 ]

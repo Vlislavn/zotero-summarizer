@@ -187,6 +187,11 @@ different shapes; it degrades to deterministic-only when no embedding model is a
 Backend tests isolate runtime state and the default project root per test, hide
 inherited provider credentials/keyring entries, and block TCP connections. Mock
 integrations explicitly; a unit test must never use a live model or Zotero service.
+The same autouse boundary snapshots the named application logger's level,
+propagation, disabled state and handlers. Teardown restores that baseline via
+`setLevel` (clearing enablement caches), closes only newly attached handlers and
+preserves original handlers. Production logging still writes to its file without
+propagating to root; later tests can capture warnings without leaked file resources.
 Before collection/fork, `tests/conftest.py` sets `no_proxy=*` for the test session.
 This avoids macOS SystemConfiguration proxy discovery from HTTP client constructors
 in forked children, as [documented by Python](https://docs.python.org/3.13/library/urllib.request.html).

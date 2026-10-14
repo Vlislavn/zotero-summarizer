@@ -25,9 +25,17 @@ export default function Settings() {
 
   const [form, setForm] = useState(null);
   const [savedBanner, setSavedBanner] = useState('');
-  const [modelsOpen, setModelsOpen] = useState(false);
+  const [modelsOpen, setModelsOpen] = useState(() => window.location.hash === '#ai-models');
   const [universityOpen, setUniversityOpen] = useState(() => window.location.hash === '#university-access');
   const [pathForm, setPathForm] = useState({ zotero_data_dir: '', pdf_root: '' });
+
+  useEffect(() => {
+    function openAiFromHash() {
+      if (window.location.hash === '#ai-models') setModelsOpen(true);
+    }
+    window.addEventListener('hashchange', openAiFromHash);
+    return () => window.removeEventListener('hashchange', openAiFromHash);
+  }, []);
 
   const seededFormState = useMemo(
     () => configToFormState(configQuery.data),
@@ -141,7 +149,7 @@ export default function Settings() {
       <ReadinessStrip />
 
       <form onSubmit={handleSave} className="space-y-4">
-        <DeploymentCard />
+        <DeploymentCard onOpenAiSettings={() => setModelsOpen(true)} />
         <AiModelsSection
           status={status}
           enabled={form.llm_enabled}

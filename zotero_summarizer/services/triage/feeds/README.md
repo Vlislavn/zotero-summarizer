@@ -8,6 +8,12 @@ each concern lives in a private sub-module.
 Automatic brief rendering publishes presentation HTML, audit JSON and figures;
 it does not create Markdown sidecars.
 
+The explicitly approved legacy `materialize_pick` recovery helper retries current
+composite My notes after its original connection/context closes, for both new and
+existing targets. Only successful owned-note upserts acknowledge the projection;
+expected failures retain pending, while schema/programming defects propagate.
+This does not authorize daemon/ingest/question-triggered materialization.
+
 Two reader roles per tick: the triage SOURCE is `AppRssReader` (the app-owned
 `rss_feeds`/`rss_items` pool, refreshed in rotation each tick); Zotero-library
 questions go through a separate OPTIONAL `ZoteroReader` (library dedup, outcome
@@ -48,6 +54,13 @@ run_daemon_loop ─every N s→ run_daemon_tick (_tick)
 and `storage.feeds`; standard services rules. `_common` is the leaf — siblings
 import from it, never the reverse.
 
+The LLM-score partition uses the response's private producer-owned corpus
+prefilter outcome, never a tag substring or score heuristic. Generated marker
+tags are preserved without authorizing `corpus_fast_reject`; genuine machine
+rejections retain that durable decision even without the display tag. Public
+schemas/dumps and review/read policies are unchanged. The private outcome is
+consumed on the live response before persistence, not inferred after JSON reload.
+
 App-RSS refresh errors propagate out of the tick: the reader records the failing
 feed and rolls back that feed's item writes before raising. A failed refresh
 cannot silently continue into triage against a stale source pool.
@@ -60,6 +73,16 @@ cached loader: verdict-only, config, tuning, code and corpus changes can retrain
 without a CSV edit. Legacy models lacking input identity are stale. The worker
 uses the currently configured classifier name, not the predecessor's name.
 The existing live gate remains available while background retraining runs.
+After successful install/rescore, the daemon appends a self-contained training
+record to `Settings.classifier_runs_log_path` through `model.training_record`.
+Artifact-retained CSV, composite training-input and model identities keep their
+full/prefix/unknown scope; current files/config are not rehashed as historical
+provenance. Metrics retain nulls; source/config/seed gaps are explicit. This is
+`gate_training`, never historical triage inference or measured score gain.
+Serialization/append failure or cancellation remains visible in
+`classifier_gate_error`; an already installed gate stays live, no success is
+claimed, and the training flag clears. The append is a separate effect with no
+cross-store transaction, automatic backfill, or fsync/power-loss guarantee.
 Startup and gate installation share the same quality formatter. An undefined
 Spearman (`None`) logs as `quality=n/a`; measured zero remains `Spearman=0.000`.
 
@@ -86,3 +109,18 @@ automatic review/render work. Existing model/input caches may be read or warmed.
 Tick counts are accumulated in DaemonTickReport itself; dataclass serialization
 includes fatal_llm_error. The loop fails on exceptions or failed reports and
 removes its signal handlers on exit; zero ticks does no work.
+
+Weekly descriptive feedback is optional and disabled by default. ONLY `feeds serve`
+passes its selected Settings as explicit `run_daemon_loop(feedback_settings=...)`.
+The loop awaits the main-thread scheduler between ticks; it never dispatches this
+operation through `to_thread`. Existing server/background/one-shot tick callers do
+not activate scheduling. Strict `ZS_FEEDBACK_SCHEDULE_ENABLED`, max-window and
+aggregate-wall Settings knobs, UTC Monday activation/catchup, confirmed publication
+before cursor, late observations and bounded-drain cancellation are documented in
+[feedback_analysis](../../golden/feedback_analysis/README.md#weekly-operation-additive-manual-and-analytic-contracts-unchanged).
+Failure/HOLD propagates, with private status/receipt evidence and no retry pile.
+No additional timer, model/label mutation or server lifecycle scheduler.
+
+Disabled Settings bypass scheduler imports; platform locking is activation-only.
+Source admission precedes all scheduler namespace writes. Owned finalization after
+acknowledged operation/sidecar writers, not success-shaped bytes, authorizes the cursor.

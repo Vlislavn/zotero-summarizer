@@ -42,13 +42,14 @@ label_verdicts: current snapshot + append-only user-label transition event
 | file | responsibility |
 |---|---|
 | `label_verdicts.py` | the concrete current-label command seam used by deliberate writers: read prior snapshot → commit `label_verdicts` → append `label_transition` with distinct prior-user/new-user/model fields. Offline sync commits atomically in its storage transaction, then calls the same `log_committed_transition` semantic seam. Same-label user saves are transition no-ops; user labels cannot be overwritten by `machine_add`; an automated row taken over by a user becomes an assignment. The JSONL append is best-effort after commit (not a transactional outbox) |
-| `verdict_effects.py` | post-commit effects shared by online and offline verdicts: metadata-enriched golden row, positive-feed materialization, current-state `label:*`/comment mirrors, plus the shared review-note mirror. Sync replays these on `already_applied` to repair a process crash between SQLite commit and delivery. Mirror errors propagate; metadata/materialization retain their separate enrichment result contracts |
+| `verdict_effects.py` | post-commit effects shared by online and offline verdicts: metadata-enriched golden row, positive-feed materialization, current-state `label:*`/comment mirrors, plus the shared review-note mirror. Sync replays these on `already_applied` to repair a process crash between SQLite commit and delivery. Verdict mirror errors propagate; composite review-note delivery reports separate pending/error receipts; metadata/materialization retain their separate enrichment result contracts |
 | `goldenset.py` | export the golden CSV/JSONL from Zotero engagement signals (atomic tmp+replace so a crash can't truncate it; labels/relevance from `domain`). A `label:<priority>` tag is the top short-circuit in `_infer_label`; `label:%` is an engagement trigger so a label-only item still gets a row. On export it reconciles `label_verdicts` from those tags (`user_labels.reconcile_label_verdicts`). Preserves **all** manual verdict keys on re-export via the uncapped `repositories.list_label_verdict_keys` (a capped fetch would silently drop verdicts); strips note HTML with the canonical `services._common.html_to_text` |
 | `user_labels.py` | the `label:<priority>` tag bridge: `detect_label` (read → priority, highest wins) + `reconcile_label_verdicts` → `ReconcileCounts(synced, changed, removed)`: imports a changed Zotero current-label mirror into `label_verdicts` (idempotent) and records assignment/change/retraction in the interaction log. It **retracts** a verdict whose tag was deleted only when it is **tag-sourced** (`original_derived_priority == ZOTERO_LABEL_ORIGIN`) and the item is present, live and tag-free. A first observation on a device has unknown earlier history; no old label is guessed. Verdicts typed in the Annotate UI are never auto-deleted unless a later mismatched Zotero label takes ownership; missing/trashed/feed/note items are skipped |
 | `hybrid_gt.py` | the single label-merge point, precedence ladder: explicit user verdict > outcome-corrected machine add > provisional machine add > derived. An **unchecked** "Add to library" verdict (`label_verdicts.source='machine_add'`) is capped at weak `could_read` (3.0) as the effective TRAINING label — not the `should_read` (4.0) the add stamps for display intent — because the user moved it Today→library but hasn't checked the label (`_UNCHECKED_ADD_PRIORITY`). It then gets corrected by the observed 7-day materialization outcome (`processed_feed_items.final_outcome`) — **demote-only** and computed from the could_read cap, not the raw add (`outcome_correction(_UNCHECKED_ADD_PRIORITY, outcome)` → `min` of the cap and `relevance_from_signal_weight(OUTCOME_WEIGHT)`; promotions flow through the engagement export, so promoting here would double-count). `pending`/`unknown`/unmapped outcomes are not behavioural evidence → no correction. Corrected rows get an `outcome_<name>` tier segment (weight: `label_weights`); relevance values from `domain.PRIORITY_TO_RELEVANCE`. Applied by every training path — `/admin/retrain`, the daemon gate retrain, and active-learning all thread `triage_db_path` into `load_or_train` |
 | `label_provenance.py` | per-row provenance via `compute_provenance` / `provenance_from_row`: which signal produced which label |
 | `feedback.py` | map emoji/engagement events to training signal tiers |
 | `relabel_audit/` | blind test-retest reliability study (κ, ICC, …) |
+| [`feedback_analysis/`](feedback_analysis/README.md) | frozen descriptive evidence, `goldenset analyze-feedback` and default-off main-thread weekly `feeds serve` automation: clean bounded child, private Darwin no-replace reports, positive-finalization/recovery before cursor; no scored chronology/ranking, scientific usefulness or cross-store atomicity claim |
 
 **Boundaries:** standard services rules. `emoji_signals` (shared) is the tag
 taxonomy this domain builds on.
@@ -105,14 +106,31 @@ an in-flight creation may have stamped an obsolete label. Revalidation performs
 no tag write when the tag already matches. CSV enrichment retains its
 separate existing post-commit behavior.
 
-Review-note delivery takes only the database path and item key, never a submitted
-body. Online save and offline set/delete/replay share `mirror_review_note`, which
-reads current alias-aware note intent under SQLite's writer lock through external
-delivery. A tombstone clears the app-owned note body (the marked child remains).
-Connector/backup/write failures propagate, leaving the local save committed and
-retryable; only unconfigured Zotero retains the optional local-first result.
-The previous review-note error-as-success fallback is removed. Other verdict
-enrichments retain their separately documented behavior.
+Review-note delivery takes only the database path and lookup key, never a submitted
+body. Manual notes, questions and offline retries share `mirror_review_note` and
+`storage.review_note_projection.current_for_mirror`: current manual text plus saved
+questions, a unique storage-resolved target, and a SQLite writer lock through delivery.
+The real reader must also find that target. Clears/retractions retain saved questions;
+owned `USER_NOTE_MARKER` rendering/backup-first upsert stay separate from verdict
+labels/rationale. Only an actual successful upsert can explicitly acknowledge the
+unchanged revision/body/target, and only a committed acknowledgement clears pending.
+
+The receipt retains `note_written`/`note_error` and adds `projection_revision`,
+`note_pending`, `target_key`. Already-acknowledged intent is a no-op (`note_written=false`,
+`note_pending=false`). Missing/nonunique targets, unconfigured Zotero and expected
+connector/backup/write/ack failures retain pending and expose an error independently
+of the committed local save. Write success followed by ack failure reports written
+but pending; retry reuses the idempotent owned-note writer. If storage cannot even
+resolve a snapshot, pending/revision/target are unknown (`null`); the five-field
+receipt shape stays stable. These nulls claim neither delivery nor acknowledgement.
+Only read/write errors explicitly carrying `expected_io=true` become optional
+receipts. The actual producer preserves numeric SQLite IO/contention classification
+through writer row results and service wrappers. Schema/programming/malformed
+payload and unknown defects still raise after saving; they cannot enter QA or become
+ordinary successful pending responses. Unconfigured Zotero's APIError contract is
+unchanged; bodies are never logged. External upsert and
+SQLite acknowledgement are not distributed-atomic. Verdict effects are unchanged;
+feed materialization reports its independent `review_note_mirror` receipt.
 
 Verdict label and comment delivery now share the current alias-aware snapshot
 and writer lock. Set, clear, delete and old UUID replay cannot restore an older

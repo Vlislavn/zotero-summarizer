@@ -34,11 +34,98 @@ label the computed final priority separately when the model proposed another tie
 Native-editor round trips and human/proxy read/skip sufficiency remain separate
 acceptance checks; passing preservation does not establish scientific correctness.
 
+PDF triage admits method artifact URLs only from complete original text, bound
+metadata or eligible whole original PDF hyperlink annotations. It retains literal
+case, percent spelling and punctuation, never guesses links from wrapped text,
+normalizes annotations or appends their raw tuple to prompts. One immutable
+capture governs direct/map and first/repair; reader/hash/ordinary source changes
+fail before model work. Rejection receipts bind full PDF and exact tuple hashes.
+This is membership, not scientific relevance or usefulness. Live abstract receipt
+writes remain required; Doctor/explicit dry is write-free and never reads a PDF.
+
+PDF triage over 80,000 text characters supplements generated map notes with whole
+original HTTP(S)-bearing ±200-character windows. Source-order selection merges
+retained overlaps and skips windows that do not fit; matched/retained occurrence
+counts disclose omitted context. The suffix budget is the existing
+`quality_review.map_chunk_chars`, including escaping, policy and wrappers, measured
+in Python characters—not tokens. Even custom refinement templates without
+`{paper_text}` receive this separately escaped suffix after formatting. Direct PDF,
+abstract/Doctor, shared library mapping and the distinct single JSON-repair prompt
+remain unchanged; only initial long-source generation gains this context.
+It adds no calls or artifacts automatically. URI windows exclude annotation-only
+and URI-free evidence and do not establish contribution role, whole-paper absence,
+scientific completeness or measured model-quality improvement.
+
 Ask Paper uses deterministic metadata only for affirmative whole-paper figure-count
 phrasing; scoped, uncertain, table-only, combined, or unmatched count questions fall
 through to grounded Q&A. The paper artifact stores `figures_count`, not a table
 count; focused Q&A and freshness routing tests passed (39), but live natural-language
 scope accuracy is not measured.
+
+Ask Paper processes the latest 20 history turns. The four recent turns retain
+conversational text; older current-extraction handles retain complete identities,
+original spans and repeated occurrences only when the checkpoint is strictly shorter.
+Prior conversation remains escaped session data, not paper evidence. Question-only
+input digests are neither authentication nor anonymization; see the
+[checkpoint contract](../zotero_summarizer/services/library/README.md#qa-evidence-checkpoints).
+
+Native Zotero annotation detail keeps highlighted `text` separate from literal
+`comment` content, with additive `annotation_key`, parent `attachment_key` and raw
+`date_modified`. Keys belong to the selected native user library/database, not a
+global identity or authenticated author. Same-clock edits can change content, so
+the clock alone is not a monotonic revision or sufficient cache invalidation.
+This readonly metadata preserves legacy values/order/multiplicity and does not
+add related-paper retrieval or interpret negative comments as interest.
+
+Typed and preset Ask questions are saved before answering and remain separate
+from editable **My notes**. The question list reports one composite Zotero-note
+outcome (pending, acknowledged or not confirmed) with its reported revision;
+new submissions or changed saved content retire the prior receipt and completion,
+even if the same text returns. An already-acknowledged retry needs no new Zotero write.
+Unreported delivery stays unknown. Comment-save, offline sync and QA outcomes
+remain distinct; reconnect never automatically repeats QA.
+
+### Accepted-digest evidence and local export
+
+New deep reviews retain the existing verifier's accepted `tldr` and `key_findings`
+checks in `deep_reviews.json`, separate from the model's digest schema. Standalone
+`assess_digest`, `digest_for_strategy` and `map_reduce_digest` callers opt in with
+an app-owned `verification_audit={}` sink; omitting it retains no audit. This adds
+no verifier calls and changes no correction, publication, ranking or Add rules.
+Accepted evidence contains original passages and exact character occurrences,
+claim/source/digest hashes, extraction/verifier fingerprints, numeric-preflight
+outcomes and correction/fallback lineage. Rank/prefix describe their actual
+selected extraction; map notes are not evidence. Complete extraction does not
+prove complete-paper coverage. Synthetic joins and unavailable PDF pages remain
+explicitly unmapped.
+
+In an already initialized local application/project context:
+
+```python
+from zotero_summarizer.services.library.deep_review import export_review_audit
+
+result = export_review_audit(item_key)  # JSON-serializable value; no output-file write
+```
+
+A missing cache key returns `None`. Otherwise `audit_status` is `available`,
+`stale` or `unavailable`, with `reason`; only an available audit includes evidence.
+Legacy and missing-source entries never acquire invented checks. Current source
+bytes are hashed without a size/mtime shortcut; extraction and verifier revisions
+invalidate independently of generation identity. Export returns the stored digest,
+not its current policy projection, and never calls a provider, repairs/quarantines
+corrupt cache bytes, writes a file or publishes anything. Corrupt bytes/envelopes
+raise `ValueError`; local read errors propagate. Saving the returned JSON is a
+separate caller-authorized action.
+
+`verified_digest`/its hash describe the accepted generator or correction result;
+`cached_digest_sha256` binds the final policy-adjusted artifact.
+`post_verification_changes` identifies changed fields, and each retained claim
+reports whether its cached field still matches. Policy text is not silently
+certified by the earlier verifier. A false support verdict means support was not
+established, not contradiction; contradiction adjudication is not performed.
+These local files contain source passages: do not share private material.
+Scientific usefulness, five accepted-digest audits and the ten-paper expert pilot
+remain separate acceptance work.
 
 ## First-run setup
 
@@ -68,6 +155,52 @@ AI-assisted setup can finish before the secret/endpoint is live — **Next** gat
 structurally-valid provider (type + base URL + key env-var name + model), not on a passing
 connection test. Environment changes require a restart; keyring saves apply immediately.
 
+HackerNoon can use existing RSS subscriptions and the practitioner rubric.
+The non-shipped `tools.method_validation.practitioner` caller is a bounded
+abstract diagnostic, not feed-daemon/selection acceptance. Frozen tag captures
+contain zero entries; main-feed diagnostic stories are not substitutes.
+
+Diagnostic receipts use started-call evidence for attempts. Generated tags cannot
+mark successful calls as gate censorship or missing-abstract nonattempts. These
+are machine accounting, not semantic judgments.
+
+### Local setup verification boundary
+
+Saving is configuration-only. Optional CLI real inference defaults to No.
+Draft/Doctor/CLI use canonical endpoint locality, even when its name is `hosted`.
+Each unique callback assesses the same captured provider/model/options before
+construction; shared stages reuse one probe.
+
+Local UNKNOWN refuses construction without blocking configuration, inventory or
+separately consented downloads. Total-RAM/disk profile floors stay advisory.
+No approved numeric budget/reserve, resident bypass or UNKNOWN exception is
+provided; Full-local hardware verification remains unfinished.
+
+Advanced operators may select `ZS_SETUP_LOAD_POLICY_PATH` and independently
+configured `ZS_SETUP_LOAD_POLICY_SHA256`, both absent by default. The SHA binds
+chosen bytes, not authenticated approval or measured sufficiency. There is no
+policy editor or generated policy file.
+
+The finite policy carries version, policy_ref, exact routing identity,
+effective context/placement/memory domain and budget/reserve. Malformed presence
+or read failure is an explicit error, even without a hash. Current clients do not
+evidence an effective envelope, so production remains UNKNOWN.
+
+Waiter timeout/cancel cannot unlock an active callback. Unproven request/retry
+finality leaves sticky same-process HOLD after callback exit; this is uncertainty,
+not evidence of ongoing work. Restart/unload is not request completion. There is
+no reset or cross-process lifecycle guarantee.
+
+“LLM verification needs action” covers local refusals and hosted abandonment
+without claiming endpoint locality. The detail identifies the provider/model and
+reason; Review endpoint settings only opens existing AI controls. Hosted
+abandonment does not by itself create local HOLD.
+
+Readiness binds policy/revision, not volatile RAM. HOLD or invalid current AI
+configuration downgrades required load rows. Review endpoint settings only opens
+existing AI controls (`/settings#ai-models` from the wizard); it never verifies,
+saves, selects a model or grants load consent.
+
 ## Two ways to run triage
 
 Scoring papers always runs the same pipeline (cheap ML gate → LLM for survivors →
@@ -82,6 +215,36 @@ SQLite). What *triggers* it is your choice:
   if you run the daemon.
 
 The daemon is convenience, not a requirement.
+
+### Local feedback evidence
+
+`zotero-summarizer goldenset analyze-feedback --project-root ROOT` creates one
+private descriptive JSON/Markdown report under that project's `data/feedback-analysis`.
+An optional `--cutoff` is timezone-aware ISO time. The command does not start the
+app, migrate source stores, contact providers or alter models/labels. It uses a clean
+bounded child and prints a report/receipt pointer. No eligible support means an
+`insufficient_data` report with explicit gaps, not a successful model evaluation.
+Errors remain nonzero; a failure receipt's path is only an attempted locator.
+Atomic no-replace publication currently requires Darwin; other platforms refuse.
+
+Analytics recognizes exact `offline_sync` and `sync_conflict_resolution` sources
+only on `label_transition`; their `human_feedback` remains nonpreference.
+Raw provenance and separate channels are retained; existing reports are not rewritten.
+
+Weekly automation is OFF unless `ZS_FEEDBACK_SCHEDULE_ENABLED=true` is explicitly
+selected for `feeds serve`. It runs between ticks on the main thread: Monday00UTC
+windows, oldest-first catchup bounded by `ZS_FEEDBACK_SCHEDULE_MAX_WINDOWS`
+(default2/max4), with aggregate `ZS_FEEDBACK_SCHEDULE_WALL_CAP_SECONDS`
+(default240/max600). Server startup, one-shot ticks and UI jobs do not activate it.
+The private `schedule/cursor.json` points to the last positively finalized report;
+failed writers, foreign/missing confirmation and interrupted work cannot advance it.
+Changed same-window input creates a new full-content identity. Recovery of a genuinely
+finalized cursor-write failure uses the exact frozen report rather than new analysis.
+
+Installed-host/scored chronology/ranking and scientific usefulness remain unverified;
+counts and confidence intervals describe selection-biased observed support only.
+See [the operation/weekly contract](../zotero_summarizer/services/golden/feedback_analysis/README.md)
+for source/ownership, resource, signal, no-fsync and cooperative-namespace limits.
 
 ## Adding sources (arXiv, bioRxiv, PubMed, HackerNoon)
 
@@ -426,6 +589,25 @@ making builder calls. The effective limit is stored in benchmark metadata. Each
 additional window adds a builder call, so a higher limit costs more. This bound
 ensures contiguous source coverage only for admitted inputs; it does not prove QA
 semantic accuracy. Generated QA and traps still require human review and approval.
+
+## Offline saved Telegram news
+
+This optional CLI mode consumes an explicit saved JSONL export; it does not connect
+to Telegram or enable a feed by default. Start with import/export only:
+
+```bash
+uv run zotero-summarizer research-feed run --source telegram --input-jsonl POSTS.jsonl --collect-only --project-root ROOT
+```
+
+Use your selected project root. See the [saved-news contract](../zotero_summarizer/services/research_feed/README.md#offline-saved-telegram-news)
+for the version-1 post schema and existing profile interests. Omitting
+`--collect-only` explicitly permits configured reranker initialization and default
+LLM processing of the original text/interests; obtain content/provider consent
+first. Loading failures and exhausted waits stay error/pending, not negative labels.
+The configured wait does not cancel a download or bound total command shutdown.
+`--cached-only` projects retained results without new model calls; `research-feed
+view --report SAVED.md` reads a retained report without reconstruction. Telegram
+never queues Zotero writes. Live collection, calibration and usefulness remain open.
 
 ## Command reference
 

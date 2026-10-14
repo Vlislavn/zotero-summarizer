@@ -2,7 +2,7 @@
 // All functions return parsed JSON or throw on non-2xx responses.
 // Designed to be called from React Query's `queryFn` / `mutationFn`.
 
-import { cacheResponse, cachedResponse, queueMutation } from '../offlineStore.js';
+import { cacheReviewDetail, cachedResponse, queueMutation } from '../offlineStore.js';
 
 function requestSync() {
   window.dispatchEvent(new Event('zs-sync-request'));
@@ -67,15 +67,30 @@ export async function fetchReviewDetail(itemKey) {
   if (!itemKey) throw new Error('fetchReviewDetail: itemKey is required');
   const qs = new URLSearchParams({ item_key: itemKey });
   const key = `review:${itemKey}`;
+  function cacheDiagnostic(error, stage, localQuestionsAvailable) {
+    const diagnostic = { stage, message: error.message || String(error),
+      local_questions_available: localQuestionsAvailable };
+    console.warn('offline detail cache unavailable', { stage, name: error.name, message: diagnostic.message });
+    return diagnostic;
+  }
+  let server;
   try {
-    const data = await request(`/review-detail?${qs.toString()}`);
-    await cacheResponse(key, data).catch((err) => console.warn('offline detail cache unavailable', err));
-    return data;
+    server = await request(`/review-detail?${qs.toString()}`);
   } catch (err) {
-    const cached = !err.status && await cachedResponse(key);
+    if (err.status || err instanceof SyntaxError) throw err;
+    let cached;
+    try {
+      cached = await cachedResponse(key);
+    } catch (cacheError) {
+      cacheDiagnostic(cacheError, 'read', false);
+    }
     if (cached) return cached;
     throw err;
   }
+  const result = await cacheReviewDetail(itemKey, server);
+  if (!result.cacheError) return result.detail;
+  return { ...result.detail, offline_cache_error:
+    cacheDiagnostic(result.cacheError, result.stage, result.localQuestionsAvailable) };
 }
 
 /**

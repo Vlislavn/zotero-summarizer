@@ -13,20 +13,21 @@ from zotero_summarizer.models.providers import resolve_stage
 from zotero_summarizer.services._common import settings, state
 
 
-@lru_cache(maxsize=256)
-def _file_sha(path: str, mtime_ns: int, size: int) -> str:
-    del mtime_ns, size
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
-
 def _source_sha(path: str) -> str:
     if not path:
         return ""
     source = Path(path)
     if not source.is_file():
         return "missing"
-    stat = source.stat()
-    return _file_sha(str(source.resolve()), stat.st_mtime_ns, stat.st_size)
+    from zotero_summarizer.integrations.pdf import _file_fingerprint
+
+    return _file_fingerprint(source)[1]
+
+
+def assert_review_source_unchanged(identity: dict[str, str]) -> None:
+    """Reject ordinary source drift before binding the retained extraction."""
+    if _source_sha(identity["source_path"]) != identity["source_sha256"]:
+        raise ValueError("PDF source changed during deep review")
 
 
 @lru_cache(maxsize=1)

@@ -23,9 +23,9 @@ const DATA = {
   ],
 };
 
-function renderChecklist() {
+function renderChecklist(props = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={client}><DoctorChecklist /></QueryClientProvider>);
+  return render(<QueryClientProvider client={client}><DoctorChecklist {...props} /></QueryClientProvider>);
 }
 
 beforeEach(() => {
@@ -34,6 +34,18 @@ beforeEach(() => {
 });
 
 afterEach(cleanup);
+
+it('typed AI recovery navigates without another verification or save', async () => {
+  const open = vi.fn();
+  fetchDoctorStatus.mockResolvedValueOnce({ ...DATA, checks: [{
+    id: 'llm_inference', status: 'needs_action', message: 'Local capacity unknown',
+    recovery: { label: 'Review endpoint settings', action: 'open_ai_settings' },
+  }] });
+  renderChecklist({ onOpenAiSettings: open });
+  fireEvent.click(await screen.findByRole('button', { name: 'Review endpoint settings' }));
+  expect(open).toHaveBeenCalledTimes(1);
+  expect(runDoctor).not.toHaveBeenCalled();
+});
 
 it('keeps only actionable hosted results expanded', async () => {
   renderChecklist();
@@ -48,13 +60,29 @@ it('keeps only actionable hosted results expanded', async () => {
 });
 
 it('acknowledges a long verification immediately', async () => {
-  runDoctor.mockReturnValue(new Promise(() => {}));
+  let finish;
+  runDoctor.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
   renderChecklist();
 
-  fireEvent.click(await screen.findByRole('button', { name: 'Verify setup' }));
-  expect(await screen.findByText(/verification can take a few minutes/i)).toBeTruthy();
-  expect(runDoctor).toHaveBeenCalledWith(null);
-  expect(screen.getByRole('button', { name: 'Verifying…' }).disabled).toBe(true);
+  try {
+    fireEvent.click(await screen.findByRole('button', { name: 'Verify setup' }));
+    expect(await screen.findByText(/verification can take a few minutes/i)).toBeTruthy();
+    expect(runDoctor).toHaveBeenCalledWith(null);
+    expect(screen.getByRole('button', { name: 'Verifying…' }).disabled).toBe(true);
+  } finally {
+    finish(DATA);
+  }
+});
+
+it('typed retry is scoped and does not pretend to execute recovery guidance', async () => {
+  fetchDoctorStatus.mockResolvedValueOnce({ ...DATA, checks: [{
+    id: 'runtime_model', status: 'needs_action', message: 'Model missing',
+    recovery: { label: 'Choose a served model', action: 'retry' },
+  }] });
+  renderChecklist();
+  expect(await screen.findByText('Choose a served model')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry check' }));
+  await waitFor(() => expect(runDoctor).toHaveBeenCalledWith(['runtime_model']));
 });
 
 it('keeps fresh and local-capability states truthful', async () => {

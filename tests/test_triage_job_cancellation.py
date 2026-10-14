@@ -1,5 +1,6 @@
 """Terminal job states must mean their blocking work has actually stopped."""
 import asyncio
+import hashlib
 import threading
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -7,6 +8,7 @@ from unittest.mock import Mock
 import pytest
 
 from tests.test_triage_job_controls import _new_job, _state
+from zotero_summarizer.integrations.pdf import PdfSource
 from zotero_summarizer.models import GoalsConfig, SummarizeRequest, SummarizeResponse, TriageResult, TriageRunRequest
 from zotero_summarizer.services.triage import summarization
 from zotero_summarizer.services.triage._execution import JobStopped, check_cancelled, run_blocking
@@ -161,7 +163,8 @@ def test_pipeline_stop_after_first_llm_call_prevents_more_calls(monkeypatch, tex
     })
     app = SimpleNamespace(app_state=SimpleNamespace(config=config), resolve_stage_client=lambda stage: llm)
     monkeypatch.setattr(summarization, "state", lambda: app)
-    monkeypatch.setattr(summarization, "_extract_pdf_text", lambda path: text)
+    monkeypatch.setattr(summarization, "_extract_pdf_source", lambda path: PdfSource(
+        text, (), hashlib.sha256(b"synthetic PDF seam fixture").hexdigest()))
     monkeypatch.setattr(summarization.corpus, "run_corpus_match", lambda *a: {})
 
     request = SummarizeRequest(title="paper", pdf_path="/stub.pdf")

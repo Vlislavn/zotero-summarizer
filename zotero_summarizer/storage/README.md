@@ -45,6 +45,21 @@ services/ ─call→ storage/
 | `feeds_schema.py` · `feeds_constants.py` · `feeds_lookup.py` | schema init/migrations + the shared `open_triage_conn` / decision+outcome enums / single-row lookups, including `get_processed_feed_item_by_stable_key` for the Zotero-optional app library reader + `fetch_processed_content_pairs` (raw `(doi, arxiv_id)` for content dedup — the same paper under a different GUID; callers normalize via `domain`) + `fetch_trashed_guids` (stable GUIDs of papers the user threw away — rows whose `decision`/`final_outcome` is in the caller-passed trashing taxonomies, e.g. `user_rejected` / `trashed` / `deleted_all`; the durable "never show again" key that survives feed-item-id reassignment and catches id-less items DOI/arXiv can't) + `fetch_resolved_outcomes_by_key` (`{stable_feed_key|legacy_key: final_outcome}` for the caller-passed outcome taxonomy — feeds the training-label outcome correction in `services/golden/hybrid_gt`). Constants also own `BEHAVIORAL_OUTCOMES` and `relevance_from_signal_weight` |
 | `interleave.py` | `interleave_log` sidecar for the P3 quality-first online experiment: per-day, per-slot arm attribution (`team` ∈ `a0`/`a2`/`both` + competitive `pair_id`) written by the Today slate when `ZS_RANK_INTERLEAVE` is on. `record_interleave_slate` is DAY-level write-once (`BEGIN IMMEDIATE` existence check → first recorded slate of a day is the ONLY write; later same-day assemblies are complete no-ops) — row-level `INSERT OR IGNORE` alone would let intra-day pool drift mix two merges' per-merge `pair_id`s into one corrupt `(day, pair_id)` group and crash the scorer (adversarial review 2026-07-08). Attribution therefore never changes after the user may have seen the slate. `fetch_interleave_log` opens read-only and returns `[]` only when the table doesn't exist yet (experiment never ran — explicit `sqlite_master` check, not a swallowed error). Table is self-creating (sidecar, additive; no `migrations.py` step needed). Sole consumer: `tools/eval_interleave.py` |
 | `migrations.py` | `migrate_existing()` + `run_migrations()` — ordered, version-gated steps recorded in `schema_migrations`. Add a schema change as a new numbered `Migration`, never an inline ALTER. v3 reconciles databases whose old v1 marker predates later baseline/feed columns; routine feed connections skip those O(N) legacy backfills. |
+| `research_feed_telegram.py` | v11 saved-news tables; composite numeric post keys, canonical original payload/hash, edit-invalidated current evaluation and hash-conditional saving. Commits remain with the caller. |
+
+Migration v11 adds only `research_feed_telegram_posts` and
+`research_feed_telegram_channels` in the selected triage DB, plus a corpus no-op
+alignment marker. `upsert_post(conn, post)` returns new/updated/unchanged and clears
+only that row's evaluation when the canonical model-consumed original changes.
+Original Unicode, locators and date spellings remain in JSON; a UTC date column
+orders the bounded newest window, returned oldest-first. `save_evaluation` compares
+the expected content hash in the UPDATE and returns false for intervening edits.
+Evaluation JSON is finite; malformed persisted data raises. No evaluation-history
+store, paper foreign key/trigger or new connection opener exists. The shared hardened
+opener and numbered migration transactions are reused; cached reads are read-only.
+Saved JSONL may register a channel ID but leaves its confirmed message ID null.
+There is no live page/cursor commit API, retry/session ownership or ingestion
+certification in this offline slice; those require the separately admitted adapter.
 
 **Boundaries:** must NOT import `services/` or `api/` (enforced). Connection
 hardening (WAL once per process/path + busy_timeout=10s + 0600) is shared by
@@ -209,6 +224,17 @@ no body copy or migration, and reads do not rewrite historical data. Ambiguous
 legacy IDs are not guessed. This changes local note identity, not Zotero mirror
 delivery. Snapshot identity resolution is per note family, not one batched join.
 
+`question_sync.py` reuses the immutable question payload validator and
+`review_questions.save` inside `_repo_sync`'s existing receipt transaction.
+Only `review_question/create` with matching canonical mutation/submission UUID
+and exact envelope/payload key is accepted. Independent UUIDs bypass manual
+revision conflicts. An existing online question gets an immutable sync receipt
+at its original insertion revision without another question/journal/intent;
+changed payloads reject. Alias-aware question snapshot fields seed question-only
+keys and keep original rows separate from manual notes. Receipt readers and
+snapshot reads never acknowledge composite delivery. No schema rewrite or new
+question ledger is introduced by this integration.
+
 `review_notes.current_for_mirror` holds SQLite's writer lock over delivery of the
 current note body, reusing the same alias/revision reader. Closing the connection
 releases the lock on both success and failure; no note body or delivery receipt
@@ -238,3 +264,62 @@ resolution reference to count unresolved conflicts, not every historical receipt
 Migration v8 adds `idx_sync_mutations_resolution` for upgrades from databases
 that already recorded the v2 offline-sync schema; new databases also create it
 with the baseline sync schema.
+
+Migration v9 creates `review_questions`, keyed by a validated UUID
+`submission_id`, with immutable original `item_key`, `question`, `origin`
+(`typed`/`preset`), optional `preset_id`, and `submitted_at`. A database trigger
+rejects row updates; duplicate IDs reuse an exact payload and reject changed
+payloads, while distinct IDs preserve intentional repeated questions. The
+corpus namespace gets a matching no-op v9. `review_questions.save(conn, payload)`
+returns `(row, created)` and leaves commit ownership with its caller. Before any
+SQL it uses the pure `models.paper_keys` guard to reject blank, dot/dot-dot,
+slash, backslash, and NUL keys; accepted keys are never normalized. No renderer
+filesystem/PDF/review/Add preflight is needed;
+`list_for_paper(conn, item_key)` returns row dictionaries ordered by submission
+time then ID. Storage shares HTTP's 2,000-code-point question bound, with no
+extra key/preset-ID cap. Both reads and writes keep original item keys, while listing
+resolves the same unambiguous feed/library aliases as manual notes through
+`review_notes.resolve_item_key_aliases`. Question rows do not modify
+`review_notes` or replace the editable manual note.
+
+Migration v10 adds question insertion revisions (`review_question`, value =
+submission UUID) to `sync_changes` and one durable current composite intent
+receipt in `review_note_mirror_intents`. Its transaction-local log rebuild retains
+revisions, AUTOINCREMENT high-water, existing triggers and label receipts without
+disabling foreign keys. Existing questions backfill in time/UUID order, once;
+the corpus receives named no-op v10 alignment.
+
+```
+question save ─┐  same caller transaction      separate delivery transaction
+manual write ─┴─> row + journal + stage ─commit─> current_for_mirror
+                                                 ├─ external upsert succeeds
+                                                 └─ acknowledge ─commit
+```
+
+`review_note_projection.stage(conn, item_key) -> None` is called by question
+creation and `review_notes.write`; exact question replay stages nothing.
+`snapshot(conn, item_key)` returns `item_key` (original lookup identity),
+`revision` (latest alias-family note/question revision), `body` (manual text
+plus saved questions in submission-time/UUID order, never answers), `target_key`
+and `pending`. Each snapshot resolves its alias family once, sharing those keys
+with the existing manual-note and ordered-question readers. Staging, delivery
+and acknowledgement retain separate fresh snapshots. The body is a derived
+delivery projection, not another editable manual note. Unrelated verdict
+revisions do not invalidate it. Aliases union
+rows without rewriting question identity; manual clears retain questions.
+A unique library-namespace alias is the storage-resolved target; feed/note-only
+or ambiguous multi-library families have no target. Storage never contacts
+Zotero to check external item existence.
+
+`current_for_mirror(db_path, item_key)` yields `(conn, desired)` under the same
+`BEGIN IMMEDIATE` writer-lock pattern as existing mirrors. Target/alias changes
+are reconciled into pending intent there. Only `acknowledge(conn, desired) -> bool`
+can acknowledge delivery, after re-resolving the lookup identity and comparing
+current revision/body/target. The caller must upsert only a real target and call
+acknowledge only after external success. Normal exit without acknowledgement,
+failed work and missing targets leave pending; exceptions roll back even an
+acknowledgement in that transaction. Empty projections can clear owned notes.
+This is not a distributed transaction with Zotero. Production delivery uses this
+composite through `services.golden.verdict_effects.mirror_review_note`, including
+materialization and recovery callers. Sync and review-detail reads expose question
+arrays separately from editable manual notes; replay never rewrites question IDs.

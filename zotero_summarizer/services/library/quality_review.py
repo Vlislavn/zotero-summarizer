@@ -16,6 +16,7 @@ from zotero_summarizer.models import GoalsConfig, PaperDigest
 from zotero_summarizer.integrations.llm import build_response_format
 from zotero_summarizer.services._common import extract_json_blob, to_text
 from zotero_summarizer.services.library._digest_verification import DigestVerifierUnavailable
+from zotero_summarizer.services.library import _digest_audit
 from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.library._review_text import select_review_text
 
@@ -31,16 +32,44 @@ _STRICT_RETRY_SUFFIX = (
     "reason, exact target, positive minute estimate, and original-only value."
 )
 
+_INTERPRETATION_SUFFIX = (
+    "\n\nExperimental AI-draft interpretation: additionally return `interpretation` with "
+    "`items`, or null when unavailable. Each item references an existing finding using "
+    "`finding_ref` = /tldr or /key_findings/<zero-based index>; NEVER copy finding text. "
+    "Include `inference_strength`, `rationale`, `scope` (strings), `uncertainties` and "
+    "`unsupported_extrapolations` (lists of strings), and `basis_refs` (existing /methods, "
+    "/limitations, /key_weakness, /parameters or /parameters/<field> pointers). "
+    "Use source-specific evidence and distinguish missing information from contradiction. "
+    "Do not infer causal warrant from observational design alone; do not confuse source "
+    "availability with scientific scope. Leave unknown scientific text empty rather than "
+    "inventing it. Do not supply origin, approval or verification state: this is UNVERIFIED "
+    "AI-draft content, not author-approved or scientifically certified."
+)
+
 
 class DigestGenerationFailed(ValueError):
     """A returned digest cannot satisfy the publication schema."""
 
 
-def _coerce_digest(raw: Any) -> PaperDigest:
-    """Build a ``PaperDigest`` from an LLM reply, salvaging prose-embedded/fenced JSON.
-    Raises ``ValidationError``/``ValueError`` when the reply can't yield a valid digest."""
+def _coerce_digest(raw: Any, *, interpretation_out: dict[str, Any] | None = None) -> PaperDigest:
+    """Salvage digest JSON; C content is captured before projection to a plain base."""
+    if interpretation_out is not None:
+        interpretation_out.clear()
     try:
-        digest = raw if isinstance(raw, PaperDigest) else PaperDigest.model_validate(extract_json_blob(to_text(raw)))
+        if interpretation_out is not None:
+            from zotero_summarizer.models.interpretation import InterpretationDigestResponse, interpretation_payload
+
+            payload = raw.model_dump(exclude_unset=True) if isinstance(raw, PaperDigest) else extract_json_blob(to_text(raw))
+            raw = InterpretationDigestResponse.model_validate(payload)
+            content = raw.interpretation
+        if type(raw) is PaperDigest:
+            digest = raw
+        elif isinstance(raw, PaperDigest):
+            present = raw.model_fields_set.intersection(PaperDigest.model_fields)
+            digest = PaperDigest.model_validate(raw.model_dump(include=present))
+            digest.model_fields_set.intersection_update(present)
+        else:
+            digest = PaperDigest.model_validate(extract_json_blob(to_text(raw)))
     except ValueError as exc:
         raise DigestGenerationFailed(str(exc)) from exc
     required = {
@@ -56,22 +85,53 @@ def _coerce_digest(raw: Any) -> PaperDigest:
             raise DigestGenerationFailed("read/skim requires a reason and exact target")
         if not digest.original_value.strip() or not (digest.estimated_read_minutes or 0) > 0:
             raise DigestGenerationFailed("read/skim requires original-only value and positive minutes")
+    if interpretation_out is not None:
+        interpretation_out.update(interpretation_payload(content, digest))
     return digest
 
 
+def _digest_response_contract(
+    prompt: str, response_format: dict[str, Any] | None, interpretation_out: dict[str, Any] | None,
+) -> tuple[type[PaperDigest], str, dict[str, Any]]:
+    extra = {"response_format": response_format} if response_format else {}
+    if interpretation_out is None:
+        return PaperDigest, prompt, extra
+    from zotero_summarizer.models.interpretation import InterpretationDigestResponse
+
+    if response_format:
+        extra = {"response_format": build_response_format(InterpretationDigestResponse)}
+    return InterpretationDigestResponse, prompt + _INTERPRETATION_SUFFIX, extra
+
+
+def _generate_digest(
+    llm: Any, prompt: str, response_model: type[PaperDigest], *, stage: str,
+    extra: dict[str, Any], interpretation_out: dict[str, Any] | None,
+) -> PaperDigest:
+    from zotero_summarizer.services.library._review_attempt import observed_client
+
+    if interpretation_out is not None:
+        interpretation_out.clear()
+    raw = observed_client(llm, stage).pydantic_prompt(prompt=prompt, pydantic_model=response_model, **extra)
+    return _coerce_digest(raw, interpretation_out=interpretation_out)
+
+
 def _verify_generated_digest(
-    digest: PaperDigest, text: str, verifier: Any, generator: Any, goals: str,
-) -> None:
+    digest: PaperDigest, text: str, verifier: Any, generator: Any, goals: str, *, attempt: dict | None = None,
+) -> Any:
     from zotero_summarizer.services.library._digest_verification import verify_digest
     from zotero_summarizer.services.library._review_attempt import record
 
     try:
-        verify_digest(digest, text, verifier, research_goals=goals)
+        return verify_digest(digest, text, verifier, research_goals=goals)
     except DigestVerifierUnavailable:
+        if attempt is not None:
+            attempt.setdefault("unavailable_routes", []).append({"route": "primary", "reason": "malformed_verifier_output"})
         if verifier is generator:
             raise
         record('verifier_fallback', {'availability': 'generator_fallback'}, kind='identity')
-        verify_digest(digest, text, generator, research_goals=goals)
+        if attempt is not None:
+            attempt["verifier_route"] = "generator_fallback"
+        return verify_digest(digest, text, generator, research_goals=goals)
 
 # Fallback when goals.yaml has no `prompts.paper_digest`. A referee-grade digest
 # (NeurIPS/ICLR rubric) condensed into scannable fields, personalised to the
@@ -147,44 +207,7 @@ _DEFAULT_DIGEST_PROMPT = (
 )
 
 
-def assess_digest(
-    *, title: str, full_text: str, config: GoalsConfig, llm: Any, focus_prompt: str = "",
-    max_chars: int | None = None, prefix: bool = False, response_format: dict[str, Any] | None = None,
-    verifier_llm: Any = None, verification_text: str | None = None,
-) -> PaperDigest:
-    """Condensed paper digest (quality + the user's 7-point investigation) from
-    the full text (must be non-empty). Personalised to ``config.research_goals``.
-    When ``focus_prompt`` is set, the reviewer emphasises or de-emphasises aspects
-    the user highlighted before running the review. ``max_chars`` overrides the
-    text cap (the deep_review orchestrator passes a smaller cap for the local tier).
-    ``prefix=True`` skips budget-aware chunk ranking and uses a naive ``[:cap]``
-    slice — the A/B baseline (``chunk_strategy=prefix``); the default keeps the
-    section-aware + BM25 ranking in ``select_review_text``. ``response_format`` (from
-    ``build_response_format``) switches to decoder-level JSON Schema constraint —
-    pass it only when the provider advertises ``structured_output`` (vLLM-style); it's
-    a no-op fall-through to the prompt-level path when None. ``verification_text``
-    supplies original paper text when generation uses map notes; otherwise the
-    selected generation text is also the verification source."""
-    from zotero_summarizer.services.library._source_admission import admit_source
-    from zotero_summarizer.services.library._review_attempt import identity, observed_client, record
-
-    record('config', identity(config.model_dump_json()), kind='identity')
-    admit_source(full_text if verification_text is None else verification_text)
-    template = config.prompts.paper_digest or _DEFAULT_DIGEST_PROMPT
-    cap = int(max_chars if max_chars is not None else config.quality_review.max_text_chars)
-    # Budget-aware selection instead of a blind prefix slice. ``full_text`` here is
-    # the onprem-markdown extraction (a different backend than the fitz section
-    # parser), so we curate over it WITHOUT section hints — chunk-ranking keeps the
-    # digest 100% onprem-sourced and self-consistent. Byte-identical to
-    # ``full_text[:cap]`` for papers that fit; relevant chunks (not a blind prefix)
-    # for those that exceed the cap (see services/library/_review_text.py).
-    # ``prefix`` bypasses ranking for the naive-truncate A/B baseline.
-    text = full_text[:cap] if prefix else select_review_text([], full_text, budget=cap)
-    source_text = text if verification_text is None else verification_text
-    record('generated_notes' if verification_text is not None else 'selected_original', text)
-    if not text.strip() or not source_text.strip():
-        raise ValueError("Digest assessment requires non-empty source text")
-    goals = "; ".join(g for g in (config.research_goals or []) if str(g).strip()) or "(not specified)"
+def _digest_prompt(template: str, title: str, text: str, goals: str, focus_prompt: str) -> str:
     supplied_source_rule = (
         "The original source is already supplied. Acquisition and authentication are operational "
         "states owned by the caller, not scientific claims to invent in the digest. "
@@ -200,36 +223,75 @@ def assess_digest(
             f"\n\nReader's focus note: {untrusted_input(focus_prompt)}\n"
             "Please adjust your review emphasis to highlight or downplay aspects matching this focus."
         )
-    # onprem/remote returns the raw (often empty or out-of-range) string when its own
-    # parser can't build the model; ``_coerce_digest`` salvages prose-embedded/fenced
-    # JSON (mirrors services/triage/summarization). A reasoning model occasionally
-    # malforms (e.g. all scores 0) — re-ask ONCE strictly before giving up. If the retry
-    # also fails, the error RAISES, caught at deep_review's per-item boundary and surfaced
-    # (never a fabricated review). ``response_format`` (decoder-level constraint) makes a
-    # parse failure rare on a supporting endpoint, but the retry still re-asks with it.
-    extra = {"response_format": response_format} if response_format else {}
+    return prompt
+
+
+def assess_digest(
+    *, title: str, full_text: str, config: GoalsConfig, llm: Any, focus_prompt: str = "",
+    max_chars: int | None = None, prefix: bool = False, response_format: dict[str, Any] | None = None,
+    verifier_llm: Any = None, verification_text: str | None = None,
+    verification_audit: dict[str, Any] | None = None, interpretation_out: dict[str, Any] | None = None,
+) -> PaperDigest:
+    """Grounded digest; prefix selects the A/B baseline and max_chars overrides its cap.
+
+    response_format opts into decoder constraints; verification_text supplies original
+    evidence for generated map notes. An explicit experimental interpretation_out selects
+    C inside these same calls. It collects only an UNVERIFIED AI draft after successful
+    base verification, never publishes a card or certifies its scientific statements.
+    """
+    from zotero_summarizer.services.library._source_admission import admit_source
+    from zotero_summarizer.services.library._review_attempt import identity, record
+
+    if interpretation_out is not None:
+        interpretation_out.clear()
+    attempt_out: dict[str, Any] | None = {} if interpretation_out is not None else None
+    if verification_audit is not None:
+        verification_audit.clear()
+    record('config', identity(config.model_dump_json()), kind='identity')
+    admit_source(full_text if verification_text is None else verification_text)
+    template = config.prompts.paper_digest or _DEFAULT_DIGEST_PROMPT
+    cap = int(max_chars if max_chars is not None else config.quality_review.max_text_chars)
+    locations: list[dict[str, Any]] = []
+    selection = {"locations": locations} if verification_audit is not None else {}
+    text = full_text[:cap] if prefix else select_review_text([], full_text, budget=cap, **selection)
+    source_text = text if verification_text is None else verification_text
+    if prefix or verification_text is not None:
+        locations = [{"selected_span": {"start": 0, "end": len(source_text)},
+                      "original_span": {"start": 0, "end": len(source_text)}, "mapping": "exact"}]
+    source = {"original_text": full_text if verification_text is None else verification_text,
+              "selected_text": source_text, "locations": locations,
+              "contracts": _digest_audit._contract_hashes() if verification_audit is not None else {}}
+    record('generated_notes' if verification_text is not None else 'selected_original', text)
+    if not text.strip() or not source_text.strip():
+        raise ValueError("Digest assessment requires non-empty source text")
+    goals = "; ".join(g for g in (config.research_goals or []) if str(g).strip()) or "(not specified)"
+    prompt = _digest_prompt(template, title, text, goals, focus_prompt)
+    response_model, prompt, extra = _digest_response_contract(prompt, response_format, interpretation_out)
     try:
-        digest = _coerce_digest(observed_client(llm, 'generator').pydantic_prompt(prompt=prompt, pydantic_model=PaperDigest, **extra))
+        digest = _generate_digest(llm, prompt, response_model, stage='generator', extra=extra, interpretation_out=attempt_out)
     except ValueError:
-        retry = observed_client(llm, 'generator_parse_retry').pydantic_prompt(
-            prompt=prompt + _STRICT_RETRY_SUFFIX, pydantic_model=PaperDigest, **extra,
-        )
-        digest = _coerce_digest(retry)
+        digest = _generate_digest(llm, prompt + _STRICT_RETRY_SUFFIX, response_model,
+                                  stage='generator_parse_retry', extra=extra, interpretation_out=attempt_out)
     digest = digest.model_copy(update={"basis": "full_text"})
     verifier = verifier_llm or llm
+    lineage = [{"digest_sha256": _digest_audit.canonical_hash(digest.model_dump(mode="json")),
+                "generator_attempt": 0, "verifier_route": "primary"}]
     try:
-        _verify_generated_digest(digest, source_text, verifier, llm, goals)
+        checks = _verify_generated_digest(digest, source_text, verifier, llm, goals, attempt=lineage[-1])
     except DigestVerifierUnavailable:
         raise
     except ValueError as exc:
-        correction = observed_client(llm, 'correction').pydantic_prompt(
-            prompt=(
-                prompt + "\n\nThe previous digest failed source verification: "
-                + str(exc) + "\nReturn a corrected, fully source-grounded JSON digest only."
-            ),
-            pydantic_model=PaperDigest,
-            **extra,
-        )
-        digest = _coerce_digest(correction).model_copy(update={"basis": "full_text"})
-        _verify_generated_digest(digest, source_text, verifier, llm, goals)
+        lineage[-1]["outcome"] = "support_not_established"
+        correction_prompt = (prompt + "\n\nThe previous digest failed source verification: "
+                             + str(exc) + "\nReturn a corrected, fully source-grounded JSON digest only.")
+        digest = _generate_digest(llm, correction_prompt, response_model, stage='correction',
+                                  extra=extra, interpretation_out=attempt_out).model_copy(update={"basis": "full_text"})
+        lineage.append({"digest_sha256": _digest_audit.canonical_hash(digest.model_dump(mode="json")),
+                        "generator_attempt": 1, "verifier_route": "primary"})
+        checks = _verify_generated_digest(digest, source_text, verifier, llm, goals, attempt=lineage[-1])
+    lineage[-1]["outcome"] = "accepted"
+    if verification_audit is not None:
+        verification_audit.update(_digest_audit.build_verification_audit(digest, checks, source, lineage))
+    if interpretation_out is not None:
+        interpretation_out.update(attempt_out)
     return digest

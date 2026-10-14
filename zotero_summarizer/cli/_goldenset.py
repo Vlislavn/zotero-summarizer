@@ -6,6 +6,7 @@ from pathlib import Path
 
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.cli._helpers import _utc_iso_now, progress_printer
+from zotero_summarizer.cli._goldenset_feedback import register_goldenset_feedback
 from zotero_summarizer.cli._goldenset_classify import register_goldenset_classify
 from zotero_summarizer.cli._goldenset_backup import register_goldenset_backup
 from zotero_summarizer.cli._goldenset_migrate import register_goldenset_migrate
@@ -465,6 +466,7 @@ def register_goldenset(subparsers) -> None:
     gs_suggest.add_argument("--project-root", default=None)
     gs_suggest.set_defaults(func=_goldenset_suggest_labels)
 
+    register_goldenset_feedback(gs_sub)
     register_goldenset_backup(gs_sub)
     register_goldenset_classify(gs_sub)
     register_goldenset_predict(gs_sub)

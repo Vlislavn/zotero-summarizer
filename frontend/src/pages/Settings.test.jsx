@@ -7,13 +7,18 @@ const api = vi.hoisted(() => ({ fetchConfig: vi.fn(), updateConfig: vi.fn() }));
 vi.mock('../api/settingsApi.js', () => api);
 vi.mock('../hooks/useSetupStatus.js', () => ({ useSetupStatus: () => ({ status: null }) }));
 vi.mock('../components/settings/ReadinessStrip.jsx', () => ({ default: () => null }));
-vi.mock('../components/settings/AiModelsSection.jsx', () => ({ default: ({ enabled, onEnabledChange }) => (
-  <button type="button" onClick={() => onEnabledChange(!enabled)}>{enabled ? 'Disable AI' : 'Enable AI'}</button>
+vi.mock('../components/settings/AiModelsSection.jsx', () => ({ default: ({ enabled, onEnabledChange, open }) => (
+  <section id="ai-models">
+    <p>{open ? 'AI disclosure open' : 'AI disclosure closed'}</p>
+    <button type="button" onClick={() => onEnabledChange(!enabled)}>{enabled ? 'Disable AI' : 'Enable AI'}</button>
+  </section>
 )}));
 vi.mock('../components/settings/EssentialsSection.jsx', () => ({ default: () => null }));
 vi.mock('../components/settings/UniversityAccessPanel.jsx', () => ({ default: () => null }));
 vi.mock('../components/settings/CalibrationCard.jsx', () => ({ default: () => null }));
-vi.mock('../components/settings/DeploymentCard.jsx', () => ({ default: () => null }));
+vi.mock('../components/settings/DeploymentCard.jsx', () => ({ default: ({ onOpenAiSettings }) => (
+  <button type="button" onClick={onOpenAiSettings}>Review endpoint settings</button>
+)}));
 vi.mock('../components/settings/RssFeedsSection.jsx', () => ({ default: () => null }));
 
 import Settings from './Settings.jsx';
@@ -32,6 +37,29 @@ beforeEach(() => {
   api.updateConfig.mockReset().mockImplementation(async (payload) => ({ config: payload }));
 });
 afterEach(cleanup);
+
+it('typed recovery opens existing AI disclosure without saving or changing mode', async () => {
+  window.history.replaceState(null, '', '/settings');
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><Settings /></QueryClientProvider>);
+  expect(await screen.findByText('AI disclosure closed')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Review endpoint settings' }));
+  expect(screen.getByText('AI disclosure open')).toBeTruthy();
+  expect(api.updateConfig).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Disable AI' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Save changes' }).disabled).toBe(true);
+  client.clear();
+});
+
+it('wizard AI hash opens the same existing disclosure without automatic effects', async () => {
+  window.history.replaceState(null, '', '/settings#ai-models');
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><Settings /></QueryClientProvider>);
+  expect(await screen.findByText('AI disclosure open')).toBeTruthy();
+  expect(api.updateConfig).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Save changes' }).disabled).toBe(true);
+  client.clear();
+});
 
 it('saves an ML-only preference while round-tripping unsurfaced configuration', async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });

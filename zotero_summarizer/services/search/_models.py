@@ -85,8 +85,11 @@ class Candidate:
     in_library: bool | None = None
     existing_zotero_key: str | None = None  # the found item's key when in_library is True
     candidate_id: str = ""             # persisted address, independent of later metadata enrichment
+    question_evidence: list[dict[str, Any]] = field(default_factory=list)  # Shadow receipts, never ranking/quality
 
     def __post_init__(self) -> None:
+        if type(self.question_evidence) is not list or any(type(row) is not dict for row in self.question_evidence):
+            raise ValueError("Question evidence must be a list of receipt objects")
         if not isinstance(self.publication_types, list) or any(
                 not isinstance(term, str) or not term.strip() for term in self.publication_types):
             raise ValueError("Publication types must be a list of nonempty metadata strings")
@@ -107,7 +110,10 @@ class Candidate:
         return [f"{ns}:{val}" for ns, val in pairs if val]
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        if not self.question_evidence:
+            data.pop("question_evidence")  # Preserve the legacy wire projection for inactive requests.
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Candidate":

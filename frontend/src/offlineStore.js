@@ -1,4 +1,5 @@
 import { PRIORITY_LABELS } from './utils/priorityLabels.js';
+import { mergeQuestions, questionSubmissionError, sameQuestion } from './questionSubmission.js';
 
 const DB_NAME = 'zotero-summarizer-offline';
 const EVENT = 'zs-sync-status';
@@ -12,12 +13,18 @@ function openDb() {
       req.result.createObjectStore('mutations', { keyPath: 'mutation_id' });
       req.result.createObjectStore('meta', { keyPath: 'key' });
     };
+    let blocked = false;
+    req.onblocked = () => {
+      blocked = true;
+      reject(new Error('IndexedDB open blocked; close other app tabs and retry'));
+    };
     req.onsuccess = () => {
+      if (blocked) { req.result.close(); return; }
       req.result.onversionchange = () => req.result.close();
       resolve(req.result);
     };
     req.onerror = () => reject(req.error);
-  });
+  }).catch((error) => { database = undefined; throw error; });
   return database;
 }
 
@@ -50,6 +57,67 @@ export async function cachedResponse(key) {
   return getMeta(`response:${key}`);
 }
 
+function localQuestion(mutation) {
+  return { ...mutation.value, submitted_at: mutation.created_at, saved_offline: true, sync_status: mutation.status };
+}
+
+function overlayReviewQuestions(itemKey, detail, mutations) {
+  const local = mutations.filter((row) => row.field === 'review_question' && row.item_key === itemKey)
+    .map(localQuestion);
+  return { ...detail, questions: mergeQuestions(detail.questions, local) };
+}
+
+export async function cacheReviewDetail(itemKey, detail) {
+  if (!Array.isArray(detail?.questions) || detail.questions.some((row) => questionSubmissionError(row))) {
+    throw new Error('Invalid review questions array or row');
+  }
+  let db;
+  try {
+    db = await openDb();
+  } catch (cacheError) {
+    return { detail, cacheError, stage: 'open', localQuestionsAvailable: false };
+  }
+  let tx;
+  try {
+    tx = db.transaction(['mutations', 'meta'], 'readwrite');
+  } catch (cacheError) {
+    let rows;
+    try {
+      rows = await request(db.transaction('mutations', 'readonly').objectStore('mutations').getAll());
+    } catch (readError) {
+      return { detail, cacheError: readError, stage: 'read', localQuestionsAvailable: false };
+    }
+    return { detail: overlayReviewQuestions(itemKey, detail, rows), cacheError,
+      stage: 'transaction', localQuestionsAvailable: true };
+  }
+  return new Promise((resolve) => {
+    let merged;
+    const failed = (cacheError, stage) => resolve({ detail: merged || detail, cacheError, stage,
+      localQuestionsAvailable: Boolean(merged) });
+    tx.oncomplete = () => resolve({ detail: merged });
+    tx.onerror = (event) => failed(event.target.error || tx.error
+      || new Error('IndexedDB review cache transaction failed'), merged ? 'write' : 'read');
+    tx.onabort = () => failed(tx.error || new Error('IndexedDB review cache transaction aborted'), merged ? 'write' : 'read');
+    let queued;
+    try {
+      queued = tx.objectStore('mutations').getAll();
+    } catch (cacheError) {
+      failed(cacheError, 'read');
+      tx.abort();
+      return;
+    }
+    queued.onsuccess = () => {
+      merged = overlayReviewQuestions(itemKey, detail, queued.result);
+      try {
+        tx.objectStore('meta').put({ key: `response:review:${itemKey}`, value: merged });
+      } catch (cacheError) {
+        failed(cacheError, 'write');
+        tx.abort();
+      }
+    };
+  });
+}
+
 export async function savePapers(rows, refreshDetails = false) {
   const db = await openDb();
   await new Promise((resolve, reject) => {
@@ -65,6 +133,7 @@ export async function savePapers(rows, refreshDetails = false) {
           if (!cached.result?.value) return;
           meta.put({ key, value: {
             ...cached.result.value, verdict: row.verdict, user_note: row.review_note,
+            questions: row.questions || [],
           } });
         };
       }
@@ -79,8 +148,15 @@ export async function allPapers() {
 }
 
 export function mutationError(row) {
+  const question = row.field === 'review_question';
+  if (question) {
+    const error = questionSubmissionError(row.value);
+    if (error) return error;
+    if (row.operation !== 'create' || row.item_key !== row.value.item_key
+        || row.mutation_id !== row.value.submission_id) return 'Invalid question create mutation';
+  }
   for (const [key, max, required] of [
-    ['device_id', 100, true], ['item_key', 500, true], ['value', 50_000, false],
+    ['device_id', 100, true], ...(!question ? [['item_key', 500, true], ['value', 50_000, false]] : []),
     ['comment', 10_000, false], ['model_priority', 50, false],
   ]) {
     const value = row[key];
@@ -89,8 +165,8 @@ export function mutationError(row) {
       return `${key} must be ${required ? 'a nonblank string' : 'text'} of at most ${max} characters`;
     }
   }
-  if (!['verdict', 'review_note'].includes(row.field)) return 'Unknown mutation field';
-  if (!['set', 'delete'].includes(row.operation)) return 'Unknown mutation operation';
+  if (!['verdict', 'review_note', 'review_question'].includes(row.field)) return 'Unknown mutation field';
+  if (!question && !['set', 'delete'].includes(row.operation)) return 'Unknown mutation operation';
   if (row.operation === 'set' && row.field === 'verdict' && !Object.hasOwn(PRIORITY_LABELS, row.value)) {
     return 'verdict must be a reading priority';
   }
@@ -162,6 +238,57 @@ export async function queueMutation({ item_key, field, operation = 'set', value 
   return { saved_offline: true, queued: true };
 }
 
+export async function queueQuestionSubmission(submission) {
+  const error = questionSubmissionError(submission);
+  if (error) throw new Error(error);
+  const payload = structuredClone(submission);
+  const db = await openDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(['papers', 'mutations', 'meta'], 'readwrite');
+    const papers = tx.objectStore('papers');
+    const mutations = tx.objectStore('mutations');
+    const meta = tx.objectStore('meta');
+    const identityKey = `question:${payload.submission_id}`;
+    Promise.all([
+      request(meta.get(identityKey)), request(papers.get(payload.item_key)),
+      request(meta.get('mutation_sequence')), request(meta.get('device_id')),
+      request(meta.get(`response:review:${payload.item_key}`)),
+    ]).then(([identity, storedPaper, storedSequence, storedDevice, storedDetail]) => {
+      if (identity) {
+        if (!sameQuestion(identity.value, payload)) throw new Error('Submission ID has a different immutable payload');
+        return;
+      }
+      const sequence = (storedSequence?.value || 0) + 1;
+      const device = storedDevice?.value || crypto.randomUUID();
+      const mutation = {
+        mutation_id: payload.submission_id, device_id: device, item_key: payload.item_key,
+        field: 'review_question', operation: 'create', value: payload, comment: null,
+        model_priority: null, base_revision: 0, created_at: new Date().toISOString(),
+        sequence, status: 'pending',
+      };
+      const invalid = mutationError(mutation);
+      if (invalid) throw new Error(invalid);
+      const row = localQuestion(mutation);
+      const paper = storedPaper || { item_key: payload.item_key, title: payload.item_key, revisions: {} };
+      paper.questions = mergeQuestions(paper.questions, [row]);
+      const detail = storedDetail?.value || { item_key: payload.item_key, user_note: paper.review_note || '' };
+      meta.put({ key: `response:review:${payload.item_key}`, value: {
+        ...detail, questions: mergeQuestions(detail.questions, [row]),
+      } });
+      meta.put({ key: identityKey, value: payload });
+      meta.put({ key: 'mutation_sequence', value: sequence });
+      meta.put({ key: 'device_id', value: device });
+      mutations.put(mutation);
+      papers.put(paper);
+    }).catch((failure) => { tx.abort(); reject(failure); });
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('IndexedDB question transaction aborted'));
+  });
+  await publishStatus('Saved on device');
+  return { saved_offline: true, queued: true };
+}
+
 export async function pendingMutations() {
   const rows = await request((await store('mutations')).getAll());
   return rows.filter((row) => row.status === 'pending').sort((a, b) => (
@@ -179,6 +306,9 @@ export async function applyPushResults(results) {
       && (!Number.isSafeInteger(r.applied_revision) || r.applied_revision < 0))) {
     throw new Error('Invalid sync acknowledgement revision; device changes preserved');
   }
+  if (new Set(results.map((row) => row.mutation_id)).size !== results.length) {
+    throw new Error('Invalid sync acknowledgement IDs; device changes preserved');
+  }
   const db = await openDb();
   const tx = db.transaction(['mutations', 'meta'], 'readwrite');
   const mutationStore = tx.objectStore('mutations');
@@ -187,7 +317,7 @@ export async function applyPushResults(results) {
     const pending = mutationStore.get(result.mutation_id);
     pending.onsuccess = () => {
       const mutation = pending.result;
-      if (!mutation) return;
+      if (!mutation || mutation.status !== 'pending') { tx.abort(); return; }
       if (result.status === 'conflict' || result.status === 'rejected') {
         mutationStore.put({ ...mutation, status: result.status, canonical: result.canonical,
           conflict_revision: result.conflict_revision, error: result.error });
@@ -225,8 +355,14 @@ export async function applyPull(payload) {
       const incomingKeys = new Set(incoming.map((row) => row.item_key));
       const retainedKeys = new Set(queued.result.map((row) => row.item_key));
       const pendingByKey = new Map();
+      const localQuestions = new Map();
+      for (const mutation of queued.result.filter((row) => row.field === 'review_question')) {
+        const rows = localQuestions.get(mutation.item_key) || [];
+        rows.push(localQuestion(mutation));
+        localQuestions.set(mutation.item_key, rows);
+      }
       for (const mutation of queued.result
-        .filter((row) => row.status === 'pending')
+        .filter((row) => row.status === 'pending' && row.field !== 'review_question')
         .sort((a, b) => (a.sequence || 0) - (b.sequence || 0)
           || a.mutation_id.localeCompare(b.mutation_id))) {
         const fields = pendingByKey.get(mutation.item_key) || {};
@@ -246,6 +382,7 @@ export async function applyPull(payload) {
         const optimistic = pendingByKey.get(row.item_key) || {};
         const merged = {
           ...row,
+          questions: mergeQuestions(row.questions, localQuestions.get(row.item_key)),
           ...(Object.hasOwn(optimistic, 'verdict') ? { verdict: optimistic.verdict } : {}),
           ...(Object.hasOwn(optimistic, 'review_note') ? { review_note: optimistic.review_note } : {}),
         };
@@ -256,6 +393,7 @@ export async function applyPull(payload) {
           if (!cached.result?.value) return;
           meta.put({ key, value: {
             ...cached.result.value, verdict: merged.verdict, user_note: merged.review_note,
+            questions: merged.questions,
           } });
         };
       }

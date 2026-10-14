@@ -22,9 +22,9 @@ llm_routing → resolve_stage → ResolvedStage → factory → LLMClient
   the server's potentially enabled reasoning default. Unset effort remains a no-op.
 - `operational_check.py` owns the tiny manual inference probe used by stage
   checks, setup validation, and Doctor. Identical routes share one serial probe;
-  local cold starts get 60 seconds and hosted checks 30 seconds. Failures become
-  bounded results, not startup errors. Cheap `/models` reachability remains the
-  proactive companion.
+  local waiters get 60 seconds and hosted waiters 30 seconds; these do not terminate
+  callbacks. Setup injects per-callback admission/abandonment while retaining the
+  unique identity cache. Default non-setup behavior and cheap `/models` remain.
 - `model_list.py` lists sorted unique model IDs. Remote discovery accepts a
   built-in preset or an identity already present in the live saved config; a
   custom remote draft must be saved first. Loopback listing receives only a

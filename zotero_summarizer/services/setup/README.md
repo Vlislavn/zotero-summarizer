@@ -15,8 +15,29 @@ a concurrent run cannot publish stale success for a new key. A saved path differ
 restart before checks can pass. Zotero remains diagnostic but optional for
 RSS-only setups; an enabled RSS source is still required for Today.
 
+The supported launcher refuses remote/wildcard binds and ignores forwarded
+identity/IP claims. The app factory guards HTTP/SPA/socket access before handlers;
+this does not imply authenticated mobile availability or Doctor readiness.
+See the [local deployment boundary](../../../docs/local-deployment-boundary.md)
+and its separate owner-approved remote-design gate.
+
 Web and CLI share profile, validation, and Doctor services. State lives under
 `Settings.data_dir`; secrets stay in the keyring or legacy environment.
+
+Local setup admission runs inside each unique callback before construction,
+using one captured resolved identity. Missing policy/effective-envelope evidence
+is UNKNOWN; malformed policy/read failures are errors. Configuration, inventory
+and separately consented downloads stay independent.
+
+Guarded rows use the locality-neutral header “LLM verification needs action”:
+reason codes also describe hosted timeout/cancellation, not only local admission.
+Details, attempted/ownership receipts and navigation-only recovery stay unchanged;
+a hosted abandonment does not acquire local HOLD.
+
+Waiters never release the callback's nonblocking lock. Timeout/cancel aborts
+remaining checks; unproven request/retry finality leaves sticky same-process HOLD
+after callback exit. No reset, resident bypass, cross-process exclusion or restart
+completion guarantee is provided.
 
 ```text
 web /api/setup/* ─┐
@@ -28,11 +49,14 @@ CLI setup/doctor ─┘                    ├─ per-stage inference
 
 | file | responsibility |
 |---|---|
+| `deployment.py` | Shared local-only bind/host/address predicates; IPv4-mapped loopback is explicit. No remote auth/session/TLS policy or readiness claim. |
 | `bootstrap.py` | Idempotently create absent files and migrate DBs; never overwrite user files. |
 | `detect.py` / `env_writer.py` | Find Zotero paths; atomically write validated `PDF_ROOT`/`ZOTERO_DATA_DIR`. |
 | `validate.py` | Validate drafts and optionally reuse the provider probe; write nothing. |
 | `status.py` | Cheap state: `configured` means personalized goals plus either an AI credential or an explicit ML-only choice; `ready` also needs Doctor, and reachability only when AI is enabled. |
-| `profiles.py` | Resolve hardware-gated Ollama profiles into the existing routing schema; never download. |
+| `profiles.py` | Static total-RAM/disk compatibility into existing routing; neither admission nor resident health. Never download. |
+| `load_admission.py` | Strict optional policy integrity/identity/envelope boundary; fresh facts, no production numeric defaults. |
+| `load_attempt.py` | Callback-owned setup lock, submission receipts, synchronized abandonment and sticky finality HOLD. |
 | `assets.py` | Shared prefetch targets and fresh-process cache-only load checks. |
 | `doctor.py` | Persisted web/CLI checklist with stable IDs, recovery actions, single-flight execution, interrupted-run recovery, redaction, and real inference gating. Recovery distinguishes absent/stopped Ollama; browser readiness checks the actual `patchright` runtime; the RSS probe is read-only so it cannot collide with daemon schema work. |
 | `doctor_environment.py` | Host/config/Zotero/database Doctor checks and the shared row contract; split from orchestration so both modules fit the code-size gate. |
@@ -48,8 +72,9 @@ endpoint. Add runtimes only with install and verification paths.
 
 Doctor state is `data/setup_doctor.json`; stale `running` rows become Needs
 action **and clear any earlier Ready flag**, even if the last full pass succeeded.
-It is current state, not an audit log. Recovery strings are displayed,
-never executed. `--fix` only runs idempotent bootstrap/migrations.
+It is current state, not an audit log. Recovery commands are displayed, never
+executed; typed `open_ai_settings` only navigates to existing AI controls.
+`--fix` only runs idempotent bootstrap/migrations.
 Bootstrap owns migration; Doctor does not repeat it. Path validation snapshots
 read the resulting `.env`, including unchanged paths and empty update requests.
 Calibration accepts 1–10 papers, checks item paths (including symlinks) remain

@@ -25,6 +25,7 @@ from zotero_summarizer.models import GoalsConfig
 from zotero_summarizer.services._common import settings, state
 from zotero_summarizer.services.search import session as session_store
 from zotero_summarizer.services.search import require_online
+from zotero_summarizer.services.search._evidence_pass import EvidencePassRequest, run_evidence_pass
 from zotero_summarizer.services.search._fulltext import acquire_full_text
 from zotero_summarizer.services.search._models import Candidate, ResearchSession, ScreenRequest, ConfirmedConstraints
 from zotero_summarizer.services.search._relevance import attach_relevance
@@ -60,6 +61,7 @@ class SearchDeps:
     max_chars: int = 0             # quality-review text cap; 0 → config default
     quota: int = 15
     crossref_mailto: str | None = None  # Crossref polite-pool mailto (optional)
+    evidence_pass: EvidencePassRequest | None = None  # Explicit supplied-original shadow only; never default-wired
 
 
 # Process-lazy keyless OpenAlex for Search federation — built once, reused (an
@@ -181,6 +183,9 @@ def run_review(session_id: str, *, deps: SearchDeps, top_n: int = LIGHT_REVIEW_N
     require_online()
     sess = session_store.load(session_id)
     request = ScreenRequest(query=sess.raw_query, questions=sess.questions)
+    run_evidence_pass(sess, getattr(deps, "evidence_pass", None))
+    if session_store.is_deleted(session_id):
+        return sess
     fulltext: dict[str, str] = {}
     for cand in sess.candidates[:top_n]:
         if session_store.is_deleted(session_id):

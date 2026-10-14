@@ -105,7 +105,7 @@ def _feeds_serve(args: argparse.Namespace) -> int:
         from zotero_summarizer.services.triage.feeds import run_daemon_loop
 
         _settings, feed_filter = _bootstrap_feeds_cli(args)
-        await run_daemon_loop(feed_library_ids=feed_filter, max_ticks=args.max_ticks)
+        await run_daemon_loop(feed_library_ids=feed_filter, max_ticks=args.max_ticks, feedback_settings=_settings)
         return 0
 
     return asyncio.run(_run())

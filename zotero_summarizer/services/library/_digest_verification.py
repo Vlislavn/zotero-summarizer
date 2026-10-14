@@ -122,7 +122,7 @@ def _parse_checks(raw: Any, claim_count: int, passages: list[str], paper_text: s
 
 def verify_digest(
     digest: PaperDigest, paper_text: str, llm: Any, *, research_goals: str = "",
-) -> None:
+) -> _Checks:
     from zotero_summarizer.services.faithbench._corpus import chunk_text
     from zotero_summarizer.services.library._review_attempt import observed_client
 
@@ -148,3 +148,4 @@ def verify_digest(
     failed = [claims[check.index] for check in parsed.checks if not check.supported]
     if failed:
         raise DigestSourceRejected(f"Digest contains unsupported fields: {failed[:3]}")
+    return parsed

@@ -15,6 +15,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
+from zotero_summarizer.models.paper_keys import validate_paper_item_key
 from zotero_summarizer.services._common import now_iso_z, settings, state
 from zotero_summarizer.services.library import (
     _paper_read_brief,
@@ -69,11 +70,10 @@ _RENDERER_REV = _compute_renderer_rev()
 
 
 def _state_path(item_key: str, *, root: Path | None = None) -> Path:
-    if (
-        not isinstance(item_key, str) or not item_key.strip() or item_key in {".", ".."}
-        or any(c in item_key for c in "/\\\0")
-    ):
-        raise APIError(error="validation_error", message="Invalid paper item key", status_code=422)
+    try:
+        validate_paper_item_key(item_key)
+    except ValueError as exc:
+        raise APIError(error="validation_error", message=str(exc), status_code=422) from exc
     directory = root if root is not None else settings().paper_render_dir
     path = directory.resolve() / item_key / _STATE_FILENAME
     # Reject links to sibling items too, not just links outside the configured root.

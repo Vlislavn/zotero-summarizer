@@ -6,7 +6,12 @@ first. Also holds read helpers for the Zotero routes, note interpretation, and
 the `get_library_reader()` resolver used by read-only Library flows.
 
 Verdict notes, user notes, digest notes and label tags share `_apply_mirror_change`:
-connector check, backup, apply and explicit failure propagation. Queue retries
+connector check, backup, apply and explicit failure propagation. It retains the
+producer's `expected_io` classification when converting a failed row to
+`ZoteroWriteError`. Connector refusal is explicit expected IO; absent/malformed
+classification defaults to terminal, not optional pending. Queued invalid rows
+remain isolated failures, while generated mirror payload defects propagate to the
+caller. No note body is added to diagnostics or logs. Queue retries
 deliver an identical visible note only once, including after a failed local
 pending-status commit; a trashed note is replaced with a visible note.
 

@@ -11,7 +11,10 @@ vi.mock('react-router-dom', async (original) => ({
 
 vi.mock('../../api/setupApi.js', () => ({ fetchDoctorStatus: vi.fn().mockResolvedValue({ ready: false }) }));
 vi.mock('../settings/DeploymentCard.jsx', () => ({
-  DoctorChecklist: () => <button>Verify setup</button>,
+  DoctorChecklist: ({ onOpenAiSettings }) => <>
+    <button>Verify setup</button>
+    <button onClick={onOpenAiSettings}>Review endpoint settings</button>
+  </>,
 }));
 
 import StepDone from './StepDone.jsx';
@@ -26,6 +29,17 @@ beforeEach(() => {
 });
 
 afterEach(() => cleanup());
+
+it('AI recovery opens Settings without verification, save, consent or dismissal', async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><MemoryRouter><StepDone /></MemoryRouter></QueryClientProvider>);
+  fireEvent.click(screen.getByRole('button', { name: 'Review endpoint settings' }));
+  expect(navigate).toHaveBeenCalledTimes(1);
+  expect(navigate).toHaveBeenCalledWith('/settings#ai-models');
+  expect(window.localStorage.getItem('zs:setupDismissed')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Open Today' }).disabled).toBe(true);
+  client.clear();
+});
 
 it('does not claim completion or open Today until a real Doctor result is ready', async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

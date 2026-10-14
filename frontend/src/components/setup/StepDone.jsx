@@ -45,7 +45,7 @@ export default function StepDone({ pathsChanged = false }) {
         <p className="text-xs text-slate-500">
           Runs real model and no-write pipeline checks. You can retry individual failures.
         </p>
-        <DoctorChecklist />
+        <DoctorChecklist onOpenAiSettings={() => navigate('/settings#ai-models')} />
       </div>
     </div>
   );

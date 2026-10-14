@@ -12,7 +12,7 @@ const STATUS = {
   unavailable: ['—', 'Unavailable', 'text-slate-500'],
 };
 
-export function DoctorChecklist() {
+export function DoctorChecklist({ onOpenAiSettings }) {
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ['setup-doctor'], queryFn: fetchDoctorStatus });
   const mutation = useMutation({
@@ -61,6 +61,10 @@ export function DoctorChecklist() {
       {visible.length > 0 && <ul className="divide-y divide-slate-100" aria-live="polite">
         {visible.map((check) => {
           const meta = STATUS[check.status] || STATUS.not_started;
+          const opensAi = check.recovery?.action === 'open_ai_settings';
+          const guidance = check.recovery?.label || 'Retry';
+          const label = check.recovery?.action === 'retry' && !guidance.startsWith('Retry')
+            ? 'Retry check' : guidance;
           return <li key={check.id} className="py-2 flex items-start gap-2">
             <span className={`${meta[2]} font-bold w-4`} aria-hidden>{meta[0]}</span>
             <div className="min-w-0 flex-1">
@@ -73,9 +77,13 @@ export function DoctorChecklist() {
               </details>}
               {check.status === 'needs_action' && <div className="mt-1 flex flex-wrap gap-2 items-center">
                 <Button type="button" variant="secondary" disabled={mutation.isPending}
-                  onClick={() => mutation.mutate([check.id])}>
-                  {check.recovery?.label || 'Retry'}
+                  onClick={() => {
+                    if (opensAi) onOpenAiSettings?.();
+                    else mutation.mutate([check.id]);
+                  }}>
+                  {label}
                 </Button>
+                {label !== guidance && <span className="text-xs text-slate-600">{guidance}</span>}
                 {check.recovery?.command && <code className="text-xs select-all">{check.recovery.command}</code>}
               </div>}
             </div>
@@ -105,9 +113,9 @@ export function DoctorChecklist() {
   );
 }
 
-export default function DeploymentCard() {
+export default function DeploymentCard({ onOpenAiSettings }) {
   return <SectionCard title="Local setup health"
     description="One shared web/CLI checklist for runtime, models, Zotero, sources and a real no-write triage.">
-    <DoctorChecklist />
+    <DoctorChecklist onOpenAiSettings={onOpenAiSettings} />
   </SectionCard>;
 }

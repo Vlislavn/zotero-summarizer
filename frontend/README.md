@@ -11,7 +11,32 @@ npm run dev
 ```
 
 Vite proxies `/api/*` to `http://localhost:8000`; `npm run build` writes
-`dist/` for FastAPI.
+`dist/` for FastAPI. Local `node_modules` directories and dependency symlinks
+are both gitignored; shared worktree dependencies must never enter a release diff.
+
+The development API proxy leaves `changeOrigin` unset, preserving the browser's
+Host and Origin while connecting to the configured `VITE_API_TARGET`. This does
+not relax the backend's loopback peer or exact-origin requirements. The additive
+`tests/test_vite_proxy_contract.py` contract loads this config and executes the
+installed Vite header/target helpers without opening sockets, then checks the
+production boundary for default and overridden local targets. It follows Vite's
+installed package metadata `exports["."].import.default` ESM entry, never the
+CommonJS entry, and binds metadata/source observations. Cross-origin refusal,
+unchanged Origin and handler reachability remain required.
+
+This cross-language check is opt-in: set `ZS_VITE_PROXY_CONTRACT_SMOKE=1` and
+`ZS_VITE_PROXY_TEST_NODE` to an absolute executable Node path, with frontend
+dependencies already installed. Ordinary backend runs skip it without needing
+Node or frontend dependencies. An admitted contract run must execute all four
+cases, with zero skips and successful source observers; prerequisite/observer
+failures are not product RED. No dependency installation or CI change is required.
+
+The source-bound regression actually observed two same-origin writes rejected
+with 403 after Host rewriting, plus two passing cross-origin refusals, before
+removing `changeOrigin`. The config subtraction is implemented; separate
+four-case GREEN and backend compatibility validation remain pending. This is
+synthetic header-helper/ASGI evidence, not live proxy, browser, TLS or mobile-device
+proof. Serving the built frontend from FastAPI does not use this development proxy.
 
 ## Product surfaces
 
@@ -70,6 +95,11 @@ Today only after explicit Doctor verification passes; saving alone never
 claims the configured pipeline works. The wizard and Settings
 share the compact server-side Doctor checklist. The gate uses backend
 `configured`; stricter operational `ready` remains diagnostic.
+
+Typed AI recovery opens the existing disclosure in Settings; wizard recovery
+navigates to `/settings#ai-models`. Neither verifies, saves, selects a model or
+grants consent. Other typed rows label scoped Retry separately from recovery
+guidance. UNKNOWN/HOLD cannot publish Ready.
 
 The shared AI editor supports hosted presets, Local, and Custom. Secrets go to
 the OS credential store; the UI receives only presence/source metadata. Local
@@ -200,9 +230,11 @@ spacing and computed contrast. They are not native-user comprehension acceptance
 ## Offline boundary
 
 The installable local-first PWA caches only its shell. IndexedDB holds compact
-snapshots, a sync cursor, and a UUID mutation outbox. Verdicts/notes queue only
-on network failure; conflicts require Keep mine / Use server. PDFs, AI,
-annotation, acquisition, and rescoring remain server-only.
+snapshots, a sync cursor, and a UUID mutation outbox. Verdicts/manual notes queue
+on network failure; conflicts require Keep mine / Use server. Review questions
+always commit their UUID, immutable create payload, local row and outbox together
+before network work. PDFs, AI answers, annotation, acquisition, and rescoring
+remain server-only.
 
 After reconnect, the server gives queued verdicts and notes the same training,
 feed-materialization, and Zotero-mirror effects as online saves. Once a snapshot
@@ -223,9 +255,60 @@ paper snapshot while retaining local papers with unresolved mutations, and
 refreshes cached review details. A 15-second sync deadline releases a stuck focus sync,
 and protocol incompatibility explicitly asks for an app refresh. The IndexedDB
 test kills/reimports the client module and proves cached context
-plus ordered concurrent mutations survive while the server is absent. Ask Paper sends a
-bounded session history; the backend compacts older evidence to verified
+plus ordered concurrent mutations survive while the server is absent.
+
+Ask Paper first confirms the comment-only `/api/library/questions` save, then
+requests an answer with the same submission UUID and bounded session history.
+Local-save or server-comment failure stops QA; offline submissions remain on the
+device. Retry answer reuses the frozen question/origin/preset/mode/history;
+a deliberate repeat gets a fresh UUID. Reconnect/restart replays only
+`review_question/create` through sync, never automatically reruns QA. A comment
+response is not a sync receipt: the outbox retires only on validated sync results.
+Questions are bounded to 2,000 Unicode code points; valid original paper keys are
+never trimmed or rewritten when aliases/canonical snapshots arrive.
+
+The existing My notes surface in shared Today/Library details and the full-page
+rail lists saved questions read-only, separate from editable `user_note`.
+Question/detail refresh uses the existing review-detail query callbacks. Both
+cache-aware detail queries (shared `usePaperReview` and `AnnotationVerdict`) use
+`networkMode: 'always'`: the existing network-to-IndexedDB reader must run during
+offline invalidation and cold mounts, not pause before reading durable local data.
+Server-only queries and retry defaults are unchanged. Dirty
+manual drafts survive both question-array and concurrent manual-note refreshes;
+questions never enter manual Save payloads. Online detail merge/cache and sync
+pull preserve unresolved local questions in existing IndexedDB transactions,
+including incompatible same-ID server rows and rejected drafts. Local comment,
+server confirmation, QA failure/abstention and Zotero delivery are separate
+states. Ask reports the supplied composite-note receipt; My notes shows one
+revision-bound delivery status, not a receipt per question. Transient receipts
+are bound to the saved manual body and immutable question payloads; new
+submissions, offline changes, changed details and navigation retire previous
+completion callbacks, even if the old content returns. Each save captures its
+expected payload before HTTP; that expected snapshot may arrive before its receipt.
+A confirmed current-projection no-op is acknowledged without claiming another
+external write. Empty/no-intent and absent/malformed receipts stay unknown;
+no answer/execution ledger or guessed
+mirror success is added.
+Existing Ask/PDF visibility gates remain unchanged, but the submission save itself
+needs neither a PDF, Add nor a successful review. Deploy with the matching backend
+question/detail/sync contract; actual Zotero delivery and browser smoke are
+integration checks. The backend compacts older answer evidence to verified
 extraction handles, and the UI labels verified quotes without inventing pages.
+
+Valid online review details remain readable when IndexedDB open/read/cache writes
+fail. The frontend returns `offline_cache_error` with `stage`, `message` and
+`local_questions_available`, and logs storage-error metadata without note/question
+content. Available local question unions survive cache-write failures; a denied
+readwrite transaction may use a readonly overlay. These diagnostics are never
+cached or treated as save/delivery acknowledgements. Malformed server JSON or
+question arrays/rows remain protocol errors, not storage fallbacks. Local submission commits
+still must succeed before comment POST/QA; HTTP rejections and original network
+errors remain distinct even when the offline read cache is unavailable.
+
+Paper-review HTTP fixtures include explicit `questions: []` when no questions
+exist. This test-contract alignment does not relax live server validation or
+migrate old cached detail objects; the existing offline cached-response fallback
+remains unchanged.
 
 Sync sends ordered batches of at most 100 with acknowledged predecessor UUIDs.
 Receipt storage and outbox retirement share an IndexedDB transaction; restart
@@ -286,6 +369,33 @@ No live Zotero/profile is used; the missing integration's collections/tags 503s
 are asserted explicitly. It covers first-save/reload, mobile verdict editing,
 setup/route navigation, keyboard isolation and filtered pending persistence—not
 model quality, actual Zotero delivery or full offline service-worker behavior.
+
+The separate `tests/test_review_question_browser.py` opt-in requires
+`ZS_REVIEW_QUESTION_BROWSER_SMOKE=1`, `ZS_REVIEW_QUESTION_BROWSER_SYNTHETIC=1`,
+and a parent-reserved `ZS_REVIEW_QUESTION_BROWSER_SLOT=reserved` after a guarded
+build. It serves the actual app on an owned ephemeral loopback port, uses an
+isolated persistent installed-Chrome profile with service workers, and exercises
+Today/Library questions through real API/sync/SQLite and synthetic native Zotero
+notes. Browser network offline, full context/API restart, unchanged UUID replay,
+manual-note separation and no automatic QA replay are asserted. The connector
+probe alone is suppressed to avoid probing a user's Zotero port. IndexedDB write
+denial is a separate injected error, not the offline proof. Main-world CDP probes
+stay attached until context close: detaching resets `navigator.onLine` in the
+installed browser despite continued transport failure. Receipts/screenshots and
+cleanup remain in `data/issue-validation/question-browser/`. This synthetic check
+certifies neither real AI usefulness, live Zotero, mobile nor human acceptance.
+
+The My notes Save action retains its intrinsic width beside save feedback, while
+feedback remains visible and wraps. This local layout boundary does not change
+manual Save payloads, dirty drafts, saved questions, or Zotero-delivery semantics.
+The opt-in `tests/test_review_notes_layout_browser.py` reuses the reviewed question
+browser fixture and its existing opt-ins, installed Chrome, viewport and cleanup.
+It checks actual text-node/glyph Range line geometry and retains computed styles,
+fixture observations and screenshots under `data/issue-validation/question-browser/`.
+Per-run source and built-asset binding remains with the parent guard/capture;
+geometry observation errors or skips are not wrapping RED. This synthetic layout
+check is not live-Zotero, mobile, model-quality or human acceptance.
+
 The Search journey also verifies the full query projection and independent Adds
 for two identical-title cards through real HTTP/session persistence and reload;
 only the external Zotero writer is substituted.

@@ -4,6 +4,12 @@ Local-first Zotero paper-triage app. Reads your local Zotero library + RSS
 feeds, scores papers with a cheap ML gate (and an LLM for survivors), and
 queues suggested Zotero changes for you to approve.
 
+PDF triage keeps a frozen selected-text/raw-SDK-link/full-document identity for
+literal method-artifact admission. Shared low-level traversal remains in
+`integrations/pdf.py`; library presentation has a separate normalized policy.
+Reader/identity and live receipt-write failures stay loud; source membership is
+not scientific support or usefulness. See `services/triage/README.md`.
+
 ## Layers (lower layers never import higher ones)
 
 ```
@@ -41,6 +47,22 @@ queues suggested Zotero changes for you to approve.
 project. Model/library caches never resolve an application cache from HOME.
 Existing home-global artifacts are left untouched and are not auto-imported;
 retrain/recompute in the selected project or explicitly copy trusted artifacts.
+
+`Settings.feedback_analysis_dir` selects `data/feedback-analysis/` for retained
+feedback snapshots, deterministic analysis and private JSON/Markdown reports.
+`goldenset analyze-feedback` uses a bounded clean child; default-off weekly
+`feeds serve` automation stores its cursor/status under `feedback_schedule_dir`
+and requires positive owned finalization before advancing. Input capture is read-only;
+retained evidence preserves source identity, ambiguity and coverage gaps rather
+than inferring historical model identities or treating descriptive counts as gain.
+Strict schedule environment/budget settings are validated by selected Settings;
+manual operation and daemon activation remain separate.
+See [the feedback-analysis contract](services/golden/feedback_analysis/INTERFACES.md).
+
+Settings optionally selects `ZS_SETUP_LOAD_POLICY_PATH` and an independent
+`ZS_SETUP_LOAD_POLICY_SHA256`; both default absent. SHA binds operator-selected
+bytes, not authenticated approval or measured sufficiency. No policy file,
+numeric defaults or effective runtime envelope is generated.
 
 Subpackages each have their own README. Start with
 [docs/architecture.md](../docs/architecture.md) for the end-to-end mental model,

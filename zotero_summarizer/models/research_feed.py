@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, TypeAdapter, field_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 
 TOPIC_TAXONOMY = frozenset({
@@ -35,6 +35,7 @@ class ResearchProfile(BaseModel):
     projects: list[str]
     shortlist_budget: _ShortlistBudget = 20
     card_budget: _CardBudget = 10
+    telegram_channels: list[str] = Field(default_factory=list)
     topic_taxonomy: list[str] = Field(default_factory=lambda: sorted(TOPIC_TAXONOMY))
 
     @field_validator("topic_taxonomy")
@@ -44,6 +45,73 @@ class ResearchProfile(BaseModel):
         if unknown:
             raise ValueError(f"unknown research-feed topics: {sorted(unknown)}")
         return list(dict.fromkeys(values))
+
+
+class TelegramPost(BaseModel):
+    """Canonical saved input only: no embedded assessments or private session fields."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    schema_version: Literal[1]
+    channel_id: int = Field(ge=-(2**63), le=2**63 - 1)
+    message_id: int = Field(ge=1, le=2**63 - 1)
+    username: str | None = None
+    permalink: str
+    text: str
+    published_at: str
+    updated_at: str | None = None
+    urls: list[str] = Field(default_factory=list)
+    skip_reason: str | None = None
+
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def _version(cls, value):
+        if type(value) is not int or value != 1:
+            raise ValueError("saved Telegram input requires schema_version=1")
+        return value
+
+    @field_validator("published_at", "updated_at")
+    @classmethod
+    def _aware_date(cls, value: str | None) -> str | None:
+        if value is not None:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.utcoffset() is None:
+                raise ValueError("post dates require a timezone")
+        return value
+
+    @model_validator(mode="after")
+    def _original_fields(self) -> TelegramPost:
+        if self.channel_id == 0:
+            raise ValueError("channel_id must be nonzero")
+        if self.skip_reason is not None and not self.skip_reason.strip():
+            raise ValueError("skip_reason must be nonempty when supplied")
+        if not self.text.strip() and self.skip_reason is None:
+            raise ValueError("empty posts require an explicit skip_reason")
+        for value in [self.permalink, *self.urls]:
+            parsed = urlsplit(value)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                raise ValueError("post locators must be absolute HTTP(S) URLs")
+        return self
+
+    @property
+    def source_id(self) -> str:
+        return f"telegram:{self.channel_id}:{self.message_id}"
+
+
+class TelegramNewsVerdict(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    decision: Literal["keep", "drop", "uncertain"]
+    matched_interests: list[str]
+    reason: str = Field(min_length=1)
+    evidence_quote: str = Field(min_length=1)
+    summary: str = ""
+
+    @model_validator(mode="after")
+    def _required_text(self) -> TelegramNewsVerdict:
+        if not self.reason.strip() or not self.evidence_quote.strip():
+            raise ValueError("verdict requires a reason and original evidence quote")
+        if self.decision == "keep" and not self.summary.strip():
+            raise ValueError("keep requires a summary")
+        return self
 
 
 class ResearchCandidate(BaseModel):
@@ -125,5 +193,5 @@ class ResearchEngineeringCard(BaseModel):
 __all__ = [
     "TOPIC_TAXONOMY", "ResearchCandidate", "ResearchEngineeringCard",
     "ResearchFeedTriage", "ResearchIdea", "ResearchProfile",
-    "parse_run_budgets",
+    "parse_run_budgets", "TelegramPost", "TelegramNewsVerdict",
 ]

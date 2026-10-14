@@ -5,12 +5,13 @@ import types
 
 import pytest
 
+from tests.test_digest_verification import _scripted_validated_checks
 from zotero_summarizer.services.library import _digest_verification, _map_reduce, _review_cache, deep_review
 from zotero_summarizer.services.zotero import zotero as zotero_svc
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
 @pytest.fixture(autouse=True)
 def _isolate_digest_generation(monkeypatch):
-    monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
+    monkeypatch.setattr(_digest_verification, "verify_digest", _scripted_validated_checks)
 @pytest.fixture(scope="module")
 def config():
     return _default_goals_config()
@@ -90,7 +91,7 @@ def _detail(*, title="T", pdf_path="/x/p.pdf", doi="10.1/x", url="", abstract="a
 
 
 def _wire(monkeypatch, config, *, reader, extractor, note_fn=None):
-    monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
+    monkeypatch.setattr(_digest_verification, "verify_digest", _scripted_validated_checks)
     monkeypatch.setattr(deep_review, "get_state", lambda: _fake_state(config, extractor=extractor, reader=reader))
     monkeypatch.setattr(zotero_svc, "zotero_upsert_digest_note", note_fn or (lambda _ik, _d: None))
     # Keep ORCHESTRATION tests hermetic: stub the heavy enrichment layers (real

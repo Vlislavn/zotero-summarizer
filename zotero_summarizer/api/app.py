@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from zotero_summarizer.api.errors import APIError, install_error_handlers
+from zotero_summarizer.api.local_access import LocalAccessMiddleware
 from zotero_summarizer.api.routes import include_routes
 from zotero_summarizer.runtime import AppContext, set_context
 from zotero_summarizer.services import lifecycle
@@ -93,6 +94,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    app.add_middleware(LocalAccessMiddleware)
     install_error_handlers(app)
     include_routes(app)
     _install_spa(app)

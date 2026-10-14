@@ -12,6 +12,7 @@ from zotero_summarizer.integrations._zotero_write_common import (  # noqa: F401
     LOGGER,
     WriteColumns,
     ZoteroWriteError,
+    is_expected_sqlite_io,
     read_write_columns,
 )
 from zotero_summarizer.integrations._zotero_write_items import ZoteroItemWriteMixin
@@ -184,7 +185,8 @@ class ZoteroWriter(
                     except (ZoteroWriteError, ValueError, TypeError, sqlite3.IntegrityError) as exc:
                         conn.execute("ROLLBACK TO change_row")
                         conn.execute("RELEASE change_row")
-                        failed.append({"id": change_id, "error": str(exc)})
+                        failed.append({"id": change_id, "error": str(exc),
+                                       "expected_io": isinstance(exc, ZoteroWriteError) and exc.expected_io is True})
 
                 conn.commit()
                 if backup_path is not None:
@@ -203,7 +205,8 @@ class ZoteroWriter(
         try:
             return self._retry_on_lock(_do, ctx="apply_changes")
         except sqlite3.Error as exc:
-            raise ZoteroWriteError(f"Failed to apply queued changes: {exc}") from exc
+            raise ZoteroWriteError(f"Failed to apply queued changes: {exc}",
+                                   expected_io=is_expected_sqlite_io(exc)) from exc
 
     def _dispatch_change(
         self, conn: sqlite3.Connection, change: dict[str, Any], cols: WriteColumns

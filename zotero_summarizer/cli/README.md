@@ -12,12 +12,13 @@ __init__.build_parser()
    ├─ register_setup(subparsers)      # _setup.py:   setup · doctor · calibrate
    ├─ register_feeds(subparsers)      # _feeds.py:   feeds run/list/serve/tick/preview/select-daily
    ├─ register_goldenset(subparsers)  # _goldenset.py: export · train · eval-baseline · tune · suggest
+          ├─ register_goldenset_feedback(gs_sub)  # _goldenset_feedback.py: analyze-feedback
           ├─ register_goldenset_classify(gs_sub)  # _goldenset_classify.py: classify · classify-llm
           ├─ register_goldenset_predict(gs_sub)   # _goldenset_predict.py:  predict-feed · analyze-notes · compare
           ├─ register_goldenset_migrate(gs_sub)   # _goldenset_migrate.py:  migrate-verdicts-to-zotero
           └─ register_goldenset_setup_tag_colors(gs_sub)  # _goldenset_setup_colors.py: setup-tag-colors
    ├─ register_faithbench(subparsers)  # _faithbench.py: faithbench build/run/judge/report
-   └─ register_research_feed(...)      # _research_feed.py: research-feed run
+   └─ register_research_feed(...)      # _research_feed.py: research-feed run · view
 main() = parse args → validate command budgets → install Settings → dispatch
 ```
 
@@ -34,9 +35,57 @@ main() = parse args → validate command budgets → install Settings → dispat
 | `_goldenset_migrate.py` | `migrate-verdicts-to-zotero` — one-time transfer of in-app verdicts (`label_verdicts`) into Zotero `label:<priority>` tags (`--dry-run`, idempotent, library items only, single batch backup) |
 | `_goldenset_setup_colors.py` | `setup-tag-colors` — prints the one-time Zotero setup (colors + number keys 1-4 for the four `label:<priority>` tags) for native keypress labeling. Non-destructive (prints the plan; writes nothing into your synced Zotero settings); `--json` for machine output |
 | `_faithbench.py` | `faithbench build/run/judge/report` — faithfulness mini-benchmark of the deep_review-stage model (span-verified QA + traps + review-claim grounding). Build stages the review CSV before publishing the immutable benchmark file as its version marker; QA runs require explicit approval of every generated review-CSV row and bind that CSV hash into the manifest. `build --max-builder-windows` bounds contiguous 6,000-character source windows per paper; its CLI/env/default precedence, preflight behavior and cost are documented below. `run` is resumable via `--run-id` and takes `--provider/--model` to sweep a model for THIS run only (no goals.yaml edit; recorded in the manifest); `judge` uses the pinned remote judge (`CUSTOM_BASE_URL`/`CUSTOM_API_KEY`). See `services/faithbench/README.md` |
-| `_research_feed.py` | `research-feed run --from … --to … [--venue …]`: bounded weekly JSON+Markdown; generates missing cards through existing deep review unless `--cached-only`; Zotero stays dry-run unless `--queue-zotero` is explicit. |
+| `_research_feed.py` | Default RSS `research-feed run --from … --to … [--venue …]`: bounded weekly JSON+Markdown/deep review unless cached; Zotero stays dry-run unless explicitly queued. `--source telegram --input-jsonl …` selects saved-news shadow processing before startup; collect/cached/view never invoke external gates. |
+
+`serve --host` accepts only localhost or literal loopback addresses, refuses
+wildcard/remote binds with a nonzero error, and disables Uvicorn proxy-header
+rewriting. Programmatic serve dispatch repeats the bind check before launch.
+No listener is terminated, and no address is silently substituted. The app
+factory separately guards transport peer, Host and browser Origin. This is not
+remote mobile authentication; see the [deployment boundary](../../docs/local-deployment-boundary.md).
 
 Handlers use lazy imports inside the function bodies to keep CLI startup fast.
+
+`research-feed run --source telegram --input-jsonl POSTS --project-root ROOT`
+imports canonical saved posts into the selected triage store, then explicitly runs
+shadow reranking and the configured DEFAULT LLM route (not the feed override).
+Obtain permitted-content/provider consent before processing originals. Add
+`--collect-only` for import/export with no model/provider/config requirement;
+`--cached-only` projects the existing store/profile/current configured identity
+without new input, external calls, migrations or store writes. `research-feed view
+--report SAVED.md` prints the retained Markdown only. Live collection/auth is not
+implemented; missing input in process/collect modes errors before Settings.
+Conflicting modes, Telegram venue/Zotero queue and RSS-only use of input/collect
+flags also fail there. RSS remains the default and still requires both dates before
+Settings/startup. Optional dates/review wait do not filter/time Telegram inference.
+The selected Settings budget bounds reranker waiting, not every provider request:
+the OpenAI factory forwards it while native Anthropic retains its adapter default.
+Evaluation identity records the configured wait input, not an effective deadline
+receipt. Shared shortlist/card defaults remain 20/10; strict admission is unchanged. See the
+[news contract](../services/research_feed/README.md#offline-saved-telegram-news).
+
+`goldenset analyze-feedback --project-root ROOT [--cutoff AWARE_ISO]` publishes one
+private JSON/Markdown feedback report and prints one compact versioned receipt
+with report/full-receipt pointers (no provenance inventory dump). The optional
+cutoff requires a timezone and normalizes to UTC. It reuses selected Settings without
+startup, migrations, Zotero or models; capture/analysis runs in a clean offline child
+with external wall/RSS/available-RAM/swap-growth safeguards. Technical budgets/seed
+are config/env only, not extra UI knobs. Missing/corrupt required input prints a
+failure receipt then propagates/nonzero. Failure `published` is true/false/null for
+owned commit/not committed/unknown, not foreign destination existence; unknown and
+failure never confirm publication or authorize a cursor. Failure-only
+`receipt_persistence` prints not_written/written/failed plus a safe secondary class,
+never raw messages. Failure-file I/O preserves the original exception and computed
+receipt; non-I/O secondary failure stays loud with receipt/context intact. Receipt
+paths are attempted locators, not guaranteed usable; failed need not mean absent,
+and no fsync/power-loss guarantee is implied. No support still publishes an
+`insufficient_data` report with gaps/hashes. Default-off weekly automation and
+confirmation/recovery are documented below; installed-host evaluation and scientific
+sufficiency remain unverified. Publication currently requires Darwin's atomic
+no-replace primitive; see [operation contract](../services/golden/feedback_analysis/README.md).
+UX source: issue47 public [Laws of UX](https://lawsofux.com/). Occam subtracts dashboards,
+export knobs and parallel command families; Tesler puts capture/publication/cleanup
+in the system; Cognitive Load keeps this one command and one visible receipt.
 
 Faithbench run IDs are single ASCII alphanumeric/underscore/hyphen names, not
 paths. The common run/judge/report path resolver rejects traversal and symlink
@@ -137,8 +186,10 @@ passes None to read all unread rows. Both return nonzero for item/provider error
 errors propagate instead of entering an automatic retry loop. `feeds run --dry-run`
 disables startup background jobs/retraining/rescoring and simulates triage against
 the existing RSS pool without refreshing subscriptions or writing decisions.
-Hosted setup persists routing before its optional probe; `setup --mode no-llm`
-persists a valid ML-only choice that can later be changed in Settings.
+Hosted setup saves routing before optional real inference (default No). Canonical
+loopback locality, not the `hosted` name, invokes shared setup admission; UNKNOWN
+cannot construct a client. `setup --mode no-llm` saves a valid ML-only choice that
+can later change in Settings.
 
 `migrate-verdicts-to-zotero` plans from the full verdict snapshot, without the old
 5000-row cutoff. Dry-run and apply use the same list; library-only checks, connector
@@ -161,3 +212,12 @@ Default events contain hashes/counts only. No online accuracy claim follows from
 these traces; stage counts are instrumentation, not review-success scores.
 
 Diagnostic CLI source reads reuse the single-component/no-symlink paper-state guard. Admission happens before provider construction. Legacy full_text is explicitly labelled unverified legacy scope; empty sources retain local failure diagnostics. Diagnostic calls disable thinking without changing app routing.
+
+`feeds serve` alone passes selected Settings to optional weekly feedback automation
+on its main asyncio thread. It is default-disabled (`ZS_FEEDBACK_SCHEDULE_ENABLED`)
+and adds no CLI flag/status command. `feeds run/tick`, server background work and
+manual `goldenset analyze-feedback` keep their existing contracts. The daemon log
+and Settings-resolved cursor/status/receipt pointers expose bounded catchup,
+publication/reuse/failure/insufficient/no-new-data states. No cursor is committed
+before confirmed receipts and the post-child cancellation yield. See the additive
+[weekly contract](../services/golden/feedback_analysis/README.md#weekly-operation-additive-manual-and-analytic-contracts-unchanged).

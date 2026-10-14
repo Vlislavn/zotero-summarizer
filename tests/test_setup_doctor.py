@@ -202,7 +202,7 @@ def test_inference_check_preserves_distinct_failures_and_local_recovery(
     config = doctor.read_config(settings.config_path)
     resolved = doctor.resolve_stage(config.llm_routing, "feed")
 
-    async def _failed(_routing):
+    async def _failed(_routing, **_kwargs):
         return {
             "stages": [
                 {

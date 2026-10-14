@@ -16,6 +16,7 @@ export default function usePaperReview(itemKey, { onSaved, onQueueRefresh } = {}
   const detailQuery = useQuery({
     queryKey: ['review-detail', itemKey],
     queryFn: () => fetchReviewDetail(itemKey),
+    networkMode: 'always', // Includes an IndexedDB fallback, even on cold offline mounts.
     enabled: Boolean(itemKey),
   });
   const submitMutation = useMutation({

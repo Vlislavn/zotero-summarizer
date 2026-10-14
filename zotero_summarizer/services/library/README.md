@@ -37,6 +37,20 @@ abstentions cannot count as supported even when legacy flags disagree.
 Once papers are in your library, this domain ranks what to read next and powers
 the deeper review/annotation surfaces, plus the Phase 1.14 feed-review queue.
 
+Review questions are immutable `review_questions` records, separate from the
+editable manual note. The library API commits a question receipt before invoking
+paper Q&A; an identical submission UUID reuses its row, a changed payload conflicts,
+and an online retry may run Q&A again. Comment-only saves never run Q&A. Reads
+resolve unambiguous feed/library aliases without rewriting the original key.
+Submissions use the pure `models.paper_keys` lexical guard before row creation or
+Q&A, including direct storage callers. Saving never probes renderer paths or
+requires a PDF/review/Add; a later Q&A path/symlink error retains the saved receipt.
+After the save transaction closes, `mirror_question(item_key)` retries the shared
+current composite note delivery; `save_question` still returns only its unchanged
+row. HTTP `question_mirror` is independent of `question_submission` and QA answers/
+errors, including abstention. Expected mirror failures never undo saving or block
+valid QA. Comment-only and same-ID retries mirror current intent without adding rows.
+
 Deep-review status advances elapsed time from a monotonic snapshot between
 worker phase updates, including while a model call is pending. An exhausted
 ETA becomes unknown rather than remaining frozen. This is progress reporting,
@@ -78,8 +92,9 @@ source plumbing and retry contracts, not live-model entailment accuracy.
 All LLM-facing paper text, metadata, research goals and user focus/question text
 use the shared escaped untrusted-input boundary, including custom digest prompts.
 
-Paper-state reads/writes share `paper_render._state_path`: keys must be nonempty
-single path components (no dot/dot-dot, slash, backslash, or NUL). Item directories,
+Paper-state reads/writes share `paper_render._state_path`: keys use the same pure
+`models.paper_keys` lexical guard as question submissions (nonblank single path
+components; no dot/dot-dot, slash, backslash, or NUL). Item directories,
 state files, and temporary state files cannot be symlinks, including links to sibling
 items. Build/status and explicit fleet requests validate before job mutation or
 scheduling; synchronous builds and Q&A validate before acquisition. These checks
@@ -195,6 +210,30 @@ serve as paper evidence. A verified citation requires a handle resolving against
 the current paper extraction; metadata counts and unlocated/stale handles do not
 claim quote verification. Conversation tails label quotations as prior, not
 verified. This proves source membership, not answer entailment (A134).
+
+### Q&A evidence checkpoints
+
+History processing uses only the last 20 turns. The four recent turns retain the
+existing conversational rendering; older handles are admitted by the unchanged
+current-extraction resolver. When the complete checkpoint is strictly smaller
+than raw history, its first line is `Earlier evidence checkpoint: ` followed by
+one JSON array. The next line carries the existing resolution warning, outside
+the payload.
+
+Each entry contains only `paper_id`, `extraction_version`, `span.start/end`, the
+full `quote_digest` and `input_digest`. Original source coordinates, order and
+repeated occurrences survive; client fields outside that projection are omitted.
+Supplied string input digests are retained exactly, including opaque/empty legacy
+values. Missing or non-string input derives from the actual string history
+question using the existing whitespace-normalized question-only digest; without
+an actual string question, `input_digest` is `null` (unknown).
+
+A derived digest does not recover or authenticate the unavailable original
+question, and a question hash is not anonymization. Prior conversation remains
+escaped untrusted session input, not paper evidence. A retained handle can resolve
+against the extraction even when its passage is absent from generation context;
+source membership alone does not establish answer entailment or citation quality.
+Existing paper-context limits, call/retry policy and output grounding remain unchanged.
 
 Metadata-count shortcuts require affirmative whole-paper wording; localized or
 uncertain count questions fall through to grounded Q&A. The artifact currently
@@ -411,6 +450,21 @@ Local finalization changes decision/outcome only on first materialization, so
 late retries preserve subsequent user decisions and the original outcome window.
 This is per-row recovery, not a distributed transaction or cross-row paper dedup.
 
+`materialize_row(..., mirror_note=True)` keeps its string return and, by default,
+retries composite My notes only after its original SQLite connection/context closes,
+including existing-sibling no-ops. Explicit Today/positive-verdict/Apply-all callers
+pass `mirror_note=False` and deliver once outside the materialization-error boundary.
+Apply-all returns per-row `note_mirrors` independently of item counts/pending-sync.
+A note failure cannot park an already-materialized item as pending or undo its target;
+expected failures return pending/error, while programming/schema defects propagate.
+No question save or ingestion flow adds an item automatically.
+
+Materialization callers require the current numbered triage migrations, normally
+run by application/feeds-CLI startup. Standalone synthetic recovery/restart stores
+must run `TRIAGE_MIGRATIONS` before seeding; the feed opener and baseline schema
+alone do not initialize sync/questions/composite intent. Delivery never repairs
+missing application schema or converts schema defects into optional pending.
+
 Reading scores, deep reviews, border suggestions and fleet proposals live in
 the selected project's `Settings.model_dir` (`data/models/`); path lookup never
 imports the classifier. HTTP/browser acquisition receives `Settings.pdf_cache_dir`
@@ -435,6 +489,56 @@ unrelated failures do not mask a newer successful review.
 Cached empty digests without `needs_pdf` are stale and recomputed; legitimate
 no-PDF entries remain current. Dense goal-encoder inference failures disable only
 that retrieval leg so an available BM25 leg can still produce a result.
+
+## Accepted verification evidence
+
+`verify_digest` returns its already validated `_Checks`; optional app-owned
+`verification_audit` sinks in `assess_digest` and strategy/map-reduce calls retain
+accepted `tldr`/`key_findings` evidence outside `PaperDigest`. No extra verifier,
+prompt/schema change or retry budget is introduced. `_digest_audit` assembles
+original/selected hashes, exact occurrence fragments, numeric outcomes and
+correction/fallback routes. Shared `chunk_spans` preserve trim/overlap coordinates;
+rank selection records coordinates before clipping/document-order restoration.
+Synthetic separators and section hints without extraction offsets are explicitly
+unknown. Text extraction supplies no PDF page mapping. Generated notes never
+become source evidence; complete extraction is not whole-paper coverage.
+
+`_review_one` binds the audit only after reading policy, preserving separate
+verified and final digest hashes and `post_verification_changes`; it uses the
+existing cache writer. Claim fields carry `matches_cached_field`, not an assertion
+that later policy/fleet text passed the model. Source rejection is support not
+established; no evidence-adjudicated contradiction is invented.
+
+Review identity is captured before extraction, not reconstructed from a later
+replacement PDF. Fresh streamed byte hashes reject known drift before the first
+library digest-note upsert, outside its best-effort I/O handler. A final fresh check
+still runs before cache binding. Persistent drift before publication preserves the
+previous note and cache; unchanged-source reviews retain ordinary note mirroring
+and note-error reporting. `_mirror_digest_note` owns that existing note responsibility.
+Review identity and strict audit export lazily reuse `integrations.pdf._file_fingerprint`
+for source SHA-256, without requiring the Python 3.11+ `hashlib.file_digest` API.
+The existing primitive reads the opening size plus a growth-detection byte and
+checks descriptor/path identities; ordinary changes during hashing may fail loud.
+Empty/missing-source results and source-I/O propagation remain unchanged. No new
+hasher, version fallback or size/mtime memoization shortcut is introduced.
+These checks are not note rollback, an atomic filesystem snapshot or protection against reverted changes;
+a change after the pre-note check can still occur during the separate note write.
+The owned-file scripted-writer regression proves orchestration order, not native
+Zotero persistence or scientific support. Prefix-audit regression expectations use
+the selected input's rstrip-derived endpoint, not its untrimmed character budget;
+production spans, source caps and verifier call counts are unchanged by that oracle fix.
+Audit fingerprints include the shared chunk-default constants and rank-selection
+tokenizer sources, so those dependency changes invalidate saved evidence too.
+
+`deep_review.export_review_audit(item_key)` re-exports the single cache-side API.
+It uses `_read_all(readonly=True)`: corrupt bytes/envelopes raise without quarantine,
+and no policy projection, provider, alias lookup, regeneration or write runs.
+It returns the exact cached digest with available evidence, or an explicit
+stale/unavailable reason and no evidence; absent keys return None. Payload/final
+identity, nonmemoized source bytes and independent extraction/verifier fingerprints
+are checked. Default cache reads still quarantine corruption as before. Retained
+passages are sensitive local data, not transport captures or scientific acceptance.
+See `docs/usage.md` for opt-in standalone retention and export usage.
 
 ## Source admission and attempt diagnostics
 
@@ -488,3 +592,41 @@ Generation schema failures retain ValueError compatibility but report generation
 The HTML brief folds goal findings behind one native disclosure, retains original goal summaries and all quotes, and reports saved quality/digest source basis separately from unrecorded reviewed extent.
 
 Map output truncation alone subdivides the failing source chunk sequentially with the existing 200-character overlap. Work sizes halve down to the shared 1000-character floor; exhausted-floor, cancellation, empty-note and other errors propagate. Segment-labelled notes remain generation context, never verification source.
+
+`_paper_read_pdf.extract_link_uris` reuses the neutral integration `raw_link_uris`
+traversal. Its separate presentation policy still strips outer whitespace,
+rejects remaining embedded whitespace, and deduplicates in order; malformed SDK
+data raises. Presentation links are not exact machine authority. Triage uses the
+unmodified SDK tuple bound to captured original PDF bytes, never this normalized
+list, and never appends raw annotations to generation prompts.
+
+## Experimental interpretation producer preparation
+
+An explicit code caller may supply keyword-only `interpretation_out={}` to
+`assess_digest`; `_coerce_digest` exposes the same bounded producer seam. This
+selects `InterpretationDigestResponse` inside the existing initial, parse-retry
+and source-correction calls. Any supplied decoder response format is derived
+from that same selected C class. The instrumented client likewise derives its
+format from the selected class. No extra generator/verifier call, public flag,
+provider/configuration change, cache or consumer activation is added.
+
+Without a collector, the normal PaperDigest model/prompt/kwargs and serialized
+keys stay unchanged. C captures optional content before projecting to plain
+PaperDigest, preserving explicit base-field presence. Malformed/missing optional
+content records `unavailable_reason`; it does not retry an otherwise valid base.
+Nonexistent/empty/duplicate finding references or absent referenced basis content
+also withhold the draft. References bind current fields, not scientific warrant.
+
+The public collector clears at entry and stays empty if generation, source
+admission or base verification fails. Attempt-local content clears before each
+call, and only the final successful base attempt is returned to the collector.
+A valid card has `status=schema_validated_ai_draft`, `origin=ai_generated` and
+`scientific_verification=unverified`. Existing accepted base-audit evidence does
+not certify any interpretation assertion; original finding passage spans remain
+base evidence, not card evidence.
+
+This is producer **preparation only**: no strategy/worker activation, scientific
+card verifier, persistence/current-text cache binding, Q&A/shared view or Zotero
+write is delivered. `tests/test_interpretation_producer.py` reuses the existing
+factory/verifier fake with scripted Mock call recording; those regressions prove
+machine contracts, not live-model or blinded-human scientific benefit.

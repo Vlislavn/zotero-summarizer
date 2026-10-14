@@ -13,7 +13,7 @@ import pytest
 from tests._zotero_fixtures import add_library_item, build_zotero_db
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.api.routes import golden as golden_routes
-from zotero_summarizer.integrations.zotero_write import ZoteroWriter
+from zotero_summarizer.integrations.zotero_write import ZoteroWriter, ZoteroWriteError
 from zotero_summarizer.services.golden import hybrid_gt
 from zotero_summarizer.services.zotero.pending import (
     USER_NOTE_MARKER,
@@ -21,7 +21,7 @@ from zotero_summarizer.services.zotero.pending import (
     build_user_note_html,
     build_verdict_note_html,
 )
-from zotero_summarizer.storage import repositories
+from zotero_summarizer.storage import repositories, review_note_projection
 from zotero_summarizer.storage.migrations import TRIAGE_MIGRATIONS, run_migrations
 
 
@@ -327,6 +327,9 @@ def _patch_note_basics(monkeypatch, *, mirror_fn):
     monkeypatch.setattr(
         golden_routes.verdict_effects, "zotero_upsert_user_note", mirror_fn
     )
+    monkeypatch.setattr(golden_routes.verdict_effects, "get_zotero_reader_or_raise", lambda: SimpleNamespace(
+        get_item_detail=lambda key: {"item_key": key},
+    ))
     return saves
 
 
@@ -340,22 +343,26 @@ def test_save_review_note_mirrors_to_zotero(monkeypatch):
             golden_routes.ReviewNoteRequest(item_key="K1", note="jot")
         )
     )
-    assert out == {"saved": True, "note_written": True, "note_error": None}
+    revision = repositories.sync_current_fields(golden_routes._db_path())[("K1", "review_note")]["revision"]
+    assert out == {"saved": True, "note_written": True, "note_error": None,
+                   "note_pending": False, "projection_revision": revision, "target_key": "K1"}
     assert saves == [("K1", "jot")]  # the DURABLE local save ran with the right args
     assert calls == [("K1", "jot")]  # and the Zotero mirror got the same
 
 
 def test_save_review_note_mirror_failure_still_saves(monkeypatch):
     def boom(*_a):
-        raise RuntimeError("Zotero is open")
+        raise ZoteroWriteError("Zotero is open", expected_io=True)
 
     saves = _patch_note_basics(monkeypatch, mirror_fn=boom)
-    with pytest.raises(RuntimeError, match="Zotero is open"):
-        asyncio.run(
-            golden_routes.save_review_note(
-                golden_routes.ReviewNoteRequest(item_key="K1", note="jot")
-            )
-        )
+    out = asyncio.run(golden_routes.save_review_note(
+        golden_routes.ReviewNoteRequest(item_key="K1", note="jot")
+    ))
+    revision = repositories.sync_current_fields(golden_routes._db_path())[("K1", "review_note")]["revision"]
+    assert out == {"saved": True, "note_written": False, "note_error": "ZoteroWriteError",
+                   "note_pending": True, "projection_revision": revision, "target_key": "K1"}
+    with sqlite3.connect(golden_routes._db_path()) as conn:
+        assert review_note_projection.snapshot(conn, "K1")["pending"] is True
     assert saves == [("K1", "jot")]  # local save happened DESPITE the mirror failing
     assert repositories.get_review_note(golden_routes._db_path(), "K1") == "jot"
 
@@ -374,8 +381,11 @@ def test_save_review_note_swallows_optional_zotero_unavailable(monkeypatch):
             golden_routes.ReviewNoteRequest(item_key="K1", note="jot")
         )
     )
-    # A missing Zotero DB is an optional-mirror miss, not an error surfaced to the user.
-    assert out == {"saved": True, "note_written": False, "note_error": None}
+    revision = repositories.sync_current_fields(golden_routes._db_path())[("K1", "review_note")]["revision"]
+    assert out == {"saved": True, "note_written": False, "note_error": "zotero_unavailable",
+                   "note_pending": True, "projection_revision": revision, "target_key": "K1"}
+    with sqlite3.connect(golden_routes._db_path()) as conn:
+        assert review_note_projection.snapshot(conn, "K1")["pending"] is True
     assert saves == [("K1", "jot")]
 
 
@@ -389,7 +399,11 @@ def test_save_review_note_feed_key_skips_zotero_mirror(monkeypatch):
             golden_routes.ReviewNoteRequest(item_key="feed:123", note="jot")
         )
     )
-    assert out == {"saved": True, "note_written": False, "note_error": None}
+    revision = repositories.sync_current_fields(golden_routes._db_path())[("feed:123", "review_note")]["revision"]
+    assert out == {"saved": True, "note_written": False, "note_error": "target_unavailable",
+                   "note_pending": True, "projection_revision": revision, "target_key": None}
+    with sqlite3.connect(golden_routes._db_path()) as conn:
+        assert review_note_projection.snapshot(conn, "feed:123")["pending"] is True
     assert saves == [
         ("feed:123", "jot")
     ]  # still saved locally, mirror correctly skipped

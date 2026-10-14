@@ -294,13 +294,14 @@ async def zotero_update_item_tags(item_key: str, req: ZoteroItemTagUpdateRequest
 def _apply_mirror_change(item_key: str, change_type: str, payload: dict[str, Any]) -> None:
     writer = get_zotero_writer_or_raise()
     if writer.is_connector_running():
-        raise ZoteroWriteError("Zotero is open; close it to save changes.")
+        raise ZoteroWriteError("Zotero is open; close it to save changes.", expected_io=True)
     result = writer.apply_changes(
         [{"id": 0, "item_key": item_key, "change_type": change_type, "payload_json": payload}],
         True,
     )
     if result["failed"]:
-        raise ZoteroWriteError(result["failed"][0]["error"])
+        failure = result["failed"][0]
+        raise ZoteroWriteError(failure["error"], expected_io=failure.get("expected_io") is True)
 
 
 def zotero_upsert_verdict_note(item_key: str, user_priority: str, comment: str) -> None:

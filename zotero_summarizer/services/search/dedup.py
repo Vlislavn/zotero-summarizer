@@ -86,7 +86,7 @@ def _merge_family(members: list[Candidate]) -> Candidate:
         preferred.relevance_band = preferred.relevance_band or m.relevance_band
         preferred.why = preferred.why or m.why
         preferred.materialized_zotero_key = preferred.materialized_zotero_key or m.materialized_zotero_key
-        if preferred.in_library is None:
+        if preferred.in_library is None or m.in_library is True:
             preferred.in_library = m.in_library
         preferred.existing_zotero_key = preferred.existing_zotero_key or m.existing_zotero_key
         if m is not preferred:

@@ -27,7 +27,7 @@ golden CSV ─featurize→ SPECTER2 embeds + library/prestige features
 | `model_card.py` | Four-field projection of the currently loaded runtime gate for Settings and setup status. Returns `{"model": null}` when no gate is loaded. No artifact selection, file-stat fields, run-log join or JSONL parsing. |
 | `llm_classifier.py` | LLM-as-classifier baseline (title+abstract → label); any OpenAI-compatible model, e.g. `--classifier-name llm_custom` |
 | `scoring.py` · `prestige.py` · `surprise.py` | composite score; OpenAlex prestige (`percentile_to_score`: field+year-normalized `citation_normalized_percentile` → [1,5]; cold-start/uncited → neutral 3.0, never floored). **Cold-start author prior** (`cold_start_author_score`, gated by `ColdStartPrestigePolicy` built from the prestige config): when a paper has no percentile yet, lift from the authors' *field-normalized* standing (`OpenAlexWork.max_author_field_percentile`, NOT raw h-index — Leiden #6) — asymmetric (raise-only), capped (`p**gamma`), threaded to BOTH train + predict so the `prestige_score` feature stays consistent; serendipity |
-| `reranker.py` | local cross-encoder `Reranker` (sentence-transformers `CrossEncoder`, default `BAAI/bge-reranker-v2-m3`) — lazy background warmup tracked by a stdlib `Future`; fusion while loading, original load/inference errors propagate; thread-locked inference; process-level singleton (`get_reranker`) |
+| `reranker.py` | local cross-encoder `Reranker` (sentence-transformers `CrossEncoder`, default `BAAI/bge-reranker-v2-m3`) — existing async warmup/fusion plus explicit caller-bounded `wait_until_ready(timeout=...)` on the same Future; original failures propagate; thread-locked inference; process-level singleton (`get_reranker`) |
 | `claim_checker.py` | local **MiniCheck** encoder (`ClaimChecker`/`get_claim_checker`) scoring claim⊨evidence support probs — the deterministic, reference-free, ~445× cheaper alternative to the LLM overstatement judge. **Phase A: SHADOW only** — `quality_eval` runs it alongside the LLM (gated by `quality_review.shadow_claim_check`, default off) and records `QualityEval.claim_support_probs` for an A/B; the band stays LLM-decided. Mirrors `reranker.py` (lazy singleton, thread-locked inference, standard HF cache / offline-aware). **Optional dep** (`minicheck`, not in base) — a missing package or load failure degrades to `is_ready()=False` (LLM verdict stands). `hf_repo_for(variant)` → the HF repo for prefetch (`flan-t5-large` → `lytang/MiniCheck-Flan-T5-Large`) |
 | `rank_blend.py` | the shared ORDER-time relevance × goal-text × prestige blend (`blend_scores`, pure cohort math) consumed by BOTH the Library queue (`library/_ranking`) and the Today slate (`triage/daily_select`) — one primitive, two surfaces, so the validated weights (0.4 goal / 0.15 prestige, blind-judge benchmark: NDCG@10 0.38→0.72) route everywhere and can't drift. Min-max per cohort; absent signal folds its weight back into relevance; unknown prestige → median-of-known (never penalised). Degenerate range (identical present values / single row) → 0.5 (uninformative), EXCEPT a lone present positive `goal_sim` (the cohort's only goal evidence) → 1.0 so it tops the goal axis over the 0.0-pinned no-evidence rows ("1 present value" ≠ "many identical"). The gate's aux pass (`classifier_features._compute_aux_with_context`) computes the per-goal cosines (`aux_context.goal_sims`) from the SAME single embed as `corpus_affinity` — goal_sim is aux-only, deliberately NOT a model feature (the engagement-trained gate would re-weight it back toward "similar to what I've saved"). Companion `quality_bonus(band, grade, *, use_band)` — the capped, order-only deep-review QUALITY lift both consumers apply through `order_within_bands`: first sort by the base blend, then permute only among slots of the same raw relevance category. This preserves the base blend's category sequence (including goal-driven cross-category order), raw scores and classifications; the bonus cap alone does not enforce it. Grade-only by default; band-primary (highlight↑/flag↓; `neutral` & `uncertain`→exactly 0.0) is a Phase-2-measured arm selected by the shared `_common.band_primary_enabled` |
 | `rank_blend_quality.py` | Optional quality-first key (`quality_first_key`, `unified_quality`): `key = q·(0.5+0.5·t)`. Reviewed grades anchor quality, flags cap it and unreviewed evidence uses a bounded prior. Topicality is a soft gate, not a hard exclusion. Consumed by `triage/daily_select` behind `ZS_RANK_QUALITY_FIRST` (default off); the ordinary `rank_blend` path remains unchanged. |
@@ -39,6 +39,17 @@ golden CSV ─featurize→ SPECTER2 embeds + library/prestige features
 | `tune.py` | Optuna hyperparameter search: paper-group folds, aligned row weights, train-fold positive-library features |
 | `eval_baseline/` | 5×5 CV baseline + learning curve with bootstrap CIs |
 
+`training_record.py` supplies the daemon-only training ledger producer. It reuses
+`run_log.make_run_id`/`append_run`, preserving CLI/admin schemas and ordering.
+The self-contained JSONL record copies actual artifact metadata/metrics (including
+nulls), full retained hashes or explicitly scoped legacy values. Source/config
+hashes and seed are unavailable when not separately retained; the composite
+`training_input` identity is not expanded into invented historical components.
+Paths are locators, not a reread of current input/model bytes. Records identify
+`gate_training`, not historical inference. Serialization rejects nonfinite JSON
+before append; failure propagates after installation, without rollback or a
+transaction/power-loss guarantee. No training, prediction or evaluation changes.
+
 **Boundaries:** standard services rules. `scoring/prestige/surprise` are shared
 primitives also used by `triage/`.
 
@@ -48,10 +59,21 @@ check or rerank request. Library search, federated ranking and goal-summary
 retrieval share this boundary; no consumer silently replaces inference errors
 with another ranking. The required `sentence-transformers` import and synchronous
 setup load also fail directly. A failed background load remains failed until
-process restart; no request-loop retry or extra status API is introduced.
+process restart; no request-loop retry is introduced.
+Only explicit one-shot news processing opts into `wait_until_ready(timeout=...)`:
+it starts/reuses the same owned load Future and calls `result` with the caller's
+finite positive budget, without a second loader, executor, polling loop or private
+load call from news. Instant and delayed completion can proceed in the same command.
+A waiting timeout returns false/pending and leaves the Future running, without
+cancellation/reload. Completed load failures propagate their original exception,
+including a loader's own TimeoutError (not confused with unfinished waiting).
+Already-ready and existing async search/setup callers retain their behavior.
 The one-shot executor stops accepting work immediately after submission and its
 worker exits after loading; Python joins outstanding executor work on exit.
-This does not cancel or time-limit a download/model load.
+This does not cancel or time-limit a download/model load. Bounded Future waiting
+is not a hard standalone CLI deadline: interpreter exit may still join outstanding
+work. The separately admitted outer process/resource guard owns hard termination;
+this method does not create a process or claim download/thread cancellation.
 
 Label-drift comparison reads `n_train` from the predecessor artifact in the
 selected training output directory (ZIP or legacy joblib), before replacement.

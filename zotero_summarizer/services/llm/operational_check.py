@@ -28,10 +28,12 @@ def _stage_skeleton(routing: Any, stage: str) -> tuple[Any, dict[str, Any]]:
     }
 
 
-def probe_provider(provider: ProviderConfig, model: str) -> dict[str, Any]:
+def probe_provider(provider: ProviderConfig, model: str, *, before_prompt=None) -> dict[str, Any]:
     """Probe one provider/model; failures are data so sibling stages still run."""
     try:
         client = build_client_for_provider(provider, model)
+        if before_prompt is not None:
+            before_prompt()
         client.prompt(_PROBE_PROMPT)
         return {"status": "operational", "detail": ""}
     except Exception as exc:  # noqa: BLE001 — probe status boundary (see docstring)
@@ -47,21 +49,27 @@ def _probe_stage(routing: Any, stage: str) -> dict[str, Any]:
     return row
 
 
-async def _probe_stage_bounded(routing: Any, stage: str) -> dict[str, Any]:
-    """Bound one blocking provider call; its orphaned worker exits independently."""
-    resolved, _row = _stage_skeleton(routing, stage)
+async def _probe_stage_bounded(routing: Any, stage: str, *, probe=None, on_abandon=None) -> dict[str, Any]:
+    """Bound the waiter only; an abandoned synchronous callback may still run."""
+    resolved, skeleton = _stage_skeleton(routing, stage)
     timeout = (
         _LOCAL_PROBE_TIMEOUT_SECS
         if getattr(resolved, "provider", None) and resolved.provider.is_local
         else _PROBE_TIMEOUT_SECS
     )
     try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(_probe_stage, routing, stage),
-            timeout=timeout,
-        )
+        work = (asyncio.to_thread(probe, resolved) if probe is not None
+                else asyncio.to_thread(_probe_stage, routing, stage))
+        result = await asyncio.wait_for(work, timeout=timeout)
+        return {**skeleton, **result}
+    except asyncio.CancelledError:
+        if on_abandon is not None:
+            on_abandon(resolved, "cancelled")
+        raise
     except asyncio.TimeoutError:
-        _resolved, row = _stage_skeleton(routing, stage)
+        if on_abandon is not None:
+            return {**skeleton, **on_abandon(resolved, "timeout")}
+        row = dict(skeleton)
         row["status"] = "fail"
         row["detail"] = f"timeout after {timeout:.0f}s — provider slow or unreachable"
         LOGGER.warning(
@@ -72,19 +80,26 @@ async def _probe_stage_bounded(routing: Any, stage: str) -> dict[str, Any]:
         return row
 
 
-async def check_routing_stages(routing: Any) -> dict[str, Any]:
-    """Run bounded real inference for every stage in an explicit routing config."""
-    stages, cached = [], {}
-    # ponytail: unique probes run serially to protect one local runtime; parallelize
-    # only if mixed-provider health-check latency becomes a measured problem.
-    for stage in STAGES:
-        resolved, _row = _stage_skeleton(routing, stage)
+async def check_routing_stages(routing: Any, *, stages=STAGES, probe=None, on_abandon=None) -> dict[str, Any]:
+    """One snapshot/cache; setup can guard each unique synchronous callback."""
+    routing = routing.model_copy(deep=True)
+    rows, cached = [], {}
+    aborted = False
+    for stage in stages:
+        resolved, skeleton = _stage_skeleton(routing, stage)
         key = (resolved.provider.name, resolved.model)
         if key not in cached:
-            cached[key] = await _probe_stage_bounded(routing, stage)
-        stages.append({**cached[key], "stage": stage})
-    all_ok = all(row["status"] == "operational" for row in stages)
-    return {"status": "ok" if all_ok else "degraded", "stages": stages}
+            if aborted:
+                cached[key] = {**skeleton, "status": "fail", "detail": "Batch abandoned; not attempted",
+                               "reason_code": "batch_abandoned", "attempted": False,
+                               "ownership": "not_submitted", "callback_state": "not_started"}
+            else:
+                cached[key] = await _probe_stage_bounded(
+                    routing, stage, probe=probe, on_abandon=on_abandon)
+                aborted = bool(cached[key].get("abort_remaining"))
+        rows.append({**cached[key], "stage": stage})
+    all_ok = all(row["status"] == "operational" for row in rows)
+    return {"status": "ok" if all_ok else "degraded", "stages": rows}
 
 
 async def check_stages() -> dict[str, Any]:

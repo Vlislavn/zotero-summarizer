@@ -14,7 +14,7 @@ it('keeps Generate disabled and does not claim a review failed on an offline rel
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
   vi.stubGlobal('fetch', vi.fn(async (path) => {
     if (path === '/api/golden/review-detail?item_key=P1') return new Response(JSON.stringify({
-      item_key: 'P1', title: 'Offline paper', tags: [], collections: [], has_pdf: false,
+      item_key: 'P1', title: 'Offline paper', tags: [], collections: [], has_pdf: false, questions: [],
     }), { status: 200 });
     if (path === '/api/zotero/collections' || path === '/api/zotero/tags?limit=300') {
       return new Response(JSON.stringify({ items: [] }), { status: 200 });
@@ -45,7 +45,7 @@ it('the single relevance heading counts supported goals, not merely retrieved pa
       { goal: 'C', retrieval_state: 'hit', relevant: false, summary: 'No support.' },
     ];
     const data = path === '/api/golden/review-detail?item_key=P1'
-      ? { item_key: 'P1', title: 'Paper', tags: [], collections: [], has_pdf: false, deep_review: { goal_summaries: goals } }
+      ? { item_key: 'P1', title: 'Paper', tags: [], collections: [], has_pdf: false, questions: [], deep_review: { goal_summaries: goals } }
       : path === '/api/admin/llm-reachability' ? { stages: [{ stage: 'deep_review', enabled: false }] }
         : path === '/api/zotero/collections' || path === '/api/zotero/tags?limit=300' ? { items: [] } : { status: 'idle' };
     return new Response(JSON.stringify(data), { status: 200 });
@@ -63,7 +63,7 @@ it('the single relevance heading counts supported goals, not merely retrieved pa
 it.each(['page', 'compact'])('%s keeps verdict comments until an explicit edit is saved', async (surface) => {
   const writes = [], unexpected = [];
   const detail = {
-    item_key: 'P1', title: 'Paper', authors: [], tags: [], collections: [], has_pdf: false,
+    item_key: 'P1', title: 'Paper', authors: [], tags: [], collections: [], has_pdf: false, questions: [],
     verdict: { id: 1, item_key: 'P1', user_priority: 'must_read', comment: 'critical rationale' },
   };
   // Valid JSON with the wrong shape must not break Prev/Next navigation.

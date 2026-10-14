@@ -4,10 +4,12 @@ import TagOfInterestEditor from '../TagOfInterestEditor.jsx';
 import CollectionEditor from '../CollectionEditor.jsx';
 import PaperReaderPane from '../../library/PaperReaderPane.jsx';
 import AskPaperBox from '../../library/AskPaperBox.jsx';
+import ReviewNotes from '../review/ReviewNotes.jsx';
 import OpenBriefButton from '../../library/OpenBriefButton.jsx';
 import VerdictPanel from '../../VerdictPanel.jsx';
 import AbstractBlock from './AbstractBlock.jsx';
 import { Section, Disclosure } from '../review/primitives.jsx';
+import useNoteDelivery from '../../../hooks/useNoteDelivery.js';
 
 // ONE configurable paper-detail assembly, extracted from the duplicated bodies
 // of AnnotationVerdict (the "detail" right column) and InlineAnnotate (the
@@ -65,6 +67,7 @@ export default function PaperDetailView({
   verdict = {},
   extras = null,
 }) {
+  const { questionMirror, beginNoteDelivery } = useNoteDelivery(itemKey, detail?.user_note || '', detail?.questions || []);
   if (!detail) return null;
   const editable = mode === 'editable';
   const hasPdf = detail.has_pdf;
@@ -78,6 +81,9 @@ export default function PaperDetailView({
   const showTags = show.tags ?? true; // both surfaces render the tag editor
   const showCollection = (show.collection ?? editable) && editable;
   const showVerdict = (show.verdict ?? editable) && editable;
+  const notes = <ReviewNotes key={itemKey} itemKey={itemKey} initialNote={detail.user_note || ''}
+    questions={detail.questions || []} questionMirror={questionMirror}
+    onMirrorStart={beginNoteDelivery} onSaved={onDeepReviewDone} />;
 
   // ONE flat, hairline-divided column for both modes (Law of Common Region:
   // a divider, not a box). Editable splits into Decide / Act chunks (Miller's
@@ -111,8 +117,8 @@ export default function PaperDetailView({
               {showAbstract && <AbstractBlock abstract={detail.abstract} variant="details" />}
               {showAsk && (
                 compact
-                  ? <Disclosure summary="Ask this paper"><AskPaperBox itemKey={itemKey} /></Disclosure>
-                  : <AskPaperBox itemKey={itemKey} />
+                  ? <Disclosure summary="Ask this paper"><AskPaperBox itemKey={itemKey} onSaved={onDeepReviewDone} onMirrorStart={beginNoteDelivery} /></Disclosure>
+                  : <AskPaperBox itemKey={itemKey} onSaved={onDeepReviewDone} onMirrorStart={beginNoteDelivery} />
               )}
             </div>
           </Section>
@@ -137,6 +143,7 @@ export default function PaperDetailView({
                   deleteError={verdict.deleteError}
                 />
               )}
+              {notes}
               {/* Collection lifted OUT of the disclosure — filing into Read Next
                   is a daily primary action, not the long tail (Pareto / Serial
                   Position): one click, default preselected. */}
@@ -192,10 +199,11 @@ export default function PaperDetailView({
               {showReader && (
                 <PaperReaderPane itemKey={itemKey} open={readerOpen} onOpenChange={onReaderOpenChange} hasPdf={hasPdf} />
               )}
-              {showAsk && <AskPaperBox itemKey={itemKey} />}
+              {showAsk && <AskPaperBox itemKey={itemKey} onSaved={onDeepReviewDone} onMirrorStart={beginNoteDelivery} />}
             </div>
           </Section>
         )}
+        <Section>{notes}</Section>
         {showAbstract && (
           <Section label="Abstract">
             <AbstractBlock abstract={detail.abstract} variant="expandable" />

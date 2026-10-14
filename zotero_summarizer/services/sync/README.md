@@ -10,8 +10,8 @@ The server SQLite database remains canonical. `pull` returns compact paper
 snapshots plus a monotonic field-change cursor; protocol-v1 `changes` is always
 empty because clients reconcile from the snapshot and never consume the event
 history. This keeps stale-device pulls independent of accumulated note/verdict
-transitions. `push` applies ordered verdict or
-review-note mutations. Each mutation has a UUID and per-field base revision, so
+transitions. `push` applies ordered verdict/manual-note mutations or independent
+immutable question creates. Each mutation has a UUID and per-field base revision, so
 replay is idempotent, edits to different fields merge, and same-field divergence
 returns an explicit conflict. A resolution is another mutation naming the
 conflicted mutation. Delete tombstones retain their last revision, so a client
@@ -30,6 +30,43 @@ or Zotero items.
 PWA IndexedDB queue ─push→ BEGIN IMMEDIATE: compare revision → write → remember UUID
                   ←pull─ sync_changes cursor + compact current paper snapshots
 ```
+
+Question creates use `review_question/create` with `mutation_id` equal to the
+canonical submission UUID and an immutable five-field value. Validation reuses
+the question store's payload rules; accepted keys/text/preset IDs are not trimmed
+or alias-rewritten. Only device identity is normalized. Distinct UUIDs ignore
+field base revisions; exact retries (including an online-saved question) reuse
+the original journal revision and add only the missing durable sync receipt.
+Changed ID payloads reject without row/journal/intent writes. Receipt insertion,
+question creation and staging share the existing `BEGIN IMMEDIATE` transaction.
+
+```
+review_question/create -> save/reuse question + immutable receipt -> commit
+                         -> mirror_review_note(db_path, original_item_key)
+pull/detail <- separate questions[] + unchanged editable manual note
+```
+
+Questions invoke exactly `golden.verdict_effects.mirror_review_note`, including
+UUID replay, never `apply_verdict_effects`, QA, training or feed materialization.
+The common return is exposed unchanged as `question_mirror` for questions and
+`review_note_mirror` for manual-note set/delete/replay. Both contain
+`{note_written, note_error, note_pending, projection_revision, target_key}` and
+are derived post-commit state, not saved in immutable request/result receipts.
+Durable local success stays HTTP 200 / `applied` or `already_applied`; the delivery
+owner reports expected external-write/acknowledgement failures as `note_error`
+with pending recovery, rather than throwing a post-save HTTP error. Unexpected
+exceptions are not suppressed here. Same-UUID replay retries the current
+projection without changing its original request/receipt. The delivery owner
+supplies composite delivery and current acknowledgement; verdict effects remain
+distinct. The online-save→sync regression verifies its pre-receipt delivery
+separately from post-receipt sync/replay delivery, retaining the original
+row/journal/intent identity and no-duplicate assertions.
+
+Snapshot fields project `questions[]` to all resolved aliases and seed
+question-only papers absent from the queue or manual/verdict store. Original row
+keys and `submitted_at` remain intact. `revisions.review_question` uses the
+existing globally ordered insertion journal; manual-note revisions stay separate.
+Detail/snapshot readers perform no acknowledgement or payload normalization.
 
 SQLite triggers capture writes from every existing server surface. This is
 field-level optimistic concurrency, not database replication: PDFs, annotations,

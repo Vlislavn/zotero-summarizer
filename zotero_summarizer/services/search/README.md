@@ -83,7 +83,13 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
   weekly paper-gap review (`.claude/commands/weekly-review.md`) reads `in_library`
   to flag which top results are *missing*. Fail-open: a failed/absent lookup stays
   `None` (unknown), never a false "not in library" that would re-surface a paper
-  you already have.
+  you already have. Opt-in refinement annotates only its new observations with
+  this same reader before merging them into the saved pool. A confirmed saved hit
+  wins over a miss or unknown member of the same identifier family, independent
+  of metadata richness; preferred metadata, addresses, reviews and scores keep
+  their existing merge rules. Membership is not relevance or fresh deletion proof.
+  Missing/unsupported lookups remain unknown, and Add alone reuses the saved key
+  rather than constructing a new Zotero item.
 - **OpenReview is SIGNAL-ONLY, never ranking** (`federate._openreview_channel`): a
   dual-judge eval refuted prestige-boost ranking, so a hit only resolves its
   OpenAlex id (title+year lookup, best-effort) to merge into the right version
@@ -121,6 +127,8 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
 | `review.py` | `light_review` (quality tier) + `select_deep_set` |
 | `_targeted_review.py` | query-lensed deep read (composes library read-only layers; sections are currently empty, so that unused parameter is not exposed) |
 | `_fulltext.py` | OA full-text acquisition for a federated (non-Zotero) candidate: PMC → Europe PMC `fullTextXML` (a PMCID hit), else identifier → OA PDF |
+| `_evidence_pass.py` | Explicit default-absent supplied-original shadow request, bounded callbacks and per-question receipts using the existing session worker |
+| `_source_context.py` | Strict raw source/occurrence, separate private-context, generated locator and verifier-output contracts; no retrieval or semantic grading |
 | `pipeline.py` | `run_screen` (fast) + `run_review` (slow) + dependencies; strict offline rejects before external search |
 | `materialize.py` | the one Search→Zotero write: `materialize_candidate(session_id, candidate_id, collection_key)` — resolve+validate collection (pre-lock 400), reuse a coverage hit or adapt Candidate→feed_payload, then check-write-stamp under the session lock via `session.materialize_once` (concurrent Adds write once) |
 | `refine.py` | bounded opt-in agentic PRF before auto-review; no-ops under strict offline |
@@ -163,6 +171,83 @@ review pairs answers only with nonblank questions. Review failures are recorded
 on the affected paper and do not stop later candidates. The session list skips
 individual unreadable/corrupt files; deleting a session locks its store entry,
 marks it cancelled, and prevents in-flight review saves from recreating it.
+
+## Supplied-original evidence shadow (explicit injection only)
+
+`SearchDeps.evidence_pass` defaults to None and `default_deps` never wires it.
+An explicit `EvidencePassRequest` (or the same structural attributes) supplies
+unique existing candidate IDs, original snapshots, separate private context,
+generator/verifier callbacks and different declared identities, plus caller-owned
+`max_calls`, `max_passages`, `max_chars` and `source-shadow-v1` schema. No HTTP/UI,
+config flag, provider resolver, discovery or default activation is added.
+
+After existing online/input validation, `run_review` assesses the finite requested
+IDs in supplied order **before** ordinary top-N acquisition/light review and deep
+selection. This includes IDs outside those cutoffs, but never promotes, acquires,
+deep-reviews or Adds them. Ordinary scores/order/quality reranking/reviews and Add
+remain unchanged. Receipts live only in `Candidate.question_evidence` through the
+existing save/load/save_merge; empty receipts are omitted from the legacy wire
+projection. A fresh active pass replaces selected candidates' receipts, rather
+than caching a verdict. Inactive/no-question requests perform zero extra source,
+context or provider calls and preserve any existing data.
+
+Snapshot v1 declares candidate/source/version IDs, full raw UTF-8 SHA256, original
+text, strict completeness/truncation booleans, checked raw codepoint extent and
+unique occurrence IDs with exact spans/quotes. Accepted kinds are
+`synthetic_original` or `supplied_original`, with `supplied_occurrence_spans` mode.
+These are supplied provenance declarations, not authentication of a live publisher
+or parser. No generated review/cache getter/read/repair/quarantine is used. The
+ordinary OA string acquisition API is not promoted into authenticated originals.
+
+Hard checks reject wrong digests, extents, coercible booleans, another source or
+version, and wrong repeated occurrences before semantic verification. Generator
+output must be exactly `{answer, evidence}`; locators retain the selected original
+occurrence, not a first-match or normalized quote. Verifier output must be exactly
+`{state, supported, evidence_ids, uncovered}` with strict states/booleans and cited
+IDs from that proposal. Only the injected verifier supplies semantic judgments;
+no word/regex/overlap sufficiency grade or quality score is inferred.
+
+Every accepted shadow string must be strictly UTF-8 encodable at its DTO/request
+boundary, including answers, uncovered aspects, source/version/occurrence IDs,
+private-context text/metadata and declared handles/question identities. Legal
+Cyrillic, astral and combining text remains exact; no character whitelist,
+normalization or ASCII-escaping persistence workaround is used. Nonencodable
+output yields unknown/invalid_schema before publication; bad source/context uses
+fixed invalid_source/invalid_context reasons and ordinary review continues.
+Malformed configuration fails at request admission before callbacks or receipts.
+Existing session serialization is unchanged, and persistence faults are not hidden.
+
+Each receipt retains the exact loaded original question/index/full SHA and a
+separate canonical-question SHA, original source/version/digest/extent,
+generator/verifier identities and attempt flags. `sufficient`, `partial`,
+`not_found_in_checked_text` and `unknown` remain distinct. Supported negative
+paper results may be sufficient; incomplete/truncated originals are unknown and
+skip semantic callbacks. Invalid schemas/locators, unavailable callbacks and
+exhausted budgets remain unknown, never scientific negatives. `max_calls` counts
+generator/verifier attempts across the whole pass, including failures, without
+retries; source/context load once per candidate when a call budget remains.
+`max_passages` bounds supplied passages and proposed evidence. `max_chars` bounds
+raw source, total supplied comment text and generated answer/uncovered text
+separately; no silent clipping or new numerical default is introduced.
+
+Private supplied comment records preserve order/text/revision/authorship only as
+generator context. Unavailable/invalid/over-budget context is disclosed separately
+from successfully empty context and does not prevent original-only assessment.
+Source and complete verifier payloads exclude context structurally; an additional
+literal string-leaf tripwire withholds overlapping private text before verifier
+calls. It can conservatively withhold legitimate coincident wording and cannot
+prove protection against transformed, split or partial private content. It is an
+I/O privacy check, not a semantic preference/disinterest classifier. No real note
+collector or live-model/private-processing approval is implied. `used_context_ids`
+remains empty when usage is not explicitly attributed, not proof that the generator
+ignored its context; comments never authorize article evidence.
+
+Deletion is checked between callback boundaries and before existing save_merge;
+no new worker/store/locking protocol is introduced. Concurrent explicit Add keys
+remain protected by save_merge. Broader question/context/version invalidation,
+promotion/UX, authentic owner-labelled accuracy/usefulness and approved live
+provider/source adapters remain separate gates; scripted outcomes establish
+routing/contracts, not scientific sufficiency or issue closure.
 
 ## Deferred (ponytail seams, known ceilings)
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from typing import Any
 
@@ -74,11 +75,21 @@ def compact_history(
         handle = turn.get("evidence_handle")
         if verified_quote(item_key, artifact, handle) is None:
             continue
-        checkpoints.append(
-            f"evidence:{handle['quote_digest'][:16]} (resolve against the current extraction before exact claims)"
-        )
+        input_digest = handle.get("input_digest")
+        if not isinstance(input_digest, str):
+            question = turn.get("question")
+            input_digest = _digest(question) if isinstance(question, str) else None
+        span = handle["span"]
+        checkpoints.append({
+            "paper_id": handle["paper_id"],
+            "extraction_version": handle["extraction_version"],
+            "span": {"start": span["start"], "end": span["end"]},
+            "quote_digest": handle["quote_digest"],
+            "input_digest": input_digest,
+        })
     compacted = "\n".join([
-        "Earlier evidence checkpoint: " + ("; ".join(checkpoints) or "no current verified handles"),
+        "Earlier evidence checkpoint: " + json.dumps(checkpoints),
+        "(resolve against the current extraction before exact claims)",
         *[_turn_text(turn) for turn in recent],
     ])
     return (compacted, True, len(checkpoints)) if len(compacted) < len(raw) else (raw, False, 0)

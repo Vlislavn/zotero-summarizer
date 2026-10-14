@@ -22,8 +22,9 @@ def _row(
     *,
     action: str = "Retry",
     command: str | None = None,
+    recovery_action: str = "retry",
 ) -> dict[str, Any]:
-    recovery = {"label": action}
+    recovery = {"label": action, "action": recovery_action}
     if command:
         recovery["command"] = command
     return {

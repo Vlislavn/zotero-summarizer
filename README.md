@@ -18,6 +18,12 @@ Zotero remains the PDF/citation surface and a synced representation of approved 
 
 ## Review recovery and search constraints
 
+Deep-review caches retain accepted `tldr`/`key_findings` verifier evidence without
+extra model calls. The local `deep_review.export_review_audit(item_key)` API returns
+the exact stored digest and current audit, never policy projections or repairs.
+Evidence includes extraction coordinates and checked scope, not a scientific verdict.
+See [audit retention/export](docs/usage.md#accepted-digest-evidence-and-local-export).
+
 Deep review rejects demonstrated access/error/login templates before model calls.
 Failures show their stage and recovery separately from scientific quality; a failed
 attempt or missing-source placeholder does not replace a current valid review.
@@ -48,6 +54,19 @@ replays require `ZS_REVIEW_ACCEPTANCE_MANIFEST=/path/to/frozen-input.json`; with
 that explicit input they skip, not pass. They check literal retention, not scientific
 truth, subjective usability or native Zotero persistence.
 
+PDF triage binds method artifact membership to complete original text, bound
+metadata and eligible exact hyperlink-annotation URIs from one immutable capture.
+Raw annotations are never appended to prompts or reconstructed from wrapped text;
+reader/source-identity failures are errors, not empty authority. Membership alone
+does not establish scientific contribution or usefulness. See the
+[triage contract](zotero_summarizer/services/triage/README.md).
+
+Successful model-scored abstract-only summaries expose the legacy
+`should_deep_read` field as `"No"` without changing the refinement used for triage
+or full-PDF responses.
+Existing stored summaries are not rewritten. This is an output compatibility
+boundary, not a full-text reading decision or usefulness assessment.
+
 When web-article review is enabled, HTML-only pages can be reviewed from a bounded,
 text-only extraction of the selected main document's body text—not a page facsimile.
 Images, layout, CSS-generated content, embedded frames, and shadow trees are outside
@@ -60,7 +79,28 @@ not hard gates; inferred refinement exclusions cannot silently remove results.
 Confirmed publication types require source metadata, with bounded exact-DOI recovery;
 unconfirmed metadata stays unknown. Legacy saved plans retain their original filters.
 The plan discloses domain context, source accounting and scholarly coverage limits.
-See [search](zotero_summarizer/services/search/README.md).
+An explicitly injected, default-absent shadow can assess supplied originals before
+review cutoffs; it does not change ranking, ordinary reviews or Add. See the
+[Search evidence boundary](zotero_summarizer/services/search/README.md).
+
+HackerNoon RSS uses the existing reader and exact-host practitioner rubric, with
+shared identity/scoring. The [diagnostic caller](tools/method_validation/README.md)
+checks parser and prompt IO only; frozen empty tag feeds, selection, web review and
+semantic usefulness remain separate evidence.
+
+The explicit [offline saved-news mode](zotero_summarizer/services/research_feed/README.md#offline-saved-telegram-news)
+accepts saved Telegram JSONL, not live collection. Processing may use the configured
+reranker/default LLM; collect/cached/view modes avoid new model calls. No default
+activation, calibrated hard gate or scientific-usefulness claim is implied.
+
+Ask saves typed/preset questions before answering. **My notes** keeps them
+separate from manual text and shows one revision-bound composite Zotero delivery
+status; new submissions or changed saved content invalidate old receipts.
+Missing delivery evidence remains unknown. See [usage](docs/usage.md#reading-reviews-and-zotero-notes).
+The opt-in synthetic checks in `tests/test_review_question_add_browser.py` cover
+explicit Add, repeat/recovery and Library/restart preservation against an owned
+native SQLite fixture. Supplied reviews are source-bound test input, not generated
+or verified output; these checks do not establish live-Zotero, device or scientific acceptance.
 
 ## Requirements
 
@@ -115,6 +155,11 @@ API key in the OS keyring and never returns it to the browser. The headless CLI 
 an env-var name and saves the chosen routing before its optional probe. Use
 `setup --mode no-llm` when you want classifier-only triage without an endpoint.
 
+Local setup verification now refuses construction when policy/effective-envelope
+evidence is UNKNOWN; hardware floors are static advice, not load adequacy.
+Configuration and explicitly consented downloads remain available. See the
+[setup boundary](docs/usage.md#local-setup-verification-boundary).
+
 After setup, go to **Today** and click **Triage backlog**
 to score your unread feed papers, then start culling. *(Going offline? Run `uv run
 zotero-summarizer prefetch-models` once while online — see [docs/usage.md](docs/usage.md).)*
@@ -128,6 +173,8 @@ zotero-summarizer prefetch-models` once while online — see [docs/usage.md](doc
   - a **paper brief** — at-a-glance read verdict, goal-match board (which of your goals it
     serves), a reference-free **quality grade** (FLAG / NEUTRAL / HIGHLIGHT), and figures;
   - **ask the paper** — grounded Q&A that quotes the text and abstains when the answer isn't there;
+    follow-ups preserve complete older evidence handles when compaction saves space
+    ([checkpoint rules](zotero_summarizer/services/library/README.md#qa-evidence-checkpoints));
   - **deep review** — an on-demand full-text digest + quality assessment for your top picks;
     map-reduce verifies claims against the original paper, not its generated notes.
     Empty source text or chunk summaries fail rather than becoming a skip recommendation.
@@ -135,6 +182,17 @@ zotero-summarizer prefetch-models` once while online — see [docs/usage.md](doc
   (`must` / `should` / `could` / `don't`). That's your ground truth; the model retrains on it.
 
 Open PDFs and take notes in Zotero as usual; come back here to triage.
+Native annotation detail retains `annotation_key`, parent `attachment_key` and raw
+`date_modified` alongside separate highlight/comment text. Keys are library/database-
+scoped; the clock is not a monotonic revision or sufficient cache invalidation.
+This readonly metadata does not add comment-aware retrieval or infer authorship.
+
+Long PDF triage (>80,000 text characters) supplements map notes with bounded,
+escaped original URI windows and occurrence-coverage counts. Initial refinement
+receives them after default/custom templates, even overrides without `{paper_text}`;
+direct PDF, abstract/Doctor, shared mapping and distinct JSON repair stay unchanged.
+No extra calls or automatic artifacts: context delivery is not scientific accuracy
+or whole-paper completeness. See [the source limits](docs/usage.md#reading-reviews-and-zotero-notes).
 
 ## Configuration
 
@@ -174,6 +232,13 @@ uv run zotero-summarizer faithbench build --max-builder-windows 64  # larger QA-
   budget and increased call cost are documented there.
 - **[Research-feed evaluation evidence](docs/issue-evidence-research-feed.md)** — why the current
   30-paper fixture is unscorable for production inclusion quality (not a 0%-precision result).
+- **[Feedback evidence](zotero_summarizer/services/golden/feedback_analysis/README.md)** — `goldenset analyze-feedback --project-root ROOT`: private JSON/Markdown from an isolated bounded child; default-off weekly automation only in `feeds serve`. Darwin publication is supported; installed-host/scored evaluation remains unverified. Exact `offline_sync`/`sync_conflict_resolution` sources are recognized only on `label_transition`; their `human_feedback` remains nonpreference, and existing reports are not rewritten.
 - **[docs/architecture.md](docs/architecture.md)** — how it works, the layering rules, and
   the dev / verification workflow.
+- **[RepoDoc experiment](experiments/repodoc/README.md)** — seed-bound Python-backend KG,
+  failed caller-impact and three failed parser/resolver controls from completed diagnostics.
+  Costs are narrowly scoped, not whole-system evidence. Parent-only acceptance; no dependency or CI integration.
+- **[Native issue delegation](docs/native-agent-workflow.md)** — pinned async Pi adapter,
+  exclusive workers, independent review, per-child cwd/role checks, isolated failure
+  handling, authority boundaries and restart/activation checks.
 - **[CHANGELOG.md](CHANGELOG.md)** — notable changes (latest: the guided first-run setup).

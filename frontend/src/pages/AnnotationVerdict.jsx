@@ -215,6 +215,7 @@ export default function AnnotationVerdict() {
   const detailQuery = useQuery({
     queryKey: ['review-detail', selectedKey],
     queryFn: () => fetchReviewDetail(selectedKey),
+    networkMode: 'always', // Includes an IndexedDB fallback, even on cold offline mounts.
     enabled: Boolean(selectedKey),
   });
 

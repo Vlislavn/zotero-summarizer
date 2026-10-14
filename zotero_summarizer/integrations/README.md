@@ -41,6 +41,15 @@ services/ ─calls→ integrations/ ─talks to→  Zotero DB | PDFs | LLM API |
 
 **Boundaries:** must NOT import `services/` or `api/` (enforced by pre-commit).
 
+Zotero read/write errors carry `expected_io` (default false), separate from their
+messages. The writer's existing per-row failures also retain that boolean; invalid
+queue rows still use savepoints and do not undo healthy rows. The shared leaf
+`is_expected_sqlite_io` recognizes numeric SQLite BUSY/LOCKED/IOERR/FULL/READONLY/
+CANTOPEN codes, including extended codes. Schema, programmer and unknown failures
+are not classified as optional IO. The mirror service preserves this distinction;
+no exception-text classifier or new retry policy is added. Existing lock retry
+budgets and backup/ownership behavior are unchanged.
+
 RSS/PDF connections use a validated numeric IP, never a second hostname lookup.
 
 Browser PDF acquisition and the headed login window use `_browser_network.public_browser_options`:
@@ -113,7 +122,15 @@ RSS requests negotiate identity/gzip and cap both wire and decoded bodies at
 unnegotiated encodings are errors. Original XML bytes preserve declared encodings.
 
 Item lists, details, notes and annotations exclude trashed children (including
-annotations on trashed PDFs); note lists/detail share one query. Collection lookup
+annotations on trashed PDFs); note lists/detail share one query. Annotation detail
+retains the six legacy fields plus `annotation_key`, the parent attachment's own
+`attachment_key`, and raw source `date_modified`. Keys are scoped to the selected
+native user library/database, not global IDs or authenticated authorship.
+`date_modified` is not a monotonic revision, content fingerprint or sufficient
+cache-invalidation signal: same-clock edits can change text/comments. Highlighted
+text and comments remain separate, literal untrusted content; row multiplicity and
+`date_added` ascending order remain unchanged (ties have no guaranteed order).
+This read metadata adds no retrieval, ownership inference or writes. Collection lookup
 belongs to the collection mixin and scopes key/name/every path segment to the user
 library. An explicit foreign key never falls through to another name. Requested
 materialization collections must resolve or the transaction fails.
@@ -186,3 +203,19 @@ page joining, and the real OnPrem backend on an original generated PDF with
 signed superscript/subscript uncertainty, title/Methods text and a URL.
 Source-length-dependent budgets must use the new extracted length, not old
 Markdown counts. Prompts, settings, limits and models are unchanged.
+
+## Original PDF authority capture
+
+`pdf.capture_pdf_source` returns frozen `PdfSource(text, annotation_uris, document_sha256)`.
+The selected extractor's text is unchanged; lazy PyMuPDF `raw_link_uris` preserves
+SDK LINK_URI strings, order and duplicates without coercion or normalization.
+Malformed reader data, unavailable readers, extractor and I/O failures propagate;
+valid absence is an empty tuple. No extra extractor protocol or temporary PDF exists.
+
+Before/after full SHA-256 and descriptor/path device, inode, size and mtime checks
+reject ordinary persistent source changes. Each streaming hash reads its opening
+size plus one growth-detection byte, using Python-3.10-compatible bounded buffers.
+This imposes no new user-PDF size cap. It is not authentication, an atomic snapshot,
+a hostile change-and-restore defense or a deadline for blocking filesystem/SDK I/O.
+Abstract/Doctor paths do not import or probe the reader. Other text-only consumers
+retain `extract_text`; triage alone carries the frozen source to private admission.
