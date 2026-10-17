@@ -33,6 +33,7 @@ def _digest(read_decision=None, grade=None, **extra):
             d.setdefault("novelty", 4)
             d.setdefault("significance", 4)
             d.setdefault("writing_friction", "low")
+            d.setdefault("basis", "full_text")
     if grade is not None:
         d["grade"] = grade
     return d
@@ -323,3 +324,91 @@ def test_grade_falls_back_to_quality_eval_when_digest_lacks_it():
     )
     assert out.grade == "B"
     assert out.proposed == "must_read"  # B is a high grade -> the read lift fires
+
+
+@pytest.mark.parametrize("basis,expected,source_flags", [
+    ("full_text", "read", []),
+    ("abstract", "skim", ["abstract_only"]),
+    (None, "skim", ["full_text_not_confirmed"]),
+    ("not_assessed", "skim", ["full_text_not_confirmed"]),
+    ("", "skim", ["full_text_not_confirmed"]),
+    ("map_reduce", "skim", ["full_text_not_confirmed"]),
+    ("PDF", "skim", ["full_text_not_confirmed"]),
+])
+def test_full_read_requires_explicit_canonical_digest_source_basis(basis, expected, source_flags):
+    digest = _digest(read_decision="read", basis=basis)
+    quality = {**_quality(band="highlight"), "basis": "full_text"}
+
+    decision, flags = propose.effective_read_decision(digest, quality, goal_summaries=_goals(matched=True))
+
+    assert decision == expected and flags == source_flags
+    assert digest["read_decision"] == "read" and digest["basis"] == basis
+
+
+def test_missing_digest_basis_is_unknown_even_when_quality_used_full_text(monkeypatch):
+    from zotero_summarizer.services.library import _review_cache
+
+    digest = _digest(read_decision="read")
+    digest.pop("basis")
+    entry = {"digest": digest, "quality": {"quality_band": "highlight", "basis": "full_text"},
+             "goal_summaries": _goals(matched=True)}
+    monkeypatch.setattr(_review_cache, "_read_all", lambda: {"PAPER": entry})
+
+    projected = _review_cache.get_cached_review("PAPER")
+
+    assert projected["digest"]["read_decision"] == "skim"
+    assert projected["reading_policy_flags"] == ["full_text_not_confirmed"]
+    assert projected["model_read_decision"] == "read"
+    assert "basis" not in projected["digest"] and "basis" not in digest
+    assert digest["read_decision"] == "read"
+
+
+@pytest.mark.parametrize("decision,board,expected,flags", [
+    ("skim", _goals(matched=True), "skim", []),
+    ("skip", _goals(matched=False), "skip", []),
+    ("skip", None, "", ["goals_not_assessed"]),
+])
+@pytest.mark.parametrize("basis", ["abstract", None, "full_text"])
+def test_source_cap_preserves_existing_non_read_actions(decision, board, expected, flags, basis):
+    assert propose.effective_read_decision({"read_decision": decision, "basis": basis}, None,
+                                          goal_summaries=board) == (expected, flags)
+
+
+def test_position_read_uses_its_quality_result_without_empirical_requirements():
+    digest = _digest(read_decision="read", grade="A")
+    quality = {"quality_band": "highlight", "grade": "A", "paper_type": "position",
+               "rubric": {"thesis": "yes", "evidence_cited": "yes", "scope_match": "yes"}}
+
+    decision, flags = propose.effective_read_decision(digest, quality, goal_summaries=_goals(matched=True))
+
+    assert decision == "read" and flags == []
+    assert "ablation" not in quality["rubric"]
+    assert "external_validation" not in quality["rubric"]
+
+
+def test_excellent_prose_cannot_promote_low_idea_value_to_full_read():
+    digest = _digest(read_decision="read", novelty=2, significance=2, clarity=5, writing_friction="low")
+
+    decision, flags = propose.effective_read_decision(digest, _quality(band="highlight"),
+                                                     goal_summaries=_goals(matched=True))
+
+    assert decision == "skim" and flags == ["idea_value_not_high"]
+
+
+def test_old_cache_projection_keeps_missing_writing_unknown_and_does_not_rewrite(monkeypatch):
+    import copy
+    from zotero_summarizer.services.library import _review_cache
+
+    digest = _digest(read_decision="read", grade="A", clarity=5)
+    digest.pop("writing_friction")
+    entry = {"digest": digest, "quality": _quality(band="highlight"), "goal_summaries": _goals(matched=True)}
+    original = copy.deepcopy(entry)
+    monkeypatch.setattr(_review_cache, "_read_all", lambda: {"PAPER": entry})
+
+    projected = _review_cache.get_cached_review("PAPER")
+
+    assert entry == original
+    assert projected["digest"]["read_decision"] == "skim"
+    assert "writing_friction" not in projected["digest"]
+    assert projected["model_read_decision"] == "read"
+    assert projected["reading_policy_flags"] == ["writing_not_assessed"]

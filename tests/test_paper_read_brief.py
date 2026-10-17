@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
 from zotero_summarizer.services.library import _paper_read_brief as brief
 from zotero_summarizer.services.library import _paper_read_html as h
 
@@ -217,8 +219,8 @@ def test_quality_panel_is_self_explaining():
     assert "Rigorous enough to act on" in html              # plain-language band gloss
     assert "How we judged it" in html and "no citation counts" in html  # the method clause
     assert "3/3 passes agree" in html                        # self-consistency in words
-    assert "HIGHLIGHT" in html and "≥6 grounded checks" in html  # legend
-    assert "What earned it" in html and "rigor checks met" in html
+    assert "HIGHLIGHT" in html and "applicable type-aware checks" in html  # legend
+    assert "What earned it" in html and "7/7 applicable checks met" in html
     # the full 9-point rubric is present but behind a disclosure, with REAL questions
     assert "Show the full" in html and "EXTERNAL / held-out" in html
 
@@ -227,7 +229,37 @@ def test_quality_panel_flag_leads_with_red_flags():
     html = brief.quality_panel_html(FLAG_Q)
     assert "Read critically" in html
     assert "q-redflags" in html and "near-perfect 99.2%" in html  # loud callout
-    assert "Why it sank" in html
+    assert "Reported checklist gaps" in html
+
+
+@pytest.mark.parametrize("band", ["flag", "neutral", "highlight", "uncertain"])
+@pytest.mark.parametrize("paper_type,rubric,gap", [
+    ("position", {"thesis": "yes", "evidence_cited": "no", "counterarguments": "na"},
+     "evidence cited"),
+    ("systematic_review", {"search_strategy": "no", "rob_assessment": "yes"}, "search strategy"),
+    ("theory", {"assumptions": "yes", "proofs": "no"}, "proofs"),
+])
+def test_type_aware_quality_details_never_invent_empirical_gaps(band, paper_type, rubric, gap):
+    quality = {"paper_type": paper_type, "quality_band": band, "rubric": rubric}
+    original_rubric = dict(rubric)
+
+    html = brief.quality_panel_html(quality)
+
+    assert "Ablations isolate" not in html
+    assert "Validated on independent" not in html
+    assert "Reports uncertainty" not in html
+    assert gap in html
+    if band == "highlight":
+        assert "1/2 applicable checks met" in html
+    assert rubric == original_rubric
+
+
+@pytest.mark.parametrize("band", ["flag", "neutral", "highlight", "uncertain"])
+@pytest.mark.parametrize("rubric", [{}, {"ablation": "na", "external_validation": "na"}])
+def test_absent_or_inapplicable_quality_criteria_are_not_displayed_as_failed(band, rubric):
+    _, rows, caption = brief._decisive_rows(rubric, band)
+
+    assert rows == [] and caption == ""
 
 
 def test_presentation_integrates_brief_no_sections_dump_no_cdn():

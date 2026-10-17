@@ -30,13 +30,22 @@ def test_quality_review_grade_normalization():
         PaperDigest(writing_friction="high")
 
 
-def test_digest_prompt_is_conservative_and_action_specific():
+def test_digest_prompt_formats_declared_schema_fields():
+    from string import Formatter
     from zotero_summarizer.services.library.quality_review import _DEFAULT_DIGEST_PROMPT
 
-    for required in ("Start at `skip`", "ONLY if all hold", '"skip_parts"',
-                     '"estimated_read_minutes"', '"original_value"', '"writing_friction"',
-                     "BEFORE choosing", "one stated axis", "weak evidence", "zero counterexamples"):
-        assert required in _DEFAULT_DIGEST_PROMPT
+    fields = ("read_decision", "read_why", "read_parts", "skip_parts",
+              "estimated_read_minutes", "original_value", "writing_friction", "writing_reasons")
+    assert set(fields) <= PaperDigest.model_fields.keys()
+    for field in fields:
+        assert f'"{field}":' in _DEFAULT_DIGEST_PROMPT
+    inputs = {"research_goals": "<<goals-input>>", "title": "<<title-input>>",
+              "full_text": "<<original-source-input>>"}
+    placeholders = {field for _, field, _, _ in Formatter().parse(_DEFAULT_DIGEST_PROMPT)
+                    if field is not None}
+    assert placeholders == inputs.keys()
+    formatted = _DEFAULT_DIGEST_PROMPT.format(**inputs)
+    assert all(value in formatted for value in inputs.values())
 
 
 def test_digest_llm_cannot_silently_default_the_writing_assessment():

@@ -20,7 +20,8 @@ flowchart LR
     LLM --> Review[Full-text review]
     Review --> Weekly[Weekly research engineering digest]
     Human --> Zotero[Zotero]
-    Review --> Zotero
+    Review --> Pending[Generated note preview]
+    Pending --> Human
 ```
 
 1. **triage** fetches RSS itself into an app-owned pool and scores it (gate
@@ -32,6 +33,16 @@ flowchart LR
 6. **zotero** writes reviewed papers into the *Inbox* only after an explicit
    Add/positive verdict, approved label tags/notes (queued + reviewed, backup
    first), and read-state sync for Zotero feed cards triaged by the app.
+
+Pending confirmation (`services/zotero/pending_confirmation.py`) binds the actual
+list DTO's common snapshot to ID/item/type/payload/edit revision/native target.
+One selection validates all ordinary/generated members before backup/effects,
+commits durable applying claims, then delivers one native batch and finalizes only
+matching claims. Existing process coordination spans prepared-reference issuance
+through consumption/finalization; generated/mixed also retains publication locking.
+Ordinary-only needs no cache configuration. This is not cross-DB atomicity or
+foreign-writer containment. Uncertain delivery is not automatically retried; implicit
+Inbox cleanup is absent, while explicitly approved membership changes remain.
 
 ## Runtime view — which subsystem owns this?
 
@@ -124,6 +135,25 @@ Deep-review source ownership stays explicit: map-reduce notes feed generation,
 while the original paper feeds verification, including correction and fallback.
 Rank/prefix verification uses its selected original spans. Empty sources or map
 summaries fail before review publication, not as scientific-quality judgments.
+Explicit code-owned interpretation collectors pass through these same strategies;
+omitted/None stays absent, and early failures clear prior optional output.
+The private one-paper entry can bind an explicit C collector through that same
+identity/audit path without automatic native notes. A private worker given that
+explicit CODE condition uses the same invocation-local selection for its current
+prior lookup, preserving a valid same-condition review when a later attempt lacks
+a PDF. OFF retains its old lookup; stale priors do not block placeholder updates.
+Explicit CODE-only feed/library detail calls can add one transient Finding/Scope/
+Unproven view from that existing qualified cache boundary. Native paths, sentence
+parts and passage IDs remain bound to the enclosing audit, without copied bodies
+or a second reader. Optional failure keeps only a qualified base; view content
+remains AI-generated, unverified and a bound snapshot. Private comprehensive QA
+can place the whole digest/view after the identical legacy-admitted PDF only if
+it fits; otherwise it supplies exact same-base legacy context. Existing legacy
+support authority stays separate from actual prompt visibility: the card adds
+no quote/answer warrant. Public/default activation, React/static consumers and
+consented native writes remain separate; native evidence is not human warrant.
+Reading proposals prefer the independent `QualityEval` grade when available;
+the Digest grade remains a fallback, without rewriting either cached assessment.
 See `services/library/README.md` for the contract and remaining context-limit caveat.
 
 ## Layering rules (lower never imports higher)
@@ -187,6 +217,11 @@ different shapes; it degrades to deterministic-only when no embedding model is a
 Backend tests isolate runtime state and the default project root per test, hide
 inherited provider credentials/keyring entries, and block TCP connections. Mock
 integrations explicitly; a unit test must never use a live model or Zotero service.
+The same autouse boundary snapshots the named application logger's level,
+propagation, disabled state and handlers. Teardown restores that baseline via
+`setLevel` (clearing enablement caches), closes only newly attached handlers and
+preserves original handlers. Production logging still writes to its file without
+propagating to root; later tests can capture warnings without leaked file resources.
 Before collection/fork, `tests/conftest.py` sets `no_proxy=*` for the test session.
 This avoids macOS SystemConfiguration proxy discovery from HTTP client constructors
 in forked children, as [documented by Python](https://docs.python.org/3.13/library/urllib.request.html).
@@ -207,3 +242,9 @@ cd frontend && npm run lint && npm test && npm run build
 isolates it so one segfaulting test can't sink the run. A handful of those tests
 fail for environment reasons, not code — diff against a clean baseline rather than
 expecting zero failures.
+
+Today selection observations stay at existing owners: candidate/paper
+`selection_evidence` and assembled `selection_policy` reuse the current parse,
+review snapshot, resolved mode and calculated cohort/picker keys. Interleave
+replaces the whole new evidence home on copied records. Native presence is not
+raw-model/calibration identity, scientific validation or Add consent.

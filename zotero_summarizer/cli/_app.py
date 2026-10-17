@@ -4,10 +4,19 @@ import argparse
 import json
 
 from zotero_summarizer.settings import Settings
+from zotero_summarizer.services.setup.deployment import require_loopback_bind
 from zotero_summarizer.storage.migrations import migrate_existing
 
 
+def _loopback_bind_argument(host: str) -> str:
+    try:
+        return require_loopback_bind(host)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def _serve(args: argparse.Namespace) -> int:
+    require_loopback_bind(args.host)
     import uvicorn
 
     # factory=True so the app is built when uvicorn starts (and on each reload),
@@ -18,6 +27,7 @@ def _serve(args: argparse.Namespace) -> int:
         host=args.host,
         port=args.port,
         reload=args.reload,
+        proxy_headers=False,
     )
     return 0
 
@@ -169,8 +179,12 @@ def _verify_deep_review(args: argparse.Namespace) -> int:
 
 
 def register_app(subparsers) -> None:
+    from zotero_summarizer.cli._mobile_serve import register_mobile_serve
+
+    register_mobile_serve(subparsers)
     serve = subparsers.add_parser("serve", help="Run the local FastAPI server")
-    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--host", default="127.0.0.1", type=_loopback_bind_argument,
+                       help="Loopback address only (127.0.0.1, localhost or ::1)")
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--reload", action="store_true")
     serve.set_defaults(func=_serve)

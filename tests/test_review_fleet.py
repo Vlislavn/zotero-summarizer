@@ -188,7 +188,7 @@ def _cached_review(read_decision="read", grade="A"):
     return {
         "review_contract_version": fleet.deep_review.REVIEW_CONTRACT_VERSION,
         "digest": {
-            "read_decision": read_decision, "grade": grade, "writing_friction": "low",
+            "read_decision": read_decision, "basis": "full_text", "grade": grade, "writing_friction": "low",
             "novelty": 4, "significance": 4,
         },
         "quality": {"quality_band": "highlight"},

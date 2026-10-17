@@ -1,7 +1,12 @@
 // Citation count is the prestige proxy available in saved Search sessions.
 // ponytail: raw counts favor older fields/papers; use field/year percentiles when supplied.
-export function sortSearchCandidates(candidates, mode) {
+export function sortSearchCandidates(candidates, mode, promotedIds = []) {
   if (mode === 'recommended') return candidates;
+  if (mode === 'question_evidence') {
+    const promoted = new Map(promotedIds.map((id, index) => [id, index]));
+    const position = (c) => c.is_retracted ? Infinity : (promoted.get(c.candidate_id) ?? promotedIds.length);
+    return [...candidates].sort((a, b) => position(a) - position(b));
+  }
   const known = candidates.map((c) => c.cited_by_count).filter(Number.isFinite).sort((a, b) => a - b);
   const middle = Math.floor(known.length / 2);
   const median = known.length ? (known[middle] + known[Math.floor((known.length - 1) / 2)]) / 2 : 0;

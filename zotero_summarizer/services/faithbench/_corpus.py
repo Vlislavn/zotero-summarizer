@@ -223,14 +223,14 @@ def select_papers(
 # ---------------------------------------------------------------------------
 
 
-def chunk_text(
+def chunk_spans(
     text: str, *, chunk_chars: int = CHUNK_CHARS, overlap: int = CHUNK_OVERLAP
-) -> list[str]:
-    """Fixed-size character windows with overlap, snapped to whitespace."""
+) -> list[tuple[int, int]]:
+    """Exact stripped-window coordinates, preserving repeated occurrences."""
     if chunk_chars <= 0 or overlap >= chunk_chars:
         raise ValueError("chunk_chars must be positive and exceed overlap")
     body = text or ""
-    chunks: list[str] = []
+    spans: list[tuple[int, int]] = []
     start = 0
     while start < len(body):
         end = min(len(body), start + chunk_chars)
@@ -238,13 +238,22 @@ def chunk_text(
             space = body.rfind(" ", start + chunk_chars // 2, end)
             if space > start:
                 end = space
-        chunk = body[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
+        window = body[start:end]
+        if window.strip():
+            left = start + len(window) - len(window.lstrip())
+            right = end - (len(window) - len(window.rstrip()))
+            spans.append((left, right))
         if end >= len(body):
             break
         start = max(end - overlap, start + 1)
-    return chunks
+    return spans
+
+
+def chunk_text(
+    text: str, *, chunk_chars: int = CHUNK_CHARS, overlap: int = CHUNK_OVERLAP
+) -> list[str]:
+    """Fixed-size character windows with overlap, snapped to whitespace."""
+    return [text[start:end] for start, end in chunk_spans(text, chunk_chars=chunk_chars, overlap=overlap)]
 
 
 class PaperChunkIndex:
@@ -256,7 +265,8 @@ class PaperChunkIndex:
     """
 
     def __init__(self, text: str, *, chunk_chars: int = CHUNK_CHARS, overlap: int = CHUNK_OVERLAP) -> None:
-        self.chunks = chunk_text(text, chunk_chars=chunk_chars, overlap=overlap)
+        self.spans = chunk_spans(text, chunk_chars=chunk_chars, overlap=overlap)
+        self.chunks = [text[start:end] for start, end in self.spans]
         self._docs = [tokenize(c) for c in self.chunks]
         try:
             from rank_bm25 import BM25Okapi
@@ -265,7 +275,7 @@ class PaperChunkIndex:
             LOGGER.warning("rank_bm25 unavailable; chunk retrieval falls back to token overlap")
         self._bm25 = BM25Okapi(self._docs) if (BM25Okapi is not None and self._docs) else None
 
-    def top_chunks(self, query: str, k: int) -> list[str]:
+    def _ranked(self, query: str) -> list[tuple[int, float]]:
         q_tokens = tokenize(query)
         if not q_tokens or not self.chunks:
             return []
@@ -274,8 +284,14 @@ class PaperChunkIndex:
         else:
             q_set = set(q_tokens)
             scores = [float(len(q_set.intersection(doc))) for doc in self._docs]
-        order = sorted(range(len(self.chunks)), key=lambda i: scores[i], reverse=True)
-        return [self.chunks[i] for i in order[: max(1, k)] if scores[i] > 0]
+        return sorted(enumerate(scores), key=lambda row: row[1], reverse=True)
+
+    def top_chunks(self, query: str, k: int) -> list[str]:
+        return [self.chunks[i] for i, score in self._ranked(query)[:max(1, k)] if score > 0]
+
+    def top_spans(self, query: str, k: int) -> list[tuple[int, int]]:
+        """Bounded ranked occurrences, without treating a retrieval score as an answer gate."""
+        return [self.spans[i] for i, _score in self._ranked(query)[:max(0, k)]]
 
 
 # ---------------------------------------------------------------------------

@@ -188,6 +188,19 @@ to be re-used:
    line per reported run (accuracy per condition, trap hallucination rate,
    claim support), so A/B deltas are a `jq`/`grep` away.
 
+## Shared extraction occurrence coordinates
+
+`_corpus.chunk_spans` returns exact stripped-window character coordinates for the
+same whitespace-snapped overlapping windows as `chunk_text`; the latter projects
+those spans, preserving text/order. `PaperChunkIndex.spans` stays aligned with its
+existing chunks and ranking. Library audit retention uses these occurrence indices
+through clipping and document-order assembly, never global first-match lookup.
+This adds no benchmark/judge calls or semantic grading and does not infer PDF pages.
+`PaperChunkIndex.top_spans` additionally exposes bounded ranked occurrences for the
+explicit Search evidence pass, without imposing the legacy positive-score gate:
+retrieval scores are not answerability. `top_chunks` retains its exact positive-score
+filter/order for existing QA and benchmark callers. Neither method judges meaning.
+
 ## Module map
 
 | file | role |

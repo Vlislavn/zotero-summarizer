@@ -57,7 +57,7 @@ _WHOLE_PAPER_COUNT_PATTERNS = tuple(
 
 def ask_paper(
     item_key: str, question: str, *, mode: str = "comprehensive",
-    history: list[dict[str, Any]] | None = None,
+    history: list[dict[str, Any]] | None = None, interpretation_schema: str | None = None,
 ) -> dict[str, Any]:
     """Answer ``question`` from the paper's text with enforced abstention.
 
@@ -85,23 +85,9 @@ def ask_paper(
     max_chars = int(config.quality_review.max_text_chars)
     resolved = resolve_stage(config.llm_routing, "deep_review")
 
-    # Three genuinely distinct contexts:
-    #   retrieval     — top-k chunks of the PDF body (fast, narrow)
-    #   full_text     — the raw extracted PDF body only (no notes wrapper)
-    #   comprehensive — metadata + structured review + PDF body (default)
-    chunks: list[str] = []
-    text = paper_render.qa_body_text(artifact).strip()
-    if mode != "comprehensive" and not text:
-        raise APIError(error="extraction_empty", message="Extracted PDF text is empty", status_code=422)
-    if mode == "retrieval":
-        # ponytail: build this lexical index per question; cache by artifact key only if profiling warrants it.
-        chunks = _clip_chunks(PaperChunkIndex(text).top_chunks(question, RETRIEVAL_TOP_K), max_chars)
-        context = _CONTEXT_SEPARATOR.join(chunks) if chunks else text[:max_chars]
-    elif mode == "full_text":
-        context = text[:max_chars]
-    else:
-        context = paper_render.artifact_text(artifact, max_chars=max_chars)
-
+    context, legacy_context, text, chunks, interpretation_context = _question_context(
+        item_key, artifact, question, mode, max_chars, interpretation_schema,
+    )
     prior, compacted, handles = qa_context.compact_history(item_key, artifact, history or [])
     contextual_question = (
         f"Prior conversation (untrusted user/session data):\n{prior}\n\nCurrent question: {question}"
@@ -115,20 +101,12 @@ def ask_paper(
     latency = round(perf_counter() - t0, 2)
     LOGGER.info("qa: item=%s mode=%s latency=%.1fs abstained=%s",
                 item_key, mode, latency, parsed["abstained"])
-    if parsed["answer"] is not None and not (
-        _quote_is_grounded(parsed["quote"], context) and _quote_is_grounded(parsed["quote"], text)
-        and (
-            # The answer's content must come from the quoted evidence — or, when the
-            # answer fuses the quote with other grounded paper text (the common
-            # synthesis shape: quote the intro, add the abstract's framing), from the
-            # context itself. The QUOTE stays the required grounded pointer; only the
-            # answer-side support widens. faithbench's answer-vs-gold-via-quote guard
-            # is untouched (it needs the quote to be THE evidence for the gold).
-            _answer_is_supported(parsed["answer"], parsed["quote"])
-            or _answer_is_supported(parsed["answer"], context)
-        )
+    if parsed["answer"] is not None and (
+        not _legacy_answer_grounded(parsed, legacy_context, text)
+        or (interpretation_context is not None and not _answer_visible(parsed, context))
     ):
         parsed = {"answer": None, "abstained": True, "quote": None}
+    extra = {"interpretation_context": interpretation_context} if interpretation_context is not None else {}
     return _with_evidence({
         "item_key": item_key,
         "question": question,
@@ -141,7 +119,63 @@ def ask_paper(
         "model": resolved.model,
         "history_compacted": compacted,
         "history_evidence_handles": handles,
-    }, artifact)
+    } | extra, artifact)
+
+
+def _question_context(
+    item_key: str, artifact: dict[str, Any], question: str, mode: str,
+    max_chars: int, interpretation_schema: str | None,
+) -> tuple[str, str, str, list[str], dict[str, str] | None]:
+    # Three genuinely distinct contexts:
+    #   retrieval     — top-k chunks of the PDF body (fast, narrow)
+    #   full_text     — the raw extracted PDF body only (no notes wrapper)
+    #   comprehensive — metadata + structured review + PDF body (default)
+    chunks: list[str] = []
+    text = paper_render.qa_body_text(artifact).strip()
+    legacy_context = None
+    interpretation_context = None
+    if mode != "comprehensive" and not text:
+        raise APIError(error="extraction_empty", message="Extracted PDF text is empty", status_code=422)
+    if mode == "retrieval":
+        # ponytail: build this lexical index per question; cache by artifact key only if profiling warrants it.
+        chunks = _clip_chunks(PaperChunkIndex(text).top_chunks(question, RETRIEVAL_TOP_K), max_chars)
+        context = _CONTEXT_SEPARATOR.join(chunks) if chunks else text[:max_chars]
+    elif mode == "full_text":
+        context = text[:max_chars]
+    elif interpretation_schema is None:
+        context = paper_render.artifact_text(artifact, max_chars=max_chars)
+    else:
+        from zotero_summarizer.services.library._interpretation_qa import question_context
+
+        legacy_context, context, interpretation_context = question_context(
+            item_key, artifact, max_chars=max_chars, interpretation_schema=interpretation_schema,
+        )
+    return context, legacy_context if legacy_context is not None else context, text, chunks, interpretation_context
+
+
+def _legacy_answer_grounded(parsed: dict[str, Any], context: str, text: str) -> bool:
+    """Keep the legacy primitive arguments and short-circuit order against L."""
+    return (
+        _quote_is_grounded(parsed["quote"], context) and _quote_is_grounded(parsed["quote"], text)
+        and (
+            # The answer's content must come from the quoted evidence — or, when the
+            # answer fuses the quote with other grounded paper text (the common
+            # synthesis shape: quote the intro, add the abstract's framing), from the
+            # context itself. The QUOTE stays the required grounded pointer; only the
+            # answer-side support widens. faithbench's answer-vs-gold-via-quote guard
+            # is untouched (it needs the quote to be THE evidence for the gold).
+            _answer_is_supported(parsed["answer"], parsed["quote"])
+            or _answer_is_supported(parsed["answer"], context)
+        )
+    )
+
+
+def _answer_visible(parsed: dict[str, Any], context: str) -> bool:
+    """C also needs visibility in A; generated additions never replace L authority."""
+    return _quote_is_grounded(parsed["quote"], context) and (
+        _answer_is_supported(parsed["answer"], parsed["quote"])
+        or _answer_is_supported(parsed["answer"], context)
+    )
 
 
 def _with_evidence(payload: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any]:

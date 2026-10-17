@@ -32,11 +32,14 @@ export async function fetchPending({ status = 'pending', limit = 500 } = {}) {
   return request(`/api/pending?${qs.toString()}`);
 }
 
-/** POST /api/pending/apply { change_ids, force, retry } */
-export async function applyPending(changeIds, { force = false, retry = false } = {}) {
+/** POST /api/pending/apply with explicit displayed approval hashes. */
+export async function applyPending(changeIds, { previews, force = false, retry = false }) {
+  if (!previews || typeof previews !== 'object' || Array.isArray(previews) || !Object.keys(previews).length) {
+    throw new TypeError('Displayed approval previews are required.');
+  }
   return request('/api/pending/apply', {
     method: 'POST',
-    body: JSON.stringify({ change_ids: changeIds, force, retry }),
+    body: JSON.stringify({ change_ids: changeIds, previews, force, retry }),
   });
 }
 

@@ -88,10 +88,10 @@ def qa_body_text(artifact: dict[str, Any]) -> str:
     return text
 
 
-def artifact_text(
-    artifact: dict[str, Any], *, max_chars: int, review: dict[str, Any] | None = None,
-) -> str:
-    """Comprehensive Q&A context: metadata, structured review, then paper body."""
+def artifact_text_fields(
+    artifact: dict[str, Any], *, review: dict[str, Any] | None = None,
+) -> tuple[list[str], dict[str, Any]]:
+    """Expose generated metadata and structured fields separately from raw PDF."""
     parts = [
         f"Title: {artifact.get('title') or ''}",
         f"Pages: {artifact.get('n_pages') or 0}",
@@ -103,9 +103,34 @@ def artifact_text(
         for key in ("digest", "quality", "goal_summaries")
         if review and review.get(key)
     }
+    return parts, structured
+
+
+def structured_qa_parts(metadata: list[str], structured: dict[str, Any]) -> list[str]:
+    """One canonical structured serializer, including legacy defaults and spacing."""
+    parts = list(metadata)
     if structured:
         parts.append("Structured review:\n" + json.dumps(structured, ensure_ascii=False, default=str))
-    body = qa_body_text(artifact)
+    return parts
+
+
+def assemble_qa_text(
+    prefix: list[str], body: str, *, after_body: dict[str, Any] | None = None,
+) -> str:
+    """Join generated components and raw PDF, optionally followed by one bundle."""
+    parts = list(prefix)
     if body:
         parts.append(body)
-    return "\n\n".join(parts)[:max_chars]
+    if after_body:
+        parts.extend(structured_qa_parts([], after_body))
+    return "\n\n".join(parts)
+
+
+def artifact_text(
+    artifact: dict[str, Any], *, max_chars: int, review: dict[str, Any] | None = None,
+) -> str:
+    """Comprehensive Q&A context: metadata, structured review, then paper body."""
+    metadata, structured = artifact_text_fields(artifact, review=review)
+    prefix = structured_qa_parts(metadata, structured)
+    body = qa_body_text(artifact)
+    return assemble_qa_text(prefix, body)[:max_chars]

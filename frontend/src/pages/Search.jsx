@@ -5,6 +5,7 @@ import {
   materialize as materializeApi,
 } from '../api/searchApi.js';
 import CollectionPicker from '../components/CollectionPicker.jsx';
+import QuestionEvidence, { EvidencePolicyStatus } from '../components/search/QuestionEvidence.jsx';
 import { ErrorBanner, StatusBanner } from '../components/library/shared.jsx';
 import { humanizeError } from '../utils/humanizeError.js';
 import { sortSearchCandidates } from '../utils/searchSort.js';
@@ -87,8 +88,14 @@ function GroundedRow({ label, row }) {
 }
 
 function ReviewPanel({ review }) {
-  if (!review || review.state === 'needs_full_text') {
+  if (!review || !review.state) {
+    return <div className="mt-2 text-[12px] text-slate-500">Not deep-reviewed.</div>;
+  }
+  if (review.state === 'needs_full_text') {
     return <div className="mt-2 text-[12px] text-slate-500">No open-access full text — not deep-reviewed.</div>;
+  }
+  if (review.state === 'error') {
+    return <div className="mt-2 text-[12px] text-slate-600">Deep review unavailable. {review.error}</div>;
   }
   const brief = review.brief || {};
   return (
@@ -107,7 +114,7 @@ function ReviewPanel({ review }) {
   );
 }
 
-function CandidateCard({ cand, onAdd }) {
+function CandidateCard({ cand, onAdd, questions }) {
   const sources = [...new Set((cand.provenance || []).map((p) => p.source))];
   const band = (cand.quality?.quality_band || '').toLowerCase();
   const meta = [cand.venue, cand.year].filter(Boolean).join(' · ');
@@ -164,6 +171,7 @@ function CandidateCard({ cand, onAdd }) {
         {cand.is_retracted && <span className="px-1.5 py-0.5 bg-rose-200 text-rose-900 rounded font-semibold">RETRACTED</span>}
       </div>
       {cand.abstract && <p className="mt-2 text-[12px] text-slate-600 line-clamp-3">{cand.abstract}</p>}
+      <QuestionEvidence candidate={cand} questions={questions} />
       <ReviewPanel review={cand.review} />
       <div className="mt-2 flex items-center gap-2">
         {added ? (
@@ -200,6 +208,7 @@ export default function Search() {
   const [saved] = useState(loadSaved);   // snapshot once, at mount
   const [query, setQuery] = useState(saved.q || '');
   const [questions, setQuestions] = useState(saved.qs || '');
+  const [evidencePolicy, setEvidencePolicy] = useState(saved.ep === 'question_evidence');
   const [session, setSession] = useState(null);
   const [constraints, setConstraints] = useState({ must_include: "", must_not_include: "", study_types: "" });
   const [loading, setLoading] = useState(false);
@@ -216,9 +225,10 @@ export default function Search() {
   // Mirror pointer + drafts to sessionStorage on every change.
   useEffect(() => {
     writeStorage(SS_KEY, JSON.stringify(
-      { id: session?.id || savedIdRef.current, q: query, qs: questions, tc: targetCollection, sort },
+      { id: session?.id || savedIdRef.current, q: query, qs: questions, tc: targetCollection, sort,
+        ep: evidencePolicy ? 'question_evidence' : 'baseline' },
     ), 'sessionStorage');
-  }, [session?.id, query, questions, targetCollection, sort]);
+  }, [session?.id, query, questions, targetCollection, sort, evidencePolicy]);
 
   // File one candidate into the chosen collection, then stamp its returned key on
   // the local session so the card flips to "✓ In library" without waiting for a poll.
@@ -269,7 +279,7 @@ export default function Search() {
     e?.preventDefault();
     if (!query.trim()) return;
     setLoading(true);
-    clearInterval(pollRef.current);
+    pollRef.current?.();
     setError(null);
     setSession(null);
     try {
@@ -277,6 +287,7 @@ export default function Search() {
       const confirmed = Object.fromEntries(Object.entries(constraints).map(([key, value]) =>
         [key, value.split('\n').map((term) => term.trim()).filter(Boolean)]));
       const sess = await screenApi({ query: query.trim(), questions: qs,
+        ...(evidencePolicy && qs.length ? { evidence_policy: 'question_evidence' } : {}),
         ...(Object.values(confirmed).some((values) => values.length) ? { constraints: confirmed } : {}) });
       savedIdRef.current = sess.id;
       setSession(sess);
@@ -286,9 +297,12 @@ export default function Search() {
     } finally {
       setLoading(false);
     }
-  }, [query, questions, constraints, pollUntilDone]);
+  }, [query, questions, constraints, evidencePolicy, pollUntilDone]);
 
   const reviewing = session?.status === 'reviewing' && !error;
+  const evidenceReady = session?.evidence_policy === 'question_evidence'
+    && session?.evidence_status?.state === 'complete' && session?.questions?.length > 0;
+  const resultSort = sort === 'question_evidence' && !evidenceReady ? 'recommended' : sort;
   // Doherty: name the honest stage. During agentic rounds refinements grow but no
   // review has landed yet — showing "Deep-reviewing…" then would mislabel the wait.
   const anyReviewed = (session?.candidates || []).some((c) => c.review && c.review.state);
@@ -303,14 +317,22 @@ export default function Search() {
       <form onSubmit={runScreen} className="mb-4 grid gap-2">
         <textarea
           className="border border-slate-300 rounded-lg p-2 text-[14px]" rows={2}
-          placeholder="e.g. LLM agents for clinical decision support in oncology"
+          aria-label="Research topic" placeholder="e.g. LLM agents for clinical decision support in oncology"
           value={query} onChange={(e) => setQuery(e.target.value)}
         />
         <textarea
           className="border border-slate-200 rounded-lg p-2 text-[12px]" rows={2}
-          placeholder="Optional — one specific question per line"
+          aria-label="Questions" placeholder="Optional — one specific question per line"
           value={questions} onChange={(e) => setQuestions(e.target.value)}
         />
+        <label className="text-[12px] text-slate-700 flex items-start gap-2">
+          <input type="checkbox" checked={evidencePolicy} disabled={!questions.trim()}
+            onChange={(e) => setEvidencePolicy(e.target.checked)} className="mt-0.5" />
+          <span>Promote evidence-backed answers (experimental)
+            <span className="block text-slate-600">Optional extra original-text/model work before review selection.
+              Uses configured Feed generator and a different Deep review verifier; remaining text stays unchecked.</span>
+          </span>
+        </label>
         <details className="text-[12px]">
           <summary>Explicit constraints (optional)</summary>
           <p>Only these confirmed filters are mandatory. One exact phrase per line; types require source metadata.
@@ -342,12 +364,14 @@ export default function Search() {
           )}
           <QueryPlan plan={session.plan || {}} />
           <Refinements rounds={session.refinements} />
+          <EvidencePolicyStatus session={session} />
           <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
             <div className="text-[12px] text-slate-500">{(session.candidates || []).length} candidates</div>
             <label className="text-[12px] text-slate-600">
               Sort by{' '}
-              <select value={sort} onChange={(e) => setSort(e.target.value)} className="rounded border border-slate-300 p-1">
+              <select value={resultSort} onChange={(e) => setSort(e.target.value)} className="rounded border border-slate-300 p-1">
                 <option value="recommended">Recommended</option>
+                {evidenceReady && <option value="question_evidence">Question evidence (experimental)</option>}
                 <option value="relevance">Relevance</option>
                 <option value="relevance_prestige">Relevance + prestige</option>
               </select>
@@ -366,13 +390,15 @@ export default function Search() {
           {session.status === 'error' && <StatusBanner isError message="Review failed — see server log." />}
           {sort === 'relevance_prestige' && <p className="mb-2 text-[12px] text-slate-500">85% relevance + 15% citation prestige (log-scaled within these results; unknown citations use the median). Citation counts favor older papers and vary by field.</p>}
           {(() => {
-            const cands = sortSearchCandidates(session.candidates || [], sort);
-            const strong = sort === 'recommended' ? cands.filter((c) => c.relevance_band !== 'weak') : cands;
-            const weak = sort === 'recommended' ? cands.filter((c) => c.relevance_band === 'weak') : [];
+            const promoted = session.evidence_status?.promoted_candidate_ids || [];
+            const cands = sortSearchCandidates(session.candidates || [], resultSort, promoted);
+            const collapsed = (c) => c.relevance_band === 'weak' && !promoted.includes(c.candidate_id);
+            const strong = resultSort === 'recommended' ? cands.filter((c) => !collapsed(c)) : cands;
+            const weak = resultSort === 'recommended' ? cands.filter(collapsed) : [];
             return (
               <>
                 <div className="grid gap-3">
-                  {strong.map((c) => <CandidateCard key={c.candidate_id} cand={c} onAdd={materializeCard} />)}
+                  {strong.map((c) => <CandidateCard key={c.candidate_id} cand={c} onAdd={materializeCard} questions={session.questions} />)}
                 </div>
                 {weak.length > 0 && (
                   <details className="mt-3">
@@ -380,7 +406,7 @@ export default function Search() {
                       {weak.length} weaker match{weak.length === 1 ? '' : 'es'} ▾
                     </summary>
                     <div className="grid gap-3 mt-2">
-                      {weak.map((c) => <CandidateCard key={c.candidate_id} cand={c} onAdd={materializeCard} />)}
+                      {weak.map((c) => <CandidateCard key={c.candidate_id} cand={c} onAdd={materializeCard} questions={session.questions} />)}
                     </div>
                   </details>
                 )}

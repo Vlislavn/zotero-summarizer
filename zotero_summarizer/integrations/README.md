@@ -12,11 +12,14 @@ services/ ─calls→ integrations/ ─talks to→  Zotero DB | PDFs | LLM API |
 
 | file | responsibility |
 |---|---|
+| `telegram.py` | `TelethonPageClient`: explicit injected async Telethon 1.45.0 leaf for the existing Research Feed collector. Fresh public broadcast resolution and one raw requested page; no session/client construction, lifecycle, auth, store, retry, default activation or publishing. |
+| `telegram_session.py` | Dedicated macOS CPython one-shot lifetime: two injected construction phases, private-session metadata, process-held lease/native fuse, one connect/disconnect and callback. Closed collect/auth purposes share ownership; auth alone can create an empty private session under lease. No credential readers or service imports. |
+| `telegram_auth.py` | Explicit owned-child callback for hidden phone/code/2FA and a fresh raw SDK client with SDK retry/sleep/update defaults disabled; never called by collection or saved/RSS modes. |
 | `zotero_read.py` | `ZoteroReader`: read-only WAL-aware connections, bounded lock retries and user-library collection helpers. Persistent locks raise; no raw snapshot copy or immutable WAL-skipping mode. Statistics scope collections/tags to the user library and exclude trashed items/attachments. `get_collections` scopes its collection and item counts; `collection_name_for_key` validates picker keys. Collection sorting pins Inbox and read-next, then alphabetical, recursively. |
 | `_zotero_read_items.py` · `_zotero_read_lookup.py` · `_zotero_read_feeds.py` | reader query mixins (items/detail — now also selects Zotero `typeName` as `item_type`, a weak paper-type prior for deep-review type detection, and `publicationTitle` as `venue` so the Library can filter by journal · `get_items` (paged, 500/call) + `get_all_items` (whole-library passes) share one SQL builder (`_build_list_query`) + row mapper (`_row_to_item`); `get_all_items` runs that query UN-paged in a SINGLE `_execute_read`, so a whole-library read uses one connection/query rather than repeated 500-item pages · find/membership/tags — DOI dedup matches all `domain.normalize_doi` variants · feeds — incl. `get_unread_feed_guid_map` (guid → unread `feedItems.itemID`; the read-sync reconciler's join key, see `services/triage/feeds/_zotero_readsync.py`)) |
 | `app_rss.py` | `AppRssReader`: app-owned RSS items and rotating bounded refresh; offline returns before network/DB writes. Each feed commits independently; HTTP/DNS/document failures are recorded and the remaining feeds continue. Partial success returns `errors` with feed IDs and URLs; when every feed fails, the last exception propagates. Storage/programming failures still abort immediately with rollback. Counts include committed items only. Text is sanitized before DOI/key derivation and storage. `stream_public_url` is shared with PDF fetching: validated numeric destination + original Host/TLS identity on every hop. |
 | `_zotero_read_common.py` | `ZoteroReadError` + arXiv/sanitize helpers + `_NON_BIBLIOGRAPHIC_TYPES_SQL` (the single `('attachment','note','annotation')` exclusion every "library items" query shares so PDF annotations never appear as papers) + `_USER_LIBRARY_ID_SELECT` (the single `type='user'` library scope every whole-library read injects — Zotero keeps ~dozens of `type='feed'` RSS libraries in the same `items` table, so an unscoped read leaks feed items into the corpus/ranker/tag writes/full-text; this caused cross-library 403 attachments) (leaf) |
-| `zotero_write.py` | `ZoteroWriter`: WAL-consistent backup and apply dispatcher. An explicit transaction encloses per-row savepoints; lock errors roll back the entire batch before retry, invalid rows return individual failures, and unexpected errors propagate. WAL setup failures are not swallowed. Backup pruning follows a successful write. |
+| `zotero_write.py` | `ZoteroWriter`: WAL-consistent backup and apply dispatcher. An explicit transaction encloses per-row savepoints; lock errors roll back the entire batch before retry, invalid rows return individual failures, and unexpected errors propagate. WAL setup failures are not swallowed. Backup pruning follows a successful write, including a validated precreated backup. |
 | `_zotero_write_items.py` · `_zotero_write_feed.py` · `_zotero_write_fields.py` · `_zotero_write_attachments.py` · `_zotero_write_tags.py` · `_zotero_write_collections.py` | writer mixins (item creation/materialization · idempotent feed-read bookkeeping · `set_field` single-field upsert e.g. Call Number · native imported_url attachment · tag/note helpers · collections) |
 | `_zotero_write_common.py` | `ZoteroWriteError` + LOGGER + `resolve_user_library_item_id` — the single guard every write that targets an item by key routes through, scoping resolution to `type='user'` so a feed item's key can never be mutated/parented into the user library (`required=False` for the best-effort batch remove). Mirrors `_USER_LIBRARY_ID_SELECT` on the read side (leaf) |
 | `pdf.py` · `pdf_fetch.py` | extract local PDFs as plain analysis text using OnPrem's existing `pdf_markdown=False` backend; fetch OA PDFs with size/timeout/magic caps. Automatic destinations/redirects use the shared public-IP pinning boundary; proxy env is ignored. Cached paths remain usable offline. |
@@ -39,7 +42,40 @@ services/ ─calls→ integrations/ ─talks to→  Zotero DB | PDFs | LLM API |
 | `_rate_limiter.py` | `RateLimiter` — per-process token bucket (≤ rate calls/sec); the single shared limiter for `openalex.py` (10 req/s) and `pubmed.py` (3 req/s) |
 | `pubmed.py` | PMID/DOI → PMC article PDF URL (keyless NCBI ID-Converter → PMCID; cached `pmc:<id>` in `OpenAlexCache`, 3 req/s). Recovers PubMed papers in PMC with **no DOI** (e.g. AMIA proceedings) that the DOI-keyed Unpaywall/OpenAlex rungs can't reach. Fresh PMC has no reliable headless download (bot-wall interstitial), so the URL is for `_pdf_acquire`'s **browser** rung; the headless attempt falls through. Best-effort: network/parse errors → `None` (mirrors `unpaywall.py`) |
 
+`search_outcomes` adds optional per-call metadata receipts without changing
+source list return types or ordering. `capture_source_outcome(provider)` must be
+bound inside the actual calling worker; ContextVars are not assumed to propagate
+through executors. arXiv/Europe PMC/Crossref/Semantic Scholar/OpenAlex report
+observed empty/nonempty, failed, not-attempted or unknown with known counts and
+fixed error codes only. No query, URL, exception text or credential is retained
+in a receipt; uninstrumented adapters stay unknown. Ordinary callers have no
+active collector and retain their existing best-effort behavior.
+
+`ZoteroWriter.target_identity()` reads the selected canonical database path,
+device/inode and exactly one actual user-library ID, without account discovery,
+content hashes or edit clocks. Before/after file checks reject observed replacement.
+Generated writes recheck this identity before backup and on their actual opened
+transaction before dispatch. These are state-boundary checks, not external-process
+CAS or a defense against undetectable in-place replacement/change-and-restore.
+
+`backup_database(expected_target=...)` prepares one outstanding writer-issued
+reference. `apply_changes(..., create_backup=False, precreated_backup=...,
+expected_target=...)` validates its owner, scope and file identity and consumes it
+once, then uses the existing prune-after-commit owner. Conflicting flags, foreign or
+unissued references fail before dispatch; no second backup or pruning framework is
+added. Omitted keywords retain ordinary callers' behavior. Uncertain operations keep
+their existing audit reference; normal retention can later expire older backups.
+
 **Boundaries:** must NOT import `services/` or `api/` (enforced by pre-commit).
+
+Zotero read/write errors carry `expected_io` (default false), separate from their
+messages. The writer's existing per-row failures also retain that boolean; invalid
+queue rows still use savepoints and do not undo healthy rows. The shared leaf
+`is_expected_sqlite_io` recognizes numeric SQLite BUSY/LOCKED/IOERR/FULL/READONLY/
+CANTOPEN codes, including extended codes. Schema, programmer and unknown failures
+are not classified as optional IO. The mirror service preserves this distinction;
+no exception-text classifier or new retry policy is added. Existing lock retry
+budgets and backup/ownership behavior are unchanged.
 
 RSS/PDF connections use a validated numeric IP, never a second hostname lookup.
 
@@ -113,7 +149,15 @@ RSS requests negotiate identity/gzip and cap both wire and decoded bodies at
 unnegotiated encodings are errors. Original XML bytes preserve declared encodings.
 
 Item lists, details, notes and annotations exclude trashed children (including
-annotations on trashed PDFs); note lists/detail share one query. Collection lookup
+annotations on trashed PDFs); note lists/detail share one query. Annotation detail
+retains the six legacy fields plus `annotation_key`, the parent attachment's own
+`attachment_key`, and raw source `date_modified`. Keys are scoped to the selected
+native user library/database, not global IDs or authenticated authorship.
+`date_modified` is not a monotonic revision, content fingerprint or sufficient
+cache-invalidation signal: same-clock edits can change text/comments. Highlighted
+text and comments remain separate, literal untrusted content; row multiplicity and
+`date_added` ascending order remain unchanged (ties have no guaranteed order).
+This read metadata adds no retrieval, ownership inference or writes. Collection lookup
 belongs to the collection mixin and scopes key/name/every path segment to the user
 library. An explicit foreign key never falls through to another name. Requested
 materialization collections must resolve or the transaction fails.
@@ -186,3 +230,161 @@ page joining, and the real OnPrem backend on an original generated PDF with
 signed superscript/subscript uncertainty, title/Methods text and a URL.
 Source-length-dependent budgets must use the new extracted length, not old
 Markdown counts. Prompts, settings, limits and models are unchanged.
+
+## Original PDF authority capture
+
+`pdf.capture_pdf_source` returns frozen `PdfSource(text, annotation_uris, document_sha256)`.
+The selected extractor's text is unchanged; lazy PyMuPDF `raw_link_uris` preserves
+SDK LINK_URI strings, order and duplicates without coercion or normalization.
+Malformed reader data, unavailable readers, extractor and I/O failures propagate;
+valid absence is an empty tuple. No extra extractor protocol or temporary PDF exists.
+
+Before/after full SHA-256 and descriptor/path device, inode, size and mtime checks
+reject ordinary persistent source changes. Each streaming hash reads its opening
+size plus one growth-detection byte, using Python-3.10-compatible bounded buffers.
+This imposes no new user-PDF size cap. It is not authentication, an atomic snapshot,
+a hostile change-and-restore defense or a deadline for blocking filesystem/SDK I/O.
+Abstract/Doctor paths do not import or probe the reader. Other text-only consumers
+retain `extract_text`; triage alone carries the frozen source to private admission.
+
+## Explicit Telegram SDK page leaf
+
+`TelethonPageClient(sdk_client)` injects a caller-owned connected async SDK client.
+Its only public operations are `await resolve_channel(username=canonical_key)` and
+`await fetch_page(channel_id=marked_id, after_id=None_or_cursor, limit=100)`.
+The optional `telegram` extra pins `Telethon==1.45.0`; unchanged default/RSS/saved
+paths do not import the leaf or require that extra. Constructing the leaf does no
+I/O. It never connects, authenticates, joins, disconnects or starts an event loop.
+
+Resolution submits literal `ResolveUsernameRequest`, checks the matching public
+broadcast/non-min Channel, usable signed-64 hash and primary/active alias, and
+marks its native PeerChannel once with the SDK utility. A private consumed input
+peer retains this point-in-time identity/hash for fetching; there is no cached
+username/numeric fallback after a rebind or failed resolution. A new resolution
+clears the old handle; a fetch attempt consumes its handle even on failure.
+
+Fetch submits one raw GetHistory request: latest100 bootstrap (offset0/add0),
+otherwise oldest-first first chunk after the exclusive cursor (offset=after+1,
+add=-100). It validates the entire descending native response and returns the
+whole ascending canonical page, never a filtered/refilled prefix. Native message
+IDs fit positive signed32; after is None or 0..2147483646. Input types, bounds and
+limit=100 validate before consuming the handle or making a request.
+
+Raw `.message`/captions, whitespace, Unicode, aware original/edit dates in UTC,
+URL entity order and duplicates remain exact. The SDK's UTF-16-aware extraction
+is used with strict whole-codepoint bounds; TextUrl preserves its exact hidden
+target. Dated service/media-only/empty/unsupported-rich observations carry explicit
+skip reasons; ordinary pinned messages remain originals. No URL/content actions,
+normalization, automatic schemes, forwarded-source reads or regex parser.
+
+Known canonical representation gaps (MessageEmpty, legitimate missing original
+date, exact URL targets outside absolute HTTP(S)) return **empty incomplete**
+pages, never fabricated dates, silently dropped observations or cursor jumps.
+Every member is checked first: malformed types/peers/spans/order/duplicates and
+unknown families remain loud bounded failures. Such incomplete pages can recur
+and stall the channel; this is not full undated-original support.
+
+Only proven narrow errors become the existing six-code transport contract;
+ChannelInvalid/unmapped RPC errors fail with a fixed bounded message. No raw
+upstream strings or originals are logged. Cancellation/programming failures are
+not negative diagnostics. The existing collector owns durable max-later FloodWait,
+per-request admission, bindings, page transactions, counts and original hashes.
+
+One explicit SDK call is not one physical send, admission before every internal
+RPC, no SDK sleep or atomic rename/publicity proof. Telethon may sleep two seconds
+on server errors even with request_retries=0 and can do internal migration work.
+The internal M3 lifetime boundary below adds Settings-derived session ownership,
+metadata admission before constructors and cancellation-safe teardown. Consent,
+application-identity provisioning and public activation/auth remain separate. No live account,
+M2b must separately provide consent, Settings-derived session ownership/permissions,
+missing-file-before-constructor checks, stdlib process locking through completed
+cancellation-safe disconnect, and explicit activation/auth. No live account,
+content permission, endpoint pagination or human acceptance follows from fake-client
+and offline SDK-component tests; their execution is separately parent-owned.
+
+Fetch captures strict native ID/hash scalars before its SDK await, checks the
+returned request route even for an empty response, and validates messages against
+that captured authority. Same-value replacement is legal; transient change-and-
+restore cannot be detected. Public Telethon message types use patched constructors:
+service action is a keyword, empty peers are explicit None, and empty media is
+normalized to None. Offline fixtures use those runtime contracts.
+
+## Dedicated Telegram collection lifetime (internal M3)
+
+```text
+explicit service callback -> collect_once_cli(Settings, collect, factories, admit, on_error)
+  -> observable platform/signal checks -> native fuse -> stable file lease
+  -> durable-admission callback -> private existing session metadata
+  -> one Runner: Session factory -> client factory -> admission -> connect -> collect
+  -> ONE shielded disconnect waiter -> Runner shutdown -> receipt -> PROCESS EXIT
+```
+
+This callable is **only for a dedicated one-shot macOS CPython main-thread/main-
+interpreter CLI process with asyncio.Runner**. It is not a server/daemon/library
+session manager. Public CLI composition now uses a dedicated child (see below). `session_factory(Path)` must build
+an existing-session object; `client_factory(session)` must construct a fresh raw
+SDK client retaining that exact object and separately provisioned app identity.
+Both are called by the owner after admission; neither is configured by default.
+There is no credential reader, login/start/auth probe or borrowed-client fallback.
+Calling with fakes is not an available product/account feature.
+
+The keyword-only `purpose` defaults to unchanged `collect`; only `auth` additionally
+requires stdin/stderr TTY before admission and permits O_EXCL/nofollow creation of
+an empty0600 session AFTER native arm/exclusive lease. Existing files still pass
+the unchanged metadata/identity checks, never replacement or chmod repair. Auth
+uses the same connect/work/cleanup deadline and one disconnect. Mapped auth-work
+errors, including FloodWait, call the existing error callback BEFORE teardown.
+The small auth leaf verifies authorization, requests one code and, if required,
+one hidden 2FA password. It never exports session/secret material. Credential
+provisioning is CLI-owned, performed only in the post-lease construction callback.
+
+The fixed slot is `Settings.data_dir/telegram-account/{account.session,.owner.lock}`.
+The account directory must be private0700; session and stable lock private0600,
+owned regular files without symlinks/hardlinks. Nonfollowing/nonblocking metadata
+opens compare descriptor/path identity; no session contents are read by admission.
+The opaque SDK factory may read/update the admitted session. Checks are cooperative,
+not atomic filename capability/hostile same-UID ABA protection, account-global
+locking, or control of external clients/cross-root copies. Never unlink/transfer
+or fork while owning this lease.
+
+Native SIG_DFL + ITIMER_REAL is armed before opaque construction and stays armed
+through synchronous Session.close, disconnect, Runner/executor shutdown and exit.
+The raw lease/metadata descriptors and local exclusion are process-lifetime: **no
+finally unlock or disarm, even after a normal return**. The caller must exit this
+process; later ML/LLM or embedding work in it is unsafe and not authorized here.
+Partial constructors and failed/uncertain cleanup retain objects/tracebacks and
+hold for native termination; repeated SIGINT cannot unwind that hold. Known SDK
+clients get one retained Future-compatible disconnect, never a duplicate retry.
+Only narrowly mapped connect/already-typed metadata transport failures call the
+required `on_error` callback BEFORE teardown. Service-owned persistence errors fail
+closed; collection/constructor/cleanup/unknown errors are not reclassified.
+The work boundary records received exceptions inside the timeout context; only
+its own exit-generated TimeoutError means work_timeout. Expiry cannot erase a
+provider/lifecycle/unknown replacement, including provider TimeoutError. Mapping
+and persistence run outside that timeout-catching region, before teardown, so a
+callback/storage TimeoutError also remains loud rather than becoming work_timeout.
+
+`ZS_TELEGRAM_COLLECTION_WALL_SECONDS` defaults90/max300; the positive finite
+`ZS_TELEGRAM_CLEANUP_RESERVE_SECONDS` defaults10 and must be less than the wall.
+These are unmeasured safety heuristics, not work/throughput targets. Cooperative
+work stops before the reserve; cleanup joining has its own non-renewed reserve.
+Synchronous blocking still needs the native fuse. Cached getsignal/current-thread
+mask checks cannot detect arbitrary native interference/other-thread changes.
+Conflicting observable signal state, wrong platform/thread/loop and missing Runner
+reject before SDK. No universal instantaneous OS death/reap guarantee follows.
+
+Results distinguish unconfigured/busy/deferred/collected/interrupted/work_timeout
+and existing transport codes. `collection` is the unchanged callback receipt or
+null; interruption never invents zero counts. Unknown programming/storage failures
+raise a bounded error after teardown. Native death may yield no final receipt;
+accept success only with complete output AND successful process exit. Connect and
+false Future values are not authorization/revocation tests. SDK bootstrap account
+scope/internal requests remain unchanged and separately require consent.
+
+The public CLI waits for a dedicated child's successful interpreter exit and
+verifies its receipt/export before model work in the parent. The native fuse and
+lease are never disarmed/released to run ML in the child. Normal collect stdin is
+DEVNULL and cannot authenticate; saved/RSS/cached paths never import the SDK leaf.
+Auth callbacks and new owned-child regression sources are authored, not performed
+account activity or runtime acceptance. Synthetic tests use no real account,
+network/model or system-keyring contents.

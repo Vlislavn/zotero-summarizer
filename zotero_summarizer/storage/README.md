@@ -1,5 +1,10 @@
 # storage — SQLite persistence
 
+Composite My notes reuses this queue for closed system-mirror claims, uncapped
+uncertainty and shared native-partition finalization. One explicit connection
+commits claim, native terminal and domain ACK separately. History is non-actionable;
+no new schema/store or recovery guarantee.
+
 Owns the two local databases under `data/` and all SQL. Services call these
 functions; nothing here reaches up into `services/` or `api/`.
 `sync_mutation_exists(db_path, uuid)` lets the feed-review gate skip a previously
@@ -33,10 +38,11 @@ services/ ─call→ storage/
 |---|---|
 | `repositories.py` | triage-DB core: `DB_PATH` (set once at startup) + `with_db_path()` for a concurrency-safe per-context override, schema, connection hardening, shared query helpers (re-exports the `_repo_*` groups below) incl. the public `table_columns(conn, table)` PRAGMA reader the `_repo_*` modules and `integrations._zotero_write_tags` share |
 | `_repo_results.py` · `_repo_jobs.py` | batch/result rows + queries · triage-job upserts/listing |
-| `_repo_pending.py` · `_repo_feedback.py` | pending-change queue with source-aware status transitions (including retry `failed → applied`) and a per-paper open-sibling check for safe Inbox removal · feedback signals |
+| `_repo_pending.py` · `_repo_feedback.py` | pending-change queue with source-aware status transitions and atomic ordinary payload edits plus `payload_edited` audit revisions · feedback signals |
 | `_repo_verdicts.py` · `_repo_labels.py` | role-value + weekly-A/B verdicts · label verdicts (with `source` provenance: `user` vs `machine_add` — the provisional "Add to library" verdict that the training overlay may outcome-correct; UPSERT propagates it so a deliberate relabel flips a machine add back to `user`). `list_label_verdict_keys` (keys only — golden-CSV preservation) and `list_label_verdict_priorities` (`{item_key: user_priority}` — the reading-queue handled-filter needs the priority so `dont_read` hides but a positive label stays visible + pins to top) are both **uncapped** (a paged fetch silently drops rows once the table outgrows the cap). Also owns the `review_notes` table (one editable free-text note per paper, jotted during a review — decoupled from a verdict): `upsert_review_note` / `get_review_note`, same UPSERT shape as `label_verdicts` |
 | `_repo_sync.py` | v2 offline-sync persistence: triggers turn every verdict/note write (including delete tombstones) into a monotonic field revision; `BEGIN IMMEDIATE` applies typed UUID mutations idempotently and records applied/conflict/resolution results in `sync_mutations`. Device and item identities are trimmed and blank values rejected at both API/service and storage boundaries. Replaying a stored conflict returns that same conflict, while a stored applied write returns `already_applied`. No service imports and no SQLite-file replication |
-| `rows.py` | typed row models for the read boundary — `from_row` fails loud on schema drift, `to_dict` keeps the legacy contract. First adopter: `_repo_pending`. Add a model + route its reader to type more tables. |
+| `pending_actions.py` | Existing v12 metadata/generated staging; closed direct/system-mirror history, caller-connection claims/shared native finalization, uncapped target admission and native/domain-ACK audit. No new schema/store/opener. |
+| `rows.py` | typed row models for the read boundary — `from_row` fails loud on schema drift; `to_dict` preserves legacy fields and shares audit/backup metadata across ordinary and generated rows. First adopter: `_repo_pending`. Add a model + route its reader to type more tables. |
 | `corpus.py` | `EmbeddingCache` — embeddings/upserts + the math helpers; exports `open_corpus_conn(db_path)` (timeout + WAL pragma), the single corpus-DB opener `corpus_bm25` now shares so both readers of the same file run the same journal mode; caches a normalized corpus matrix (version-invalidated on write) for the fast affinity path. The default `all-MiniLM-L6-v2` was shoot-out-validated and deliberately KEPT (2026-06-12, `tools/eval_goal_embedder.py` on 491 real kept/trashed decisions): goal_sim AUC 0.714 vs bge-m3's 0.712 (25× larger, MPS-OOM risk without a 512-token cap) and SPECTER2+proximity's 0.684 (paper-paper model, poor on short goal queries) — don't "upgrade" it without re-measuring |
 | `corpus_read.py` · `corpus_types.py` | `EmbeddingCache` read/match methods (mixin): full `match_candidate` (UI) + `affinity_and_goals` (ONE candidate embed → engagement pos−neg affinity AND per-goal `{goal: cosine}` — the single computational definition of both per-candidate corpus signals) + `goal_affinity_for_items` (cached-item cosine to the research-goal embeddings) + `query_affinity_for_items` (cosine to an ad-hoc QUERY string — the dense leg of Library hybrid search); the item-side reads share one `_affinity_to_targets` matmul, no model load. That matmul looks items up in a PROCESS-WIDE normalized-embedding matrix (`_normalized_corpus_matrix`) cached by a `_corpus_fingerprint` (main + `-wal` mtime/size, so a WAL-resident write still invalidates it) — the reading queue builds a fresh `EmbeddingCache` per open, so the instance `_affinity_cache` can't help there; without this every open re-parsed ~2k embeddings from JSON (~0.5s) · shared value types |
 | `corpus_bm25.py` | `CorpusBM25` — in-memory `rank_bm25` (Okapi) index over corpus title+abstract+tags; the LEXICAL leg of Library hybrid search. Reuses the main/WAL fingerprint from `corpus_read`, so same-timestamp updates invalidate the index; process-level singleton (`get_corpus_bm25`); `texts_for` feeds the rerank stage. No DB migration. Also exports the public `tokenize` (lowercase alphanumeric words) — the single tokenizer reused by `faithbench._build_qa` and `library._paper_goal_summaries` |
@@ -45,6 +51,56 @@ services/ ─call→ storage/
 | `feeds_schema.py` · `feeds_constants.py` · `feeds_lookup.py` | schema init/migrations + the shared `open_triage_conn` / decision+outcome enums / single-row lookups, including `get_processed_feed_item_by_stable_key` for the Zotero-optional app library reader + `fetch_processed_content_pairs` (raw `(doi, arxiv_id)` for content dedup — the same paper under a different GUID; callers normalize via `domain`) + `fetch_trashed_guids` (stable GUIDs of papers the user threw away — rows whose `decision`/`final_outcome` is in the caller-passed trashing taxonomies, e.g. `user_rejected` / `trashed` / `deleted_all`; the durable "never show again" key that survives feed-item-id reassignment and catches id-less items DOI/arXiv can't) + `fetch_resolved_outcomes_by_key` (`{stable_feed_key|legacy_key: final_outcome}` for the caller-passed outcome taxonomy — feeds the training-label outcome correction in `services/golden/hybrid_gt`). Constants also own `BEHAVIORAL_OUTCOMES` and `relevance_from_signal_weight` |
 | `interleave.py` | `interleave_log` sidecar for the P3 quality-first online experiment: per-day, per-slot arm attribution (`team` ∈ `a0`/`a2`/`both` + competitive `pair_id`) written by the Today slate when `ZS_RANK_INTERLEAVE` is on. `record_interleave_slate` is DAY-level write-once (`BEGIN IMMEDIATE` existence check → first recorded slate of a day is the ONLY write; later same-day assemblies are complete no-ops) — row-level `INSERT OR IGNORE` alone would let intra-day pool drift mix two merges' per-merge `pair_id`s into one corrupt `(day, pair_id)` group and crash the scorer (adversarial review 2026-07-08). Attribution therefore never changes after the user may have seen the slate. `fetch_interleave_log` opens read-only and returns `[]` only when the table doesn't exist yet (experiment never ran — explicit `sqlite_master` check, not a swallowed error). Table is self-creating (sidecar, additive; no `migrations.py` step needed). Sole consumer: `tools/eval_interleave.py` |
 | `migrations.py` | `migrate_existing()` + `run_migrations()` — ordered, version-gated steps recorded in `schema_migrations`. Add a schema change as a new numbered `Migration`, never an inline ALTER. v3 reconciles databases whose old v1 marker predates later baseline/feed columns; routine feed connections skip those O(N) legacy backfills. |
+| `research_feed_telegram.py` | Unchanged v11 saved originals/hash/evaluation helpers; integrated v13 remembered username bindings, initial-window/retry state and caller-transaction page helpers. |
+
+Migration v11 adds only `research_feed_telegram_posts` and
+`research_feed_telegram_channels` in the selected triage DB, plus a corpus no-op
+alignment marker. `upsert_post(conn, post)` returns new/updated/unchanged and clears
+only that row's evaluation when the canonical model-consumed original changes.
+Original Unicode, locators and date spellings remain in JSON; a UTC date column
+orders the bounded newest window, returned oldest-first. `save_evaluation` compares
+the expected content hash in the UPDATE and returns false for intervening edits.
+Evaluation JSON is finite; malformed persisted data raises. No evaluation-history
+store, paper foreign key/trigger or new connection opener exists. The shared hardened
+opener and numbered migration transactions are reused; cached reads are read-only.
+Saved JSONL may register a channel ID but leaves its confirmed message ID null,
+without establishing a binding or live initialization.
+
+Numbered v13 `combined_live_telegram_review` adds one checked initial-window bit,
+canonical configured-username → numeric-channel bindings and a nullable UTC retry
+deadline. It composes the separately tested live-Telegram and generated-review v12
+branches: each complete known footprint is preserved and the missing complete
+component is added. A partial footprint fails before new DDL/version publication;
+this is not delivery-time schema repair. Corpus receives only a named alignment
+marker. Existing v11 originals/evaluations/cursors and pending data are not rewritten;
+legacy bit0/non-NULL cursor is invalid, not reset or certified.
+
+New helpers receive the caller's connection:
+- `read_channel_state(conn, *, username)` distinguishes unknown binding from an
+  initialized empty channel; corrupt state/missing parents fail loud.
+- `bind_channel(conn, *, username, channel_id)` creates its parent explicitly even
+  with FKs off. Same-ID aliases retain state; different ID returns false without
+  rebinding or creating a new parent. Commit the binding before a future fetch.
+- `commit_page(conn, *, username, channel_id, expected_state, page)` admits the
+  whole complete page before any upsert, rereads exact binding/state, stores every
+  canonical observation through unchanged `upsert_post`, then advances to its last
+  ID. IDs are unique/ascending, may be sparse and must exceed the incremental
+  cursor. Empty initial becomes true/NULL; empty incremental retains the cursor.
+  Counts are fetched/new/updated/unchanged/skipped; the three upsert counts sum to
+  fetched, while explicitly skipped stored observations also advance the cursor.
+- `read_retry_at(conn)` returns None or canonical UTC `datetime.isoformat()` text
+  with `+00:00`; malformed/naive/non-UTC/noncanonical stored time raises bounded
+  ValueError. `defer_account(conn, *, retry_at)` normalizes an aware input and
+  preserves the later deadline without clearing expiry, sleeping or retrying.
+
+One shared application username normalizer and strict live-ID validator guard
+these boundaries. Writes require an active caller transaction; the caller must
+use BEGIN IMMEDIATE and roll back on ANY error to keep all page posts/cursor/bit
+atomic, including nth-upsert failures. Helpers never commit, roll back or close;
+`in_transaction` does not prove transaction mode. No transaction spans future
+external awaits, and publication-time `list_posts` never reconstructs a cursor.
+These are offline storage contracts, not a collector, SDK/auth/session owner,
+public CLI activation, ingestion certification or account-wide coordination.
 
 **Boundaries:** must NOT import `services/` or `api/` (enforced). Connection
 hardening (WAL once per process/path + busy_timeout=10s + 0600) is shared by
@@ -209,6 +265,17 @@ no body copy or migration, and reads do not rewrite historical data. Ambiguous
 legacy IDs are not guessed. This changes local note identity, not Zotero mirror
 delivery. Snapshot identity resolution is per note family, not one batched join.
 
+`question_sync.py` reuses the immutable question payload validator and
+`review_questions.save` inside `_repo_sync`'s existing receipt transaction.
+Only `review_question/create` with matching canonical mutation/submission UUID
+and exact envelope/payload key is accepted. Independent UUIDs bypass manual
+revision conflicts. An existing online question gets an immutable sync receipt
+at its original insertion revision without another question/journal/intent;
+changed payloads reject. Alias-aware question snapshot fields seed question-only
+keys and keep original rows separate from manual notes. Receipt readers and
+snapshot reads never acknowledge composite delivery. No schema rewrite or new
+question ledger is introduced by this integration.
+
 `review_notes.current_for_mirror` holds SQLite's writer lock over delivery of the
 current note body, reusing the same alias/revision reader. Closing the connection
 releases the lock on both success and failure; no note body or delivery receipt
@@ -222,6 +289,40 @@ unknown/conflict UUIDs cannot supply a base. Existing compare-and-write still
 checks the latest canonical revision inside its writer transaction. Receipt
 lookup never repeats Zotero/CSV effects and requires no new table.
 
+Migration v12 adds nullable `proposal_json`, `audit_json` and `backup_path` to the
+existing pending queue, plus update/delete guards for generated proposal identity,
+payload and history. Corpus v12 is a named alignment no-op. Ordinary legacy row
+fields remain; both families expose parsed `audit` and `backup_path`, while generated
+rows additionally expose `generated_preview`. Editing a generated payload is forbidden. Production
+callers require numbered migrations; missing schema is not repaired on delivery.
+The shared Pending confirmation service holds process→optional publication→queue
+order and commits `applying` claims before external work. Atomic ordinary edits append
+`payload_edited` even for identical saves; counting those events binds ABA/no-op-save
+revisions without a schema column. Finalization rereads matching claims and complete
+native outcomes in one new transaction. Interruption remains explicit uncertainty,
+not an exactly-once/distributed-commit guarantee. Ordinary Apply no longer performs
+implicit Inbox removal; explicit queued membership changes retain their own approval. Composite My notes now uses the separate claim/native-terminal/domain-ACK stages;
+verdict and label mirror owners remain unchanged.
+
+The direct-human backend candidate reuses these existing columns and `locked_queue`;
+`proposal_json` remains NULL, not an origin sentinel. A validated first
+`direct_requested` event binds one of `direct_tags`, `direct_priority`, or
+`direct_collections` to its typed normalized request, item/type/effective payload,
+actual native target and backup-only reference. Malformed/late declarations raise,
+not ordinary fallback. Application edit/status/reject guards preserve direct
+history even with corrupted pending status; this is not SQL-trigger or foreign-process
+immutability. Whole reject selections are checked before generated rejection commits.
+
+Direct insertion and first audit share the caller's transaction. Applying commits
+before native dispatch. Finalization checks the complete native ID partition,
+backup identity, failure classification and every unchanged stored claim before
+any terminal update; all terminal events commit or roll back together. The uncapped
+applying query uses item keys before comparing recorded actual targets across types;
+missing/malformed targets refuse instead of rebinding or accepting matching state.
+No reset, reconciliation, inverse, UUID or exactly-once protocol is added. Native/
+terminal-commit acknowledgement loss and broader recovery remain unqualified.
+These are candidate implementation contracts, not observed runtime GREEN.
+
 `get_pending_changes(..., item_key=...)` filters by item key in SQLite before
 ordering and applying its row limit. Callers retrieving one paper's history do
 not scan a capped global window and discard unrelated rows afterward.
@@ -230,7 +331,12 @@ uncapped exact-signature check across every lifecycle state. When a caller must
 make an idempotent queue decision, `insert_pending_change_if_absent(item_key,
 item_title, change_type, payload)` performs that check and insert under one
 `BEGIN IMMEDIATE` transaction, so concurrent callers cannot both queue the same
-change. The read-only existence helper is for reporting, not check-then-insert.
+ordinary change. Only this ordinary insertion excludes validated direct/system-mirror receipts;
+matching malformed direct declarations raise, while any ordinary row still dedups
+across every status with exact item/type/serialized-payload matching. No JSON
+canonicalization or history-view limit is introduced. Generic history/existence
+still includes direct receipts unchanged. The read-only existence helper is for
+reporting, not check-then-insert.
 
 Sync snapshot pulls read only the maximum `sync_changes.revision` as their cursor;
 the legacy `changes` response field stays empty. Conflict status uses the indexed
@@ -238,3 +344,62 @@ resolution reference to count unresolved conflicts, not every historical receipt
 Migration v8 adds `idx_sync_mutations_resolution` for upgrades from databases
 that already recorded the v2 offline-sync schema; new databases also create it
 with the baseline sync schema.
+
+Migration v9 creates `review_questions`, keyed by a validated UUID
+`submission_id`, with immutable original `item_key`, `question`, `origin`
+(`typed`/`preset`), optional `preset_id`, and `submitted_at`. A database trigger
+rejects row updates; duplicate IDs reuse an exact payload and reject changed
+payloads, while distinct IDs preserve intentional repeated questions. The
+corpus namespace gets a matching no-op v9. `review_questions.save(conn, payload)`
+returns `(row, created)` and leaves commit ownership with its caller. Before any
+SQL it uses the pure `models.paper_keys` guard to reject blank, dot/dot-dot,
+slash, backslash, and NUL keys; accepted keys are never normalized. No renderer
+filesystem/PDF/review/Add preflight is needed;
+`list_for_paper(conn, item_key)` returns row dictionaries ordered by submission
+time then ID. Storage shares HTTP's 2,000-code-point question bound, with no
+extra key/preset-ID cap. Both reads and writes keep original item keys, while listing
+resolves the same unambiguous feed/library aliases as manual notes through
+`review_notes.resolve_item_key_aliases`. Question rows do not modify
+`review_notes` or replace the editable manual note.
+
+Migration v10 adds question insertion revisions (`review_question`, value =
+submission UUID) to `sync_changes` and one durable current composite intent
+receipt in `review_note_mirror_intents`. Its transaction-local log rebuild retains
+revisions, AUTOINCREMENT high-water, existing triggers and label receipts without
+disabling foreign keys. Existing questions backfill in time/UUID order, once;
+the corpus receives named no-op v10 alignment.
+
+```
+question save ─┐  same caller transaction      separate delivery transaction
+manual write ─┴─> row + journal + stage ─commit─> current_for_mirror
+                                                 ├─ external upsert succeeds
+                                                 └─ acknowledge ─commit
+```
+
+`review_note_projection.stage(conn, item_key) -> None` is called by question
+creation and `review_notes.write`; exact question replay stages nothing.
+`snapshot(conn, item_key)` returns `item_key` (original lookup identity),
+`revision` (latest alias-family note/question revision), `body` (manual text
+plus saved questions in submission-time/UUID order, never answers), `target_key`
+and `pending`. Each snapshot resolves its alias family once, sharing those keys
+with the existing manual-note and ordered-question readers. Staging, delivery
+and acknowledgement retain separate fresh snapshots. The body is a derived
+delivery projection, not another editable manual note. Unrelated verdict
+revisions do not invalidate it. Aliases union
+rows without rewriting question identity; manual clears retain questions.
+A unique library-namespace alias is the storage-resolved target; feed/note-only
+or ambiguous multi-library families have no target. Storage never contacts
+Zotero to check external item existence.
+
+`current_for_mirror(db_path, item_key)` yields `(conn, desired)` under the same
+`BEGIN IMMEDIATE` writer-lock pattern as existing mirrors. Target/alias changes
+are reconciled into pending intent there. Only `acknowledge(conn, desired) -> bool`
+can acknowledge delivery, after re-resolving the lookup identity and comparing
+current revision/body/target. The caller must upsert only a real target and call
+acknowledge only after external success. Normal exit without acknowledgement,
+failed work and missing targets leave pending; exceptions roll back even an
+acknowledgement in that transaction. Empty projections can clear owned notes.
+This is not a distributed transaction with Zotero. Production delivery uses this
+composite through `services.golden.verdict_effects.mirror_review_note`, including
+materialization and recovery callers. Sync and review-detail reads expose question
+arrays separately from editable manual notes; replay never rewrites question IDs.

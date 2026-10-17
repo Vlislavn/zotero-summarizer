@@ -50,7 +50,7 @@ async def update_paths(req: UpdatePathsRequest) -> UpdatePathsResponse:
 
 async def validate_config(req: ValidateConfigRequest) -> ValidateConfigResponse:
     """Validate a draft and optionally probe it; write nothing."""
-    return await validate_config_draft(req)
+    return await validate_config_draft(req, settings=get_settings())
 
 
 class CredentialRequest(BaseModel):
@@ -114,9 +114,16 @@ async def doctor_status() -> dict:
 async def run_doctor(req: DoctorRequest) -> dict:
     from zotero_summarizer.services.setup.doctor import run_doctor as run_checks
 
-    return await asyncio.to_thread(
-        run_checks, get_settings(), check_ids=req.check_ids, fix=req.fix,
-    )
+    from zotero_summarizer.services.setup.load_attempt import SetupAttempt
+
+    attempt = SetupAttempt()
+    try:
+        return await asyncio.to_thread(
+            run_checks, get_settings(), check_ids=req.check_ids, fix=req.fix, attempt=attempt,
+        )
+    except asyncio.CancelledError:
+        attempt.abandon("cancelled")
+        raise
 
 
 router.add_api_route("/api/setup/doctor", doctor_status, methods=["GET"])

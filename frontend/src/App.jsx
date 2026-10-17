@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import NavBar from './components/NavBar.jsx';
 import Today from './pages/Today.jsx';
+import Weekly from './pages/Weekly.jsx';
 import Settings from './pages/Settings.jsx';
 import Library from './pages/Library.jsx';
 import Search from './pages/Search.jsx';
@@ -37,6 +38,7 @@ export default function App() {
             <Route path="/" element={<Navigate to="/library" replace />} />
             <Route path="/setup" element={<SetupFlow />} />
             <Route path="/today" element={<Today />} />
+            <Route path="/weekly" element={<Weekly />} />
             <Route path="/settings" element={<Settings />} />
 
             {/* Library: Read next (default) + Batch label (?mode=batch). */}

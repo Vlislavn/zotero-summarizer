@@ -291,3 +291,147 @@ def test_map_reduce_malformed_verifier_fallback_keeps_original_source(corrected)
         assert PAPER in evidence and NO_ACCESS not in evidence
     if corrected:
         assert "failed source verification" in generator.prompts[1]
+
+
+def test_prefix_audit_retains_clipped_repeated_occurrence_and_partial_scope():
+    source = "  " + PAPER + "\n\n" + PAPER + " UNSELECTED_TAIL"
+    cap = 2 + len(PAPER) + 12
+    generator, verifier, audit = _Generator(_digest()), _Verifier(), {}
+
+    assess_digest(title="Paper", full_text=source, config=_default_goals_config(),
+                  llm=generator, verifier_llm=verifier, prefix=True, max_chars=cap,
+                  verification_audit=audit)
+
+    assert audit["source"]["scope"] == "selected_original"
+    assert audit["source"]["coverage"] == "partial"
+    assert audit["source"]["selected_characters"] == cap
+    passage = audit["passages"][0]
+    assert passage["text"] == source[:cap].strip()
+    passage_end = len(source[:cap].rstrip())
+    assert passage["selected_span"] == {"start": 2, "end": passage_end}
+    assert passage["original_fragments"] == [{
+        "selected_span": {"start": 2, "end": passage_end},
+        "original_span": {"start": 2, "end": passage_end}, "mapping": "exact",
+    }]
+    assert passage["pdf_page"] is None
+    assert passage["page_mapping_reason"] == "text_extraction_has_no_page_mapping"
+    assert len(generator.prompts) == 1 and verifier.calls == 1
+
+
+def test_map_audit_preserves_correction_lineage_and_original_evidence():
+    class CorrectingMapper(_Mapper):
+        def _checks(self, prompt):
+            checks = super()._checks(prompt)
+            if self.calls == 1:
+                checks[0].update(supported=False, evidence=[])
+            return checks
+
+    good = _digest()
+    bad = _digest("An initial generated claim.")
+    mapper, generator, audit = CorrectingMapper("Generated summary, not original evidence."), _Generator(bad, good), {}
+
+    result = map_reduce_digest("Paper", PAPER, _default_goals_config(), map_llm=mapper,
+                               reduce_llm=generator, verification_audit=audit)
+
+    assert result.tldr == good.tldr and result.basis == "map_reduce"
+    assert audit["source"]["scope"] == "complete_extracted_text"
+    assert audit["passages"][0]["text"] == PAPER
+    assert [attempt["outcome"] for attempt in audit["lineage"]] == ["support_not_established", "accepted"]
+    assert audit["lineage"][0]["digest_sha256"] != audit["lineage"][1]["digest_sha256"]
+    assert len(generator.prompts) == 2 and mapper.calls == 2 and mapper.map_calls == 1
+
+
+def test_rank_audit_tracks_nonfirst_clipped_occurrence_document_order_and_synthetic_join(monkeypatch):
+    from zotero_summarizer.services.faithbench import _corpus
+
+    chunks = [PAPER + " First occurrence.", "Unselected bridge.",
+              PAPER + " Nonfirst occurrence.", "Rank winner: methodology evaluation results."]
+    source = "\n\n".join(chunks)
+    spans, cursor = [], 0
+    for chunk in chunks:
+        spans.append((cursor, cursor + len(chunk)))
+        cursor += len(chunk) + 2
+
+    class RankedIndex:
+        def __init__(self, text):
+            assert text == source
+            self.chunks, self.spans = chunks, spans
+
+        def top_chunks(self, query, k):
+            return [chunks[3], chunks[2]]  # relevance order differs from document order
+
+    monkeypatch.setattr(_corpus, "PaperChunkIndex", RankedIndex)
+    clipped = 32
+    expected = chunks[2][:clipped] + "\n\n" + chunks[3]
+    generator, verifier, audit = _Generator(_digest("The paper discusses methodology.")), _Verifier(), {}
+    assess_digest(title="Paper", full_text=source, config=_default_goals_config(),
+                  llm=generator, verifier_llm=verifier, max_chars=len(expected), verification_audit=audit)
+
+    passage = audit["passages"][0]
+    assert passage["text"] == expected
+    assert passage["original_fragments"] == [
+        {"selected_span": {"start": 0, "end": clipped},
+         "original_span": {"start": spans[2][0], "end": spans[2][0] + clipped}, "mapping": "exact"},
+        {"selected_span": {"start": clipped, "end": clipped + 2}, "original_span": None,
+         "mapping": "unknown", "reason": "synthetic_separator"},
+        {"selected_span": {"start": clipped + 2, "end": len(expected)},
+         "original_span": {"start": spans[3][0], "end": spans[3][1]}, "mapping": "exact"},
+    ]
+    assert spans[2][0] != source.find(chunks[2][:clipped]) == 0
+    assert passage["pdf_page"] is None and audit["source"]["coverage"] == "partial"
+    assert len(generator.prompts) == 1 and verifier.calls == 1
+
+
+class _MalformedAuditMapper(_Mapper):
+    def pydantic_prompt(self, *, prompt, **kwargs):
+        self.verification_prompts.append(prompt)
+        return {"checks": []}
+
+
+class _FallbackAuditGenerator(_Generator):
+    def __init__(self, *digests, unavailable=False):
+        super().__init__(*digests)
+        self.verification_prompts, self.unavailable = [], unavailable
+
+    def pydantic_prompt(self, *, prompt, pydantic_model, **kwargs):
+        from zotero_summarizer.models import PaperDigest
+        from zotero_summarizer.services.library._digest_verification import _Checks
+
+        if pydantic_model is PaperDigest:
+            return super().pydantic_prompt(prompt=prompt, pydantic_model=pydantic_model, **kwargs)
+        assert pydantic_model is _Checks
+        self.verification_prompts.append(prompt)
+        return "" if self.unavailable else pydantic_model(checks=_AccessVerifier()._checks(prompt))
+
+
+@pytest.mark.parametrize("corrected", [False, True], ids=["initial", "corrected"])
+def test_fallback_audit_retains_unavailability_route_accepted_checks_and_original_scope(corrected):
+    good, bad = _digest(), _digest().model_copy(update={"read_why": NO_ACCESS})
+    mapper = _MalformedAuditMapper(NO_ACCESS)
+    generator = _FallbackAuditGenerator(bad, good) if corrected else _FallbackAuditGenerator(good)
+    audit = {}
+    result = map_reduce_digest("Paper", PAPER, _default_goals_config(), map_llm=mapper,
+                               reduce_llm=generator, verification_audit=audit)
+    attempts = 2 if corrected else 1
+    assert result.tldr == good.tldr
+    assert [step["outcome"] for step in audit["lineage"]] == (["support_not_established"] if corrected else []) + ["accepted"]
+    assert all(step["verifier_route"] == "generator_fallback" and step["unavailable_routes"] == [
+        {"route": "primary", "reason": "malformed_verifier_output"}] for step in audit["lineage"])
+    assert audit["passages"][0]["text"] == PAPER and audit["source"]["scope"] == "complete_extracted_text"
+    assert all(claim["evidence"] == [0] for claim in audit["claims"])
+    assert audit["contradiction_adjudication"] == "not_performed"
+    assert len(mapper.verification_prompts) == 2 * attempts
+    assert len(generator.verification_prompts) == len(generator.prompts) == attempts
+
+
+def test_audit_unavailable_fallback_does_not_publish_or_regenerate():
+    from zotero_summarizer.services.library._digest_verification import DigestVerifierUnavailable
+
+    mapper, generator = _MalformedAuditMapper(PAPER), _FallbackAuditGenerator(_digest(), unavailable=True)
+    audit = {"old_accepted_evidence": True}
+    with pytest.raises(DigestVerifierUnavailable):
+        map_reduce_digest("Paper", PAPER, _default_goals_config(), map_llm=mapper,
+                           reduce_llm=generator, verification_audit=audit)
+    assert audit == {}
+    assert len(mapper.verification_prompts) == len(generator.verification_prompts) == 2
+    assert len(generator.prompts) == 1

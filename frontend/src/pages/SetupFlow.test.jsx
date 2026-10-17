@@ -99,6 +99,42 @@ it.each([
   client.clear();
 });
 
+it('does not save when setup validation cannot be reached', async () => {
+  api.validateSetup.mockRejectedValue(new Error('validation unavailable'));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  render(<QueryClientProvider client={client}><MemoryRouter><SetupFlow /></MemoryRouter></QueryClientProvider>);
+  fireEvent.click(await screen.findByRole('radio', { name: /Triage without an LLM/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+  fireEvent.change(screen.getByLabelText('Research goal'), { target: { value: 'Clinical agents' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
+
+  expect(await screen.findByText(/validation unavailable/)).toBeTruthy();
+  expect(api.updateConfig).not.toHaveBeenCalled();
+  expect(screen.queryByRole('heading', { name: 'Setup saved' })).toBeNull();
+  client.clear();
+});
+
+it('resumes verification with the saved server config, not a stale wizard draft', async () => {
+  const storage = new Map([['zs_setup_progress_v1', JSON.stringify({ mode: 'none', step: 4,
+    draft: { research_goals_text: 'Stale unsaved wizard goal' } })]]);
+  vi.stubGlobal('localStorage', {
+    getItem: (key) => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, value),
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  try {
+    render(<QueryClientProvider client={client}><MemoryRouter><SetupFlow /></MemoryRouter></QueryClientProvider>);
+    expect(await screen.findByRole('heading', { name: 'Setup saved' })).toBeTruthy();
+    expect(api.updateConfig).not.toHaveBeenCalled();
+    const restored = JSON.parse(storage.get('zs_setup_progress_v1'));
+    expect(restored.draft).toBeNull();
+  } finally {
+    client.clear();
+    vi.unstubAllGlobals();
+  }
+});
+
 it('returns to the research step on validation errors and does not save invalid setup', async () => {
   api.validateSetup.mockResolvedValue({ valid: false, field_errors: [
     { field: 'research_goals', message: 'Add a research goal.' },

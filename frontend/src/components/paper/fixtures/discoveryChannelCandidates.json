@@ -1,0 +1,29 @@
+[
+  {
+    "candidate_id": "10.1234/fixture-doi",
+    "title": "Synthetic Crossref DOI-only result",
+    "abstract": "Public synthetic metadata for the Crossref channel.",
+    "doi": "10.1234/fixture-doi",
+    "pmid": "",
+    "openalex_id": "",
+    "url": ""
+  },
+  {
+    "candidate_id": "12345678",
+    "title": "Synthetic Europe PMC PMID-only result",
+    "abstract": "Public synthetic metadata for the Europe PMC channel.",
+    "doi": "",
+    "pmid": "12345678",
+    "openalex_id": "",
+    "url": ""
+  },
+  {
+    "candidate_id": "W1234567890",
+    "title": "Synthetic OpenAlex ID-only result",
+    "abstract": "Public synthetic metadata for the OpenAlex channel.",
+    "doi": "",
+    "pmid": "",
+    "openalex_id": "W1234567890",
+    "url": ""
+  }
+]

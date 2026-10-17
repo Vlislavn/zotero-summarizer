@@ -8,9 +8,24 @@ verdict follows the same gate. Pending Add is committed only while the
 SQLite-locked current verdict remains positive; a newer Trash produces a
 `superseded` per-item result instead of reviving a rejected paper. Trash and negative verdicts work without review.
 
+Explicit Add, positive-verdict Add and already-materialized no-ops retry current
+composite My notes after the original materialization transaction closes. Add returns
+per-row `note_mirrors`; feed-verdict results carry a separate `review_note_mirror`.
+Expected note failures leave item counts/targets intact and expose pending/error;
+programming/schema defects are post-commit note-stage failures (`note_delivery_failed`
+in Add's per-row failure list), never item pending-sync. Apply-all recovery uses the
+same projection/writer. Questions never authorize Add, and no ingest-to-write hook
+is introduced.
+
 Turns raw RSS feed items into scored, ranked `processed_feed_items` rows that
 the Today tab consumes. The cheap `model/` gate fast-rejects; survivors get an
 LLM summary + composite score.
+
+The abstract/PDF corpus prefilter shares `_fast_reject_response`, which stamps a
+private machine-owned outcome for the feed partition. Arbitrary generated tags
+remain display data, not gate authority. The existing has-corpus check, strict
+below-threshold comparison, zero-model-call rejection and public response fields
+are unchanged; no new scorer or policy is introduced.
 
 ```
 Zotero feedItems ─feeds.run_daemon_tick→ gate(model) ─reject──> dropped
@@ -184,12 +199,39 @@ subdivided down to the existing minimum work size. Empty or exhausted segments
 still fail before refinement. Generated notes remain derived context, not original
 source evidence; numerical scoring, providers and output-token limits are unchanged.
 
+For full text **over 80,000 characters**, `_method_context.py` also supplies bounded
+original URI-bearing windows to the initial refinement, even when map notes omit
+those references. The existing lexer exposes exact occurrence spans without changing
+admission. Whole ±200-character windows are considered in source order; retained
+overlaps merge, unfittable windows are skipped and later windows remain eligible.
+The complete suffix fits `map_chunk_chars` in Python characters after reversible
+library escaping, policy, counts and framing. Counts describe complete occurrence
+windows, not distinct URLs or contribution artifacts. Matches with no fitting window
+produce an incompleteness notice; no matches leave the old generation prompt intact.
+
+Application-authored policy sits after the fully formatted default/custom template;
+only escaped original slices are data. Long-source custom `prompts.refine` overrides
+receive this suffix even without `{paper_text}`; their formatting is otherwise
+unchanged. Only the **first generation** receives it: the distinct schema/error/
+malformed-output repair prompt and single-repair budget are unchanged. Direct text,
+abstract/Doctor, PDF annotation exclusion and the shared library mapper are unchanged.
+No automatic artifact insertion, URI normalization, semantic ranking or extra model
+call occurs. Radius/budget coverage is not whole-paper or scientific completeness:
+background references may not be contributions, and missing/clipped excerpts cannot
+establish whole-source absence. Mock input/framing checks do not prove semantic
+uplift, universal injection resistance, reproducibility or human usefulness.
+
 Refinement receives the trusted UTC runtime date and distinguishes experimental
 phases, author interpretations, conditional outcomes and proposed adaptations.
 Study safeguards and measurement uncertainty associations must be source-explicit.
 When a triage model's proposed priority differs from composite mapping, the response
 labels the computed priority as authoritative and retains the model assessment as
 its pre-mapping explanation. This does not change scores or promote suggestions.
+
+Daemon retraining appends an artifact-bound `gate_training` record only after
+install/rescore succeeds, using `model.training_record` and the shared run log.
+A later ledger failure stays visible without rolling back the live gate; training
+is not evidence of historical triage inference. See `feeds/README.md` for gaps.
 
 **Boundaries:** imports `model/` (gate), `zotero/` (pending), the library's existing
 source mapper, and shared scoring; standard services rules.
@@ -207,9 +249,104 @@ attempt (invalid repair propagates). The shared `extract_json_blob` and decoded
 output capture/telemetry are unchanged. Candidate spans do not overlap: scanning
 and decoding work is bounded by input characters, without suffix retries or regex.
 
+Live refinement admits `method_and_code.artifacts` only as complete, verbatim
+HTTP(S) URI lexemes from the **full original text** or already-bound request
+`title`/`doi`/`abstract`, on both first and repaired JSON. Map notes never authorize
+links; no DOI URL is constructed and no artifact is fetched. Matching preserves
+case, percent spelling, query/fragment and balanced parentheses; it never accepts
+prefixes or normalized variants. Explicit angle/quote/Markdown destinations keep
+literal punctuation. Bare prose excludes unmatched closing wrappers and exactly
+one final dot/comma without a query/fragment; multiple punctuation trailers do not
+grant a shorter guessed URI. This declared lexical convention cannot infer intent:
+a literal trailing dot/comma needs explicit delimiters, and query/fragment
+punctuation is always URI data.
+
+The v7 lexer indexes balanced Markdown label bounds outside explicit URI tokens,
+then visits independently eligible label contents and destinations on one forward
+cursor. Explicit angle/quote/backtick and immediately paired Markdown destination
+tokens need complete delimiters and opener context before opacity; no label event
+may split them or authorize embedded suffixes. Indexing and scanning reuse the
+same scheme-run, wrapper, destination-start and URI-end conventions; no stale
+in-token end is activated. Bare label tokens stop at the active label end, while
+explicit tokens retain their complete bounds, including destination parentheses.
+Labels are not discarded; slashes/colons cannot disqualify the independent later
+destination. Nested scopes use constant-time stack events, not range rescans.
+A forward pass consumes non-overlapping scheme-shaped runs and complete containing
+tokens, including non-HTTP, malformed HTTP and rejected prefixes, before admitting
+HTTP(S). Markdown-looking text inside a containing URI cannot escape that token.
+A shared whitespace-bounded completion table prevents failed-suffix rescans; word-attached quotes/backticks are not openers. Incomplete wrappers stay conservative.
+Full-source work is linear in characters: one completion pass, one label-index pass, one forward scan,
+and bounded local passes over disjoint runs/tokens; no suffix-search/backward rescan.
+Standalone `URL=https://...` and other plain identifier assignments remain valid;
+query/path/fragment/colon-bearing prefixes are not assignments. No URI normalization
+runs. Bare colon-attached labels still look like opaque schemes; use whitespace or
+explicit wrappers. This is not a full markup/URI parser or intent inference, and
+no protocol-specific denylist, semantic filter or additional model stage runs.
+
+Rejections append v1 rows to `settings().data_dir / method-artifact-rejections.jsonl`
+using the existing JSONL writer under a process-local lock. Each row records the
+original UTF-8 SHA-256, canonical bound-metadata SHA-256, first/repair phase, parsed
+artifact field index, candidate, reason and lexical convention. Write failures
+propagate before the filtered result returns; they do not trigger JSON repair.
+Receipts are local, not a new public response schema. The lock serializes threads
+in one process, not multi-process writers; existing schema normalization still
+strips artifact whitespace. Accepted artifacts and all other method fields retain
+their order/content. Null, empty and artifact-only blocks and historical JSON
+reload remain compatible. Membership does **not** prove contribution role,
+novelty, evaluation, reproducibility or usefulness; those semantic decisions and
+empty live-block completeness remain open to separate source/human evaluation.
+Doctor's write-free `run_abstract_dry` uses the same pure membership check but
+raises an explicit admission error on a rejected URI, outside JSON repair,
+before any Settings access or receipt write. It never silently filters without
+a receipt or converts failure to null; valid/null/empty dry output remains
+write-free. The private static policy does not change live receipt requirements.
+No new model calls, retry budgets, prompts or scoring changes.
+
+PDF triage captures one immutable `PdfSource` after existing resolved PDF_ROOT,
+file and selected-extractor admission, before corpus/maps. The selected OnPrem
+plain text remains unchanged and required original authority through direct/map
+and first/repair paths. Conflicting text/source fails before a model call. The
+same capture survives later file changes; generated notes never authorize links.
+Only eligible whole SDK HTTP(S) annotation strings join original text/metadata
+membership. No stripping, decoding, reconstruction, nested-suffix scan or raw
+annotation prompt concatenation occurs. Case, percent spelling, query/fragment,
+dot/comma, apostrophes and unpaired parentheses remain literal opaque URI data;
+enclosing wrappers, prose, whitespace/nonprintable controls, double quotes,
+backticks and angle characters do not become annotation authority. This is minimal
+lexical eligibility, not complete RFC validation or scientific support.
+
+Actual PDF rejection rows additionally bind the full `original_document_sha256`
+and `annotation_authority_sha256`: UTF-8 compact JSON array, ensure_ascii=False,
+allow_nan=False, preserving the entire raw tuple including ineligible values,
+order and duplicates. No raw tuple is logged. Abstracts supply no PDF source:
+live abstract keeps its existing v1 append-before-filter and loud I/O failures;
+only Doctor/explicit dry is write-free. Reader/hash/ordinary identity failures
+stay loud before corpus/model work, never empty-annotation fallback. Capture's
+finite hash work is not race-free authentication or a blocking-I/O deadline.
+
 Triage receives the complete canonical `RefinedSummary` JSON inside the existing
 untrusted summary boundary, not an executive-only excerpt. Methods, findings,
 limitations and optional artifacts remain available without new calls or scoring
 changes. Default refinement preserves conditional effect directions and Results
 exceptions, failed versus absent validation, and repository versus reproducibility
 evidence. Instruction-presence tests are not scientific-faithfulness evaluations.
+
+## Abstract-only legacy response boundary
+
+Successful model-scored abstract summaries, including Doctor's dry path, expose
+`should_deep_read="No"` regardless of the provider's legacy string. Only outbound
+response assembly uses a copy; triage still receives the original complete
+refinement. Full-PDF responses, shared DTO normalization, prompts, source/artifact
+admission, calls, retries and numerical ranking are unchanged. Missing abstracts
+and corpus fast-rejections retain their existing machine-owned responses.
+
+This compatibility projection does not produce `PaperDigest.read_decision`,
+rewrite stored summaries, or establish rendered reading advice or usefulness.
+The broader selective-reading policy and semantic acceptance remain separate.
+
+Today returns additive `selection_evidence` and assembled `selection_policy`,
+without changing scoring, role allocation or review/Add authority. The existing
+source parse, current-review snapshot and actual rank/picker calculations are
+reused; no new reader, scorer or policy read is added. Empty slates retain their
+resolved policy. Interleave replaces all new paper evidence with common blinded
+metadata while preserving old arm records/logs. See `daily_select/README.md`.

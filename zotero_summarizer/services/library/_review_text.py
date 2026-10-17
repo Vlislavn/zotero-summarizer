@@ -64,6 +64,7 @@ def select_review_text(
     *,
     budget: int,
     queries: list[str] | None = None,
+    locations: list[dict[str, Any]] | None = None,
 ) -> str:
     """Return at most ``budget`` characters of the paper, selected to maximise
     referee coverage.
@@ -75,15 +76,19 @@ def select_review_text(
     ``queries`` — optional ranking queries for filling leftover budget; defaults
         to a minimal rubric dimension set when omitted.
     """
+    if locations is not None:
+        locations.clear()
     if budget <= 0:
         return ""
 
     # Preserve short papers byte-for-byte, regardless of parsed sections.
     if len(full_text) <= budget:
+        if locations is not None:
+            locations.append(_location(0, len(full_text), 0))
         return full_text
 
     if not sections:
-        return _fill_from_chunks(full_text, budget, queries or _DEFAULT_QUERIES)
+        return _fill_from_chunks(full_text, budget, queries or _DEFAULT_QUERIES, locations=locations)
 
     # Step 1: high-value sections, allocated by EQUAL-SHARE water-filling so an
     # early long section (e.g. a 30k Introduction) can't crowd out the critical
@@ -99,14 +104,20 @@ def select_review_text(
     kept = [chunk[:cap] for chunk, cap in zip(selected, allocations) if cap > 0]
     context = "\n\n".join(kept)
     if not context:
-        return _fill_from_chunks(full_text, budget, queries or _DEFAULT_QUERIES)
+        return _fill_from_chunks(full_text, budget, queries or _DEFAULT_QUERIES, locations=locations)
+    if locations is not None:
+        locations.append(_location(0, len(context), None, "section_selection_has_no_extraction_offsets"))
 
-    # Step 2: any leftover budget (sections shorter than their share) is filled
-    # with BM25-ranked chunks of the whole text for extra coverage.
     remaining = budget - len(context) - 2
     if remaining > 0:
-        filler = _fill_from_chunks(full_text, remaining, queries or _DEFAULT_QUERIES)
+        filler_locations: list[dict[str, Any]] = []
+        filler = _fill_from_chunks(full_text, remaining, queries or _DEFAULT_QUERIES,
+                                   locations=filler_locations if locations is not None else None,
+                                   selected_offset=len(context) + 2)
         if filler:
+            if locations is not None:
+                locations.append(_location(len(context), len(context) + 2, None, "synthetic_separator"))
+                locations.extend(filler_locations)
             context += "\n\n" + filler
 
     return context
@@ -132,7 +143,14 @@ _DEFAULT_QUERIES = [
 ]
 
 
-def _fill_from_chunks(text: str, budget: int, queries: list[str]) -> str:
+def _location(start: int, end: int, original_start: int | None, reason: str = "") -> dict[str, Any]:
+    original = None if original_start is None else {"start": original_start, "end": original_start + end - start}
+    return {"selected_span": {"start": start, "end": end}, "original_span": original,
+            "mapping": "unknown" if original is None else "exact", **({"reason": reason} if reason else {})}
+
+
+def _fill_from_chunks(text: str, budget: int, queries: list[str], *,
+                      locations: list[dict[str, Any]] | None = None, selected_offset: int = 0) -> str:
     """Fit ranked chunks (including a final prefix), then restore document order.
 
     Separators count toward the cap; a remainder too small for a separator and
@@ -146,6 +164,8 @@ def _fill_from_chunks(text: str, budget: int, queries: list[str]) -> str:
     index = PaperChunkIndex(text)
     chunks = index.chunks  # document order
     if not chunks:
+        if locations is not None:
+            locations.append(_location(selected_offset, selected_offset + len(text[:budget]), 0))
         return text[:budget]
 
     # Rank by the combined query, then order chunk INDICES by relevance (best BM25
@@ -163,4 +183,13 @@ def _fill_from_chunks(text: str, budget: int, queries: list[str]) -> str:
     )
 
     kept = _clip_chunks([chunks[i] for i in by_relevance], budget, separator="\n\n")
-    return "\n\n".join(chunk for _, chunk in sorted(zip(by_relevance, kept)))
+    ordered = sorted(zip(by_relevance, kept))
+    if locations is not None:
+        cursor = selected_offset
+        for position, (i, fragment) in enumerate(ordered):
+            if position:
+                locations.append(_location(cursor, cursor + 2, None, "synthetic_separator"))
+                cursor += 2
+            locations.append(_location(cursor, cursor + len(fragment), index.spans[i][0]))
+            cursor += len(fragment)
+    return "\n\n".join(chunk for _, chunk in ordered)

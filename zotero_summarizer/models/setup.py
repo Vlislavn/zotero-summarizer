@@ -124,6 +124,7 @@ class ConnectionResult(BaseModel):
     status: str
     detail: str = ""
     models_discovered: int = Field(default=0, ge=0)
+    load_receipt: dict = Field(default_factory=dict)
 
 
 class ValidateConfigRequest(BaseModel):

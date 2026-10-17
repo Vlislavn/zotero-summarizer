@@ -47,7 +47,8 @@ async def screen(req: ScreenRequest) -> dict[str, Any]:
     reviews fill in."""
     require_online()
     deps = await asyncio.to_thread(default_deps)
-    sess = await asyncio.to_thread(run_screen, req.query, req.questions, deps=deps, constraints=req.constraints)
+    policy = {"evidence_policy": req.evidence_policy} if req.evidence_policy != "baseline" else {}
+    sess = await asyncio.to_thread(run_screen, req.query, req.questions, deps=deps, constraints=req.constraints, **policy)
     await asyncio.to_thread(_kickoff_review, sess.id)
     fresh = await asyncio.to_thread(session_store.load, sess.id)
     return fresh.to_dict()

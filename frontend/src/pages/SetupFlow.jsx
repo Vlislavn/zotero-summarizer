@@ -6,7 +6,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchConfig, updateConfig } from '../api/settingsApi.js';
 import { configToFormState, formStateToConfig } from '../utils/configForm.js';
 import { humanizeError } from '../utils/humanizeError.js';
+import { invalidateSetupDoctor, invalidateSetupDoctorAfterWriteError } from '../utils/setupDoctorState.js';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
+import { useFocusOnChange } from '../hooks/useFocusOnChange.js';
 import { dismissSetup } from '../components/setup/SetupGate.jsx';
 import StepProgress from '../components/setup/StepProgress.jsx';
 import StepConnectZotero from '../components/setup/StepConnectZotero.jsx';
@@ -23,7 +25,7 @@ const DEFAULT_TRIAGE_CRITERIA = [
   'Introduces a method, dataset, or result I could build on',
   'Strong venue or credible authors',
 ].join('\n');
-const STEP_LABELS = ['Choose mode', 'Zotero sync', 'Connect LLM', 'Describe research'];
+const STEP_LABELS = ['Choose mode', 'Zotero folder', 'Connect model', 'Describe research'];
 const PROGRESS_KEY = 'zs_setup_progress_v1';
 
 function savedProgress() {
@@ -60,10 +62,13 @@ export default function SetupFlow() {
 
   const saved = useMemo(savedProgress, []);
   const [mode, setMode] = useState(saved.mode || null);
-  const [step, setStep] = useState(saved.mode ? (saved.step || 0) : 0);
+  const [step, setStep] = useState(saved.mode
+    ? (saved.mode === 'local' && saved.step === 3 ? 2 : saved.step || 0) : 0);
   const [maxStepReached, setMaxStepReached] = useState(saved.mode ? (saved.maxStepReached || 0) : 0);
-  const [draft, setDraft] = useState(saved.draft || null);
+  const [draft, setDraft] = useState(saved.step === 4 ? null : saved.draft || null);
   const [llmTestedOk, setLlmTestedOk] = useState(false);
+  const [localCompatible, setLocalCompatible] = useState(false);
+  const headingRef = useFocusOnChange(`${step}:${Boolean(draft)}`);
   const [fieldErrors, setFieldErrors] = useState([]);
   const [finishError, setFinishError] = useState('');
   const [pathsChanged, setPathsChanged] = useState(Boolean(saved.pathsChanged));
@@ -107,8 +112,9 @@ export default function SetupFlow() {
       draft && draft.research_goals_text && draft.research_goals_text.trim().length > 0,
     );
     return [Boolean(mode), zoteroOk,
-      mode === 'none' || (llmOk && modeMatchesStages(draft?.llm_routing, mode)), goalsOk];
-  }, [draft, mode]);
+      mode === 'none' || (llmOk && modeMatchesStages(draft?.llm_routing, mode)
+        && (mode !== 'local' || localCompatible)), goalsOk];
+  }, [draft, mode, localCompatible]);
 
   const allValid = validity.every(Boolean);
 
@@ -116,7 +122,7 @@ export default function SetupFlow() {
 
   useEffect(() => {
     if (draft) writeStorage(PROGRESS_KEY, JSON.stringify({
-      step, maxStepReached, draft, draftPaths, pathsChanged, mode,
+      step, maxStepReached, draft: step === 4 ? null : draft, draftPaths, pathsChanged, mode,
     }));
   }, [step, maxStepReached, draft, draftPaths, pathsChanged, mode]);
 
@@ -129,10 +135,14 @@ export default function SetupFlow() {
         queryClient.invalidateQueries({ queryKey: ['runtime-config'] });
       }
       queryClient.invalidateQueries({ queryKey: ['setup-status'] });
+      void invalidateSetupDoctor(queryClient);
       queryClient.removeQueries({ queryKey: ['setup-doctor'] });
       setStep(4);
     },
-    onError: (err) => setFinishError(humanizeError(err)),
+    onError: (err) => {
+      invalidateSetupDoctorAfterWriteError(queryClient, err);
+      setFinishError(humanizeError(err));
+    },
   });
 
   const validateMutation = useMutation({
@@ -152,9 +162,15 @@ export default function SetupFlow() {
     setFinishError('');
     const payload = formStateToConfig(draft, configQuery.data);
     // Field-level validation first; show inline errors and stop if invalid.
-    const res = await validateMutation.mutateAsync(payload).catch(() => null);
-    if (res && res.valid === false) {
-      setFieldErrors(res.field_errors || []);
+    let res;
+    try {
+      res = await validateMutation.mutateAsync(payload);
+    } catch (error) {
+      setFinishError(`Could not validate setup: ${humanizeError(error)}. Retry Finish; nothing was saved.`);
+      return;
+    }
+    if (res?.valid !== true) {
+      setFieldErrors(res?.field_errors || []);
       setStep(3);
       return;
     }
@@ -166,6 +182,11 @@ export default function SetupFlow() {
     dismissSetup();
     navigate('/library');
   }
+
+  if (configQuery.isError) return <div className="space-y-3">
+    <Banner kind="error">Could not load setup: {humanizeError(configQuery.error)}</Banner>
+    <Button variant="secondary" onClick={() => configQuery.refetch()}>Retry setup</Button>
+  </div>;
 
   if (configQuery.isLoading || !draft) {
     return (
@@ -185,7 +206,7 @@ export default function SetupFlow() {
       <div className="glass rounded-2xl border border-slate-200 p-5 space-y-5">
         <header className="space-y-3">
           <div className="flex items-baseline justify-between gap-3">
-            <h2 className="text-lg font-bold text-slate-900">Set up Zotero Summarizer</h2>
+            <h2 ref={headingRef} tabIndex={-1} className="text-lg font-medium text-slate-900 focus-visible:outline focus-visible:outline-2">Set up Zotero Summarizer</h2>
             {step < 4 && (
               <button
                 type="button"
@@ -211,13 +232,13 @@ export default function SetupFlow() {
           <fieldset className="space-y-2">
             <legend className="text-sm font-semibold text-slate-800">How should summaries run?</legend>
             {[
-              ['local', 'Full local', 'All inference stays on this machine. Choose a compatible profile next.'],
+              ['local', 'Full local — recommended for privacy', 'All inference stays on this machine; no API key. RSS and PDF acquisition may still use the internet.'],
               ['hosted', 'Hosted model', 'Connect an AI service with a key.'],
               ['none', 'Triage without an LLM', 'Classifier/search only. AI reviews, Ask Paper and adding new feed papers to Zotero stay off; manual Zotero imports still work.'],
             ].map(([id, label, description]) => (
               <label key={id} className="flex items-start gap-2 rounded-lg border border-slate-200 p-3 cursor-pointer">
                 <input type="radio" name="setup-mode" className="mt-0.5" checked={mode === id}
-                  onChange={() => { setMode(id); patchDraft({ llm_enabled: id !== 'none' }); }} />
+                  onChange={() => { setMode(id); setLocalCompatible(false); patchDraft({ llm_enabled: id !== 'none' }); }} />
                 <span><span className="block text-sm font-medium">{label}</span>
                   <span className="block text-xs text-slate-500">{description}</span></span>
               </label>
@@ -235,7 +256,8 @@ export default function SetupFlow() {
         )}
         {step === 2 && mode !== 'none' && (
           <StepConnectLlm status={status} routing={draft.llm_routing} mode={mode}
-            onPatchRouting={patchRouting} testedOk={llmTestedOk} onTested={setLlmTestedOk} />
+            onPatchRouting={patchRouting} testedOk={llmTestedOk} onTested={setLlmTestedOk}
+            onValidityChange={setLocalCompatible} />
         )}
         {step === 3 && (
           <StepDescribeResearch

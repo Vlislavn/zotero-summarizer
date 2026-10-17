@@ -24,7 +24,7 @@ def _wire(monkeypatch, *, detail):
     from zotero_summarizer.services.library import _review_identity
 
     monkeypatch.setattr(_review_identity, "build_review_identity", lambda **kwargs: {
-        "generation_sha256": "a" * 64, "source_sha256": "b" * 64,
+        "generation_sha256": "a" * 64, "source_sha256": _review_identity._source_sha(kwargs["pdf_path"]),
         "source_kind": kwargs["source_kind"], "source_path": kwargs["pdf_path"],
         "focus_prompt": kwargs["focus_prompt"],
     })

@@ -11,6 +11,7 @@ import LinksRow from '../components/paper/LinksRow.jsx';
 import AbstractBlock from '../components/paper/PaperDetailView/AbstractBlock.jsx';
 import PaperReview from '../components/paper/review/PaperReview.jsx';
 import ReviewFailure from '../components/paper/ReviewFailure.jsx';
+import RelatedLibrary from '../components/paper/RelatedLibrary.jsx';
 import PaperFigures from '../components/library/PaperFigures.jsx';
 import SectionMap from '../components/paper/review/SectionMap.jsx';
 import StoryToc from '../components/paper/review/StoryToc.jsx';
@@ -183,12 +184,9 @@ export default function PaperReviewPage() {
   const hasPdf = Boolean(detail?.has_pdf);
   const render = renderQuery.data || null;
   const renderCompleted = render?.status === 'completed';
-  const showFigures = hasPdf || renderCompleted || render?.status === 'running';
-  const canAsk = hasPdf || renderCompleted;
-  // Auto-generate on open only for papers with a local Zotero PDF (no silent PDF
-  // fetch); a no-PDF paper shows the manual Generate path instead, even if an
-  // acquired render artifact already exists.
   const runner = useDeepReviewRunner(itemKey, { deep: detail?.deep_review, onDone: refreshDetail, autoRun: hasPdf });
+  const showFigures = runner.online && (hasPdf || renderCompleted || render?.status === 'running');
+  const canAsk = hasPdf || renderCompleted;
 
   if (isLoading) return <div className="py-4 text-sm text-slate-500">Loading review…</div>;
   if (error) {
@@ -258,6 +256,8 @@ export default function PaperReviewPage() {
           <section id="review" className="scroll-mt-20 pb-6">
             <ReviewZone deep={deep} runner={runner} sectionOverlay={ov} />
           </section>
+
+          <RelatedLibrary key={itemKey} itemKey={itemKey} detail={detail} onOpenPaper={goToKey} />
 
           {showFigures && (
             <section id="figures" className="scroll-mt-20 py-6">

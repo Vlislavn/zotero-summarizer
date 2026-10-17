@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { detectZotero, updatePaths } from '../../api/setupApi.js';
 import { humanizeError } from '../../utils/humanizeError.js';
+import { invalidateSetupDoctor, invalidateSetupDoctorAfterWriteError } from '../../utils/setupDoctorState.js';
 import { Banner, Field } from '../form/Fields.jsx';
 import Button from '../ui/Button.jsx';
 
@@ -24,9 +25,11 @@ export default function StepConnectZotero({ status, draftPaths, onPatchPaths, on
 
   const saveMutation = useMutation({
     mutationFn: updatePaths,
+    onError: (error) => invalidateSetupDoctorAfterWriteError(queryClient, error),
     onSuccess: () => {
       setRestartBanner('Restart required to apply new paths.');
       queryClient.invalidateQueries({ queryKey: ['setup-status'] });
+      void invalidateSetupDoctor(queryClient);
       onStatusChanged?.();
       onPathsSaved?.();
     },

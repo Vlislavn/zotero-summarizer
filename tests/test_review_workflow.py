@@ -106,6 +106,9 @@ def patched_settings(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(review_summary, "_fetch_feed_metadata", lambda **kw: {})
     # Pre-create the schema so `_init_triage_db` and `_conn` agree.
     _init_triage_db(tmp_path).close()
+    from zotero_summarizer.storage.migrations import TRIAGE_MIGRATIONS, run_migrations
+
+    run_migrations(fake_settings.triage_db_path, "triage", TRIAGE_MIGRATIONS)
     return tmp_path
 
 

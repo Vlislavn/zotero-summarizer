@@ -17,7 +17,7 @@ import re
 from typing import Any
 
 from zotero_summarizer.services.library import _quality_prompts as qp
-from zotero_summarizer.services.library._paper_read_html import _h
+from zotero_summarizer.services.library._paper_read_html import _h, _reading_plan_html
 
 _BAND_LABEL = {"flag": "FLAG", "neutral": "NEUTRAL", "highlight": "HIGHLIGHT", "uncertain": "UNCERTAIN", "": "—"}
 _STATE_LABEL = {"hit": "● addressed", "miss": "○ not addressed", "not_retrieved": "⚠ not retrieved"}
@@ -41,7 +41,7 @@ _METHOD_CLAUSE = (
 )
 _LEGEND = (
     "<b>FLAG</b> a rigor red-flag fired · <b>NEUTRAL</b> sound, unremarkable · "
-    "<b>HIGHLIGHT</b> ≥6 grounded checks, zero flags"
+    "<b>HIGHLIGHT</b> strong coverage of applicable type-aware checks"
 )
 # Short plain-English labels for the decisive-signal list (the full prompt
 # questions live in _quality_prompts and drive the collapsed checklist).
@@ -57,8 +57,12 @@ _RUBRIC_LABEL = {
     "clinical_calibration": "Calibration / multi-site validation",
     "determinism": "Reports run-to-run determinism",
     "eval_contamination": "Addresses eval contamination",
+    "thesis": "States a clear thesis / position",
+    "evidence_cited": "Supports premises with cited evidence",
+    "counterarguments": "Addresses counterarguments / limitations",
+    "scope_match": "Matches claim scope to the evidence offered",
 }
-# The rigor floor: a paper FLAGs if all three are absent (mirrors quality_eval._band_for).
+# Legacy empirical display order only; absent criteria never become failed checks.
 _TRIAD = ("external_validation", "uncertainty", "ablation")
 
 
@@ -139,10 +143,15 @@ def brief_html(
     idea_score = max(int((digest or {}).get("novelty") or 0), int((digest or {}).get("significance") or 0))
     idea = "not assessed" if not idea_score else "high" if idea_score >= 4 else "low" if idea_score <= 2 else "moderate"
     axes = f'<div class="v-rel">Idea: {idea} · Evidence: {_h(_BAND_LABEL.get(band, "not assessed"))} · Writing: {_h((digest or {}).get("writing_friction") or "not assessed")}</div>'
+    time_note = ('<div class="v-rel">Time not estimated</div>'
+                 if decision in {"read", "skim", "skip"} and (digest or {}).get("estimated_read_minutes") is None else "")
     verdict = (
         f'<div class="verdict v-{vkey}"><div class="v-eyebrow">Diagnosis</div>'
         f'<div class="v-word">{_h(vlabel)}</div>'
-        f'<div class="v-why">{_h(vreason)}</div>{rel_line}{axes}</div>'
+        f'<div class="v-why">{_h(vreason)}</div>'
+        f'{_reading_plan_html(digest or {}, decision)}'
+        f'{time_note}'
+        f'{rel_line}{axes}</div>'
     ) if (goals or quality or digest) else ""
 
     gauge = _gauge_html(band, agreed, total) if quality else ""
@@ -279,22 +288,17 @@ def _label(key: str) -> str:
 
 
 def _decisive_rows(rubric: dict[str, str], band: str) -> tuple[str, list[tuple[bool, str]], str]:
-    """(heading, [(passed, label)...], caption) — only the 2-3 items that moved
-    the band, in plain English. Empty list ⇒ caller renders no decisive block."""
-    core = [k for k, _ in qp.RUBRIC_ITEMS]
-    val = {k: str(rubric.get(k) or "na").lower() for k in set(core) | set(_TRIAD) | set(rubric)}
-    yes_count = sum(1 for k in core if val.get(k) == "yes")
-    if band == "highlight":
-        ordered = list(_TRIAD) + [k for k in core if k not in _TRIAD]
-        earned = [k for k in ordered if val.get(k) == "yes"][:3]
-        return "What earned it", [(True, _label(k)) for k in earned], f"{yes_count}/{len(core)} rigor checks met"
-    if band == "flag":
-        failed = [k for k in _TRIAD if val.get(k) != "yes"][:3]
-        return "Why it sank", [(False, _label(k)) for k in failed], ""
-    if band == "uncertain":
-        return "Split decision", [(val.get(k) == "yes", _label(k)) for k in _TRIAD], ""
-    gaps = [k for k in core if val.get(k) == "no"][:3]
-    return "What's missing", [(False, _label(k)) for k in gaps], ""
+    """Summarize only supplied applicable criteria; never synthesize empirical gaps."""
+    val = {key: str(value or "na").lower() for key, value in rubric.items()}
+    ordered = dict.fromkeys([*_TRIAD, *rubric])
+    applicable = [key for key in ordered if val.get(key) in {"yes", "no"}]
+    met = [key for key in applicable if val[key] == "yes"]
+    selected = (met if band == "highlight" else applicable if band == "uncertain"
+                else [key for key in applicable if val[key] == "no"])
+    heading = {"highlight": "What earned it", "uncertain": "Split decision",
+               "flag": "Reported checklist gaps"}.get(band, "What's missing")
+    caption = f"{len(met)}/{len(applicable)} applicable checks met" if band == "highlight" and applicable else ""
+    return heading, [(val[key] == "yes", _label(key)) for key in selected[:3]], caption
 
 
 def _full_checklist_html(rubric: dict[str, str], evidence: dict[str, Any]) -> str:
