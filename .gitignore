@@ -2,8 +2,19 @@
 venv/
 env/
 .claude/skills
-# Tool-local agent/CLI config (codex hooks, agent skills) — per-machine, not shared.
-.agents/
+# Keep per-machine skills/config private; share only the native delegation adapter.
+!.agents/
+.agents/*
+!.agents/scout.md
+!.agents/reviewer.md
+!.agents/worker.md
+!.agents/coordinator.md
+!.agents/workflows/
+.agents/workflows/*
+!.agents/workflows/review.js
+!.agents/workflows/smoke.js
+.pi/npm/
+.pi/subagents/
 .codex/
 __pycache__/
 *.pyc
