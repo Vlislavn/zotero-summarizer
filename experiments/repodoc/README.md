@@ -1,45 +1,46 @@
 # RepoDoc architecture-diagnostics experiment
 
-**Decision: reject RepoDoc 0.1.0 at upstream commit
-`306becd0f143211c0dde2bdbd480578356280e28`.** It can inventory a source-only
-snapshot, but its graph, clustering, and incremental impact are too noisy to be
-an architecture oracle. Keep it out of dependencies and CI. Re-evaluate when it
-honors ignore files, resolves symbols by scope, fails closed on LLM errors, and
-bounds incremental fan-out.
+**Reject the inspected graph as an automatic architecture oracle; keep integration
+withheld.** Two false call edges are verified against embedded and current source,
+and explained by the unchanged upstream global name resolver. The retained current
+backend arm also **fails caller-impact propagation**. Neither fact turns missing
+whole-system/runtime receipts into failures. **#23 remains incomplete.**
 
-The 2026-08-27 experiment used the dirty worktree. Runtime artifacts remain in
-gitignored `data/issue_runs/23/`; no generated docs or third-party code are
-committed.
+Start with [REPORT.md](REPORT.md). It reconciles the conflicting seed reports
+against hash-bound primary JSON: 2,585 nodes/4,539 edges, a 41-root tree with no
+children, and a separate 188-node/235-edge triage graph. These are historical,
+not current source1065 results. A separate source1065 Python-backend receipt now
+establishes 2,354 nodes/4,120 edges, a failed caller-impact control, a recorded
+2.4847991669084877-second inner duration and zero LLM calls/tokens. Its separate
+guard records max sampled tree RSS 97,517,568 bytes (93 MiB) and swap growth 0:
+this narrow diagnostic completed, but its oracle failed. Full CLI update,
+historical provider outcomes and whole-system costs remain UNKNOWN.
 
-Any rerun requires an explicitly user-configured chat-compatible provider and
-model; there is no default hosted backend. Keep credentials out of reports.
+The parent also executed `parser-semantics-03` on two seed-bound files: all three
+correctness discriminators fail (keyword-only signature, outer context after a
+nested function, receiver resolution). Its 19 loaded-source references are bound;
+inner duration is 0.164493374992162 s, LLM calls/tokens 0/0. The 229,376-byte RSS
+sample is **not a peak or process-footprint measurement**. This is diagnostic
+completion, not product delivery, correctness, acceptance or closure.
 
-## CAPA and evidence
+- [PRIMARY_RECONCILIATION.json](PRIMARY_RECONCILIATION.json): source/artifact
+  identities, actual counts, code-policy cross-checks and unknowns.
+- [HISTORY.md](HISTORY.md): both complete original reports, byte-preserved inside
+  fenced blocks with their seed hashes; superseded, not execution proof.
+- [NEXT_ARM.md](NEXT_ARM.md): both completed diagnostics and their failed oracles;
+  the frozen preparation/refusal/unrun preimages stay unchanged. **No next arm or
+  replay is authorized.** Source-anchored design-transfer/defer requirements are
+  in REPORT; no frontend/CLI/comprehension claim.
 
-| Finding | Evidence | Disposition |
-|---|---|---|
-| Full scan exhausted resources | Stopped at 187.91 s and 1.49 GB RSS. RepoDoc selected 6,465 frontend files plus 2,238 agent-config files because it ignores neither `.gitignore` nor `node_modules`. | Keep outside the repo; require ignore-file support. |
-| Source-only parsing works | Completed in 2.95 s / 94 MB with 2,585 components, 4,539 edges, and 246 leaves. | Useful only as an experiment input. |
-| Call graph is unsound | A nested frontend `get` helper received 600 callers; it also invented Python/frontend and reverse-layer edges while the import-policy check passed. | Require scoped symbol resolution and zero false layer edges. |
-| LLM errors report false success | Deliberate 401s produced arbitrary `batch_N` groups while the CLI printed `Clustering done`. | Require a nonzero exit and no fallback graph. |
-| Successful clustering is unreadable | The explicitly user-configured model produced 41 flat, duplicated groups with no children. The run used at least 10,001 observable tokens. | Require 8–15 coherent groups and a hierarchy. |
-| Incremental impact explodes | One class-docstring edit expanded to 366 affected components and 13 regenerations, then stalled for five minutes without a receipt. | Require bounded impact matching the changed component. |
+Pinned RepoDoc is v0.1.0 at
+`306becd0f143211c0dde2bdbd480578356280e28`. The private source packet has null
+license metadata and no license file: no copying, adoption, redistribution,
+installation, dependency or CI change. Existing graphs/PNGs stay in gitignored
+`data/issue_runs/23/`; the curated `docs/architecture.md` is unchanged.
 
-Owner for containment/corrective action: repository maintainer. Upstream owns
-parser and clustering defects; a future evaluator owns the preventive rerun.
-
-## Go / no-go gates
-
-| Gate | Result |
-|---|---|
-| Understandable in about 30 seconds | **Fail** — 41 flat groups. |
-| Low enough density to expose smells | **Fail** — 4,539 noisy edges. |
-| Correct against code/import policy | **Fail** — false cross-language and reverse-layer edges. |
-| Answers a useful non-obvious question | **Fail** — reported hubs/cycles do not survive independent checks. |
-| Incremental update follows impact | **Fail** — one edit expanded to 366 components and stalled. |
-| Deterministic GitHub rendering | **Partial** — Mermaid renders, but useful grouping needs path-specific glue. |
-
-The apparent 211 isolates, two multi-node cycles, and high-fan-in hubs all fail
-cross-checks against Vulture and the executable import-policy gate. The existing
-curated Mermaid views plus import, LOC, overlap, and dead-code checks are smaller,
-deterministic, and more trustworthy.
+A future full experiment still needs current KG/hierarchical domain clustering,
+8-15-domain system and triage views with render/visual gates, code-policy-grounded
+smells with dead-code cross-checks, controlled incremental artifact preservation,
+actual runtime/token receipts, and source-naive human comprehension. Existing #7
+ADR/QA/provider/write work is preserved, not accepted as complete by this slice.
+Reviewers provide findings only; **the parent alone accepts or closes**.

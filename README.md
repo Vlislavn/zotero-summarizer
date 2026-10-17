@@ -176,4 +176,7 @@ uv run zotero-summarizer faithbench build --max-builder-windows 64  # larger QA-
   30-paper fixture is unscorable for production inclusion quality (not a 0%-precision result).
 - **[docs/architecture.md](docs/architecture.md)** — how it works, the layering rules, and
   the dev / verification workflow.
+- **[RepoDoc experiment](experiments/repodoc/README.md)** — seed-bound Python-backend KG,
+  failed caller-impact and three failed parser/resolver controls from completed diagnostics.
+  Costs are narrowly scoped, not whole-system evidence. Parent-only acceptance; no dependency or CI integration.
 - **[CHANGELOG.md](CHANGELOG.md)** — notable changes (latest: the guided first-run setup).

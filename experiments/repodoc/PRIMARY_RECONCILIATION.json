@@ -1,0 +1,245 @@
+{
+  "scope": "Source/evidence-only reconciliation of two completed parent-run diagnostics; no imports, tests, runtime, new preparation or replay at this checkpoint. Original preparation/refusal/unrun preimages are unchanged.",
+  "acceptanceAuthority": "Parent alone accepts, integrates, publishes or closes; reviewers supply findings only.",
+  "appInput": {
+    "seed": "data/issue-closure/native-resume43/integration-latency32/seed-receipt.json",
+    "sourceFiles": 1065,
+    "candidate": "f66b78dde325a0fc0db1a0fff13302f7efd5e891",
+    "laneHead": "bd5e26741dd70f3a359b984f759d68b32ac1eab9",
+    "historicalGraphSourcePaths": 423,
+    "historicalPathsPresentInCurrentSource": 423,
+    "historicalComponentSnippetsPresentAsExactSubstrings": 1778,
+    "historicalComponentSnippetsNotPresentAsExactSubstrings": 807,
+    "caveat": "Substring equality is not full-file or extraction identity; retained graph is not a current-repository run."
+  },
+  "artifacts": [
+    {
+      "path": "data/issue_runs/23/backend/data/zotero_summarizer_dependency_graph.json",
+      "SHA256": "3d1d8cdb3927c5d9dbbb14aef0ed217e2fb7bc1cd2ae8896d28ae57c689e7a70",
+      "bytes": 3729885,
+      "nodes": 1799,
+      "dependsOnEntries": 2833
+    },
+    {
+      "path": "data/issue_runs/23/frontend/data/src_dependency_graph.json",
+      "SHA256": "21a240ec76259bab5becaff8698e4729705cdd5af0e789b6c096c23b80038698",
+      "bytes": 852641,
+      "nodes": 413,
+      "dependsOnEntries": 424
+    },
+    {
+      "path": "data/issue_runs/23/triage/data/triage_dependency_graph.json",
+      "SHA256": "a2a99b2b473bf1936b9d65b6b051f83d62e03c78badfb2de6a8f0e0b619d9ca9",
+      "bytes": 438588,
+      "nodes": 188,
+      "dependsOnEntries": 235
+    },
+    {
+      "path": "data/issue_runs/23/source-only/data/zs_repodoc_target2_20260826_dependency_graph.json",
+      "SHA256": "73866a56beabe1249edb11ec93f6c7800cb3d3d7abb863a83f7ee6023f3d8b8b",
+      "bytes": 5466775,
+      "nodes": 2585,
+      "dependsOnEntries": 4539,
+      "nodeTypes": {"function": 2330, "class": 255},
+      "pathGroups": {"zotero_summarizer": 1799, "frontend": 413, "tools": 373},
+      "isolates": 211,
+      "missingEdgeEndpoints": 0,
+      "largestFanIn": {"node": "frontend.src.utils.relevanceBands.get", "callers": 600},
+      "largestFanOut": [
+        {"node": "frontend.src.pages.LibraryReadNext.LibraryReadNext", "callees": 26},
+        {"node": "zotero_summarizer.services.model.classifier_training.train_and_save", "callees": 25},
+        {"node": "zotero_summarizer.services.triage.feeds._tick.run_daemon_tick", "callees": 25}
+      ]
+    },
+    {
+      "path": "data/issue_runs/23/source-only/data/zs_repodoc_target2_20260826_knowledge_graph.json",
+      "SHA256": "ccc1c2b459b38f9abd0290ffc1aaff8f1fc886d21bbc296c2867961b06ddaf6b",
+      "bytes": 5641268,
+      "nodes": 2585,
+      "edges": 4539,
+      "nodeTypes": {"code": 2585},
+      "nodeIdsEqualDependencyGraph": true,
+      "callEdgePairsEqualDependencyGraph": true
+    },
+    {
+      "path": "data/issue_runs/23/source-only/data/zs_repodoc_target2_20260826_module_tree.json",
+      "SHA256": "12b9fa369b2af204cad771b763004ea5047a59aadba8fec0847c94b366e34ea8",
+      "bytes": 14591,
+      "roots": 41,
+      "childGroups": 0,
+      "members": 209,
+      "exactIdMembers": 113,
+      "uniqueNameOnlyMembers": 94,
+      "ambiguousNameMembers": 2,
+      "missingNameMembers": 0,
+      "resolvedNodeTypes": {"class": 207},
+      "caveat": "Name-only matching is diagnostic, not permission to repair or accept module identities."
+    }
+  ],
+  "currentSourceCrossChecks": [
+    {"path": "zotero_summarizer/storage/_repo_feedback.py", "SHA256": "6fd1a672687d07c4a8e9b02a9d86b930b27b0050ec04703342ba7471b704d339", "observation": "get_feedback_events uses conn.execute on the SQLite connection, not faithbench._runner.execute."},
+    {"path": "frontend/src/utils/relevanceBands.js", "SHA256": "b87530de62c708f7747f3c5202cde5914c384bef9c99a76a8bc37493cf9406f2", "observation": "get is a local arrow helper within hydrateFilters, not a globally callable exported function."},
+    {"path": "tools/precommit/check_import_policy.py", "SHA256": "14723db147518af44193902fa8df19d603a7cf5aea8fe90f9d40c20f07ce7270", "observation": "Policy checks static imports with relative/alias resolution. A calls edge is not an import violation. Current policy gate was not executed."},
+    {"path": "docs/architecture.md", "SHA256": "ffbce23ec85ec9e309789bd2df76cab7370406eb4d0ce1055f8604fe1fcbfe9d", "observation": "Unchanged; no verified product architecture correction was needed."}
+  ],
+  "upstream": {
+    "head": "306becd0f143211c0dde2bdbd480578356280e28",
+    "version": "0.1.0",
+    "packet": "data/issue-closure/native-resume43/repodoc-source/source-binding.json",
+    "metadataLicense": null,
+    "licenseFiles": [],
+    "authority": "Current read-source-only inspection of the exact pinned packet; no import/runtime authority here. The prior narrow import exception belonged only to the completed parent-run parser03 diagnostic. Null license is not permission to copy, patch, adopt or redistribute.",
+    "inspectedMechanisms": [
+      "repodoc/src/analysis/call_graph_analyzer.py:207-225 globally resolves function names and attribute suffixes without lexical/language scope.",
+      "repodoc/src/analysis/dependency_graphs_builder.py:24-75 filters clustering leaves to class/interface/struct when any exist; this is not clustering every function.",
+      "repodoc/src/clustering/cluster_modules.py:121-138 returns batch fallback after caught failure; its existence does not prove this historical run's provider outcome.",
+      "repodoc/src/graph/builder.py:12-37 creates calls edges from caller to callee.",
+      "repodoc/src/incremental/incremental_updater.py:136-162 traverses successors of caller-to-callee calls as dependent impact; retained current direction control fails with callee-only impact.",
+      "repodoc/src/analysis/analyzers/python.py:_process_function_node reads positional args only and clears rather than restores nested function context; retained keyword-only/flat-scope counterexamples are separate from updater direction.",
+      "repodoc/cli/commands.py:369-833 regenerates docs with an agent; no no-model graph/view-refresh CLI mode was found in this inspected command."
+    ]
+  },
+  "currentExecution": {
+    "root": "data/issue-validation/wave43/architecture43/kg-impact-01",
+    "status": "existing retained arm inspected; caller-impact oracle FAILED; no execution/replay at this checkpoint",
+    "scope": "366 seed-bound Python-backend files only; not whole-repository/CLI update/clustering",
+    "sourceInputHashesEqualSeed": true,
+    "beforeSnapshotHashesEqualSeed": true,
+    "loadedUpstreamFiles": 22,
+    "loadedUpstreamHashesEqualPinnedSource": true,
+    "provenanceLocation": "receipt.json:loaded_upstream; standalone loaded-source.json is absent",
+    "artifacts": [
+      {"path": "receipt.json", "SHA256": "efe142a9942778f744d1c5896469f620a1c2c085d2e05b7d1ef47528e77d125d", "bytes": 50365},
+      {"path": "before-dependency.json", "SHA256": "3a881de2b3c91361f986638f4fe3d677f4654ee1aeccc549f4316349cee86e12", "bytes": 5089862, "nodes": 2354, "edges": 4120},
+      {"path": "after-dependency.json", "SHA256": "cd32f3f03bb3387e0c970062d24e1f315dc96f1b912584dd357edc15b86f304e", "bytes": 5087577, "nodes": 2354, "edges": 4120},
+      {"path": "before-kg.json", "SHA256": "ecb188b00f22070958c0dbbd6319c04628e4439601a58d9796a02f1d8caeec48", "bytes": 5246310, "nodes": 2354, "edges": 4120},
+      {"path": "after-kg.json", "SHA256": "9376d689c6d049ad1d64aa698689f36ba0eaf59ea95fd8949a469f7530a8e8e2", "bytes": 5243996, "nodes": 2354, "edges": 4120},
+      {"path": "direction-control-kg.json", "SHA256": "25d43cb712b67a877ec7001326eee415e584195bf31d65d6ad13fa6df27ee765", "bytes": 12508, "nodes": 3, "edges": 1}
+    ],
+    "beforeAfterNodeIdsAndCallEdgePairsEqual": true,
+    "changedSnapshotFiles": ["zotero_summarizer/services/triage/select.py"],
+    "changedSourceOrParameterComponents": ["zotero_summarizer.services.triage.select.plateau_select"],
+    "backendAffectedComponents": [
+      "zotero_summarizer.services.triage.select.plateau_select",
+      "zotero_summarizer.services.triage.select.SelectionResult"
+    ],
+    "directionControl": {
+      "expected": ["zotero_summarizer.services.triage.feeds._daily.run_daily_selection", "zotero_summarizer.services.triage.select.plateau_select"],
+      "actual": ["zotero_summarizer.services.triage.select.plateau_select"],
+      "matchesCallerImpact": false,
+      "knownCallerInBackendImpact": false,
+      "isolatedHelperUntouched": true,
+      "mechanism": "Caller-to-callee graph plus successor traversal visits callees, not affected callers; file matching succeeded and no module-tree filter was supplied."
+    },
+    "receiptDurationSeconds": 2.4847991669084877,
+    "receiptLLMCalls": 0,
+    "receiptTokens": 0,
+    "costCaveat": "Inner imports/two parses/graph saves/impact/source collection only; excludes setup/snapshot copying/receipt publication. Separate guard provides sampled resource values for this narrow arm only, not continuous peaks/full-system or universal provider instrumentation.",
+    "guardEvidence": {
+      "root": "data/issue-validation/wave43/architecture43/kg-impact-01-parent-guard02",
+      "artifacts": [
+        {"path": "guard.jsonl", "SHA256": "a0700779337453b7941be45ccb8fb2cce0d9108d1b290f000446d4048e3c5bab"},
+        {"path": "parent-admission.json", "SHA256": "124827872bfb36283344b1bfaadf68607c7c955dab9cbe59543b19c6f6ea5b1f"},
+        {"path": "parent-release.json", "SHA256": "1b24ec6ccd80f5cdc09424a56fcca020f1a52c616df854c7e4af47c68c3f2f74"},
+        {"path": "probe.log", "SHA256": "e58d699eaba50825855b93ccd23cf4d606073990e04302ebfed1f729eba7de92"}
+      ],
+      "maxSampledTreeRSSBytes": 97517568,
+      "maxSampledSwapGrowthBytes": 0,
+      "samplePollSeconds": 1,
+      "parentAdmissionAvailablePercent": 24.63544209798177,
+      "workerRenewalAvailablePercent": 24.536609649658203,
+      "exitCode": 0,
+      "outcome": "completed",
+      "released": true,
+      "remainingGroupMembers": [],
+      "wholeIssueAccepted": false,
+      "oraclePassed": false,
+      "caveat": "Diagnostic completion only, not semantic acceptance. Sampled maximum is not a continuous peak; historical/full-system costs remain UNKNOWN."
+    },
+    "parserCounterexamples": [
+      "Source run_daily_selection has keyword-only feed_library_ids; retained parsed parameters are []. Executed parser03 also misses an added keyword-only parameter; analyzer reads node.args.args only.",
+      "Nested triage._execution.call has a flat module-level graph ID; run_blocking has no graph dependencies despite real post-nested calls. Executed parser03 confirms raw outer asyncio.wait_for missing at line 33 while pre-nested copy_context is present; visitor clears outer context.",
+      "Nested feeds._loop._on_signal is flat; outer run_daemon_loop retains only _load_config, omitting post-nested run_due_feedback.",
+      "Current get_feedback_events still depends_on faithbench._runner.execute although source calls SQLite conn.execute; global receiver-suffix resolution persists."
+    ]
+  },
+  "unknown": [
+    "Historical full-tree durations, RSS and selected-file counts",
+    "Historical clustering provider/model/request outcomes and exact token usage",
+    "Historical incremental change, affected-component/regeneration counts and timeout",
+    "Historical Vulture or import-policy execution receipts",
+    "Current whole-repository KG and clustering",
+    "Current system/domain rendering gates and human comprehension",
+    "Current CLI update/regeneration and unrelated-view preservation"
+  ],
+  "parserExecution": {
+    "root": "data/issue-validation/wave43/architecture43/parser-semantics-03",
+    "guardRoot": "data/issue-validation/wave43/architecture43/parser-semantics-03-parent-guard",
+    "status": "Parent executed; completed/released; three correctness discriminators FAILED. No worker execution/replay or product delivery.",
+    "applicationCandidate": "f66b78dde325a0fc0db1a0fff13302f7efd5e891",
+    "scope": "Two bound source1065 lane files, real pinned analyzer/resolver; no application module execution or whole-repository scan. Not acceptance evidence for a later integration candidate.",
+    "receiptSHA256": "5bd49884d294a98adc0bea12021635c09bdd548a4082028ca1aaa3cce3cde459",
+    "artifacts": [
+      {"path": "authority-frozen.json", "SHA256": "2821e12d1720b8f26ffa89796ba6923dbcf5d01ac0edbd1d5c92af93a3f68feb"},
+      {"path": "next-arm-frozen.md", "SHA256": "d6c338ba1cdfceb7a99a8db88d66d242015d4f78c928adf9ac0b20a2dac19c5b"},
+      {"path": "stdin.py", "SHA256": "65a8ebad9c2b5ee60520f31b43eaa93583315928393dd5f34b86f4b9d37200e9"},
+      {"path": "diagnostic.stdout", "SHA256": "e2a9798e38b1832dfa6bb52645e4290e0f2151474d409120684f1b4debee6d85"},
+      {"path": "guard.jsonl", "SHA256": "dcecd45aea99b9443dd09b02e4c0facff62ee48a7dbc0a6295908ca20286d4a7"},
+      {"path": "parent-release.json", "SHA256": "964f5948c290666fd1ec6528479ddf0e78fcbfb581015a709421a93399e19d08"}
+    ],
+    "sourceInputs": {
+      "zotero_summarizer/services/triage/feeds/_daily.py": "b301acd5c20de45fc5fc8451c897e6101f09ff73045b6e1856d87173968e071a",
+      "zotero_summarizer/services/triage/_execution.py": "412cb21f5ebcaa44464343315846619b6c9b91f29b27cc420ee04b4ea2246875"
+    },
+    "all67PinnedSourcesAndTwoLaneInputsHashVerifiedHere": true,
+    "loadedUpstreamReferences": 19,
+    "loadedReferencesHashVerifiedHere": true,
+    "provenanceLocation": "receipt.json:loaded_upstream; no forced imports at this checkpoint",
+    "keywordOnly": {
+      "sourceBefore": ["feed_library_ids"],
+      "sourceAfter": ["feed_library_ids", "_architecture_probe"],
+      "parsedBefore": [],
+      "parsedAfter": [],
+      "expectedSignatureChangeDetected": true,
+      "actualSignatureChangeDetected": false
+    },
+    "nestedContext": {
+      "expectedRawCall": {"caller": "zotero_summarizer.services.triage._execution.run_blocking", "callee": "asyncio.wait_for", "call_line": 33},
+      "expectedPostNestedCallPresent": true,
+      "actualPostNestedCallPresent": false,
+      "preNestedCopyContextPresent": true,
+      "nestedFlatIdPresent": true
+    },
+    "receiverControl": {
+      "realCalls": 5,
+      "rawReceivers": ["feeds_cfg.get", "selection_cfg.get"],
+      "baselineAllUnresolved": true,
+      "syntheticWitness": "diagnostic_receiver_control.get",
+      "withWitnessAllResolveToSentinel": true,
+      "expectedUnrelatedBareNameAbsorbs": false,
+      "actualUnrelatedBareNameAbsorbs": true,
+      "syntheticWitnessNotApplicationEdge": true
+    },
+    "durationSeconds": 0.164493374992162,
+    "LLMCalls": 0,
+    "tokens": 0,
+    "durationScope": "Inner imports/analysis/provenance/source rechecks; excludes outer setup and receipt publication; not whole-system cost or product smoke.",
+    "guard": {
+      "exitCode": 0,
+      "outcome": "completed",
+      "maxSampledTreeRSSBytes": 229376,
+      "maxSampledSwapGrowthBytes": 0,
+      "pollSeconds": 1,
+      "released": true,
+      "remainingGroupMembers": [],
+      "parentRecordsAll67SourcesAndTwoInputsUnchanged": true,
+      "wholeAcceptance": false,
+      "licenseAdoptionGranted": false,
+      "caveat": "Short diagnostic can finish between one-second samples: 229376 bytes is not actual peak RSS or a meaningful process-footprint estimate. Zero sampled swap growth is not zero total system swap."
+    },
+    "completionIsNotAcceptance": true,
+    "correctnessDiscriminatorsFailed": 3,
+    "frozenPreparationUnchanged": "prepared-parser-03 and authority/Markdown frozen copies retain historical NOT RUN/runtimeGranted=false fields. Actual receipt/guard/release supersede active status for parser03 only; do not rewrite preparation or infer recovery of older unmeasured reports."
+  },
+  "nextAction": "experiments/repodoc/NEXT_ARM.md records completed diagnostics only. No new arm, runner, upstream patch, replay or runtime grant; legal and correctness requirements in REPORT are deferred, not implemented. Fresh readonly review and parent-only integration/acceptance remain required."
+}
