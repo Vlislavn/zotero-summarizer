@@ -99,6 +99,8 @@ fields have one displayed home. Unknown decisions show neutral unavailable copy,
 not an old action rationale, targets or time; evidence panels remain unchanged.
 Missing targets/value/time remain explicit unknowns. Existing policy, scores, cache,
 API and native HTML briefs are unchanged; this is only the React presentation.
+PaperReview admits the projected action once for its verdict, time and reading plan;
+the plan presenter has no separate action-validity policy.
 
 Library keeps Rescore available after a queue-read error, including when the
 display retains a previously scored list. Rescore can rebuild a corrupt score

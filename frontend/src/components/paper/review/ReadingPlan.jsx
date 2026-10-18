@@ -1,8 +1,6 @@
 import { KeyVal, Bullets } from './primitives.jsx';
 
-// The action is already policy-projected by the API; this view only presents it.
 export default function ReadingPlan({ digest, decision }) {
-  if (!['read', 'skim', 'skip'].includes(decision)) return null;
   const opensOriginal = decision !== 'skip';
   const targets = (digest.read_parts || []).filter(Boolean);
   const skips = (digest.skip_parts || []).filter(Boolean);

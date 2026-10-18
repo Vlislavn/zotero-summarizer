@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Reuse one recognized-action predicate for the review verdict, time and reading plan; remove the presenter's duplicate admission branch without changing the displayed fields or unknown-state behavior.
 - Show saved reading targets, skip hints and original-paper value beside the React review verdict without duplication. Unknown decisions withhold cached action advice and time; reuse existing cache/API without new model calls or writes.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.
