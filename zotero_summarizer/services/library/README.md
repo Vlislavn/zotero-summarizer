@@ -196,6 +196,31 @@ the current paper extraction; metadata counts and unlocated/stale handles do not
 claim quote verification. Conversation tails label quotations as prior, not
 verified. This proves source membership, not answer entailment (A134).
 
+### Q&A evidence checkpoints
+
+Ask Paper processes the latest 20 history turns and keeps the four recent turns
+in their existing conversational rendering. Older handles must resolve against
+the current paper extraction. Only when the complete checkpoint is strictly
+shorter than raw history does it replace older prose; otherwise history stays raw.
+The first line is `Earlier evidence checkpoint: ` followed by one JSON array;
+the resolution warning stays on the next line, outside the payload.
+
+Entries contain only `paper_id`, `extraction_version`, `span.start/end`, the full
+`quote_digest` and `input_digest`. Original coordinates, order and repeated
+occurrences survive; client extras are omitted. Supplied string input digests
+are retained exactly, including opaque/empty legacy values. Missing or non-string
+input derives from the actual string history question using the existing
+whitespace-normalized question-only digest; without a string question it is
+`null` (unknown). Derivation does not recover or authenticate the original question,
+and a question hash is not anonymization.
+
+Prior conversation remains escaped untrusted session input, never paper evidence.
+A handle may resolve even when its passage is absent from generation context;
+it cannot bypass the existing quote-in-context and quote-in-original-body checks.
+Generated map/review notes cannot substitute for that original source. No store,
+LLM stage, context budget or retry policy is added. These are source-membership
+and serialization guarantees, not proof of answer entailment or scientific quality.
+
 Metadata-count shortcuts require affirmative whole-paper wording; localized or
 uncertain count questions fall through to grounded Q&A. The artifact currently
 has `figures_count` but no table count, so table-only and combined figure/table
