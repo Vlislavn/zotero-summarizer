@@ -10,6 +10,7 @@ from urllib.parse import unquote, urlparse
 from zotero_summarizer.domain import is_valid_reading_priority
 from zotero_summarizer.integrations._zotero_read_common import (  # noqa: F401  (ZoteroReadError re-exported)
     ZoteroReadError,
+    is_expected_sqlite_io,
     _INJECTION_CHAR_PATTERN,
     _NON_BIBLIOGRAPHIC_TYPES_SQL,
     _USER_LIBRARY_ID_SELECT,
@@ -194,10 +195,13 @@ class ZoteroReader(ZoteroItemsMixin, ZoteroLookupMixin, ZoteroFeedsMixin):
                 last_error = exc
                 if self._is_busy_error(exc):
                     continue
-                raise ZoteroReadError(f"Failed to query Zotero DB: {exc}") from exc
+                raise ZoteroReadError(f"Failed to query Zotero DB: {exc}",
+                                      expected_io=is_expected_sqlite_io(exc)) from exc
             except sqlite3.Error as exc:
-                raise ZoteroReadError(f"Failed to query Zotero DB: {exc}") from exc
-        raise ZoteroReadError(f"Zotero DB is busy: {last_error}") from last_error
+                raise ZoteroReadError(f"Failed to query Zotero DB: {exc}",
+                                      expected_io=is_expected_sqlite_io(exc)) from exc
+        raise ZoteroReadError(f"Zotero DB is busy: {last_error}",
+                              expected_io=is_expected_sqlite_io(last_error)) from last_error
 
     @staticmethod
     def _is_busy_error(exc: sqlite3.OperationalError) -> bool:

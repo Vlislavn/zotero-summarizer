@@ -11,7 +11,20 @@ LOGGER = logging.getLogger("zotero_summarizer.integrations.zotero_write")
 
 
 class ZoteroWriteError(RuntimeError):
-    """Raised when writing to the local Zotero database fails."""
+    """Write failure; only explicitly classified environmental IO is optional."""
+
+    def __init__(self, *args, expected_io: bool = False):
+        super().__init__(*args)
+        self.expected_io = expected_io is True
+
+
+def is_expected_sqlite_io(exc: sqlite3.Error) -> bool:
+    """Machine-coded IO/contention only; schema and unknown errors fail closed."""
+    code = getattr(exc, "sqlite_errorcode", None)
+    return isinstance(code, int) and code & 255 in {
+        sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED, sqlite3.SQLITE_IOERR,
+        sqlite3.SQLITE_FULL, sqlite3.SQLITE_READONLY, sqlite3.SQLITE_CANTOPEN,
+    }
 
 
 @dataclass(frozen=True)

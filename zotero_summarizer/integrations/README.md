@@ -186,3 +186,6 @@ page joining, and the real OnPrem backend on an original generated PDF with
 signed superscript/subscript uncertainty, title/Methods text and a URL.
 Source-length-dependent budgets must use the new extracted length, not old
 Markdown counts. Prompts, settings, limits and models are unchanged.
+
+<!-- PR53 review slice 04 -->
+Review slice 04: Native boundary / 1. Depends on the preceding slice; not release acceptance.
