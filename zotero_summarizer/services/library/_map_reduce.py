@@ -83,6 +83,7 @@ def digest_for_strategy(
     budget: ChunkBudget,
     focus_prompt: str = "",
     response_format: dict[str, Any] | None = None,
+    verification_audit: dict[str, Any] | None = None,
 ) -> PaperDigest:
     """Dispatch ``config.quality_review.chunk_strategy`` to the right digest path.
 
@@ -95,6 +96,10 @@ def digest_for_strategy(
     propagate to deep_review's per-item boundary (never a fabricated review)."""
     from zotero_summarizer.services.library._source_admission import admit_source
 
+    extra = {}
+    if verification_audit is not None:
+        verification_audit.clear()
+        extra['verification_audit'] = verification_audit
     admit_source(full_text)
     strategy = config.quality_review.chunk_strategy
     if strategy == "map_reduce":
@@ -102,12 +107,12 @@ def digest_for_strategy(
             title=title, full_text=full_text, config=config, map_llm=map_llm,
             reduce_llm=reduce_llm, chunk_chars=budget.chunk_chars,
             sub_concurrency=budget.sub_concurrency, focus_prompt=focus_prompt,
-            response_format=response_format,
+            response_format=response_format, **extra,
         )
     return assess_digest(
         title=title, full_text=full_text, config=config, llm=reduce_llm,
         focus_prompt=focus_prompt, max_chars=budget.max_chars, prefix=(strategy == "prefix"),
-        response_format=response_format, verifier_llm=map_llm,
+        response_format=response_format, verifier_llm=map_llm, **extra,
     )
 
 
@@ -122,6 +127,7 @@ def map_reduce_digest(
     sub_concurrency: int = 1,
     focus_prompt: str = "",
     response_format: dict[str, Any] | None = None,
+    verification_audit: dict[str, Any] | None = None,
 ) -> PaperDigest:
     """MAP each chunk on ``map_llm`` (parallel up to ``sub_concurrency``), REDUCE the notes into
     a ``PaperDigest`` on ``reduce_llm``. The reduce reuses ``quality_review.assess_digest`` (its
@@ -133,6 +139,8 @@ def map_reduce_digest(
     from zotero_summarizer.services.library._source_admission import admit_source
     from zotero_summarizer.services.library._review_attempt import observed_client
 
+    if verification_audit is not None:
+        verification_audit.clear()
     admit_source(full_text)
     recorded_map = observed_client(map_llm, 'map')
     chunks = split_chunks(full_text, chunk_chars)
@@ -147,6 +155,8 @@ def map_reduce_digest(
 
     combined = "\n\n".join(f"[chunk {i + 1}/{len(notes)}]\n{note}" for i, note in enumerate(notes))
     extra = {"response_format": response_format} if response_format else {}
+    if verification_audit is not None:
+        extra['verification_audit'] = verification_audit
     digest = assess_digest(
         title=title, full_text=combined, config=config, llm=reduce_llm,
         max_chars=len(combined) + 1, verifier_llm=map_llm,

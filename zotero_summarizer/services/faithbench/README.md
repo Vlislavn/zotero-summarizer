@@ -1,5 +1,9 @@
 # services/faithbench — faithfulness mini-benchmark
 
+`_corpus.chunk_spans` exposes the exact stripped coordinates used by `chunk_text`
+and `PaperChunkIndex`; repeated occurrences remain distinct. Digest audit retention
+reuses these offsets without changing chunks, ranking or semantic judgments.
+
 Validates that the local **deep_review** model answers questions about a paper
 and writes review claims **faithfully** (grounded in the paper, no
 hallucination) — the go/no-go gate before building the Library-tab deep-review

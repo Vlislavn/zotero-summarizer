@@ -78,3 +78,21 @@ def test_current_review_requires_matching_source_and_generation_identity(monkeyp
     )
     assert _review_cache.get_current_review("CURRENT") is None
     assert _review_cache.current_review_keys() == set()
+
+
+@pytest.mark.parametrize('raw', [b'{', b'{"reviews": []}', b'\xff'])
+def test_readonly_cache_reader_preserves_malformed_original(raw, tmp_path):
+    path = _review_cache._cache_path()
+    path.write_bytes(raw)
+    with pytest.raises(ValueError, match='Invalid deep-review cache'):
+        _review_cache._read_all(readonly=True)
+    assert path.read_bytes() == raw
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['deep_reviews.json']
+
+
+def test_explicit_audit_export_missing_review_never_creates_a_store(tmp_path):
+    from zotero_summarizer.api.errors import APIError
+    with pytest.raises(APIError) as error:
+        _review_cache.export_review_audit('ABCDEFGH')
+    assert error.value.status_code == 404
+    assert not _review_cache._cache_path().exists()

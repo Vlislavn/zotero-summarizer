@@ -188,6 +188,19 @@ def _try_rebuild_render(item_key: str) -> None:
         LOGGER.warning("auto-rebuild after deep review failed for %s: %s", item_key, exc)
 
 
+def _write_digest_note(item_key: str, digest: PaperDigest) -> tuple[bool, str | None]:
+    from zotero_summarizer.services.library import review_detail
+    if review_detail.classify_item_key(item_key) != review_detail.SOURCE_LIBRARY:
+        return False, None
+    try:
+        from zotero_summarizer.services.zotero.zotero import zotero_upsert_digest_note
+        zotero_upsert_digest_note(item_key, digest)
+        return True, None
+    except Exception as exc:  # noqa: BLE001 — note write must not fail the digest
+        LOGGER.warning("digest note write for %s failed: %s", item_key, exc)
+        return False, f"{type(exc).__name__}: {exc}"
+
+
 def _review_one(
     item: dict[str, Any],
     *,
@@ -207,14 +220,10 @@ def _review_one(
     progress_sink: Any = None,
     provenance: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """Condensed paper DIGEST (what it's about + how to use it + quality) for one
-    library item. ``None`` when the item vanished from Zotero (caller skips it).
+    """Review one item: explicit PDF override wins over its attachment.
 
-    PDF source (precedence): an injected ``item['pdf_path']`` (review-fleet cache via
-    the university browser/OA chain) > Zotero's local attachment (``detail['pdf_path']``).
-    With neither we mark ``needs_pdf`` and do nothing else (cheap, no doomed fetch). The
-    digest is also written to Zotero as one short note (best-effort; in-app digest
-    unaffected by a note-write failure).
+    Missing items return None; missing PDFs report needs_pdf without acquisition.
+    Accepted original-source evidence accompanies the policy-adjusted digest.
     """
     item_key = str(item["item_key"])
     detail = reader.get_item_detail(item_key)
@@ -222,10 +231,13 @@ def _review_one(
         return None
 
     title = str(detail.get("title") or item.get("title") or "") or "Untitled"
-    # An injected cache path (fleet's university/OA acquisition) wins over the
-    # Zotero attachment — the decouple that lets a verdict happen while Zotero is open.
     pdf_path = str(item.get("pdf_path") or detail.get("pdf_path") or "")
     source_kind = "override" if item.get("pdf_path") else ("library" if pdf_path else "none")
+    from zotero_summarizer.services.library._review_identity import build_review_identity, _source_sha
+    from zotero_summarizer.services.library._digest_audit import bind_cached_audit
+    review_identity = build_review_identity(
+        config=config, pdf_path=pdf_path, source_kind=source_kind, focus_prompt=focus_prompt)
+    verification_audit: dict[str, Any] = {}
 
     digest_dump = quality_dump = goal_dump = paper_type_dump = section_overlay = code_link_dump = None
     model_read_decision = ""
@@ -237,7 +249,6 @@ def _review_one(
         sink = progress_sink if progress_sink is not None else (lambda _p: None)
         reporter = _deep_review_progress.ReviewReporter(item_key, title, sink)
         reporter.phase("extract")
-        # Extraction failures and empty bodies are recorded by this item's worker.
         text = extractor.extract_text(pdf_path).strip()
         if not text:
             raise ValueError("PDF extraction returned no text")
@@ -245,13 +256,12 @@ def _review_one(
             qr = config.quality_review
             max_chars = int(qr.lean_max_text_chars if lean_tier else qr.max_text_chars)
             reporter.phase("digest", is_call=True)
-            # chunk_strategy dispatch (rank/prefix/map_reduce) in _map_reduce.digest_for_strategy.
             digest = _map_reduce.digest_for_strategy(
                 title, text, config, map_llm=llm_map or llm, reduce_llm=llm_digest or llm,
                 budget=_map_reduce.ChunkBudget(
                     max_chars=max_chars, chunk_chars=qr.map_chunk_chars, sub_concurrency=sub_concurrency,
                 ),
-                focus_prompt=focus_prompt, response_format=response_format)
+                focus_prompt=focus_prompt, response_format=response_format, verification_audit=verification_audit)
             digest_dump = digest.model_dump()
             quality_dump, goal_dump, paper_type_dump, section_overlay, code_link_dump = _deep_review_layers.extra_layers(_deep_review_layers.ExtraLayersCtx(
                 item_key=item_key, title=title, pdf_path=pdf_path, text=text,
@@ -266,23 +276,16 @@ def _review_one(
                 digest_dump, quality_dump, goal_dump,
             )
             digest = PaperDigest.model_validate(digest_dump)
+            if _source_sha(pdf_path) != review_identity['source_sha256']:
+                raise ValueError('Review source changed during verification')
             reporter.phase("note")
-            from zotero_summarizer.services.library import review_detail
-            if review_detail.classify_item_key(item_key) == review_detail.SOURCE_LIBRARY:
-                try:
-                    from zotero_summarizer.services.zotero.zotero import zotero_upsert_digest_note
-                    zotero_upsert_digest_note(item_key, digest)
-                    note_written = True
-                except Exception as exc:  # noqa: BLE001 — note write must not fail the digest
-                    note_error = f"{type(exc).__name__}: {exc}"
-                    LOGGER.warning("digest note write for %s failed: %s", item_key, exc)
+            note_written, note_error = _write_digest_note(item_key, digest)
             reporter.summary()
 
-    from zotero_summarizer.services.library._review_identity import build_review_identity
-    return {
+    return bind_cached_audit({
         "review_contract_version": REVIEW_CONTRACT_VERSION,
-        "review_identity": build_review_identity(
-            config=config, pdf_path=pdf_path, source_kind=source_kind, focus_prompt=focus_prompt),
+        "review_identity": review_identity,
+        "verification_audit": verification_audit or None,
         "provenance": provenance or {},
         "digest": digest_dump,
         "quality": quality_dump,
@@ -293,16 +296,13 @@ def _review_one(
         "model_read_decision": model_read_decision,
         "reading_policy_flags": reading_policy_flags,
         "needs_pdf": not bool(pdf_path),
-        # Set by _review_worker from the acquire result when a fetch was DECLARED-but-
-        # gated (paywall/no session) — the per-paper pane shows login_url as a
-        # click-to-open sign-in link. Default off (most reviews have a PDF).
         "needs_login": False,
         "login_url": "",
         "gate_relevance": item.get("gate_relevance"),
         "reviewed_at": now_iso_z(),
         "zotero_note_written": note_written,
         "zotero_note_error": note_error,
-    }
+    })
 
 
 def _load_prestige_context() -> tuple[dict[str, Any], float | None]:
