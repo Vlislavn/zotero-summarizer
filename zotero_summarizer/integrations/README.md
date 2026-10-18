@@ -201,3 +201,6 @@ Review slice 15: Search and discovery / 1. Depends on the preceding slice; not r
 
 <!-- PR53 review slice 16 -->
 Review slice 16: Research feed and Telegram / 1. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 17 -->
+Review slice 17: Research feed and Telegram / 2. Depends on the preceding slice; not release acceptance.
