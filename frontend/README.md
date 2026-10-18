@@ -17,6 +17,7 @@ Vite proxies `/api/*` to `http://localhost:8000`; `npm run build` writes
 
 - **Library** — Read next, labels, reviews, figures, paper Q&A, and acquisition.
 - **Search** — query-driven discovery and review.
+- **Weekly** — read-only saved RSS research digests, engineering cards, paper links, and JSON/Markdown downloads.
 - **Today** — feed triage and Zotero filing. Author h-index badges render only for positive OpenAlex evidence; unresolved author metadata is not shown as `h=0`.
 - **Settings** — AI, research profile, Zotero, sources, and advanced controls.
 - **Ops** — feeds, jobs, pending writes, diagnostics, and retraining.
@@ -60,6 +61,23 @@ by title. The query panel consumes `plan.display` so tight/broad variants and
 OpenReview are not omitted. Backend and frontend must be deployed together.
 Today/Search's shared collection picker consumes the API's `items` tree, including
 nested collections; it does not mistake the response envelope for the tree.
+
+## Saved weekly digests
+
+Open **Weekly** (`/weekly`), select a saved CLI run, or reopen its bookmark
+`/weekly?run=<bundle-name>`. The latest 100 bundles are listed; older retained
+runs remain reachable by URL. **Refresh saved runs** refreshes both list and
+selection after CLI publication. A valid zero-card digest, a missing report and
+an unreadable/unsupported report remain distinct. Legacy missing provenance and
+ideas stay unknown/unrecorded; missing reviews do not imply missing PDFs.
+Cards expose project use, artifacts, reproducibility, ideas and selection audit,
+with current-paper links through the existing `/paper/:itemKey` route.
+
+This page needs the local server and does not persist reports for offline use.
+It never builds a report, acquires sources, calls AI or writes Zotero. Use the
+existing `research-feed run` CLI to publish a new bundle. The focused tests are
+`src/pages/Weekly.test.jsx`, `src/api/researchFeedApi.test.js` and the optional
+`tests/test_research_feed_browser.py` built-app check using the existing fixture.
 
 ## Setup and AI
 

@@ -3,21 +3,12 @@ import { NavLink } from 'react-router-dom';
 import { publishStatus, resolveConflict, syncStatusEvent } from '../offlineStore.js';
 import { syncNow } from '../syncClient.js';
 
-// Primary tabs: Library / Today / Settings / Ops (Increment 3 nav collapse —
-// 8 routes folded to 3 daily surfaces + one Ops surface). Library (Read next) is
-// the landing surface and the leftmost "home" tab (Serial Position / Jakob's
-// Law: the default view IS the first tab), since it carries both daily workflows
-// (Read-next queue + Meaning search) AND the folded-in Batch-label mode (the
-// former Annotate page). Today (feed cull) sits next, then Settings. Ops is the
-// rarely-used operator surface (Feed review + Triage jobs + Pending changes) on
-// its own tab — Hick's Law: the bar stays at four flat choices, no disclosure.
-// Search (Targeted Search) sits next to Library: both are research entry points —
-// Library is the *push* surface (cull what feeds brought), Search is the *pull*
-// surface (go find papers on a topic). Kept a flat choice, no disclosure.
+// Library is the daily landing page; Weekly opens retained research snapshots.
 const PRIMARY = [
   { to: '/library', label: 'Library' },
   { to: '/search', label: 'Search' },
   { to: '/today', label: 'Today' },
+  { to: '/weekly', label: 'Weekly' },
   { to: '/settings', label: 'Settings' },
   { to: '/ops', label: 'Ops' },
 ];

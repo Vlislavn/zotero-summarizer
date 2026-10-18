@@ -134,6 +134,13 @@ zotero-summarizer prefetch-models` once while online — see [docs/usage.md](doc
 - **Annotate — label.** When you actually read one, give it the fine label
   (`must` / `should` / `could` / `don't`). That's your ground truth; the model retrains on it.
 
+- **Weekly — browse saved digests.** Open **Weekly**, choose a saved research-feed
+  CLI run, follow its paper links, or download canonical JSON and Markdown.
+  Bookmark `/weekly?run=<bundle-name>` to reopen it. Refresh saved runs after
+  publishing with `uv run zotero-summarizer research-feed run --from 2026-08-22
+  --to 2026-08-29 --cached-only`. Browsing is read-only and needs the local server;
+  missing reviews, unknown evidence and unreadable reports stay explicit.
+
 Open PDFs and take notes in Zotero as usual; come back here to triage.
 
 ## Configuration
