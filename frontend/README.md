@@ -346,3 +346,6 @@ Review slice 28: Frontend offline and navigation / 1. Depends on the preceding s
 
 <!-- PR53 review slice 29 -->
 Review slice 29: Frontend offline and navigation / 2. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 30 -->
+Review slice 30: Frontend offline and navigation / 3. Depends on the preceding slice; not release acceptance.

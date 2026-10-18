@@ -10,6 +10,7 @@ vi.mock('./pages/Today.jsx', () => ({ default: () => <p>Today destination</p> })
 vi.mock('./pages/Settings.jsx', () => ({ default: () => <p>Settings destination</p> }));
 vi.mock('./pages/Library.jsx', () => ({ default: () => <p>Library destination</p> }));
 vi.mock('./pages/Search.jsx', () => ({ default: () => <p>Search destination</p> }));
+vi.mock('./pages/Weekly.jsx', () => ({ default: () => <p>Weekly destination</p> }));
 vi.mock('./pages/PaperReviewPage.jsx', () => ({ default: () => <p>Paper destination</p> }));
 vi.mock('./pages/Ops.jsx', () => ({ default: () => <p>Ops destination</p> }));
 vi.mock('./pages/SetupFlow.jsx', () => ({ default: () => <p>Setup destination</p> }));
@@ -21,6 +22,12 @@ function CurrentLocation() {
   const { pathname, search } = useLocation();
   return <output data-testid="location">{pathname}{search}</output>;
 }
+
+it('opens a retained weekly digest deep link', async () => {
+  render(<MemoryRouter initialEntries={['/weekly?run=weekly-synthetic']}><CurrentLocation /><App /></MemoryRouter>);
+  await screen.findByText('Weekly destination');
+  expect(screen.getByTestId('location').textContent).toBe('/weekly?run=weekly-synthetic');
+});
 
 describe('legacy route compatibility', () => {
   it('redirects Feed Review to Ops while preserving the pile filter and other query values', async () => {

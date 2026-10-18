@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchConfig, updateConfig } from '../api/settingsApi.js';
 import { configToFormState, formStateToConfig } from '../utils/configForm.js';
 import { humanizeError } from '../utils/humanizeError.js';
+import { invalidateSetupDoctor, invalidateSetupDoctorAfterWriteError } from '../utils/setupDoctorState.js';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import { Banner } from '../components/form/Fields.jsx';
 import Button from '../components/ui/Button.jsx';
@@ -17,6 +18,12 @@ import CalibrationCard from '../components/settings/CalibrationCard.jsx';
 import DeploymentCard from '../components/settings/DeploymentCard.jsx';
 import RssFeedsSection from '../components/settings/RssFeedsSection.jsx';
 
+function focusSettingsSection(target) {
+  const section = document.getElementById(target);
+  section?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  section?.querySelector('input, textarea, select, button')?.focus({ preventScroll: true });
+}
+
 export default function Settings() {
   const queryClient = useQueryClient();
   const { status } = useSetupStatus();
@@ -25,9 +32,21 @@ export default function Settings() {
 
   const [form, setForm] = useState(null);
   const [savedBanner, setSavedBanner] = useState('');
-  const [modelsOpen, setModelsOpen] = useState(false);
+  const [modelsOpen, setModelsOpen] = useState(() => window.location.hash === '#ai-models');
   const [universityOpen, setUniversityOpen] = useState(() => window.location.hash === '#university-access');
   const [pathForm, setPathForm] = useState({ zotero_data_dir: '', pdf_root: '' });
+  const formReady = form !== null;
+
+  useEffect(() => {
+    function openFromHash() {
+      const target = window.location.hash.slice(1);
+      if (target === 'ai-models') setModelsOpen(true);
+      if (formReady && target) focusSettingsSection(target);
+    }
+    openFromHash();
+    window.addEventListener('hashchange', openFromHash);
+    return () => window.removeEventListener('hashchange', openFromHash);
+  }, [formReady]);
 
   const seededFormState = useMemo(
     () => configToFormState(configQuery.data),
@@ -63,6 +82,7 @@ export default function Settings() {
 
   const saveMutation = useMutation({
     mutationFn: (payload) => updateConfig(payload),
+    onError: (error) => invalidateSetupDoctorAfterWriteError(queryClient, error),
     onSuccess: (resp) => {
       if (resp && resp.config) {
         queryClient.setQueryData(['runtime-config'], resp.config);
@@ -71,6 +91,7 @@ export default function Settings() {
         queryClient.invalidateQueries({ queryKey: ['runtime-config'] });
       }
       queryClient.invalidateQueries({ queryKey: ['setup-status'] });
+      void invalidateSetupDoctor(queryClient);
       setSavedBanner('Saved successfully');
       setTimeout(() => setSavedBanner(''), 3000);
     },
@@ -83,6 +104,11 @@ export default function Settings() {
 
   function updatePathField(key, value) {
     setPathForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function openSetupSettings(target) {
+    if (target === 'ai-models') setModelsOpen(true);
+    focusSettingsSection(target);
   }
 
   function handleSave(e) {
@@ -138,10 +164,11 @@ export default function Settings() {
         </p>
       </header>
 
-      <ReadinessStrip />
-
       <form onSubmit={handleSave} className="space-y-4">
-        <DeploymentCard />
+        <DeploymentCard onOpenAiSettings={() => openSetupSettings('ai-models')}
+          onOpenSettings={openSetupSettings}>
+          <ReadinessStrip />
+        </DeploymentCard>
         <AiModelsSection
           status={status}
           enabled={form.llm_enabled}
@@ -160,7 +187,9 @@ export default function Settings() {
           onUpdatePath={updatePathField}
         />
 
-        <RssFeedsSection />
+        <section id="rss-feeds" aria-label="RSS sources" className="scroll-mt-20">
+          <RssFeedsSection />
+        </section>
 
         <details id="university-access" open={universityOpen} onToggle={(event) => setUniversityOpen(event.currentTarget.open)}
           className="glass rounded-2xl border border-slate-200 p-4 scroll-mt-20">

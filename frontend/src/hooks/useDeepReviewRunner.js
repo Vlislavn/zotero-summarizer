@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { runDeepReview, fetchDeepReviewStatus } from '../api/libraryApi.js';
 import { fetchLlmReachability } from '../api/settingsApi.js';
+import useServerAvailable from './useServerAvailable.js';
 
 // One per-paper poll for both review surfaces. Query keys isolate navigation;
 // a failed status request ends the spinner and leaves an explicit retry action.
@@ -9,20 +10,14 @@ export default function useDeepReviewRunner(itemKey, { deep, onDone, autoRun = f
   const client = useQueryClient();
   const autoRunFiredFor = useRef(null);
   const lastRunning = useRef(null);
-  const [online, setOnline] = useState(() => navigator.onLine);
+  const online = useServerAvailable();
   useEffect(() => {
-    const disconnected = () => setOnline(false);
     const reconnected = () => {
-      setOnline(true);
       client.invalidateQueries({ queryKey: ['deep-review-status', itemKey] });
       client.invalidateQueries({ queryKey: ['deep-review-reachability'] });
     };
-    window.addEventListener('offline', disconnected);
     window.addEventListener('online', reconnected);
-    return () => {
-      window.removeEventListener('offline', disconnected);
-      window.removeEventListener('online', reconnected);
-    };
+    return () => window.removeEventListener('online', reconnected);
   }, [client, itemKey]);
   const statusQuery = useQuery({
     queryKey: ['deep-review-status', itemKey],

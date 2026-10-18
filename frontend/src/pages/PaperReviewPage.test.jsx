@@ -14,7 +14,7 @@ it('keeps Generate disabled and does not claim a review failed on an offline rel
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
   vi.stubGlobal('fetch', vi.fn(async (path) => {
     if (path === '/api/golden/review-detail?item_key=P1') return new Response(JSON.stringify({
-      item_key: 'P1', title: 'Offline paper', tags: [], collections: [], has_pdf: false,
+      item_key: 'P1', title: 'Offline paper', tags: [], collections: [], has_pdf: false, questions: [],
     }), { status: 200 });
     if (path === '/api/zotero/collections' || path === '/api/zotero/tags?limit=300') {
       return new Response(JSON.stringify({ items: [] }), { status: 200 });
@@ -36,6 +36,45 @@ it('keeps Generate disabled and does not claim a review failed on an offline rel
   client.clear();
 });
 
+it.each(['page', 'compact'])('%s displays the API reading plan without generating another review', async (surface) => {
+  const unexpected = [];
+  const deep = { model_read_decision: 'read', reading_policy_flags: ['abstract_only'], digest: {
+    basis: 'abstract', read_decision: 'skim', read_why: 'A provisional abstract-only recommendation.',
+    read_parts: ['Figure 3 — compare site splits'], skip_parts: ['Appendix A — notation'],
+    estimated_read_minutes: 8, original_value: 'The exact held-out protocol.',
+  } };
+  vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('fetch', vi.fn(async (path, options = {}) => {
+    let data;
+    if (path === '/api/golden/review-detail?item_key=PLAN9') data = {
+      item_key: 'PLAN9', title: 'Synthetic reviewed paper', tags: [], collections: [],
+      has_pdf: false, questions: [], deep_review: deep,
+    };
+    else if (path === '/api/zotero/collections' || path === '/api/zotero/tags?limit=300') data = { items: [] };
+    else if (path === '/api/library/related/PLAN9') data = { status: 'empty', items: [], saved_seed: false };
+    else if (path === '/api/library/render/PLAN9' || path === '/api/library/deep-review/status?item_key=PLAN9') data = { status: 'idle' };
+    else if (path === '/api/admin/llm-reachability') data = { stages: [{ stage: 'deep_review', enabled: false }] };
+    else { unexpected.push([path, options.method || 'GET']); return new Response('{}', { status: 500 }); }
+    return new Response(JSON.stringify(data), { status: 200 });
+  }));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/paper/PLAN9']}>
+    <Routes><Route path="/paper/:itemKey" element={surface === 'page'
+      ? <PaperReviewPage /> : <InlineAnnotate itemKey="PLAN9" />} /></Routes>
+  </MemoryRouter></QueryClientProvider>);
+
+  const plan = await screen.findByRole('region', { name: 'Reading plan' });
+  expect(plan.closest('details')).toBeNull();
+  for (const text of [...deep.digest.read_parts, ...deep.digest.skip_parts, deep.digest.original_value]) {
+    expect(plan.textContent).toContain(text);
+  }
+  expect(screen.getByText('SKIM', { exact: true })).toBeTruthy();
+  expect(screen.queryByText('READ', { exact: true })).toBeNull();
+  expect(screen.getByText('8 min', { exact: true })).toBeTruthy();
+  expect(unexpected).toEqual([]);
+  client.clear();
+});
+
 it('the single relevance heading counts supported goals, not merely retrieved passages', async () => {
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
   vi.stubGlobal('fetch', vi.fn(async (path) => {
@@ -45,7 +84,7 @@ it('the single relevance heading counts supported goals, not merely retrieved pa
       { goal: 'C', retrieval_state: 'hit', relevant: false, summary: 'No support.' },
     ];
     const data = path === '/api/golden/review-detail?item_key=P1'
-      ? { item_key: 'P1', title: 'Paper', tags: [], collections: [], has_pdf: false, deep_review: { goal_summaries: goals } }
+      ? { item_key: 'P1', title: 'Paper', tags: [], collections: [], has_pdf: false, questions: [], deep_review: { goal_summaries: goals } }
       : path === '/api/admin/llm-reachability' ? { stages: [{ stage: 'deep_review', enabled: false }] }
         : path === '/api/zotero/collections' || path === '/api/zotero/tags?limit=300' ? { items: [] } : { status: 'idle' };
     return new Response(JSON.stringify(data), { status: 200 });
@@ -63,7 +102,7 @@ it('the single relevance heading counts supported goals, not merely retrieved pa
 it.each(['page', 'compact'])('%s keeps verdict comments until an explicit edit is saved', async (surface) => {
   const writes = [], unexpected = [];
   const detail = {
-    item_key: 'P1', title: 'Paper', authors: [], tags: [], collections: [], has_pdf: false,
+    item_key: 'P1', title: 'Paper', authors: [], tags: [], collections: [], has_pdf: false, questions: [],
     verdict: { id: 1, item_key: 'P1', user_priority: 'must_read', comment: 'critical rationale' },
   };
   // Valid JSON with the wrong shape must not break Prev/Next navigation.
@@ -74,6 +113,7 @@ it.each(['page', 'compact'])('%s keeps verdict comments until an explicit edit i
     if (path === '/api/golden/review-detail?item_key=P1') data = detail;
     else if (path === '/api/zotero/collections') data = { items: [] };
     else if (path === '/api/zotero/tags?limit=300') data = { items: [] };
+    else if (path === '/api/library/related/P1') data = { status: 'empty', items: [], saved_seed: false };
     else if (path === '/api/library/render/P1') data = { status: 'idle' };
     else if (path === '/api/library/deep-review/status?item_key=P1') data = { status: 'idle' };
     else if (path === '/api/admin/llm-reachability') data = { stages: [{ stage: 'deep_review', enabled: false }] };
@@ -101,6 +141,7 @@ it.each(['page', 'compact'])('%s keeps verdict comments until an explicit edit i
   await screen.findByRole('heading', { name: 'Your verdict' });
   expect(screen.queryByRole('button', { name: 'Must read' })).toBeNull();
   if (surface === 'page') {
+    expect(await screen.findByRole('heading', { name: 'Related in my library' })).toBeTruthy();
     const jump = screen.getByRole('link', { name: 'Your verdict' });
     expect(document.querySelector(jump.getAttribute('href')).contains(
       screen.getByRole('heading', { name: 'Your verdict' }),

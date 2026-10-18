@@ -530,6 +530,7 @@ export default function Today() {
                 <PaperCard
                   key={paper.item_key}
                   paper={paper}
+                  selectionPolicy={slate?.selection_policy}
                   selected={selectedIds.has(paper.item_id)}
                   onToggleSelect={toggleSelect}
                   llmEnabled={llmEnabled}
