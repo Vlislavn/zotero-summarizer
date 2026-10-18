@@ -42,3 +42,6 @@ shortlist 1–100, cards 1–20, source rows 1–5,000 and wait timeout 1–86,4
 Only omitted shortlist/card overrides use profile defaults; zero is not omission.
 
 `MIN_MAP_CHUNK_CHARS` is the shared 1000-character validation/recovery floor; the 8000-character default is unchanged.
+
+<!-- PR53 review slice 01 -->
+Review slice 01: Core contracts / 1. Depends on the preceding slice; not release acceptance.

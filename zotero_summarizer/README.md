@@ -45,3 +45,6 @@ retrain/recompute in the selected project or explicitly copy trusted artifacts.
 Subpackages each have their own README. Start with
 [docs/architecture.md](../docs/architecture.md) for the end-to-end mental model,
 then the [README](../README.md) for setup + usage.
+
+<!-- PR53 review slice 01 -->
+Review slice 01: Core contracts / 1. Depends on the preceding slice; not release acceptance.
