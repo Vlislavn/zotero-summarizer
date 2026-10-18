@@ -20,8 +20,9 @@ Prestige validation uses the shared ZIP/legacy-joblib artifact resolver.
 | `eval_temporal_objective.py` | offline eval of the temporal-split training objective; reuses production's aligned training matrix and train-only engagement-column rebuild for shuffled folds and both temporal objectives. |
 | `eval_quality_promote.py` | offline eval of the quality→must_read promotion (`rank_blend.promote_band`) against firewalled user verdicts — precision + flooding per (goal, relevance) floor. Gates the `quality_promote` flip. |
 | `eval_reading_policy.py` | offline 17-paper, user-labelled gate for the conservative reading cap: before/after read rate, full-read precision, idea rescue, and zero high-friction/weak-evidence full reads. Uses `reading_policy_fixture_v2.json`, captured from matching real cache entries with unchanged human annotations; `--check` retains the original thresholds. This is not a full recommendation-accuracy gate. |
-| `eval_research_feed.py` | honest Research Intelligence acceptance gate: 30-paper fixture currently lacks frozen pre-human machine/review inputs, so production inclusion, artifact, project-use and review-time metrics are `null`/unscorable (nonzero exit), not invented 0/100% scores. Frozen machine projections, when supplied, rank by score/confidence/title; separate 17-paper reading-policy agreement is labelled diagnostic only. |
+| `eval_research_feed.py` · `_research_feed_replay.py` | Version-2 conditional replay over complete frozen pre-human B1-output cohorts, reusing the canonical whole-cohort ranker once before top ten. Human labels stay separate. Missing cohorts are unscorable/null; malformed complete inputs fail loudly. Historical v1 math and the separate 17-paper reading-policy agreement are diagnostic only; absent full admission/review/artifact/time evidence keeps `passes=false` and `--check` nonzero. |
 | `validate_prestige_upgrade.py` | sanity-check the OpenAlex prestige enrichment. |
+| `method_validation/` | non-shipped source-bound public-eval client, bounded RSS practitioner caller and offline criterion/evidence decision contract; strict generator-only IO, shared source/prompt primitives, no daemon/selection/semantic proof or new runner. See its [contract](method_validation/README.md). |
 | `precommit/` | the repo's custom pre-commit checks (LOC cap, layering, README freshness, dead-code, AI-slop). |
 
 **Benchmarking discipline + the memory-safety protocol live in `docs/benchmarking.md` (local-only, gitignored — not in the repo)** — read it before running any local sweep (this box has been thrashed by unsupervised local benchmarking).
@@ -32,8 +33,10 @@ all policy-consumed inputs from all 17 matching legacy reviews, including unknow
 with source timestamps and cache/annotation SHA-256 hashes. It uses no new model
 calls and never derives input signals from expected labels. The compact projection
 was checked against full cache entries for identical actions, flags and metrics.
-Research-feed action agreement reads the same v2 snapshot; its separate inclusion
-oracle leakage and incomplete acceptance criteria remain tracked as A163.
+Research-feed action agreement reads the same v2 snapshot against current reading
+policy. Complete-cohort replay has separate source/label joins; conditional ranking
+precision and eligible recall do not certify native admission, capture authenticity,
+artifact accuracy or usefulness. The shipped 30-paper fixture remains unscorable.
 
 `eval_prompt_variant.py` compares existing faithbench reports without model work.
 An unmeasured (`null`) trap rate blocks comparison, even if another QA condition
@@ -51,6 +54,3 @@ The sweep requires `PAPERS`, `REF_PROVIDER`, and `REF_MODEL`. Its default is the
 remote budget phase only. Local phases (`PHASES=2` or `both`) additionally require
 explicit `CANDIDATES` and `CANDIDATE_PROVIDER`; no local model is selected implicitly.
 Provider names refer to caller-owned saved configuration; this does not rename it.
-
-<!-- PR53 review slice 31 -->
-Review slice 31: Launch and tool wiring / 1. Depends on the preceding slice; not release acceptance.
