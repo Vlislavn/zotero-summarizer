@@ -19,7 +19,7 @@ services/ ─calls→ integrations/ ─talks to→  Zotero DB | PDFs | LLM API |
 | `zotero_write.py` | `ZoteroWriter`: WAL-consistent backup and apply dispatcher. An explicit transaction encloses per-row savepoints; lock errors roll back the entire batch before retry, invalid rows return individual failures, and unexpected errors propagate. WAL setup failures are not swallowed. Backup pruning follows a successful write. |
 | `_zotero_write_items.py` · `_zotero_write_feed.py` · `_zotero_write_fields.py` · `_zotero_write_attachments.py` · `_zotero_write_tags.py` · `_zotero_write_collections.py` | writer mixins (item creation/materialization · idempotent feed-read bookkeeping · `set_field` single-field upsert e.g. Call Number · native imported_url attachment · tag/note helpers · collections) |
 | `_zotero_write_common.py` | `ZoteroWriteError` + LOGGER + `resolve_user_library_item_id` — the single guard every write that targets an item by key routes through, scoping resolution to `type='user'` so a feed item's key can never be mutated/parented into the user library (`required=False` for the best-effort batch remove). Mirrors `_USER_LIBRARY_ID_SELECT` on the read side (leaf) |
-| `pdf.py` · `pdf_fetch.py` | extract local PDFs as plain analysis text using OnPrem's existing `pdf_markdown=False` backend; fetch OA PDFs with size/timeout/magic caps. Automatic destinations/redirects use the shared public-IP pinning boundary; proxy env is ignored. Cached paths remain usable offline. |
+| `pdf.py` · `pdf_fetch.py` | extract local PDFs as plain analysis text using OnPrem's existing `pdf_markdown=False` backend; triage captures immutable selected text, verbatim SDK annotation URI tuples and full-document SHA-256 together; fetch OA PDFs with size/timeout/magic caps. Automatic destinations/redirects use the shared public-IP pinning boundary; proxy env is ignored. Cached paths remain usable offline. |
 | `browser_fetch.py` | Institutional-access PDF acquisition with optional Patchright/Playwright Chromium and a persistent login profile. Bounded decoded CDP streams preserve HTML/JS/cookies and follow citation metadata plus Download PDF links; PDF bytes are identified by magic even with a wrong MIME type. A declared-but-unavailable scholarly PDF does not become a rendered paywall stub. HTML-only article review uses bounded text-only snapshots, not Chromium printing. The canonical `article_snapshot_path(url, cache_dir)` identifies only those derivatives: they use `cache_dir/article-snapshots/<full SHA-256(raw URL)>.pdf`; captured publisher PDFs from either browser entrypoint use the unchanged root-level `cache_dir/<first 16 hex SHA-256(raw URL)>.pdf` key. Persistent snapshots are reused only with `render_fallback=True`, after the source-PDF cache check. Legacy prefixed root-level snapshot files remain untouched; there is no alias, migration, or deletion. See the [browser article memory boundary](../../docs/browser-article-memory-boundary.md). Browser sessions share the public-only proxy and one lock; `channel` selects Chrome/bundled Chromium. Optional cookie-store import and headed login readiness remain here. Missing dependency/non-PDF returns `None`; oversized bodies and unexpected acquisition errors propagate. |
 | [`_browser_response.py`](./_browser_response.py) | Bounded decoded Fetch/CDP response capture and proxy authentication. A captured PDF requires actual `%PDF-` bytes within `max_bytes`, independent of MIME; a typed missing-PDF status is recorded only when the main-frame response declares `application/pdf` and returns HTTP 400+ (except 407). |
 | [`_browser_article.py`](./_browser_article.py) | Complete admitted-scope `document.body` text-node collection in a CDP isolated world, in ≤8 KiB UTF-8 chunks with text-byte, DOM-node and deadline limits. It does not collect images, layout, CSS-generated content, embedded frames, or shadow trees. Mutation, partial traversal, invalid/empty text, or exhausted limits fail closed rather than returning a prefix. |
@@ -181,6 +181,18 @@ guarantee is implied; primary evidence still needs checking.
 Callers consume strings: deep review, triage summarization, search full text,
 and the faithbench corpus; QA consumes the extracted raw body. No Markdown
 schema is required at this boundary. Presentation retains its own PDF parser.
+Triage's `capture_pdf_source` hashes in finite 64 KiB reads (opening size plus
+one growth-detection byte) before and after extraction/annotation reading. Changed
+identity/content, malformed SDK data and read/hash/extraction failures raise before
+corpus/model work. This detects ordinary file changes, not a hostile concurrent
+writer restoring identical bytes between checks. SDK annotation strings retain
+order and duplicates without trimming, unwrapping or URI normalization; their
+HTTP(S) admission belongs to triage, not presentation's sanitized link list.
+Abstract-only calls do not import the PDF reader or probe a path. Other existing
+text-only consumers retain `extract_text`; no adapter/backend setting changes.
+`tests/test_pdf_source_authority.py` and `tests/test_method_pdf_authority.py`
+cover capture identity, annotation authority and failure sequencing on owned PDFs.
+
 Prevention: `tests/test_pdf_analysis_text.py` checks the exact loader flag,
 page joining, and the real OnPrem backend on an original generated PDF with
 signed superscript/subscript uncertainty, title/Methods text and a URL.

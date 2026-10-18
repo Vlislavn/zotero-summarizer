@@ -9,7 +9,7 @@ from typing import Any
 
 from zotero_summarizer.api.errors import APIError, ExtractionError
 from zotero_summarizer.integrations.llm import LLMClient
-from zotero_summarizer.integrations.pdf import PdfExtractor
+from zotero_summarizer.integrations.pdf import PdfExtractor, PdfSource, capture_pdf_source
 from zotero_summarizer.models import (
     GoalsConfig,
     RefinedSummary,
@@ -23,6 +23,8 @@ from zotero_summarizer.services.model import scoring
 from zotero_summarizer.services.triage.prompts import DEFAULT_REFINE_PROMPT, DEFAULT_TRIAGE_PROMPT
 from zotero_summarizer.services.triage._execution import check_cancelled
 from zotero_summarizer.services.triage._json_output import parse_typed_output
+from zotero_summarizer.services.triage._method_admission import _admit_method_artifacts, _validate_pdf_authority
+from zotero_summarizer.services.triage._method_context import original_uri_context
 from zotero_summarizer.services._common import (
     LOGGER,
     build_log_prefix,
@@ -34,7 +36,7 @@ from zotero_summarizer.services._common import (
 )
 
 
-def _extract_pdf_text(pdf_path: str) -> str:
+def _extract_pdf_source(pdf_path: str) -> PdfSource:
     pdf_candidate = Path(pdf_path).expanduser().resolve()
     allowed_root = settings().pdf_root.expanduser().resolve()
     if allowed_root not in [pdf_candidate, *pdf_candidate.parents]:
@@ -52,10 +54,10 @@ def _extract_pdf_text(pdf_path: str) -> str:
     if extractor is None:
         raise ExtractionError("PDF extractor is not initialized")
 
-    text = extractor.extract_text(pdf_candidate)
-    if not text.strip():
+    source = capture_pdf_source(pdf_candidate, extractor)
+    if not source.text.strip():
         raise ExtractionError("Extracted document content is empty")
-    return text
+    return source
 
 
 def _build_refine_prompt(config: GoalsConfig, req: SummarizeRequest, paper_text: str) -> str:
@@ -164,6 +166,7 @@ def run_abstract_dry(
     """Run the real abstract prompts without reading or writing app/Zotero state."""
     return _score_abstract(
         config, req, llm, corpus.empty_corpus_match_result(), "doctor", perf_counter(), None,
+        persist_rejections=False,
     )
 
 
@@ -175,11 +178,16 @@ def _score_abstract(
     prefix: str,
     started: float,
     template_override: str | None = None,
+    *,
+    persist_rejections: bool = True,
 ) -> SummarizeResponse:
     abstract_text = (req.abstract or "").strip()
     if not abstract_text:
         return _abstract_only_empty_response("Feed item missing abstract")
-    refined = _refine_with_retry(llm, config, req, abstract_text, prefix)
+    refined = _refine_with_retry(
+        llm, config, req, abstract_text, prefix, original_text=req.abstract or "",
+        persist_rejections=persist_rejections,
+    )
     triage = _run_triage(
         llm, config, req, refined, corpus_context,
         template_override=template_override,
@@ -245,13 +253,20 @@ def _refine_with_retry(
     paper_text: str,
     prefix: str,
     cancel_event: Event | None = None,
+    *,
+    original_text: str,
+    persist_rejections: bool = True,
+    original_pdf: PdfSource | None = None,
+    source_context: str = "",
 ) -> RefinedSummary:
+    _validate_pdf_authority(original_text, original_pdf)
     check_cancelled(cancel_event)
-    refine_prompt = _build_refine_prompt(config, req, paper_text)
+    refine_prompt = _build_refine_prompt(config, req, paper_text) + source_context
     refined_text = to_text(llm.prompt(refine_prompt))
     check_cancelled(cancel_event)
+    phase = "first"
     try:
-        return parse_typed_output(refined_text, RefinedSummary)
+        refined = parse_typed_output(refined_text, RefinedSummary)
     except ValueError as exc:
         LOGGER.warning("%s refine JSON parse failed, retrying", prefix)
         retry_prompt = (
@@ -265,7 +280,11 @@ def _refine_with_retry(
         check_cancelled(cancel_event)
         retry_text = to_text(llm.prompt(retry_prompt))
         check_cancelled(cancel_event)
-        return parse_typed_output(retry_text, RefinedSummary)
+        refined = parse_typed_output(retry_text, RefinedSummary)
+        phase = "repair"
+    return _admit_method_artifacts(
+        refined, original_text, req, phase=phase, persist_rejections=persist_rejections, original_pdf=original_pdf,
+    )
 
 
 def _run_triage(
@@ -339,7 +358,8 @@ def run_pipeline(
 
     log_context(prefix, "pipeline started pdf_path=%s", req.pdf_path)
     extract_started = perf_counter()
-    raw_text = _extract_pdf_text(req.pdf_path)
+    original_pdf = _extract_pdf_source(req.pdf_path)
+    raw_text = original_pdf.text
     check_cancelled(cancel_event)
     log_context(prefix, "pdf extracted chars=%d in %.2fs", len(raw_text), perf_counter() - extract_started)
 
@@ -361,6 +381,7 @@ def run_pipeline(
         log_context(prefix, "fast-rejected by corpus threshold=%.3f", config.corpus.similarity_threshold)
         return _fast_reject_response(req, corpus_context, raw_text)
 
+    source_context = ""
     max_direct_chars = 80_000
     if len(raw_text) > max_direct_chars:
         from zotero_summarizer.services.library._map_reduce import _map_chunk, split_chunks
@@ -375,11 +396,17 @@ def run_pipeline(
             check_cancelled(cancel_event)
         paper_text = "\n\n".join(f"[chunk {index}/{len(notes)}]\n{note}"
                                   for index, note in enumerate(notes, 1))
+        check_cancelled(cancel_event)
+        source_context = original_uri_context(raw_text, max_chars=config.quality_review.map_chunk_chars)
+        check_cancelled(cancel_event)
     else:
         paper_text = raw_text
 
     refine_started = perf_counter()
-    refined = _refine_with_retry(llm, config, req, paper_text, prefix, cancel_event)
+    refined = _refine_with_retry(
+        llm, config, req, paper_text, prefix, cancel_event, original_text=raw_text, original_pdf=original_pdf,
+        source_context=source_context,
+    )
     log_context(prefix, "refine completed in %.2fs", perf_counter() - refine_started)
 
     triage_started = perf_counter()
