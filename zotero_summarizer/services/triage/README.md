@@ -213,3 +213,6 @@ limitations and optional artifacts remain available without new calls or scoring
 changes. Default refinement preserves conditional effect directions and Results
 exceptions, failed versus absent validation, and repository versus reproducibility
 evidence. Instruction-presence tests are not scientific-faithfulness evaluations.
+
+<!-- PR53 review slice 09 -->
+Review slice 09: Source admission / 1. Depends on the preceding slice; not release acceptance.

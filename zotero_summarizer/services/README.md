@@ -176,3 +176,6 @@ deleted. The removed `import_corpus_items` wrapper had only this caller.
 The listing is an in-memory snapshot and commits are per batch, not an atomic
 whole-library/cross-database snapshot. A later failed batch leaves earlier
 successful batches committed; inferred feedback still follows the corpus commit.
+
+<!-- PR53 review slice 09 -->
+Review slice 09: Source admission / 1. Depends on the preceding slice; not release acceptance.

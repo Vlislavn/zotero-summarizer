@@ -192,3 +192,6 @@ Review slice 04: Native boundary / 1. Depends on the preceding slice; not releas
 
 <!-- PR53 review slice 05 -->
 Review slice 05: Provider capabilities / 1. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 09 -->
+Review slice 09: Source admission / 1. Depends on the preceding slice; not release acceptance.
