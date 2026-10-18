@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Review slice 78: Consolidate package documentation / 6. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 77: Consolidate package documentation / 5. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 76: Consolidate package documentation / 4. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 75: Consolidate package documentation / 3. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
