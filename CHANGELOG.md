@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Preserve null unknown/absent assessment evidence through engineering-card publication instead of dropping valid papers or neighboring proposals. Keep configured cached-only no-startup/explicit-queue controls; missing config or newly missing assessment remains an explicit failed qualification.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.
 - Fold goal findings without losing originals; disclose saved source basis and unknown reviewed extent. Factor literal warning frames into one introduction with expanded scope/context, qualifiers and source links; retain original wording. Compact cards remain unchanged.
@@ -21,7 +22,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ### Fixed
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
-- Keep weekly-card reproduction effort unknown when code is available without an effort assessment. Preserve reported blockers, artifact URLs, the existing schema and saved reports; do not infer a one-week estimate or add another model call.
+- Generate source-bound RSS project proposals in existing review calls; reuse successful stages, recompute cards and retain errors/v1 reports. Cached qualification reads existing goals without startup. Keep effort unknown or explicitly unverified; preserve blockers and artifact links.
 - A124: verify section one-liners in a second batch against the same first 700 source characters (up to 24 sections); omit unsupported summaries. Scripted checks do not establish live semantic accuracy.
 - A136: use figure metadata only for affirmative whole-paper figure-count wording; route scoped, uncertain, table-only, combined, and unmatched counts to grounded Q&A. Live scope accuracy is unmeasured.
 - A142: validate persisted and injected review-fleet proposals; skip malformed rows, retain valid neighbors, and calibrate only valid human/proposal pairs.

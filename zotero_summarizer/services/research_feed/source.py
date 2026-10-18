@@ -2,11 +2,67 @@
 from __future__ import annotations
 
 import sqlite3
+import json
+import math
 from collections.abc import Iterable, Iterator
 from datetime import datetime
 from itertools import islice
 
 from zotero_summarizer.models import ResearchCandidate
+from zotero_summarizer.domain import normalize_doi
+from zotero_summarizer.services.library.app_library_reader import AppLibraryReader
+
+
+class CandidateReader(AppLibraryReader):
+    """Explicit weekly selection, including RSS papers without processed history."""
+    def __init__(self, db_path, candidates):
+        super().__init__(db_path)
+        self.candidates = {candidate.source_id: candidate for candidate in candidates}
+
+    def get_item_detail(self, item_key):
+        candidate = self.candidates[item_key]
+        return {**(super().get_item_detail(item_key) or {}), "item_key": item_key,
+                "title": candidate.title, "abstract": candidate.abstract, "doi": candidate.doi or "",
+                "url": candidate.url, "authors": candidate.authors, "pdf_path": None, "has_pdf": False}
+
+
+def number(value, default=0.0, minimum=0.0, maximum=5.0):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        raise ValueError("boolean is not a score")
+    result = float(value)
+    if not math.isfinite(result) or not minimum <= result <= maximum:
+        raise ValueError("stored score out of range")
+    return result
+
+
+def summary(row, field="summary"):
+    payload = json.loads((row or {}).get("shap_contribs_json") or "{}")
+    if not isinstance(payload, dict):
+        raise ValueError("stored triage payload must be an object")
+    value = payload.get(field, {})
+    if not isinstance(value, dict):
+        raise ValueError("stored triage field must be an object")
+    return value
+
+
+def admit_history(candidate, row):
+    if row is None:
+        return candidate
+    if (row.get("stable_feed_key") != candidate.source_id or row.get("source_type") != "app_rss"
+            or not candidate.title.strip() or row.get("title") != candidate.title):
+        raise ValueError("triage history source/title mismatch")
+    stored_doi, abstract = row.get("doi"), row.get("abstract")
+    if stored_doi is not None and not isinstance(stored_doi, str):
+        raise ValueError("triage history DOI invalid")
+    if stored_doi and candidate.doi and normalize_doi(stored_doi) != normalize_doi(candidate.doi):
+        raise ValueError("triage history DOI mismatch")
+    if abstract is not None and not isinstance(abstract, str):
+        raise ValueError("triage history abstract invalid")
+    if abstract and candidate.abstract.strip() and abstract != candidate.abstract:
+        raise ValueError("triage history abstract changed")
+    return candidate.model_copy(update={"abstract": candidate.abstract or abstract or ""})
 
 
 def _parse_date(value: object) -> datetime | None:

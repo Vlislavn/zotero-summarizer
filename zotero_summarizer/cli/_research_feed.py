@@ -28,7 +28,7 @@ def _run(args: argparse.Namespace) -> int:
         generate_reviews=not args.cached_only, review_timeout_seconds=args.review_timeout,
     )
     print(json.dumps(result, indent=2))
-    return 0
+    return 1 if result.get("failed", 0) else 0
 
 
 def _validate_research_feed_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
@@ -54,7 +54,7 @@ def register_research_feed(subparsers: argparse._SubParsersAction) -> None:
     run.add_argument("--shortlist-budget", type=int, default=None)
     run.add_argument("--card-budget", type=int, default=None)
     run.add_argument("--review-timeout", type=int, default=3600)
-    run.add_argument("--cached-only", action="store_true", help="Do not generate missing deep reviews")
+    run.add_argument("--cached-only", action="store_true", help="Project current source-qualified reviews only; no model work")
     run.add_argument(
         "--queue-zotero", action="store_true",
         help="Queue idempotent tags for already materialized items (default: dry-run)",

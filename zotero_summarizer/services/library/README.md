@@ -436,6 +436,22 @@ Cached empty digests without `needs_pdf` are stale and recomputed; legitimate
 no-PDF entries remain current. Dense goal-encoder inference failures disable only
 that retrieval leg so an available BM25 leg can still produce a result.
 
+## Same-response research-feed proposals
+
+Explicit `feed_contexts` must match the complete requested item-key set; stored
+paper content cannot select the schema. `quality_review` and all three strategy
+paths co-produce optional typed project/reproduction/impact assessments in the
+existing digest response. Only the final accepted base attempt contributes.
+Malformed optional content or non-original quotes retain the verified base without
+another call; weekly qualification reports the assessment failure separately.
+`_feed_assessment` binds context, producer/schema, original-text hash and exact
+spans to the current review identity, digest, timestamp and configured provenance.
+The existing `_review_cache` remains the writer. No extra source extraction or
+judge is used during projection; source bytes/config freshness belong to the
+current-review reader. Literal membership is not entailment: proposals and effort
+estimates are AI-generated/unverified, never measured reproduction or user data.
+Review source hashing no longer trusts equal size/mtime as equal bytes.
+
 ## Source admission and attempt diagnostics
 
 `_source_admission` checks the untruncated original before strategy dispatch or

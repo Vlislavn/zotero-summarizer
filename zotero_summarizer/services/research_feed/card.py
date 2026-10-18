@@ -7,7 +7,6 @@ from zotero_summarizer.models import (
     ResearchCandidate,
     ResearchEngineeringCard,
     ResearchFeedTriage,
-    ResearchIdea,
     ResearchProfile,
 )
 from zotero_summarizer.services.library.review_fleet.propose import effective_read_decision
@@ -32,19 +31,6 @@ def topic_tags(text: str, profile: ResearchProfile) -> list[str]:
             if any(term in lower for term in _TOPIC_TERMS.get(topic, (topic,)))]
 
 
-def _project_use(project: str, topics: list[str]) -> str:
-    lower = project.lower()
-    if "activation" in lower and "interpretability" in topics:
-        return "activation_oracle_extension"
-    if "biomedical" in lower and ({"biology", "genomics"} & set(topics)):
-        return "biomedical_agent_extension"
-    if "harness" in lower and ({"agents", "tool-use", "planning"} & set(topics)):
-        return "integrate_into_harness"
-    if "evaluation" in lower and ({"evaluation", "benchmarks", "verification"} & set(topics)):
-        return "use_as_benchmark"
-    return "not_applicable"
-
-
 def _reproducibility(review: dict[str, Any], code_urls: list[str]) -> tuple[str, list[str]]:
     quality = review.get("quality") or {}
     missing = [str(value) for value in (quality.get("missing_critical") or []) if str(value).strip()]
@@ -55,12 +41,49 @@ def _reproducibility(review: dict[str, Any], code_urls: list[str]) -> tuple[str,
     return "unknown", []
 
 
+def _assessment_fields(assessment: dict) -> dict:
+    fields = {"project_assessment_status": assessment["status"], "project_uses": [],
+              "project_use_notes": ["Project mechanisms and validation experiments have not been assessed."],
+              "research_ideas": [], "research_impact": 0, "production_impact": 0, "personal_novelty": 0}
+    if assessment["status"] == "not_assessed":
+        return fields
+    content = assessment["content"]
+    fields.update(project_assessments=content["projects"], assessment_evidence=assessment["evidence"],
+                  assessment_origin="ai_generated", scientific_verification="unverified",
+                  reproduction_assessment=content["reproduction"], impact_assessment=content["impact"],
+                  project_use_notes=["AI-generated project proposals; scientifically unverified."])
+    for record in content["projects"]:
+        fields["project_use_notes"].append(f"{record['target_project']} — {record['assessment']}: {record['rationale']}")
+        if record["use_kind"] is not None and record["use_kind"] not in fields["project_uses"]:
+            fields["project_uses"].append(record["use_kind"])
+        if record["assessment"] == "applicable":
+            fields["project_use_notes"].append(
+                f"{record['mechanism']} → {record['target_component']}; change: {record['proposed_change']}; "
+                f"validate: {record['minimal_validation_experiment']}")
+            fields["research_ideas"].append({"proposed_change": record["proposed_change"],
+                "source_paper_id": record["source_id"], "target_project": record["target_project"],
+                "minimal_validation_experiment": record["minimal_validation_experiment"]})
+    reproduction, impact = content["reproduction"], content["impact"]
+    if reproduction is not None:
+        fields.update(reproducibility_tier=reproduction["tier"],
+                      reproducibility_rationale="AI estimate, unverified: " + reproduction["rationale"],
+                      missing_reproduction_inputs=reproduction["missing_inputs"])
+    if impact is not None:
+        fields.update(research_impact=impact["research"], production_impact=impact["production"],
+                      personal_novelty=impact["personal_novelty"])
+    return fields
+
+
 def build_card(
     candidate: ResearchCandidate,
     triage: ResearchFeedTriage,
     review: dict[str, Any],
     profile: ResearchProfile,
+    *, assessment: dict | None = None,
 ) -> ResearchEngineeringCard:
+    from zotero_summarizer.services.library import _feed_assessment
+    if assessment is None:
+        assessment = _feed_assessment.qualify(review, _feed_assessment.context_for(candidate.source_id, profile))
     digest, quality = review.get("digest") or {}, review.get("quality") or {}
     code = review.get("code_link") or {}
     code_urls = list(candidate.code_urls)
@@ -74,17 +97,14 @@ def build_card(
     worth, flags = effective_read_decision(
         digest, quality, goal_summaries=review.get("goal_summaries"),
     )
-    uses = [_project_use(project, topics) for project in triage.matched_projects]
-    uses = list(dict.fromkeys(use for use in uses if use != "not_applicable")) or ["not_applicable"]
-    relevance = str(digest.get("relevance") or triage.rationale)
-    use_notes = [f"{project}: {relevance}" for project in triage.matched_projects] or ["No concrete project fit found."]
-    implementations = [str(value).strip() for value in (digest.get("implementation") or []) if str(value).strip()]
-    target = triage.matched_projects[0] if triage.matched_projects else "not_applicable"
-    ideas = [ResearchIdea(
-        proposed_change=idea, source_paper_id=candidate.source_id, target_project=target,
-        minimal_validation_experiment=f"Compare one existing {target} task with and without this change.",
-    ) for idea in implementations[:3]]
     tier, missing = _reproducibility(review, code_urls)
+    fields = {"reproducibility_tier": tier, "missing_reproduction_inputs": missing,
+              "reproducibility_rationale": "Reproduction effort has not been assessed." if not missing else "; ".join(missing),
+              **_assessment_fields(assessment)}
+    fields["missing_reproduction_inputs"] = list(dict.fromkeys([*missing, *fields["missing_reproduction_inputs"]]))
+    if any(str(value).strip() for value in quality.get("missing_critical") or []) and assessment.get("content", {}).get("reproduction") is not None:
+        fields.update(reproducibility_tier="blocked", reproducibility_rationale=
+                      "; ".join(missing) + "; " + fields["reproducibility_rationale"])
     return ResearchEngineeringCard(
         source_id=candidate.source_id,
         problem=str(digest.get("tldr") or candidate.abstract[:500] or candidate.title),
@@ -93,13 +113,7 @@ def build_card(
         contribution_kind=triage.contribution_kind, topic_tags=topics,
         code_urls=code_urls, dataset_urls=candidate.dataset_urls, model_urls=candidate.model_urls,
         benchmark_names=[candidate.title] if "benchmark" in triage.contribution_kind else [],
-        reproducibility_tier=tier,
-        reproducibility_rationale=("Reproduction effort has not been assessed." if not missing else "; ".join(missing)),
-        missing_reproduction_inputs=missing, project_uses=uses, project_use_notes=use_notes,
-        research_impact=max(0, min(5, int(digest.get("significance") or 0))),
-        production_impact=min(5, 2 + int(bool(implementations)) + int(bool(code_urls))),
-        personal_novelty=max(0, min(5, int(digest.get("novelty") or 0))),
-        worth_reading=worth or "unknown", research_ideas=ideas,
+        **fields, worth_reading=worth or "unknown",
         evidence_gaps=list(dict.fromkeys([
             *review.get("reading_policy_flags", []), *flags,
             *[str(value) for value in (quality.get("red_flags") or []) if str(value).strip()],

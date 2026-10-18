@@ -5,7 +5,9 @@ from datetime import datetime
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, TypeAdapter, field_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator, model_validator
+
+from zotero_summarizer.models.triage import PaperDigest
 
 
 TOPIC_TAXONOMY = frozenset({
@@ -89,6 +91,91 @@ ProjectUse = Literal[
 ]
 
 
+class FeedReviewContext(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    source_id: str = Field(min_length=1)
+    profile: ResearchProfile
+
+    @model_validator(mode="after")
+    def _keys(self) -> FeedReviewContext:
+        keys = self.profile.projects
+        if not self.source_id.strip() or any(not key.strip() for key in keys) or len(set(keys)) != len(keys):
+            raise ValueError("feed context requires nonblank unique source/project keys")
+        return self
+
+
+class FeedProjectAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    source_id: str
+    target_project: str
+    assessment: Literal["applicable", "not_applicable", "unknown"]
+    use_kind: ProjectUse | None
+    rationale: str = Field(min_length=1)
+    mechanism: str
+    target_component: str
+    proposed_change: str
+    minimal_validation_experiment: str
+    evidence_quote: str
+
+    @model_validator(mode="after")
+    def _use_contract(self) -> FeedProjectAssessment:
+        proposal = (self.mechanism, self.target_component, self.proposed_change, self.minimal_validation_experiment)
+        if not self.rationale.strip():
+            raise ValueError("assessment requires rationale")
+        if self.assessment == "applicable":
+            if self.use_kind in (None, "not_applicable") or not all(value.strip() for value in (*proposal, self.evidence_quote)):
+                raise ValueError("positive use requires mechanism, component, change, experiment and quote")
+        elif any(proposal) or self.use_kind != ("not_applicable" if self.assessment == "not_applicable" else None):
+            raise ValueError("nonpositive assessment cannot propose a use")
+        if self.assessment != "unknown" and not self.evidence_quote.strip():
+            raise ValueError("assessed use requires original evidence")
+        return self
+
+
+class _FeedWarrant(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    rationale: str = Field(min_length=1)
+    evidence_quote: str = Field(min_length=1)
+
+    @field_validator("rationale", "evidence_quote")
+    @classmethod
+    def _nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("rationale and quote must be nonblank")
+        return value
+
+
+class FeedReproduction(_FeedWarrant):
+    tier: Literal["one_day", "one_week", "multi_week", "blocked", "unknown"]
+    missing_inputs: list[str]
+
+
+class FeedImpact(_FeedWarrant):
+    research: int = Field(ge=0, le=5)
+    production: int = Field(ge=0, le=5)
+    personal_novelty: int = Field(ge=0, le=5)
+
+
+class FeedAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    projects: list[FeedProjectAssessment]
+    reproduction: FeedReproduction | None
+    impact: FeedImpact | None
+
+
+class FeedDigestResponse(PaperDigest):
+    """Explicit feed-only response; optional failure never retries the base digest."""
+    feed_assessment: FeedAssessment | None = None
+
+    @field_validator("feed_assessment", mode="wrap")
+    @classmethod
+    def _optional_assessment(cls, value, handler):
+        try:
+            return handler(value)
+        except ValidationError:
+            return None
+
+
 class ResearchEngineeringCard(BaseModel):
     source_id: str
     problem: str
@@ -105,6 +192,13 @@ class ResearchEngineeringCard(BaseModel):
     missing_reproduction_inputs: list[str] = Field(default_factory=list)
     project_uses: list[ProjectUse] = Field(default_factory=list)
     project_use_notes: list[str] = Field(default_factory=list)
+    project_assessment_status: Literal["not_assessed", "assessed", "partial"] = "not_assessed"
+    project_assessments: list[FeedProjectAssessment] = Field(default_factory=list)
+    assessment_origin: Literal["ai_generated"] | None = None
+    scientific_verification: Literal["unverified"] | None = None
+    assessment_evidence: dict[str, dict | None] = Field(default_factory=dict)
+    reproduction_assessment: FeedReproduction | None = None
+    impact_assessment: FeedImpact | None = None
     research_impact: int = Field(ge=0, le=5)
     production_impact: int = Field(ge=0, le=5)
     personal_novelty: int = Field(ge=0, le=5)

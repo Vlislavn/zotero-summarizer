@@ -41,4 +41,12 @@ types are also used by `research_feed.parse_run_budgets` at CLI/service entry:
 shortlist 1–100, cards 1–20, source rows 1–5,000 and wait timeout 1–86,400 seconds.
 Only omitted shortlist/card overrides use profile defaults; zero is not omission.
 
+`FeedReviewContext` selects same-response `FeedDigestResponse` explicitly. Typed
+project proposals require mechanism/component/change/experiment and original
+quotes; reproduction/impact remain nullable. Cards add assessment/evidence and
+unverified-origin fields without changing saved v1 report keys or rewriting old
+JSON. Unknown/absent assessment evidence spans remain null in cards as in the
+producer/qualifier; they do not discard a paper or valid neighboring proposals.
+Legacy numeric impact zero is not evidence of measured zero benefit.
+
 `MIN_MAP_CHUNK_CHARS` is the shared 1000-character validation/recovery floor; the 8000-character default is unchanged.

@@ -1,31 +1,12 @@
 """On-demand DEEP review of the top unread library picks (Stage-2 "Read next").
 
-A heavier, opt-in companion to ``reading_queue`` (which only scores abstracts
-with the gate). For each requested item this produces a single **condensed paper
-digest** from the LOCAL PDF via ``services.quality_review.assess_digest`` — what
-the paper is about + how to use it (read/skip + why, parts to read, relevance to
-the user's goals, controversies, impact, unknown-unknowns, implementation) plus
-a quality grade + 5 dimensions. No separate relevance re-score (it contradicted
-the gate and confused users); the digest is the whole output.
+One opt-in local-PDF digest per item, cached in deep_reviews.json and surfaced
+by review_detail, with best-effort Zotero note writeback. No separate relevance
+scorer. The provider-aware shared pool serializes local work and bounds remote
+concurrency; keyed jobs expose progress and single-flight submission.
 
-Results land in ``deep_reviews.json`` keyed by ``item_key`` and are surfaced by
-``review_detail.build_library_detail``. The digest is also upserted to the Zotero
-item as one short note (best-effort).
-
-**Concurrency: per-item jobs over one provider-aware pool** (mirrors
-``paper_render``). Each requested paper becomes its own ``_JOBS[item_key]`` entry
-with its OWN live progress, run on a shared ``ThreadPoolExecutor`` sized by
-``deep_review_fleet_concurrency``: a **local** model runs 1 at a time (the 2nd
-paper QUEUES — one on-device model can't serve two reviews without thrashing host
-RAM), a **remote** model runs up to its ``max_sub_concurrency`` concurrently. So
-you can deep-review a second paper while the first is still running, and each
-paper's panel polls ``status(item_key)`` for ITS own progress (not a global one).
-Re-submitting a paper that's already running is a no-op (per-item single-flight).
-
-Empty/partial results are valid: a paper with no local PDF is marked
-``needs_pdf`` and nothing else runs — an honest "no full text", not a masked
-error. A per-item failure is recorded on that item's job (with the connectivity
-hint) and never affects another paper's review.
+Missing PDFs remain needs_pdf, not scientific judgments; per-item failures are
+recorded on their own jobs without affecting another paper's review.
 """
 from __future__ import annotations
 
@@ -206,6 +187,7 @@ def _review_one(
     sub_concurrency: int = 1,
     progress_sink: Any = None,
     provenance: dict[str, Any] | None = None,
+    feed_context: Any = None, feed_out: dict | None = None,
 ) -> dict[str, Any] | None:
     """Condensed paper DIGEST (what it's about + how to use it + quality) for one
     library item. ``None`` when the item vanished from Zotero (caller skips it).
@@ -216,6 +198,7 @@ def _review_one(
     digest is also written to Zotero as one short note (best-effort; in-app digest
     unaffected by a note-write failure).
     """
+    from zotero_summarizer.services.library._review_identity import build_review_identity
     item_key = str(item["item_key"])
     detail = reader.get_item_detail(item_key)
     if detail is None:
@@ -226,6 +209,8 @@ def _review_one(
     # Zotero attachment — the decouple that lets a verdict happen while Zotero is open.
     pdf_path = str(item.get("pdf_path") or detail.get("pdf_path") or "")
     source_kind = "override" if item.get("pdf_path") else ("library" if pdf_path else "none")
+    source_identity = build_review_identity(config=config, pdf_path=pdf_path, source_kind=source_kind,
+                                            focus_prompt=focus_prompt) if feed_context is not None else None
 
     digest_dump = quality_dump = goal_dump = paper_type_dump = section_overlay = code_link_dump = None
     model_read_decision = ""
@@ -251,7 +236,8 @@ def _review_one(
                 budget=_map_reduce.ChunkBudget(
                     max_chars=max_chars, chunk_chars=qr.map_chunk_chars, sub_concurrency=sub_concurrency,
                 ),
-                focus_prompt=focus_prompt, response_format=response_format)
+                focus_prompt=focus_prompt, response_format=response_format,
+                **({"feed_context": feed_context, "feed_out": feed_out} if feed_context is not None else {}))
             digest_dump = digest.model_dump()
             quality_dump, goal_dump, paper_type_dump, section_overlay, code_link_dump = _deep_review_layers.extra_layers(_deep_review_layers.ExtraLayersCtx(
                 item_key=item_key, title=title, pdf_path=pdf_path, text=text,
@@ -278,11 +264,12 @@ def _review_one(
                     LOGGER.warning("digest note write for %s failed: %s", item_key, exc)
             reporter.summary()
 
-    from zotero_summarizer.services.library._review_identity import build_review_identity
+    final_identity = build_review_identity(config=config, pdf_path=pdf_path, source_kind=source_kind, focus_prompt=focus_prompt)
+    if source_identity is not None and source_identity != final_identity:
+        raise ValueError("feed review source changed during generation")
     return {
         "review_contract_version": REVIEW_CONTRACT_VERSION,
-        "review_identity": build_review_identity(
-            config=config, pdf_path=pdf_path, source_kind=source_kind, focus_prompt=focus_prompt),
+        "review_identity": final_identity,
         "provenance": provenance or {},
         "digest": digest_dump,
         "quality": quality_dump,
@@ -412,11 +399,17 @@ def _review_worker(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str)
                         "source_url": acquired.source_url,
                     },
                 })
+        from zotero_summarizer.services.library import _feed_assessment
+        context = (ctx.get("_feed_contexts") or {}).get(item_key)
+        feed_out = {}
+        if context is not None:
+            kwargs.update(feed_context=context, feed_out=feed_out)
         entry = _review_one(
             item, focus_prompt=focus_prompt,
             progress_sink=lambda prog: _set_job_progress(item_key, prog), **kwargs,
         )
         if entry is not None:
+            _feed_assessment.bind(entry, feed_out)
             if item.get("acquired_pdf"):
                 entry["acquired_pdf"] = item["acquired_pdf"]
             if acquired is not None and not item.get("pdf_path"):
@@ -455,6 +448,7 @@ def start(
     pdf_overrides: dict[str, Any] | None = None,
     acquire_missing: bool = False,
     reader: Any = None,
+    feed_contexts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Kick off deep review(s). With ``item_keys`` set, reviews exactly those papers
     (the per-paper button / the review-fleet); otherwise the top-``top_k`` unread picks.
@@ -475,11 +469,17 @@ def start(
     Duplicate keys are submitted once, in first-seen order. On a setup failure
     (no Zotero reader / queue build) the targeted papers are marked errored so their
     panels surface the cause."""
+    from zotero_summarizer.models.research_feed import FeedReviewContext
+    contexts = {key: FeedReviewContext.model_validate(value).model_copy(deep=True)
+                for key, value in (feed_contexts or {}).items()}
+    if contexts and (set(contexts) != set(item_keys or []) or any(c.source_id != key for key, c in contexts.items())):
+        raise ValueError("feed contexts require exact explicit item keys")
     if item_keys == []:
         return {**status(), "accepted": False}
     overrides = pdf_overrides or {}
     try:
         ctx = _build_ctx(reader=reader)
+        ctx["_feed_contexts"] = contexts
         ctx["_acquire_missing"] = bool(acquire_missing)
         items = _resolve_items(top_k, item_keys, overrides)
     except Exception as exc:  # noqa: BLE001 — surface setup failure on the targeted jobs
