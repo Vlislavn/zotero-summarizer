@@ -107,3 +107,6 @@ Review slice 66: Discovery regression tests / 2. Depends on the preceding slice;
 
 <!-- PR53 review slice 67 -->
 Review slice 67: Discovery regression tests / 3. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 68 -->
+Review slice 68: Application regression tests / 1. Depends on the preceding slice; not release acceptance.
