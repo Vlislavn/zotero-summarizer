@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Review slice 02: Persistence and schema / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 01: Core contracts / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.

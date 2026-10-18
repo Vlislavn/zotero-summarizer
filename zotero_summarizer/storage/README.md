@@ -238,3 +238,6 @@ resolution reference to count unresolved conflicts, not every historical receipt
 Migration v8 adds `idx_sync_mutations_resolution` for upgrades from databases
 that already recorded the v2 offline-sync schema; new databases also create it
 with the baseline sync schema.
+
+<!-- PR53 review slice 02 -->
+Review slice 02: Persistence and schema / 1. Depends on the preceding slice; not release acceptance.
