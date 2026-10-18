@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, StrictInt
 
@@ -24,6 +24,16 @@ class _Checks(BaseModel):
 
 class DigestSourceRejected(ValueError):
     """A well-formed generated digest failed original-source grounding."""
+
+    def __init__(
+        self, message: str, *, phase: Literal["numeric", "semantic"] | None = None,
+        base_count: int | None = None, rejected_indices: tuple[int, ...] = (), checks: _Checks | None = None,
+    ):
+        super().__init__(message)
+        self.phase = phase
+        self.base_count = base_count
+        self.rejected_indices = tuple(sorted(rejected_indices))
+        self.checks = checks.model_copy(deep=True) if phase == "semantic" and checks is not None else None
 
 
 class DigestVerifierUnavailable(ValueError):
@@ -122,14 +132,19 @@ def _parse_checks(raw: Any, claim_count: int, passages: list[str], paper_text: s
 
 def verify_digest(
     digest: PaperDigest, paper_text: str, llm: Any, *, research_goals: str = "",
-) -> None:
+    optional_claims: tuple[str, ...] = (),
+) -> _Checks:
     from zotero_summarizer.services.faithbench._corpus import chunk_text
     from zotero_summarizer.services.library._review_attempt import observed_client
 
-    claims = _claims(digest)
+    base_claims = _claims(digest)
+    claims = base_claims + list(optional_claims)
     unsupported = _unsupported_literals(claims, paper_text)
     if unsupported:
-        raise DigestSourceRejected(f"Digest contains source-absent literals: {unsupported[:3]}")
+        raise DigestSourceRejected(
+            f"Digest contains source-absent literals: {unsupported[:3]}", phase="numeric",
+            base_count=len(base_claims), rejected_indices=tuple(i for i, claim in enumerate(claims) if claim in unsupported),
+        )
     passages = chunk_text(paper_text)
     prompt = _PROMPT.format(
         claims=untrusted_input("\n".join(f"[{i}] {claim}" for i, claim in enumerate(claims))),
@@ -145,6 +160,11 @@ def verify_digest(
             if attempt:
                 raise DigestVerifierUnavailable(f"Digest verifier returned an invalid response twice: {exc}") from exc
             prompt += "\nYour previous verification was invalid: " + str(exc) + ". Return all indices with valid evidence IDs in JSON."
+    rejected = tuple(sorted(check.index for check in parsed.checks if not check.supported))
     failed = [claims[check.index] for check in parsed.checks if not check.supported]
     if failed:
-        raise DigestSourceRejected(f"Digest contains unsupported fields: {failed[:3]}")
+        raise DigestSourceRejected(
+            f"Digest contains unsupported fields: {failed[:3]}", phase="semantic",
+            base_count=len(base_claims), rejected_indices=rejected, checks=parsed,
+        )
+    return parsed
