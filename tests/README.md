@@ -14,3 +14,6 @@ Review slice 35: Feedback regression tests / 2. Depends on the preceding slice; 
 
 <!-- PR53 review slice 36 -->
 Review slice 36: Feedback regression tests / 3. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 37 -->
+Review slice 37: Review regression tests / 1. Depends on the preceding slice; not release acceptance.
