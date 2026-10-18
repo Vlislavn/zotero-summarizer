@@ -2,6 +2,7 @@ if (typeof args.task !== "string" || !args.task.trim()) {
   throw new Error("task must contain the complete current read-only smoke assignment");
 }
 const first = await runs.run("sequence", {
+  label: "Check sequential canary",
   agent: "scout",
   context: "fresh",
   task: [args.task, "Return exactly NATIVE_SEQUENCE. No edits, shell commands or delegation."].join("\n\n")
@@ -12,12 +13,14 @@ if (!first.ok) {
 const parallel = await runs.all([
   {
     key: "left",
+    label: "Check left canary",
     agent: "scout",
     context: "fresh",
     task: [args.task, "Return exactly NATIVE_LEFT. No edits, shell commands or delegation."].join("\n\n")
   },
   {
     key: "right",
+    label: "Check right canary",
     agent: "scout",
     context: "fresh",
     task: [args.task, "Return exactly NATIVE_RIGHT. No edits, shell commands or delegation."].join("\n\n")

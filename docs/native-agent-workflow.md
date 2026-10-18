@@ -105,7 +105,21 @@ Inline `output`
 can include a saved-path notice: verify literal artifact content through the
 returned `outputReference`, not equality against transport display text.
 The saved `smoke.js` uses literal canaries for machine wiring only; it does not
-establish model quality, writer/recursive safety or product acceptance.
+establish model quality, writer/recursive safety or product acceptance. Both saved
+workflows label stages without changing their stable keys.
+
+Offline machine contracts execute the actual saved JavaScript using synthetic
+native API receipts; no children, provider calls or private inputs are involved:
+
+```bash
+node --test tests/native_workflows.test.mjs
+```
+
+These cover task rejection, awaited scout completion, rejection/nonterminal stop,
+ordered fresh review requests, preserved peer failures and smoke sequencing.
+They do not establish effective runtime permissions, live provider behavior or
+semantic correctness. Use native validation and actual terminal/artifact readback
+for the separately authorized live wiring check.
 
 After an async receipt, continue independent work or return control for native
 completion wake. Do not sleep/status-poll. Retain actual runId/asyncDir/result
