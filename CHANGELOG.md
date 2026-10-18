@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Review slice 18: Feedback analysis / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 17: Research feed and Telegram / 2. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 16: Research feed and Telegram / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 15: Search and discovery / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
