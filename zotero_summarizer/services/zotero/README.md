@@ -80,3 +80,6 @@ unowned rather than retroactively adopting it.
 Digest strength and weakness paragraphs precede the unchanged version-1 quality
 metadata footer. The footer is always the last meaningful paragraph, preserving
 structural ownership after native editors discard HTML comments.
+
+<!-- PR53 review slice 13 -->
+Review slice 13: Native write authority / 1. Depends on the preceding slice; not release acceptance.

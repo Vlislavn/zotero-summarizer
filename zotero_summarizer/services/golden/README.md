@@ -134,3 +134,6 @@ missing/invalid originals raise. The existing short-circuit trace exposes
 `explicit_label`, so the UI explains the label instead of showing additive math.
 The shared short-circuit constructor also handles trash/veto; unlabeled scoring
 and final-label manual-override detection retain their existing semantics.
+
+<!-- PR53 review slice 13 -->
+Review slice 13: Native write authority / 1. Depends on the preceding slice; not release acceptance.
