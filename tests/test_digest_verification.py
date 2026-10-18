@@ -227,3 +227,62 @@ def test_unavailable_verifier_does_not_regenerate_the_digest(separate_verifier):
                       llm=generator, verifier_llm=verifier)
     assert generator.generated == 1
     assert generator.checked == 2 and verifier.checked == 2
+
+
+def test_successful_production_verifier_returns_validated_checks_without_extra_calls():
+    digest = _digest().model_copy(update={"key_findings": ["The evaluation uses held-out data."]})
+    verifier = _Verifier()
+
+    result = verify_digest(digest, PAPER, verifier)
+
+    assert result is not None
+    assert result.model_dump(mode="json") == {"checks": [
+        {"index": index, "supported": True, "evidence": [0]}
+        for index in range(len(_claims(digest)))
+    ]}
+    assert verifier.calls == 1
+
+
+def test_assessment_retains_only_accepted_claim_evidence_without_changing_digest_schema():
+    import hashlib
+
+    class Generator:
+        calls = 0
+
+        def pydantic_prompt(self, **kwargs):
+            self.calls += 1
+            return digest
+
+    digest = _digest().model_copy(update={"key_findings": ["The evaluation uses held-out data."]})
+    generator, verifier, audit = Generator(), _Verifier(), {}
+
+    result = assess_digest(title="Paper", full_text=PAPER, config=_default_goals_config(),
+                           llm=generator, verifier_llm=verifier, verification_audit=audit)
+
+    assert result.model_dump(mode="json") == digest.model_dump(mode="json")
+    assert "verification_audit" not in result.model_json_schema()["properties"]
+    assert audit["status"] == "accepted_verifier_evidence"
+    assert audit["source"]["original_text_sha256"] == hashlib.sha256(PAPER.encode()).hexdigest()
+    assert audit["source"]["selected_text_sha256"] == audit["source"]["original_text_sha256"]
+    assert audit["source"]["scope"] == "complete_extracted_text"
+    assert {claim["field"] for claim in audit["claims"]} == {"tldr", "key_findings"}
+    assert all(claim["numeric_outcome"] == "passed_existing_literal_preflight" for claim in audit["claims"])
+    assert all(claim["support"] == "supported_by_existing_verifier" for claim in audit["claims"])
+    assert all(claim["evidence"] == [0] for claim in audit["claims"])
+    assert audit["passages"][0]["text"] == PAPER
+    assert audit["passages"][0]["selected_span"] == {"start": 0, "end": len(PAPER)}
+    assert audit["passages"][0]["original_fragments"] == [{
+        "selected_span": {"start": 0, "end": len(PAPER)},
+        "original_span": {"start": 0, "end": len(PAPER)}, "mapping": "exact",
+    }]
+    assert generator.calls == 1 and verifier.calls == 1
+
+
+def _scripted_validated_checks(digest, _paper_text, _llm, **_kwargs):
+    """Orchestration-only typed mock, not a semantic or numerical support oracle."""
+    from zotero_summarizer.services.library._digest_verification import _Checks
+
+    return _Checks.model_validate({"checks": [
+        {"index": index, "supported": True, "evidence": [0]}
+        for index in range(len(_claims(digest)))
+    ]})
