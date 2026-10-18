@@ -40,6 +40,18 @@ through to grounded Q&A. The paper artifact stores `figures_count`, not a table
 count; focused Q&A and freshness routing tests passed (39), but live natural-language
 scope accuracy is not measured.
 
+## Rejecting pending changes
+
+Reject selected applies only when every captured ID still exists and is pending.
+A missing or already-applied/rejected/failed/uncertain row returns409 and leaves
+valid siblings unchanged. Reload the queue and explicitly select the current rows.
+SQL failures or triggers preventing a complete update roll back the whole change.
+
+The client announces success only for an integer updated count matching the
+captured distinct IDs. An incomplete/malformed reply is unconfirmed, not success;
+the existing optimistic rollback retains selection for reconciliation. This alters
+only the app queue, not the native Zotero library, labels or other status callers.
+
 ## First-run setup
 
 There's nothing to copy and nothing to migrate by hand. On the first `serve` (or `setup`),

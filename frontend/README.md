@@ -149,7 +149,10 @@ same-mounted query-string navigation updates the view.
 Individual Review actions acknowledge the saved decision without claiming a CSV
 append or pending-change enqueue; the server stores training metadata atomically
 with the verdict and returns only the processed ID and state.
-Pending treats a partially failed HTTP-200 batch as an error and points to the Failed tab.
+Pending treats a partially failed HTTP-200 Apply batch as an error and points to
+the Failed tab. Reject resolves only when the API's integer updated count matches
+the captured distinct IDs; zero/partial/contradictory/malformed replies cannot
+announce success, and existing rollback retains the selection for reconciliation.
 Today, Library and Pending derive batch counts and write IDs from the same current
 filtered selection. Hidden selections cannot enter Add/Trash/Triage/Apply/Reject;
 an empty filtered selection is a no-op. Library/Pending also block retained rows

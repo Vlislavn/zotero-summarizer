@@ -42,10 +42,14 @@ export async function applyPending(changeIds, { force = false, retry = false } =
 
 /** POST /api/pending/reject { change_ids } */
 export async function rejectPending(changeIds) {
-  return request('/api/pending/reject', {
+  const result = await request('/api/pending/reject', {
     method: 'POST',
     body: JSON.stringify({ change_ids: changeIds }),
   });
+  if (!Number.isInteger(result?.updated) || result.updated !== new Set(changeIds).size) {
+    throw new Error('Selected rejection was not confirmed completely. Reload the queue to reconcile.');
+  }
+  return result;
 }
 
 /** PUT /api/pending/change/{id} { payload } */

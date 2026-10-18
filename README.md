@@ -16,6 +16,10 @@ keep/trash decisions train the model, so tomorrow's slate is sharper.
 the model learns from how you triage). The app owns current decisions and their history;
 Zotero remains the PDF/citation surface and a synced representation of approved tags/notes.
 
+Pending rejection is all-or-none for the captured selection. Missing/stale rows
+return a conflict without changing valid siblings; incomplete replies never claim
+success. See [usage](docs/usage.md#rejecting-pending-changes).
+
 ## Review recovery and search constraints
 
 Deep review rejects demonstrated access/error/login templates before model calls.

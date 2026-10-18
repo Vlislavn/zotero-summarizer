@@ -336,12 +336,13 @@ async def pending_change_count(
 
 
 async def reject_pending_changes(req: PendingChangeMutationRequest) -> dict[str, int]:
-    updated = await asyncio.to_thread(
-        triage_db.set_pending_changes_status,
-        req.change_ids,
-        ChangeStatus.REJECTED.value,
-        "",
-    )
+    try:
+        updated = await asyncio.to_thread(
+            triage_db.set_pending_changes_status,
+            req.change_ids, ChangeStatus.REJECTED.value, "", require_all=True,
+        )
+    except ValueError as exc:
+        raise APIError(error="pending_write_conflict", message=str(exc), status_code=409) from exc
     return {"updated": updated}
 
 

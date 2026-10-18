@@ -273,14 +273,27 @@ def set_pending_changes_status(
     status: str,
     error_message: str | None = None,
     expected_status: str | None = None,
+    *, require_all: bool = False,
 ) -> int:
+    if require_all and any(type(change_id) is not int or change_id <= 0 for change_id in change_ids):
+        raise ValueError("A complete Pending selection requires positive integer IDs")
     normalized = [int(change_id) for change_id in change_ids if int(change_id) > 0]
+    if require_all:
+        normalized = list(dict.fromkeys(normalized))
     if not normalized:
         return 0
 
     placeholders = ",".join("?" for _ in normalized)
     conn = _get_conn()
     try:
+        if require_all:
+            conn.execute("BEGIN IMMEDIATE")
+            selected = conn.execute(
+                f"SELECT id,status FROM pending_changes WHERE id IN ({placeholders})", normalized,
+            ).fetchall()
+            source = expected_status or ChangeStatus.PENDING.value
+            if len(selected) != len(normalized) or any(row["status"] != source for row in selected):
+                raise ValueError("Pending selection changed; reload before rejecting")
         if status == ChangeStatus.APPLIED.value:
             source = expected_status or ChangeStatus.PENDING.value
             cursor = conn.execute(
@@ -316,8 +329,14 @@ def set_pending_changes_status(
                 """,
                 [status, (error_message or "").strip(), *normalized],
             )
+        updated = int(cursor.rowcount or 0)
+        if require_all and updated != len(normalized):
+            raise ValueError("Pending selection could not be changed completely")
         conn.commit()
-        return int(cursor.rowcount or 0)
+        return updated
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
