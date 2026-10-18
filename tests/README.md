@@ -77,3 +77,6 @@ Review slice 56: Research feed regression tests / 7. Depends on the preceding sl
 
 <!-- PR53 review slice 57 -->
 Review slice 57: Setup regression tests / 1. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 58 -->
+Review slice 58: Setup regression tests / 2. Depends on the preceding slice; not release acceptance.
