@@ -1,5 +1,9 @@
 # Zotero Summarizer
 
+Native RSS read-state maintenance also completes the existing WAL-consistent,
+integrity-checked backup before changing unread markers. See the
+[raw read-state safety boundary](docs/usage.md#native-rss-read-state-backups).
+
 A local-first reading assistant for [Zotero](https://www.zotero.org/). It reads the
 RSS feeds you follow, scores each new paper for how worth-reading it is (a cheap ML
 gate first, an LLM for the survivors), and gives you a small daily slate to cull. Your

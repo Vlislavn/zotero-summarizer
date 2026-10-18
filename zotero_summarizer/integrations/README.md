@@ -10,6 +10,13 @@ clear types.
 services/ ─calls→ integrations/ ─talks to→  Zotero DB | PDFs | LLM API | OpenAlex | Unpaywall
 ```
 
+Raw `mark_feed_items_read(list[int]) -> int` reuses `backup_database()` before
+its existing native retry, then `_prune_backups()` only after commit. Empty input
+has no probe/backup/write. Backup refusal prevents effects; write failure rolls
+back while preserving the backup. Retention errors after commit propagate outside
+the retry, without replay. This is not backup-to-write isolation, typed approval
+or rollback-on-every-error. Selected caller policy and all other native ABIs stay.
+
 | file | responsibility |
 |---|---|
 | `zotero_read.py` | `ZoteroReader`: read-only WAL-aware connections, bounded lock retries and user-library collection helpers. Persistent locks raise; no raw snapshot copy or immutable WAL-skipping mode. Statistics scope collections/tags to the user library and exclude trashed items/attachments. `get_collections` scopes its collection and item counts; `collection_name_for_key` validates picker keys. Collection sorting pins Inbox and read-next, then alphabetical, recursively. |

@@ -61,7 +61,8 @@ class ZoteroFeedWriteMixin:
                 conn.close()
 
         try:
-            return self._retry_on_lock(_do, ctx="mark_feed_items_read")
+            self.backup_database()
+            changed_count = self._retry_on_lock(_do, ctx="mark_feed_items_read")
         except sqlite3.OperationalError as exc:
             raise ZoteroWriteError(
                 "DB still locked after retries — items will remain unread in Zotero "
@@ -69,6 +70,9 @@ class ZoteroFeedWriteMixin:
             ) from exc
         except sqlite3.Error as exc:
             raise ZoteroWriteError(f"Failed to mark feed items read: {exc}") from exc
+
+        self._prune_backups()
+        return changed_count
 
 
 __all__ = ["ZoteroFeedWriteMixin"]
