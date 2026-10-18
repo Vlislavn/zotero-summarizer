@@ -53,6 +53,15 @@ is an explicit empty state even if trained artifacts exist on disk.
 Settings deep links to `#university-access` open the matching disclosure, and
 saving an AI-mode change round-trips unsurfaced config fields unchanged.
 
+Search offers an unchecked-by-default original-source question-evidence experiment.
+The checkbox sends `evidence_policy=question_evidence` for that search only; sessions
+restore the saved policy/status, not future opt-in consent. QuestionEvidence shows
+scoped states, original-character locators and evaluator/capability provenance.
+Recommended preserves server promotions (including weak-band cards); explicit sorts
+still show the whole pool. Late restore/Add responses cannot overwrite a new session.
+No automatic Add or measured quality/latency claim accompanies evidence. See
+[usage](../docs/usage.md#experimental-search-question-evidence).
+
 Search coverage hits reuse their existing Zotero key: the card says In library
 and the server command cannot create a duplicate even if called directly.
 Search keys cards and Add requests by the server's persisted candidate ID, never

@@ -150,7 +150,7 @@ def claim(session_id: str, *, expect: str, to: str) -> bool:
         sess = load(session_id)
         if sess.status != expect:
             return False
-        ScreenRequest(query=sess.raw_query, questions=sess.questions)
+        ScreenRequest(query=sess.raw_query, questions=sess.questions, evidence_policy=sess.evidence_policy)
         sess.status = to
         save(sess)
     return True

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import Search from './Search.jsx';
 
 afterEach(() => {
@@ -84,6 +84,81 @@ it('keeps Search usable when session storage throws a SecurityError', async () =
 
   expect(await screen.findByRole('heading', { name: 'Targeted Search' })).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Search' }).disabled).toBe(true);
+});
+
+it('opts in explicitly and keeps a promoted weak candidate in the recommended visible set', async () => {
+  const requests = [];
+  const writes = [];
+  const research = { id: 'evidence', status: 'reviewed', evidence_policy: 'question_evidence', questions: ['Question'],
+    evidence_status: { state: 'complete', calls_used: 24, calls: 24, topic_floor: 0.35, promoted_candidate_ids: ['p11'] },
+    candidates: [{ candidate_id: 'p11', title: 'Answer-bearing paper', url: 'https://example.org/11',
+      query_score: 0.5, relevance_band: 'weak' },
+    { candidate_id: 'p1', title: 'Higher topic match', url: 'https://example.org/1', query_score: 0.9 }],
+  };
+  vi.stubGlobal('fetch', vi.fn(async (path, options = {}) => {
+    let body = { items: [] };
+    if (path === '/api/search/screen') { requests.push(JSON.parse(options.body)); body = research; }
+    if (path === '/api/search/evidence/materialize') { writes.push(JSON.parse(options.body)); body = { zotero_key: 'SAVED' }; }
+    return new Response(JSON.stringify(body));
+  }));
+  render(<Search />);
+  const checkbox = screen.getByRole('checkbox', { name: /Experimental original-source/ });
+  expect(checkbox.checked).toBe(false);
+  fireEvent.change(screen.getByPlaceholderText(/e.g. LLM agents/), { target: { value: 'topic' } });
+  fireEvent.change(screen.getByPlaceholderText(/one specific question/), { target: { value: 'Question' } });
+  fireEvent.click(checkbox);
+  fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+  await screen.findByText('Answer-bearing paper');
+  expect(requests).toEqual([{ query: 'topic', questions: ['Question'], evidence_policy: 'question_evidence' }]);
+  expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['Answer-bearing paper', 'Higher topic match']);
+  expect(screen.queryByText(/weaker match/)).toBeNull();
+  expect(screen.getByRole('status').textContent).toContain('1 candidates promoted');
+  expect(writes).toEqual([]);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Sort by' }), { target: { value: 'relevance' } });
+  expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['Higher topic match', 'Answer-bearing paper']);
+  fireEvent.click(screen.getAllByRole('button', { name: 'Add to library' })[1]);
+  await screen.findByText('✓ In library');
+  expect(writes).toEqual([{ candidate_id: 'p11', collection_key: null }]);
+});
+
+it('ignores a late restored session after a new screen request', async () => {
+  let restore;
+  sessionStorage.setItem('zs.searchSession', JSON.stringify({ id: 'old' }));
+  vi.stubGlobal('fetch', vi.fn(async (path) => {
+    if (path === '/api/search/old') return new Promise((resolve) => { restore = resolve; });
+    return new Response(JSON.stringify(path === '/api/search/screen'
+      ? { id: 'new', status: 'reviewed', candidates: [{ candidate_id: 'new', title: 'New result' }] } : { items: [] }));
+  }));
+  render(<Search />);
+  fireEvent.change(screen.getByPlaceholderText(/e.g. LLM agents/), { target: { value: 'new topic' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+  await screen.findByText('New result');
+  await act(async () => {
+    restore(new Response(JSON.stringify({ id: 'old', status: 'reviewed', candidates: [{ candidate_id: 'old', title: 'Old result' }] })));
+  });
+  expect(screen.getByText('New result')).toBeTruthy();
+  expect(screen.queryByText('Old result')).toBeNull();
+});
+
+it('does not stamp a late explicit Add onto a different search session', async () => {
+  let finishAdd;
+  sessionStorage.setItem('zs.searchSession', JSON.stringify({ id: 'first', q: 'topic' }));
+  vi.stubGlobal('fetch', vi.fn(async (path) => {
+    if (path === '/api/search/first/materialize') return new Promise((resolve) => { finishAdd = resolve; });
+    const body = path === '/api/search/first' ? { id: 'first', status: 'reviewed', candidates: [{ candidate_id: 'same', title: 'First result' }] }
+      : path === '/api/search/screen' ? { id: 'second', status: 'reviewed', candidates: [{ candidate_id: 'same', title: 'Second result' }] }
+        : { items: [] };
+    return new Response(JSON.stringify(body));
+  }));
+  render(<Search />);
+  await screen.findByText('First result');
+  fireEvent.click(screen.getByRole('button', { name: 'Add to library' }));
+  await waitFor(() => expect(finishAdd).toBeTypeOf('function'));
+  fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+  await screen.findByText('Second result');
+  await act(async () => { finishAdd(new Response(JSON.stringify({ zotero_key: 'OLDKEY' }))); });
+  expect(screen.getByRole('button', { name: 'Add to library' })).toBeTruthy();
+  expect(screen.queryByText('✓ In library')).toBeNull();
 });
 
 it('sends only explicitly confirmed constraints, not restrictions inferred from the topic', async () => {

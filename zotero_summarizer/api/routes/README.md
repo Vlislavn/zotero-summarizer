@@ -14,6 +14,12 @@ per blocked item while processing eligible batch members. The server, not the fr
 Replacing a hosted credential through `/api/setup/ai-credential` invalidates
 prior Doctor inference success without returning the key to the browser.
 
+Search screen also accepts `evidence_policy: baseline|question_evidence` (default
+baseline). The explicit experimental choice persists through the existing review
+worker/session API. Responses include session `evidence_status` and per-candidate
+`question_evidence` with original ranges, fingerprints, capability flags and failures.
+No evidence endpoint or native-write authority is added; Add remains explicit.
+
 One module per resource. Each registers its paths on a router; `__init__.py`
 collects them via `include_routes(app)`. Handlers parse/validate and delegate
 to `services/`; they raise `APIError` for failures.

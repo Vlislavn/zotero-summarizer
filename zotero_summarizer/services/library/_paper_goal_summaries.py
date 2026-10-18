@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 
 from zotero_summarizer.models import GoalSummary
 from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
-from zotero_summarizer.services.faithbench._corpus import chunk_text
+from zotero_summarizer.services.faithbench._corpus import chunk_spans, chunk_text
 from zotero_summarizer.services.library._grounding import quote_is_grounded
 from zotero_summarizer.storage.corpus_bm25 import tokenize
 from zotero_summarizer.services.library._search import _rrf
@@ -114,7 +114,8 @@ def _section_chunks(sections: list[dict[str, Any]], full_text: str) -> list[dict
         for piece in chunk_text(text):
             out.append({"text": piece, "section_title": title, "page": page})
     if not out and (full_text or "").strip():
-        out = [{"text": p, "section_title": "Body", "page": None} for p in chunk_text(full_text)]
+        out = [{"text": full_text[start:end], "start": start, "end": end, "section_title": "Body", "page": None}
+               for start, end in chunk_spans(full_text)]
     return out
 
 
@@ -186,26 +187,9 @@ def summarize_for_goals(
     if not texts:
         return [GoalSummary(goal=g, retrieval_state="not_retrieved") for g in goals]
 
-    bm25 = _ChunkBM25(texts)
-    embedder = _get_embedder(embedder_model)
-    chunk_mat = goal_vecs = None
-    if embedder is not None:
-        try:
-            import numpy as np
-            chunk_mat = np.asarray(embedder.encode(texts, normalize_embeddings=True), dtype="float32")
-            goal_vecs = {g: np.asarray(embedder.encode([g], normalize_embeddings=True)[0], dtype="float32") for g in goals}
-        except Exception as exc:  # noqa: BLE001 — keep the lexical retrieval leg available
-            chunk_mat = goal_vecs = None
-            LOGGER.warning("goal-summaries dense inference failed; dense leg off: %s", exc)
-
-    reranker = get_reranker(reranker_model)
-    reranker.ensure_loaded_async()
-    ctx = _GoalCtx(
-        texts=texts, chunks=chunks, bm25=bm25,
-        chunk_mat=chunk_mat, goal_vecs=goal_vecs, has_dense=chunk_mat is not None,
-        reranker=reranker, floor=relevance_floor, llm=llm,
-        prompt_tmpl=facet_prompt or _DEFAULT_GOAL_FACET_PROMPT,
-    )
+    ctx = _retrieval_context(goals, chunks, embedder_model, reranker_model)
+    ctx.floor, ctx.llm = relevance_floor, llm
+    ctx.prompt_tmpl = facet_prompt or _DEFAULT_GOAL_FACET_PROMPT
     if batch:
         return _summarize_batched(goals, ctx, reporter)
 
@@ -243,6 +227,39 @@ def summarize_for_goals(
                 reporter.sub(nonlocal_done, n)
 
     return [s for s in ordered if s is not None]
+
+
+def _retrieval_context(goals: list[str], chunks: list[dict], embedder_model: str, reranker_model: str) -> _GoalCtx:
+    texts = [c["text"] for c in chunks]
+    bm25 = _ChunkBM25(texts)
+    embedder = _get_embedder(embedder_model)
+    chunk_mat = goal_vecs = None
+    if embedder is not None and texts:
+        try:
+            import numpy as np
+            chunk_mat = np.asarray(embedder.encode(texts, normalize_embeddings=True), dtype="float32")
+            goal_vecs = {g: np.asarray(embedder.encode([g], normalize_embeddings=True)[0], dtype="float32") for g in goals}
+        except Exception as exc:  # noqa: BLE001 — keep the lexical retrieval leg available
+            chunk_mat = goal_vecs = None
+            LOGGER.warning("goal-summaries dense inference failed; dense leg off: %s", exc)
+    reranker = get_reranker(reranker_model)
+    reranker.ensure_loaded_async()
+    return _GoalCtx(texts, chunks, bm25, chunk_mat, goal_vecs, chunk_mat is not None,
+                    reranker, RELEVANCE_FLOOR, None, _DEFAULT_GOAL_FACET_PROMPT)
+
+
+def retrieve_original_passages(text: str, questions: list[str], *, embedder_model: str,
+                               reranker_model: str) -> tuple[list[list[dict]], dict]:
+    """Reuse hybrid retrieval without converting similarity into answer sufficiency."""
+    ctx = _retrieval_context(questions, _section_chunks([], text), embedder_model, reranker_model)
+    ctx.floor = -1.0  # No cosine-based negative judgment in the experimental question arm.
+    results = []
+    for question in questions:
+        _early, retrieval = _retrieve_goal(question, ctx)
+        results.append(retrieval.ctx_chunks if retrieval is not None else [])
+    return results, {"dense": ctx.has_dense, "bm25": ctx.bm25.available,
+                     "reranker": ctx.reranker.is_ready(), "embedder_model": embedder_model,
+                     "reranker_model": reranker_model}
 
 
 def _summarize_batched(goals: list[str], ctx: _GoalCtx, reporter: Any) -> list[GoalSummary]:

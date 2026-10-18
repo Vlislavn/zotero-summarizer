@@ -62,6 +62,18 @@ unconfirmed metadata stays unknown. Legacy saved plans retain their original fil
 The plan discloses domain context, source accounting and scholarly coverage limits.
 See [search](zotero_summarizer/services/search/README.md).
 
+Search also offers **Experimental original-source question evidence**, off by default
+for each new page visit. With questions and explicit opt-in, a bounded original-text
+pass can promote sufficient answers before review selection. Inspect located quotes,
+partial/unchecked states and evaluator provenance; unknown is not a negative result.
+The configured Feed/Deep review routes must differ. Saved evidence is active only
+while loaded provider/model/settings and local evaluator protocol still match;
+missing metadata means unchecked, not assumed valid. Reads build no clients or
+requests. Historical receipts remain intact, and retained pre-promotion tie order
+restores the constrained baseline when evidence becomes stale. Legacy sessions
+cannot reconstruct an unrecorded tie order. No quality or latency win has been
+measured and issue #30 remains open. [Usage and limits](docs/usage.md#experimental-search-question-evidence).
+
 ## Requirements
 
 - **Python 3.10+** and **[uv](https://docs.astral.sh/uv/getting-started/installation/)**

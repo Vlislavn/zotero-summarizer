@@ -108,6 +108,54 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
   concurrent auto-review can't lose the key AND two simultaneous Add clicks on one
   candidate write exactly once. Idempotent (re-add returns the existing key).
 
+## Opt-in original-source question evidence (#30, experimental)
+
+`ScreenRequest.evidence_policy` accepts `baseline` (default) or `question_evidence`.
+HTTP → `run_screen` persists the explicit choice; the existing claimed review worker
+runs `_question_evidence` before top-ten light review and top-four selection, then
+`_question_policy` reapplies stable sufficient-answer promotion after quality ranking.
+No questions, disabled budgets or unavailable prerequisites preserve baseline order.
+
+The pass reuses `_fulltext.acquire_full_text`, Library's shared hybrid retrieval
+context and faithbench's answer prompt/parser plus existing strict quote/answer
+support guards. An independent configured Deep review route verifies Feed answers;
+exactly located, unambiguous original quotes are required. No generated summary
+supplies offsets. Up to eight chunks per question, 12 topic-eligible candidates and
+24 attempted model-client invocations by default; `ZS_SEARCH_EVIDENCE_{CANDIDATES,CALLS,TOPIC_FLOOR}`
+override within 0–30 / 0–120 / finite 0–1. Floor default 0.35 is provisional. Calls
+are reserved in generation/verifier pairs and failures count. Internal provider
+transport retries are outside this invocation cap. Source length uses the
+existing quality-review cap; over-budget originals are unknown, not truncated.
+
+Per-question receipts preserve unknown/partial/sufficient/not-found-in-checked-text,
+checked original ranges, exact extraction/question/input fingerprints, configured
+route/protocol identity, capability breakdown and typed failures. Only sufficient
+answers promote; not-found never asserts whole-document absence. Missing or partial
+capability never penalizes. Sessions remain the sole store; `save_merge` preserves
+concurrent explicit Adds and deletion stops work between boundaries. Family merges
+carry receipts. `_question_policy.current_receipt` is the single validity authority
+for display, invalidation and promotion: source/input, generator/verifier provider and
+model IDs, relevant provider settings and local prompt/schema/protocol must match the
+available loaded runtime configuration. `_evaluators` computes those identities without
+clients, credentials, inference or requests. Absent/disabled/invalid metadata is unknown,
+not permission to trust stored IDs. New evidence work requires the same current binding.
+
+`ResearchSession.evidence_baseline_order` retains the observed candidate sequence before
+promotion. Restoration seeds the existing stable constrained ranker with that sequence;
+current quality/relevance keys still win, missing/new candidate IDs retain observed order,
+and family/Add ownership is unchanged. Legacy receipts without recorded order/binding
+cannot certify current evidence or invent lost ties. No automatic rerun repairs them.
+Invalidation changes only the in-memory snapshot, not files on read. Raw serialization
+keeps exact historical receipts/answers through ordinary saves; only HTTP projection
+suppresses stale answers. Stored extraction identity is historical, not a freshness
+probe; unchanged metadata cannot detect remotely mutable weights. No private comments,
+separate question store, classifier/index/worker or native writer is added.
+
+The Search checkbox is explicit per page visit. Recommended shows server order and
+promoted weak-band cards; user-selected relevance/prestige sorts remain independent.
+Evidence and provenance live in native disclosures. See [usage](../../../docs/usage.md#experimental-search-question-evidence).
+Human-held-out answerability and latency remain unmeasured; issue #30 remains open.
+
 ## Files
 
 | file | role |

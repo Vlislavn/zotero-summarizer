@@ -82,6 +82,7 @@ def _merge_family(members: list[Candidate]) -> Candidate:
         preferred.coverage = preferred.coverage or m.coverage
         preferred.peer_review = preferred.peer_review or m.peer_review
         preferred.review = preferred.review or m.review
+        preferred.question_evidence = preferred.question_evidence or m.question_evidence
         preferred.verdict = preferred.verdict or m.verdict
         preferred.relevance_band = preferred.relevance_band or m.relevance_band
         preferred.why = preferred.why or m.why

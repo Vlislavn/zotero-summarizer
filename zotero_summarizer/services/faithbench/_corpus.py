@@ -223,14 +223,14 @@ def select_papers(
 # ---------------------------------------------------------------------------
 
 
-def chunk_text(
+def chunk_spans(
     text: str, *, chunk_chars: int = CHUNK_CHARS, overlap: int = CHUNK_OVERLAP
-) -> list[str]:
-    """Fixed-size character windows with overlap, snapped to whitespace."""
+) -> list[tuple[int, int]]:
+    """Original stripped-window coordinates, preserving repeated occurrences."""
     if chunk_chars <= 0 or overlap >= chunk_chars:
         raise ValueError("chunk_chars must be positive and exceed overlap")
     body = text or ""
-    chunks: list[str] = []
+    spans: list[tuple[int, int]] = []
     start = 0
     while start < len(body):
         end = min(len(body), start + chunk_chars)
@@ -238,13 +238,22 @@ def chunk_text(
             space = body.rfind(" ", start + chunk_chars // 2, end)
             if space > start:
                 end = space
-        chunk = body[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
+        window = body[start:end]
+        if window.strip():
+            left = start + len(window) - len(window.lstrip())
+            right = end - (len(window) - len(window.rstrip()))
+            spans.append((left, right))
         if end >= len(body):
             break
         start = max(end - overlap, start + 1)
-    return chunks
+    return spans
+
+
+def chunk_text(
+    text: str, *, chunk_chars: int = CHUNK_CHARS, overlap: int = CHUNK_OVERLAP
+) -> list[str]:
+    """Fixed-size character windows with overlap, snapped to whitespace."""
+    return [text[start:end] for start, end in chunk_spans(text, chunk_chars=chunk_chars, overlap=overlap)]
 
 
 class PaperChunkIndex:
