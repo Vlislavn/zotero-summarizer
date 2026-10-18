@@ -73,8 +73,11 @@ shared so the daemon, deep-review job, and `verify-deep-review` CLI never drift)
 source checkout; it never guesses a developer checkout location.
 (`build_llm`: OpenAI-compatible client via OnPrem — threads the
 configured request timeout and per-provider `temperature` (default 0, deterministic);
-registers the completion guard before OnPrem discards finish reason/token usage;
-`build_pdf_extractor`.
+registers the completion guard before OnPrem discards finish reason/token usage.
+Explicit local setup observation additionally disables SDK retries/cache/redirects
+and owns a no-env-proxy transport, closed within the callback. This is request-only
+finality evidence, not capacity admission or global model lifecycle management;
+ordinary/hosted defaults remain unchanged. `build_pdf_extractor`.
 All LLM clients are constructed through `services/llm/factory`, which calls
 `build_llm` for `openai`-type providers), `lifecycle` (startup composition root — small `_init_*`
 builders wire each singleton onto `RuntimeState`; LLM clients are NOT built here,
@@ -151,8 +154,14 @@ counterfactual cohort, model-version attribution or sampling weights are claimed
 
 An enabled corpus requires a working encoder: startup and config updates propagate
 load/encode failures, without fallback vectors. A disabled corpus does not load
-the encoder or rewrite goals. Background corpus import logs and rethrows failures
-to the task owner/event loop instead of reporting a successful partial import.
+the encoder or rewrite goals. Targeted post-edit refresh first preserves the
+reader/cache-unavailable `(0, 0, 0)` return without dereferencing configuration.
+These availability field reads are passive; with both resources present, corpus
+OFF still returns before reader/cache I/O, lock creation/entry or feedback I/O.
+This does not undo the preceding native edit. Enabled refresh retains the detail,
+missing-key, atomic-batch and inferred-feedback reconciliation described below.
+Background corpus import logs and rethrows failures to the task owner/event loop
+instead of reporting a successful partial import.
 
 Background corpus import reads the existing whole-library listing once, unions
 its keys with all cached keys, then delegates batches to the same detail-based
@@ -176,9 +185,3 @@ deleted. The removed `import_corpus_items` wrapper had only this caller.
 The listing is an in-memory snapshot and commits are per batch, not an atomic
 whole-library/cross-database snapshot. A later failed batch leaves earlier
 successful batches committed; inferred feedback still follows the corpus commit.
-
-<!-- PR53 review slice 09 -->
-Review slice 09: Source admission / 1. Depends on the preceding slice; not release acceptance.
-
-<!-- PR53 review slice 22 -->
-Review slice 22: API and CLI wiring / 1. Depends on the preceding slice; not release acceptance.

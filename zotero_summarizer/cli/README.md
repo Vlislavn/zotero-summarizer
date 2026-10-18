@@ -12,12 +12,13 @@ __init__.build_parser()
    ├─ register_setup(subparsers)      # _setup.py:   setup · doctor · calibrate
    ├─ register_feeds(subparsers)      # _feeds.py:   feeds run/list/serve/tick/preview/select-daily
    ├─ register_goldenset(subparsers)  # _goldenset.py: export · train · eval-baseline · tune · suggest
+          ├─ register_goldenset_feedback(gs_sub)  # _goldenset_feedback.py: analyze-feedback
           ├─ register_goldenset_classify(gs_sub)  # _goldenset_classify.py: classify · classify-llm
           ├─ register_goldenset_predict(gs_sub)   # _goldenset_predict.py:  predict-feed · analyze-notes · compare
           ├─ register_goldenset_migrate(gs_sub)   # _goldenset_migrate.py:  migrate-verdicts-to-zotero
           └─ register_goldenset_setup_tag_colors(gs_sub)  # _goldenset_setup_colors.py: setup-tag-colors
    ├─ register_faithbench(subparsers)  # _faithbench.py: faithbench build/run/judge/report
-   └─ register_research_feed(...)      # _research_feed.py: research-feed run
+   └─ register_research_feed(...)      # _research_feed.py: research-feed run · view · telegram-auth
 main() = parse args → validate command budgets → install Settings → dispatch
 ```
 
@@ -26,6 +27,7 @@ main() = parse args → validate command budgets → install Settings → dispat
 | `__init__.py` | `build_parser()` + `main()` (the entry point `zotero-summarizer`) |
 | `__main__.py` | enables `python -m zotero_summarizer.cli` |
 | `_helpers.py` | shared CLI helpers: feed-id resolution, run-log writing, slugs |
+| `_mobile_serve.py` | Explicit `serve-mobile --origin https://node.tailnet.ts.net --owner-login owner@example.net`: private prebound 0600 Unix socket in a 0700 Settings-managed directory, one Uvicorn worker with proxy rewriting disabled. Does not configure Tailscale, expose TCP, query accounts or remove an existing socket. |
 | `_app.py` | `serve` (uvicorn `api.app:create_app`, `factory=True`; leaves existing listeners intact and reports a bind error on an occupied port; the process-killing helper and `--no-kill` option are removed) / `mcp` / `migrate` / `smoke-test` / `prefetch-models` (download the ML models for offline use; `--check` reports cache status; includes the MiniCheck claim-checker only when `quality_review.shadow_claim_check` is on). `__init__.apply_offline_env()` (called at CLI import, before any transformers import) turns `ZS_OFFLINE`/`HF_HUB_OFFLINE` into cache-only model loading. `verify-deep-review` runs the real digest + quality path headlessly against the live `deep_review` model on ONE already-built paper's cached `qa_text` (`--item-key`, default `4NIMLFMV`; `--with-goals` adds the heavier goal board) — prints per-phase timing + the digest JSON; the end-to-end "does a review actually produce a digest" check without Zotero or the server. It computes `sub_concurrency` via the SAME `_common.deep_review_sub_concurrency` helper the background job uses (and prints it in the tier line), so its wall-clock is a faithful production receipt — a remote provider's rubric/goal sub-calls run in parallel here exactly as they would in the app. `--provider`/`--model` override the deep_review stage for THIS run only (e.g. `--provider default --model qwen3.5:4b` to drive the pipeline against a local ollama model when the configured provider is unreachable/over-budget) |
 | `_setup.py` | `setup` reuses bootstrap/path/goals services; `--mode local --profile light\|balanced\|existing` resolves the same hardware-gated profile definitions as web and prints (never runs) an explicit model pull command. Hosted and skip/no-LLM paths remain. `doctor [--json|--fix|--check id]` runs the shared persisted real-pipeline checklist; `calibrate` retains measured hardware/endpoint tuning. |
 | `_feeds.py` | the `feeds` subcommands (drive the RSS daemon) |
@@ -34,9 +36,106 @@ main() = parse args → validate command budgets → install Settings → dispat
 | `_goldenset_migrate.py` | `migrate-verdicts-to-zotero` — one-time transfer of in-app verdicts (`label_verdicts`) into Zotero `label:<priority>` tags (`--dry-run`, idempotent, library items only, single batch backup) |
 | `_goldenset_setup_colors.py` | `setup-tag-colors` — prints the one-time Zotero setup (colors + number keys 1-4 for the four `label:<priority>` tags) for native keypress labeling. Non-destructive (prints the plan; writes nothing into your synced Zotero settings); `--json` for machine output |
 | `_faithbench.py` | `faithbench build/run/judge/report` — faithfulness mini-benchmark of the deep_review-stage model (span-verified QA + traps + review-claim grounding). Build stages the review CSV before publishing the immutable benchmark file as its version marker; QA runs require explicit approval of every generated review-CSV row and bind that CSV hash into the manifest. `build --max-builder-windows` bounds contiguous 6,000-character source windows per paper; its CLI/env/default precedence, preflight behavior and cost are documented below. `run` is resumable via `--run-id` and takes `--provider/--model` to sweep a model for THIS run only (no goals.yaml edit; recorded in the manifest); `judge` uses the pinned remote judge (`CUSTOM_BASE_URL`/`CUSTOM_API_KEY`). See `services/faithbench/README.md` |
-| `_research_feed.py` | `research-feed run --from … --to … [--venue …]`: bounded weekly JSON+Markdown; generates missing cards through existing deep review unless `--cached-only`; Zotero stays dry-run unless `--queue-zotero` is explicit. |
+| `_research_feed.py` | Default RSS `research-feed run --from … --to … [--venue …]`: bounded weekly JSON+Markdown/deep review unless cached; Zotero stays dry-run unless explicitly queued. `--source telegram --input-jsonl …` selects saved-news shadow processing before startup; collect/cached/view never invoke external gates. |
+
+`serve --host` accepts only localhost or literal loopback addresses, refuses
+wildcard/remote binds with a nonzero error, and disables Uvicorn proxy-header
+rewriting. Programmatic serve dispatch repeats the bind check before launch.
+No listener is terminated, and no address is silently substituted.
+The mobile launcher releases only its own Unix-socket inode inside Uvicorn's
+signal-capture lifetime, before the vendor restores and re-raises SIGTERM/SIGINT.
+Its outer context still owns normal/error cleanup; it never deletes an existing
+path to make restart appear successful. SIGKILL cleanup is not guaranteed. The app
+factory separately guards transport peer, Host and browser Origin. This is not
+remote mobile authentication. `serve-mobile` is a separate explicit gateway
+selection using existing Tailscale Serve authentication, not a relaxed `serve
+--host` or a new app login/session system. It never runs Tailscale commands or
+activates network access itself; see the [deployment boundary](../../docs/local-deployment-boundary.md).
 
 Handlers use lazy imports inside the function bodies to keep CLI startup fast.
+
+`research-feed run --source telegram --input-jsonl POSTS --project-root ROOT`
+imports canonical saved posts into the selected triage store, then explicitly runs
+shadow reranking and the configured DEFAULT LLM route (not the feed override).
+Obtain permitted-content/provider consent before processing originals. Add
+`--collect-only` for import/export with no model/provider/config requirement;
+`--cached-only` projects the existing store/profile/current configured identity
+without new input, external calls, migrations or store writes. `research-feed view
+--report SAVED.md` prints the retained Markdown only. Omitting saved input in
+explicit Telegram process/collect mode selects the dedicated live child below.
+Conflicting modes, Telegram venue/Zotero queue and RSS-only use of input/collect
+flags also fail there. RSS remains the default and still requires both dates before
+Settings/startup. Optional dates/review wait do not filter/time Telegram inference.
+The selected Settings budget bounds reranker waiting, not every provider request:
+the OpenAI factory forwards it while native Anthropic retains its adapter default.
+Evaluation identity records the configured wait input, not an effective deadline
+receipt. Shared shortlist/card defaults remain 20/10; strict admission is unchanged. See the
+[news contract](../services/research_feed/README.md#offline-saved-telegram-news).
+
+## Explicit Telegram auth and live collection
+
+```text
+telegram-auth -> TTY child -> SAME M3 fuse/lease -> own app identity -> connect/code/2FA
+run --source telegram -> DEVNULL-stdin child -> M3 -> M1b SQLite -> collect-only export
+                       -> child EXIT0 + hash/receipt verification -> existing run_saved ML/LLM
+```
+
+Use `research-feed telegram-auth --project-root ROOT` once, interactively, with your
+own Telegram application api_id/api_hash. Only the api_id and an uppercase
+OS-keyring credential NAME enter `data/telegram-account/application.json` (0600);
+the hash goes to the existing app keyring namespace, never argv/export/logs or
+environment fallback. Existing credential names are not overwritten. Phone, login
+code and optional 2FA are hidden prompts confined to auth. Auth requires a TTY
+before Settings/child work; its session/credential writes happen only under the
+existing M3 fuse and exclusive lease. Partial failures do not clobber existing
+session/identity files; a failed identity publication can leave an unused keyring
+entry, requiring explicit operator recovery with a new name.
+
+Declare `telegram_channels` in the existing ResearchProfile, then run
+`research-feed run --source telegram --project-root ROOT`. `--collect-only` stops
+at the durable collect/export bundle, without config/model/Zotero work. Normal
+collection never calls start/sign_in, prompts for secrets, joins or follows a
+channel; it has DEVNULL stdin. Missing/revoked sessions require explicit auth.
+Only allowlisted public broadcasts are read; rebinding or partial channel failures
+remain loud and preserve committed pages without proceeding to models. Missing
+optional Telethon reports that the `telegram` extra is required; nothing installs.
+
+Live/auth children require macOS CPython with asyncio.Runner. Both use the SAME
+existing configurable M3 wall/reserve/max cap and process-held fuse/lease through
+interpreter exit. The parent waits with the wall+reserve outer startup/exit cap;
+it never disarms/reuses the armed child. Isolated reentry pins this CLI's source
+root rather than importing code from the selected data project's working directory.
+Successful termination and matching JSON/Markdown/input hashes are required before
+model work. The verified live snapshot is compared against current stored originals
+before processing; changed originals fail rather than being overwritten by replay.
+Reports retain actual collection counts, channel cursors and durable retry_at.
+Saved-input replay/cached/view never launch Telegram. RSS has no new import/session
+or Telegram-config/schema requirement. ML stays shadow, never a qualified hard gate.
+This is source/test authoring, not performed authentication, live-content consent,
+three-channel/manual/restart acceptance or the 400-post RU/EN holdout study.
+
+`goldenset analyze-feedback --project-root ROOT [--cutoff AWARE_ISO]` publishes one
+private JSON/Markdown feedback report and prints one compact versioned receipt
+with report/full-receipt pointers (no provenance inventory dump). The optional
+cutoff requires a timezone and normalizes to UTC. It reuses selected Settings without
+startup, migrations, Zotero or models; capture/analysis runs in a clean offline child
+with external wall/RSS/available-RAM/swap-growth safeguards. Technical budgets/seed
+are config/env only, not extra UI knobs. Missing/corrupt required input prints a
+failure receipt then propagates/nonzero. Failure `published` is true/false/null for
+owned commit/not committed/unknown, not foreign destination existence; unknown and
+failure never confirm publication or authorize a cursor. Failure-only
+`receipt_persistence` prints not_written/written/failed plus a safe secondary class,
+never raw messages. Failure-file I/O preserves the original exception and computed
+receipt; non-I/O secondary failure stays loud with receipt/context intact. Receipt
+paths are attempted locators, not guaranteed usable; failed need not mean absent,
+and no fsync/power-loss guarantee is implied. No support still publishes an
+`insufficient_data` report with gaps/hashes. Default-off weekly automation and
+confirmation/recovery are documented below; installed-host evaluation and scientific
+sufficiency remain unverified. Publication currently requires Darwin's atomic
+no-replace primitive; see [operation contract](../services/golden/feedback_analysis/README.md).
+UX source: issue47 public [Laws of UX](https://lawsofux.com/). Occam subtracts dashboards,
+export knobs and parallel command families; Tesler puts capture/publication/cleanup
+in the system; Cognitive Load keeps this one command and one visible receipt.
 
 Faithbench run IDs are single ASCII alphanumeric/underscore/hyphen names, not
 paths. The common run/judge/report path resolver rejects traversal and symlink
@@ -137,8 +236,10 @@ passes None to read all unread rows. Both return nonzero for item/provider error
 errors propagate instead of entering an automatic retry loop. `feeds run --dry-run`
 disables startup background jobs/retraining/rescoring and simulates triage against
 the existing RSS pool without refreshing subscriptions or writing decisions.
-Hosted setup persists routing before its optional probe; `setup --mode no-llm`
-persists a valid ML-only choice that can later be changed in Settings.
+Hosted setup saves routing before optional real inference (default No). Canonical
+loopback locality, not the `hosted` name, invokes shared setup admission; UNKNOWN
+cannot construct a client. `setup --mode no-llm` saves a valid ML-only choice that
+can later change in Settings.
 
 `migrate-verdicts-to-zotero` plans from the full verdict snapshot, without the old
 5000-row cutoff. Dry-run and apply use the same list; library-only checks, connector
@@ -162,5 +263,11 @@ these traces; stage counts are instrumentation, not review-success scores.
 
 Diagnostic CLI source reads reuse the single-component/no-symlink paper-state guard. Admission happens before provider construction. Legacy full_text is explicitly labelled unverified legacy scope; empty sources retain local failure diagnostics. Diagnostic calls disable thinking without changing app routing.
 
-<!-- PR53 review slice 22 -->
-Review slice 22: API and CLI wiring / 1. Depends on the preceding slice; not release acceptance.
+`feeds serve` alone passes selected Settings to optional weekly feedback automation
+on its main asyncio thread. It is default-disabled (`ZS_FEEDBACK_SCHEDULE_ENABLED`)
+and adds no CLI flag/status command. `feeds run/tick`, server background work and
+manual `goldenset analyze-feedback` keep their existing contracts. The daemon log
+and Settings-resolved cursor/status/receipt pointers expose bounded catchup,
+publication/reuse/failure/insufficient/no-new-data states. No cursor is committed
+before confirmed receipts and the post-child cancellation yield. See the additive
+[weekly contract](../services/golden/feedback_analysis/README.md#weekly-operation-additive-manual-and-analytic-contracts-unchanged).
