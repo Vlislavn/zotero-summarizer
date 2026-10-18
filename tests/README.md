@@ -119,3 +119,6 @@ Review slice 70: Application regression tests / 3. Depends on the preceding slic
 
 <!-- PR53 review slice 71 -->
 Review slice 71: Application regression tests / 4. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 72 -->
+Review slice 72: Known failing native safety contracts / 1. Depends on the preceding slice; not release acceptance.
