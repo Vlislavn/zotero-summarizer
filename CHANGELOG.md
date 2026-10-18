@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Review slice 32: Test fixtures and isolation / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 31: Launch and tool wiring / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 30: Frontend offline and navigation / 3. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 29: Frontend offline and navigation / 2. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
