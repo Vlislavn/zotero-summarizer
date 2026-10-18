@@ -70,3 +70,6 @@ timestamps raise instead of silently becoming absent dates.
 
 **Boundary:** may compose library services and storage reads. Zotero writes are
 optional pending actions only; default runs are dry-run.
+
+<!-- PR53 review slice 16 -->
+Review slice 16: Research feed and Telegram / 1. Depends on the preceding slice; not release acceptance.

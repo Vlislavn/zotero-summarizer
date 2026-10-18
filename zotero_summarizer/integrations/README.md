@@ -198,3 +198,6 @@ Review slice 09: Source admission / 1. Depends on the preceding slice; not relea
 
 <!-- PR53 review slice 15 -->
 Review slice 15: Search and discovery / 1. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 16 -->
+Review slice 16: Research feed and Telegram / 1. Depends on the preceding slice; not release acceptance.
