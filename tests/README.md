@@ -113,3 +113,6 @@ Review slice 68: Application regression tests / 1. Depends on the preceding slic
 
 <!-- PR53 review slice 69 -->
 Review slice 69: Application regression tests / 2. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 70 -->
+Review slice 70: Application regression tests / 3. Depends on the preceding slice; not release acceptance.
