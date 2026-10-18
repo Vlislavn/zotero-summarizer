@@ -343,3 +343,6 @@ Review slice 27: Frontend Pending / 1. Depends on the preceding slice; not relea
 
 <!-- PR53 review slice 28 -->
 Review slice 28: Frontend offline and navigation / 1. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 29 -->
+Review slice 29: Frontend offline and navigation / 2. Depends on the preceding slice; not release acceptance.

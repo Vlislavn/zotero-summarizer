@@ -1,20 +1,8 @@
-// Today slate card — Stage 1 of the two-stage reading flow: read the abstract,
-// then tick the checkbox. Per the Laws of UX gate:
-//   • Von Restorff   — a relevance BAND (color + word) drives the card's visual
-//                      weight, so treasures pop and likely-trash is muted.
-//   • Selective Attention — a plain-language "why it matters" row sits at the top
-//                      (right under the band + title), where the eye lands.
-//   • Cognitive Load / Working Memory — ONE ordinal scale on this cull card: the
-//                      relevance band. Prestige and full-text Quality A–D are
-//                      Stage-2 reading signals that live in the Library, not here.
-//
-// The relevance band uses cull-card vocabulary (top pick / strong / fair / weak),
-// deliberately NOT the Stage-2 must/should/could action labels. The full-text
-// Quality A–D assessment lives in the full brief ("Open full brief ↗"), not here —
-// the old per-card QualityBlock expander was a second ordinal scale this header
-// forbids, so it was subtracted (Occam's Razor / Cognitive Load).
+// Today cull card: relevance is separate from review evidence. Selection
+// observations explain the existing server order; rendering never rescores.
 
 import AuthorByline from '../AuthorByline.jsx';
+import SelectionEvidence from './SelectionEvidence.jsx';
 import { scoreToBand, BAND_ACTIVE_CLS } from '../../utils/relevanceBands.js';
 import { Link } from 'react-router-dom';
 
@@ -26,12 +14,11 @@ const BAND_CARD_CLS = {
   could_read: 'border border-slate-200 border-l-4 border-l-amber-400 bg-white',
   dont_read: 'border border-slate-200 border-l-2 border-l-rose-300 bg-slate-50 opacity-70',
 };
-// Treasure→trash wording for THIS card. Deliberately NOT the must/should/could
-// priority words (those are the Stage-2 action labels) nor the Quality A–D grade.
+// Display-only relevance words, not saved priorities or scientific grades.
 const RELEVANCE_WORD = {
   must_read: 'top pick',
   should_read: 'strong',
-  could_read: 'fair',
+  could_read: 'moderate',
   dont_read: 'weak',
 };
 
@@ -44,45 +31,15 @@ function parseAuthorsString(s) {
     .map((name) => ({ name, h_index: null }));
 }
 
-// ---------------------------------------------------------------------------
-// Why it matters — heuristic, no-LLM reason chips (paper.why from the API). Sits
-// at the top of the card so the relevance story is the first thing read.
-// ---------------------------------------------------------------------------
-
-function WhyRow({ why }) {
-  if (!Array.isArray(why) || why.length === 0) return null;
-  return (
-    <div className="mt-2">
-      <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 mb-1">
-        Why it matters
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        {why.map((reason) => (
-          <span
-            key={reason}
-            className="inline-flex items-center px-2 py-0.5 rounded-full border border-teal-200 bg-teal-50 text-teal-800 text-[11px] font-medium"
-          >
-            {reason}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Paper card
-// ---------------------------------------------------------------------------
-
-export default function PaperCard({ paper, selected, onToggleSelect, llmEnabled = true }) {
+export default function PaperCard({ paper, selected, onToggleSelect, llmEnabled = true, selectionPolicy }) {
   const authors = parseAuthorsString(paper.authors);
   if (authors.length > 0 && typeof paper.max_author_h_index === 'number' && paper.max_author_h_index > 0) {
     authors[0] = { ...authors[0], h_index: paper.max_author_h_index };
   }
-  const band = scoreToBand(paper.composite_score);
+  const displayedScore = paper.selection_evidence?.stored?.composite_recorded === false
+    || !Number.isFinite(paper.composite_score) ? null : paper.composite_score;
+  const band = scoreToBand(displayedScore);
   const cardCls = BAND_CARD_CLS[band] || 'border border-slate-200 bg-white';
-  const compositeStr =
-    typeof paper.composite_score === 'number' ? paper.composite_score.toFixed(2) : '—';
 
   const titleNode = paper.url || paper.doi
     ? (
@@ -90,16 +47,16 @@ export default function PaperCard({ paper, selected, onToggleSelect, llmEnabled 
         href={paper.url || `https://doi.org/${paper.doi}`}
         target="_blank"
         rel="noreferrer noopener"
-        className="text-sm font-bold text-slate-900 hover:text-teal-700 underline-offset-2 hover:underline"
+        className="text-sm font-medium text-slate-900 hover:text-teal-700 underline-offset-2 hover:underline"
       >
         {paper.title || '(untitled)'}
       </a>
     )
-    : <span className="text-sm font-bold text-slate-900">{paper.title || '(untitled)'}</span>;
+    : <span className="text-sm font-medium text-slate-900">{paper.title || '(untitled)'}</span>;
 
   return (
     <article
-      className={`rounded-xl p-3 shadow-sm transition-colors ${cardCls} ${
+      className={`rounded-xl p-3 transition-colors ${cardCls} ${
         selected ? 'ring-1 ring-teal-300' : ''
       }`}
     >
@@ -113,22 +70,19 @@ export default function PaperCard({ paper, selected, onToggleSelect, llmEnabled 
         />
         <div className="min-w-0 flex-1">
           <header className="mb-2">
-            {/* Band pill + title — the band sets the card's visual weight and is
-                the ONE relevance scale on the cull card (raw value in the tooltip). */}
-            <div className="flex items-start gap-2">
+            <div className="flex flex-wrap items-start gap-2">
               <span
-                className={`shrink-0 mt-0.5 px-2 py-0.5 rounded-full border text-[10px] font-bold uppercase tracking-wider ${
-                  band ? BAND_ACTIVE_CLS[band] : 'bg-slate-100 text-slate-500 border-slate-200'
+                className={`mt-0.5 px-2 py-0.5 rounded-full border text-[11px] font-medium ${
+                  band ? BAND_ACTIVE_CLS[band] : 'bg-slate-100 text-slate-600 border-slate-200'
                 }`}
-                title={`Relevance to you ${compositeStr}/5 (model + corpus + prestige) — not a quality judgment`}
+                title="Relevance to you, not a scientific-quality judgment"
               >
-                {band ? RELEVANCE_WORD[band] : 'unscored'}
+                Relevance: {band ? RELEVANCE_WORD[band] : 'unscored'}
               </span>
-              <div className="leading-snug flex-1 min-w-0">{titleNode}</div>
+              <div className="leading-snug flex-1 min-w-0 break-words">{titleNode}</div>
             </div>
 
-            {/* Why it matters — top of card, where the eye lands. */}
-            <WhyRow why={paper.why} />
+            <SelectionEvidence paper={paper} selectionPolicy={selectionPolicy} />
 
             <div className="mt-2">
               <AuthorByline authors={authors} source="feed" quiet />

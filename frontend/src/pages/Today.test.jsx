@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -58,6 +58,34 @@ it('selects only the visible source-filtered slate for batch actions', async () 
   await waitFor(() => expect(daily.addToLibrary).toHaveBeenCalledWith([1], ''));
   expect(await screen.findByText(/Zotero sync pending \(1\)/)).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Add to library' }).disabled).toBe(true);
+  client.clear();
+});
+
+it('passes the actual slate policy to cards while preserving server order, scores and labels', async () => {
+  const papers = [
+    { item_id: 8, item_key: 'P8', title: 'Earlier lower composite', composite_score: 2.8,
+      reading_priority: 'must_read', selection_evidence: { mode: 'quality_first',
+        stored: { composite_recorded: true, reading_priority: 'must_read' } } },
+    { item_id: 9, item_key: 'P9', title: 'Later higher composite', composite_score: 4.6,
+      selection_evidence: { mode: 'quality_first', stored: { composite_recorded: true } } },
+  ];
+  const before = JSON.stringify(papers);
+  daily.fetchDailySlate.mockResolvedValue({ papers, selection_policy: 'quality_first', awaiting_review_total: 2 });
+  daily.getTriageStatus.mockResolvedValue({ running: false });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><MemoryRouter><Today /></MemoryRouter></QueryClientProvider>);
+
+  await screen.findByText('Earlier lower composite');
+  const cards = screen.getAllByRole('article');
+  expect(within(cards[0]).getByText('Earlier lower composite')).toBeTruthy();
+  expect(within(cards[0]).getByText('Relevance: moderate')).toBeTruthy();
+  expect(within(cards[1]).getByText('Later higher composite')).toBeTruthy();
+  expect(within(cards[1]).getByText('Relevance: top pick')).toBeTruthy();
+  expect(screen.getAllByText('Quality-first')).toHaveLength(2);
+  fireEvent.click(within(cards[0]).getByText('Why selected'));
+  expect(JSON.stringify(papers)).toBe(before);
+  expect(daily.addToLibrary).not.toHaveBeenCalled();
+  expect(daily.trashPapers).not.toHaveBeenCalled();
   client.clear();
 });
 
