@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Review slice 73: Consolidate package documentation / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 72: Known failing native safety contracts / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 71: Application regression tests / 4. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 70: Application regression tests / 3. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
