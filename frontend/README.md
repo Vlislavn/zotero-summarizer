@@ -337,3 +337,6 @@ Review slice 25: Frontend paper review / 2. Depends on the preceding slice; not 
 
 <!-- PR53 review slice 26 -->
 Review slice 26: Frontend setup / 1. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 27 -->
+Review slice 27: Frontend Pending / 1. Depends on the preceding slice; not release acceptance.

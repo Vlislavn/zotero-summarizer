@@ -2,11 +2,38 @@
 // the per-page LOC budget. No React here — only payload parsing, draft
 // construction, and presentational utilities for queued Zotero changes.
 
+export const UNBOUND_GENERATED_TARGET_MESSAGE = 'This generated note has no bound Zotero target. Reject it or regenerate the review before applying.';
+
+export function hasUnboundGeneratedTarget(change) {
+  return Boolean(change.generated_preview && !change.generated_preview.target);
+}
+
+export const MISSING_APPROVAL_MESSAGE = 'Approval snapshot unavailable. Reload and review the payload and Zotero target before applying.';
+
+export function hasApprovalPreview(change) {
+  const preview = change.approval_preview;
+  return !hasUnboundGeneratedTarget(change)
+    && preview?.version === 1
+    && preview.change_id === change.id
+    && preview.item_key === change.item_key
+    && preview.change_type === change.change_type
+    && preview.payload !== null && typeof preview.payload === 'object' && !Array.isArray(preview.payload)
+    && Number.isInteger(preview.edit_revision) && preview.edit_revision >= 0
+    && preview.target !== null && typeof preview.target === 'object' && !Array.isArray(preview.target)
+    && typeof preview.preview_sha256 === 'string' && /^[a-f0-9]{64}$/.test(preview.preview_sha256);
+}
+
+export function approvalPreviews(changes) {
+  if (!changes.length || !changes.every(hasApprovalPreview)) return null;
+  return Object.fromEntries(changes.map((change) => [change.id, change.approval_preview.preview_sha256]));
+}
+
 export const STATUS_TABS = [
   { value: 'pending', label: 'Pending' },
   { value: 'applied', label: 'Applied' },
   { value: 'rejected', label: 'Rejected' },
   { value: 'failed', label: 'Failed' },
+  { value: 'applying', label: 'Needs reconciliation' },
 ];
 
 export function flattenCollections(nodes, depth = 0) {
