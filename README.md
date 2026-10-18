@@ -174,6 +174,8 @@ uv run zotero-summarizer faithbench build --max-builder-windows 64  # larger QA-
   budget and increased call cost are documented there.
 - **[Research-feed evaluation evidence](docs/issue-evidence-research-feed.md)** — why the current
   30-paper fixture is unscorable for production inclusion quality (not a 0%-precision result).
+  New card JSON keeps reproduction effort unknown until assessed; code availability
+  alone establishes no duration. Existing saved reports and artifact/blocker fields remain.
 - **[docs/architecture.md](docs/architecture.md)** — how it works, the layering rules, and
   the dev / verification workflow.
 - **[CHANGELOG.md](CHANGELOG.md)** — notable changes (latest: the guided first-run setup).

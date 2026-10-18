@@ -32,6 +32,12 @@ on the same date keep separate artifacts. Reversed date windows fail before
 profile/source reads or writes. The sole RSS adapter is `load_candidates`;
 the unused source protocol and state-only class wrapper are removed.
 
+New card JSON keeps reproduction effort `unknown` when code is available but no
+effort assessment exists; availability is not a one-week estimate. Existing
+reported blockers, artifact URLs and the output schema remain intact. Saved
+reports are not rewritten. `tests/test_reproduction_uncertainty.py` covers this
+projection and schema round-trip without executing an experiment or model.
+
 Offline acceptance is `uv run python tools/eval_research_feed.py --check`.
 The shipped 30-paper fixture records human inclusion and verified artifact labels
 but lacks frozen pre-human abstracts/scores/summaries and review outputs. The

@@ -68,6 +68,14 @@ AI-assisted setup can finish before the secret/endpoint is live — **Next** gat
 structurally-valid provider (type + base URL + key env-var name + model), not on a passing
 connection test. Environment changes require a restart; keyring saves apply immediately.
 
+## Reproduction effort in weekly card JSON
+
+Newly generated weekly card JSON reports `reproducibility_tier: "unknown"` when
+code is available but effort has not been assessed. Verified artifact availability
+is not a promise of reproduction within a week. Existing blockers, artifact URLs
+and the schema remain available; old saved reports are not automatically rewritten.
+This correction does not run a new model or a reproduction experiment.
+
 ## Two ways to run triage
 
 Scoring papers always runs the same pipeline (cheap ML gate → LLM for survivors →

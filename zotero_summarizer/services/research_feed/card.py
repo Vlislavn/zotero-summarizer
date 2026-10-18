@@ -52,7 +52,7 @@ def _reproducibility(review: dict[str, Any], code_urls: list[str]) -> tuple[str,
         missing.append("No verified code URL")
     if missing:
         return "blocked", list(dict.fromkeys(missing))
-    return "one_week", []
+    return "unknown", []
 
 
 def build_card(
@@ -94,7 +94,7 @@ def build_card(
         code_urls=code_urls, dataset_urls=candidate.dataset_urls, model_urls=candidate.model_urls,
         benchmark_names=[candidate.title] if "benchmark" in triage.contribution_kind else [],
         reproducibility_tier=tier,
-        reproducibility_rationale=("Verified code and no critical missing inputs." if not missing else "; ".join(missing)),
+        reproducibility_rationale=("Reproduction effort has not been assessed." if not missing else "; ".join(missing)),
         missing_reproduction_inputs=missing, project_uses=uses, project_use_notes=use_notes,
         research_impact=max(0, min(5, int(digest.get("significance") or 0))),
         production_impact=min(5, 2 + int(bool(implementations)) + int(bool(code_urls))),
