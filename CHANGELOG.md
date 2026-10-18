@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Review slice 60: Method regression tests / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 59: Setup regression tests / 3. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 58: Setup regression tests / 2. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 57: Setup regression tests / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
