@@ -25,6 +25,8 @@ from zotero_summarizer.services.search._models import (
     SearchIntent,
 )
 
+from zotero_summarizer.services.search.dedup import reconcile_operation_state
+
 # Per-session-id locks so the background review worker (whole-session saves) and a
 # concurrent "Add to library" (stamps one candidate's materialized key) never
 # lost-update each other. In-process only — sessions are served by one app process.
@@ -80,23 +82,16 @@ def save(session: ResearchSession) -> None:
 
 
 def save_merge(session: ResearchSession) -> ResearchSession:
-    """Persist under the session lock, preserving any ``materialized_zotero_key`` that
-    a concurrent "Add to library" stamped since this in-memory copy was loaded. The
-    key is add-only/monotonic, so the review worker's whole-session saves must never
-    drop it. Everything else (order, quality, reviews) is owned by the worker."""
+    """Preserve operation keys across saved/current exact families under the lock.
+
+    Selection, order, metadata, quality and reviews remain worker-owned.
+    """
     with _lock_for(session.id):
         with _locks_guard:
             if session.id in _deleted:
                 return session
         persisted = load(session.id)
-        keyed = {
-            c.candidate_id: c.materialized_zotero_key
-            for c in persisted.candidates
-            if c.materialized_zotero_key
-        }
-        for cand in session.candidates:
-            if not cand.materialized_zotero_key and keyed.get(cand.candidate_id):
-                cand.materialized_zotero_key = keyed[cand.candidate_id]
+        reconcile_operation_state(session.candidates, persisted.candidates)
         save(session)
     return session
 

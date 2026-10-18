@@ -11,6 +11,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Persist Search Add's planned native key before effects and preserve operation identity across exact-family/background merges. Explicit retries reuse the existing native-key no-op after failed session finalization; unknown delivery never becomes an invented rollback or distributed exactly-once claim.
+- Refuse Search Add when enriched library coverage conflicts with its retained operation plan; preserve both observations without stamping contradictory delivery or dispatching another native write. Reconcile the configured library explicitly.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.
 - Fold goal findings without losing originals; disclose saved source basis and unknown reviewed extent. Factor literal warning frames into one introduction with expanded scope/context, qualifiers and source links; retain original wording. Compact cards remain unchanged.
