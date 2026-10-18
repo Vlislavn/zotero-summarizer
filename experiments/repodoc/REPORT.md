@@ -3,10 +3,10 @@
 ## Decision and scope
 
 **Reject the inspected RepoDoc call graph as an automatic architecture oracle.**
-Retained artifacts contain source-demonstrable false calls; the pinned upstream
-resolver explains them. Do not add a dependency, CI job, dashboard or parallel
-architecture framework. The retained current Python-backend arm also fails its
-caller-impact oracle. This is not a verdict on unobserved whole-system cost,
+Retained graphs contain source-demonstrable false calls; historical inspection
+ascribed them to the pinned upstream resolver. Do not add a dependency, CI job,
+dashboard or parallel architecture framework. The historical Python-backend
+checkpoint reports a failed caller-impact oracle. This is not a verdict on unobserved whole-system cost,
 model quality, CLI completion or human comprehension: those remain **UNKNOWN**.
 The parent-run two-file parser arm also fails all three correctness discriminators.
 **These are completed diagnostics, not product delivery or correction GREEN.**
@@ -14,9 +14,25 @@ The complete current-repository experiment and issue closure remain incomplete.
 
 The two complete conflicting seed reports are preserved in [HISTORY.md](HISTORY.md).
 This report supersedes their unsupported numbers and success/failure narratives.
-[PRIMARY_RECONCILIATION.json](PRIMARY_RECONCILIATION.json) binds each primary
-artifact, source comparison and unknown. Raw graphs stay in private, gitignored
-`data/issue_runs/23/`; no embedded third-party/application source is republished.
+[PRIMARY_RECONCILIATION.json](PRIMARY_RECONCILIATION.json) separates current
+availability from historical checkpoint records. Raw graphs stay in private,
+gitignored `data/issue_runs/23/`; no embedded source is republished.
+
+### Publication qualification: 2026-10-18
+
+Local stdlib checks re-opened all six historical graph files: hashes, bytes and
+declared counts match; dependency/KG IDs and call pairs agree. Tree membership is
+113 exact IDs, 94 unique names and two ambiguous names. These checks import no
+application or upstream code and do not establish graph correctness.
+
+The six named backend execution artifacts, seven parser artifacts and upstream
+source packet are unavailable at their declared locations. The execution/source
+verification statements below are preserved historical checkpoint accounts, **not
+current raw-evidence verification**. Missing files do not prove nonexecution or
+loss everywhere. Historical verifier booleans retain their original scope; JSON
+uses `historicalBackendExecution`, `historicalParserExecution` and
+`historicalSourceCrossChecks`, without old-name aliases. No diagnostic replay,
+private-source transmission, installation, model or issue closure is authorized.
 
 Input is source1065 candidate `f66b78dde325a0fc0db1a0fff13302f7efd5e891`,
 seeded into the exclusive lane at HEAD `bd5e26741dd70f3a359b984f759d68b32ac1eab9`.
@@ -106,11 +122,12 @@ its product loop or layering was found. A future current 8-15-domain system view
 must separate measured call data from documented policy, and must be rendered,
 read and pass the approved visual/UX gates before acceptance.
 
-## Current backend receipt: actual failed caller impact
+## Historical backend checkpoint: reported failed caller impact
 
-The retained `data/issue-validation/wave43/architecture43/kg-impact-01/receipt.json`
-supersedes the previous queued/unrun status. This checkpoint did not execute it;
-it inspected and independently recounted its existing artifacts using stdlib only.
+The following preserves the checkpoint account for
+`data/issue-validation/wave43/architecture43/kg-impact-01/receipt.json`, which then
+superseded queued/unrun status. Its raw files are now unavailable for reverification.
+That earlier reconciliation described stdlib inspection, not a new diagnostic run.
 All **366** before-snapshot inputs match the source1065 seed; all **22** embedded
 `loaded_upstream` identities match pinned source. The requested standalone
 `loaded-source.json` does not exist; provenance is embedded in `receipt.json`.
@@ -138,11 +155,12 @@ missing caller. `get_upstream_dependencies` conversely walks predecessors despit
 claiming dependencies. No upstream or application patch, edge reversal or oracle
 relaxation was performed. CLI behavior is a separate unexecuted requirement.
 
-## Executed parser arm: three correctness discriminators FAIL
+## Historical parser checkpoint: three reported discriminators FAIL
 
-The parent actually executed `parser-semantics-03`; this checkpoint only reads its
-primary receipt, frozen stdin/authority/Markdown, stdout, guard and release. Their
-identities are in [PRIMARY_RECONCILIATION.json](PRIMARY_RECONCILIATION.json).
+The historical account reports parent execution of `parser-semantics-03` and
+inspection of its receipt, frozen inputs, stdout, guard and release. Recorded
+identities remain in [PRIMARY_RECONCILIATION.json](PRIMARY_RECONCILIATION.json);
+those raw files are unavailable for this publication qualification.
 Inputs are the existing seed-bound `_daily.py` and `_execution.py`, not a current
 whole-repository scan or the parent's later integration candidate.
 
@@ -176,8 +194,9 @@ supersedes only parser03's active status, not unmeasured historical report claim
 
 ## Causal design-transfer / defer map
 
-Anchors below are the inspected RepoDoc v0.1.0 source at the pinned HEAD. This is
-concept-level design assessment, **not permission to patch, copy or adopt code**.
+Anchors below describe the historical inspection of RepoDoc v0.1.0 at the pinned
+HEAD. The raw upstream packet is currently unavailable for reverification. This
+is a preserved design assessment, **not permission to patch, copy or adopt code**.
 
 | Source mechanism and demonstrated limit | Transfer / defer | Minimum future corrective requirement |
 |---|---|---|
@@ -226,7 +245,7 @@ no dependency, upstream code adoption, redistribution or license decision.
 
 | #23 requirement | Actual status / remaining gate |
 |---|---|
-| Current initial KG + hierarchical clustering | Current seed-bound Python backend KG retained/recounted (2,354/4,120); whole graph/clustering and frontend dependencies remain unresolved. |
+| Current initial KG + hierarchical clustering | Historical checkpoint reports backend KG2,354/4,120; its raw files are now unavailable. Whole graph/clustering and frontend dependencies remain unresolved. |
 | Meaningful domain/boundary clustering | Historical class-only, 41-root tree does not establish it; current API/services/storage/integrations/core/frontend/MCP mapping needed. |
 | System 8-15 domains + triage drill-down | Existing old PNGs read; no current generated views/render gates. |
 | Cycles/hubs/isolation/backward edges/placement | Two source-grounded graph defects verified; raw 211 isolates/hubs retained; no current code-policy/Vulture/placement result. |
@@ -267,8 +286,9 @@ synthesis and any production slices rather than treating this report as closure.
 **RED preservation evidence:** seed README and REPORT disagree on node/edge counts,
 model success and update outcome; primary stdlib counts disprove REPORT's bound
 numbers and expose unbound runtime claims. Original reports are retained verbatim.
-**Actual runtime RED retained:** caller impact returns only the changed callee;
-all three parser/resolver discriminators fail. Exit 0 is not a passing oracle.
+**Reported historical runtime REDs:** caller impact returns only the callee;
+three parser/resolver discriminators fail. Their raw evidence is now unavailable
+for reverification; exit0 alone was never a passing oracle.
 **Documentation reconciliation only:** active docs/ledger now consume both parent-run
 receipts, retain exact expected/actual values and source mechanisms, separate
 historical/backend/parser/CLI evidence, and keep missing gates UNKNOWN/open. No

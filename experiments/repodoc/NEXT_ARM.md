@@ -1,4 +1,10 @@
-# Completed diagnostics; no next arm authorized
+# Historical diagnostic reports; no next arm authorized
+
+Publication qualification (2026-10-18) rechecked six historical graph files.
+The backend/parser raw execution files and upstream packet are unavailable at
+their declared locations. The results below preserve the historical checkpoint
+account; they are not current raw-evidence verification or new execution authority.
+See the canonical ledger's `qualification` field. Missing evidence is UNKNOWN.
 
 ## Backend `kg-impact-01`: retain the failed oracle
 
@@ -40,8 +46,8 @@ licenseAdoptionGranted=false. One-second sampling records 229,376 bytes and then
 0 after exit: **not actual peak RSS or a meaningful process-footprint estimate**.
 Sampled swap growth 0 is not zero total system swap.
 
-[PRIMARY_RECONCILIATION.json](PRIMARY_RECONCILIATION.json) binds receipt, frozen
-stdin/authority/Markdown, stdout, guard and release. [REPORT.md](REPORT.md) maps
+[PRIMARY_RECONCILIATION.json](PRIMARY_RECONCILIATION.json) preserves historical
+receipt/input/guard identities separately from current primary availability. [REPORT.md](REPORT.md) maps
 source mechanisms, concept-level transfer/defer and minimum future corrections.
 
 ## Preserve preparation; stop rather than replay
@@ -54,10 +60,11 @@ unchanged. Execution of parser03 does not recover their outcomes or unmeasured
 historical README/REPORT claims.
 
 **No new arm, runner, replay, upstream/application patch or runtime lease is
-prepared or granted here.** This checkpoint reads source/evidence and reconciles
-docs only. The earlier narrow readonly-import exception belonged to that named
-parent-run diagnostic; current upstream authority is read-source-only, not import,
-copy/adopt/redistribute permission. License metadata remains null/no license file.
+prepared or granted here.** This qualification checks available local graph data
+and reconciles docs only. The earlier narrow readonly-import exception belonged
+to that named diagnostic, not this PR. Historical upstream metadata recorded a
+null licence/no licence file; its packet is unavailable for a current check.
+No private-source read/transmission, import, copying or adoption is authorized.
 
 Both runs are diagnostic evidence, **not product delivery, correction GREEN,
 acceptance or #7/#23 closure**. Full hierarchy/frontend, current system/triage

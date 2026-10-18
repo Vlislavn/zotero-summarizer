@@ -1,30 +1,32 @@
 # RepoDoc architecture-diagnostics experiment
 
 **Reject the inspected graph as an automatic architecture oracle; keep integration
-withheld.** Two false call edges are verified against embedded and current source,
-and explained by the unchanged upstream global name resolver. The retained current
-backend arm also **fails caller-impact propagation**. Neither fact turns missing
-whole-system/runtime receipts into failures. **#23 remains incomplete.**
+withheld. #23 remains incomplete.** The six historical graph files remain available;
+publication qualification rechecked their hashes and counts. Raw files for the
+reported backend/parser executions and the pinned upstream packet are currently
+unavailable at their declared locations. Their results/mechanisms below are
+historical checkpoint accounts, not newly verified execution/source evidence.
+Missing evidence is UNKNOWN, not proof of success, failure or nonexecution.
 
 Start with [REPORT.md](REPORT.md). It reconciles the conflicting seed reports
 against hash-bound primary JSON: 2,585 nodes/4,539 edges, a 41-root tree with no
 children, and a separate 188-node/235-edge triage graph. These are historical,
-not current source1065 results. A separate source1065 Python-backend receipt now
-establishes 2,354 nodes/4,120 edges, a failed caller-impact control, a recorded
+not current source1065 results. The historical source1065 Python-backend checkpoint
+reports 2,354 nodes/4,120 edges, a failed caller-impact control, a recorded
 2.4847991669084877-second inner duration and zero LLM calls/tokens. Its separate
 guard records max sampled tree RSS 97,517,568 bytes (93 MiB) and swap growth 0:
-this narrow diagnostic completed, but its oracle failed. Full CLI update,
+the checkpoint reports diagnostic completion and a failed oracle. Full CLI update,
 historical provider outcomes and whole-system costs remain UNKNOWN.
 
-The parent also executed `parser-semantics-03` on two seed-bound files: all three
-correctness discriminators fail (keyword-only signature, outer context after a
-nested function, receiver resolution). Its 19 loaded-source references are bound;
+The historical checkpoint also reports `parser-semantics-03` on two seed-bound
+files: all three correctness discriminators fail (keyword-only signature, outer context after a
+nested function, receiver resolution). It records 19 loaded-source references;
 inner duration is 0.164493374992162 s, LLM calls/tokens 0/0. The 229,376-byte RSS
 sample is **not a peak or process-footprint measurement**. This is diagnostic
 completion, not product delivery, correctness, acceptance or closure.
 
-- [PRIMARY_RECONCILIATION.json](PRIMARY_RECONCILIATION.json): source/artifact
-  identities, actual counts, code-policy cross-checks and unknowns.
+- [PRIMARY_RECONCILIATION.json](PRIMARY_RECONCILIATION.json): current availability,
+  rechecked graph counts and separately labelled historical source/execution records.
 - [HISTORY.md](HISTORY.md): both complete original reports, byte-preserved inside
   fenced blocks with their seed hashes; superseded, not execution proof.
 - [NEXT_ARM.md](NEXT_ARM.md): both completed diagnostics and their failed oracles;

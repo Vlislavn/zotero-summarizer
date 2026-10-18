@@ -1,5 +1,19 @@
 {
-  "scope": "Source/evidence-only reconciliation of two completed parent-run diagnostics; no imports, tests, runtime, new preparation or replay at this checkpoint. Original preparation/refusal/unrun preimages are unchanged.",
+  "scope": "Historical checkpoint reconciliation, not present execution proof. The qualification field owns current primary availability. Historical verifier booleans/results retain their original checkpoint meaning; no imports, tests, diagnostic replay or source adoption.",
+  "qualification": {
+    "date": "2026-10-18",
+    "historicalGraphArtifactsAvailable": 6,
+    "historicalGraphHashesAndCountsMatch": true,
+    "backendExecutionArtifactsExpected": 6,
+    "backendExecutionArtifactsAvailableAtDeclaredRoot": 0,
+    "parserExecutionArtifactsExpected": 7,
+    "parserExecutionArtifactsAvailableAtDeclaredRoot": 0,
+    "upstreamSourcePacketAvailableAtDeclaredRoot": false,
+    "executionEvidenceStatus": "unavailable_for_current_reverification",
+    "historicalExecutionClaims": "Preserved checkpoint reports, not newly verified raw evidence; absence does not prove nonexecution or loss everywhere.",
+    "method": "Local stdlib file/hash/count checks only; no application/upstream import, model, diagnostic replay, install or new rendered artifact.",
+    "wholeIssueAccepted": false
+  },
   "acceptanceAuthority": "Parent alone accepts, integrates, publishes or closes; reviewers supply findings only.",
   "appInput": {
     "seed": "data/issue-closure/native-resume43/integration-latency32/seed-receipt.json",
@@ -76,7 +90,7 @@
       "caveat": "Name-only matching is diagnostic, not permission to repair or accept module identities."
     }
   ],
-  "currentSourceCrossChecks": [
+  "historicalSourceCrossChecks": [
     {"path": "zotero_summarizer/storage/_repo_feedback.py", "SHA256": "6fd1a672687d07c4a8e9b02a9d86b930b27b0050ec04703342ba7471b704d339", "observation": "get_feedback_events uses conn.execute on the SQLite connection, not faithbench._runner.execute."},
     {"path": "frontend/src/utils/relevanceBands.js", "SHA256": "b87530de62c708f7747f3c5202cde5914c384bef9c99a76a8bc37493cf9406f2", "observation": "get is a local arrow helper within hydrateFilters, not a globally callable exported function."},
     {"path": "tools/precommit/check_import_policy.py", "SHA256": "14723db147518af44193902fa8df19d603a7cf5aea8fe90f9d40c20f07ce7270", "observation": "Policy checks static imports with relative/alias resolution. A calls edge is not an import violation. Current policy gate was not executed."},
@@ -99,7 +113,7 @@
       "repodoc/cli/commands.py:369-833 regenerates docs with an agent; no no-model graph/view-refresh CLI mode was found in this inspected command."
     ]
   },
-  "currentExecution": {
+  "historicalBackendExecution": {
     "root": "data/issue-validation/wave43/architecture43/kg-impact-01",
     "status": "existing retained arm inspected; caller-impact oracle FAILED; no execution/replay at this checkpoint",
     "scope": "366 seed-bound Python-backend files only; not whole-repository/CLI update/clustering",
@@ -172,7 +186,7 @@
     "Current system/domain rendering gates and human comprehension",
     "Current CLI update/regeneration and unrelated-view preservation"
   ],
-  "parserExecution": {
+  "historicalParserExecution": {
     "root": "data/issue-validation/wave43/architecture43/parser-semantics-03",
     "guardRoot": "data/issue-validation/wave43/architecture43/parser-semantics-03-parent-guard",
     "status": "Parent executed; completed/released; three correctness discriminators FAILED. No worker execution/replay or product delivery.",
