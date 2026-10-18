@@ -5,3 +5,6 @@ Review slice 18: Feedback analysis / 1. Depends on the preceding slice; not rele
 
 <!-- PR53 review slice 19 -->
 Review slice 19: Feedback analysis / 2. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 20 -->
+Review slice 20: Feedback analysis / 3. Depends on the preceding slice; not release acceptance.
