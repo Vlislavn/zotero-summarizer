@@ -55,9 +55,8 @@ def _goal_evidence(goal_summaries: Any) -> str:
 
 
 def _grade(digest: dict[str, Any] | None, quality: dict[str, Any] | None) -> str:
-    """The A-D grade, preferring the digest's then the quality_eval's (they echo
-    each other); ``""`` when neither assessed it."""
-    for src in (digest, quality):
+    """Prefer the independent quality grade; use Digest only when it is unavailable."""
+    for src in (quality, digest):
         grade = str((src or {}).get("grade") or "").strip().upper()[:1]
         if grade in {"A", "B", "C", "D"}:
             return grade
@@ -123,6 +122,9 @@ def effective_read_decision(
     if decision != "read":
         return decision if decision in {"skim", "skip"} else "", []
     flags: list[str] = []
+    basis = d.get("basis")
+    if basis != "full_text":
+        flags.append("abstract_only" if basis == "abstract" else "full_text_not_confirmed")
     friction = str(d.get("writing_friction") or "")
     if friction == "high":
         flags.append("writing_friction")

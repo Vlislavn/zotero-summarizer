@@ -260,3 +260,6 @@ legacy identities refuse resume without upgrading/overwriting old artifacts.
 Changed config/source may conservatively require a new run even if irrelevant to
 a particular trial. This does not pin remotely mutable model weights or replace
 the frozen dataset's separate human-review requirement.
+
+<!-- PR53 review slice 12 -->
+Review slice 12: Review and interpretation / 3. Depends on the preceding slice; not release acceptance.

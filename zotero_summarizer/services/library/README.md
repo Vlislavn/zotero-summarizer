@@ -494,3 +494,6 @@ Review slice 10: Review and interpretation / 1. Depends on the preceding slice; 
 
 <!-- PR53 review slice 11 -->
 Review slice 11: Review and interpretation / 2. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 12 -->
+Review slice 12: Review and interpretation / 3. Depends on the preceding slice; not release acceptance.

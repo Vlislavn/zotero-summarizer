@@ -252,6 +252,8 @@ def build_feed_detail_by_key(
     triage_db_path: Path,
     zotero_data_dir: Path,
     feed_key: int | str,
+    *,
+    interpretation_schema: str | None = None,
 ) -> dict[str, Any] | None:
     """Assemble the feed-source review-detail payload.
 
@@ -303,11 +305,16 @@ def build_feed_detail_by_key(
     # A feed-item-id (int) key never has a review entry → None.
     from zotero_summarizer.services.library import deep_review
 
-    cached_review = (
-        deep_review.get_current_review(feed_key)
-        if isinstance(feed_key, str) and is_stable_feed_key(feed_key)
-        else None
-    )
+    if interpretation_schema is not None and is_stable:
+        from zotero_summarizer.services.library._interpretation_view import current_review_view
+
+        cached_review = current_review_view(feed_key, interpretation_schema=interpretation_schema)
+    else:
+        cached_review = (
+            deep_review.get_current_review(feed_key)
+            if isinstance(feed_key, str) and is_stable_feed_key(feed_key)
+            else None
+        )
 
     return {
         "source": SOURCE_FEED,
@@ -394,6 +401,8 @@ def build_note_detail(
 def build_library_detail(
     reader: ZoteroReader,
     item_key: str,
+    *,
+    interpretation_schema: str | None = None,
 ) -> dict[str, Any] | None:
     """Assemble the library-source review-detail payload.
 
@@ -417,6 +426,8 @@ def build_library_detail(
             "publication_date": str(detail.get("publication_date", "")),
             "venue": str(detail.get("publication_title", "")),
         })
+    if interpretation_schema is not None:
+        from zotero_summarizer.services.library._interpretation_view import current_review_view
     return {
         "source": SOURCE_LIBRARY,
         "title": str(detail.get("title", "")),
@@ -434,7 +445,10 @@ def build_library_detail(
         "notes": list(detail.get("notes") or []),
         "date_added": str(detail.get("date_added", "")),
         "scoring": scoring,
-        "deep_review": deep_review.get_current_review(item_key),
+        "deep_review": (
+            deep_review.get_current_review(item_key) if interpretation_schema is None
+            else current_review_view(item_key, interpretation_schema=interpretation_schema)
+        ),
     }
 
 

@@ -64,6 +64,22 @@ def _map_chunk(map_llm: Any, chunk: str, *, check_cancelled: Callable[[], None] 
     return note
 
 
+def _collectors(interpretation_out: dict | None, feed_context: Any, feed_out: dict | None) -> dict:
+    extra = {}
+    if interpretation_out is not None:
+        interpretation_out.clear()
+        extra["interpretation_out"] = interpretation_out
+    if feed_out is not None:
+        feed_out.clear()
+    if (feed_context is None) != (feed_out is None):
+        raise ValueError("feed context and collector must be supplied together")
+    if feed_context is not None:
+        from zotero_summarizer.services.library._feed_assessment import validate_selection
+
+        extra.update(feed_context=validate_selection(feed_context, interpretation_out), feed_out=feed_out)
+    return extra
+
+
 class ChunkBudget(NamedTuple):
     """The chunking budget trio for ``digest_for_strategy``: the rank/prefix output
     cap, the map_reduce per-chunk size, and its map-step parallelism."""
@@ -83,6 +99,10 @@ def digest_for_strategy(
     budget: ChunkBudget,
     focus_prompt: str = "",
     response_format: dict[str, Any] | None = None,
+    verification_audit: dict[str, Any] | None = None,
+    interpretation_out: dict[str, Any] | None = None,
+    feed_context: Any = None,
+    feed_out: dict[str, Any] | None = None,
 ) -> PaperDigest:
     """Dispatch ``config.quality_review.chunk_strategy`` to the right digest path.
 
@@ -92,22 +112,26 @@ def digest_for_strategy(
     ``[:cap]`` truncate (A/B baseline); ``map_reduce`` = chunk-local / synthesis-API.
     ``response_format`` (decoder-level JSON Schema) is forwarded to the rank/prefix
     assess_digest call; map_reduce's reduce reuses assess_digest and gets it too. Errors
-    propagate to deep_review's per-item boundary (never a fabricated review)."""
+    propagate to deep_review's per-item boundary (never a fabricated review).
+    An explicit interpretation collector is cleared before admission and relayed unchanged."""
+    extra = _collectors(interpretation_out, feed_context, feed_out)
     from zotero_summarizer.services.library._source_admission import admit_source
 
     admit_source(full_text)
     strategy = config.quality_review.chunk_strategy
+    if verification_audit is not None:
+        extra["verification_audit"] = verification_audit
     if strategy == "map_reduce":
         return map_reduce_digest(
             title=title, full_text=full_text, config=config, map_llm=map_llm,
             reduce_llm=reduce_llm, chunk_chars=budget.chunk_chars,
             sub_concurrency=budget.sub_concurrency, focus_prompt=focus_prompt,
-            response_format=response_format,
+            response_format=response_format, **extra,
         )
     return assess_digest(
         title=title, full_text=full_text, config=config, llm=reduce_llm,
         focus_prompt=focus_prompt, max_chars=budget.max_chars, prefix=(strategy == "prefix"),
-        response_format=response_format, verifier_llm=map_llm,
+        response_format=response_format, verifier_llm=map_llm, **extra,
     )
 
 
@@ -122,6 +146,10 @@ def map_reduce_digest(
     sub_concurrency: int = 1,
     focus_prompt: str = "",
     response_format: dict[str, Any] | None = None,
+    verification_audit: dict[str, Any] | None = None,
+    interpretation_out: dict[str, Any] | None = None,
+    feed_context: Any = None,
+    feed_out: dict[str, Any] | None = None,
 ) -> PaperDigest:
     """MAP each chunk on ``map_llm`` (parallel up to ``sub_concurrency``), REDUCE the notes into
     a ``PaperDigest`` on ``reduce_llm``. The reduce reuses ``quality_review.assess_digest`` (its
@@ -129,10 +157,14 @@ def map_reduce_digest(
     uses the original paper, never the generated notes. Every chunk must yield a nonempty
     note, otherwise partial coverage fails before reduction. ``response_format`` is forwarded
     to the reduce's assess_digest when the reduce provider supports structured output. Errors
-    propagate (caught at deep_review's per-item boundary)."""
+    propagate (caught at deep_review's per-item boundary). An explicit interpretation
+    collector is cleared before mapping; native verified identities are not restamped."""
+    extra = _collectors(interpretation_out, feed_context, feed_out)
     from zotero_summarizer.services.library._source_admission import admit_source
     from zotero_summarizer.services.library._review_attempt import observed_client
 
+    if verification_audit is not None:
+        verification_audit.clear()
     admit_source(full_text)
     recorded_map = observed_client(map_llm, 'map')
     chunks = split_chunks(full_text, chunk_chars)
@@ -146,7 +178,10 @@ def map_reduce_digest(
         notes = [_map_chunk(recorded_map, chunk) for chunk in chunks]
 
     combined = "\n\n".join(f"[chunk {i + 1}/{len(notes)}]\n{note}" for i, note in enumerate(notes))
-    extra = {"response_format": response_format} if response_format else {}
+    if response_format:
+        extra["response_format"] = response_format
+    if verification_audit is not None:
+        extra["verification_audit"] = verification_audit
     digest = assess_digest(
         title=title, full_text=combined, config=config, llm=reduce_llm,
         max_chars=len(combined) + 1, verifier_llm=map_llm,
