@@ -62,6 +62,16 @@ unconfirmed metadata stays unknown. Legacy saved plans retain their original fil
 The plan discloses domain context, source accounting and scholarly coverage limits.
 See [search](zotero_summarizer/services/search/README.md).
 
+The shared Today/Library paper page offers **Related in my library** over saved
+metadata, including already-read papers. An optional, explicitly consented
+comment-context experiment uses the configured review model on complete seed and
+candidate notes. It remains unqualified and off by default; no external discovery
+or automatic Add occurs. Stage-client cache publication is bound to its actual
+effective routing snapshot and invalidation generation, not current metadata alone.
+Saving seed notes/verdicts hides prior related context and fences old reads until
+an explicit fresh load. See [related saved papers](docs/related-saved-papers.md)
+for privacy, budgets, durable results and outstanding owner evaluation.
+
 ## Requirements
 
 - **Python 3.10+** and **[uv](https://docs.astral.sh/uv/getting-started/installation/)**

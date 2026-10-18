@@ -28,6 +28,16 @@ async function request(path, options = {}) {
   return data;
 }
 
+export async function fetchRelatedPapers(itemKey, { signal } = {}) {
+  return request(`/api/library/related/${encodeURIComponent(itemKey)}`, { signal });
+}
+
+export async function assessRelatedPapers(itemKey, consentToken, retry = false) {
+  return request(`/api/library/related/${encodeURIComponent(itemKey)}/assess`, {
+    method: 'POST', body: JSON.stringify({ consent_token: consentToken, retry }),
+  });
+}
+
 /** GET /api/zotero/collections — collection tree. */
 export async function fetchCollections() {
   return request('/api/zotero/collections');

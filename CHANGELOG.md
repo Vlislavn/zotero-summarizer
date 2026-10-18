@@ -10,6 +10,9 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+### Fixed
+- Fence Related at primary verdict acknowledgement, including dont_read while its secondary reject-tag request is pending. Preserve existing completion/collapse callbacks and saved-verdict warnings; add actual page and hook regressions.
+
 ### Changed
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.
@@ -19,6 +22,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Bind model-client cache publication to effective routing and invalidation generation. Fence Related cached/late comment reads after seed edits; retain complete assessed context with a library eligibility digest. Semantic usefulness remains unqualified.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
 - A124: verify section one-liners in a second batch against the same first 700 source characters (up to 24 sections); omit unsupported summaries. Scripted checks do not establish live semantic accuracy.
@@ -42,6 +46,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ### Added
 
+- Related saved-paper links plus an opt-in, consented experiment using full seed/candidate comments, durable context identities and honest failure/unknown states. Metadata hybrid stays default; semantic usefulness remains unqualified.
 - Independent HTML-preservation checks and mutation controls; opt-in frozen real-review browser replays skip when inputs are absent. Literal retention proves neither scientific truth nor native-editor compatibility.
 - Review attempts expose typed stage/recovery and metadata-only traces. Explicit local CLI captures retain decoded calls; operational source templates never become scientific reviews, and unavailable placeholders preserve current valid reviews (#32).
 - Search hard constraints require user confirmation; model hints/refinement cannot create bans. Bounded complementary queries, publication metadata recovery and retrieval accounting preserve legacy plans and disclose coverage limits (#31).

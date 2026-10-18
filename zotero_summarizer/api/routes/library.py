@@ -16,6 +16,7 @@ from zotero_summarizer.services.library import (
     paper_render,
     qa,
     reading_queue,
+    related,
     score_tags,
     university_access,
 )
@@ -52,6 +53,13 @@ class ReviewFleetRunRequest(BaseModel):
     # should-read) keys so the fleet reviews THOSE rows, not the band-agnostic
     # top-of-undecided slice. Bounded so a client can't flood the review pool.
     item_keys: list[str] | None = Field(default=None, max_length=20)
+
+
+class RelatedAssessmentRequest(BaseModel):
+    consent_token: str = Field(min_length=64, max_length=64)
+    collection: str = Field(default="", max_length=100)
+    tag: str = Field(default="", max_length=200)
+    retry: bool = False
 
 
 class RejectTagRequest(BaseModel):
@@ -116,6 +124,14 @@ async def get_reading_queue(
         include_read=include_read, limit=limit, refresh=refresh,
         collection=collection, tag=tag, search=search, semantic=semantic,
     )
+
+
+async def get_related_papers(item_key: str, collection: str = "", tag: str = "") -> dict[str, Any]:
+    return await asyncio.to_thread(related.related_papers, item_key, collection=collection, tag=tag)
+
+
+async def assess_related_papers(item_key: str, req: RelatedAssessmentRequest) -> dict[str, Any]:
+    return await asyncio.to_thread(related.assess_related, item_key, **req.model_dump())
 
 
 async def get_reading_queue_status() -> dict[str, Any]:
@@ -325,6 +341,8 @@ async def sync_score_ranks(req: RelTagSyncRequest) -> dict[str, Any]:
     return await asyncio.to_thread(score_tags.sync_score_ranks, force=req.force)
 
 
+router.add_api_route("/api/library/related/{item_key}", get_related_papers, methods=["GET"])
+router.add_api_route("/api/library/related/{item_key}/assess", assess_related_papers, methods=["POST"])
 router.add_api_route("/api/library/reading-queue", get_reading_queue, methods=["GET"])
 router.add_api_route("/api/library/reading-queue/status", get_reading_queue_status, methods=["GET"])
 router.add_api_route("/api/library/pdf/{item_key}", get_item_pdf, methods=["GET"])

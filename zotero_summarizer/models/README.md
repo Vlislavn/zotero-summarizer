@@ -22,6 +22,12 @@ triage.py ──(domain)        all three ──*──> __init__.py  ──>  f
 | `setup.py` | the FROZEN `/api/setup/*` contract: `SetupStatusResponse` separates saved `configured` state from operational `ready` health (+ nested `ConfigStatus`/`LlmStatus`/`PathStatus`/`PathEntry`/`ZoteroStatus`/`ClassifierStatus` + a `subsystems: list[SubsystemStatus]` runtime-readiness array, additive — a not-ready entry names the down subsystem + reason without affecting the top-level `ready`), `DetectedZoteroDir`/`DetectZoteroResponse`, `UpdatePathsRequest`/`UpdatePathsResponse`, `ValidateConfigRequest`/`ValidateConfigResponse` (+ `FieldError`/`ConnectionResult`). SECURITY: `api_key_env` is only ever an env-var NAME; key presence is the BOOL `api_key_present` — no model here carries a secret value |
 | `__init__.py` | re-exports all of the above (the public `models` surface) |
 
+`ResolvedStage.fingerprint()` is the shared opaque identity of effective stage,
+provider settings and model. It reads no environment/keyring credential values.
+Consent and runtime cache admission use the same definition; callers can bind
+`resolve_stage_client(expected_identity=...)` to their expected processing
+snapshot instead of treating current metadata as proof about an opaque client.
+
 `GoalsConfig.llm_enabled` is user-owned. `LlmStatus.enabled=false` is the
 deliberate ML-only state, not an unreachable-provider error.
 

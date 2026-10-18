@@ -246,6 +246,7 @@ class ResearchSession:
     status: str = "created"
     screened_count: int = 0
     refinements: list[dict[str, Any]] = field(default_factory=list)
+    related: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         _require_unique_addresses(self.candidates)
@@ -263,6 +264,7 @@ class ResearchSession:
             "status": self.status,
             "screened_count": self.screened_count,
             "refinements": [dict(r) for r in self.refinements],
+            "related": dict(self.related),
         }
 
     @classmethod
@@ -287,4 +289,5 @@ class ResearchSession:
             status=data.get("status", "created"),
             screened_count=int(data.get("screened_count") or 0),
             refinements=[dict(r) for r in data.get("refinements") or []],
+            related=dict(data.get("related") or {}),
         )

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from enum import Enum
+import hashlib
+import json
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
@@ -137,6 +139,11 @@ class ResolvedStage(BaseModel):
     stage: str
     provider: ProviderConfig
     model: str
+
+    def fingerprint(self) -> str:
+        """Effective processing identity, without reading any credential value."""
+        payload = json.dumps(self.model_dump(mode="json"), ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def resolve_stage(routing: LLMRoutingConfig, stage: str) -> ResolvedStage:

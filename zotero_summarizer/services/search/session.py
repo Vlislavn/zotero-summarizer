@@ -168,6 +168,8 @@ def list_sessions() -> list[dict[str, object]]:
     for path in _dir().glob("*.json"):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
+            if data.get("related"):
+                continue  # Related assessments have their own paper surface, never auto-review.
             rows.append({
                 "id": data["id"],
                 "created_at": data["created_at"],

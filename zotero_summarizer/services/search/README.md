@@ -41,6 +41,15 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
         → brief + grounded query-lens + one grounded answer per question
 ```
 
+The library's optional related-comment experiment also reuses `ResearchSession`,
+`claim`, per-process ownership locks and atomic `save` under `Settings.search_dir`.
+Its `related` field holds full private context identity, snapshot, prior attempts
+and terminal result; `related_*` statuses never qualify for Search's screened
+review claim. Related sessions are omitted from the Search sidebar. No federation,
+Search review or materialization is started by that flow. See
+[related saved papers](../../../docs/related-saved-papers.md) for consent,
+work ceilings, invalidation and unqualified semantic judgments.
+
 ## Why this shape
 
 - **Per-source query plan, not one universal query** (`intent.build_query_plan`): a
