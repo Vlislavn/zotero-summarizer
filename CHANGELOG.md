@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Review slice 28: Frontend offline and navigation / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 27: Frontend Pending / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 26: Frontend setup / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 25: Frontend paper review / 2. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.

@@ -340,3 +340,6 @@ Review slice 26: Frontend setup / 1. Depends on the preceding slice; not release
 
 <!-- PR53 review slice 27 -->
 Review slice 27: Frontend Pending / 1. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 28 -->
+Review slice 28: Frontend offline and navigation / 1. Depends on the preceding slice; not release acceptance.
