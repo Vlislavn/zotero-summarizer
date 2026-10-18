@@ -237,3 +237,6 @@ Simplification check: reuse provider search leaves, identifier dedup, session
 serialization and existing plan display; no competing retrieval/ranking loop.
 
 Fresh semantic/library queries use the raw user topic and questions, not the model's expanded canonical restatement. The executable two-pass lexical plan covers all bounded concepts/acronyms in its broad OR pass. A model-proposed domain absent from the raw topic is disclosed, not a mandatory anchor; unspecified context asks the user to refine the existing topic. Metadata for a broad Review does not certify a Systematic Review: request-relative exact-DOI recovery runs before unconfirmed-type exclusion.
+
+<!-- PR53 review slice 15 -->
+Review slice 15: Search and discovery / 1. Depends on the preceding slice; not release acceptance.

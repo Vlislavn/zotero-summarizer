@@ -195,3 +195,6 @@ Review slice 05: Provider capabilities / 1. Depends on the preceding slice; not 
 
 <!-- PR53 review slice 09 -->
 Review slice 09: Source admission / 1. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 15 -->
+Review slice 15: Search and discovery / 1. Depends on the preceding slice; not release acceptance.

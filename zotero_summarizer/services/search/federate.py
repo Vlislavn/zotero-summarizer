@@ -23,6 +23,7 @@ from zotero_summarizer.integrations.crossref import search_crossref
 from zotero_summarizer.integrations.europepmc import search_europepmc
 from zotero_summarizer.integrations.openreview import search_openreview
 from zotero_summarizer.integrations.semantic_scholar import search_semantic_scholar
+from zotero_summarizer.integrations.search_outcomes import capture_source_outcome, record_source_outcome
 from zotero_summarizer.services._common import now_iso_z
 from zotero_summarizer.services.search._models import Candidate, Provenance
 from zotero_summarizer.services.search.dedup import to_version_families
@@ -67,6 +68,7 @@ def _europepmc_channel(query: str, quota: int, at: str) -> list[Candidate]:
 
 def _openalex_channel(client: Any, query: str, quota: int, at: str, *, semantic: bool) -> list[Candidate]:
     if client is None or not query:
+        record_source_outcome('openalex', 'not_attempted', error_code='disabled')
         return []
     hits = client.search_works(query, per_page=quota, semantic=semantic)
     cands = [
@@ -163,6 +165,14 @@ def _matches_constraints(candidate: Candidate, plan: Any) -> bool:
                      & set(term.casefold() for term in candidate.publication_types)))))
 
 
+def _observe_channel(task, request):
+    # Bind inside the executor worker: ContextVars do not cross its thread bridge.
+    with capture_source_outcome(request['source']) as receipt:
+        results = task()
+    request['outcome'] = dict(receipt)
+    return results
+
+
 def federate(
     plan: Any,
     *,
@@ -171,6 +181,7 @@ def federate(
     library_finder: LibraryFinder | None = None,
     quota: int = 15,
     crossref_mailto: str | None = None,
+    observe_outcomes: bool = False,
 ) -> list[Candidate]:
     """Run every channel concurrently, quota each PASS, union into version families.
 
@@ -223,7 +234,9 @@ def federate(
     channel_results = []
     if tasks:
         with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
-            channel_results = [f.result() for f in [pool.submit(t) for t in tasks]]
+            futures = [pool.submit(_observe_channel, task, request) if observe_outcomes else pool.submit(task)
+                       for task, request in zip(tasks, requests)]
+            channel_results = [future.result() for future in futures]
     for request, results in zip(requests, channel_results):
         request.update(observations=len(results), status="observed" if results else "unknown")
 

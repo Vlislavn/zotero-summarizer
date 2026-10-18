@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from zotero_summarizer.integrations._rate_limiter import RateLimiter
+from zotero_summarizer.integrations.search_outcomes import record_source_outcome
 
 _BASE = "https://api.semanticscholar.org/graph/v1/paper/search"
 _TIMEOUT_SECS = 12.0
@@ -79,6 +80,7 @@ def search_semantic_scholar(
     (throttling 429, network, non-200, malformed JSON) — never raises."""
     query = (query or "").strip()
     if not query:
+        record_source_outcome('semantic_scholar', 'not_attempted')
         return []
     params = {"query": query, "limit": max(1, min(limit, 100)), "fields": _FIELDS}
     _RATE_LIMITER.acquire()
@@ -86,16 +88,25 @@ def search_semantic_scholar(
     try:
         resp = client.get(_BASE, params=params, headers={"User-Agent": "zotero-summarizer/1.0"})
         if resp.status_code != 200:
+            record_source_outcome('semantic_scholar', 'failed', error_code='rate_limited' if resp.status_code == 429 else 'http_error')
             return []
         payload = resp.json()
-    except (httpx.HTTPError, OSError, ValueError):
+    except (httpx.HTTPError, OSError):
+        record_source_outcome('semantic_scholar', 'failed', error_code='transport_error')
+        return []
+    except ValueError:
+        record_source_outcome('semantic_scholar', 'failed', error_code='invalid_response')
         return []
     finally:
         if http_client is None:
             client.close()
     papers = payload.get("data") or []
-    hits = [_hit_from_paper(p) for p in papers if isinstance(p, dict)]
-    return [h for h in hits if h is not None]
+    hits = [h for paper in papers if isinstance(paper, dict) and (h := _hit_from_paper(paper)) is not None]
+    if not isinstance(payload.get('data'), list) or (papers and not hits):
+        record_source_outcome('semantic_scholar', 'failed', error_code='invalid_response')
+    else:
+        record_source_outcome('semantic_scholar', 'success_nonempty' if hits else 'success_empty', count=len(hits))
+    return hits
 
 
 __all__ = ["SemanticScholarHit", "search_semantic_scholar"]
