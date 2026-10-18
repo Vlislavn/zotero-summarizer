@@ -126,6 +126,11 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
 | `refine.py` | bounded opt-in agentic PRF before auto-review; no-ops under strict offline |
 | `session.py` | one-JSON-per-session persistence under `settings().search_dir` + per-session lock: `claim` (status CAS, single-flights the worker), `save_merge` (whole-session save that preserves a concurrent Add's `materialized_zotero_key`), `update` (read-modify-write), `materialize_once` (Add's check-write-stamp under the lock, single-write). Malformed id → `APIError(400)` |
 
+Refinement annotates newly fetched DOI/arXiv observations with the same library
+lookup before merging families. A confirmed saved hit survives richer bibliographic
+metadata; absent/unsupported/failed lookups remain unknown. Existing reviews,
+addresses and scores survive, and explicit Add reuses a confirmed saved key.
+
 ## Execution and identity boundaries
 
 Screening accepts a nonblank topic of at most 4,000 characters and up to ten

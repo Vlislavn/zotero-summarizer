@@ -57,6 +57,8 @@ An unavailable declared scholarly PDF is not replaced by a paywall snapshot. See
 
 Search's folded explicit constraints are user-owned. Model proposals are visible,
 not hard gates; inferred refinement exclusions cannot silently remove results.
+Refinement preserves identifier-confirmed library membership through version merging;
+unknown lookup state is not presented as a confirmed new paper.
 Confirmed publication types require source metadata, with bounded exact-DOI recovery;
 unconfirmed metadata stays unknown. Legacy saved plans retain their original filters.
 The plan discloses domain context, source accounting and scholarly coverage limits.

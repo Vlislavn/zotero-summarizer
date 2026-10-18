@@ -40,6 +40,14 @@ through to grounded Q&A. The paper artifact stores `figures_count`, not a table
 count; focused Q&A and freshness routing tests passed (39), but live natural-language
 scope accuracy is not measured.
 
+## Library membership when refining Search
+
+Opt-in agentic refinement (`ZS_SEARCH_AGENTIC`) checks newly retrieved DOI/arXiv
+identities through the existing library reader before merging versions. A saved
+match stays saved even when another version has richer metadata; explicit Add
+reuses its existing key. Missing readers, unsupported identities and lookup errors
+remain unknown, not confirmed library misses. Refinement itself writes no Zotero items.
+
 ## First-run setup
 
 There's nothing to copy and nothing to migrate by hand. On the first `serve` (or `setup`),
