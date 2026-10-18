@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from datetime import datetime, timezone
@@ -57,7 +58,13 @@ def _seed(settings: Settings, key: str, title: str, *, materialized: str = "") -
 def _review(key: str) -> dict:
     return {
         "review_contract_version": 3, "reviewed_at": "2026-08-26T00:00:00Z",
-        "review_identity": {"fixture": key},
+        "review_identity": {
+            "source_kind": "override", "source_path": f"/synthetic/research-feed/{key}.pdf",
+            "source_sha256": hashlib.sha256(f"synthetic paper {key}".encode()).hexdigest(),
+            "generation_sha256": hashlib.sha256(b"synthetic review generation").hexdigest(),
+            "focus_prompt": "",
+        },
+        "needs_pdf": False,
         "provenance": {"provider": "local", "model": "model", "prompt_schema_version": 2},
         "digest": {
             "tldr": f"Review {key}", "key_strength": "Reliable benchmark",

@@ -53,3 +53,6 @@ Review slice 48: Write authority regression tests / 2. Depends on the preceding 
 
 <!-- PR53 review slice 49 -->
 Review slice 49: Write authority regression tests / 3. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 50 -->
+Review slice 50: Research feed regression tests / 1. Depends on the preceding slice; not release acceptance.
