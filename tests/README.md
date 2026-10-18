@@ -101,3 +101,6 @@ Review slice 64: Method regression tests / 5. Depends on the preceding slice; no
 
 <!-- PR53 review slice 65 -->
 Review slice 65: Discovery regression tests / 1. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 66 -->
+Review slice 66: Discovery regression tests / 2. Depends on the preceding slice; not release acceptance.
