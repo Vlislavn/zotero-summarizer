@@ -241,3 +241,6 @@ with the baseline sync schema.
 
 <!-- PR53 review slice 02 -->
 Review slice 02: Persistence and schema / 1. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 03 -->
+Review slice 03: Persistence and schema / 2. Depends on the preceding slice; not release acceptance.
