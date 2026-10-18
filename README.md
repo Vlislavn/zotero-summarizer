@@ -115,6 +115,16 @@ API key in the OS keyring and never returns it to the browser. The headless CLI 
 an env-var name and saves the chosen routing before its optional probe. Use
 `setup --mode no-llm` when you want classifier-only triage without an endpoint.
 
+**Verification is separate from saving.** Doctor now refuses local LLM inference and
+local dry-runs as **unknown**: no adapter supplies the effective runtime context,
+placement and memory domain needed for hardware-safe admission. Listed models,
+profile estimates and free RAM are not proof. No download starts automatically and
+loopback needs no API key. Hosted and No LLM verification remain available; issue
+#11's hardware-safe Full-local completion is not yet delivered. Literal 127/8 and
+IPv4-mapped IPv6 loopbacks share this guard; mixed-runtime recovery names the
+failing endpoint rather than borrowing a sibling's Ollama command. See
+[setup verification](docs/usage.md#setup-verification-and-recovery).
+
 After setup, go to **Today** and click **Triage backlog**
 to score your unread feed papers, then start culling. *(Going offline? Run `uv run
 zotero-summarizer prefetch-models` once while online — see [docs/usage.md](docs/usage.md).)*

@@ -53,15 +53,28 @@ class AnthropicLLMClient:
         base_url: str | None = None,
         timeout: float = _DEFAULT_TIMEOUT_SECS,
         thinking_budget: int | None = None,
+        verification: bool = False,
+        before_request: Any = None,
     ) -> None:
         import anthropic  # lazy: optional dependency
 
-        self._client = anthropic.Anthropic(
-            api_key=api_key,
-            base_url=(base_url or None),
-            timeout=timeout,
-        )
+        transport = None
+        if verification:
+            import httpx
+
+            transport = httpx.Client(follow_redirects=False, trust_env=False)
+        try:
+            self._client = anthropic.Anthropic(
+                api_key=api_key, base_url=(base_url or None), timeout=timeout,
+                **({"max_retries": 0, "http_client": transport} if verification else {}),
+            )
+        except BaseException:
+            if transport is not None:
+                transport.close()
+            raise
         self._model = model
+        self._verification = verification
+        self._before_request = before_request
         self._thinking_budget = thinking_budget
         # Extended thinking requires max_tokens > budget_tokens; clamp up so a
         # roomy thinking budget can't starve the actual answer. None → unchanged.
@@ -92,7 +105,16 @@ class AnthropicLLMClient:
             getattr(usage, "cache_read_input_tokens", 0),
         )
 
+    def close(self) -> None:
+        self._client.close()
+
+    def _verify_response(self, response: Any) -> None:
+        if self._verification and (response.model != self._model or response.stop_reason not in {"end_turn", "stop_sequence"}):
+            raise ValueError("Verification model identity or successful terminal reason was not established")
+
     def prompt(self, prompt: str, **kwargs: Any) -> str:
+        if self._before_request is not None:
+            self._before_request()
         resp = self._client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
@@ -100,10 +122,13 @@ class AnthropicLLMClient:
             messages=[{"role": "user", "content": prompt}],
             **self._thinking_kwargs(),
         )
+        self._verify_response(resp)
         self._log_usage("prompt", resp.usage)
         return "".join(block.text for block in resp.content if block.type == "text")
 
     def pydantic_prompt(self, prompt: str, pydantic_model: Any, **kwargs: Any) -> Any:
+        if self._before_request is not None:
+            self._before_request()
         resp = self._client.messages.parse(
             model=self._model,
             max_tokens=self._max_tokens,
@@ -112,6 +137,7 @@ class AnthropicLLMClient:
             output_format=pydantic_model,
             **self._thinking_kwargs(),
         )
+        self._verify_response(resp)
         self._log_usage("pydantic_prompt", resp.usage)
         parsed = resp.parsed_output
         if parsed is None:

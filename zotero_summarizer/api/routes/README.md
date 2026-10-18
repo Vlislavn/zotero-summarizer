@@ -13,6 +13,9 @@ label before it can hide a paper from Today. Today Add reports the same code
 per blocked item while processing eligible batch members. The server, not the frontend badge, enforces this invariant.
 Replacing a hosted credential through `/api/setup/ai-credential` invalidates
 prior Doctor inference success without returning the key to the browser.
+`POST /api/setup/doctor/cancel` requires the current `run_id`; stale IDs return
+409. API task cancellation abandons that same attempt. Neither response claims
+remote termination; callback exclusion and unresolved receipts remain service-owned.
 
 One module per resource. Each registers its paths on a router; `__init__.py`
 collects them via `include_routes(app)`. Handlers parse/validate and delegate

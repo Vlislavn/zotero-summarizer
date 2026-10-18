@@ -9,6 +9,7 @@ import {
   updateRssFeed,
 } from '../../api/settingsApi.js';
 import { humanizeError } from '../../utils/humanizeError.js';
+import { invalidateSetupDoctor } from '../../utils/setupDoctorState.js';
 import { Banner, CheckboxField, Field, SectionCard } from '../form/Fields.jsx';
 import Button from '../ui/Button.jsx';
 
@@ -25,6 +26,7 @@ export default function RssFeedsSection() {
 
   const addMutation = useMutation({
     mutationFn: addRssFeed,
+    onSettled: () => invalidateSetupDoctor(queryClient),
     onSuccess: () => {
       setDraft({ name: '', url: '', enabled: true });
       setMessage('Feed saved');
@@ -34,6 +36,7 @@ export default function RssFeedsSection() {
 
   const updateMutation = useMutation({
     mutationFn: ({ id, payload }) => updateRssFeed(id, payload),
+    onSettled: () => invalidateSetupDoctor(queryClient),
     onSuccess: () => {
       setMessage('Feed updated');
       invalidate();
@@ -42,6 +45,7 @@ export default function RssFeedsSection() {
 
   const deleteMutation = useMutation({
     mutationFn: deleteRssFeed,
+    onSettled: () => invalidateSetupDoctor(queryClient),
     onSuccess: () => {
       setMessage('Feed deleted');
       invalidate();
@@ -50,6 +54,7 @@ export default function RssFeedsSection() {
 
   const importMutation = useMutation({
     mutationFn: importRssFeedsFromZotero,
+    onSettled: () => invalidateSetupDoctor(queryClient),
     onSuccess: (res) => {
       setMessage(`Imported ${res.imported || 0} feed${res.imported === 1 ? '' : 's'}`);
       invalidate();

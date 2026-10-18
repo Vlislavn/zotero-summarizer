@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Make setup verification evidence-bound: refuse local loads without an envelope before credentials, verify hosted identity, preserve cancellation uncertainty, and fence stale Ready. Ordinary explicitly configured credentials remain intact; local clients still need no key.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.
 - Fold goal findings without losing originals; disclose saved source basis and unknown reviewed extent. Factor literal warning frames into one introduction with expanded scope/context, qualifiers and source links; retain original wording. Compact cards remain unchanged.
@@ -19,6 +20,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Refuse setup inference on all literal IPv4/mapped-IPv6 loopbacks, invalidate older Ready results, and derive mixed-runtime recovery from the failing endpoint without automatic downloads.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
 - A124: verify section one-liners in a second batch against the same first 700 source characters (up to 24 sections); omit unsupported summaries. Scripted checks do not establish live semantic accuracy.

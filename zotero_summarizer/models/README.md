@@ -22,6 +22,15 @@ triage.py ──(domain)        all three ──*──> __init__.py  ──>  f
 | `setup.py` | the FROZEN `/api/setup/*` contract: `SetupStatusResponse` separates saved `configured` state from operational `ready` health (+ nested `ConfigStatus`/`LlmStatus`/`PathStatus`/`PathEntry`/`ZoteroStatus`/`ClassifierStatus` + a `subsystems: list[SubsystemStatus]` runtime-readiness array, additive — a not-ready entry names the down subsystem + reason without affecting the top-level `ready`), `DetectedZoteroDir`/`DetectZoteroResponse`, `UpdatePathsRequest`/`UpdatePathsResponse`, `ValidateConfigRequest`/`ValidateConfigResponse` (+ `FieldError`/`ConnectionResult`). SECURITY: `api_key_env` is only ever an env-var NAME; key presence is the BOOL `api_key_present` — no model here carries a secret value |
 | `__init__.py` | re-exports all of the above (the public `models` surface) |
 
+`ProviderConfig.capabilities` is an optional declared set (`text`,
+`native_json_schema`), intersected with enabled adapter paths; omission preserves
+legacy text support without asserting optional support. Loopback detection is
+central and literal-only: localhost, all IPv4 127/8, IPv6 loopback and IPv4-mapped
+IPv6 loopbacks use the same rule for both adapters. Unspecified addresses remain
+local; remote/private non-loopback literals remain unchanged. No DNS is consulted. `ConnectionResult` distinguishes `listed`, declared
+`capable`, `observed_operational`, `hardware_safe` and `reason_code`; unknown is
+not false or Ready. No ResourceEnvelope is fabricated from these declarations.
+
 `GoalsConfig.llm_enabled` is user-owned. `LlmStatus.enabled=false` is the
 deliberate ML-only state, not an unreachable-provider error.
 

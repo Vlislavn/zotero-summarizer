@@ -1,5 +1,33 @@
 # services/setup — one setup domain, two front-ends
 
+## Trustworthy verification boundary
+
+`load_admission.py` separates hardware safety from listing/configuration and
+profile advice. No current adapter produces an authoritative effective LLM
+ResourceEnvelope (context, placement, memory domain), so all local LLM inference
+and dry-run callbacks refuse UNKNOWN before constructing a client; this includes
+loopback native Anthropic. No operator policy/synthetic numeric-success API is
+introduced. Hosted/no-LLM and nonloading metadata remain available. The existing
+bounded cache-only ML asset subprocess is separate from LLM admission.
+
+`load_attempt.py` uses setup's daemon-worker pattern with a bounded waiter and
+callback-owned exclusion. Cancellation/timeout stops later requests, never claims
+remote termination, and retains an unresolved receipt/HOLD. Only the callback can
+release its lock; HOLD is diagnostic, not a cross-process runtime kill/lease.
+Doctor persists each completed check and a version-bound final result; legacy
+success must be reverified. `POST /api/setup/doctor/cancel` accepts the current
+`run_id`, so a stale cancel cannot affect a successor. Web and CLI share this
+boundary; issue #11's hardware-safe Full-local acceptance remains unfulfilled.
+
+The shared provider predicate includes all literal 127/8 and IPv4-mapped IPv6
+loopbacks, with no DNS lookup. Both probe and explicit verification factory paths
+refuse before credentials/adapters. Verification revision v2 invalidates pre-fix
+Ready. Inventory recovery uses the failing provider/model/endpoint, not any sibling:
+Ollama suggestions apply to that local OpenAI-compatible endpoint on port 11434;
+other runtimes open AI Settings and choose a served model. Model-error prose cannot
+select a runtime or produce a pull command; actual inventory recovery is retained.
+
+
 The web wizard chooses Full local, Hosted or No LLM **before** Zotero paths;
 ML-only skips the model step. Full-local mode shows compatible profiles with
 no API-key field. Doctor's fresh-process asset probe not only enables HF

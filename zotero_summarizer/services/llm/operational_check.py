@@ -6,9 +6,10 @@ import asyncio
 import logging
 from typing import Any
 
-from zotero_summarizer.models.providers import STAGES, ProviderConfig, resolve_stage
+from zotero_summarizer.models.providers import STAGES, LLMCapability, ProviderConfig, resolve_stage
 from zotero_summarizer.services._common import state
 from zotero_summarizer.services.llm.factory import build_client_for_provider
+from zotero_summarizer.services.setup.load_admission import refused_local_load
 
 LOGGER = logging.getLogger("zotero_summarizer")
 
@@ -25,20 +26,38 @@ def _stage_skeleton(routing: Any, stage: str) -> tuple[Any, dict[str, Any]]:
         "provider": resolved.provider.name,
         "type": resolved.provider.type.value,
         "model": resolved.model,
+        "configured": True,
+        "capable": LLMCapability.text in resolved.provider.available_capabilities,
     }
 
 
 def probe_provider(provider: ProviderConfig, model: str) -> dict[str, Any]:
     """Probe one provider/model; failures are data so sibling stages still run."""
+    if LLMCapability.text not in provider.available_capabilities:
+        return {"status": "fail", "reason_code": "unsupported_capabilities", "attempted": False,
+                "detail": "Selected provider does not declare text support"}
+    refusal = refused_local_load(provider, model)
+    if refusal:
+        return refusal
+    attempted = False
     try:
-        client = build_client_for_provider(provider, model)
-        client.prompt(_PROBE_PROMPT)
-        return {"status": "operational", "detail": ""}
+        client = build_client_for_provider(provider, model, verification=True)
+        try:
+            attempted = True
+            output = client.prompt(_PROBE_PROMPT)
+            if not isinstance(output, str) or not output.strip():
+                raise ValueError("Inference returned an empty response")
+            return {"status": "operational", "detail": "", "observed_operational": True,
+                    "attempted": True, "ownership": "observed_terminal", "hardware_safe": "not_applicable"}
+        finally:
+            client.close()
     except Exception as exc:  # noqa: BLE001 — probe status boundary (see docstring)
         LOGGER.warning(
             "LLM probe failed for provider=%s model=%s: %s", provider.name, model, exc
         )
-        return {"status": "fail", "detail": f"{type(exc).__name__}: {exc}"}
+        return {"status": "fail", "detail": f"{type(exc).__name__}: {exc}",
+                "reason_code": "inference_failed", "attempted": attempted,
+                "ownership": "unresolved" if attempted else "not_submitted"}
 
 
 def _probe_stage(routing: Any, stage: str) -> dict[str, Any]:
@@ -63,7 +82,9 @@ async def _probe_stage_bounded(routing: Any, stage: str) -> dict[str, Any]:
     except asyncio.TimeoutError:
         _resolved, row = _stage_skeleton(routing, stage)
         row["status"] = "fail"
-        row["detail"] = f"timeout after {timeout:.0f}s — provider slow or unreachable"
+        row["reason_code"] = "waiter_timeout"
+        row["ownership"] = "unresolved"
+        row["detail"] = f"timeout after {timeout:.0f}s — remote termination is not established"
         LOGGER.warning(
             "LLM operational check timed out for stage=%s (>%.0fs)",
             stage,
@@ -72,16 +93,22 @@ async def _probe_stage_bounded(routing: Any, stage: str) -> dict[str, Any]:
         return row
 
 
-async def check_routing_stages(routing: Any) -> dict[str, Any]:
+async def check_routing_stages(routing: Any, *, should_stop=None) -> dict[str, Any]:
     """Run bounded real inference for every stage in an explicit routing config."""
+    routing = routing.model_copy(deep=True)
     stages, cached = [], {}
+    abandoned = False
     # ponytail: unique probes run serially to protect one local runtime; parallelize
     # only if mixed-provider health-check latency becomes a measured problem.
     for stage in STAGES:
         resolved, _row = _stage_skeleton(routing, stage)
+        abandoned = abandoned or bool(should_stop and should_stop())
         key = (resolved.provider.name, resolved.model)
         if key not in cached:
-            cached[key] = await _probe_stage_bounded(routing, stage)
+            cached[key] = ({**_row, "status": "fail", "reason_code": "batch_abandoned",
+                            "attempted": False, "detail": "Batch abandoned; not submitted"}
+                           if abandoned else await _probe_stage_bounded(routing, stage))
+            abandoned = abandoned or cached[key].get("reason_code") == "waiter_timeout"
         stages.append({**cached[key], "stage": stage})
     all_ok = all(row["status"] == "operational" for row in stages)
     return {"status": "ok" if all_ok else "degraded", "stages": stages}

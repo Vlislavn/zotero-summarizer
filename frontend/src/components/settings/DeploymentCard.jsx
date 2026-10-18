@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchDoctorStatus, runDoctor } from '../../api/setupApi.js';
+import { fetchDoctorStatus, runDoctor, cancelDoctor } from '../../api/setupApi.js';
+import { doctorQueryOptions, doctorVerificationOptions } from '../../utils/setupDoctorState.js';
 import { humanizeError } from '../../utils/humanizeError.js';
 import { Banner, SectionCard } from '../form/Fields.jsx';
 import Button from '../ui/Button.jsx';
@@ -14,15 +15,17 @@ const STATUS = {
 
 export function DoctorChecklist() {
   const queryClient = useQueryClient();
-  const query = useQuery({ queryKey: ['setup-doctor'], queryFn: fetchDoctorStatus });
-  const mutation = useMutation({
-    mutationFn: (ids) => runDoctor(ids),
-    onSuccess: (result) => queryClient.setQueryData(['setup-doctor'], result),
-  });
+  const query = useQuery({ ...doctorQueryOptions(queryClient, fetchDoctorStatus),
+    refetchInterval: (current) => current.state.data?.status === 'running' ? 1000 : false });
+  const mutation = useMutation(doctorVerificationOptions(queryClient, runDoctor));
+  const cancellation = useMutation({ mutationFn: cancelDoctor,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['setup-doctor'] }) });
 
   if (query.isLoading) return <p className="text-sm text-slate-500">Loading local health…</p>;
-  if (query.isError) return <Banner kind="error">{humanizeError(query.error)}</Banner>;
-  const data = query.data || mutation.data;
+  if (query.isError) return <Banner kind="error">{humanizeError(query.error)} Verification status is unknown;
+    server work may still be running. Reload to retry the status check.</Banner>;
+  const data = query.data;
+  const running = mutation.isPending || data?.status === 'running';
   const checks = data?.checks || [];
   const visible = checks.filter((check) => ['needs_action', 'running'].includes(check.status));
   const passed = checks.filter((check) => check.status === 'ready');
@@ -51,7 +54,7 @@ export function DoctorChecklist() {
       {mutation.isPending && <p role="status" className="text-sm text-sky-700">
         Verification can take a few minutes. Results will appear here when complete.
       </p>}
-      {!mutation.isPending && data?.ready && <p className="text-sm font-medium text-emerald-700">
+      {!running && !query.isFetching && data?.ready && <p className="text-sm font-medium text-emerald-700">
         ✓ Setup verified
       </p>}
       {!mutation.isPending && !data?.ready && visible.length === 0 && (
@@ -62,7 +65,7 @@ export function DoctorChecklist() {
         {visible.map((check) => {
           const meta = STATUS[check.status] || STATUS.not_started;
           return <li key={check.id} className="py-2 flex items-start gap-2">
-            <span className={`${meta[2]} font-bold w-4`} aria-hidden>{meta[0]}</span>
+            <span className={`${meta[2]} font-medium w-4`} aria-hidden>{meta[0]}</span>
             <div className="min-w-0 flex-1">
               <p className="text-sm text-slate-800">
                 <span className="sr-only">{meta[1]}: </span>{check.message}
@@ -72,9 +75,12 @@ export function DoctorChecklist() {
                 <p className="break-words mt-1">{check.detail}</p>
               </details>}
               {check.status === 'needs_action' && <div className="mt-1 flex flex-wrap gap-2 items-center">
-                <Button type="button" variant="secondary" disabled={mutation.isPending}
+                {check.recovery?.action === 'open_ai_settings' && <a href="/settings" className="text-teal-700 underline text-sm">
+                  Review AI settings (Hosted or No LLM)
+                </a>}
+                <Button type="button" variant="secondary" disabled={running}
                   onClick={() => mutation.mutate([check.id])}>
-                  {check.recovery?.label || 'Retry'}
+                  {check.recovery?.action === 'open_ai_settings' ? 'Retry' : check.recovery?.label || 'Retry'}
                 </Button>
                 {check.recovery?.command && <code className="text-xs select-all">{check.recovery.command}</code>}
               </div>}
@@ -92,11 +98,16 @@ export function DoctorChecklist() {
         </ul>
       </details>}
 
-      {mutation.isError && <Banner kind="error">{humanizeError(mutation.error)}</Banner>}
+      {(mutation.isError || cancellation.isError) && <Banner kind="error">{humanizeError(mutation.error || cancellation.error)}</Banner>}
+      {data?.attempt?.ownership === 'unresolved' && <p role="status" className="text-sm text-amber-800">
+        Verification stopped. Callback or remote termination is not established; no Ready result was accepted.
+      </p>}
       <div className="flex flex-wrap gap-3 items-center">
-        <Button type="button" variant="secondary" onClick={() => mutation.mutate(null)} disabled={mutation.isPending}>
+        <Button type="button" variant="secondary" onClick={() => mutation.mutate(null)} disabled={running}>
           {mutation.isPending ? 'Verifying…' : 'Verify setup'}
         </Button>
+        {running && data?.run_id && <Button type="button" variant="secondary" disabled={cancellation.isPending}
+          onClick={() => cancellation.mutate(data.run_id)}>Stop verification</Button>}
         {data?.last_successful_at && <span className="text-xs text-slate-500">
           Last successful check: {new Date(data.last_successful_at).toLocaleString()}
         </span>}

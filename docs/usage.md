@@ -68,6 +68,42 @@ AI-assisted setup can finish before the secret/endpoint is live — **Next** gat
 structurally-valid provider (type + base URL + key env-var name + model), not on a passing
 connection test. Environment changes require a restart; keyring saves apply immediately.
 
+### Setup verification and recovery
+
+Saving config is not a successful pipeline check. The wizard and Settings use
+one Doctor API, also used by `zotero-summarizer doctor --json`. Model listing,
+declared capability, saved configuration, observed operational response, and
+hardware safety are distinct. Local model metadata remains available without a
+key or download, but local LLM requests (including loopback Anthropic) are refused
+with `effective_envelope_unknown`: the production runtime does not provide an
+authoritative ResourceEnvelope (effective context, placement, memory domain).
+Static profiles and host free RAM cannot replace it. Choose Hosted or No LLM in
+Settings to verify another mode; retrying or restarting cannot manufacture that
+evidence. Hardware-safe Full-local completion of issue #11 remains unfulfilled.
+Local detection includes all literal 127/8 and IPv4-mapped IPv6 loopbacks; it does
+not discover DNS aliases. Prior verification revision v1 is no longer accepted.
+
+Runtime/model inventory recovery names the failing provider, model and endpoint.
+A healthy Ollama sibling cannot prescribe `ollama serve` or `ollama pull` for a
+failing vLLM, MLX or LM Studio endpoint. Ollama suggestions apply only to the failing
+local OpenAI-compatible endpoint on the supported port 11434; other endpoints link
+to AI Settings to repair the connection or choose a served model. Commands remain
+manual suggestions: nothing is installed or downloaded automatically. Error prose
+alone never identifies a runtime.
+
+Hosted verification requires nonempty inference plus observed matching model
+identity and successful terminal metadata; missing metadata or aliases differing
+from the returned ID need action, not Ready. Use the actual served ID. Cache-only
+ML asset verification retains its bounded, isolated offline load check; it does
+not certify local LLM hardware safety. No model weights are auto-downloaded.
+
+**Stop verification** stops the waiter and later requests, not a remote runtime.
+The synchronous callback retains exclusion until it returns. An unresolved
+receipt/HOLD is not termination evidence, even after restart. Each check's result
+is persisted; interrupted checks need retry. Changes to AI/goals, credentials,
+paths, enabled sources or the verification revision invalidate old success,
+including late browser replies. Technical details retain the actual failed check.
+
 ## Two ways to run triage
 
 Scoring papers always runs the same pipeline (cheap ML gate → LLM for survivors →

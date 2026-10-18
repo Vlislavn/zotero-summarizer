@@ -162,7 +162,13 @@ Ownership, replay and manual-note isolation are covered by
 `tests/test_note_ownership.py`, `tests/test_zotero_audit_boundaries.py` and
 `tests/test_zotero_note_envelope.py`. Native acceptance receipts remain private.
 
-CompletionGuard raises typed `LLMOutputTruncated(RuntimeError)` only for observed `length`; metadata-only logs and its diagnostic message remain unchanged.
+CompletionGuard raises typed `LLMOutputTruncated(RuntimeError)` for ordinary observed `length`.
+Setup verification additionally requires observed exact model identity and a successful
+terminal reason before accepting text/typed output. Missing observations, truncation,
+model mismatch and cached text cannot establish verification. Verification wrappers
+support cancellation checks before every request and close their owned transport;
+native Anthropic checks its actual response model/stop reason. Ordinary inference
+keeps its existing behavior; no paper text controls these verification options.
 
 Analysis-source serialization correction (CAPA: proven for the checked PDF):
 

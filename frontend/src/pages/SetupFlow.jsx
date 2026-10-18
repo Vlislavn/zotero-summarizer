@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchConfig, updateConfig } from '../api/settingsApi.js';
 import { configToFormState, formStateToConfig } from '../utils/configForm.js';
 import { humanizeError } from '../utils/humanizeError.js';
+import { invalidateSetupDoctor } from '../utils/setupDoctorState.js';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import { dismissSetup } from '../components/setup/SetupGate.jsx';
 import StepProgress from '../components/setup/StepProgress.jsx';
@@ -122,6 +123,7 @@ export default function SetupFlow() {
 
   const finishMutation = useMutation({
     mutationFn: (payload) => updateConfig(payload),
+    onSettled: () => invalidateSetupDoctor(queryClient),
     onSuccess: (resp) => {
       if (resp?.config) {
         queryClient.setQueryData(['runtime-config'], resp.config);
@@ -129,7 +131,6 @@ export default function SetupFlow() {
         queryClient.invalidateQueries({ queryKey: ['runtime-config'] });
       }
       queryClient.invalidateQueries({ queryKey: ['setup-status'] });
-      queryClient.removeQueries({ queryKey: ['setup-doctor'] });
       setStep(4);
     },
     onError: (err) => setFinishError(humanizeError(err)),

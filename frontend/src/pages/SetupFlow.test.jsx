@@ -61,7 +61,8 @@ it('completes ML-only setup after validation and saves the personalized goal', a
   expect(saved.llm_enabled).toBe(false);
   expect(saved.research_goals).toEqual(['Evidence synthesis for clinical agents']);
   expect(saved.prestige).toEqual(config.prestige);
-  expect(client.getQueryData(['setup-doctor'])).toBeUndefined();
+  // A shared invalidation tombstone fences late checks; removed cache entries cannot do that.
+  expect(client.getQueryData(['setup-doctor'])?.ready).toBe(false);
   client.clear();
 });
 

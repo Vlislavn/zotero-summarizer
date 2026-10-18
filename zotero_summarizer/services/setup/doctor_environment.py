@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 from pathlib import Path
 import shutil
@@ -33,6 +34,28 @@ def _row(
         "detail": detail,
         "recovery": recovery,
     }
+
+
+def redact_diagnostics(value, secrets: list[str]):
+    if isinstance(value, dict):
+        return {key: redact_diagnostics(item, secrets) for key, item in value.items()}
+    if isinstance(value, list):
+        return [redact_diagnostics(item, secrets) for item in value]
+    if isinstance(value, str):
+        for secret in secrets:
+            value = value.replace(secret, "[redacted]")
+    return value
+
+
+def _optional_extras(_: Settings) -> dict[str, Any]:
+    browsers = importlib.util.find_spec("patchright") is not None
+    return _row(
+        "optional_extras", "ready" if browsers else "unavailable",
+        "Browser/PDF extras are available" if browsers else "Browser automation is optional and unavailable",
+        "Core local triage does not require browser automation.",
+        action="Install browser extras",
+        command=None if browsers else "uv sync --extra browser",
+    )
 
 
 def _environment(settings: Settings) -> dict[str, Any]:

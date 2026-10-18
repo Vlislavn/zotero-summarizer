@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from enum import Enum
+from ipaddress import ip_address
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_serializer, model_validator
 
 __all__ = [
     "STAGES",
     "DefaultModelConfig",
     "LLMRoutingConfig",
+    "LLMCapability",
     "ProviderConfig",
     "ProviderType",
     "ResolvedStage",
@@ -21,14 +23,14 @@ __all__ = [
 
 STAGES = ("feed", "backlog", "deep_review")
 
-# Loopback hosts that mark a provider as "local" — its stage runs serially to
-# protect host RAM (one big local model can't absorb concurrent inference).
-_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1"})
-
-
 class ProviderType(str, Enum):
     openai = "openai"  # OpenAI-compatible chat (reuses build_llm / OnPrem)
     anthropic = "anthropic"  # native Anthropic messages API
+
+
+class LLMCapability(str, Enum):
+    text = "text"
+    native_json_schema = "native_json_schema"
 
 
 class ProviderConfig(BaseModel):
@@ -49,6 +51,24 @@ class ProviderConfig(BaseModel):
     num_ctx: int | None = Field(default=None, ge=512)
     keep_alive: int | None = Field(default=None)
     structured_output: bool = Field(default=False)
+    capabilities: frozenset[LLMCapability] | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize_capabilities(self, handler) -> dict[str, Any]:
+        payload = handler(self)
+        if self.capabilities is None:
+            payload.pop("capabilities", None)
+        return payload
+
+    @property
+    def available_capabilities(self) -> frozenset[LLMCapability]:
+        """Declared adapter paths, not observed model support or hardware safety."""
+        enabled = {LLMCapability.text}
+        if self.capabilities is None:
+            return frozenset(enabled)
+        if self.type == ProviderType.anthropic or self.structured_output:
+            enabled.add(LLMCapability.native_json_schema)
+        return self.capabilities & enabled
 
     @model_validator(mode="after")
     def _require_base_url_for_openai(self) -> ProviderConfig:
@@ -65,9 +85,7 @@ class ProviderConfig(BaseModel):
 
     @property
     def is_local(self) -> bool:
-        """Whether the endpoint is loopback and must use local concurrency limits."""
-        if self.type is ProviderType.anthropic:
-            return False
+        """Literal local endpoints share concurrency, credential and admission rules."""
         raw = (self.base_url or "").strip()
         if not raw:
             return False
@@ -76,7 +94,14 @@ class ProviderConfig(BaseModel):
         if "://" not in raw:
             raw = "http://" + raw
         host = (urlsplit(raw).hostname or "").lower()
-        return host in _LOCAL_HOSTS
+        if host == "localhost":
+            return True
+        try:
+            address = ip_address(host)
+        except ValueError:
+            return False  # not a literal IP; never resolve DNS during classification
+        address = getattr(address, "ipv4_mapped", None) or address
+        return address.is_loopback or address.is_unspecified
 
 
 class StageModelConfig(BaseModel):

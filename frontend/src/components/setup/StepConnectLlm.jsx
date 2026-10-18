@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { listModels } from '../../api/settingsApi.js';
 import { fetchAiPresets, saveAiCredential } from '../../api/setupApi.js';
+import { invalidateSetupDoctor } from '../../utils/setupDoctorState.js';
 import { humanizeError } from '../../utils/humanizeError.js';
 import { Banner, Field } from '../form/Fields.jsx';
 import Button from '../ui/Button.jsx';
@@ -114,9 +115,11 @@ export default function StepConnectLlm({ status, routing, mode, onPatchRouting, 
   const connectMutation = useMutation({
     mutationFn: async () => {
       if (requiresKey && apiKey) {
-        await saveAiCredential(provider.api_key_env, apiKey);
-        queryClient.setQueryData(['setup-doctor'], { ready: false, status: 'not_started', checks: [], modes: {} });
-        queryClient.invalidateQueries({ queryKey: ['setup-doctor'] });
+        try {
+          await saveAiCredential(provider.api_key_env, apiKey);
+        } finally {
+          await invalidateSetupDoctor(queryClient);
+        }
       }
       return listModels(provider);
     },
