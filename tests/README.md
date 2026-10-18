@@ -86,3 +86,6 @@ Review slice 59: Setup regression tests / 3. Depends on the preceding slice; not
 
 <!-- PR53 review slice 60 -->
 Review slice 60: Method regression tests / 1. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 61 -->
+Review slice 61: Method regression tests / 2. Depends on the preceding slice; not release acceptance.
