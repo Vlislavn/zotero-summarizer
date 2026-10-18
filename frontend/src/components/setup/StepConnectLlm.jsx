@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { listModels } from '../../api/settingsApi.js';
 import { fetchAiPresets, saveAiCredential } from '../../api/setupApi.js';
 import { humanizeError } from '../../utils/humanizeError.js';
+import { invalidateSetupDoctor } from '../../utils/setupDoctorState.js';
 import { Banner, Field } from '../form/Fields.jsx';
 import Button from '../ui/Button.jsx';
 
@@ -22,7 +23,7 @@ function presetFor(provider, presets) {
   ))?.id || 'custom';
 }
 
-export default function StepConnectLlm({ status, routing, mode, onPatchRouting, testedOk, onTested }) {
+export default function StepConnectLlm({ status, routing, mode, onPatchRouting, testedOk, onTested, onValidityChange }) {
   const queryClient = useQueryClient();
   const presetsQuery = useQuery({ queryKey: ['ai-presets'], queryFn: fetchAiPresets });
   const presets = presetsQuery.data?.presets || [];
@@ -36,7 +37,8 @@ export default function StepConnectLlm({ status, routing, mode, onPatchRouting, 
   const selected = presets.find((preset) => preset.id === selectedId);
   const selectedLocal = localCatalog?.profiles.find((profile) => profile.id === localProfile)
     || (current?.name === 'local' ? (
-      localCatalog?.profiles.find((profile) => profile.model && profile.model === routing?.default?.model)
+      localCatalog?.profiles.find((profile) => profile.model && profile.model === routing?.default?.model
+        && profile.provider?.base_url === current.base_url)
       || localCatalog?.profiles.find((profile) => profile.id === 'existing')
     ) : null);
   const provider = selectedId === 'custom' ? current
@@ -44,6 +46,11 @@ export default function StepConnectLlm({ status, routing, mode, onPatchRouting, 
       ? (selectedLocal?.id === 'existing' ? current : selectedLocal?.provider || selected?.provider)
       : selected?.provider;
   const defaultModel = routing?.default?.model || '';
+  const localCompatible = Boolean(localCatalog && selectedLocal?.compatible);
+
+  useEffect(() => {
+    onValidityChange?.(mode !== 'local' || localCompatible);
+  }, [mode, localCompatible, onValidityChange]);
 
   function patchProvider(next, clearModel = false) {
     const providers = (routing?.providers || []).filter((item) => item.name !== next.name);
@@ -73,7 +80,7 @@ export default function StepConnectLlm({ status, routing, mode, onPatchRouting, 
     if (!local || !profile.compatible) return;
     const providers = (routing?.providers || []).filter((item) => item.name !== local.name);
     providers.push(local);
-    const model = profile.model || null;
+    const model = profile.model || (current?.name === 'local' ? routing?.default?.model : null);
     setLocalProfile(profile.id);
     onPatchRouting({
       ...routing, providers,
@@ -103,6 +110,7 @@ export default function StepConnectLlm({ status, routing, mode, onPatchRouting, 
   }
 
   function patchModel(model) {
+    if (selectedId === 'local') setLocalProfile(null);
     const next = { ...routing,
       default: { ...(routing?.default || {}), provider: provider?.name, model: model || null } };
     ['feed', 'backlog', 'deep_review'].forEach((stage) => {
@@ -114,9 +122,14 @@ export default function StepConnectLlm({ status, routing, mode, onPatchRouting, 
   const connectMutation = useMutation({
     mutationFn: async () => {
       if (requiresKey && apiKey) {
-        await saveAiCredential(provider.api_key_env, apiKey);
-        queryClient.setQueryData(['setup-doctor'], { ready: false, status: 'not_started', checks: [], modes: {} });
-        queryClient.invalidateQueries({ queryKey: ['setup-doctor'] });
+        try {
+          await saveAiCredential(provider.api_key_env, apiKey);
+        } catch (error) {
+          // Even validation failure can follow a persisted Doctor revision change.
+          void invalidateSetupDoctor(queryClient);
+          throw error;
+        }
+        void invalidateSetupDoctor(queryClient);
       }
       return listModels(provider);
     },
@@ -132,7 +145,7 @@ export default function StepConnectLlm({ status, routing, mode, onPatchRouting, 
   const legacyStored = status?.llm?.api_key_env === provider?.api_key_env
     && status?.llm?.api_key_present;
   const stored = Boolean(selected?.credential?.present || legacyStored);
-  const canConnect = Boolean(provider && (selectedId !== 'local' || selectedLocal)
+  const canConnect = Boolean(provider && (selectedId !== 'local' || localCompatible)
     && (!requiresKey || apiKey || stored));
   const connected = Boolean(testedOk && connectMutation.isSuccess && models.includes(defaultModel));
   const cardClass = (id) => `text-left rounded-xl border px-3 py-2 transition-colors ${
@@ -142,30 +155,34 @@ export default function StepConnectLlm({ status, routing, mode, onPatchRouting, 
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-base font-semibold text-slate-900">Connect AI</h3>
+        <h3 className="text-base font-medium text-slate-900">{mode === 'local' ? 'Local model' : 'Connect AI'}</h3>
         <p className="text-sm text-slate-500 mt-1">
           {mode === 'local' ? 'Choose a compatible local profile, then confirm its model.'
             : 'Choose a service, paste its key, then pick one model.'}
         </p>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2" aria-label="AI services">
-        {presets.filter((preset) => mode === 'local' ? preset.id === 'local'
-          : mode === 'hosted' ? preset.id !== 'local' : true).map((preset) => (
+      {mode !== 'local' && <div className="grid grid-cols-2 sm:grid-cols-4 gap-2" aria-label="AI services">
+        {presets.filter((preset) => mode !== 'hosted' || preset.id !== 'local').map((preset) => (
           <button key={preset.id} type="button" className={cardClass(preset.id)} onClick={() => choosePreset(preset.id)}>
             <span className="block text-sm font-semibold text-slate-800">{preset.label}</span>
             {preset.recommended && <span className="text-[11px] text-forest-800">Recommended</span>}
           </button>
         ))}
-      </div>
+      </div>}
 
-      {presetsQuery.isError && <Banner kind="error">Could not load AI services.</Banner>}
+      {presetsQuery.isLoading && <p role="status" className="text-sm text-slate-500">Checking hardware and model profiles…</p>}
+      {presetsQuery.isError && <div className="space-y-2">
+        <Banner kind="error">Could not load hardware and model profiles. No model has been selected or downloaded.</Banner>
+        <Button variant="secondary" onClick={() => presetsQuery.refetch()}>Retry profiles</Button>
+      </div>}
 
       {selectedId === 'local' && localCatalog && (
         <fieldset className="space-y-2">
           <legend className="text-sm font-semibold text-slate-700">Choose a local profile</legend>
           <p className="text-xs text-slate-500">
-            Detected {localCatalog.hardware.memory_gb} GB memory and {localCatalog.hardware.disk_free_gb} GB free disk.
+            Detected {localCatalog.hardware.memory_gb} GB total memory and {localCatalog.hardware.disk_free_gb} GB free disk.
+            Recommendations are defaults, not requirements. These floors do not verify currently available memory or runtime load safety.
           </p>
           <div className="grid sm:grid-cols-3 gap-2">
             {localCatalog.profiles.map((profile) => (
@@ -179,14 +196,22 @@ export default function StepConnectLlm({ status, routing, mode, onPatchRouting, 
                 <span className="block text-xs text-slate-500 mt-1">
                   {profile.model || 'Your model'}{profile.size_gb ? ` · ${profile.size_gb} GB` : ''}
                 </span>
+                {profile.min_memory_gb > 0 && <span className="block text-xs text-slate-600 mt-1">
+                  Requires {profile.min_memory_gb} GB memory · {profile.min_disk_gb} GB free disk
+                </span>}
                 <span className="block text-[11px] text-slate-500 mt-1">{profile.compatibility_detail}</span>
               </button>
             ))}
           </div>
-          {selectedLocal?.id === 'existing' && (
-            <Field label="Local endpoint URL" value={current?.base_url || ''}
-              onChange={patchExistingEndpoint} />
-          )}
+          {selectedLocal?.id === 'existing' && <div className="space-y-3">
+            <Field label="Local model name" value={defaultModel} onChange={patchModel}
+              hint="Use the exact model name served by your runtime. Verification happens after saving." />
+            <details className="text-sm text-slate-600">
+              <summary className="cursor-pointer focus-visible:outline focus-visible:outline-2">Advanced · local endpoint</summary>
+              <Field label="Local endpoint URL" value={current?.base_url || ''}
+                onChange={patchExistingEndpoint} />
+            </details>
+          </div>}
           {selectedLocal && (
             <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600">
               <p>{selectedLocal.runtime} · {selectedLocal.features.join(', ')}</p>
@@ -195,7 +220,8 @@ export default function StepConnectLlm({ status, routing, mode, onPatchRouting, 
                 target="_blank" rel="noreferrer">Official model source</a>}
               {selectedLocal.pull_command && <>
                 <p className="mt-2">Download starts only when you run this explicit command:</p>
-                <code className="block my-1 select-all text-slate-900">{selectedLocal.pull_command}</code>
+                <p>Model: {selectedLocal.model} · approximately {selectedLocal.size_gb} GB. Review the source and size before running it.</p>
+                <code className="block my-1 select-all text-slate-900 [overflow-wrap:anywhere]">{selectedLocal.pull_command}</code>
                 <Button type="button" variant="secondary"
                   onClick={() => navigator.clipboard?.writeText(selectedLocal.pull_command)}>
                   Copy command
@@ -230,10 +256,12 @@ export default function StepConnectLlm({ status, routing, mode, onPatchRouting, 
       <div className="flex items-center gap-3 flex-wrap">
         <Button variant="secondary" onClick={() => connectMutation.mutate()}
           disabled={!canConnect || connectMutation.isPending}>
-          {connectMutation.isPending ? 'Connecting…' : 'Connect & load models'}
+          {connectMutation.isPending ? 'Listing…' : 'List available models'}
         </Button>
-        {connected && <span className="text-sm font-semibold text-emerald-700">✓ Connected</span>}
+        {connected && <span className="text-sm text-slate-600">✓ Model listed — inference not yet verified</span>}
       </div>
+
+      <p className="text-xs text-slate-500">Listing checks model names only. Real inference is verified after saving; it does not start a download.</p>
 
       {models.length > 0 && (
         <label className="block">
