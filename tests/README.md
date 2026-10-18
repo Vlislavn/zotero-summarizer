@@ -1,14 +1,11 @@
 # Tests
 
-```text
-Search refinement -> exact DOI/arXiv coverage -> version family -> saved session
-                                                        -> explicit Add reuses key
-```
+Run focused cases with `pytest -q tests/<test_file>.py`. Tests use the existing
+pytest fixtures and isolated application state; do not point fixtures at a live
+Zotero library, provider, account or model. Feature-specific regression contracts
+are documented with their owning service package and usage instructions.
 
-`test_search_refinement_coverage.py` exercises the existing reader's tri-state
-contract, both family orders, persisted membership/review/address retention, and
-explicit Add without constructing a native writer for an already-saved result.
-It uses fake retrieval/readers and isolated session storage, not live accounts or
-models. Run with `pytest -q tests/test_search_refinement_coverage.py`; repository
-verification and the known macOS native-fork baseline are documented in
-`../docs/architecture.md`. Authored tests are not a claim of execution.
+Full verification commands and the known macOS native-library fork baseline are
+in [architecture.md](../docs/architecture.md#verify-a-change). Compare the failed
+set against that baseline rather than hiding failures. Authored/static-checked
+cases are not evidence of execution; report RED/GREEN and runtime limits honestly.

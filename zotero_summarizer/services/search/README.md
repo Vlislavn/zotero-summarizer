@@ -130,6 +130,7 @@ Refinement annotates newly fetched DOI/arXiv observations with the same library
 lookup before merging families. A confirmed saved hit survives richer bibliographic
 metadata; absent/unsupported/failed lookups remain unknown. Existing reviews,
 addresses and scores survive, and explicit Add reuses a confirmed saved key.
+`tests/test_search_refinement_coverage.py` covers this contract without live sources or a native writer.
 
 ## Execution and identity boundaries
 
