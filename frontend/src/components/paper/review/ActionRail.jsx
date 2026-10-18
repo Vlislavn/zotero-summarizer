@@ -4,6 +4,7 @@ import CollectionEditor from '../CollectionEditor.jsx';
 import TagOfInterestEditor from '../TagOfInterestEditor.jsx';
 import AskPaperBox from '../../library/AskPaperBox.jsx';
 import { Disclosure } from './primitives.jsx';
+import useNoteDelivery from '../../../hooks/useNoteDelivery.js';
 
 // The persistent decision rail for the story page: the verdict editor (the day's
 // primary action), one-tap filing into Read Next, tags behind a fold, and the
@@ -15,6 +16,7 @@ export default function ActionRail({
   itemKey, detail, collections, verdict, onTagsChanged, onCollectionsChanged, hasPdf, canAsk = hasPdf,
   onNoteSaved = () => {}, onNotesDirtyChange = () => {},
 }) {
+  const { questionMirror, beginNoteDelivery } = useNoteDelivery(itemKey, detail.user_note || '', detail.questions || []);
   return (
     <div className="space-y-5">
       <VerdictPanel
@@ -33,6 +35,9 @@ export default function ActionRail({
         <ReviewNotes
           itemKey={itemKey}
           initialNote={detail.user_note || ''}
+          questions={detail.questions || []}
+          questionMirror={questionMirror}
+          onMirrorStart={beginNoteDelivery}
           onSaved={onNoteSaved}
           onDirtyChange={onNotesDirtyChange}
         />
@@ -52,7 +57,7 @@ export default function ActionRail({
       </div>
       {canAsk && (
         <div className="border-t border-slate-200/60 pt-4">
-          <AskPaperBox itemKey={itemKey} variant="rail" allowRawPdfModes={hasPdf} />
+          <AskPaperBox itemKey={itemKey} variant="rail" allowRawPdfModes={hasPdf} onSaved={onNoteSaved} onMirrorStart={beginNoteDelivery} />
         </div>
       )}
     </div>

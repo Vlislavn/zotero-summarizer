@@ -11,6 +11,7 @@ import { humanizeError } from '../../utils/humanizeError.js';
 import { SORT_FIELDS, SORT_DEFAULT_DIR, DEFAULT_SORT } from '../../utils/relevanceBands.js';
 import Spinner from '../ui/Spinner.jsx';
 import { readStorage } from '../../utils/safeStorage.js';
+import useServerAvailable from '../../hooks/useServerAvailable.js';
 
 // Stage-2 "Read next": the single Library surface. Ranked queue over the WHOLE
 // library with an inline annotate panel (links, tags, per-paper deep review).
@@ -110,6 +111,7 @@ export default function ReadNextView({
   // sorted). 'best' = the blended server order.
   sort = DEFAULT_SORT, onSortChange,
 }) {
+  const serverAvailable = useServerAvailable();
   const computing = status === 'computing';
   // A failed read must leave Rescore available even with retained last-good rows.
   const errored = status === 'error';
@@ -220,7 +222,7 @@ export default function ReadNextView({
             <button
               type="button"
               onClick={onRescore}
-              disabled={computing}
+              disabled={computing || !serverAvailable}
               title={`Recompute relevance scores for your whole library against the current model${computedAt ? ` · scores as of ${formatShortDate(computedAt)}` : ''}. First full scan (~2,400 papers) can take a few minutes; re-scans are fast.`}
               className={`px-2 py-0.5 rounded-md border text-[11px] disabled:opacity-50 disabled:cursor-not-allowed ${
                 scoresStale
@@ -245,7 +247,7 @@ export default function ReadNextView({
             <button
               type="button"
               onClick={onRunTriage}
-              disabled={!selected || selected.size === 0 || starting}
+              disabled={!serverAvailable || !selected || selected.size === 0 || starting}
               className="px-3 py-0.5 rounded-md bg-teal-700 text-[11px] font-semibold text-white hover:bg-teal-800 disabled:bg-slate-300 disabled:text-slate-500"
             >
               {starting ? 'Starting…' : `Run triage (${selected?.size || 0})`}
@@ -269,7 +271,7 @@ export default function ReadNextView({
               <button
                 type="button"
                 onClick={() => onAddToCollection(targetCollection)}
-                disabled={!selected?.size || !targetValid || addingToCollection}
+                disabled={!serverAvailable || !selected?.size || !targetValid || addingToCollection}
                 className="px-3 py-0.5 rounded-md bg-slate-700 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:bg-slate-300 disabled:text-slate-500"
                 title="Add the selected papers to this Zotero collection (backup-first; no more memorizing titles and re-finding them in Zotero)"
               >

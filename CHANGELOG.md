@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Review slice 25: Frontend paper review / 2. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 24: Frontend paper review / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 23: Frontend API contracts / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 22: API and CLI wiring / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.

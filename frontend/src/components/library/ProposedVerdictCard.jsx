@@ -16,6 +16,8 @@ const CONFIDENCE_FLOOR = 0.6;
 export default function ProposedVerdictCard({ itemKey, proposal, onSaved, onOverride }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [saved, setSaved] = useState(null);
+  const [warning, setWarning] = useState(null);
   if (!proposal || !proposal.proposed) return null;
 
   const proposed = proposal.proposed;
@@ -27,19 +29,29 @@ export default function ProposedVerdictCard({ itemKey, proposal, onSaved, onOver
   const confirmable = confidence >= CONFIDENCE_FLOOR && flags.length === 0;
 
   async function handleConfirm() {
+    if (submitting || saved) return;
     setSubmitting(true);
     setError(null);
+    let result;
     try {
-      // Same path as InlineAnnotate's submit: a dont_read also queues the ❌ tag,
-      // so there is ONE reject path (Occam's Razor), behind this explicit click.
-      const tasks = [submitVerdict({ item_key: itemKey, user_priority: proposed })];
-      if (isRemove) tasks.push(queueRejectTag(itemKey));
-      await Promise.all(tasks);
-      onSaved?.();
+      result = await submitVerdict({ item_key: itemKey, user_priority: proposed });
     } catch (e) {
       setError(`Couldn’t save: ${e.message || e}`);
       setSubmitting(false);
+      return;
     }
+    setSaved(result.saved_offline ? 'Saved on this device — waiting to sync.' : 'Verdict saved.');
+    // Match usePaperReview: replay owns offline effects; an online tag failure
+    // is a secondary warning, never a reason to submit another verdict.
+    if (isRemove && !result.saved_offline) {
+      try {
+        await queueRejectTag(itemKey);
+      } catch (e) {
+        setWarning(`Verdict saved, but reject tag was not queued: ${e.message || e}`);
+      }
+    }
+    setSubmitting(false);
+    onSaved?.();
   }
 
   return (
@@ -75,7 +87,9 @@ export default function ProposedVerdictCard({ itemKey, proposal, onSaved, onOver
         </p>
       )}
 
-      {error && <p className="text-[12px] text-rose-700">{error}</p>}
+      {error && <p role="alert" className="text-[12px] text-rose-700">{error}</p>}
+      {saved && <p role="status" className="text-[12px] text-slate-700">{saved}</p>}
+      {warning && <p role="status" className="text-[12px] text-amber-800">{warning}</p>}
 
       {/* Exactly TWO primary actions (Hick's/Tesler's) — and only ONE (Override)
           when the proposal is ambiguous, so an uncertain call always goes to the
@@ -85,7 +99,7 @@ export default function ProposedVerdictCard({ itemKey, proposal, onSaved, onOver
           <button
             type="button"
             onClick={handleConfirm}
-            disabled={submitting}
+            disabled={submitting || Boolean(saved)}
             className={`px-3 py-1 rounded-lg text-xs font-semibold text-white disabled:opacity-50 ${
               isRemove ? 'bg-rose-600 hover:bg-rose-700' : 'bg-indigo-600 hover:bg-indigo-700'
             }`}
@@ -93,13 +107,13 @@ export default function ProposedVerdictCard({ itemKey, proposal, onSaved, onOver
               ? 'Accept the proposal: remove this paper (queues the ❌ tag) and record the label.'
               : 'Accept the proposal: record this reading priority and pin/handle the paper.'}
           >
-            {submitting ? 'Saving…' : `Confirm — ${pretty(proposed)}`}
+            {saved ? `Confirmed — ${pretty(proposed)}` : submitting ? 'Saving…' : `Confirm — ${pretty(proposed)}`}
           </button>
         )}
         <button
           type="button"
           onClick={onOverride}
-          disabled={submitting}
+          disabled={submitting || Boolean(saved)}
           className="px-3 py-1 rounded-lg text-xs font-semibold border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-50"
           title="Open the full review to pick a different verdict (the proposal is pre-selected)."
         >

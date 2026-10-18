@@ -331,3 +331,6 @@ Review slice 23: Frontend API contracts / 1. Depends on the preceding slice; not
 
 <!-- PR53 review slice 24 -->
 Review slice 24: Frontend paper review / 1. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 25 -->
+Review slice 25: Frontend paper review / 2. Depends on the preceding slice; not release acceptance.

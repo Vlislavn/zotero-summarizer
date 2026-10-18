@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { fetchPaperRender, buildPaperRender } from '../../api/libraryApi.js';
 import Spinner from '../ui/Spinner.jsx';
+import useServerAvailable from '../../hooks/useServerAvailable.js';
 
 // One-click access to the full review from a Read-next row. The paper-read render
 // artifact (notes/figures/HTML next to the Zotero PDF) used to be reached only
@@ -8,7 +9,8 @@ import Spinner from '../ui/Spinner.jsx';
 // the artifact is built (build-on-demand + spinner), then open the review route
 // (/paper/:key) in a new tab — which carries the verdict/collection/tag controls
 // the static HTML brief never had. Reuses the existing render helpers — no
-// backend change. A sibling of the row's expand <button> (never nested inside it
+// backend change. Offline, open the existing cache-aware route without preparing
+// an artifact. A sibling of the row's expand <button> (never nested inside it
 // — nested interactive elements are invalid).
 
 const POLL_MS = 1500;
@@ -33,6 +35,7 @@ function briefErrorMessage(error) {
 }
 
 export default function OpenBriefButton({ itemKey, hasPdf = true, label = null }) {
+  const serverAvailable = useServerAvailable();
   const [working, setWorking] = useState(false);
   const [error, setError] = useState(null);
   // Drop the in-flight result if the row unmounts mid-build (don't navigate a
@@ -43,6 +46,10 @@ export default function OpenBriefButton({ itemKey, hasPdf = true, label = null }
   async function handleClick() {
     if (working) return;
     setError(null);
+    if (!serverAvailable || !navigator.onLine) {
+      window.open(`/paper/${encodeURIComponent(itemKey)}`, '_blank', 'noopener');
+      return;
+    }
     // Open the tab synchronously, BEFORE any await, so the popup-blocker treats
     // it as user-initiated. Don't pass the 'noopener' feature — it makes open()
     // return null and we'd lose the handle; null `opener` afterwards instead.
@@ -114,7 +121,7 @@ export default function OpenBriefButton({ itemKey, hasPdf = true, label = null }
           disabled={working}
           aria-busy={working}
           aria-describedby={error ? `${itemKey}-brief-error` : undefined}
-          title={hasPdf ? 'Open the full review (builds it first if needed)' : NO_PDF_MESSAGE}
+          title={!serverAvailable ? 'Open cached review; PDF preparation needs the Mac' : hasPdf ? 'Open the full review (builds it first if needed)' : NO_PDF_MESSAGE}
           className="w-full inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg bg-teal-700 text-white text-[13px] font-semibold hover:bg-teal-800 disabled:opacity-60"
         >
           {working && <Spinner size="sm" color="teal-on-fill" />}
@@ -139,15 +146,17 @@ export default function OpenBriefButton({ itemKey, hasPdf = true, label = null }
         type="button"
         onClick={handleClick}
         disabled={working}
-        aria-label={hasPdf ? 'Open full review' : 'Fetch and open full review'}
+        aria-label={!serverAvailable ? 'Open cached review' : hasPdf ? 'Open full review' : 'Fetch and open full review'}
         aria-busy={working}
         aria-describedby={error ? `${itemKey}-brief-error` : undefined}
         title={
           error
             ? `Couldn't open the review: ${error}`
-            : hasPdf
-              ? 'Open the full review (builds the paper artifact first if needed)'
-              : NO_PDF_MESSAGE
+            : !serverAvailable
+              ? 'Open cached review; PDF preparation needs the Mac'
+              : hasPdf
+                ? 'Open the full review (builds the paper artifact first if needed)'
+                : NO_PDF_MESSAGE
         }
         className={`shrink-0 flex items-center justify-center w-7 h-7 rounded text-sm hover:bg-teal-50 disabled:opacity-60 ${
           error
@@ -157,7 +166,7 @@ export default function OpenBriefButton({ itemKey, hasPdf = true, label = null }
               : 'text-slate-300 hover:text-amber-700 hover:bg-amber-50'
         }`}
       >
-        {working ? <Spinner size="sm" color="teal" /> : <span aria-hidden="true">{hasPdf ? 'ℹ' : 'PDF'}</span>}
+        {working ? <Spinner size="sm" color="teal" /> : <span aria-hidden="true">{hasPdf || !serverAvailable ? 'ℹ' : 'PDF'}</span>}
       </button>
       {error && (
         <span
