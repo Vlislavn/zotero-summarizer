@@ -328,3 +328,6 @@ Full reading views fold goal findings into one native disclosure; states and cit
 
 <!-- PR53 review slice 23 -->
 Review slice 23: Frontend API contracts / 1. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 24 -->
+Review slice 24: Frontend paper review / 1. Depends on the preceding slice; not release acceptance.
