@@ -49,6 +49,8 @@ def _coerce_digest(raw: Any) -> PaperDigest:
     }
     if not required <= digest.model_fields_set:
         raise DigestGenerationFailed("digest omitted required reading or writing assessment")
+    if digest.writing_friction is None:
+        raise DigestGenerationFailed("new digest requires an explicit writing assessment")
     if digest.read_decision not in {"read", "skim", "skip"}:
         raise DigestGenerationFailed("digest reading action must be read, skim or skip")
     if digest.read_decision in {"read", "skim"}:
@@ -110,12 +112,18 @@ _DEFAULT_DIGEST_PROMPT = (
     '- "skip_parts": low-value parts safe to ignore ([] if none).\n'
     '- "estimated_read_minutes": total minutes for the recommended action (null if unknown).\n'
     '- "original_value": what opening the original adds beyond this digest ("" for skip).\n'
-    "Audit writing independently BEFORE choosing the reading action. Actively seek recurring counterexamples to: "
-    "central terms before use; one stated axis per taxonomy; signposted abstraction shifts; explicit claim/evidence "
-    "links. Ignore isolated typos, technical depth, study validity, weak evidence, and sophistication. MUST return both "
-    "writing fields: zero counterexamples = low, one = moderate, two or more or a reconstructed central argument = high.\n"
-    '- "writing_friction": exactly "low", "moderate", or "high" from the counterexample count.\n'
-    '- "writing_reasons": each concrete counterexample (1-3 for moderate/high; [] for low).\n'
+    "Audit avoidable writing friction independently before choosing the reading action: "
+    "definitions/intuition before dependency; reconstructable input/state -> transformation -> output; "
+    "one axis per taxonomy; signposted abstraction shifts; explained essential terminology; editorial "
+    "coherence; and clear separation of prior evidence, proposals, findings and speculation. "
+    "Do not penalize advanced mathematics, unfamiliar topics or a reader's knowledge gap. "
+    "Scientific support and writing polish are separate; poor writing is not weak science. "
+    "Flag only concrete text-grounded exposition failures, not difficulty alone. "
+    "For high friction, explain the valuable idea cleanly in the digest and target only useful original sections.\n"
+    '- "writing_friction": exactly "low" (no material obstacles), "moderate" (local obstacles), '
+    'or "high" (recurring or central missing exposition links).\n'
+    '- "writing_reasons": at most 3 concrete failures with text/section anchors '
+    '(required for moderate/high; [] for low).\n'
     '- "relevance": how it connects to the reader\'s research goals above (one sentence; "" if none).\n'
     '- "controversies": the most debatable claim and why it is contestable (one sentence; "" if none).\n'
     '- "impact": likely effect on the field if the claims hold (one sentence).\n'

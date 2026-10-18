@@ -34,13 +34,15 @@ def _generation_sources() -> dict[str, str]:
     from zotero_summarizer.integrations import pdf as analysis_extractor
     from zotero_summarizer.services.library import (
         _deep_review_layers, _map_reduce, _paper_goal_summaries,
-        _paper_section_summaries, _source_admission, _auth_envelope, paper_type, quality_eval, quality_review,
+        _paper_section_summaries, _paper_type_checklists, _quality_prompts,
+        _source_admission, _auth_envelope, paper_type, quality_eval, quality_review,
     )
     from zotero_summarizer.services.library.review_fleet import propose
 
     modules = (
         analysis_extractor, _deep_review_layers, _map_reduce, _paper_goal_summaries,
-        _paper_section_summaries, _source_admission, _auth_envelope, paper_type, quality_eval, quality_review, propose,
+        _paper_section_summaries, _paper_type_checklists, _quality_prompts,
+        _source_admission, _auth_envelope, paper_type, quality_eval, quality_review, propose,
     )
     paths = [Path(inspect.getfile(PaperDigest)), *(Path(module.__file__) for module in modules)]
     return {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}

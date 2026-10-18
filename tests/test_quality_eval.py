@@ -12,7 +12,7 @@ from zotero_summarizer.services.library._quality_prompts import (
     SelfVerifyResponse,
 )
 
-# The GENERIC_EMPIRICAL checklist keys (default when no paper_type is passed). Each
+# The GENERIC_EMPIRICAL checklist keys (an explicitly selected supertype). Each
 # value is a >=6-word / >=40-char verbatim span used as grounded evidence.
 EV = {
     "baselines": "We compare against strong recent baselines including the current state of the art.",
@@ -48,7 +48,7 @@ class _FakeLLM:
         return RubricLLMResponse(checks=dict(sample), evidence=dict(self._evidence), concerns=[], band="highlight")
 
 
-def _eval(llm, *, body=RIGOROUS_BODY, digest=None, paper_type=None, **kw):
+def _eval(llm, *, body=RIGOROUS_BODY, digest=None, paper_type="generic_empirical", **kw):
     return quality_eval.evaluate_quality(
         title="Hidden", full_text=body, sections=[{"title": "Methods", "text": body}],
         digest=digest or {"tldr": "a method", "key_findings": [], "grade": "A"},

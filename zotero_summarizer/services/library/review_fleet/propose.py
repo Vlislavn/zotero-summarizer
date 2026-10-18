@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from zotero_summarizer.models.triage import ProposedVerdict
+from zotero_summarizer.models.triage import ProposedVerdict, QualityEval
 from zotero_summarizer.services._common import now_iso_z
 
 # Grades that read as "this is a strong paper" for the verdict lift.
@@ -55,13 +55,13 @@ def _goal_evidence(goal_summaries: Any) -> str:
 
 
 def _grade(digest: dict[str, Any] | None, quality: dict[str, Any] | None) -> str:
-    """The A-D grade, preferring the digest's then the quality_eval's (they echo
-    each other); ``""`` when neither assessed it."""
-    for src in (digest, quality):
-        grade = str((src or {}).get("grade") or "").strip().upper()[:1]
-        if grade in {"A", "B", "C", "D"}:
-            return grade
-    return ""
+    """Independent quality owns the grade, including an explicit ungraded result."""
+    if (quality or {}).get("basis") in {"non_paper", "not_assessed"}:
+        return ""
+    independent = quality is not None and "grade" in quality
+    src = quality if independent else digest
+    grade = str((src or {}).get("grade") or "").strip().upper()[:1]
+    return grade if grade in {"A", "B", "C", "D"} else ""
 
 
 def _base_verdict(read_decision: str, grade: str, *, goal_evidence: str) -> str:
@@ -120,9 +120,20 @@ def effective_read_decision(
     decision = str(d.get("read_decision") or "").strip().lower()
     if decision == "skip" and _goal_evidence(goal_summaries) == "unknown":
         return "", ["goals_not_assessed"]
-    if decision != "read":
-        return decision if decision in {"skim", "skip"} else "", []
+    if decision not in {"read", "skim"}:
+        return decision if decision == "skip" else "", []
     flags: list[str] = []
+    band = str(q.get("quality_band") or "")
+    if q.get("basis") != "non_paper" and (
+        band == "flag" or any(str(value).strip() for value in (q.get("overstatements") or []))
+    ):
+        flags.append("weak_evidence")
+    if decision == "skim":
+        return decision, flags
+    if d.get("basis") != "full_text":
+        flags.append("full_text_not_confirmed")
+    if not str(d.get("original_value") or "").strip():
+        flags.append("original_value_not_assessed")
     friction = str(d.get("writing_friction") or "")
     if friction == "high":
         flags.append("writing_friction")
@@ -133,11 +144,10 @@ def effective_read_decision(
     idea_score = max(int(d.get("novelty") or 0), int(d.get("significance") or 0))
     if idea_score < 4:
         flags.append("idea_value_not_high")
-    band = str(q.get("quality_band") or "")
-    if str(q.get("basis") or "") != "non_paper" and band != "highlight":
+    if q.get("basis") != "non_paper" and (q.get("basis") != "full_text" or band != "highlight"):
         flags.append("strong_evidence_not_confirmed")
-    if band == "flag" or any(str(value).strip() for value in (q.get("overstatements") or [])):
-        flags.append("weak_evidence")
+    if not any(str(part).strip() for part in (d.get("read_parts") or [])):
+        return "", [*flags, "reading_targets_not_assessed"]
     return ("skim", flags) if flags else ("read", [])
 
 
@@ -146,20 +156,41 @@ def apply_reading_policy(
     quality: dict[str, Any] | None,
     goal_summaries: Any,
 ) -> tuple[dict[str, Any], str, list[str]]:
-    """Apply the glassbox reading cap while preserving the model's raw decision."""
+    """Project reading and scientific grade; the caller retains the raw model digest."""
+    grade = _grade(digest, quality)
     raw = str(digest.get("read_decision") or "")
     effective, flags = effective_read_decision(
         digest, quality, goal_summaries=goal_summaries,
     )
-    if effective != raw:
-        reason = "Goals not assessed; reading decision withheld." if not effective else (
-            "Full reading threshold not met. " + str(digest.get("read_why") or "")
-        )
-        digest = {**digest,
-            "read_decision": effective,
-            "read_why": reason,
-        }
+    warnings = []
+    if not effective and flags:
+        warnings.append("Reading decision withheld; assessment or exact targets unavailable.")
+    elif effective != raw:
+        warnings.append("Full reading threshold not met; skim targeted parts.")
+    if "weak_evidence" in flags:
+        warnings.append("Concept/hypothesis source only; claims not established.")
+    if "writing_friction" in flags:
+        warnings.append("Idea preserved; writing friction is high.")
+    reason = str(digest.get("read_why") or "")
+    warnings = [warning for warning in warnings if warning not in reason]
+    if effective != raw or warnings or grade != str(digest.get("grade") or ""):
+        digest = {**digest, "grade": grade, "read_decision": effective,
+                  "read_why": " ".join([*warnings, reason]).strip()}
     return digest, raw, flags
+
+
+def project_review(entry: dict[str, Any]) -> dict[str, Any]:
+    """Derive presentation from retained model output without modifying either source."""
+    source = entry.get("model_digest") or entry.get("digest")
+    if not source:
+        return entry
+    quality = entry.get("quality")
+    if quality is None and entry.get("model_digest"):
+        quality = QualityEval(quality_band="uncertain", basis="not_assessed").model_dump()
+    digest, raw, flags = apply_reading_policy(source, quality, entry.get("goal_summaries"))
+    retained_flags = [] if entry.get("model_digest") else entry.get("reading_policy_flags", [])
+    return {**entry, "digest": digest, "quality": quality, "model_read_decision": entry.get("model_read_decision", raw),
+            "reading_policy_flags": list(dict.fromkeys([*retained_flags, *flags]))}
 
 
 def _confidence(read_decision: str, grade: str, *, goal_evidence: str, shaky: bool) -> float:
@@ -244,4 +275,4 @@ def propose_verdict(
     )
 
 
-__all__ = ["apply_reading_policy", "effective_read_decision", "propose_verdict"]
+__all__ = ["apply_reading_policy", "effective_read_decision", "project_review", "propose_verdict"]

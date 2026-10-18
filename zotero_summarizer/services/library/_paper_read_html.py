@@ -59,7 +59,10 @@ def _render_presentation(
     code_link: dict[str, Any] | None = None,
 ) -> str:
     from zotero_summarizer.services.library import _paper_read_brief as brief
+    from zotero_summarizer.services.library.review_fleet.propose import apply_reading_policy
 
+    if digest:
+        digest, _, _ = apply_reading_policy(digest, quality, goal_summaries)
     title = str(content.get("title") or "Untitled")
     authors = str(content.get("authors") or "")
     figures = [fig for fig in (content.get("figures") or []) if fig.get("name")]

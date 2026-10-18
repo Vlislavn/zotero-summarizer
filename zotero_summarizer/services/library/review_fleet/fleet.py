@@ -300,7 +300,7 @@ def _propose_for_item(item_key: str, *, login: dict[str, dict[str, str]]) -> str
             return "failed"
         return "no_fetchable_source"
     proposal = propose.propose_verdict(
-        review.get("digest"),
+        review.get("model_digest") or review.get("digest"),
         review.get("quality"),
         goal_summaries=review.get("goal_summaries"),
     )

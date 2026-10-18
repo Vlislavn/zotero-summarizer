@@ -67,9 +67,10 @@ def _review(read_decision="read", grade="A", *, relevant=True):
         "review_contract_version": fleet.deep_review.REVIEW_CONTRACT_VERSION,
         "digest": {
             "read_decision": read_decision, "grade": grade, "writing_friction": "low",
-            "novelty": 4, "significance": 4,
+            "novelty": 4, "significance": 4, "basis": "full_text", "read_parts": ["Methods"],
+            "original_value": "The decisive comparison.",
         },
-        "quality": {"quality_band": "highlight"},
+        "quality": {"quality_band": "highlight", "basis": "full_text"},
         "goal_summaries": [GoalSummary(
             goal="Fixture goal", relevant=relevant,
             retrieval_state="hit" if relevant else "miss", abstained=not relevant,

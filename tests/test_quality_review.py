@@ -19,24 +19,26 @@ def test_quality_review_grade_normalization():
     assert QualityReview(grade="x").grade == ""
     old = PaperDigest.model_validate({"read_decision": "read"})
     assert old.skip_parts == [] and old.estimated_read_minutes is None and old.original_value == ""
+    assert old.writing_friction is None
     skip = PaperDigest(read_decision="skip", read_parts=["Methods"], original_value="nuance")
     assert skip.read_parts == [] and skip.original_value == ""
     with pytest.raises(ValueError, match="exact read target"):
         PaperDigest(read_decision="skim")
     friction = PaperDigest(read_decision="read", read_parts=["§2"], writing_friction="high",
                            writing_reasons=["Core construct is used before it is defined."])
-    assert friction.read_decision == "skim"
+    assert friction.read_decision == "read"  # raw model action; policy owns the cap
     with pytest.raises(ValueError, match="concrete reason"):
         PaperDigest(writing_friction="high")
 
 
-def test_digest_prompt_is_conservative_and_action_specific():
+def test_digest_prompt_formats_and_schema_retains_orthogonal_fields():
     from zotero_summarizer.services.library.quality_review import _DEFAULT_DIGEST_PROMPT
 
-    for required in ("Start at `skip`", "ONLY if all hold", '"skip_parts"',
-                     '"estimated_read_minutes"', '"original_value"', '"writing_friction"',
-                     "BEFORE choosing", "one stated axis", "weak evidence", "zero counterexamples"):
-        assert required in _DEFAULT_DIGEST_PROMPT
+    # Semantic prompt review is independent source review, not phrase matching.
+    _DEFAULT_DIGEST_PROMPT.format(research_goals="Goal", title="Study", full_text="Body")
+    properties = PaperDigest.model_json_schema()["properties"]
+    assert {"novelty", "significance", "clarity", "writing_friction", "writing_reasons",
+            "read_decision", "read_parts", "original_value"} <= properties.keys()
 
 
 def test_digest_llm_cannot_silently_default_the_writing_assessment():

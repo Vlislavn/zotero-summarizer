@@ -185,8 +185,8 @@ def test_goal_summary_disclosure_is_keyboard_accessible_and_responsive():
 
 
 def test_flag_verdict_inlines_the_red_flag():
-    html = brief.brief_html(CONTENT, digest=DIGEST, quality=FLAG_Q, goal_summaries=GOALS)
-    assert "SKIM" in html and "evidence weak" in html
+    html = h._render_presentation(CONTENT, {**DIGEST, "read_parts": ["Methods"]}, FLAG_Q, GOALS)
+    assert "SKIM" in html and "claims not established" in html
     assert "near-perfect 99.2% metric with no leakage discussion" in html  # visible in the verdict bar
 
 
@@ -214,20 +214,20 @@ def test_missing_digest_does_not_invent_skip_even_for_assessed_misses():
 
 def test_quality_panel_is_self_explaining():
     html = brief.quality_panel_html(HIGHLIGHT_Q)
-    assert "Rigorous enough to act on" in html              # plain-language band gloss
+    assert "Strong checklist coverage" in html              # plain-language band gloss
     assert "How we judged it" in html and "no citation counts" in html  # the method clause
     assert "3/3 passes agree" in html                        # self-consistency in words
-    assert "HIGHLIGHT" in html and "≥6 grounded checks" in html  # legend
-    assert "What earned it" in html and "rigor checks met" in html
+    assert "HIGHLIGHT" in html and "applicable type-aware checks" in html  # legend
+    assert "What earned it" in html and "applicable checks met" in html
     # the full 9-point rubric is present but behind a disclosure, with REAL questions
-    assert "Show the full" in html and "EXTERNAL / held-out" in html
+    assert "Show the full" in html and "held-out / independent" in html
 
 
 def test_quality_panel_flag_leads_with_red_flags():
     html = brief.quality_panel_html(FLAG_Q)
     assert "Read critically" in html
     assert "q-redflags" in html and "near-perfect 99.2%" in html  # loud callout
-    assert "Why it sank" in html
+    assert "Checks to inspect" in html
 
 
 def test_presentation_integrates_brief_no_sections_dump_no_cdn():
@@ -236,7 +236,19 @@ def test_presentation_integrates_brief_no_sections_dump_no_cdn():
     assert 'id="sections"' not in html and 'id="per-goal"' not in html  # the dumps are gone
     assert 'class="fade-in digest-fold"' in html  # digest collapsed by default
     assert "cdn.jsdelivr" not in html
-    assert "READ" in html
+    assert '<div class="v-word">REVIEW</div>' in html
+
+
+def test_presentation_qualified_original_read_keeps_explicit_read_action():
+    digest = {**DIGEST, "basis": "full_text", "read_parts": ["Methods"],
+              "novelty": 4, "significance": 4, "writing_friction": "low",
+              "original_value": "Inspect the decisive comparison."}
+    quality = {**HIGHLIGHT_Q, "basis": "full_text", "overstatements": []}
+
+    html = h._render_presentation(CONTENT, digest, quality, GOALS)
+
+    assert '<div class="v-word">READ</div>' in html
+    assert "basis" not in DIGEST and "read_parts" not in DIGEST
 
 
 def test_abstained_hit_shows_withheld_not_evidence_found():

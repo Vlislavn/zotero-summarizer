@@ -36,6 +36,15 @@ Only an explicit, complete `miss` board permits a hide. Missing/malformed cells,
 relevant and non-abstained states together. A retrieval miss may legitimately
 abstain from generating a summary. Unknown-goal skips withhold the effective
 reading action and carry `goals_not_assessed`; raw model actions remain provenance.
+`project_review` is the single policy projection for cached review readers; new
+reviews retain `model_digest` and fleet proposals consume that raw validated output
+before applying the same cap. Full reading needs recorded full-text basis and exact
+targets; unknown/missing assessments cannot manufacture a full read or a hide.
+The same server grade authority projects applied `digest.grade` and proposal strength;
+React and saved digest notes consume that projection. Independent grades override
+raw self-grades retained in `model_digest`, including explicit ungraded non-paper,
+unknown and evaluator-failure states. Only real legacy absence permits a self-grade
+fallback. Weak-evidence skims keep a concept-only warning.
 Calibration also validates injected proposals against `ProposedVerdict` and
 human labels against the supported priority set. Its agreement denominator uses
 only valid human/proposal pairs; malformed rows do not discard healthy neighbors.
