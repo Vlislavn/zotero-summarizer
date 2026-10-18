@@ -325,3 +325,6 @@ share one finding heading. No semantic classifier, rewritten summary, rubric or
 scoring change is introduced; compact presentation remains unchanged.
 
 Full reading views fold goal findings into one native disclosure; states and citations remain visible. Saved quality/digest source basis is shown literally, with reviewed extent explicitly unrecorded. Rubric-literal warning frames preserve each modifier, complete suffix, and original wording.
+
+<!-- PR53 review slice 23 -->
+Review slice 23: Frontend API contracts / 1. Depends on the preceding slice; not release acceptance.
