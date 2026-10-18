@@ -69,8 +69,31 @@ def test_doctor_failure_is_actionable_and_single_check_retry_preserves_rows(
     result = doctor.run_doctor(settings, check_ids=["zotero"])
     rows = {row["id"]: row for row in result["checks"]}
     assert rows["zotero"]["status"] == "needs_action"
-    assert rows["zotero"]["recovery"]["label"] == "Retry"
+    assert rows["zotero"]["recovery"] == {
+        "label": "Choose Zotero folder", "action": "open_zotero_settings",
+    }
     assert rows["database"]["status"] == "ready"
+
+
+@pytest.mark.parametrize(("check_id", "action", "label"), [
+    ("research_goals", "open_goals_settings", "Edit research goals"),
+    ("zotero", "open_zotero_settings", "Choose Zotero folder"),
+    ("rss_source", "open_sources_settings", "Add a source in Settings"),
+    ("local_profile", "open_ai_settings", "Choose a safe profile"),
+])
+def test_doctor_settings_recovery_uses_typed_navigation(check_id, action, label):
+    row = doctor._row(check_id, "needs_action", "Check failed")
+    assert row["recovery"] == {"label": label, "action": action}
+
+
+def test_doctor_recovery_keeps_commands_and_guarded_actions_explicit():
+    command = doctor._row("database", "needs_action", "Migration required",
+                          action="Run migrations", command="uv run zotero-summarizer doctor --fix")
+    assert command["recovery"]["action"] == "retry"
+    assert command["recovery"]["command"].endswith("doctor --fix")
+    guarded = doctor._row("llm_inference", "needs_action", "UNKNOWN",
+                          action="Review endpoint settings", recovery_action="open_ai_settings")
+    assert guarded["recovery"] == {"label": "Review endpoint settings", "action": "open_ai_settings"}
 
 
 def test_local_modes_require_real_inference(tmp_path):
@@ -202,7 +225,7 @@ def test_inference_check_preserves_distinct_failures_and_local_recovery(
     config = doctor.read_config(settings.config_path)
     resolved = doctor.resolve_stage(config.llm_routing, "feed")
 
-    async def _failed(_routing):
+    async def _failed(_routing, **_kwargs):
         return {
             "stages": [
                 {
