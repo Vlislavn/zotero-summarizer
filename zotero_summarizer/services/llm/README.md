@@ -45,3 +45,6 @@ llm_routing → resolve_stage → ResolvedStage → factory → LLMClient
   factory; call sites do not build provider-specific wire payloads.
 - OpenAI-compatible response reads are bounded by `Settings.summary_timeout_seconds`;
   transport timeout errors propagate to each worker's existing error boundary.
+
+<!-- PR53 review slice 05 -->
+Review slice 05: Provider capabilities / 1. Depends on the preceding slice; not release acceptance.

@@ -6,7 +6,9 @@ import asyncio
 import logging
 from typing import Any
 
-from zotero_summarizer.models.providers import STAGES, ProviderConfig, resolve_stage
+from zotero_summarizer.models.providers import (
+    STAGES, CapabilityMismatchError, ProviderConfig, ResolvedStage, resolve_stage,
+)
 from zotero_summarizer.services._common import state
 from zotero_summarizer.services.llm.factory import build_client_for_provider
 
@@ -17,9 +19,15 @@ _PROBE_TIMEOUT_SECS = 30.0
 _LOCAL_PROBE_TIMEOUT_SECS = 60.0
 
 
-def _stage_skeleton(routing: Any, stage: str) -> tuple[Any, dict[str, Any]]:
-    """Resolved identity shared by success and timeout rows."""
-    resolved = resolve_stage(routing, stage)
+def _stage_skeleton(routing: Any, stage: str) -> tuple[ResolvedStage | None, dict[str, Any]]:
+    """Resolved identity or a known unsupported-selection failure, without IO."""
+    try:
+        resolved = resolve_stage(routing, stage)
+    except CapabilityMismatchError as exc:
+        return None, {**exc.route, "status": "fail", "reachable": False,
+                      "reason_code": "unsupported_capabilities", "detail": str(exc),
+                      "required_capabilities": exc.required_capabilities,
+                      "declared_capabilities": exc.declared_capabilities}
     return resolved, {
         "stage": stage,
         "provider": resolved.provider.name,
@@ -28,12 +36,22 @@ def _stage_skeleton(routing: Any, stage: str) -> tuple[Any, dict[str, Any]]:
     }
 
 
-def probe_provider(provider: ProviderConfig, model: str) -> dict[str, Any]:
+def probe_provider(provider: ProviderConfig, model: str, *, before_prompt=None,
+                   request_observer=None) -> dict[str, Any]:
     """Probe one provider/model; failures are data so sibling stages still run."""
     try:
-        client = build_client_for_provider(provider, model)
-        client.prompt(_PROBE_PROMPT)
-        return {"status": "operational", "detail": ""}
+        client = build_client_for_provider(provider, model,
+            **({"request_observer": request_observer} if request_observer is not None else {}))
+        try:
+            if before_prompt is not None:
+                before_prompt()
+            output = client.prompt(_PROBE_PROMPT)
+            if request_observer is not None and (not isinstance(output, str) or not output.strip()):
+                raise ValueError("Setup inference returned no response text")
+            return {"status": "operational", "detail": ""}
+        finally:
+            if request_observer is not None:
+                client.close()
     except Exception as exc:  # noqa: BLE001 — probe status boundary (see docstring)
         LOGGER.warning(
             "LLM probe failed for provider=%s model=%s: %s", provider.name, model, exc
@@ -43,25 +61,35 @@ def probe_provider(provider: ProviderConfig, model: str) -> dict[str, Any]:
 
 def _probe_stage(routing: Any, stage: str) -> dict[str, Any]:
     resolved, row = _stage_skeleton(routing, stage)
+    if resolved is None:
+        return row
     row.update(probe_provider(resolved.provider, resolved.model))
     return row
 
 
-async def _probe_stage_bounded(routing: Any, stage: str) -> dict[str, Any]:
-    """Bound one blocking provider call; its orphaned worker exits independently."""
-    resolved, _row = _stage_skeleton(routing, stage)
+async def _probe_stage_bounded(routing: Any, stage: str, *, probe=None, on_abandon=None) -> dict[str, Any]:
+    """Bound the waiter only; an abandoned synchronous callback may still run."""
+    resolved, skeleton = _stage_skeleton(routing, stage)
+    if resolved is None:
+        return skeleton
     timeout = (
         _LOCAL_PROBE_TIMEOUT_SECS
         if getattr(resolved, "provider", None) and resolved.provider.is_local
         else _PROBE_TIMEOUT_SECS
     )
     try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(_probe_stage, routing, stage),
-            timeout=timeout,
-        )
+        work = (asyncio.to_thread(probe, resolved) if probe is not None
+                else asyncio.to_thread(_probe_stage, routing, stage))
+        result = await asyncio.wait_for(work, timeout=timeout)
+        return {**skeleton, **result}
+    except asyncio.CancelledError:
+        if on_abandon is not None:
+            on_abandon(resolved, "cancelled")
+        raise
     except asyncio.TimeoutError:
-        _resolved, row = _stage_skeleton(routing, stage)
+        if on_abandon is not None:
+            return {**skeleton, **on_abandon(resolved, "timeout")}
+        row = dict(skeleton)
         row["status"] = "fail"
         row["detail"] = f"timeout after {timeout:.0f}s — provider slow or unreachable"
         LOGGER.warning(
@@ -72,19 +100,29 @@ async def _probe_stage_bounded(routing: Any, stage: str) -> dict[str, Any]:
         return row
 
 
-async def check_routing_stages(routing: Any) -> dict[str, Any]:
-    """Run bounded real inference for every stage in an explicit routing config."""
-    stages, cached = [], {}
-    # ponytail: unique probes run serially to protect one local runtime; parallelize
-    # only if mixed-provider health-check latency becomes a measured problem.
-    for stage in STAGES:
-        resolved, _row = _stage_skeleton(routing, stage)
+async def check_routing_stages(routing: Any, *, stages=STAGES, probe=None, on_abandon=None) -> dict[str, Any]:
+    """One snapshot/cache; setup can guard each unique synchronous callback."""
+    routing = routing.model_copy(deep=True)
+    rows, cached = [], {}
+    aborted = False
+    for stage in stages:
+        resolved, skeleton = _stage_skeleton(routing, stage)
+        if resolved is None:
+            rows.append(skeleton)
+            continue
         key = (resolved.provider.name, resolved.model)
         if key not in cached:
-            cached[key] = await _probe_stage_bounded(routing, stage)
-        stages.append({**cached[key], "stage": stage})
-    all_ok = all(row["status"] == "operational" for row in stages)
-    return {"status": "ok" if all_ok else "degraded", "stages": stages}
+            if aborted:
+                cached[key] = {**skeleton, "status": "fail", "detail": "Batch abandoned; not attempted",
+                               "reason_code": "batch_abandoned", "attempted": False,
+                               "ownership": "not_submitted", "callback_state": "not_started"}
+            else:
+                cached[key] = await _probe_stage_bounded(
+                    routing, stage, probe=probe, on_abandon=on_abandon)
+                aborted = bool(cached[key].get("abort_remaining"))
+        rows.append({**cached[key], "stage": stage})
+    all_ok = all(row["status"] == "operational" for row in rows)
+    return {"status": "ok" if all_ok else "degraded", "stages": rows}
 
 
 async def check_stages() -> dict[str, Any]:
@@ -102,10 +140,15 @@ def _disabled_stages(routing: Any, *, inference: bool) -> dict[str, Any]:
     rows = []
     for stage in STAGES:
         resolved, row = _stage_skeleton(routing, stage)
+        if resolved is None:
+            row.pop("status")
+            row.pop("reachable")
+            row["reason_code"] = "llm_disabled"
+        else:
+            row["base_url"] = resolved.provider.base_url or ""
         row.update(
             {
                 "enabled": False,
-                "base_url": resolved.provider.base_url or "",
                 "detail": "AI features are disabled by choice",
             }
         )
@@ -118,6 +161,8 @@ def _reach_stage(routing: Any, stage: str) -> dict[str, Any]:
     from zotero_summarizer.services.llm import model_list
 
     resolved, row = _stage_skeleton(routing, stage)
+    if resolved is None:
+        return row
     row["base_url"] = resolved.provider.base_url or ""
     try:
         model_list.list_models_for_provider(resolved.provider)
@@ -138,6 +183,8 @@ async def _reach_stage_bounded(routing: Any, stage: str) -> dict[str, Any]:
         )
     except asyncio.TimeoutError:
         _resolved, row = _stage_skeleton(routing, stage)
+        if _resolved is None:
+            return row
         row["base_url"] = _resolved.provider.base_url or ""
         row["reachable"] = False
         row["detail"] = (

@@ -189,3 +189,6 @@ Markdown counts. Prompts, settings, limits and models are unchanged.
 
 <!-- PR53 review slice 04 -->
 Review slice 04: Native boundary / 1. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 05 -->
+Review slice 05: Provider capabilities / 1. Depends on the preceding slice; not release acceptance.
