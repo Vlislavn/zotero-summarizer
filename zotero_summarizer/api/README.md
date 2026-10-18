@@ -37,3 +37,6 @@ JSON includes `constraint_origin`, `pending_constraints`, and observed
 `retrieval_accounting`; old saved plans remain visibly legacy.
 
 Review diagnostics classify generation, verification and operational source failure from actual boundaries. Source-unavailable ready jobs are not verified reviews; confirmed search types remain unconfirmed until supported source metadata exists.
+
+<!-- PR53 review slice 06 -->
+Review slice 06: Setup and deployment / 1. Depends on the preceding slice; not release acceptance.

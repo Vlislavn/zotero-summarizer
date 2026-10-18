@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Review slice 06: Setup and deployment / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 05: Provider capabilities / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 04: Native boundary / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 03: Persistence and schema / 2. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.

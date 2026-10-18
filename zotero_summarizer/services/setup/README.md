@@ -72,3 +72,6 @@ classifier loader. The cheap cache report checks that revision, not merely any
 bytes under the repository; an old snapshot cannot satisfy a new pin. Prefetch
 uses the actual pinned loader. Snapshot presence remains a cheap inventory
 check, while Doctor's fresh-process offline load verifies loadability.
+
+<!-- PR53 review slice 06 -->
+Review slice 06: Setup and deployment / 1. Depends on the preceding slice; not release acceptance.
