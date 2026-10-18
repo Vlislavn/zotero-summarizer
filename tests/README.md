@@ -47,3 +47,6 @@ Review slice 46: Question and note regression tests / 5. Depends on the precedin
 
 <!-- PR53 review slice 47 -->
 Review slice 47: Write authority regression tests / 1. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 48 -->
+Review slice 48: Write authority regression tests / 2. Depends on the preceding slice; not release acceptance.
