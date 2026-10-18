@@ -51,3 +51,6 @@ The sweep requires `PAPERS`, `REF_PROVIDER`, and `REF_MODEL`. Its default is the
 remote budget phase only. Local phases (`PHASES=2` or `both`) additionally require
 explicit `CANDIDATES` and `CANDIDATE_PROVIDER`; no local model is selected implicitly.
 Provider names refer to caller-owned saved configuration; this does not rename it.
+
+<!-- PR53 review slice 31 -->
+Review slice 31: Launch and tool wiring / 1. Depends on the preceding slice; not release acceptance.

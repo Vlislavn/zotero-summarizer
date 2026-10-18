@@ -72,3 +72,6 @@ bodies or rerunning predecessor effects. Intervening writes still conflict.
 Unknown or conflict receipts reject the request before writes. IndexedDB commits
 these receipt IDs with acknowledgement retirement, so continuation survives a
 restart or the existing 15-second whole-sync deadline. No schema or worker is added.
+
+<!-- PR53 review slice 31 -->
+Review slice 31: Launch and tool wiring / 1. Depends on the preceding slice; not release acceptance.

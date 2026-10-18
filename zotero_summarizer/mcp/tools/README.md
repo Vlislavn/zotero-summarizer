@@ -46,3 +46,6 @@ empty list. Historical/terminal jobs receive an explicit empty list from the API
 with explicit unavailable feedback when the reranker cannot serve the query. `get_paper` gets
 pending/history rows using the item-key filter, so unrelated queue traffic does
 not consume its result window.
+
+<!-- PR53 review slice 31 -->
+Review slice 31: Launch and tool wiring / 1. Depends on the preceding slice; not release acceptance.
