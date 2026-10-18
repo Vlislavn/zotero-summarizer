@@ -9,11 +9,14 @@ removed entirely — it degenerated into an endless one-at-a-time stream when
 the primary pool emptied, and the spot-check now lives in the Review page +
 Today's SpotCheck section (`services/library/review.list_by_state`).
 
-Quality joins consume only deep reviews whose PDF and generation identity is
-still current; stale cached grades cannot reorder a new slate. The same join
-sets `review_ready` only for a usable paper-specific digest, so the Today UI
-can explain disabled Add without mistaking a quality badge for a review. The
-server rechecks at every write boundary; this flag is advisory, not permission.
+The deep-review join consumes only entries whose PDF and generation identity
+is current. A join miss does not, however, clear legacy `quality_review_json`
+loaded from the processed row; that quality can still affect existing ranking
+without an attested current review. It must not be described as current, stale
+or neutral merely from the join outcome. The join sets `review_ready` only for
+a usable paper-specific digest, so a quality badge is not Add authorization.
+The server rechecks at every write boundary; this flag is advisory, not permission.
+This documents existing behavior, not a change to ranking or quality policy.
 
 ```
 processed_feed_items ─_querying.open_ro→ rows ─drop handled ─drop trashed-GUID ─drop content dupes─┐
@@ -59,7 +62,7 @@ ladder's composite fallback is circular and never feeds the blend). The WHOLE
 deduped pool goes to the allocator — `backlog_cap` only bounds the never-empty
 fallback's **cleaned unique rows**, never the picker pool (a pre-pick cap starved the
 surprise/diversity roles of exactly the off-mainstream papers they exist to
-find). **Deep-review QUALITY** rides on top of this: `_candidate.attach_quality_from_reviews` bridges the deep_reviews cache onto the slate by each row's `stable_feed_key` (the IN-PLACE Today review key — no Zotero write) OR `materialized_zotero_key` (post-materialize; the feed GUID can't key the library-keyed cache), and the capped `rank_blend.quality_bonus` is applied ONLY inside the FLOORED model role (`_allocation._model_score`) — so a high-quality paper floats up only among its raw-composite category's slots in the base `rank_score` order (`rank_blend.order_within_bands`) while the un-floored surprise/diversity discovery roles stay quality-free and a below-bar paper can never be lifted in. Cards are therefore intentionally NOT in displayed-composite order.
+find). **Deep-review QUALITY** rides on top of this: `_candidate.attach_quality_from_reviews` bridges the deep_reviews cache onto the slate by each row's `stable_feed_key` (the IN-PLACE Today review key — no Zotero write) OR `materialized_zotero_key` (post-materialize; the feed GUID can't key the library-keyed cache), and the capped `rank_blend.quality_bonus` is applied ONLY inside the FLOORED model role (`_allocation._pick_model`) — so a high-quality paper floats up only among its raw-composite category's slots in the base `rank_score` order (`rank_blend.order_within_bands`) while surprise uses its own scalar and control-mode diversity uses the original cohort key and a below-bar paper can never be lifted in. Cards are therefore intentionally NOT in displayed-composite order.
 `goal_sim` staleness: rescore-on-retrain/startup/drain plus a goals-save hook
 (`services/config.update_runtime_config` → `schedule_slate_rescore_async`);
 abstract-less rows are never rescored and keep `goal_sim=None` (honest absence,
@@ -129,8 +132,28 @@ day's log nor widen the auto-review candidate set beyond the shipped arm.
 | `_querying.py` | read-only SQLite access (delegates to `_common.connect_sqlite_ro`); `fetch_decided_content_keys` returns normalized DOI/arXiv sets for decided / in-library papers (now also blocks on a trashing `final_outcome`, not just `decision`) + `fetch_trashed_guids` returns the stable GUIDs of explicitly-trashed papers for the never-show-again guard |
 | `_candidate.py` | raw DB row → normalized candidate dict (scores, provenance, `goal_sim` via `row_goal_sim` = max over `aux_context.goal_sims`, KNOWN `citation_percentile`, positive-only `max_author_h_index` (legacy zero→unknown), `rank_score`); also extracts the quality-first inputs from `summary` (`row_relevance_score` = LLM 1-5 `relevance_score`, `row_triage_dim` for `goal_alignment`/`methodological_rigor`/`evidence_strength` — sparse, `None` = signal absent); `attach_rank_scores(quality_first=)` adapts the cohort to `rank_blend.blend_scores` (default) OR `rank_blend_quality.quality_first_key` (quality-first); `attach_quality_from_reviews` is the bridge that joins the deep_reviews cache onto each candidate's `quality` via its `stable_feed_key` (in-place Today review) OR `materialized_zotero_key` (post-materialize) (one cache read; LOUD-warns on a 0-match join); `stable_feed_key` is surfaced on the candidate + `SlatePaper` for the in-place review trigger; `row_*` string accessors share `_row_str`/`_obj_field`; `row_prestige` (display only) prefers OpenAlex field-normalized `citation_percentile` (already [0,1]) → LLM prestige → h-index → composite |
 | `_relevance.py` | heuristic, no-LLM reason chips. `attach_why` labels a whole cohort: goal chips key on the REAL `goal_sim` with pool-relative tercile bands (self-calibrating — mirrors the frontend `goalHighKeys` idiom; no absolute cosine constant). `goal_bands` requires ≥ 3 present positive goal_sims (a tercile needs 3 points) — with fewer the bands degenerate and a lone weak value (e.g. 0.2) would read "Strong goal match" right under the `weak_slate` "Light week" banner; below 3 it returns `(None, None)`, which suppresses goal chips entirely. Library chips key on `corpus_affinity` (engagement, labeled honestly: "Like papers you've saved" / "Off your usual track"); other thresholds reuse `domain`/`surprise` constants |
-| `_allocation.py` | greedy role allocator (model / surprise / diversity slots); model + diversity picks order by `rank_score`; the model role + its fallback apply `MODEL_RELEVANCE_FLOOR` (no dont_read-band picks), surprise/diversity are un-floored. The capped deep-review QUALITY lift (`rank_blend.quality_bonus`) is added ONLY in the floored model role's sort key (`_model_score`), never in the un-floored discovery roles — so quality permutes only within the raw-composite category slots of the base `rank_score` order, via `order_within_bands`; it cannot change that category sequence, win an un-floored slot or lift a below-bar paper. `quality_first=True` mode (`allocate`/`_pick_model` param): `_pick_model` uses the bare quality-led `rank_score`, without additive quality or category-slot restriction and `_passes_model_floor` swaps the composite floor for `relevance_score > QF_RELEVANCE_FLOOR` (2.0; `None` passes) |
+| `_allocation.py` | greedy role allocator (model / surprise / diversity slots); model + diversity picks order by `rank_score`; the model role + its fallback apply `MODEL_RELEVANCE_FLOOR` (no dont_read-band picks), surprise/diversity are un-floored. The capped deep-review QUALITY lift (`rank_blend.quality_bonus`) is added ONLY in the floored model role's sort key (`_pick_model`), never in the un-floored discovery roles — so quality permutes only within the raw-composite category slots of the base `rank_score` order, via `order_within_bands`; it cannot change that category sequence, win an un-floored slot or lift a below-bar paper. `quality_first=True` mode (`allocate`/`_pick_model` param): `_pick_model` uses the bare quality-led `rank_score`, without additive quality or category-slot restriction and `_passes_model_floor` swaps the composite floor for `relevance_score > QF_RELEVANCE_FLOOR` (2.0; `None` passes) |
 | `_dataclasses.py` | frozen result types (`DailySlate` — incl. `low_relevance_hidden`/`weak_slate` weak-week banner signals; `SlatePaper` — includes `abstract`, `pub_year`, `goal_sim`, and `why` chips for the Today card) |
 
-<!-- PR53 review slice 21 -->
-Review slice 21: Triage selection and training / 1. Depends on the preceding slice; not release acceptance.
+## Selection observations
+
+`_selection_evidence.py` projects existing values into one `selection_evidence`
+home; it does not parse, query, resolve configuration or score. Native composite
+presence and known priority remain separate from the operational score. The
+existing review snapshot, join/usability result, cohort key and actual picker
+bonus/policy are observed without recomputation. A miss preserves legacy quality;
+it does not establish stale, absent or failed reviews. Direct conversions without
+observed selection context retain `not_observed`.
+
+`_prepare_cohort` retains the original post-review mode resolution and ranking
+order. `_pick_model` owns the removed thin `_model_score` calculation. Each actual
+model/fallback attempt records its own policy and requested role; surprise uses
+its own scalar and quality-first diversity inherits the existing cohort key.
+Empty slates retain `selection_policy=control|quality_first`.
+
+Interleave replaces the whole new evidence home on copied records with exactly
+`{"mode":"interleave","basis":"unavailable_blinded"}` and root policy
+`interleave`, without modifying arm records or attribution logs. This protects
+new metadata only, not every legacy source of arm inference. Finite-or-null
+observations never change scoring, quotas or defaults, certify raw calibrated
+predictions, authorize Add or establish scientific quality/human usefulness.
