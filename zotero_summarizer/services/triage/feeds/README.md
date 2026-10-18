@@ -86,3 +86,6 @@ automatic review/render work. Existing model/input caches may be read or warmed.
 Tick counts are accumulated in DaemonTickReport itself; dataclass serialization
 includes fatal_llm_error. The loop fails on exceptions or failed reports and
 removes its signal handlers on exit; zero ticks does no work.
+
+<!-- PR53 review slice 21 -->
+Review slice 21: Triage selection and training / 1. Depends on the preceding slice; not release acceptance.

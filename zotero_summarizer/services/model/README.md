@@ -243,3 +243,6 @@ the category-slot restriction. Its `--replay` also compares score keys directly,
 not the production role allocator; neither measures this new ordering policy.
 The new restriction has regression coverage, not a measured user-preference lift;
 bonus magnitudes and feature-flag defaults are unchanged.
+
+<!-- PR53 review slice 21 -->
+Review slice 21: Triage selection and training / 1. Depends on the preceding slice; not release acceptance.

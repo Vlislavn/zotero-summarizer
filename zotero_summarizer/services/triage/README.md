@@ -216,3 +216,6 @@ evidence. Instruction-presence tests are not scientific-faithfulness evaluations
 
 <!-- PR53 review slice 09 -->
 Review slice 09: Source admission / 1. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 21 -->
+Review slice 21: Triage selection and training / 1. Depends on the preceding slice; not release acceptance.

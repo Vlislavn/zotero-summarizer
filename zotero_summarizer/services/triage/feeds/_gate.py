@@ -375,9 +375,8 @@ def schedule_slate_rescore_async(reason: str) -> None:
 
 def _gate_retrain_worker(golden_csv: Path, classifier_name: str) -> None:
     """Background thread: retrain, then atomic swap + slate rescore via
-    ``install_gate``. Errors are logged then re-raised so the default thread
-    excepthook surfaces them; the daemon keeps using the old gate in the
-    meantime."""
+    ``install_gate``, then append the training ledger. Errors are logged and
+    re-raised; an already saved or installed model is not rolled back."""
     try:
         from zotero_summarizer.services.model import classifier_persistence
         app_state = get_state()
@@ -396,13 +395,15 @@ def _gate_retrain_worker(golden_csv: Path, classifier_name: str) -> None:
             triage_db_path=settings_.triage_db_path,
         )
         install_gate(new_gate, reason="daemon-retrain")
-    except Exception as exc:
+        from zotero_summarizer.services.model.training_record import append_daemon_training_record
+        append_daemon_training_record(settings_, new_gate, golden_csv)
+    except BaseException as exc:
         # Record WHY so readiness can report it (e.g. "No module named
         # 'lightgbm'") instead of leaving the gate a silent None. install_gate
         # clears this on the next success. Re-raised below so the thread
         # excepthook still surfaces it.
         get_state().classifier_gate_error = f"{type(exc).__name__}: {exc}"
-        LOGGER.exception("background gate retrain/install/rescore failed; completed steps are not rolled back")
+        LOGGER.exception("background gate retrain/install/rescore/ledger failed; completed steps are not rolled back")
         raise
     finally:
         # Always clear the in-progress flag so the next tick can retry.
