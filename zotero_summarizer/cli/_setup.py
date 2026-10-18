@@ -75,9 +75,10 @@ def _step_provider(settings: Settings) -> None:
         ProviderType,
     )
     from zotero_summarizer.services._common import read_config, write_user_config
-    from zotero_summarizer.services.llm import operational_check
+    import asyncio
+    from zotero_summarizer.services.setup.load_attempt import check_setup_stages
 
-    print("\n== LLM provider (reachability test) ==")
+    print("\n== LLM provider (configuration; optional real inference) ==")
     print("  (the API key is read from an ENV VAR you name below — never typed here)")
     type_raw = _prompt("Provider type (openai|anthropic)", "openai").lower()
     provider_type = (
@@ -112,10 +113,10 @@ def _step_provider(settings: Settings) -> None:
         config.model_copy(update={"llm_enabled": True, "llm_routing": routing}),
     )
     print(f"  saved {provider.name}/{model} to {settings.config_path}")
-    if not _confirm("Run the reachability probe now?", default=True):
+    if not _confirm("Run real inference now (may load the configured model)?", default=False):
         return
-    print("  probing…")
-    result = operational_check.probe_provider(provider, model)
+    print("  verifying…")
+    result = asyncio.run(check_setup_stages(settings, routing, stages=("deep_review",)))["stages"][0]
     status = result["status"]
     detail = result["detail"]
     print(f"  → {status}" + (f": {detail}" if detail else ""))

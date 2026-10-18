@@ -149,3 +149,6 @@ description above; the explicit unconfigured-Zotero boundary remains local-first
 `GET /api/pending?item_key=...` passes the item filter through to the indexed
 storage query. `GET /api/triage/jobs?active_only=true` returns persisted running
 and cancelling jobs without limiting the lookup to newest terminal jobs.
+
+<!-- PR53 review slice 22 -->
+Review slice 22: API and CLI wiring / 1. Depends on the preceding slice; not release acceptance.

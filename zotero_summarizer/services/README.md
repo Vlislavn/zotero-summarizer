@@ -179,3 +179,6 @@ successful batches committed; inferred feedback still follows the corpus commit.
 
 <!-- PR53 review slice 09 -->
 Review slice 09: Source admission / 1. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 22 -->
+Review slice 22: API and CLI wiring / 1. Depends on the preceding slice; not release acceptance.

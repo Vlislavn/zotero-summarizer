@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Review slice 22: API and CLI wiring / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 21: Triage selection and training / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 20: Feedback analysis / 3. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 19: Feedback analysis / 2. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.

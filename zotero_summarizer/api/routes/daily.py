@@ -95,6 +95,7 @@ def _slate_to_payload(slate: daily_select.DailySlate) -> dict[str, Any]:
         "fellback_to_recent": slate.fellback_to_recent,
         "low_relevance_hidden": slate.low_relevance_hidden,
         "weak_slate": slate.weak_slate,
+        "selection_policy": slate.selection_policy,
     }
 
 

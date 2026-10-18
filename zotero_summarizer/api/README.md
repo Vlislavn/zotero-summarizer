@@ -40,3 +40,6 @@ Review diagnostics classify generation, verification and operational source fail
 
 <!-- PR53 review slice 06 -->
 Review slice 06: Setup and deployment / 1. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 22 -->
+Review slice 22: API and CLI wiring / 1. Depends on the preceding slice; not release acceptance.
