@@ -1,8 +1,10 @@
+import hashlib
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
+from zotero_summarizer.integrations.pdf import PdfSource
 from zotero_summarizer.models import RefinedSummary, SummarizeRequest, TriageResult
 from zotero_summarizer.services import corpus
 from zotero_summarizer.services.library import _map_reduce
@@ -19,7 +21,8 @@ def test_long_source_reuses_configured_bounded_maps_without_losing_tail(monkeypa
     monkeypatch.setattr(summarization, 'state', lambda: SimpleNamespace(
         app_state=SimpleNamespace(config=config), resolve_stage_client=lambda stage: llm))
     text = ('A source paragraph with methods and conditional results.\n' * 1700) + 'Unique final limitation.'
-    monkeypatch.setattr(summarization, '_extract_pdf_text', lambda path: text)
+    monkeypatch.setattr(summarization, '_extract_pdf_source', lambda path: PdfSource(
+        text, (), hashlib.sha256(b'synthetic PDF seam fixture').hexdigest()))
     monkeypatch.setattr(corpus, 'run_corpus_match', lambda *args: corpus.empty_corpus_match_result())
     observed = []
     original_map = _map_reduce._map_chunk
@@ -49,7 +52,8 @@ def test_short_source_keeps_direct_refinement_without_map_calls(monkeypatch):
     llm = Mock()
     monkeypatch.setattr(summarization, 'state', lambda: SimpleNamespace(
         app_state=SimpleNamespace(config=config), resolve_stage_client=lambda stage: llm))
-    monkeypatch.setattr(summarization, '_extract_pdf_text', lambda path: 'Short original source.')
+    monkeypatch.setattr(summarization, '_extract_pdf_source', lambda path: PdfSource(
+        'Short original source.', (), hashlib.sha256(b'synthetic PDF seam fixture').hexdigest()))
     monkeypatch.setattr(corpus, 'run_corpus_match', lambda *args: corpus.empty_corpus_match_result())
     refined = Mock(return_value=RefinedSummary(executive_summary='Result.'))
     monkeypatch.setattr(summarization, '_refine_with_retry', refined)
