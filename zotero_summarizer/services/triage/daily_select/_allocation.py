@@ -11,11 +11,13 @@ Review page + Today's SpotCheck section (``services/library/review``).
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from zotero_summarizer.domain import PRIORITY_COULD_READ_THRESHOLD, score_to_priority
 from zotero_summarizer.services._common import band_primary_enabled
 from zotero_summarizer.services.triage.daily_select._dataclasses import SlatePaper
+from zotero_summarizer.services.triage.daily_select._selection_evidence import picker_observations
 from zotero_summarizer.services.model.rank_blend import order_within_bands, quality_bonus
 from zotero_summarizer.services.model.surprise import DEFAULT_BLACK_SWAN_MIN_SCORE
 
@@ -39,7 +41,10 @@ MODEL_RELEVANCE_FLOOR = PRIORITY_COULD_READ_THRESHOLD
 QF_RELEVANCE_FLOOR = 2.0
 
 
-def _to_slate_paper(cand: dict[str, Any], *, role: str) -> SlatePaper:
+def _to_slate_paper(
+    cand: dict[str, Any], *, role: str, selection: dict[str, Any] | None = None,
+) -> SlatePaper:
+    """Project a pick; absent picker context does not attest selection."""
     return SlatePaper(
         item_key=cand["item_key"],
         item_id=cand["id"],
@@ -64,14 +69,9 @@ def _to_slate_paper(cand: dict[str, Any], *, role: str) -> SlatePaper:
         why=cand.get("why", []),
         goal_sim=cand.get("goal_sim"),
         url=cand.get("url", ""),
-    )
-
-
-def _model_score(cand: dict[str, Any], *, use_band: bool) -> float:
-    """Quality-adjusted key, restricted to raw-band slots by _pick_model."""
-    q = cand.get("quality") or {}
-    return cand["rank_score"] + quality_bonus(
-        q.get("quality_band"), q.get("grade"), use_band=use_band
+        selection_evidence=(
+            deepcopy(selection) if selection is not None else {"basis": "not_observed"}
+        ),
     )
 
 
@@ -92,6 +92,7 @@ def _pick_model(
     *,
     quality_first: bool = False,
     min_composite: float = MODEL_RELEVANCE_FLOOR,
+    requested_role: str = "model",
 ) -> list[dict[str, Any]]:
     """Top-N by the model-role key among unchosen items clearing the model floor —
     the system's current best recommendation. Default: the relevance×goal×prestige
@@ -111,11 +112,35 @@ def _pick_model(
     )
     if not quality_first:
         use_band = band_primary_enabled()
-        order = order_within_bands(
-            [score_to_priority(c["composite_score"]) for c in ordered],
-            [(_model_score(c, use_band=use_band), "") for c in ordered],
-        )
+        bands = [score_to_priority(c["composite_score"]) for c in ordered]
+        keys: list[tuple[float, str]] = []
+        bonuses: list[float] = []
+        for cand in ordered:
+            q = cand.get("quality") or {}
+            bonus = quality_bonus(q.get("quality_band"), q.get("grade"), use_band=use_band)
+            keys.append((cand["rank_score"] + bonus, ""))
+            bonuses.append(bonus)
+        order = order_within_bands(bands, keys)
+        for i in order[:n]:
+            cand = ordered[i]
+            cand["selection_evidence"] = picker_observations(
+                cand.get("selection_evidence", {"basis": "not_observed"}),
+                requested_role=requested_role,
+                basis="model_adjusted",
+                key=keys[i][0],
+                bonus=bonuses[i],
+                bonus_policy="band" if use_band else "grade",
+                band_restricted=True,
+            )
         ordered = [ordered[i] for i in order]
+    else:
+        for cand in ordered[:n]:
+            cand["selection_evidence"] = picker_observations(
+                cand.get("selection_evidence", {"basis": "not_observed"}),
+                requested_role=requested_role,
+                basis="cohort",
+                key=cand["rank_score"],
+            )
     return ordered[:n]
 
 
@@ -132,7 +157,13 @@ def _pick_surprise(
         if c["id"] not in chosen_ids and c["surprise_score"] >= min_score
     ]
     eligible.sort(key=lambda c: c["surprise_score"], reverse=True)
-    return eligible[:n]
+    picked = eligible[:n]
+    for cand in picked:
+        cand["selection_evidence"] = picker_observations(
+            cand.get("selection_evidence", {"basis": "not_observed"}),
+            requested_role="surprise", basis="surprise", key=cand["surprise_score"],
+        )
+    return picked
 
 
 def _pick_diversity(
@@ -148,7 +179,13 @@ def _pick_diversity(
         if c["id"] not in chosen_ids and c["corpus_affinity"] < 0.0
     ]
     eligible.sort(key=lambda c: c["rank_score"], reverse=True)
-    return eligible[:n]
+    picked = eligible[:n]
+    for cand in picked:
+        cand["selection_evidence"] = picker_observations(
+            cand.get("selection_evidence", {"basis": "not_observed"}),
+            requested_role="diversity", basis="cohort", key=cand["rank_score"],
+        )
+    return picked
 
 
 def allocate(
@@ -185,16 +222,22 @@ def allocate(
         picked = role_pickers[role](wanted)
         for cand in picked:
             chosen_ids.add(cand["id"])
-            papers.append(_to_slate_paper(cand, role=role))
+            papers.append(_to_slate_paper(
+                cand, role=role, selection=cand["selection_evidence"],
+            ))
         missing = wanted - len(picked)
         for _ in range(missing):
-            fallback = _pick_model(candidate_pool, 1, chosen_ids, quality_first=quality_first)
+            fallback = _pick_model(
+                candidate_pool, 1, chosen_ids, quality_first=quality_first, requested_role=role,
+            )
             empty_roles.append(role)
             if not fallback:
                 # Genuinely nothing left — slate becomes shorter than K.
                 continue
             chosen_ids.add(fallback[0]["id"])
-            papers.append(_to_slate_paper(fallback[0], role="model_fallback"))
+            papers.append(_to_slate_paper(
+                fallback[0], role="model_fallback", selection=fallback[0]["selection_evidence"],
+            ))
 
     # Cap in case roles sum to > K.
     return papers[:K], empty_roles

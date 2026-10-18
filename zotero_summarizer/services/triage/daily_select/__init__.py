@@ -24,6 +24,7 @@ spot-check now lives in its own labeled Today section + the Review page
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -291,7 +292,9 @@ def _assemble_interleaved(
         # The drafting arm's SlatePaper carries the role label; 'both' takes A0's
         # ('a'/'both' picks are by construction in the A0 slate — KeyError = bug).
         paper = by_a2[pick.item] if pick.team == "b" else by_a0[pick.item]
-        papers.append(paper)
+        papers.append(replace(
+            paper, selection_evidence={"mode": "interleave", "basis": "unavailable_blinded"},
+        ))
         entries.append({
             "item_id": pick.item,
             "item_key": paper.item_key,
@@ -309,7 +312,22 @@ def _assemble_interleaved(
         fellback_to_recent=a0.fellback_to_recent or a2.fellback_to_recent,
         low_relevance_hidden=a0.low_relevance_hidden,
         weak_slate=a0.weak_slate,
+        selection_policy="interleave",
     )
+
+
+def _prepare_cohort(
+    primary_rows: list[dict], quality_first: bool | None,
+) -> tuple[list[dict], bool]:
+    """Join current quality, resolve the mode once, and rank the entire pool."""
+    candidates = [make_candidate(row) for row in primary_rows]
+    attach_quality_from_reviews(candidates)
+    if quality_first is None:
+        quality_first = rank_quality_first_enabled()
+    attach_rank_scores(candidates, quality_first=quality_first)
+    candidates.sort(key=lambda c: c["rank_score"], reverse=True)
+    attach_why(candidates)
+    return candidates, quality_first
 
 
 def assemble_daily_slate(
@@ -372,28 +390,8 @@ def assemble_daily_slate(
     finally:
         conn.close()
 
-    deduped = [make_candidate(row) for row in primary_rows]
-    pool_size = len(deduped)
-
-    # Bridge the deep-review QUALITY signal onto the slate: feed-GUID-keyed
-    # candidates can't join the library-item_key-keyed deep_reviews cache directly,
-    # so resolve via each row's materialized_zotero_key. The lift is confined to the
-    # floored model role in the allocator (discovery roles stay quality-free).
-    attach_quality_from_reviews(deduped)
-
-    # Shared relevance × goal × prestige blend (rank_blend) — the same order
-    # the Library queue uses; degrades to composite-only when those signals
-    # are absent. The full pool goes to the allocator: a cap here would starve
-    # the surprise/diversity pickers of exactly the papers they exist to find.
-    # Quality-first mode (default OFF, eval-gated) swaps in the quality-led key
-    # (``rank_blend_quality``): grade leads, topicality soft-gates. An explicit
-    # ``quality_first`` argument pins the arm (the interleave builds both);
-    # ``None`` resolves from config/env as before.
-    if quality_first is None:
-        quality_first = rank_quality_first_enabled()
-    attach_rank_scores(deduped, quality_first=quality_first)
-    deduped.sort(key=lambda c: c["rank_score"], reverse=True)
-    attach_why(deduped)
+    pool_size = len(primary_rows)
+    deduped, quality_first = _prepare_cohort(primary_rows, quality_first)
 
     papers, empty_role_events = allocate(
         candidate_pool=deduped,
@@ -437,6 +435,7 @@ def assemble_daily_slate(
         fellback_to_recent=fellback_to_recent,
         low_relevance_hidden=low_relevance_hidden,
         weak_slate=weak_slate,
+        selection_policy="quality_first" if quality_first else "control",
     )
 
 

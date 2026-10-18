@@ -24,7 +24,7 @@ export const BAND_LABEL = {
 export const BAND_ACTIVE_CLS = {
   must_read: 'bg-emerald-600 text-white border-emerald-600',
   should_read: 'bg-sky-600 text-white border-sky-600',
-  could_read: 'bg-amber-500 text-white border-amber-500',
+  could_read: 'bg-amber-600 text-white border-amber-600',
   dont_read: 'bg-rose-600 text-white border-rose-600',
 };
 

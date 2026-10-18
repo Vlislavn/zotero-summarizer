@@ -5,6 +5,13 @@ and publication types). Missing constraints never authorize model-imposed filter
 legacy sessions disclose unknown origin. Review status adds typed stage/recovery
 and metadata-only attempt diagnostics without exposing sensitive capture through HTTP.
 
+`GET /api/daily` adds the resolved `selection_policy` (also for empty slates)
+and each card's `selection_evidence`: stored-score presence/priority, current
+review join, cohort key and actual picker/bonus observations. Interleave exposes
+only a blinded evidence marker, never new per-arm diagnostics. These observations
+neither authorize Add nor change ranking, labels or scores; absent/stale/failed
+reviews remain unknown on a current join miss.
+
 `POST /api/golden/verdict` checks a new positive feed verdict for a current,
 usable full-text review **before** writing its label. Missing/empty/failed
 reviews return HTTP 409 `review_required`; negative verdicts remain immediate.

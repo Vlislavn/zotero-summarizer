@@ -124,6 +124,10 @@ zotero-summarizer prefetch-models` once while online — see [docs/usage.md](doc
 - **Today — cull.** A ranked slate of fresh feed papers. Generate and inspect a full-text
   review before explicitly **Add to library** (materialized into the Zotero *Inbox*);
   **Trash** remains immediate without a review. Both decisions train the gate.
+  Cards separate **Relevance** from AI evidence; expand **Why selected** for the
+  actual policy/picker observations. Unknown evidence does not distinguish absent,
+  stale or failed reviews. Ranking, thresholds and labels are unchanged; this is
+  observability, not measured recommendation-quality improvement.
 - **Library — read.** Your unread papers, ranked by relevance. For each you get:
   - a **paper brief** — at-a-glance read verdict, goal-match board (which of your goals it
     serves), a reference-free **quality grade** (FLAG / NEUTRAL / HIGHLIGHT), and figures;
