@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Review slice 10: Review and interpretation / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 09: Source admission / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 08: Method validation tools / 2. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 07: Method validation tools / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
