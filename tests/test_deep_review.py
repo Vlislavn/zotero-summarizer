@@ -5,12 +5,15 @@ import types
 
 import pytest
 
+from tests.test_digest_verification import _scripted_validated_checks
+from tests._generated_write_fixtures import install_generated_writer
 from zotero_summarizer.services.library import _digest_verification, _map_reduce, _review_cache, deep_review
 from zotero_summarizer.services.zotero import zotero as zotero_svc
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
+from zotero_summarizer.storage import repositories
 @pytest.fixture(autouse=True)
 def _isolate_digest_generation(monkeypatch):
-    monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
+    monkeypatch.setattr(_digest_verification, "verify_digest", _scripted_validated_checks)
 @pytest.fixture(scope="module")
 def config():
     return _default_goals_config()
@@ -22,13 +25,12 @@ def _reset_state(tmp_path, monkeypatch):
     with deep_review._LOCK:
         deep_review._JOBS.clear()
     monkeypatch.setattr(_review_cache, "_cache_path", lambda: tmp_path / "deep_reviews.json")
+    install_generated_writer(tmp_path, monkeypatch)
     yield
 
 
 def _run(items, *, focus_prompt=""):
-    """Synchronously review ``items`` via the new per-item path (build the run ctx
-    once, then run each worker inline) — mirrors the old ``_run_job`` for the
-    cache + per-item status assertions, with no pool/threads."""
+    """Exercise the per-item worker synchronously with one shared run context."""
     ctx = deep_review._build_ctx()
     for item in items:
         deep_review._review_worker(item, ctx, focus_prompt)
@@ -90,7 +92,7 @@ def _detail(*, title="T", pdf_path="/x/p.pdf", doi="10.1/x", url="", abstract="a
 
 
 def _wire(monkeypatch, config, *, reader, extractor, note_fn=None):
-    monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
+    monkeypatch.setattr(_digest_verification, "verify_digest", _scripted_validated_checks)
     monkeypatch.setattr(deep_review, "get_state", lambda: _fake_state(config, extractor=extractor, reader=reader))
     monkeypatch.setattr(zotero_svc, "zotero_upsert_digest_note", note_fn or (lambda _ik, _d: None))
     # Keep ORCHESTRATION tests hermetic: stub the heavy enrichment layers (real
@@ -122,14 +124,10 @@ def test_run_job_clears_progress_when_done(config, monkeypatch):
 
 
 def test_run_job_writes_digest_entry(config, monkeypatch):
-    from zotero_summarizer.services.zotero._notes import build_digest_note_html
-
     reader = _StubReader({"K1": _detail()})
-    def render_note(_key, digest):
-        assert digest.parameters.dataset == "DATASET"
-        assert "DATASET" in build_digest_note_html(digest)
-
-    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"), note_fn=render_note)
+    writes = []
+    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"),
+          note_fn=lambda *args: writes.append(args))
 
     _run([{"item_key": "K1", "title": "T", "gate_relevance": 3.0}])
 
@@ -143,10 +141,14 @@ def test_run_job_writes_digest_entry(config, monkeypatch):
     assert entry["review_contract_version"] == deep_review.REVIEW_CONTRACT_VERSION
     assert entry["gate_relevance"] == 3.0
     assert entry["needs_pdf"] is False
-    assert entry["zotero_note_written"] is True and entry["zotero_note_error"] is None
+    assert entry["zotero_note_written"] is False and entry["zotero_note_error"] is None
+    from zotero_summarizer.models import PaperDigest
+    proposal, = repositories.get_pending_changes(item_key="K1")
+    assert PaperDigest.model_validate(entry["digest"]).parameters.dataset == "DATASET"
+    assert "DATASET" in proposal["generated_preview"]["payload"]["note_html"]
+    assert proposal["generated_preview"]["item_key"] == "K1"
+    assert writes == []
     assert entry["reviewed_at"]
-    # The confusing relevance re-score is gone; the goal-aligned layers are attached
-    # (quality verdict + per-goal board), each independently-skippable.
     assert "fulltext_composite" not in entry
     assert "quality" in entry and "goal_summaries" in entry
     assert isinstance(entry["goal_summaries"], list)
@@ -228,7 +230,9 @@ def test_run_job_records_note_failure_without_dropping_digest(config, monkeypatc
     entry = deep_review.get_cached_review("K1")
     assert entry["digest"]["grade"] == "A"  # digest still produced
     assert entry["zotero_note_written"] is False
-    assert "Zotero is open" in entry["zotero_note_error"]
+    assert entry["zotero_note_error"] is None  # generation does not contact the writer
+    proposal, = repositories.get_pending_changes(item_key="K1")
+    assert proposal["status"] == "pending" and proposal["audit"][0]["event"] == "staged"
 
 
 def test_run_job_isolates_per_item_failure(config, monkeypatch):

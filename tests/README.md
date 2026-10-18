@@ -26,3 +26,6 @@ Review slice 39: Review regression tests / 3. Depends on the preceding slice; no
 
 <!-- PR53 review slice 40 -->
 Review slice 40: Review regression tests / 4. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 41 -->
+Review slice 41: Review regression tests / 5. Depends on the preceding slice; not release acceptance.
