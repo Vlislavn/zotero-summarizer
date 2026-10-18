@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Review slice 14: Questions and materialization / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 13: Native write authority / 1. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 12: Review and interpretation / 3. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
 - Review slice 11: Review and interpretation / 2. Extracted from PR53; no new behavior versus its recorded source. Runtime approval is separate.
