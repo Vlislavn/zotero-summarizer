@@ -71,3 +71,6 @@ Review slice 54: Research feed regression tests / 5. Depends on the preceding sl
 
 <!-- PR53 review slice 55 -->
 Review slice 55: Research feed regression tests / 6. Depends on the preceding slice; not release acceptance.
+
+<!-- PR53 review slice 56 -->
+Review slice 56: Research feed regression tests / 7. Depends on the preceding slice; not release acceptance.
