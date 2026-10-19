@@ -70,6 +70,10 @@ def pytest_configure(config):
 def _isolate_app_and_network(monkeypatch, tmp_path):
     import keyring
     from zotero_summarizer import runtime
+    from zotero_summarizer.services._common import LOGGER
+
+    level, propagate, disabled = LOGGER.level, LOGGER.propagate, LOGGER.disabled
+    handlers = LOGGER.handlers[:]
 
     monkeypatch.setenv("ZOTERO_SUMMARIZER_HOME", str(tmp_path))
     monkeypatch.setattr(runtime, "_context", None)
@@ -92,6 +96,18 @@ def _isolate_app_and_network(monkeypatch, tmp_path):
 
     monkeypatch.setattr(socket.socket, "connect", guarded_connect)
     monkeypatch.setattr(socket.socket, "connect_ex", guarded_connect_ex)
+
+    try:
+        yield
+    finally:
+        for handler in LOGGER.handlers[:]:
+            if handler not in handlers:
+                LOGGER.removeHandler(handler)
+                handler.close()
+        LOGGER.handlers[:] = handlers
+        LOGGER.setLevel(level)
+        LOGGER.propagate = propagate
+        LOGGER.disabled = disabled
 
 
 @pytest.fixture(autouse=True)

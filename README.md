@@ -175,5 +175,6 @@ uv run zotero-summarizer faithbench build --max-builder-windows 64  # larger QA-
 - **[Research-feed evaluation evidence](docs/issue-evidence-research-feed.md)** — why the current
   30-paper fixture is unscorable for production inclusion quality (not a 0%-precision result).
 - **[docs/architecture.md](docs/architecture.md)** — how it works, the layering rules, and
-  the dev / verification workflow.
+  the dev / verification workflow, including owned application-logger isolation
+  between tests.
 - **[CHANGELOG.md](CHANGELOG.md)** — notable changes (latest: the guided first-run setup).

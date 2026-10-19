@@ -19,6 +19,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Restore the application logger after every test: level/cache, propagation, disabled state and original handlers. Close only new handlers; retain production file logging. Add a real ordered pytest lifecycle regression.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
 - A124: verify section one-liners in a second batch against the same first 700 source characters (up to 24 sections); omit unsupported summaries. Scripted checks do not establish live semantic accuracy.
