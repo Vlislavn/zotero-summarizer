@@ -1,4 +1,16 @@
-# Offline support comparison (#37)
+# Offline support and reading-priority comparisons
+
+The additive `priority` command compares frozen title/abstract/goals against four
+canonical reading priorities, preserving native choices/vectors and imported
+regressor/LLM baseline capabilities. It shares the existing raw-terminal/transport
+and artifact primitives, not a second client or model loader. Default admission
+and artifact inspection perform zero calls/writes; only explicit `--run` writes a
+new selected-root attempt. See [priority usage](../../docs/decision-priority-comparison.md)
+and [its frozen API](PRIORITY-INTERFACES.md). Missing/invalid/blocked/abstained
+outcomes stay unscored; synthetic controls and unknown resources cannot establish
+a winner, promotion or full #38 completion.
+
+## Support comparison (#37)
 
 `python -m tools.method_validation support --config FILE` validates frozen public
 inputs without HTTP or writes. Add `--run` to consent to private artifact writes

@@ -8,7 +8,7 @@ Prestige validation uses the shared ZIP/legacy-joblib artifact resolver.
 
 | script | what it does |
 |---|---|
-| `method_validation/` | Opt-in offline #37 criterion/original-evidence comparison: native or recorded readouts, matched binary baseline artifacts, immutable private reports. See [contract](../docs/decision-support-comparison.md); no model loads or default execution. |
+| `method_validation/` | Explicit offline [support](../docs/decision-support-comparison.md) and [reading-priority](../docs/decision-priority-comparison.md) comparisons: native/retained readouts, matched baseline artifacts, private reports. No model loads or default execution. |
 | `bench_deep_review.py` | benchmark a deep-review DIGEST model (candidate) vs a strong reference on quality + time + memory, judged blinded/pairwise by a pinned independent LLM judge. `--run-name` persists a versioned, resumable run under `data/deep_review_sweep/`. See **`docs/benchmarking.md`** (local-only, gitignored). |
 | `sweep_deep_review.sh` | memory-SAFE driver that runs the bench config matrix one config at a time (Phase 1 cloud budget sweep, Phase 2 local models lightest-first behind a free-phys-%/swap-growth gate). Foreground, single-instance — mirrors `mlx-deep-review.sh`. |
 | `mlx-deep-review.sh` | launch the local MLX server (Qwen3.6-35B) foreground with a RAM gate before pointing `deep_review` at it. **Never** run on a loaded box (22 GB weights). |

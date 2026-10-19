@@ -16,6 +16,15 @@ keep/trash decisions train the model, so tomorrow's slate is sharper.
 the model learns from how you triage). The app owns current decisions and their history;
 Zotero remains the PDF/citation surface and a synced representation of approved tags/notes.
 
+## Offline reading-priority comparison
+
+`python -m tools.method_validation priority --config FILE` admits frozen public
+inputs without calls or writes. Explicit `--run` compares retained/native readouts
+and matched ML/LLM artifacts in a new private attempt; `--inspect` verifies it
+without effects. No production model or ranking is changed. See the
+[priority comparison contract](docs/decision-priority-comparison.md) for input,
+qualification and inconclusive-result boundaries.
+
 ## Review recovery and search constraints
 
 Deep review rejects demonstrated access/error/login templates before model calls.
