@@ -3,6 +3,24 @@
 The application fixtures isolate runtime paths and network; see `conftest.py` and
 `docs/architecture.md`. No test is permission for live models or private data.
 
+## Offline existing-collection comparison (part of #42)
+
+`test_collection_comparison.py`, `test_collection_boundaries.py`,
+`test_collection_replay.py`, `test_collection_reservations.py` and
+`test_collection_native.py` use only public synthetic `test_collection_fixtures.py`
+data. `test_collection_review_findings.py` rejects missing corpus-backed reference
+inventory and resealed foreign case/snapshot/unrelated files, preserving safe earlier
+references, no-corpus unknowns and canonical replay without original snapshots. Real module entry exercises admission/run/inspect/reuse refusal; inert HTTPX
+exercises native raw ACK order and operational states. Original top3 names, duplicate
+workflow names, missing corpus, independent parent/child choice, shortlist recall,
+canonical/time/source-owner joins, cumulative requests+snapshots, closed capabilities,
+threshold/insufficient states and whole-branch replay remain explicit.
+
+Recomputed report/hashes/ACK do not replace admitted recording bytes or ownership.
+Writer-before/after-write raises never count as ACK. Literal perfect set metrics are
+wiring floors, not scientific quality, live-provider, private-library or resource
+acceptance. Existing176support/priority tests remain unchanged controls.
+
 ## Offline reading-priority comparison (part of #38)
 
 `test_priority_comparison.py`, `test_priority_boundaries.py` and

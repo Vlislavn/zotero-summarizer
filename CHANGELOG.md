@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Added
+- Add offline existing-collection comparison: frozen taxonomy/human-gold firewall, independent native choices, original top3-name baseline, set/calibration/paired reports and verified private replay. No model loads, membership writes or unmeasured winner.
 - Add explicit offline reading-priority comparison: frozen human-label firewall, four-class native/retained readouts, matched ML/LLM artifacts, ranking/calibration/paired reports and verified private replay. No model loads, production writes or winner without empirical/resource qualification.
 
 ### Changed
@@ -25,6 +26,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Refuse corpus-backed comparison artifacts lacking declared reference lineage before effects. Close collection replay inventory against admitted snapshots, canonical case rows, owned terminals, timing and reports; resealed foreign files cannot join the plan.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
 - A124: verify section one-liners in a second batch against the same first 700 source characters (up to 24 sections); omit unsupported summaries. Scripted checks do not establish live semantic accuracy.

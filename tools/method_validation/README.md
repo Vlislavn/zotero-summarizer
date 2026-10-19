@@ -1,4 +1,26 @@
-# Offline support and reading-priority comparisons
+# Offline support, priority and collection comparisons
+
+## Existing-collection comparison (part of #42)
+
+`python -m tools.method_validation collections --config FILE [--run]` uses the
+same optional admission/run/inspect grammar, transport/raw ACK and fresh-owner
+publication primitives. It asks independent existing-key membership questions,
+retains full native choices/vectors, and imports original top3 NAME suggestions
+without inventing keys/scores or confident no-match. Taxonomy, canonical/time
+lineage, separate human gold, complete request/work budgets and all replay branches
+are validated before scoring. Corpus-backed artifacts require nonempty declared
+reference lineage; replay filenames must match the admitted publication plan, not
+merely a resealed manifest. No live library/model loading or assignment effects.
+See [usage](../../docs/decision-collection-comparison.md) and the frozen
+[collection API](COLLECTION-INTERFACES.md). Synthetic/recorded controls cannot
+establish a model winner, live smoke, resource qualification or full#42 completion.
+
+```
+frozen existing tree/papers + grader-only memberships
+ -> independent questions / original similarity readouts
+ -> acknowledged raw terminals + selected-key/question outcomes
+ -> private set/calibration/paired reports + verified effect-free reopen
+```
 
 The additive `priority` command compares frozen title/abstract/goals against four
 canonical reading priorities, preserving native choices/vectors and imported

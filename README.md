@@ -16,6 +16,15 @@ keep/trash decisions train the model, so tomorrow's slate is sharper.
 the model learns from how you triage). The app owns current decisions and their history;
 Zotero remains the PDF/citation surface and a synced representation of approved tags/notes.
 
+## Offline existing-collection comparison
+
+`python -m tools.method_validation collections --config FILE` admits a frozen
+existing taxonomy and public papers without calls/writes. Explicit `--run` compares
+independent membership choices and original top3 similarity suggestions in a new
+private attempt; `--inspect` verifies retained outcomes without effects. No collection,
+Zotero membership or model is changed. See the [collection contract](docs/decision-collection-comparison.md)
+for lineage, duplicate-name, capability and remaining empirical-qualification limits.
+
 ## Offline reading-priority comparison
 
 `python -m tools.method_validation priority --config FILE` admits frozen public
