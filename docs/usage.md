@@ -242,12 +242,18 @@ start; quality improves as you label more.
 
 ## Offline / air-gapped use
 
-If a review detail was previously cached on this device, opening or refreshing
-it can use that cache while disconnected. Verdict changes and retractions enter
-the existing local outbox immediately. They are device saves, not server/Zotero
-confirmation. A missing cache still reports an error; HTTP refusals are not hidden
-by the offline fallback. New AI review, PDF acquisition and Zotero actions still
-need their existing server paths.
+For a disconnected browser while the Mac is unavailable, first **Sync now** while
+connected, then reopen **Library** from the same app address. The admitted working
+set includes compact context for previously unopened papers. Explicitly save verdicts,
+retractions and manual notes; **Saved on this device** is not a server/Zotero ACK.
+On reconnect, sync and compare both values/comments before **Keep mine / Use server**.
+Observed HTTP refusals and malformed received acknowledgements remain errors, not
+new offline-success mutations. Missing cached context requires reconnection.
+
+See [Offline review](offline-review.md) for the complete flow, persistent-storage
+warnings, the bounded transport check and the separate authenticated HTTPS/device
+requirements. This does not sync PDFs or enable offline AI, acquisition or native
+Zotero operations. Mac inference preparation below is a different boundary.
 
 The app is **local-first**: the UI, Zotero I/O, the ML relevance gate, and Library
 search (BM25 + embeddings + cross-encoder rerank) all run on your machine. There is no

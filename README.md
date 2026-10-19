@@ -134,9 +134,13 @@ zotero-summarizer prefetch-models` once while online — see [docs/usage.md](doc
 - **Annotate — label.** When you actually read one, give it the fine label
   (`must` / `should` / `could` / `don't`). That's your ground truth; the model retrains on it.
 
-Previously cached paper reviews can reopen without a connection. Verdict changes and
-retractions save to the existing device outbox immediately, rather than waiting
-for connectivity; a device save is not a confirmed server or Zotero write.
+**Disconnected review:** sync a working set, then reopen **Library** with the Mac
+unavailable, including papers not previously opened. Compact context, explicit
+verdict changes/retractions and manual notes use the existing device store/outbox.
+Reconnection reconciles typed UUID mutations; compare both versions before resolving
+same-field conflicts. Device saves are not server/Zotero confirmations. PDFs and AI
+remain server-only. See [the offline review workflow](docs/offline-review.md) for
+installation, storage/error boundaries and the separate remote-device requirements.
 
 Open PDFs and take notes in Zotero as usual; come back here to triage.
 

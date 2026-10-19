@@ -138,6 +138,14 @@ replies keep `saved/note_written/note_error` (the latter is null); unconfigured
 Zotero and feed/note keys keep their local-only success. This supersedes the
 review-note best-effort failure behavior above, not verdict-comment enrichment.
 
+Sync v1 additionally admits explicit `keep_server`: a conflict UUID and compared
+field revision, with null value/comment rather than an echoed canonical body.
+Missing/wrong references refuse; a changed field conflicts again. This records a
+no-op app receipt without a field/history/native effect, not authorization to
+write or acknowledge old native work. Set/delete DTO caps remain unchanged;
+canonical conflict readouts may contain longer valid server text. Older servers
+must reject an unsupported operation rather than reinterpret it.
+
 Sync push accepts at most 100 mutations and 100 optional `predecessors` UUIDs.
 These reference applied receipts for cross-batch causality; they never alter a
 mutation's immutable UUID/body identity. Unknown/conflict receipts return 422

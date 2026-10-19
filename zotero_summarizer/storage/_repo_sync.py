@@ -96,6 +96,8 @@ def _latest_revision(conn: sqlite3.Connection, item_key: str, field: str) -> int
 
 
 def _write_value(conn: sqlite3.Connection, request: dict[str, Any]) -> None:
+    if request["operation"] == "keep_server":
+        return
     item_key, field = request["item_key"], request["field"]
     if field == "review_note":
         review_notes.write(conn, item_key, None if request["operation"] == "delete" else request["value"])
@@ -137,6 +139,9 @@ def apply_sync_mutation(db_path: Path, request: dict[str, Any]) -> dict[str, Any
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{field} must contain non-whitespace characters")
         request[field] = value.strip()
+    keep_server = request["operation"] == "keep_server"
+    if keep_server and (not request.get("resolves_mutation_id") or request.get("value") is not None or request.get("comment") is not None):
+        raise ValueError("keep_server requires a conflict reference and no new content")
     public_request = {key: value for key, value in request.items() if not key.startswith("_")}
     request_json = json.dumps(public_request, sort_keys=True, separators=(",", ":"))
     conn = _connect_to(db_path)
@@ -162,12 +167,17 @@ def apply_sync_mutation(db_path: Path, request: dict[str, Any]) -> dict[str, Any
                 "SELECT item_key, field, result_json FROM sync_mutations WHERE mutation_id = ?",
                 (resolves,),
             ).fetchone()
+            prior_result = json.loads(prior["result_json"]) if prior else {}
             if (prior is None or prior["item_key"] != item_key or prior["field"] != field
-                    or json.loads(prior["result_json"]).get("status") != "conflict"):
+                    or prior_result.get("status") != "conflict"):
                 raise ValueError("resolves_mutation_id must name a conflict for the same field")
+            if keep_server and request["base_revision"] != prior_result["conflict_revision"]:
+                raise ValueError("keep_server must name the compared field revision")
         latest = _latest_revision(conn, item_key, field)
         previous = _canonical(conn, item_key, field)
-        if latest > request.get("_effective_base_revision", request["base_revision"]):
+        base = request["base_revision"] if keep_server else request.get("_effective_base_revision", request["base_revision"])
+        conflicted = latest != base if keep_server else latest > base
+        if conflicted:
             result = {"mutation_id": request["mutation_id"], "status": "conflict",
                       "conflict_revision": latest, "canonical": previous}
         else:

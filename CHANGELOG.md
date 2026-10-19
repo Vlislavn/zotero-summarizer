@@ -11,7 +11,9 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Fixed
-- Let cached review detail and verdict set/delete fallbacks run while React Query is offline. Device-only negative verdicts skip the secondary reject-tag request; HTTP refusals remain errors. Preserve the existing IndexedDB outbox and sync protocol. Regressions use fake-indexeddb.
+- Complete disconnected working-set review with the existing PWA/outbox: unopened compact context, draft/owner fences, bounded transport, strict atomic ACK/pull handling and compared conflict resolution. Device/server/native ACKs stay distinct; no PDF/AI sync or physical iOS acceptance.
+- Add version-bound `keep_server` sync resolutions without canonical-body echo or native effects. Preserve stale-choice recovery and canonical provenance, use admitted unscoped membership, retain dirty inline notes, and distinguish fetch failure from a received response.
+- Preserve later durable pending fields when earlier edits conflict and a later batch fails before pull. Canonical evidence/revisions and ACK retirement remain atomic; no outbox rewrite or relaxed acknowledgement.
 
 ### Changed
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.

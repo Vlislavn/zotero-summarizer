@@ -75,7 +75,7 @@ it('persists ordered verdicts and retraction offline without attempting a second
   act(() => hook.result.current.verdict.onDelete());
   await waitFor(() => expect(hook.result.current.verdict.deleting).toBe(false));
   await waitFor(async () => expect((await changes(key)).length).toBe(4));
-  expect(hook.result.current.detail.verdict).toBeNull();
+  await waitFor(() => expect(hook.result.current.detail.verdict).toBeNull());
   const rows = await changes(key);
   expect(rows.map(row => [row.operation, row.value])).toEqual([
     ['set', 'should_read'], ['set', 'could_read'], ['set', 'dont_read'], ['delete', null],
@@ -89,6 +89,26 @@ it('persists ordered verdicts and retraction offline without attempting a second
   await waitFor(() => expect(remounted.result.current.detail?.user_note).toBe('Manual'));
   expect(remounted.result.current.detail.verdict).toBeNull();
   expect(await changes(key)).toEqual(rows);
+});
+
+it('separates a durable deletion ACK from its asynchronous detail refresh', async () => {
+  const key = 'DELETION_REFRESH_BOUNDARY';
+  const detail = { item_key: key, user_note: 'Retained', verdict: { user_priority: 'could_read' } };
+  await savePapers([{ item_key: key, revisions: { verdict: 4 } }]);
+  await cacheResponse(`review:${key}`, detail);
+  disconnect();
+  const reads = [];
+  fetch.mockImplementation((_path, options) => options?.method === 'DELETE'
+    ? Promise.reject(new TypeError('Disconnected test transport'))
+    : new Promise((_resolve, reject) => { reads.push(reject); }));
+  const hook = mount(key, detail);
+  act(() => hook.result.current.verdict.onDelete());
+  await waitFor(async () => expect((await changes(key)).length).toBe(1));
+  await waitFor(() => expect(hook.result.current.verdict.deleting).toBe(false));
+  await waitFor(() => expect(reads).toHaveLength(2));
+  expect(hook.result.current.detail.verdict).toEqual(detail.verdict);
+  await act(async () => { reads.forEach(reject => reject(new TypeError('Disconnected test transport'))); });
+  await waitFor(() => expect(hook.result.current.detail.verdict).toBeNull());
 });
 
 it('settles a missing local detail as a transport error instead of remaining paused', async () => {

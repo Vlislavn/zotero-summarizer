@@ -14,7 +14,12 @@ transitions. `push` applies ordered verdict or
 review-note mutations. Each mutation has a UUID and per-field base revision, so
 replay is idempotent, edits to different fields merge, and same-field divergence
 returns an explicit conflict. A resolution is another mutation naming the
-conflicted mutation. Delete tombstones retain their last revision, so a client
+conflicted mutation. `keep_server` carries no value/comment: it references the
+compared conflict and exact field revision. The same SQLite transaction verifies
+that target/version and records the actual no-op UUID receipt; a changed version
+conflicts again. No canonical field/origin, transition log or native mirror is
+changed by that choice or its replay. Set/delete and their existing effects stay
+separate; canonical readouts are not restricted by outbound mutation size caps. Delete tombstones retain their last revision, so a client
 that has pulled a deletion can edit from that revision without a false conflict;
 replaying a conflict UUID returns the same conflict rather than treating it as
 an applied write.
