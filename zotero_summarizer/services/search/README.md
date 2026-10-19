@@ -149,6 +149,34 @@ reconstructed. Existing reviews, addresses and scores survive; explicit Add reus
 a confirmed saved key. The refinement/family-identifier tests use controlled
 readers and JSON round trips, not live sources, native writes or scientific truth.
 
+## Explicit Add recovery
+
+An explicit new-item Add saves `planned_zotero_key` in the existing session JSON
+before backup/native work. A failed prewrite save dispatches nothing. Native
+failure or failed session finalization retains the plan; an explicit retry reuses
+the writer's existing-key transaction no-op instead of generating another key.
+Delivery is stamped only after native return; a planned key is not library coverage
+or a success receipt. Existing coverage hits still reuse their saved key without
+constructing a writer or inventing a new plan.
+
+Exact-identifier families and same persisted candidate addresses preserve planned
+and materialized operation keys across metadata enrichment, absorption, transitive
+merges and stale background saves. Conflicting selected-family identities fail
+before updates; unrelated/unselected families do not hijack the worker's selection,
+metadata, order or review. Empty plans preserve the legacy wire shape. Nonempty
+plans must be eight ASCII uppercase letters/digits; invalid persisted values fail.
+If confirmed coverage disagrees with a retained plan, Add returns409 before any
+native write or delivery stamp. Both observations remain available for explicit
+library reconciliation; a later background save must not inherit contradictory
+planned/materialized identities.
+
+The existing per-session lock serializes one app process. Session JSON and native
+SQLite are not one transaction; no distributed exactly-once, historical receipt
+repair or cross-library replay guarantee is claimed. Retrying a committed item
+never repairs later user edits. Tests use real temporary native SQLite to cover
+commit/final-save gaps, prewrite refusal, rollback, backup, repeat, concurrency and
+family/session preservation; no live user library is needed.
+
 ## Execution and identity boundaries
 
 Screening accepts a nonblank topic of at most 4,000 characters and up to ten
