@@ -204,6 +204,15 @@ snapshots, a sync cursor, and a UUID mutation outbox. Verdicts/notes queue only
 on network failure; conflicts require Keep mine / Use server. PDFs, AI,
 annotation, acquisition, and rescoring remain server-only.
 
+`usePaperReview` lets the existing detail and verdict API fallbacks execute even
+when React Query is offline (`networkMode: 'always'` on these three operations
+only). Cold mounts and local refetches can reach IndexedDB; verdict sets/deletes
+reach the existing outbox. A device-only negative verdict does not attempt the
+secondary server-only reject-tag request. HTTP refusals still propagate rather
+than becoming cached detail or queued-success responses. The six real-IndexedDB
+hook regressions cover remount, refresh, ordered changes/retraction and errors;
+these are not service-worker, native-device or full #19 acceptance.
+
 After reconnect, the server gives queued verdicts and notes the same training,
 feed-materialization, and Zotero-mirror effects as online saves. Once a snapshot
 is reconciled, open paper details refetch: a rejected optimistic verdict no

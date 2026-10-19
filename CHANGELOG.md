@@ -10,6 +10,9 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+### Fixed
+- Let cached review detail and verdict set/delete fallbacks run while React Query is offline. Device-only negative verdicts skip the secondary reject-tag request; HTTP refusals remain errors. Preserve the existing IndexedDB outbox and sync protocol.
+
 ### Changed
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.

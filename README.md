@@ -134,6 +134,10 @@ zotero-summarizer prefetch-models` once while online — see [docs/usage.md](doc
 - **Annotate — label.** When you actually read one, give it the fine label
   (`must` / `should` / `could` / `don't`). That's your ground truth; the model retrains on it.
 
+Previously cached paper reviews can reopen without a connection. Verdict changes and
+retractions save to the existing device outbox immediately, rather than waiting
+for connectivity; a device save is not a confirmed server or Zotero write.
+
 Open PDFs and take notes in Zotero as usual; come back here to triage.
 
 ## Configuration

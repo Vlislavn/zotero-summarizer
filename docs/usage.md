@@ -242,6 +242,13 @@ start; quality improves as you label more.
 
 ## Offline / air-gapped use
 
+If a review detail was previously cached on this device, opening or refreshing
+it can use that cache while disconnected. Verdict changes and retractions enter
+the existing local outbox immediately. They are device saves, not server/Zotero
+confirmation. A missing cache still reports an error; HTTP refusals are not hidden
+by the offline fallback. New AI review, PDF acquisition and Zotero actions still
+need their existing server paths.
+
 The app is **local-first**: the UI, Zotero I/O, the ML relevance gate, and Library
 search (BM25 + embeddings + cross-encoder rerank) all run on your machine. There is no
 telemetry and the served UI pulls no external assets (no CDN/fonts). Model
