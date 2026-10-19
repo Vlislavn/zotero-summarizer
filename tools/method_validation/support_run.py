@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from math import isfinite
 from pathlib import Path
 from time import monotonic
 
@@ -136,9 +137,10 @@ def run(cfg, raw_config, *, transport=None):
                     row['telemetry']['reserved'] = arm.kind == 'native' and not blocked
                     recording = recordings.get((arm.arm_id, key))
                     left = cfg.max_run_seconds - (monotonic() - started)
-                    if blocked or left <= 0 or (arm.kind == 'recorded' and recording is None):
-                        row['status'] = 'blocked' if blocked else ('wall_budget' if left <= 0 else 'unavailable')
-                        row['reason'] = blocked
+                    state, reason = unattempted(arm, left, recording)
+                    if state:
+                        row.update(status=state, reason=reason)
+                        row['telemetry']['remaining_seconds'] = left
                     else:
                         name = f'terminal-{len(rows)}.bin'
                         reply = evaluate_support(case, arm, cfg, lambda raw: retain(name, raw),
@@ -162,6 +164,24 @@ def run(cfg, raw_config, *, transport=None):
             stream.write(b'Publication failed; never reopen as accepted.\n')
         raise
     return owner, result
+
+
+def unattempted(arm, remaining, recording):
+    if type(remaining) not in (int, float) or not isfinite(remaining):
+        raise ValueError('missing/invalid remaining-budget observation')
+    blocked = arm.blockage()
+    status = 'blocked' if blocked else ('wall_budget' if remaining <= 0 else
+             'unavailable' if arm.kind == 'recorded' and recording is None else None)
+    return status, blocked
+
+
+def check_unattempted(row, base, arm, request, recording):
+    remaining = row['telemetry'].get('remaining_seconds')
+    status, reason = unattempted(arm, remaining, recording)
+    base.update(status=status, reason=reason, request_sha256=sha(request))
+    base['telemetry'].update(remaining_seconds=remaining, reserved=arm.kind == 'native' and not arm.blockage())
+    if status is None or row != base:
+        raise ValueError('unattempted outcome disagrees with admission/budget evidence')
 
 
 def read_owned(path, cap=67108864):
@@ -201,8 +221,11 @@ def reopen(owner):
     expected_pairs = [(key, arm) for key in cases for arm in (*cfg.arms, *cfg.baselines)]
     if len(rows) != len(expected_pairs):
         raise ValueError('incomplete pair/arm outcomes')
-    for row, (key, arm) in zip(rows, expected_pairs):
+    for index, (row, (key, arm)) in enumerate(zip(rows, expected_pairs)):
         SupportResult.model_validate(row)
+        name = f'terminal-{index}.bin'
+        if ('terminal' in row) != (name in saved) or ('terminal' in row and row['terminal'] != name):
+            raise ValueError('terminal ownership/reference mismatch')
         base = base_row(cases[key], key, arm, sources[cases[key].paper_key], gold)
         if any(row[k] != base[k] for k in ('case_sha256', 'pair_id', 'arm_id', 'family', 'split', 'gold', 'capability')):
             raise ValueError('pair identity mismatch')
@@ -210,12 +233,22 @@ def reopen(owner):
             if row != baseline_result(base, arm, baselines[arm.arm_id].get(key)):
                 raise ValueError('baseline projection mismatch')
         elif 'terminal' in row:
-            status, readout = project(saved[row['terminal']], arm, cfg, row['telemetry']['terminal_status'])
+            if arm.blockage():
+                raise ValueError('blocked arm cannot own a dispatched terminal')
+            terminal = saved[row['terminal']]
+            if arm.kind == 'recorded':
+                recording = recordings.get((arm.arm_id, key))
+                if terminal != recording or row['telemetry']['terminal_status'] != 'received':
+                    raise ValueError('recording input/terminal binding mismatch')
+                terminal = recording
+            status, readout = project(terminal, arm, cfg, row['telemetry']['terminal_status'])
             if (status != row['status'] or readout != row['readout'] or row['request_sha256'] != sha(payload(cases[key], cfg))
                     or row['support'] != (readout['label'] == 'supports' if status == 'decision' else None)):
                 raise ValueError('native projection mismatch')
-        elif row['status'] not in ('blocked', 'wall_budget', 'unavailable') or row['support'] is not None:
-            raise ValueError('unattempted row became semantic decision')
+        else:
+            check_unattempted(row, base, arm, payload(cases[key], cfg), recordings.get((arm.arm_id, key)))
+    if {n for n in saved if n.startswith('terminal-')} != {r['terminal'] for r in rows if 'terminal' in r}:
+        raise ValueError('unreferenced terminal inventory')
     result = report(rows, cfg, bundle)
     if encoded(result) != saved['report.json'] or readable(result).encode() != saved['report.md']:
         raise ValueError('report projection mismatch')

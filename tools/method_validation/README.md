@@ -29,6 +29,14 @@ marks FAILED and propagates, even if the file it wrote is readable. ACK is writt
 only after required publications return; reopening rejects FAILED, missing ACK,
 foreign/partial inventory, code/schema/input hash drift or inconsistent projections.
 Hashes establish integrity relative to the manifest, not signed authenticity.
+Recorded reopening additionally compares each copied terminal with the admitted
+recording for that exact case/arm and requires the recorded received state. A
+self-consistent replacement of terminal/derived report/hashes cannot substitute
+another decision while leaving that bound input unchanged. Terminal references
+must match their per-row retained files. Terminal-free outcomes reconstruct the
+admitted blockage/recording presence and finite remaining-budget observation;
+`blocked` cannot hide an invalid response or shrink evaluated coverage. Actual
+wall exhaustion stays unscored, not blocked. Timing observations remain unsigned.
 
 Regression sources: `tests/test_support_comparison.py`,
 `tests/test_native_decision_cli.py`, `tests/test_support_metrics.py`, with public

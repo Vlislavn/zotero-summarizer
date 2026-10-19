@@ -55,6 +55,19 @@ arm list replaces the whole list. The effective validated config and exact origi
 config bytes are both retained. Unknown fields, duplicate JSON members, nonfinite
 numbers, wrong input hashes and oversize admission fail before model calls/writes.
 
+Recorded replay binds the per-row copied terminal to the exact admitted
+`(case_sha256, arm_id)` recording and derives its decision from those bytes. The
+recorded received state cannot be relabelled as a transport failure. Recomputing
+copied-terminal/result/report hashes and ACK alone cannot replace an unchanged
+frozen recording; this input-to-output check is separate from signed authenticity.
+Omitting a terminal reference cannot orphan acknowledged terminal bytes. A row
+without a terminal must exactly reconstruct an admission-permitted blockage,
+missing recording or wall exhaustion and its request hash, empty result and
+finite `telemetry.remaining_seconds` observation. Wall exhaustion remains in the
+evaluated denominator. Transport statuses are restricted to the adapter's emitted
+domain; a transport terminal cannot claim predispatch blockage. Remaining time is
+an unsigned observation, not authenticated execution or external resource proof.
+
 ## Bounds and resource accounting
 
 Defaults: at most 120 pairs (maximum 10,000), 32 total arms, 12,000 full-prompt

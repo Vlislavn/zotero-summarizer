@@ -3,6 +3,16 @@
 The application fixtures isolate runtime paths and network; see `conftest.py` and
 `docs/architecture.md`. No test is permission for live models or private data.
 
+## Recorded-input replay regression
+
+`test_recorded_support_binding.py` replaces a copied terminal and recomputes all
+derived rows/report/hashes/ACK while leaving the frozen recording unchanged.
+`test_support_replay_states.py` additionally removes terminal references/bytes,
+forges recorded/native blocked states and request identities, and preserves actual
+blocked/missing/wall/malformed-neighbor states and coverage denominators.
+Reopening must reject this input-to-output substitution, independently of unsigned
+artifact authenticity. Existing recorded/native/error/reopen controls remain.
+
 ## Offline support comparison (#37)
 
 Parent-controlled focused selector (existing pytest installation, no dependency sync):

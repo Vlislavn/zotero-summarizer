@@ -11,6 +11,8 @@ import httpx
 
 from .support import NativeSupportReadout, SUPPORT_OPTIONS, loads
 
+TRANSPORT_STATES = frozenset(('received', 'timeout', 'unavailable', 'response_too_large', 'encoded_response'))
+
 
 @dataclass(frozen=True)
 class ProviderReply:
@@ -96,6 +98,8 @@ def parse_native(raw, arm, cfg):
 
 
 def project(raw, arm, cfg, status='received'):
+    if status not in TRANSPORT_STATES:
+        raise ValueError('invalid terminal transport state')
     if status != 'received':
         return status, None
     try:
