@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import types
 
-from zotero_summarizer.models import GoalSummary, PaperDigest
+from zotero_summarizer.models import GoalSummary, PaperDigest, QualityEval
 from zotero_summarizer.services.library import deep_review
 
 
@@ -43,8 +43,8 @@ def _wire(monkeypatch, *, detail):
     monkeypatch.setattr(deep_review.quality_review, "assess_digest", lambda **_k: digest)
     goals = [GoalSummary(goal="Fixture goal", relevant=True, retrieval_state="hit", abstained=False).model_dump()]
     monkeypatch.setattr(deep_review._deep_review_layers, "extra_layers",
-                        lambda ctx: ({"quality_band": "highlight"}, goals,
-                                     {"type": "x"}, None, None))
+                        lambda ctx: (QualityEval(grade="A", basis="full_text", quality_band="highlight").model_dump(),
+                                     goals, {"type": "x"}, None, None))
     # The note write is a local import inside _review_one — patch the source symbol.
     from zotero_summarizer.services.zotero import zotero as zsvc
     monkeypatch.setattr(zsvc, "zotero_upsert_digest_note", lambda *_a, **_k: None)
