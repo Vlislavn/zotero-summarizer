@@ -209,8 +209,8 @@ when React Query is offline (`networkMode: 'always'` on these three operations
 only). Cold mounts and local refetches can reach IndexedDB; verdict sets/deletes
 reach the existing outbox. A device-only negative verdict does not attempt the
 secondary server-only reject-tag request. HTTP refusals still propagate rather
-than becoming cached detail or queued-success responses. The six real-IndexedDB
-hook regressions cover remount, refresh, ordered changes/retraction and errors;
+than becoming cached detail or queued-success responses. The six regressions use
+the real hook/API/store with fake-indexeddb for remount, refresh, ordered changes/retraction and errors;
 these are not service-worker, native-device or full #19 acceptance.
 
 After reconnect, the server gives queued verdicts and notes the same training,
