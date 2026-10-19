@@ -10,6 +10,10 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Make injected-PDF full-reading fixtures provide typed independent full-text quality. Preserve path/grade/read assertions and add abstract/unassessed controls; digest grade alone never supplies scientific basis.
+
+- Bind historical coverage comparisons to the frozen main algorithm, preserving old flag and current policy-highlight oracles. Add distinct empty/unknown, explicit-failure and red-flag controls; production grading and paper annotations remain unchanged.
+
 ### Changed
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.
