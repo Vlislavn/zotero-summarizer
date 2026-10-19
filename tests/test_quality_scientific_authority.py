@@ -31,7 +31,7 @@ def test_evaluator_to_worker_cache_proposal_and_saved_note_share_grade(
 ):
     from zotero_summarizer.services.library import (
         _code_link, _paper_goal_summaries, _paper_read_html,
-        _paper_read_pdf, _review_identity, _review_section_overlay, deep_review, paper_type, quality_eval,
+        _paper_read_pdf, _review_section_overlay, deep_review, paper_type, quality_eval,
     )
     from zotero_summarizer.services.library.review_fleet import fleet, verdict_store
     from zotero_summarizer.services.setup.bootstrap import _default_goals_config
@@ -64,11 +64,12 @@ def test_evaluator_to_worker_cache_proposal_and_saved_note_share_grade(
     monkeypatch.setattr(_paper_goal_summaries, "summarize_for_goals", lambda **_kwargs: [GoalSummary(**HIT)])
     monkeypatch.setattr(_code_link, "find_code_link", lambda *_args: {"found": False})
     monkeypatch.setattr(_review_section_overlay, "build_section_overlay", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(_review_identity, "build_review_identity", lambda **_kwargs: {"generation_sha256": "fixture"})
     monkeypatch.setattr(zotero, "zotero_upsert_digest_note", capture_note)
     cache_path = tmp_path / "reviews.json"
     monkeypatch.setattr(_review_cache, "_cache_path", lambda: cache_path)
-    reader = SimpleNamespace(get_item_detail=lambda _key: {"title": "Study", "pdf_path": "/fixture.pdf"})
+    path = tmp_path / "fixture.pdf"
+    path.write_bytes(b"Synthetic original bytes; extraction is controlled by the fixture")
+    reader = SimpleNamespace(get_item_detail=lambda _key: {"title": "Study", "pdf_path": str(path)})
 
     entry = deep_review._review_one({"item_key": "PAPER001"}, reader=reader, config=config,
                                    extractor=SimpleNamespace(extract_text=lambda _path: "A concept."),

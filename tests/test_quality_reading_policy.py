@@ -202,8 +202,8 @@ def test_high_friction_is_generated_in_the_existing_digest_call(monkeypatch):
     assert result.writing_reasons == source["writing_reasons"] and result.read_decision == "read"
 
 
-def test_real_review_worker_keeps_model_output_while_note_and_cache_receive_policy(monkeypatch):
-    from zotero_summarizer.services.library import deep_review, _review_identity
+def test_real_review_worker_keeps_model_output_while_note_and_cache_receive_policy(monkeypatch, tmp_path):
+    from zotero_summarizer.services.library import deep_review
     from zotero_summarizer.services.setup.bootstrap import _default_goals_config
     from zotero_summarizer.services.zotero import zotero
 
@@ -212,9 +212,10 @@ def test_real_review_worker_keeps_model_output_while_note_and_cache_receive_poli
     notes = []
     monkeypatch.setattr(deep_review._map_reduce, "digest_for_strategy", lambda *_args, **_kwargs: source)
     monkeypatch.setattr(deep_review._deep_review_layers, "extra_layers", lambda _ctx: (QUALITY, HIT, {"type": "position"}, None, None))
-    monkeypatch.setattr(_review_identity, "build_review_identity", lambda **_kwargs: {"generation_sha256": "fixture"})
     monkeypatch.setattr(zotero, "zotero_upsert_digest_note", lambda key, digest: notes.append((key, digest)))
-    reader = SimpleNamespace(get_item_detail=lambda _key: {"title": "Study", "pdf_path": "/fixture.pdf"})
+    path = tmp_path / "fixture.pdf"
+    path.write_bytes(b"Synthetic original bytes; extraction is controlled by the fixture")
+    reader = SimpleNamespace(get_item_detail=lambda _key: {"title": "Study", "pdf_path": str(path)})
     result = deep_review._review_one({"item_key": "PAPER001"}, reader=reader,
                                     config=_default_goals_config(), extractor=SimpleNamespace(extract_text=lambda _path: "A concept."),
                                     llm=object(), quality_enabled=True)
