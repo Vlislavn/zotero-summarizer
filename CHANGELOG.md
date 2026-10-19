@@ -42,6 +42,9 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ### Added
 
+- Opt-in offline support comparison (#37): frozen original spans, native/recorded readouts, matched binary baseline imports and immutable private no-go reports. No model loads or product-policy changes; human/resource qualification remains open.
+- Frozen support inputs use pathlib absolute-path admission rather than an unavailable Pydantic type. Isolated import and actual module-entry CLI regressions cover recorded execution, read-only inspection and exclusive-owner refusal.
+- Native support readouts validate inside the provider boundary. Malformed Unicode aliases retain raw bytes and fail only their pair, while valid Unicode aliases and neighboring cases continue to the comparative report.
 - Independent HTML-preservation checks and mutation controls; opt-in frozen real-review browser replays skip when inputs are absent. Literal retention proves neither scientific truth nor native-editor compatibility.
 - Review attempts expose typed stage/recovery and metadata-only traces. Explicit local CLI captures retain decoded calls; operational source templates never become scientific reviews, and unavailable placeholders preserve current valid reviews (#32).
 - Search hard constraints require user confirmation; model hints/refinement cannot create bans. Bounded complementary queries, publication metadata recovery and retrieval accounting preserve legacy plans and disclose coverage limits (#31).
