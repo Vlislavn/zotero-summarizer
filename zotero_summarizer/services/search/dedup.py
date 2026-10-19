@@ -52,6 +52,15 @@ def _richness(cand: Candidate) -> tuple[int, int, int, int]:
 
 
 def _merge_family(members: list[Candidate]) -> Candidate:
+    identifiers = list(dict.fromkeys(key for member in members for key in member.identifier_keys()))
+    saved_key = next((member.existing_zotero_key for member in members
+                      if member.in_library is True and member.existing_zotero_key), None)
+    if any(member.in_library is True for member in members):
+        membership = True
+    elif all(member.in_library is False for member in members):
+        membership = False
+    else:
+        membership = None
     preferred = max(members, key=_richness)
     preferred.candidate_id = members[0].candidate_id  # Metadata enrichment must not change a displayed address.
     # Fill missing identifiers + flags from the other members (one work, many ids).
@@ -86,11 +95,11 @@ def _merge_family(members: list[Candidate]) -> Candidate:
         preferred.relevance_band = preferred.relevance_band or m.relevance_band
         preferred.why = preferred.why or m.why
         preferred.materialized_zotero_key = preferred.materialized_zotero_key or m.materialized_zotero_key
-        if preferred.in_library is None or m.in_library is True:
-            preferred.in_library = m.in_library
-        preferred.existing_zotero_key = preferred.existing_zotero_key or m.existing_zotero_key
         if m is not preferred:
             preferred.provenance.extend(m.provenance)
+    preferred.family_identifier_keys = identifiers
+    preferred.in_library = membership
+    preferred.existing_zotero_key = saved_key
     preferred.version_type = _version_type(preferred)
     return preferred
 
