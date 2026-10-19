@@ -62,6 +62,10 @@ unconfirmed metadata stays unknown. Legacy saved plans retain their original fil
 The plan discloses domain context, source accounting and scholarly coverage limits.
 See [search](zotero_summarizer/services/search/README.md).
 
+With corpus disabled, post-edit corpus refresh skips library/cache reads and
+inferred-feedback writes even if resources remain initialized. The explicit edit
+itself is unchanged; see [service boundaries](zotero_summarizer/services/README.md).
+
 ## Requirements
 
 - **Python 3.10+** and **[uv](https://docs.astral.sh/uv/getting-started/installation/)**

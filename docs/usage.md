@@ -402,6 +402,10 @@ have working defaults — leave them until you need them. `quality_review.shadow
 (default off) opts into the local MiniCheck encoder claim-checker; see
 [services/model/README.md](../zotero_summarizer/services/model/README.md).
 
+With `corpus.enabled: false`, targeted refresh after an edit skips corpus reader,
+cache, lock and inferred-feedback I/O, even if those resources are initialized.
+The explicit edit is unchanged; turning corpus back on retains normal reconciliation.
+
 All app state (the two SQLite DBs, your golden dataset, logs, ML artifacts) lives under
 `data/` (gitignored).
 
