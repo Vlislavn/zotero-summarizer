@@ -21,6 +21,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Preserve unknown membership through persisted refinement when a newly retrieved identity cannot be checked. Genuine hits still win; older misses cannot certify absence for unresolved family members.
+- Retain every observed version-family identifier through screening, refinement and session reloads. Resolve saved membership across retained DOI/arXiv alternatives; preserve the genuine hit key and distinguish partial lookup failures from complete misses.
 - Preserve identifier-confirmed saved-library membership through Search refinement and version merging. Reuse the existing reader and tri-state coverage; retain reviews and addresses, and let explicit Add reuse the saved key without creating another item.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.

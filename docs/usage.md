@@ -40,13 +40,20 @@ through to grounded Q&A. The paper artifact stores `figures_count`, not a table
 count; focused Q&A and freshness routing tests passed (39), but live natural-language
 scope accuracy is not measured.
 
-## Library membership when refining Search
+## Library membership in Search
 
-Opt-in agentic refinement (`ZS_SEARCH_AGENTIC`) checks newly retrieved DOI/arXiv
-identities through the existing library reader before merging versions. A saved
-match stays saved even when another version has richer metadata; explicit Add
-reuses its existing key. Missing readers, unsupported identities and lookup errors
-remain unknown, not confirmed library misses. Refinement itself writes no Zotero items.
+Screening preserves all observed version-family identifiers through preferred
+metadata selection and saved-session reloads. The existing reader checks retained
+DOI/arXiv alternatives, not just the displayed version. A confirmed hit supplies
+its matching library key; partial lookup failure remains unknown, not a known miss.
+No title-only match is inferred. Old sessions cannot recover identifiers that were
+previously discarded; an explicit new search/refinement can observe them again.
+
+Opt-in agentic refinement (`ZS_SEARCH_AGENTIC`) checks newly retrieved identities
+before merging. A saved match survives richer metadata; explicit Add reuses its
+key. An unresolved newly retrieved identity keeps the family unknown rather than
+borrowing an older version's miss. Refinement writes no Zotero items and starts
+no automatic Add.
 
 ## Retrying Search Add
 

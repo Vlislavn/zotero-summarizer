@@ -67,6 +67,7 @@ class Candidate:
     publication_types: list[str] = field(default_factory=list)
     version_type: str = "unknown"
     provenance: list[Provenance] = field(default_factory=list)
+    family_identifier_keys: list[str] = field(default_factory=list)
     # Derived downstream:
     query_score: float | None = None   # master key — OUR cross-encoder vs the query
     goal_sim: float | None = None      # weak tiebreak (standing goals); often absent
@@ -97,6 +98,23 @@ class Candidate:
         self.arxiv_id = normalize_arxiv_id(self.arxiv_id) if self.arxiv_id else ""
         self.pmid = (self.pmid or "").strip()
         self.pmcid = (self.pmcid or "").strip()
+        if not isinstance(self.family_identifier_keys, list):
+            raise ValueError("Family identifiers must be a list of namespaced keys")
+        normalized = []
+        for key in self.family_identifier_keys:
+            if not isinstance(key, str):
+                raise ValueError("Family identifier must be a namespaced string")
+            namespace, separator, value = key.partition(":")
+            if not separator or namespace not in {"doi", "arxiv", "pmid", "pmcid", "openalex"} or not value.strip():
+                raise ValueError("Invalid family identifier namespace or value")
+            if namespace == "doi":
+                value = normalize_doi(value)
+            elif namespace == "arxiv":
+                value = normalize_arxiv_id(value)
+            if not value:
+                raise ValueError("Family identifier normalization produced an empty value")
+            normalized.append(f"{namespace}:{value}")
+        self.family_identifier_keys = list(dict.fromkeys(normalized))
         if not self.candidate_id:
             self.candidate_id = next((ident for ident in (self.doi, self.arxiv_id, self.pmid, self.pmcid,
                                                           self.openalex_id) if ident), "") or f"local:{uuid.uuid4().hex}"
@@ -112,7 +130,7 @@ class Candidate:
             ("doi", self.doi), ("arxiv", self.arxiv_id), ("pmid", self.pmid),
             ("pmcid", self.pmcid), ("openalex", self.openalex_id),
         )
-        return [f"{ns}:{val}" for ns, val in pairs if val]
+        return list(dict.fromkeys([f"{ns}:{val}" for ns, val in pairs if val] + self.family_identifier_keys))
 
     def to_dict(self) -> dict[str, Any]:
         self._validate_planned_key()
