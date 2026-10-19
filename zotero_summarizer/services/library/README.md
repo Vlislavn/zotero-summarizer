@@ -2,7 +2,10 @@
 
 Accepted digest verification retains `tldr`/`key_findings` checks in the existing
 review cache, including exact original fragments, actual selected extent and
-correction/fallback lineage. `_digest_audit` assembles/binds receipts;
+correction/fallback lineage. Attempt and retained hashes use the same declared
+`PaperDigest` fields; extra subtype metadata stays outside verifier authority.
+Projection does not mutate the original model or certify optional enrichment.
+`_digest_audit` assembles/binds receipts;
 `_digest_audit_export` qualifies them without extraction or model calls;
 `_review_cache.export_review_audit(item_key)` supplies the real local HTTP export.
 Export opens no native database and invokes no reader, including initialized

@@ -23,7 +23,8 @@ A [local read-only JSON export](docs/verification-audit.md) exposes those existi
 checks without another model call or native SQLite read. Library receipts expose
 validated retained-source evidence, not current-attachment proof. Legacy evidence
 stays unavailable; literal membership is not scientific validation, and audit-effort
-benefits are unmeasured.
+benefits are unmeasured. Audit identity covers declared digest fields, not
+optional model enrichment.
 
 Deep review rejects demonstrated access/error/login templates before model calls.
 Failures show their stage and recovery separately from scientific quality; a failed

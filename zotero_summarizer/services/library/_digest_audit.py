@@ -14,6 +14,12 @@ def canonical_hash(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def digest_contract_payload(digest: Any) -> dict:
+    from zotero_summarizer.models import PaperDigest
+
+    return digest.model_dump(mode='json', include=set(PaperDigest.model_fields))
+
+
 def contract_hashes() -> dict[str, str]:
     root = Path(__file__).parents[2]
     sources = {
@@ -109,7 +115,7 @@ def build_verification_audit(digest: Any, checks: Any, source: dict, lineage: li
                  'page_mapping_reason': 'text_extraction_has_no_page_mapping'} for i in sorted(used)]
     complete = (source['original_text'] == source['selected_text']
                 and source['locations'] == [_location(0, len(source['selected_text']), 0)])
-    verified = digest.model_dump(mode='json')
+    verified = digest_contract_payload(digest)
     return {'contract': CONTRACT, 'status': 'accepted_verifier_evidence', 'source': {
         'original_text_sha256': sha256_text(source['original_text']),
         'selected_text_sha256': sha256_text(source['selected_text']),

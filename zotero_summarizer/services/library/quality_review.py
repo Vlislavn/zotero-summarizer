@@ -172,7 +172,8 @@ def _digest_prompt(template: str, title: str, text: str, goals: str, focus_promp
 
 
 def _verification_attempt(digest: PaperDigest, correction: bool) -> dict:
-    return {'digest_sha256': _digest_audit.canonical_hash(digest.model_dump(mode='json')),
+    payload = _digest_audit.digest_contract_payload(digest)
+    return {'digest_sha256': _digest_audit.canonical_hash(payload),
             'correction': correction, 'verifier_route': 'primary'}
 
 

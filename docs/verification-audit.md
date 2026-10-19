@@ -65,11 +65,15 @@ export or a scientific rejection. Disallowed local/origin boundary: 403
 
 The receipt contains:
 
-- Exact accepted `verified_digest`, its hash, cached digest hash and explicit
+- Exact accepted `verified_digest` over the declared `PaperDigest` fields, its
+  hash, cached digest hash and explicit
   `post_verification_changes` (for example map-reduce basis and reading policy).
   Each retained claim identifies its actual verifier index, field, nested path,
   sentence-part number, text, numeric-preflight outcome and cited passage IDs.
   `matches_cached_field` prevents presenting changed findings as current support.
+  Attempt and retained hashes use this same field contract. Additional runtime
+  subtype metadata is neither silently verified nor included in those hashes;
+  projection leaves the original model untouched.
 - Actual original and selected extraction text hashes/character extents,
   extraction/verifier contract hashes, source-byte and review-generation hashes.
   `complete_extracted_text` means only that every character of this extraction

@@ -20,6 +20,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Hash attempt lineage and retained evidence through one declared PaperDigest field projection. Extra subtype metadata remains outside verification authority; preserve original models and add generic subtype regressions.
 - Never invoke native readers during audit export: read-only SQLite can write WAL sidecars. Separate validated retained-source evidence from unknown current-item binding; preserve ordinary cache identity checks. Reuse streaming hashes compatible with Python 3.10.
 - Align synthetic SQL/identity/currentness fixtures with audit boundaries; preserve label/override/read-only oracles. Add real initialized-attachment cache acceptance and changed-attachment rejection controls.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
