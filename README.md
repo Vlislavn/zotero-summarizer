@@ -119,6 +119,11 @@ After setup, go to **Today** and click **Triage backlog**
 to score your unread feed papers, then start culling. *(Going offline? Run `uv run
 zotero-summarizer prefetch-models` once while online — see [docs/usage.md](docs/usage.md).)*
 
+For remote use, explicitly configure the owner-authenticated HTTPS-to-private-Unix
+[deployment boundary](docs/local-deployment-boundary.md). Ordinary `serve` remains
+loopback-only; `make iphone` refuses rather than exposing unauthenticated LAN HTTP.
+This is not a claim of physical-device/offline/revocation acceptance.
+
 ## What you'll do
 
 - **Today — cull.** A ranked slate of fresh feed papers. Generate and inspect a full-text

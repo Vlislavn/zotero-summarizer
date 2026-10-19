@@ -4,6 +4,11 @@ Everything beyond the [README](../README.md) Quickstart: first-run setup, the tw
 run triage, how the model learns from your labels, offline use, the safety model, and the
 full config reference. (Architecture and dev workflow live in [architecture.md](architecture.md).)
 
+Remote access is opt-in through the exact-owner HTTPS/private-Unix
+[deployment boundary](local-deployment-boundary.md). Local `serve` refuses LAN
+binds; `make iphone` no longer prints an unauthenticated phone URL. Existing
+relative API/sync clients are reused; physical device/offline checks stay separate.
+
 ## Reading reviews and Zotero notes
 
 Full paper reviews lead with contribution and visible material caveats. Findings,

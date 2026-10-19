@@ -28,6 +28,7 @@ CLI setup/doctor ─┘                    ├─ per-stage inference
 
 | file | responsibility |
 |---|---|
+| `deployment.py` | Shared numeric/mapped-loopback classification and refusal for the ordinary local launcher and inbound API guard; no gateway discovery or authentication inference. |
 | `bootstrap.py` | Idempotently create absent files and migrate DBs; never overwrite user files. |
 | `detect.py` / `env_writer.py` | Find Zotero paths; atomically write validated `PDF_ROOT`/`ZOTERO_DATA_DIR`. |
 | `validate.py` | Validate drafts and optionally reuse the provider probe; write nothing. |

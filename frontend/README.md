@@ -11,7 +11,11 @@ npm run dev
 ```
 
 Vite proxies `/api/*` to `http://localhost:8000`; `npm run build` writes
-`dist/` for FastAPI.
+`dist/` for FastAPI. The dev proxy preserves browser Host/Origin for the backend's
+local admission checks; do not expose Vite as an unauthenticated remote proxy.
+The deployed SPA keeps relative API/sync URLs at the explicitly approved gateway
+origin, without frontend credentials or a second mode selector. See
+[deployment boundary](../docs/local-deployment-boundary.md).
 
 ## Product surfaces
 
@@ -214,8 +218,10 @@ expanding the page horizontally. The primary tabs wrap below narrow mobile
 widths instead of pushing the viewport beyond its edge. An offline or unchecked review model cannot
 activate Generate or auto-review; a status transport error is not called a failed
 review job. This is a
-same-machine loopback PWA boundary; remote mobile needs a future authenticated
-HTTPS deployment rather than exposing `/api/sync` directly.
+same-machine loopback PWA boundary by default. The separate explicit authenticated
+HTTPS gateway is described in [deployment boundary](../docs/local-deployment-boundary.md);
+physical device/offline/revocation acceptance remains separate. Never expose
+`/api/sync` directly as unauthenticated LAN HTTP.
 
 Sequence allocation, mutation insert, optimistic paper state, and cached-detail
 update share one IndexedDB transaction; each full pull replaces the compact

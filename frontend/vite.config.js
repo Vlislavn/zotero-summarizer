@@ -21,7 +21,8 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: process.env.VITE_API_TARGET || 'http://localhost:8000',
-        changeOrigin: true,
+        // Keep the browser authority: backend local admission compares Host/Origin.
+        changeOrigin: false,
         secure: false,
       },
     },
