@@ -190,6 +190,13 @@ def run_review(session_id: str, *, deps: SearchDeps, top_n: int = LIGHT_REVIEW_N
     heavy local-model calls is unsafe on a unified-memory box (memory-safety rule)."""
     require_online()
     sess = session_store.load(session_id)
+    if sess.discovery:
+        from zotero_summarizer.api.errors import APIError
+        from zotero_summarizer.services.search.discovery import require_current_discovery
+
+        if sess.status != "reviewing":
+            raise APIError("explicit_review_required", "Discovery requires an explicit Review claim", status_code=409)
+        require_current_discovery(sess)
     request = ScreenRequest(query=sess.raw_query, questions=sess.questions)
     fulltext: dict[str, str] = {}
     for cand in sess.candidates[:top_n]:

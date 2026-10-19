@@ -77,7 +77,7 @@ def save(session: ResearchSession) -> None:
             return
         path = _path(session.id)
         tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(session.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.write_text(json.dumps(session.to_dict(for_storage=True), indent=2, ensure_ascii=False), encoding="utf-8")
         tmp.replace(path)
 
 
@@ -155,6 +155,37 @@ def load(session_id: str) -> ResearchSession:
     """Load one session. Raises ``FileNotFoundError`` when it does not exist (the
     route maps that to a 404 — an unknown id is a client error, not a silent None)."""
     return ResearchSession.from_dict(json.loads(_path(session_id).read_text(encoding="utf-8")))
+
+
+def find_discovery(context_fingerprint: str) -> ResearchSession | None:
+    """Strict namespace lookup; corrupt/ambiguous matches are never cache misses."""
+    if len(context_fingerprint) != 64 or any(c not in "0123456789abcdef" for c in context_fingerprint):
+        raise ValueError("Invalid discovery fingerprint")
+    matches = []
+    for path in _dir().glob(f"discovery_{context_fingerprint}_*.json"):
+        with _lock_for(path.stem):
+            if is_deleted(path.stem):
+                continue
+            try:
+                sess = load(path.stem)
+            except FileNotFoundError:
+                if is_deleted(path.stem):
+                    continue
+                raise
+            discovery = sess.discovery
+            suffix = path.stem[len(f"discovery_{context_fingerprint}_"):]
+            if (sess.id != path.stem or len(suffix) != 12 or any(c not in "0123456789abcdef" for c in suffix)
+                    or type(discovery.get("version")) is not int or discovery["version"] != 1
+                    or discovery.get("context_fingerprint") != context_fingerprint
+                    or not {"seed_key", "seed_title", "snapshot", "boundary", "retrieval", "assessment",
+                            "candidate_fingerprint", "membership_digest", "phase", "attempts", "error"} <= discovery.keys()
+                    or sess.status not in {"discovery_pending", "discovery_running", "discovery_ready",
+                                           "discovery_failed", "discovery_interrupted", "reviewing", "reviewed", "error"}):
+                raise ValueError("Invalid persisted discovery identity/state")
+            matches.append(sess)
+    if len(matches) > 1:
+        raise APIError("discovery_identity_conflict", "Multiple discovery sessions match this context", status_code=409)
+    return matches[0] if matches else None
 
 
 def list_sessions() -> list[dict[str, object]]:

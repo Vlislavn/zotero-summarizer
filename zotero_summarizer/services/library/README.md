@@ -436,6 +436,11 @@ Cached empty digests without `needs_pdf` are stale and recomputed; legitimate
 no-PDF entries remain current. Dense goal-encoder inference failures disable only
 that retrieval leg so an available BM25 leg can still produce a result.
 
+Discovery reuses the attributed seed-comment and consent/quote validation owners.
+External candidates have unavailable private context, not observed-empty notes.
+Only explicit Find consent invokes assessment; saved Related behavior is unchanged.
+See [Discovery](../../../docs/discovery.md).
+
 ## Related saved papers
 
 `related.py` reuses `_search.hybrid_search` for up to three saved-paper links on

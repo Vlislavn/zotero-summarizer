@@ -73,8 +73,13 @@ See [search](zotero_summarizer/services/search/README.md).
 The shared Today/Library paper page offers **Related in my library** over saved
 metadata, including already-read papers. An optional, explicitly consented
 comment-context experiment uses the configured review model on complete seed and
-candidate notes. It remains unqualified and off by default; no external discovery
-or automatic Add occurs. Stage-client cache publication is bound to its actual
+candidate notes. It remains unqualified and off by default. Saved seeds additionally
+offer **Find new relevant**: OpenAlex semantic/lexical public-metadata discovery,
+with optional explicitly consented seed comments applied only inside the named
+processing boundary. Ordinary topic Search retains its other sources. Search
+shows qualified evidence and retained candidates; Review and Add are explicit and
+server freshness remains authoritative. See the [server/privacy contract](docs/discovery.md)
+and [discovery UI](docs/discovery-ui.md). Stage-client cache publication is bound to its actual
 effective routing snapshot and invalidation generation, not current metadata alone.
 Saving seed notes/verdicts hides prior related context and fences old reads until
 an explicit fresh load. See [related saved papers](docs/related-saved-papers.md)

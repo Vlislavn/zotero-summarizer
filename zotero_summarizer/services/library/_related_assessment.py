@@ -13,7 +13,7 @@ from zotero_summarizer.settings import offline_requested
 DEFAULT_CANDIDATES = 10
 DEFAULT_INPUT_CHARS = 30000
 
-_PROMPT = """Assess saved papers for a reader reviewing the seed. Return each candidate exactly once,
+_PROMPT = """Assess supplied paper records for a reader reviewing the seed. Return each candidate exactly once,
 ordered by usefulness of its connection. This is experimental, metadata-bound judgment, not a scientific finding.
 Interpret complete RU/EN comments in context, including negation, exclusions and criticism. Negative text is
 NOT a positive interest. A candidate's comments may explain why NOT to recommend it. Respect current human

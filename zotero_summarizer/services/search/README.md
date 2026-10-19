@@ -1,5 +1,11 @@
 # services/search — Targeted Search (the query-driven pull surface)
 
+Discovery reuses identifier union-find for app-linked native seed families,
+including alternating app-alias and DOI/arXiv links until closure. Only that family's complete comments own
+freshness; unrelated notes do not. Candidate identity selects declared public
+metadata, not later operation/question-evidence fields. Ordinary HTTP sessions
+retain empty Discovery objects, distinguished from real Discovery state in the UI.
+
 The library/triage domains are *push*: papers arrive from feeds and you cull them.
 This domain is *pull*: you give a research topic, and it federates the open
 literature + (later) your library, ranks by real relevance, and deep-reads a few —
@@ -49,6 +55,14 @@ review claim. Related sessions are omitted from the Search sidebar. No federatio
 Search review or materialization is started by that flow. See
 [related saved papers](../../../docs/related-saved-papers.md) for consent,
 work ceilings, invalidation and unqualified semantic judgments.
+
+`discovery.py` reuses public Search and consent-bound seed context. Raw session
+snapshots serialize only for storage; HTTP uses freshness-qualified views.
+Find V1 schedules only OpenAlex semantic/lexical; ordinary all-source Search remains
+unchanged. Only explicit Review may claim discovery; new Add preflights before effects.
+Stale retained plans require an explicit existing-only native ACK (exact key,
+empty steps, no backup) before app finalization, never exception-time readback.
+See [server contract](../../../docs/discovery.md).
 
 ## Why this shape
 
@@ -279,8 +293,10 @@ existing two-lexical-pass cap remains. No additional provider framework.
 
 Accounting snapshots observations before mutable family merging. Every scheduled
 variant records its query, allocation, observations and state, including zero hits.
-Best-effort leaves do not distinguish transport failure from a genuine empty
-result: those states stay `unknown`, never successful. Source family counts are
+Ordinary calls keep best-effort empty states `unknown`. Opt-in
+`observe_outcomes=True` retains distinct per-request OpenAlex channel/outcome receipts;
+see [provider receipts](../../../docs/discovery-provider-receipts.md).
+Source family counts are
 cross-source attributed (not globally additive); type-unknown and other rejection
 counts survive persistence. Refinement stores its round's accounting separately.
 

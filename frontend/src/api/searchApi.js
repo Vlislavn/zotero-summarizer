@@ -20,8 +20,11 @@ export async function startReview(sessionId) {
 }
 
 /** GET /api/search/{id} — poll one session (status + candidates + reviews). */
-export async function getSession(sessionId) {
-  return request(`/api/search/${encodeURIComponent(sessionId)}`, { signal: AbortSignal.timeout(15_000) });
+export async function getSession(sessionId, { signal } = {}) {
+  const timeout = AbortSignal.timeout(15_000);
+  return request(`/api/search/${encodeURIComponent(sessionId)}`, {
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+  });
 }
 
 /** POST /api/search/{id}/materialize — file one candidate into a chosen Zotero

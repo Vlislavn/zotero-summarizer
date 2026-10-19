@@ -1,5 +1,9 @@
 # integrations — external-system adapters
 
+Opt-in OpenAlex search receipts reject nonfinite decoded JSON as parse failure
+before publishing hits. Ordinary/no-receipt payload policy remains unchanged;
+malformed variants do not invalidate independently usable neighboring requests.
+
 Thin, low-level clients for everything outside the app: the local Zotero
 SQLite DB, PDFs, the LLM, OpenAlex (prestige), Unpaywall (OA PDFs), and the
 Targeted Search sources (arXiv/EuropePMC/Crossref/Semantic Scholar + the
@@ -128,6 +132,11 @@ Feed materialization acquires `BEGIN IMMEDIATE` before its existing-key probe
 and writes all item/collection/tag/note steps in that transaction. Replaying a
 committed user-library key is a no-op for the whole operation, preserving later
 user edits; callers must reuse a reserved key only for the same creation intent.
+Explicit `existing_only=True` instead opens SQLite URI `mode=ro` with `query_only`
+and acknowledges only that user-library key (missing→None), bypassing backup,
+pruning, mutating PRAGMAs and materialization. This current no-op ACK does not
+certify an earlier raised attempt, live/untrashed membership or physical DB identity.
+Ordinary WAL-read filesystem effects remain possible.
 Queued feed-read writes verify both item and feed-library IDs and preserve an
 existing read timestamp. Note insertion deduplicates identical visible HTML;
 upsert requires a marker in its HTML and matches it literally among live notes.
@@ -141,6 +150,10 @@ shared tag records or links belonging to other items. A one-row lookup is still
 appropriate for tag creation/reuse, but cannot implement complete removal.
 Adapters are leaves — they depend only on stdlib, third-party clients, and
 `models`/`domain`.
+
+OpenAlex search accepts optional request-local `outcome` receipts; ordinary calls
+and all other source leaves stay unchanged. HTTP, transport and malformed payloads are not successful empty
+responses. See [provider receipts](../../docs/discovery-provider-receipts.md).
 
 Stored-attachment names strip separators and non-printable Unicode characters.
 Known PDF/PNG extensions are normalized and reserved before the 120-character

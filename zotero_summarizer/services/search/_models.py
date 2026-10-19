@@ -277,12 +277,17 @@ class ResearchSession:
     screened_count: int = 0
     refinements: list[dict[str, Any]] = field(default_factory=list)
     related: dict[str, Any] = field(default_factory=dict)
+    discovery: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         _require_unique_addresses(self.candidates)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, for_storage: bool = False) -> dict[str, Any]:
         _require_unique_addresses(self.candidates)
+        discovery = dict(self.discovery) if for_storage else {}
+        if self.discovery and not for_storage:
+            discovery = {"version": self.discovery.get("version"), "seed_key": self.discovery.get("seed_key"),
+                         "freshness": "unverified", "new_actions_allowed": False}
         return {
             "id": self.id,
             "created_at": self.created_at,
@@ -295,10 +300,14 @@ class ResearchSession:
             "screened_count": self.screened_count,
             "refinements": [dict(r) for r in self.refinements],
             "related": dict(self.related),
+            "discovery": discovery,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ResearchSession":
+        discovery = dict(data.get("discovery") or {})
+        if discovery and not {"snapshot", "context_fingerprint", "candidate_fingerprint"} <= discovery.keys():
+            raise ValueError("Discovery projections cannot restore durable sessions")
         candidates = []
         for index, row in enumerate(data.get("candidates") or []):
             candidate = Candidate.from_dict(row)
@@ -320,4 +329,5 @@ class ResearchSession:
             screened_count=int(data.get("screened_count") or 0),
             refinements=[dict(r) for r in data.get("refinements") or []],
             related=dict(data.get("related") or {}),
+            discovery=discovery,
         )

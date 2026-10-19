@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services.library import (
@@ -21,6 +21,7 @@ from zotero_summarizer.services.library import (
     university_access,
 )
 from zotero_summarizer.services.library.review_fleet import fleet as review_fleet
+from zotero_summarizer.services.search import discovery
 from zotero_summarizer.services.zotero.zotero import (
     get_library_reader,
     get_zotero_reader_or_raise,
@@ -59,6 +60,13 @@ class RelatedAssessmentRequest(BaseModel):
     consent_token: str = Field(min_length=64, max_length=64)
     collection: str = Field(default="", max_length=100)
     tag: str = Field(default="", max_length=200)
+    retry: bool = False
+
+
+class DiscoveryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    context_fingerprint: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    consent_token: str | None = Field(default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
     retry: bool = False
 
 
@@ -132,6 +140,15 @@ async def get_related_papers(item_key: str, collection: str = "", tag: str = "")
 
 async def assess_related_papers(item_key: str, req: RelatedAssessmentRequest) -> dict[str, Any]:
     return await asyncio.to_thread(related.assess_related, item_key, **req.model_dump())
+
+
+async def get_discovery(item_key: str) -> dict[str, Any]:
+    return await asyncio.to_thread(discovery.discovery_metadata, item_key)
+
+
+async def find_new_relevant(item_key: str, req: DiscoveryRequest) -> dict[str, Any]:
+    sess = await asyncio.to_thread(discovery.find_new, item_key, **req.model_dump())
+    return await asyncio.to_thread(discovery.discovery_view, sess)
 
 
 async def get_reading_queue_status() -> dict[str, Any]:
@@ -341,6 +358,8 @@ async def sync_score_ranks(req: RelTagSyncRequest) -> dict[str, Any]:
     return await asyncio.to_thread(score_tags.sync_score_ranks, force=req.force)
 
 
+router.add_api_route("/api/library/related/{item_key}/discover", get_discovery, methods=["GET"])
+router.add_api_route("/api/library/related/{item_key}/discover", find_new_relevant, methods=["POST"])
 router.add_api_route("/api/library/related/{item_key}", get_related_papers, methods=["GET"])
 router.add_api_route("/api/library/related/{item_key}/assess", assess_related_papers, methods=["POST"])
 router.add_api_route("/api/library/reading-queue", get_reading_queue, methods=["GET"])

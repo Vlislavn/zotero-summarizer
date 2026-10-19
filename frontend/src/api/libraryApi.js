@@ -32,6 +32,28 @@ export async function fetchRelatedPapers(itemKey, { signal } = {}) {
   return request(`/api/library/related/${encodeURIComponent(itemKey)}`, { signal });
 }
 
+export async function fetchDiscovery(itemKey, { signal } = {}) {
+  const data = await request(`/api/library/related/${encodeURIComponent(itemKey)}/discover`, { signal });
+  const hash = value => typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value);
+  if (data?.seed_key !== itemKey || !['saved', 'not_saved', 'unknown'].includes(data?.admission?.state)
+      || (data.context_fingerprint !== null && !hash(data.context_fingerprint))) throw new Error('Invalid discovery metadata');
+  if (data.admission.state === 'saved' && (!data.private_context || !data.boundary
+      || !['observed', 'empty', 'partial', 'unavailable'].includes(data.private_context.status)
+      || !['native', 'user_approved'].includes(data.admission.basis)
+      || (data.private_context.record_count !== null && (!Number.isInteger(data.private_context.record_count) || data.private_context.record_count < 0))
+      || typeof data.boundary.enabled !== 'boolean' || !hash(data.boundary.token)
+      || (data.boundary.endpoint != null && typeof data.boundary.endpoint !== 'string')
+      || typeof data.boundary.provider !== 'string' || typeof data.boundary.model !== 'string')) throw new Error('Invalid discovery boundary/context');
+  return data;
+}
+
+export async function findNewRelevant(itemKey, { contextFingerprint, consentToken = null, retry = false, signal } = {}) {
+  return request(`/api/library/related/${encodeURIComponent(itemKey)}/discover`, {
+    method: 'POST', signal,
+    body: JSON.stringify({ context_fingerprint: contextFingerprint, consent_token: consentToken, retry }),
+  });
+}
+
 export async function assessRelatedPapers(itemKey, consentToken, retry = false) {
   return request(`/api/library/related/${encodeURIComponent(itemKey)}/assess`, {
     method: 'POST', body: JSON.stringify({ consent_token: consentToken, retry }),

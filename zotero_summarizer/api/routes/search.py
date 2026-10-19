@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services.search import session as session_store
-from zotero_summarizer.services.search import require_online
+from zotero_summarizer.services.search import discovery, require_online
 from zotero_summarizer.services.search._models import ScreenRequest
 from zotero_summarizer.services.search.pipeline import default_deps, run_review, run_screen
 from zotero_summarizer.services.search.refine import agentic_enabled, run_agentic_rounds
@@ -50,7 +50,7 @@ async def screen(req: ScreenRequest) -> dict[str, Any]:
     sess = await asyncio.to_thread(run_screen, req.query, req.questions, deps=deps, constraints=req.constraints)
     await asyncio.to_thread(_kickoff_review, sess.id)
     fresh = await asyncio.to_thread(session_store.load, sess.id)
-    return fresh.to_dict()
+    return await asyncio.to_thread(discovery.discovery_view, fresh) if fresh.discovery else fresh.to_dict()
 
 
 def _review_worker(session_id: str) -> None:
@@ -60,8 +60,12 @@ def _review_worker(session_id: str) -> None:
     When agentic search is enabled, the PRF refinement rounds run FIRST so the deep
     set is chosen from the refined pool (plan Phase E — "E gates A's trigger")."""
     try:
+        sess = session_store.load(session_id)
+        if sess.discovery and sess.status != "reviewing":
+            raise APIError("explicit_review_required", "Discovery requires an explicit Review claim", status_code=409)
+        discovery.require_current_discovery(sess)
         deps = default_deps()
-        if agentic_enabled():
+        if not sess.discovery and agentic_enabled():
             run_agentic_rounds(session_id, deps=deps)
         run_review(session_id, deps=deps)
     except Exception as exc:  # noqa: BLE001 — surface the failure on the session, then log
@@ -70,12 +74,17 @@ def _review_worker(session_id: str) -> None:
         raise
 
 
-def _kickoff_review(session_id: str) -> bool:
+def _kickoff_review(session_id: str, *, explicit: bool = False) -> bool:
     """Single-flight the review worker: atomically claim ``screened`` → ``reviewing``
     and spawn the thread. Returns False if another worker already owns it (or the
     session is terminal), so auto-start + a manual click can't stack workers."""
     require_online()
-    if not session_store.claim(session_id, expect="screened", to="reviewing"):
+    sess = session_store.load(session_id)
+    if sess.discovery and not explicit:
+        raise APIError("explicit_review_required", "Discovery cannot enter automatic Review", status_code=409)
+    discovery.require_current_discovery(sess)
+    expected = "discovery_ready" if sess.discovery else "screened"
+    if not session_store.claim(session_id, expect=expected, to="reviewing"):
         return False
     threading.Thread(target=_review_worker, args=(session_id,), daemon=True).start()
     return True
@@ -84,7 +93,7 @@ def _kickoff_review(session_id: str) -> bool:
 async def start_review(session_id: str) -> dict[str, Any]:
     """Phase 2 — kick off the review in the background; poll GET for completion. Now
     usually a no-op since ``screen`` auto-starts it, but kept for an explicit re-trigger."""
-    started = await asyncio.to_thread(_kickoff_review, session_id)
+    started = await asyncio.to_thread(_kickoff_review, session_id, explicit=True)
     if not started:
         sess = await asyncio.to_thread(session_store.load, session_id)
         return {"accepted": False, "status": sess.status}
@@ -100,7 +109,7 @@ async def get_session(session_id: str) -> dict[str, Any]:
             message=f"no such search session: {session_id}",
             status_code=404,
         ) from exc
-    return sess.to_dict()
+    return await asyncio.to_thread(discovery.discovery_view, sess) if sess.discovery else sess.to_dict()
 
 
 async def materialize(session_id: str, req: MaterializeRequest) -> dict[str, Any]:

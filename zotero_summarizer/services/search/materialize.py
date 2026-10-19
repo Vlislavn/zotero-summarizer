@@ -85,13 +85,19 @@ def materialize_candidate(
 
     def _do_write(cand: Candidate, sess: ResearchSession) -> str:
         nonlocal reused_existing
-        if cand.existing_zotero_key:
-            if cand.planned_zotero_key and cand.planned_zotero_key != cand.existing_zotero_key:
-                raise APIError(
-                    error="search_write_conflict", status_code=409,
-                    message="Saved library coverage conflicts with the retained Add identity. "
-                            "Reconcile the library before retrying.",
-                )
+        from zotero_summarizer.services.search.discovery import _freshness, require_current_discovery
+
+        existing_only = bool(sess.discovery and cand.planned_zotero_key and _freshness(sess) != "current")
+        if not existing_only:
+            require_current_discovery(sess)  # Already-materialized replay never enters do_write.
+        if (cand.existing_zotero_key and cand.planned_zotero_key
+                and cand.planned_zotero_key != cand.existing_zotero_key):
+            raise APIError(
+                error="search_write_conflict", status_code=409,
+                message="Saved library coverage conflicts with the retained Add identity. "
+                        "Reconcile the library before retrying.",
+            )
+        if cand.existing_zotero_key and not existing_only:
             reused_existing = True
             return cand.existing_zotero_key
         try:
@@ -107,14 +113,20 @@ def materialize_candidate(
             session_store.save(sess)  # Persist identity before backup or any native write.
         new_key = cand.planned_zotero_key
         try:
-            writer.apply_feed_materialization(
+            receipt = writer.apply_feed_materialization(
                 new_item_key=new_key,
                 feed_payload=_feed_payload(cand),
                 inbox_collection_name=collection_name,
                 tags=[_TAG],
                 note_title=f"Targeted Search: {sess.raw_query[:80]}",
                 note_html=_note_html(cand, sess.raw_query),
+                **({"existing_only": True} if existing_only else {}),
             )
+            if existing_only:
+                if (type(receipt) is not dict
+                        or receipt != {"item_key": new_key, "applied_steps": [], "backup_path": None}):
+                    raise APIError("search_write_unconfirmed", "Retained Add was not acknowledged", status_code=409)
+                reused_existing = True
         except ZoteroWriteError as exc:
             # Surface the failure without claiming delivery; retain the plan for retry.
             raise APIError(
