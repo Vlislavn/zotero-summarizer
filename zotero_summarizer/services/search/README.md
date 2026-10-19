@@ -135,6 +135,20 @@ work ceilings, invalidation and unqualified semantic judgments.
 | `refine.py` | bounded opt-in agentic PRF before auto-review; no-ops under strict offline |
 | `session.py` | one-JSON-per-session persistence under `settings().search_dir` + per-session lock: `claim` (status CAS, single-flights the worker), `save_merge` (whole-session save that preserves a concurrent Add's `materialized_zotero_key`), `update` (read-modify-write), `materialize_once` (Add's check-write-stamp under the lock, single-write). Malformed id → `APIError(400)` |
 
+Refinement annotates newly fetched DOI/arXiv observations before merging.
+`Candidate.family_identifier_keys` retains the complete normalized identifier
+union independently of the preferred bibliography and survives session JSON.
+`identifier_keys()` reuses that union in later transitive merges. Coverage checks
+all retained DOI/arXiv alternatives: any actual hit supplies its returned key,
+only complete misses establish False, and partial failures stay unknown. Family
+merging also preserves unknown members instead of borrowing another version's
+older miss; a genuine positive still dominates. A genuine positive key is captured before preferred-member mutation; stale miss keys cannot
+replace it. No title-only merge or candidate-address-as-identifier inference.
+Legacy sessions default to no extra observed identities; discarded aliases are not
+reconstructed. Existing reviews, addresses and scores survive; explicit Add reuses
+a confirmed saved key. The refinement/family-identifier tests use controlled
+readers and JSON round trips, not live sources, native writes or scientific truth.
+
 ## Execution and identity boundaries
 
 Screening accepts a nonblank topic of at most 4,000 characters and up to ten
