@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Route both local calibration client constructions through existing setup admission, including cached Tier-1 runs. Unknown effective resources refuse before credentials, inference or new calibration output; HTTP jobs expose error, not Ready. Hosted and ordinary application calls are unchanged.
 - Make setup verification evidence-bound: refuse local loads without an envelope before credentials, verify hosted identity, preserve cancellation uncertainty, and fence stale Ready. Ordinary explicitly configured credentials remain intact; local clients still need no key.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.

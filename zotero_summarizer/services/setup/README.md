@@ -9,6 +9,9 @@ and dry-run callbacks refuse UNKNOWN before constructing a client; this includes
 loopback native Anthropic. No operator policy/synthetic numeric-success API is
 introduced. Hosted/no-LLM and nonloading metadata remain available. The existing
 bounded cache-only ML asset subprocess is separate from LLM admission.
+The shared calibration orchestrator opts into this admission for both local
+client constructions, including cached Tier-1 runs; HTTP jobs surface refusal
+as an error, not Ready. Hosted calibration retains ordinary transport behavior.
 
 `load_attempt.py` uses setup's daemon-worker pattern with a bounded waiter and
 callback-owned exclusion. Cancellation/timeout stops later requests, never claims

@@ -83,6 +83,12 @@ evidence. Hardware-safe Full-local completion of issue #11 remains unfulfilled.
 Local detection includes all literal 127/8 and IPv4-mapped IPv6 loopbacks; it does
 not discover DNS aliases. Prior verification revision v1 is no longer accepted.
 
+`calibrate` and the HTTP calibration job apply this same admission before both
+local client constructions. Cached Tier-1 output does not grant permission, and
+a later refusal cannot be reported as a completed calibration. No constructor,
+credential lookup, prompt or calibration write follows initial UNKNOWN refusal.
+Hosted calibration and explicitly configured ordinary application calls are unchanged.
+
 Runtime/model inventory recovery names the failing provider, model and endpoint.
 A healthy Ollama sibling cannot prescribe `ollama serve` or `ollama pull` for a
 failing vLLM, MLX or LM Studio endpoint. Ollama suggestions apply only to the failing

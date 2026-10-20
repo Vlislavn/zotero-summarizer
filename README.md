@@ -124,6 +124,9 @@ loopback needs no API key. Hosted and No LLM verification remain available; issu
 IPv4-mapped IPv6 loopbacks share this guard; mixed-runtime recovery names the
 failing endpoint rather than borrowing a sibling's Ollama command. See
 [setup verification](docs/usage.md#setup-verification-and-recovery).
+Local calibration uses the same admission at both client constructions, including
+cached Tier-1 runs; it cannot bypass UNKNOWN to load a model or publish success.
+Hosted calibration and ordinary application clients retain their existing behavior.
 
 After setup, go to **Today** and click **Triage backlog**
 to score your unread feed papers, then start culling. *(Going offline? Run `uv run
