@@ -152,6 +152,10 @@ stage routing, classifier gate, corpus). Secrets stay **name-only** everywhere i
 collects the env-var name, never the raw value. Everything else has working defaults. Full
 reference in [docs/usage.md](docs/usage.md).
 
+CLI commands select `--project-root` before loading its `.env`; an unselected
+project's configuration is not imported into the process. Invalid command budgets
+refuse before Settings loading. See [CLI configuration](docs/usage.md#configuration-reference).
+
 ## Commands
 
 ```bash

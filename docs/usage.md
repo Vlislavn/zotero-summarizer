@@ -322,6 +322,19 @@ Two files under the project root, both gitignored and created for you on first r
   **Settings** page; the app serializes the file. (Hand-edits are tolerated but the app is the
   writer of record.)
 
+CLI import and parser construction do not load a default project's `.env` or model
+SDKs. The dispatcher validates command budgets first, then loads the selected
+`--project-root` through Settings and applies offline flags before handler model
+imports. No additional root is read by the offline helper. Existing Settings
+precedence is unchanged: selected `.env` values override the same inherited keys;
+keys absent from that file retain explicitly inherited shell values. For example:
+
+```bash
+zotero-summarizer migrate --project-root /path/to/project
+```
+
+This selects configuration; it is not an OS sandbox or process-lifetime guarantee.
+
 ### Settings page — Essentials vs Advanced
 
 Settings is chunked to keep the common path short:

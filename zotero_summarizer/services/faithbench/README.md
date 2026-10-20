@@ -20,6 +20,12 @@ builder LLM ──► [_build_qa] ─► benchmark_vN.jsonl ─► [_runner] ─
                                           [_build_claims] digest→claims      │  (residual only)
 ```
 
+Package exports resolve lazily to the same defining objects. Constants and pure
+`_options.RunOptions` validation can be used by CLI admission without importing
+corpus/model/execution modules. The runner imports that same options class;
+benchmark algorithms, defaults, prompts and validation remain unchanged. Code
+identity guards may conservatively require a new run after a source refactor.
+
 ## Stages (all resumable, all artifacts under `data/faithbench/`)
 
 1. **build** (`_corpus` + `_build_qa`): select papers with local PDFs, extract
@@ -193,6 +199,7 @@ to be re-used:
 | file | role |
 |---|---|
 | `_constants.py` | pinned `DEFAULT_JUDGE_MODEL` + env-var names + thresholds |
+| `_options.py` | pure `RunOptions`, conditions/tracks shared by pre-Settings CLI validation and execution |
 | `_judgment.py` | tri-state `Judgment`, closed `FailureReason`/`JudgeMethod` enums |
 | `_dataset.py` | benchmark schemas, versioned JSONL persistence, review CSV |
 | `_corpus.py` | paper selection/extraction, frozen text, `normalize_text` (shared by gate AND judge), chunking, per-paper BM25 (word `tokenize` reused from `storage.corpus_bm25`); `PaperSubstrate` bundles a paper's text+norm+chunk-index (the trio `_judge`/`_runner` cache per paper) |

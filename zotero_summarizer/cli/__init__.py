@@ -17,21 +17,8 @@ def apply_offline_env() -> bool:
     ~10–30 s before falling back to cache. Triggered by ``ZS_OFFLINE`` (shell or
     .env) or a pre-set ``HF_HUB_OFFLINE=1``.
 
-    MUST run before any ``transformers``/``sentence_transformers`` import, so it
-    is invoked at CLI module load (above the heavy submodule imports below) and
-    returns whether offline mode is on. Reads .env (shell vars win)."""
-    from dotenv import load_dotenv
-    from zotero_summarizer.settings import default_project_root
-
-    # This bootstrap reads the default root, not necessarily the project selected by a CLI
-    # command. Keep its .env value from masquerading as an inherited shell override.
-    budget_env = "ZS_FAITHBENCH_QA_MAX_BUILDER_WINDOWS"
-    shell_set_budget = budget_env in os.environ
-    env = default_project_root() / ".env"
-    if env.exists():
-        load_dotenv(env, override=False)
-    if not shell_set_budget:
-        os.environ.pop(budget_env, None)
+    Called after the selected Settings loads its .env and before handler model
+    imports. Projects the effective environment without reading another root."""
     val = (os.getenv("ZS_OFFLINE") or "").strip().lower()
     offline = val in ("1", "true", "yes", "on") or (os.getenv("HF_HUB_OFFLINE") or "").strip() == "1"
     if offline:
@@ -39,9 +26,6 @@ def apply_offline_env() -> bool:
         os.environ["TRANSFORMERS_OFFLINE"] = "1"
     return offline
 
-
-# Apply BEFORE the submodule imports below pull in transformers (transitively).
-apply_offline_env()
 
 from zotero_summarizer.cli._app import register_app  # noqa: E402
 from zotero_summarizer.cli._faithbench import register_faithbench, _validate_faithbench_args  # noqa: E402
@@ -77,6 +61,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.command == "research-feed":
         _validate_research_feed_args(args, parser)
     set_context(AppContext(settings=Settings.load(project_root=getattr(args, "project_root", None))))
+    apply_offline_env()
     return int(args.func(args))
 
 
