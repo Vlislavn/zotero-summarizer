@@ -163,6 +163,12 @@ Ownership, replay and manual-note isolation are covered by
 `tests/test_zotero_note_envelope.py`. Native acceptance receipts remain private.
 
 CompletionGuard raises typed `LLMOutputTruncated(RuntimeError)` only for observed `length`; metadata-only logs and its diagnostic message remain unchanged.
+`observe_completions` is an explicit invocation-scoped observer before parsing or
+truncation rejection. The interpretation experiment attaches it inside each
+client call, including parallel map workers; aggregate provider usage is one event,
+not multiplied by generation count. No observer means no decoded/raw retention.
+Missing provider usage/model metadata stays unknown; observed model names do not
+pin mutable remote weights. Ordinary logging remains metadata-only.
 
 Analysis-source serialization correction (CAPA: proven for the checked PDF):
 

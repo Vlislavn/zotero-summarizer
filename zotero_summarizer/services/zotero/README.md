@@ -1,5 +1,11 @@
 # services/zotero — Zotero access + optional read resolver
 
+`build_digest_note_html(..., interpretation=record)` accepts an explicitly supplied
+qualified experiment record whose digest must match the rendered digest. It reuses
+Library's shared three-group projection and keeps ownership metadata as the final
+paragraph. Ordinary callers/default HTML are unchanged. This builds HTML only;
+no experiment result grants native-write consent or target/Add authority.
+
 The only road back into Zotero. Triage never writes directly: it queues
 **pending changes** that you review, then apply. Apply backs up the Zotero DB
 first. Also holds read helpers for the Zotero routes, note interpretation, and

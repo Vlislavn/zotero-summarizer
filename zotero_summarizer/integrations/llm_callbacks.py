@@ -1,11 +1,24 @@
 """Observe completion metadata before OnPrem reduces responses to plain text."""
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.outputs import LLMResult
 
 from .llm import LOGGER
+
+_OBSERVER = ContextVar('completion_observer', default=None)
+
+
+@contextmanager
+def observe_completions(consume):
+    token = _OBSERVER.set(consume)
+    try:
+        yield
+    finally:
+        _OBSERVER.reset(token)
 
 
 class LLMOutputTruncated(RuntimeError):
@@ -18,6 +31,9 @@ class CompletionGuard(BaseCallbackHandler):
 
     def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
         usage = (response.llm_output or {}).get("token_usage", {})
+        observer = _OBSERVER.get()
+        if observer is not None:
+            observer(response)
         for generations in response.generations:
             for generation in generations:
                 reason = (generation.generation_info or {}).get("finish_reason")

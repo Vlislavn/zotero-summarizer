@@ -16,6 +16,14 @@ keep/trash decisions train the model, so tomorrow's slate is sharper.
 the model learns from how you triage). The app owns current decisions and their history;
 Zotero remains the PDF/citation surface and a synced representation of approved tags/notes.
 
+## Opt-in interpretation experiment
+
+[Compare current/caution/card digests and grounded Q&A](docs/interpretation-experiment.md)
+on frozen, human-approved sources. Inspection makes no model calls; execution and
+sensitive capture require explicit flags. Independent human judgments and complete
+operational evidence gate any conditional pilot recommendation. Defaults and native
+write/Add authority remain unchanged; benefit is not established by protocol tests.
+
 ## Review recovery and search constraints
 
 Accepted deep reviews retain original-source evidence for their digest findings.

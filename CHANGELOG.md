@@ -10,7 +10,12 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Keep tightened interpretation resource caps inclusive with exact token-count and decimal-latency arithmetic. Preserve mean/median reporting, per-paper and independent unknown/refusal gates; no rounding tolerance or threshold changes.
+
+- Reject malformed persisted interpretation states without losing qualified base rendering; evaluate known timing/token breaches independently of unrelated unknown observations.
+
 ### Changed
+- Add opt-in frozen A/B/C interpretation runs, strict independent card checks, original-authority Q&A, audited brief/native HTML and blinded human reporting. Preserve defaults/Add authority and failed-question denominators; human benefit remains unmeasured.
 - Retain accepted digest finding checks and exact original-source fragments in the review cache. Add a local read-only audit export with stale/legacy/error distinctions; no extra model calls or measured human-audit benefit.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.

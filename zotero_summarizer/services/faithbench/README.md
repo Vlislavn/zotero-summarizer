@@ -1,5 +1,26 @@
 # services/faithbench — faithfulness mini-benchmark
 
+`_interpretation_inputs` admits a separate opt-in experiment recipe over existing
+frozen benchmarks, exact approved references and source texts. It requires four
+answerability/stance cells per held-out paper, clinical/agent coverage, nonempty
+family/version/time metadata and a separate earlier tuning cohort. Inspection is
+read-only. Explicit preparation freezes a private attempt and verifies its own
+approved reference before provider construction; existing runs/caches are untouched.
+Recipe limits and stricter-only project thresholds are validated, not silently
+coerced. Declared runtime conditions, unknown physical retries and mutable remote
+weight identity are distinct from observed completion data and scientific benefit.
+Exact duplicate evaluation extractions refuse admission even with different family
+names. Current strategy-selected profiles and `RuntimeState` own model/thinking
+resolution; no second client cache is introduced. Card judgments use independent
+random IDs and a separate source/check/passage packet; review/QA packets omit cards.
+Known refusal gates do not depend on unrelated missing judgments. Timing and token
+caps use independent required evidence; either known breach refuses even when the
+other observation is unknown, while success requires both. Point thresholds
+use exact assigned-count fractions, not rounded/subtracted float rates. Inclusive
+resource caps use exact token counts and captured decimal latency; displayed means
+are unchanged and checked against their count maps. No epsilon relaxes a breach.
+Saved optional acceptance must match its retained invocation tape on reopening.
+
 `_corpus.chunk_spans` exposes the exact stripped coordinates used by `chunk_text`
 and `PaperChunkIndex`; repeated occurrences remain distinct. Digest audit retention
 reuses these offsets without changing chunks, ranking or semantic judgments.
