@@ -29,6 +29,10 @@ browser restrictions while preserving interactive acquisition.
 with hostile closing-tag markup across source fields and an unchanged plain-text
 control. These are structural boundary tests, not live semantic safety evidence.
 
+`test_feed_runtime_contracts.py` covers verifier/generator effort separation,
+advertised wire dialects, unsupported-provider preservation and JSON-only CLI
+stdout when runtime diagnostics are printed. Live model receipts remain separate.
+
 Full verification commands and the known macOS native-library fork baseline are
 in [architecture.md](../docs/architecture.md#verify-a-change). Compare the failed
 set against that baseline rather than hiding failures. Authored/static-checked

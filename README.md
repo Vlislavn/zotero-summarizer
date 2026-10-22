@@ -182,7 +182,9 @@ uv run zotero-summarizer faithbench build --max-builder-windows 64  # larger QA-
   visible (CLI exit 1). Weekly acquisition never opens a browser; missing abstract
   stages are errors, and omitted projects remain unknown. Shared abstract prompts
   escape source boundary markup; semantic injection resistance is not established.
-  Saved v1 reports are not rewritten.
+  Saved v1 reports are not rewritten. Partial-run diagnostics stay on stderr so
+  CLI stdout remains parseable JSON; verification requests supported thinking-off
+  without changing the digest's configured reasoning effort.
 - **[docs/architecture.md](docs/architecture.md)** — how it works, the layering rules, and
   the dev / verification workflow.
 - **[CHANGELOG.md](CHANGELOG.md)** — notable changes (latest: the guided first-run setup).

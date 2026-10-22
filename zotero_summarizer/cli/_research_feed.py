@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import redirect_stdout
 import json
 from datetime import datetime
+import sys
 
 
 def _date(value: str) -> datetime:
@@ -19,14 +21,15 @@ def _run(args: argparse.Namespace) -> int:
     from zotero_summarizer.services.research_feed import run_weekly
 
     settings = current_settings()
-    if not args.cached_only:
-        lifecycle.startup(background=False)
-    result = run_weekly(
-        settings, start=args.start, end=args.end, venue=args.venue,
-        shortlist_budget=args.shortlist_budget, card_budget=args.card_budget,
-        dry_run=not args.queue_zotero, queue_zotero=args.queue_zotero,
-        generate_reviews=not args.cached_only, review_timeout_seconds=args.review_timeout,
-    )
+    with redirect_stdout(sys.stderr):
+        if not args.cached_only:
+            lifecycle.startup(background=False)
+        result = run_weekly(
+            settings, start=args.start, end=args.end, venue=args.venue,
+            shortlist_budget=args.shortlist_budget, card_budget=args.card_budget,
+            dry_run=not args.queue_zotero, queue_zotero=args.queue_zotero,
+            generate_reviews=not args.cached_only, review_timeout_seconds=args.review_timeout,
+        )
     print(json.dumps(result, indent=2))
     return 1 if result.get("failed", 0) else 0
 

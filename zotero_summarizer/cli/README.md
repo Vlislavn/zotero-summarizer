@@ -121,7 +121,9 @@ existing review response; cached-only projects qualified current reviews without
 model work. Each run publishes a new schema-v1 bundle, never rewrites/replays an
 old card. Partial failures stay in JSON/Markdown and return CLI status 1, including
 failed assessment attempts with a reusable base review. Default dry-run and
-explicit idempotent `--queue-zotero` pending-tag consent are unchanged.
+explicit idempotent `--queue-zotero` pending-tag consent are unchanged. Runtime
+and dependency diagnostics go to stderr; stdout remains one JSON result even
+when a model callback prints a warning during a failed partial run.
 
 `predict-feed` no longer accepts unused `--calibration`/`--threshold-strategy`;
 its regressor has no such tuning step. `classify` retains its used options.

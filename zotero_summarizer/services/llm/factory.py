@@ -35,8 +35,10 @@ def resolve_api_key(provider: ProviderConfig) -> str:
 
 def _override_thinking(extra_body: dict | None, enable: bool) -> dict | None:
     """Override thinking only for providers that advertise the compatible key."""
-    if not extra_body or "chat_template_kwargs" not in extra_body:
+    if not extra_body:
         return extra_body
+    if "chat_template_kwargs" not in extra_body:
+        return {**extra_body, "reasoning_effort": "none"} if not enable and "reasoning_effort" in extra_body else extra_body
     ctk = dict(extra_body["chat_template_kwargs"])
     ctk["enable_thinking"] = enable
     return {**extra_body, "chat_template_kwargs": ctk}

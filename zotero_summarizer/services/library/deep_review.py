@@ -330,9 +330,9 @@ def _build_ctx(reader: Any = None) -> dict[str, Any]:
         "config": config,
         "extractor": extractor,
         "quality_enabled": bool(cfg.enabled and extractor is not None),
-        "llm": app.resolve_stage_client("deep_review"),
+        "llm": app.resolve_stage_client("deep_review", enable_thinking=False),
         "llm_digest": app.resolve_stage_client("deep_review", enable_thinking=provider.thinking_on),  # DIGEST reasons unless provider thinking_effort=off
-        "llm_map": app.resolve_stage_client("feed") if cfg.chunk_strategy == "map_reduce" else None,
+        "llm_map": app.resolve_stage_client("feed", enable_thinking=False) if cfg.chunk_strategy == "map_reduce" else None,
         "prestige_scores": prestige_scores,
         "prestige_floor_value": prestige_floor_value,
         "lean_tier": bool(getattr(provider, "lean_deep_review", False)),  # ollama=prefill-bound→lean; keyed on flag, not is_local

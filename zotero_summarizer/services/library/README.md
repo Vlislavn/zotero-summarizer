@@ -451,6 +451,10 @@ judge is used during projection; source bytes/config freshness belong to the
 current-review reader. Literal membership is not entailment: proposals and effort
 estimates are AI-generated/unverified, never measured reproduction or user data.
 Review source hashing no longer trusts equal size/mtime as equal bytes.
+Deep-review verification and light/map calls explicitly request thinking off;
+the digest retains the provider's configured effort. Advertised plain OpenAI
+reasoning-effort profiles honor the same off contract as chat-template profiles.
+Output truncation still fails closed; no verifier check or retry cap is bypassed.
 Omitted configured projects become explicit unknowns with null evidence; no
 project silently disappears. Feed-context acquisition reuses headless PDF sources
 only (`allow_browser=False`); interactive per-paper acquisition is unchanged.

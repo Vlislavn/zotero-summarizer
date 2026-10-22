@@ -82,7 +82,8 @@ class RuntimeState:
         ``enable_thinking`` (not ``None``) forces the reasoning flag on/off for the
         returned client — deep_review uses it to think on the DIGEST (quality) but
         not on the trivial verification calls (speed) on the same provider. It is a
-        no-op for providers that don't advertise ``chat_template_kwargs``.
+        no-op for providers that advertise neither ``chat_template_kwargs``
+        nor a configured ``reasoning_effort`` parameter.
 
         Raises (APIError / provider error) only here, on first use — never at
         startup. Callers run inside their own worker boundaries, so a missing

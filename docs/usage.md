@@ -112,7 +112,9 @@ stage is an explicit error, not a relevance rejection. Optional cache errors do
 not stop papers with valid history. Generating runs can retry a missing cached PDF
 through existing headless sources. Access,
 assessment and provider errors are per-paper failures, not scientific rejections;
-CLI exit 1 accompanies a published partial run. JSON schema version 1 and Markdown
+CLI exit 1 accompanies a published partial run; stdout remains JSON and runtime
+diagnostics go to stderr. The digest keeps configured reasoning effort while its
+verification calls explicitly request the provider's supported thinking-off mode. JSON schema version 1 and Markdown
 retain their existing shape with additive assessment/provenance fields. New bundles
 are immutable; cheap projections are recomputed, never replayed from old reports.
 `--queue-zotero` alone opts into idempotent pending tags for materialized items;
