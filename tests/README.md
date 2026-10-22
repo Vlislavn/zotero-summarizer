@@ -27,3 +27,5 @@ or source-path assertions.
 
 Use the repository verification commands and the local source-bound evidence;
 scoped checks do not substitute for full hooks, backend or hosted CI.
+
+Retain original interpretation source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
