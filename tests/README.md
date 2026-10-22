@@ -17,3 +17,7 @@ Part 2 retains the corresponding original Feedback suites without assertion chan
 Part 3 retains the corresponding original Feedback suites without assertion changes.
 
 Part 4 retains the corresponding original Feedback suites without assertion changes.
+
+`test_feedback_scheduler_recovery_regressions.py` covers repaired-source retry,
+unknown-publication holds, delayed initial cursor recovery, cursor symlinks,
+cycle-cap admission and owned daemon shutdown signals.

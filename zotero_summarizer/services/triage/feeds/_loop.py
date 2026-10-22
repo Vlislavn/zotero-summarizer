@@ -58,7 +58,13 @@ async def run_daemon_loop(
         while not stop_event.is_set():
             if feedback_settings is not None and feedback_settings.feedback_schedule_enabled:
                 from zotero_summarizer.services.golden.feedback_analysis.scheduler import run_due_feedback
-                feedback = await run_due_feedback(feedback_settings, now=datetime.now(timezone.utc))
+                try:
+                    feedback = await run_due_feedback(feedback_settings, now=datetime.now(timezone.utc))
+                except (InterruptedError, KeyboardInterrupt) as exc:
+                    if getattr(exc, "feedback_signal", None) not in (signal.SIGINT, signal.SIGTERM):
+                        raise
+                    _on_signal()
+                    break
                 LOGGER.info("weekly feedback: %s", feedback)
                 if stop_event.is_set():
                     break

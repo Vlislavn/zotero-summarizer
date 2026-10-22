@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from . import operation, schedule_state
 from .history import aware_time
+from .inputs import _no_symlinks
 from .provenance import canonical_bytes, utc_iso
 from .report import read_protocol
 
@@ -32,7 +33,7 @@ def weekly_intent(cutoff):
 
 
 def _cursor(settings, guard):
-    path = settings.feedback_schedule_dir / "cursor.json"
+    path = _no_symlinks(settings.feedback_schedule_dir / "cursor.json")
     if not path.exists():
         return None
     cursor = read_protocol(path, guard)
@@ -67,10 +68,11 @@ def _summary(cursor, status, completed, latest):
 
 async def _windows(settings, latest, configured, guard):
     cursor = _cursor(settings, guard)
+    activation = (schedule_state.pending_cutoff(settings, guard) or latest) if cursor is None else None
     completed = 0
     status = "no_due"
     for _ in range(settings.feedback_schedule_max_windows):
-        cutoff = latest if cursor is None else aware_time(cursor["last_confirmed_cutoff"]) + WEEK
+        cutoff = activation if cursor is None else aware_time(cursor["last_confirmed_cutoff"]) + WEEK
         if cutoff > latest:
             break
         guard.check()
@@ -108,6 +110,8 @@ async def run_due_feedback(settings, *, now, budgets=None):
         return _summary(None, "disabled", 0, latest)
     operation.admit_sources(settings)
     configured = operation.resolve_budgets(budgets)
+    if settings.feedback_schedule_wall_cap_seconds <= configured["operation"]["wall_cap_seconds"]:
+        raise ValueError("feedback schedule wall cap must exceed the fixed operation cap")
     root = schedule_state.private_root(settings)
     cycle_bounds = configured["operation"] | {"wall_cap_seconds": settings.feedback_schedule_wall_cap_seconds}
     guard = operation.OperationGuard(cycle_bounds)

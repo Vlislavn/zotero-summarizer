@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Recover weekly Feedback after confirmed prepublication failures and delayed first cursor commits; reject unsafe cursor links/incompatible caps, and stop the daemon cleanly on owned analysis signals.
+
 - Package existing existing weekly daemon scheduling and recovery from the working changes for dependent review; no behavior redesign.
 
 - Package existing existing manual report command and publication from the working changes for dependent review; no behavior redesign.

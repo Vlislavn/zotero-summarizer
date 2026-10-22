@@ -164,4 +164,8 @@ Diagnostic CLI source reads reuse the single-component/no-symlink paper-state gu
 
 Feedback review stack part 3: Feedback: existing manual report command and publication. See `zotero_summarizer/services/golden/feedback_analysis/README.md`; later parts supply the remaining existing workflow.
 
-Existing Feedback weekly scheduling is included by the dependent review stack; this packaging does not repair known original lifecycle limitations.
+Weekly local reports are off by default. Enable them with:
+`ZS_FEEDBACK_SCHEDULE_ENABLED=true python -m zotero_summarizer.cli feeds serve --project-root ROOT`.
+Reports precede feed ticks; owned SIGINT/SIGTERM during reporting stop
+cleanly after child cleanup, with no cursor advancement. See the Feedback package
+README for cap compatibility and conservative recovery rules.

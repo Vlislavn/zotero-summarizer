@@ -87,4 +87,6 @@ Tick counts are accumulated in DaemonTickReport itself; dataclass serialization
 includes fatal_llm_error. The loop fails on exceptions or failed reports and
 removes its signal handlers on exit; zero ticks does no work.
 
-Existing Feedback weekly scheduling is included by the dependent review stack; this packaging does not repair known original lifecycle limitations.
+Weekly Feedback runs only when explicitly enabled for `feeds serve`. Owned
+SIGINT/SIGTERM during analysis drain the child and stop the daemon cleanly
+without starting a feed tick or advancing the cursor. Other failures propagate.

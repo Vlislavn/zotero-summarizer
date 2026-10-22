@@ -316,13 +316,21 @@ operation_receipt_path,schedule_receipt_path,late_observations,recovery,source_i
 `committed/owned_published=true` requires successful original publication/receipt.
 `reused/owned_published=false/confirmed_report=true` describes a prior verified
 confirmed report, not a current owned commit. Recovery completion is explicitly
-`recovery=true`, not a new capture. Missing or failed original receipts HOLD; never
-infer success from an existing destination or retry equivalent publication.
+`recovery=true`, not a new capture. Missing or failed original candidate receipts
+HOLD; never infer success from an existing destination or retry equivalent publication.
+Before a candidate exists, a matching persisted failure proving no publication,
+a reaped/absent child group and an absent destination permits a fresh bounded
+attempt. This negative evidence is not report confirmation or cursor permission;
+missing/ambiguous evidence still HOLDs, and old attempts remain intact.
 
 Async `run_due_feedback(settings, *, now, budgets=None)` requires explicit selected
 Settings/main-thread ownership. Disabled performs no state I/O. First activation
-selects latest closed cutoff; catchup is arithmetic oldest-first, max2/default,
-cap4. A fixed operation cap is reserved from the configured aggregate safety budget.
+selects latest closed cutoff. Without a committed cursor, the oldest retained
+active intent takes precedence across weekly rollovers; inventory is bounded by
+`operation.max_source_files` and the cycle guard. Catchup is arithmetic oldest-first,
+max2/default, cap4. A fixed operation cap is reserved from the configured aggregate
+safety budget; the aggregate cap must strictly exceed it or activation refuses
+before schedule output.
 `no_due` does no snapshot/source rehash. `no_new_data` means equal captured source
 hash/status/size identity, not a skipped analysis or unchanged live-source proof.
 Cursor commit follows durable scheduled receipt and a cancellation-delivery yield.
@@ -330,7 +338,10 @@ The cursor envelope is exactly `schema_version,activation_cutoff,
 last_confirmed_cutoff,last_receipt,status`. Cursor is authoritative; status-file
 precommit diagnostics are not proof of cursor commit. Task cancellation drains the
 synchronous owned process before yield; immediate shared-event-loop interruption
-is not claimed. Signal restoration, no fsync and post-rename ambiguity caveats apply.
+is not claimed. The daemon handles only owned, explicitly tagged SIGINT/SIGTERM
+interruptions as clean shutdown after child drain, without a tick/cursor commit;
+unrelated interruptions propagate. Signal restoration, no fsync and post-rename
+ambiguity caveats apply.
 
 All-time retained evidence handles late old dates. Late sidecar count is raw retained
 observations at/before prior cutoff, not newly arrived action count. Its result path

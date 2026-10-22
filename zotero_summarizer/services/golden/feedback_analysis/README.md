@@ -1,8 +1,8 @@
 # Review stack part 4/4
 
-Existing implementation, mechanically packaged for review. No new feature or issue closure.
+Existing implementation with focused scheduling/recovery corrections. No issue closure.
 Merge the dependent parts in order; this part is `Feedback: existing weekly daemon scheduling and recovery`.
-Known original limitations are not repaired by this packaging.
+Private installed-host evidence and the portability limits below remain unverified.
 
 # feedback_analysis — frozen inputs and local descriptive evidence
 
@@ -278,6 +278,9 @@ Automation is disabled by default. Settings resolves strict
 `ZS_FEEDBACK_SCHEDULE_ENABLED=true|false|1|0`,
 `ZS_FEEDBACK_SCHEDULE_MAX_WINDOWS` (default 2, range 1..4), and
 `ZS_FEEDBACK_SCHEDULE_WALL_CAP_SECONDS` (default 240, positive/max 600).
+At activation, this cycle cap must exceed the resolved fixed operation cap
+(default 120s); incompatible caps fail before schedule output rather than staying
+`catchup_pending` forever.
 State is under `Settings.feedback_schedule_dir` (`feedback-analysis/schedule`).
 No new CLI flag, command family, timer, generic callback or subprocess runner.
 `run_due_feedback(settings, *, now, budgets=None)` is async but invokes the existing
@@ -285,7 +288,9 @@ synchronous clean-child dispatcher on the MAIN thread only. The loop passes its
 selected Settings explicitly; ticks, server startup and generic jobs never do.
 
 The anchor is Monday 1970-01-05 00:00 UTC. First activation processes only the
-latest closed window. Resumed catchup advances oldest first by arithmetic, at most
+latest closed window. If its cursor was never committed, restart first recovers
+the oldest retained active intent, even after a weekly rollover. Resumed catchup
+advances oldest first by arithmetic, at most
 the configured windows per cycle. The aggregate safety cap reserves a whole fixed
 operation cap before each child; remaining attempt-clock values never enter content
 identity. Individual freeze/analysis/operation bounds remain unchanged. Blocking
@@ -305,7 +310,11 @@ record before publication. Cursor/index failure recovery adopts that EXACT froze
 confirmed candidate, not a fresh analysis of current sources. Reused receipts say
 `publication_action=reused`, `owned_published=false`, `confirmed_report=true`;
 destination existence never proves a current owned commit. Missing/failed original
-success receipts HOLD the attempt with no cursor and no automatic attempt pile.
+success receipts HOLD a candidate with no cursor and no automatic attempt pile.
+Before any candidate exists, an identity-bound failure receipt proving no
+publication, a reaped/absent child group and no destination permits one fresh
+bounded attempt after source repair. Missing/ambiguous evidence still HOLDs;
+old attempts and failure evidence are retained.
 Required retained inputs/output/provenance hashes and private read-only modes are
 reverified. Logical immutability/cooperating namespace is not authentication.
 
@@ -321,7 +330,10 @@ not an invented scientific sufficiency threshold.
 Task cancellation is bounded-drain, not instantaneous: a yield BEFORE cursor
 commit and BETWEEN windows delivers pending asyncio cancellation only after the
 owned child is reaped. SIGINT/SIGTERM uses the existing nested main-thread signal
-ownership/restoration checks. Parent loss/SIGKILL/power loss, foreign handlers,
+ownership/restoration checks. The daemon handles only explicitly tagged owned
+SIGINT/SIGTERM interruptions as a clean stop after child drain, without a feed
+tick or cursor commit; unrelated interruptions still propagate.
+Parent loss/SIGKILL/power loss, foreign handlers,
 post-rename I/O ambiguity and unsupported platforms retain the existing caveats.
 No failed or unconfirmed report authorizes cursor advancement.
 
