@@ -2,7 +2,9 @@
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import json
+import os
 import sqlite3
+import stat
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -380,3 +382,42 @@ def test_bounded_snapshot_omits_unassessed_context_but_retains_its_invalidation(
     assert second["context_fingerprint"] != first["context_fingerprint"]
     assert len(journey.model.payloads) == 2
     assert session.load(first["session_id"]).related["result"] == first
+
+
+def test_unreadable_human_eligibility_fails_closed_before_retrieval_or_assessment(journey, monkeypatch):
+    def unavailable(*args):
+        error = sqlite3.OperationalError("synthetic app context busy")
+        error.sqlite_errorcode = sqlite3.SQLITE_BUSY
+        raise error
+
+    monkeypatch.setattr(context, "read_context", unavailable)
+    for action in (lambda: related.related_papers("SEED0001"),
+                   lambda: related.assess_related("SEED0001", consent_token=semantic.model_boundary()["token"])):
+        with pytest.raises(APIError) as error:
+            action()
+        assert error.value.error == "source_identity_unavailable"
+        assert error.value.status_code == 503
+    assert journey.queries == []
+    assert journey.model.payloads == []
+    assert not journey.paths.search_dir.exists()
+
+
+def test_private_context_store_restricts_existing_directory_and_temporary_file(journey):
+    baseline = related.related_papers("SEED0001")
+    directory = journey.paths.search_dir
+    directory.mkdir(mode=0o755)
+    directory.chmod(0o755)
+    temporary = directory / f'related-{baseline["context_fingerprint"]}.tmp'
+    temporary.write_text("old interrupted write")
+    temporary.chmod(0o644)
+    old_umask = os.umask(0o022)
+    try:
+        result = related.assess_related("SEED0001", consent_token=baseline["boundary"]["token"])
+    finally:
+        os.umask(old_umask)
+    assert result["assessment_status"] == "assessed"
+    assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+    saved = directory / f'{result["session_id"]}.json'
+    assert stat.S_IMODE(saved.stat().st_mode) == 0o600
+    assert not temporary.exists()
+    assert session.load(result["session_id"]).related["result"] == result

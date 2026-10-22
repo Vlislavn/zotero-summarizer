@@ -45,7 +45,9 @@ The library's optional related-comment experiment also reuses `ResearchSession`,
 `claim`, per-process ownership locks and atomic `save` under `Settings.search_dir`.
 Its `related` field holds full private context identity, snapshot, prior attempts
 and terminal result; `related_*` statuses never qualify for Search's screened
-review claim. Related sessions are omitted from the Search sidebar. No federation,
+review claim. The shared session directory is owner-only (0700), including existing
+directories; temporary files become 0600 before private bytes are written, and
+atomic replacement retains that mode. Existing files are protected by the directory. Related sessions are omitted from the Search sidebar. No federation,
 Search review or materialization is started by that flow. See
 [related saved papers](../../../docs/related-saved-papers.md) for consent,
 work ceilings, invalidation and unqualified semantic judgments.

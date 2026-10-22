@@ -18,6 +18,7 @@ from zotero_summarizer.models.providers import STAGES, resolve_stage
 from zotero_summarizer.services._common import (
     read_config,
     read_json_or_empty,
+    state,
     write_json_atomic,
 )
 from zotero_summarizer.services.setup.doctor_environment import (
@@ -275,7 +276,10 @@ def store_credential_and_invalidate(settings: Settings, name: str, key: str) -> 
 
     with _LOCK:
         _invalidate_doctor_unlocked(settings)
-        return store_api_key(name, key)
+        try:
+            return store_api_key(name, key)
+        finally:
+            state().invalidate_stage_clients()
 
 
 def _config_signature(settings: Settings) -> str:

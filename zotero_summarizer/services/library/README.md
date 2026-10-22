@@ -446,6 +446,8 @@ comments; read items remain eligible, self aliases/identifiers and current human
 alias/revision owners, plus structurally unowned native notes and annotation
 comments, retaining full text and original source identity. Generated reviews and
 app mirrors are not user evidence; failed/unknown reads never become empty.
+Unreadable app context blocks retrieval and assessment with a source error: seed
+aliases and current human exclusions cannot safely be inferred from missing data.
 
 Only an explicit provider/model-bound consent action invokes `_related_assessment`
 through the existing deep-review client. Full seed and candidate notes enter the

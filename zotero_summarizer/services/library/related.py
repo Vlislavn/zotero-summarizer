@@ -69,8 +69,8 @@ def _snapshot(item_key, collection, tag):
     items = {row["item_key"]: row for row in reader.get_all_items(
         collection_key=collection or None, tag=tag or None, include_abstract=True)["items"]}
     contexts, app = app_context(settings().triage_db_path, list(dict.fromkeys([item_key, *items])))
-    if app != "observed" and is_stable_feed_key(item_key) and not isinstance(reader, AppLibraryReader):
-        raise APIError("source_identity_unavailable", "Cannot exclude the saved seed alias while app context is unavailable", status_code=503)
+    if app != "observed":
+        raise APIError("source_identity_unavailable", "Cannot determine seed aliases or human exclusions while app context is unavailable", status_code=503)
     aliases = set(contexts.get(item_key, {}).get("aliases", [item_key]))
     seen_ids, seen_aliases = _identifiers(seed), set(aliases)
     candidates, excluded = {}, []

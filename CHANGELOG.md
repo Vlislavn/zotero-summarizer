@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Fixed
+- Fail Related closed when human eligibility is unreadable; retain private session context with owner-only permissions and invalidate stage clients after credential replacement. Add regressions for all three safety boundaries.
 - Fence Related at primary verdict acknowledgement, including dont_read while its secondary reject-tag request is pending. Preserve existing completion/collapse callbacks and saved-verdict warnings; add actual page and hook regressions.
 
 ### Changed

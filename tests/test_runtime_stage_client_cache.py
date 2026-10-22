@@ -226,3 +226,46 @@ def test_consented_identity_rejects_a_different_actual_snapshot_even_if_metadata
     assert builds == payloads == []
     app.app_state = SimpleNamespace(config=config_b)
     assert real_boundary() == consent_b
+
+
+@pytest.mark.parametrize("store_failure", [False, True])
+def test_setup_credential_replacement_rebuilds_the_actual_cached_stage(cached_runtime, tmp_path, monkeypatch, store_failure):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from zotero_summarizer.api.routes import setup
+    from zotero_summarizer.runtime import get_context
+    from zotero_summarizer.services.llm import credentials
+    from zotero_summarizer.settings import Settings
+
+    app, _, _ = cached_runtime
+    saved, builds = {"key": "synthetic-A"}, []
+
+    def store(name, key):
+        assert name == "SYNTHETIC_HOSTED_KEY_NAME"
+        saved["key"] = key
+        if store_failure:
+            raise OSError("synthetic partial credential write")
+        return {"name": name, "source": "synthetic-test"}
+
+    def build(resolved):
+        client = SimpleNamespace(credential=saved["key"])
+        builds.append(client)
+        return client
+
+    monkeypatch.setattr(credentials, "store_api_key", store)
+    monkeypatch.setattr(factory, "build_client_for_stage", build)
+    monkeypatch.setattr(get_context(), "state", app)
+    monkeypatch.setattr(setup, "get_settings", lambda: Settings.load(project_root=tmp_path))
+    first = app.resolve_stage_client("deep_review")
+    server = FastAPI()
+    server.include_router(setup.router)
+    with TestClient(server, raise_server_exceptions=False) as client:
+        response = client.put("/api/setup/ai-credential", json={
+            "name": "SYNTHETIC_HOSTED_KEY_NAME", "api_key": "synthetic-B"})
+    assert response.status_code == (500 if store_failure else 200)
+    second = app.resolve_stage_client("deep_review")
+    assert first.credential == "synthetic-A"
+    assert second.credential == "synthetic-B"
+    assert second is not first
+    assert app.resolve_stage_client("deep_review") is second
+    assert len(builds) == 2

@@ -8,7 +8,9 @@ is distinct from a successful empty result; the paper review remains usable.
 When all inspected comment sources are observed empty, the optional action returns
 `no_comments` without model work. Unavailable empty sources instead return
 `context_unavailable`; neither becomes a successful comment assessment.
-Current explicit human `dont_read` verdicts exclude candidates. Machine labels,
+Current explicit human `dont_read` verdicts exclude candidates. If the app context
+cannot be read, retrieval and assessment stop with a source error instead of
+treating unknown verdicts as eligible. Machine labels,
 negative words, emoji and inferred sentiment do not become deterministic exclusions.
 The API's optional `collection` and `tag` scopes are applied before retrieval;
 unavailable Zotero-only scopes fail explicitly with the app-only reader.
@@ -26,11 +28,14 @@ checks alone are not treated as proof about an opaque cached client. The consent
 token uses the shared `ResolvedStage.fingerprint()` and is passed as the runtime
 resolver's `expected_identity`; a different actual snapshot rejects before cache
 access or client construction, including an away-and-back config change.
-Reading the processing boundary does not build a client or read credentials. Opening the page,
+Replacing a credential through Settings invalidates cached stage clients even
+when routing metadata is unchanged. Reading the processing boundary does not build a client or read credentials. Opening the page,
 loading related papers or refreshing context does not make this semantic model call. There is no external discovery,
 automatic full-text review, Add, label, note, training or Zotero write in this flow.
 The explicit assessment action does persist its own private session under
 `Settings.search_dir` (`data/search/`); those files must not be shared publicly.
+The shared directory is owner-only (0700), including pre-existing directories;
+new/replaced session files are 0600, set before writing private context.
 
 The experiment assesses a metadata-retrieved pool, not a comment index. The local
 BM25/dense/cross-encoder retrieval query contains only seed title/abstract.
