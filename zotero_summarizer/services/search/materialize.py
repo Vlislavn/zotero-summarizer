@@ -86,12 +86,6 @@ def materialize_candidate(
     def _do_write(cand: Candidate, sess: ResearchSession) -> str:
         nonlocal reused_existing
         if cand.existing_zotero_key:
-            if cand.planned_zotero_key and cand.planned_zotero_key != cand.existing_zotero_key:
-                raise APIError(
-                    error="search_write_conflict", status_code=409,
-                    message="Saved library coverage conflicts with the retained Add identity. "
-                            "Reconcile the library before retrying.",
-                )
             reused_existing = True
             return cand.existing_zotero_key
         try:
@@ -107,7 +101,7 @@ def materialize_candidate(
             session_store.save(sess)  # Persist identity before backup or any native write.
         new_key = cand.planned_zotero_key
         try:
-            writer.apply_feed_materialization(
+            native_result = writer.apply_feed_materialization(
                 new_item_key=new_key,
                 feed_payload=_feed_payload(cand),
                 inbox_collection_name=collection_name,
@@ -115,6 +109,7 @@ def materialize_candidate(
                 note_title=f"Targeted Search: {sess.raw_query[:80]}",
                 note_html=_note_html(cand, sess.raw_query),
             )
+            reused_existing = not native_result["applied_steps"]
         except ZoteroWriteError as exc:
             # Surface the failure without claiming delivery; retain the plan for retry.
             raise APIError(
