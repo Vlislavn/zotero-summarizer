@@ -176,6 +176,11 @@ dedicated branch, publish with:
 tools/create-pr.sh 'Short PR title' /path/to/body.md
 ```
 
+Prepare the body using the [default PR template](.github/pull_request_template.md):
+record an actually executed feature action and failure/no-op boundary, expected
+versus observed results, environment/revision, evidence and limits. Checks alone
+are not a feature smoke. Edit the existing PR for updates; do not publish it again.
+
 This runs `make check` locally, pushes only after every check passes, and opens a
 PR against `main`. It never stashes your work. Hosted Actions is optional/manual;
 GitHub billing is not part of this path. See the [check contract and platform

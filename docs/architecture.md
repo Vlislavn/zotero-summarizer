@@ -224,6 +224,14 @@ baseline exceptions. Build output is temporary: an existing `frontend/dist` is u
 Tests still create their normal isolated temporary files/caches. No model download or
 service is requested by the check command.
 
+Fill the body file from the [repository PR template](../.github/pull_request_template.md).
+Report an executed real feature action plus a safe failure/no-op boundary, intended
+versus observed output, exact run environment/revision, evidence, repeat action and
+blockers; keep automated checks secondary. For isolated runs say **Not tested in
+production**. For documentation changes follow the actual artifact/command path.
+Reuse receipts only when the exercised executable is unchanged, retaining its run
+revision. Update an existing PR's body instead of rerunning PR creation.
+
 The publisher accepts exactly a title and readable body file. It requires clean tracked,
 staged and untracked source, refuses main/detached HEAD, and checks branch/commit identity
 again after validation. It pushes only that checked commit, non-force, to the current

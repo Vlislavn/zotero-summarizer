@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Add a default PR template that leads with executed feature outcomes, expected versus observed smoke results, exact environment/revision, evidence and limits; keep automated checks secondary.
 - Validate locally before PR publication with serial `make check` and a clean-source checked publisher; retain all existing checks plus smoke construction, preserve existing UI build output, and make hosted Actions manual-only.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.
