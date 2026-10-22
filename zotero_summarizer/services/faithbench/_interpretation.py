@@ -91,6 +91,8 @@ def execute(settings, snapshot, config, profiles, build_client):
 
 def read_run(directory):
     root = Path(directory)
+    if root.is_symlink() or (root / 'manifest.json').is_symlink():
+        raise ValueError('Symlinked experiment run or manifest')
     manifest = json.loads((root / 'manifest.json').read_text())
     paths = {str(p.relative_to(root)) for p in root.rglob('*') if p.is_file() and p != root / 'manifest.json'}
     if manifest['contract'] != 'interpretation-experiment-v1' or paths != set(manifest['files']):

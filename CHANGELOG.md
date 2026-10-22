@@ -10,6 +10,10 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Reject interpretation source/run/export symlinks and selected-project escapes before file access, including symlinked manifests. Retain immutable attempts and explicit capture consent.
+
+- Hide interpretation assignment order in blinded exports; validate approval rows during inspection. Preserve partial-label accuracy bounds, independent conclusive-shortfall gates and actual card-exposure counts; zero exposure cannot recommend a pilot.
+
 - Keep tightened interpretation resource caps inclusive with exact token-count and decimal-latency arithmetic. Preserve mean/median reporting, per-paper and independent unknown/refusal gates; no rounding tolerance or threshold changes.
 
 - Reject malformed persisted interpretation states without losing qualified base rendering; evaluate known timing/token breaches independently of unrelated unknown observations.

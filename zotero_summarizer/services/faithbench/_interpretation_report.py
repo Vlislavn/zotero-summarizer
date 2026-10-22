@@ -11,7 +11,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from zotero_summarizer.services.faithbench._interpretation import read_run
-from zotero_summarizer.services.faithbench._interpretation_inputs import Hash, publish_json
+from zotero_summarizer.services.faithbench._interpretation_inputs import Hash, project_path, publish_json
 from zotero_summarizer.services.faithbench._stats import _percentile
 from zotero_summarizer.services.faithbench._corpus import chunk_text
 from zotero_summarizer.services.library.interpretation import selected_original
@@ -65,7 +65,7 @@ def blind_packets(records):
                 'question': row['question'], 'response_sha256': canonical_hash(response),
                 'response': response, 'source': result['text'] if result else None,
             }
-    return packets
+    return dict(sorted(packets.items()))
 
 
 def _labels(path, manifest_sha, packets):
@@ -138,7 +138,8 @@ def _metrics(inputs, records, labels):
         result[arm] = {'assigned': len(assigned), 'overclaim_lower': sum(x is True for x in assigned) / len(assigned),
                        'overclaim_upper': sum(x is not False for x in assigned) / len(assigned),
                        'overclaim_counts': [sum(x is True for x in assigned), sum(x is not False for x in assigned)],
-                       'supported_counts': None if None in accuracy else [sum(accuracy), len(accuracy)],
+                       'supported_counts': [sum(value is True for value in accuracy), len(accuracy)],
+                       'supported_unknown': sum(value is None for value in accuracy),
                        'supported_accuracy': None if None in accuracy else mean(accuracy),
                        'supported_accuracy_median': None if None in accuracy else median(accuracy),
                        'accuracy_mean': None if None in overall_accuracy else mean(overall_accuracy),
@@ -148,6 +149,9 @@ def _metrics(inputs, records, labels):
                        'review_overclaims': review_overclaims, 'card_failures': sum(card_failures),
                        'add_regressions': add_regressions,
                        'human_complete': None not in assigned + accuracy + review_overclaims + add_regressions and missing == 0,
+                       'card_exposed_questions': sum(row.get('output', {}).get('card_visibility') == 'whole_card'
+                                                     for record in records if record['assignment']['condition'] == arm
+                                                     for row in record['questions']),
                        'observed_tokens_mean': None if None in tokens.values() else mean(tokens.values()),
                        'observed_tokens_median': None if None in tokens.values() else median(tokens.values()),
                        'tokens_by_paper': tokens,
@@ -194,7 +198,9 @@ def _decision(metrics, comparisons, recipe, labels):
     for control, comparison in comparisons.items():
         baseline = metrics[control]
         if current['supported_counts'] is not None and baseline['supported_counts'] is not None:
-            known_failures |= Fraction(*current['supported_counts']) < Fraction(*baseline['supported_counts']) - thresholds['accuracy_loss']
+            correct, total = current['supported_counts']
+            upper_accuracy = Fraction(correct + current.get('supported_unknown', 0), total)
+            known_failures |= upper_accuracy < Fraction(*baseline['supported_counts']) - thresholds['accuracy_loss']
         known_failures |= sum(x is True for x in current['review_overclaims']) > sum(x is not False for x in baseline['review_overclaims'])
         known_failures |= current['failures'] > baseline['failures'] or current['review_failures'] > baseline['review_failures']
         reference = Fraction(baseline['overclaim_counts'][0], baseline['assigned'])
@@ -203,24 +209,25 @@ def _decision(metrics, comparisons, recipe, labels):
         benefit.append(reference > 0 and difference >= thresholds['relative_reduction'] * reference and
                        difference >= thresholds['absolute_reduction'] and interval[0] > 0)
         relative_interval = comparison['relative_95_interval']
-        shortfall.append(interval[1] < 0 or (baseline['overclaim_lower'] > 0 and
+        primary_complete = all(row['overclaim_counts'][0] == row['overclaim_counts'][1] for row in (current, baseline))
+        shortfall.append(primary_complete and (interval[1] < 0 or (baseline['overclaim_lower'] > 0 and
                          (Fraction(str(interval[1])) < thresholds['absolute_reduction'] or
-                          relative_interval is not None and Fraction(str(relative_interval[1])) < thresholds['relative_reduction'])))
+                          relative_interval is not None and Fraction(str(relative_interval[1])) < thresholds['relative_reduction']))))
     if known_failures or False in resource_passes:
         return 'NO-GO'
-    if complete and len(resource_passes) == 2 and all(resource_passes) and all(benefit):
+    if complete and current['card_exposed_questions'] > 0 and len(resource_passes) == 2 and all(resource_passes) and all(benefit):
         return 'GO_TO_LARGER_PILOT'
-    if complete and len(resource_passes) == 2 and all(resource_passes) and any(shortfall):
+    if any(shortfall):
         return 'NO-GO'
     return 'INCONCLUSIVE'
 
 
 def report(settings, run_directory, labels_path=None):
-    root = Path(run_directory)
+    root = project_path(settings, Path(run_directory))
     inputs, records = read_run(root)
     manifest_sha = hashlib.sha256((root / 'manifest.json').read_bytes()).hexdigest()
     packets = blind_packets(records)
-    output = settings.faithbench_dir / 'interpretation-reports' / uuid4().hex
+    output = project_path(settings, settings.faithbench_dir / 'interpretation-reports' / uuid4().hex)
     if labels_path is None:
         template = {'reviewer': '', 'manifest_sha256': manifest_sha, 'judgments': {
             key: {'response_sha256': packet['response_sha256'], 'question': packet['question'],

@@ -22,6 +22,7 @@ hash-named frozen texts in the selected project's `Settings.faithbench_dir/paper
 Curate **at least twenty distinct held-out clinical/agent paper families**, each
 with exactly four questions: answerable/unanswerable × neutral/leading. Retain
 separate earlier tuning sources; tuning cannot supply evaluation questions.
+Inspection validates every exact approval row, not just the CSV hash.
 Human approval is the semantic gate. Family/version/time declarations are not
 cryptographically authenticated or automatically verified bibliographic facts.
 
@@ -108,14 +109,17 @@ The manifest is published last. Reopening checks exact planned inventory, hashes
 source/code/runtime identities and every assigned outcome. Partial attempts are
 retained but cannot produce a complete report. A retry creates a new UUID; there
 is no overwrite, automatic repair, last-row-wins replacement or implicit resume.
-Unsigned consistency is not authentication or proof of semantic completeness.
+Selected-project source, run and export paths reject symlinks/escapes before I/O;
+a reopened run or its manifest cannot be a symlink. These checks are not filesystem
+race protection. Unsigned consistency is not authentication or proof of semantic completeness.
 Reports/blind packets are separate immutable siblings under `interpretation-reports`.
 
 ## Human judgments and decision
 
 Give `blinded.json` to the review/QA raters and `cards.json` to separate card
 raters: the former omits cards; independent random card IDs disclose no review-ID
-mapping. Merge their independently filled template judgments without changing IDs.
+mapping. Packet files and the label template are ordered by those random IDs,
+not by paper/condition assignment. Merge their independently filled template judgments without changing IDs.
 Judgments bind to response hashes and normalized question TEXT, never position.
 Card targets use normalized scientific TEXT plus exact source/evidence identity;
 the packet supplies original text, selected passages, checks and source coordinates.
@@ -136,6 +140,10 @@ failures, mean **and** median and domain/cell breakdowns. Seeded paired bootstra
 resamples papers, keeping all four cells together. Tokens and p95 elapsed time
 cover generation plus four answers, excluding admission/publication/startup.
 
+Reports disclose `card_exposed_questions` from actual whole-card QA visibility.
+Zero exposure makes a pilot recommendation inconclusive even if other gates pass;
+a nonzero count is not a scientifically established adequate exposure rate.
+
 `GO_TO_LARGER_PILOT` is conditional on supplied independent judgments: ≥30% relative
 and ≥5-point absolute reduction versus BOTH controls with positive improvement
 intervals; ≤5-point supported-accuracy loss; no false retained card claims, invalid
@@ -143,7 +151,11 @@ links, review/Add regression or increased failures; observed tokens and p95
 latency ≤1.25×A with complete operational evidence (token cap applies to each
 paired paper, not just the cohort mean). Timing and token caps use their own
 required observations: a known breach gives `NO-GO` even when the other resource
-is unknown; GO requires both. A known correctness/resource
+is unknown; GO requires both. Supported counts retain known-correct and unknown totals; point accuracy remains
+null until complete. A proven accuracy breach uses C's best possible accuracy
+against each control's worst possible accuracy. Conclusive benefit shortfalls
+require complete primary overclaim observations for the compared pair, not unrelated
+review/resource judgments. A known correctness/resource
 gate failure or conclusive benefit shortfall gives `NO-GO`; otherwise missing
 observations, no baseline errors or inconclusive intervals give `INCONCLUSIVE`.
 Defaults remain unchanged in every case. A conditional pilot recommendation is

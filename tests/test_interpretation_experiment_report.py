@@ -129,7 +129,8 @@ def test_resealed_record_cannot_detach_from_retained_verifier_or_original(frozen
 
 def decision_fixture():
     from zotero_summarizer.services.faithbench._interpretation_report import Labels
-    metrics = {arm: {'human_complete': True, 'card_failures': 0, 'add_regressions': [False],
+    metrics = {arm: {'human_complete': True, 'card_exposed_questions': 80 if arm == 'C' else 0,
+                      'card_failures': 0, 'add_regressions': [False],
                       'supported_accuracy': 0.9, 'supported_counts': [36, 40], 'review_overclaims': [False], 'failures': 0, 'review_failures': 0,
                       'assigned': 80, 'overclaim_counts': [32, 32] if arm != 'C' else [8, 8],
                       'observed_tokens_mean': 100, 'latency_p95': 1.0, 'tokens_by_paper': {'paper': 100},
