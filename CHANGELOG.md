@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Retain original explicit default-no inference consent; use the existing canonical provider verification boundary.
+
 ### Changed
 - Route both local calibration client constructions through existing setup admission, including cached Tier-1 runs. Unknown effective resources refuse before credentials, inference or new calibration output; HTTP jobs expose error, not Ready. Hosted and ordinary application calls are unchanged.
 - Make setup verification evidence-bound: refuse local loads without an envelope before credentials, verify hosted identity, preserve cancellation uncertainty, and fence stale Ready. Ordinary explicitly configured credentials remain intact; local clients still need no key.
