@@ -64,7 +64,7 @@ body {
 .review-reading { font-size: 1rem; line-height: 1.65; max-width: 66ch; }
 .review-reading :is(p, li, dd, blockquote) { font-size: 1rem; line-height: inherit; }
 .review-reading :is(h2, h3) { font-size: 1.125rem; font-weight: 400; text-transform: none; letter-spacing: normal; color: #0f3e17; }
-.review-reading :is([class*="text-slate-400"], [class*="text-slate-500"]) { color: #6b685f; }
+.review-reading :is(.text-slate-400, .text-slate-500) { color: #6b685f; }
 .review-reading [class*="text-rose-400"] { color: #70483c; }
 .review-reading [class*="opacity-"] { opacity: 1; }
 .review-reading :is(dl, dd, section, details) { min-width: 0; }
@@ -77,4 +77,4 @@ body {
 .review-reading :is([class*="text-[12px]"], [class*="text-[13px]"], [class*="text-[14px]"], .text-xs) { font-size: 1rem; }
 .review-reading .goal-board-grid { grid-template-columns: minmax(0, 1fr); }
 .paper-reading-page main :is(p, li, dd, blockquote) { font-size: 1rem; line-height: 1.65; }
-.paper-reading-page :is([class*="text-slate-400"], [class*="text-slate-500"]) { color: #6b685f; }
+.paper-reading-page :is(.text-slate-400, .text-slate-500) { color: #6b685f; }
