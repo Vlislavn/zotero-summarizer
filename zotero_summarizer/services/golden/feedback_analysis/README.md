@@ -1,10 +1,30 @@
-# Review stack part 4/4
+# feedback_analysis — retained inputs and report primitives
 
-Existing implementation with focused scheduling/recovery corrections. No issue closure.
-Merge the dependent parts in order; this part is `Feedback: existing weekly daemon scheduling and recovery`.
-Private installed-host evidence and the portability limits below remain unverified.
+## Available in this PR (stack part 1/4)
 
-# feedback_analysis — frozen inputs and local descriptive evidence
+The callable input boundary is `freeze_inputs` / `verify_inputs`, exported by this
+package. `metrics.py` and `report.py` retain supporting primitives for dependent
+parts; there is no integrated analysis, report operation, CLI command or weekly
+scheduler in this checkout. No overall issue #47 completion is claimed.
+
+`report.__all__` explicitly declares the existing low-level library boundary:
+`hash_file`, `inventory`, `make_immutable`, `markdown`, `read_protocol`,
+`stage_report`, `verify_report`, `write_private`, `write_protocol`. Direct callers
+supply a version-1 result, attempt/run identity and bounded `guard.consume(bytes)`;
+this is not an installed-host operation or analyzer. `stage_report` writes only
+its caller-owned staging tree; `make_immutable` changes that tree's modes. Keep
+raw retained inputs/results local and do not point these helpers at live sources.
+
+Report evidence uses code-span delimiters longer than any recorded backtick run,
+so recorded surfaces/locators remain literal text rather than active Markdown.
+
+**Downstream reference only:** the analysis/manual/weekly flow, contracts and
+sections below describe later stack parts, not functionality available here.
+`history.py`, `analysis.py`, operation/worker/scheduler modules and
+`goldenset analyze-feedback` are absent. Do not run those reference commands or
+bypass the future clean-child isolation requirement. For this part, exercise the
+real Python `freeze_inputs(settings, new_destination, cutoff=..., provenance=...)`
+and `verify_inputs(destination)` boundary described below.
 
 ```
 Settings sources --ro/WAL-aware backup + bounded EOF reads--> NEW private staging
@@ -12,6 +32,30 @@ Settings sources --ro/WAL-aware backup + bounded EOF reads--> NEW private stagin
 retained bytes --verify_inputs--> analyze_inputs --> local result dictionary
 manual / opt-in weekly --clean child(capture + analyze)--> immutable report + receipt
 ```
+
+## Current checkout — stack part 2/4
+
+The **part-1 availability block above is the prerequisite #162 reference**, not
+this head's scope. This checkout additionally implements and exports
+`analyze_inputs(destination, *, budgets=None)`; `history.py` and `analysis.py`
+are present. `freeze_inputs`/`verify_inputs` and the report primitives remain
+available with their safety contract above. Manual/weekly dispatchers and the
+`goldenset analyze-feedback` command remain absent; do not run those later-stack
+reference commands. No overall #47 completion is claimed.
+
+Analysis must run in a dedicated externally bounded process because its temporary
+CSV parser ceiling is process-global. Physical byte lines/positions are consumed
+lazily, so the record cap stops short-row inputs without a full line/offset list.
+SQL observation/alias keys must be nonblank text and a present journal must have
+`source`. UTC-conversion overflow remains located invalid/unknown time, not a
+whole-analysis failure. Snapshot duplicate-namespace refusal and literal report
+Markdown remain intact.
+
+Current coverage also includes `tests/test_feedback_analysis_{history,metrics,analysis,
+conflicting_cohorts,sync_sources}.py` and the eight analyzer boundary regressions.
+The later text's absent-history/analysis-suite statements describe part 1 only.
+These library tests and synthetic smoke are not operation/weekly, production,
+scientific or private installed-host acceptance.
 
 `freeze_inputs(settings, destination: Path, *, cutoff: datetime, provenance: dict,
 budgets=None) -> dict` creates a new directory beneath
@@ -30,6 +74,31 @@ SQLite metadata. It never reads source locators. It refuses incomplete, changed,
 extra or symlinked artifacts. This is integrity checking, not authentication
 against an attacker who can replace the bytes **and** recompute the manifest.
 
+## Current checkout — stack part 3/4 (manual CLI)
+
+The part-1/part-2 availability blocks above are prerequisite #162/#163 references,
+not this head's scope. This checkout also provides `goldenset analyze-feedback`
+and the dedicated operation/worker that freezes inputs, analyzes them, validates
+hashes, then atomically publishes an immutable private report and receipt. The
+manual-operation section below is available here despite its inherited
+later-stack heading; weekly scheduler activation remains unavailable. No overall
+#47 completion, installed private-data acceptance or production claim is made.
+
+The source-checkout command requires Git HEAD, `pyproject.toml` and `uv.lock`;
+a standalone wheel without that provenance fails before capture. Its worker
+suppresses source-tree bytecode writes. Signal ownership covers success/failure
+receipt persistence; main-thread SIGINT/SIGTERM are deferred during child launch
+until cleanup is armed, and the child unblocks the inherited launch mask.
+Completed-worker RSS peaks must be positive integers within the configured cap,
+in addition to live tree sampling; this is not instantaneous OS RSS enforcement.
+The operation I/O bound counts provenance/protocol/report artifacts per guard,
+not whole-process or shared parent/child cumulative I/O. Independent capture and
+analysis source/page/record/byte/work caps are unchanged. These current controls
+supersede the older operation wording retained below as prerequisite reference.
+
+Parent lazy CSV, UTC-overflow, journal-source/SQL-identity, literal Markdown and
+duplicate-namespace protections are preserved in the actual manual CLI path.
+
 ## Capture and identity
 
 | Source key | Retained path | Capture boundary |
@@ -45,7 +114,8 @@ Database integrity, canonical schema SHA, user_version, page bounds, available
 numbered namespace versions and sync revision min/max come **only from retained
 SQLite**. Old absent migration/sync tables are explicitly unavailable/null.
 Admission requires core triage result, feedback and verdict reading columns, not
-a current migration floor. An uninitialized/empty-file store is refused, not
+a current migration floor. Present migration metadata must have unique namespace
+rows; equal or conflicting duplicate versions are rejected rather than collapsed. An uninitialized/empty-file store is refused, not
 successful empty history; it cannot establish absence of decisions elsewhere.
 No live repository opener or writer backup is used.
 
@@ -65,6 +135,35 @@ fails. There is no lock protecting against adversarial write-and-restore or
 same-user namespace races. SQLite may use its normal WAL shared-memory read
 coordination; this layer performs no explicit live-file writes or mode changes.
 It requires ordinary read-only WAL access, never live `immutable=1`.
+
+## Current checkout — stack part 4/4 (weekly daemon)
+
+The part-1/2/3 availability notices and later-stack/unavailable headings above
+are preserved prerequisite #162/#163/#164 review-stage references. This head
+provides both the manual CLI and opt-in weekly scheduler through the existing
+`feeds serve` daemon, with selected Settings and a dedicated clean child.
+The callable library/report boundaries, parser/source admission, launch/receipt
+ownership and completed-worker peak controls above remain in force.
+No overall #47 completion, private installed-host or scientific acceptance follows.
+
+Current weekly behavior supplements the inherited reference contract:
+
+- The aggregate schedule wall cap must exceed the resolved fixed operation cap
+  before output; incompatible settings fail rather than staying pending forever.
+- With no committed cursor, bounded lookup recovers the oldest retained active
+  intent across a weekly rollover before processing newer closed windows.
+- Missing/failed success receipts HOLD a candidate. Before any candidate exists,
+  an identity-bound failure proving no publication, a reaped/absent child group
+  and no destination permits one fresh bounded attempt; missing/ambiguous
+  evidence still HOLDs. Old attempts and failure evidence remain intact.
+- Only explicitly tagged owned SIGINT/SIGTERM interruptions stop the daemon
+  cleanly after drain, without a feed tick or cursor advancement. Other faults
+  propagate. Cursor links are refused before child launch.
+
+All source paths, bounds, immutable publication and authoritative cursor rules
+remain unchanged. No timer, dashboard, command family or new runner is added.
+See the existing weekly reference section for Settings/env names and artifact
+layout; this current section supersedes its older activation/retry wording.
 
 ## Budgets and permissions
 
@@ -93,8 +192,8 @@ unverified. No model/label change or issue closure follows from these functions.
 - `inputs.py`: boundary/path admission, work/safety guard, file capture, replay verification.
 - `sqlite_snapshot.py`: WAL online backup and retained schema/revision metadata.
 - `provenance.py`: JSON wire validation and deterministic identity.
-- `history.py`: strict retained CSV/JSONL/SQL readers and ambiguity-safe current alias graph.
-- `analysis.py`: `analyze_inputs(destination: Path, *, budgets=None) -> dict`, bounded retained-only result.
+- Later parts only — `history.py`: retained readers and ambiguity-safe current alias graph (absent here).
+- Later parts only — `analysis.py`: bounded retained-only `analyze_inputs` result (absent here).
 - `metrics.py`: separate unique-paper descriptive channels, Wilson intervals and eligibility metadata.
 - `__init__.py`: exported boundary functions and budget/error types.
 
@@ -155,15 +254,14 @@ Synthetic `tests/test_feedback_analysis_inputs*.py` cover numbered empty/populat
 stores, committed WAL preservation, unavailable old history, missing versus broken
 optional reads, replay after source removal, capture races, tamper/escape, budgets
 and failed publication. Existing golden CSV snapshot/hash checks remain separate.
-New synthetic `tests/test_feedback_analysis_{history,metrics,analysis}.py` cover
-canonical ambiguity/tombstones, channel/content multiplicity, missing-history
-recovery limits, strict malformed records, saved predictions, temporal exclusions,
-exact boundaries, confidence edges, bounds and read-only deterministic replay.
+`tests/test_feedback_analysis_report_primitives.py` covers safe Markdown evidence
+encoding. History/analysis/metrics suites described by later parts are absent here;
+this checkout does not establish their integrated behavior or coverage.
 Further subtraction: no parsing framework, inferred model identity, live-store
 alignment lock, scored training evaluation, export knobs or UI. Weekly automation
 below reuses the operation boundary without changing these frozen analytics.
 
-## Manual operation (additive; frozen analytic boundary above is unchanged)
+## Manual operation — later-stack reference, unavailable here
 
 ```
 goldenset analyze-feedback --project-root ROOT [--cutoff AWARE_ISO]
@@ -184,11 +282,7 @@ explicit minimal environment is passed; no dotenv or live config parser runs the
 
 New caller provenance accepts **only** `seed` (default 42, env
 `ZS_FEEDBACK_OPERATION_SEED`, unsigned 32-bit integer; booleans rejected). The
-frozen functions' broader provenance contracts are unchanged. This dispatcher
-requires a source checkout with Git HEAD, `pyproject.toml` and `uv.lock`; a
-standalone wheel without that provenance is unsupported. Worker bootstrap
-unblocks the inherited launch signal mask and disables source-tree bytecode writes.
-Child provenance
+frozen functions' broader provenance contracts are unchanged. Child provenance
 contains full HEAD, actual application Python/dependency-file SHA-256 inventory,
 actual import root, Python/SQLite and relevant installed package versions. Selected
 `Settings.config_path` bytes are hashed, or explicitly missing; no values are
@@ -219,24 +313,17 @@ can only shrink. Operation names have `ZS_FEEDBACK_OPERATION_<UPPER_NAME>` env
 forms; malformed env always raises even with explicit overrides. Named defaults /
 hard caps: wall 120/600 seconds; tree RSS 512 MiB/1 GiB (provisional); swap growth
 2 GiB/max 2 GiB; available RAM floor 20%/minimum 20%; poll 1 second/max 1; terminate
-grace 1/max 5 seconds; operation artifact I/O 2 GiB/max 2 GiB per guard; source inventory entries (`max_source_files`, including directories/non-Python names)
+grace 1/max 5 seconds; cumulative I/O 2 GiB/max 2 GiB; source inventory entries (`max_source_files`, including directories/non-Python names)
 4096/max 4096. Application/dependency-file inventory additionally caps 64 MiB;
 selected goals hashing caps 1 MiB. psutil measures available/total,
 tree RSS and swap **growth**, never old absolute swap residue. Child reports actual
-`getrusage` peak RSS separately from parent sampled peak; a successful child with
-an invalid or over-cap peak cannot publish. Sampling is not instantaneous OS
-memory enforcement. Operation I/O counters cover protocols, provenance and report
-hashing, not whole-process I/O or a shared parent/child cumulative counter.
-Capture and analysis retain their independent work/byte caps. Parent protocol/inventory
+`getrusage` peak RSS separately from parent sampled peak. Parent protocol/inventory
 validation is size/work/safety bounded; blocking filesystem calls cannot promise
 an absolute parent deadline. Child blocking calls are externally terminated/reaped.
 
 Main-thread SIGINT/SIGTERM interruption kills/waits only the owned process group,
 verifies absence and restores owned handlers without clobbering an observed foreign
-replacement. Main-thread launch signals are deferred only until the process is
-registered inside armed cleanup, then normal delivery resumes. Dispatcher signal
-ownership includes success/failure receipt persistence.
-Threaded callers do **not** get signal-handler ownership. SIGKILL,
+replacement. Threaded callers do **not** get signal-handler ownership. SIGKILL,
 parent loss, machine crash and foreign signal handlers can prevent normal cleanup
 or receipt writing; no detached work is intentionally launched. Failures retain
 staging/phase/safe class and propagate/nonzero CLI; frozen capture still performs
@@ -274,7 +361,7 @@ Chronological eligibility and null ranking remain unscored. Weekly confirmation
 and cursor behavior are documented below; daemon training provenance is described
 in `services/model`. First private run, scored usefulness and overall #47 remain open.
 
-## Weekly operation (additive; manual and analytic contracts unchanged)
+## Weekly operation — later-stack reference, unavailable here
 
 ```
 feeds serve -- selected Settings / explicit main-thread capability
@@ -289,9 +376,6 @@ Automation is disabled by default. Settings resolves strict
 `ZS_FEEDBACK_SCHEDULE_ENABLED=true|false|1|0`,
 `ZS_FEEDBACK_SCHEDULE_MAX_WINDOWS` (default 2, range 1..4), and
 `ZS_FEEDBACK_SCHEDULE_WALL_CAP_SECONDS` (default 240, positive/max 600).
-At activation, this cycle cap must exceed the resolved fixed operation cap
-(default 120s); incompatible caps fail before schedule output rather than staying
-`catchup_pending` forever.
 State is under `Settings.feedback_schedule_dir` (`feedback-analysis/schedule`).
 No new CLI flag, command family, timer, generic callback or subprocess runner.
 `run_due_feedback(settings, *, now, budgets=None)` is async but invokes the existing
@@ -299,9 +383,7 @@ synchronous clean-child dispatcher on the MAIN thread only. The loop passes its
 selected Settings explicitly; ticks, server startup and generic jobs never do.
 
 The anchor is Monday 1970-01-05 00:00 UTC. First activation processes only the
-latest closed window. If its cursor was never committed, restart first recovers
-the oldest retained active intent, even after a weekly rollover. Resumed catchup
-advances oldest first by arithmetic, at most
+latest closed window. Resumed catchup advances oldest first by arithmetic, at most
 the configured windows per cycle. The aggregate safety cap reserves a whole fixed
 operation cap before each child; remaining attempt-clock values never enter content
 identity. Individual freeze/analysis/operation bounds remain unchanged. Blocking
@@ -321,11 +403,7 @@ record before publication. Cursor/index failure recovery adopts that EXACT froze
 confirmed candidate, not a fresh analysis of current sources. Reused receipts say
 `publication_action=reused`, `owned_published=false`, `confirmed_report=true`;
 destination existence never proves a current owned commit. Missing/failed original
-success receipts HOLD a candidate with no cursor and no automatic attempt pile.
-Before any candidate exists, an identity-bound failure receipt proving no
-publication, a reaped/absent child group and no destination permits one fresh
-bounded attempt after source repair. Missing/ambiguous evidence still HOLDs;
-old attempts and failure evidence are retained.
+success receipts HOLD the attempt with no cursor and no automatic attempt pile.
 Required retained inputs/output/provenance hashes and private read-only modes are
 reverified. Logical immutability/cooperating namespace is not authentication.
 
@@ -341,10 +419,7 @@ not an invented scientific sufficiency threshold.
 Task cancellation is bounded-drain, not instantaneous: a yield BEFORE cursor
 commit and BETWEEN windows delivers pending asyncio cancellation only after the
 owned child is reaped. SIGINT/SIGTERM uses the existing nested main-thread signal
-ownership/restoration checks. The daemon handles only explicitly tagged owned
-SIGINT/SIGTERM interruptions as a clean stop after child drain, without a feed
-tick or cursor commit; unrelated interruptions still propagate.
-Parent loss/SIGKILL/power loss, foreign handlers,
+ownership/restoration checks. Parent loss/SIGKILL/power loss, foreign handlers,
 post-rename I/O ambiguity and unsupported platforms retain the existing caveats.
 No failed or unconfirmed report authorizes cursor advancement.
 
@@ -362,14 +437,3 @@ Further subtraction: reuse clean-child, atomic publication and signal primitives
 no scheduling surface in ticks/server threads, status flag, dashboard or framework.
 UX source remains issue47's public Laws-of-UX basis: Occam one daemon, Tesler owned
 coordination, Cognitive Load one committed cursor/report pointer.
-
-### Inherited input/report boundaries exercised by weekly work
-
-Capture rejects duplicate migration namespaces rather than silently projecting
-them away. History admission requires journal source and nonblank text SQL
-identities. Unrepresentable UTC conversions remain located invalid/unknown times;
-CSV physical lines/offsets are consumed lazily under the record cap, preserving
-CR/LF/multiline locators. Report evidence uses code delimiters longer than every
-recorded backtick run, so recorded links/markup remain literal local evidence.
-These corrections also apply to manual analysis; they add no model, label write,
-command, framework or private-input permission.

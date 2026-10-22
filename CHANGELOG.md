@@ -10,21 +10,15 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
-- Carry required Feedback dependency safety into weekly execution: bound CSV parsing, validate retained identities/schema/time, preserve literal Markdown, pin the selected CLI root, and close child-launch/RSS enforcement gaps.
-
-- Recover weekly Feedback after confirmed prepublication failures and delayed first cursor commits; reject unsafe cursor links/incompatible caps, and stop the daemon cleanly on owned analysis signals.
-
-- Package existing existing weekly daemon scheduling and recovery from the working changes for dependent review; no behavior redesign.
-
-- Package existing existing manual report command and publication from the working changes for dependent review; no behavior redesign.
-
-- Package existing retained history and descriptive analysis from the working changes for dependent review; no behavior redesign.
-
-- Package existing retained input capture and report primitives from the working changes for dependent review; no behavior redesign.
+- Pin the admitted CLI root through handler reloads and server factory startup; a selected `.env` cannot redirect writes to another project. Cover shell/cwd defaults and direct provider-SDK import rejection; name subprocess safety-cap constants.
 
 - CLI validates before Settings/.env loading, then applies offline flags from the selected project only. Importing CLI no longer reads another root. Faithbench/Setup exports and pure run options load lazily without changing public objects or benchmark algorithms.
 
 ### Changed
+- Reconcile weekly Feedback with the current manual/analysis foundation without losing safe recovery, signal cleanup, parser/identity bounds or admitted-root ownership.
+- Carry required Feedback dependency safety into weekly execution: bound CSV parsing, validate retained identities/schema/time, preserve literal Markdown, pin the selected CLI root, and close child-launch/RSS enforcement gaps.
+- Recover weekly Feedback after confirmed prepublication failures and delayed first cursor commits; reject unsafe cursor links/incompatible caps, and stop the daemon cleanly on owned analysis signals.
+- Package existing weekly daemon scheduling and recovery from the working changes for dependent review; no behavior redesign.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.
 - Fold goal findings without losing originals; disclose saved source basis and unknown reviewed extent. Factor literal warning frames into one introduction with expanded scope/context, qualifiers and source links; retain original wording. Compact cards remain unchanged.
@@ -33,10 +27,16 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Reconcile Feedback primitives with the current CLI foundation; preserve admitted-root pinning, literal Markdown and duplicate-namespace refusal.
+- Keep recorded Feedback report evidence literal when it contains Markdown backticks; reject ambiguous duplicate migration namespaces; clarify available capture primitives versus later-stack analysis/CLI/weekly contracts.
+- Package existing retained input capture and report primitives from the working changes for dependent review; no behavior redesign.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
 - A124: verify section one-liners in a second batch against the same first 700 source characters (up to 24 sections); omit unsupported summaries. Scripted checks do not establish live semantic accuracy.
 - A136: use figure metadata only for affirmative whole-paper figure-count wording; route scoped, uncertain, table-only, combined, and unmatched counts to grounded Q&A. Live scope accuracy is unmeasured.
+- Reconcile retained analysis with the current capture/report foundation; preserve admitted CLI roots, literal Markdown, duplicate-namespace refusal and analyzer bounds/identity checks.
+- Bound retained CSV line indexing incrementally; reject missing journal source and invalid SQL paper keys; retain unrepresentable UTC timestamps as unknown. Clarify later-stack CLI/weekly docs.
+- Package existing retained history and descriptive analysis from the working changes for dependent review; no behavior redesign.
 - A142: validate persisted and injected review-fleet proposals; skip malformed rows, retain valid neighbors, and calibrate only valid human/proposal pairs.
 - A176: cover admitted Faithbench text with contiguous 6,000-character windows; default 32, maximum 256, with preflight rejection above budget and the effective limit recorded in metadata.
 - FaithBench build resolves window budgets as CLI > shell environment > selected-project `.env` > default before provider setup; warning-call assertions are isolated from root-logger propagation.
@@ -53,6 +53,9 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Preserve every saved finding, reading hint and tag instead of silently capping lists at six; add eight-item regressions.
 - Prioritize bounded publication-type recovery with title hints, never title-based eligibility; expose unattempted/confirmed counts. Real source metadata recovered qualifying reviews without increasing lookup budgets.
 - Normalize optional positive signs in source/digest numeric tokens. A real captured review failed on `+3.3` versus `3.3` and `9.6` versus `+9.6`; negative signs, absent magnitudes, arithmetic restrictions and semantic verification remain enforced.
+
+- Reconcile manual Feedback with current retained-analysis prerequisites; preserve admitted roots, parser/identity bounds, literal Markdown and snapshot namespace checks alongside signal/receipt/RSS controls.
+- Keep Feedback signal cleanup armed during child launch and receipt persistence; reject invalid or over-cap worker RSS peaks before publication. Clarify source-checkout and artifact-I/O limits.
 
 ### Added
 
