@@ -57,12 +57,14 @@ project/global instruction inheritance and the skill catalog are disabled;
 | worker | read, bash, edit, write, grep, find, ls | none |
 | coordinator | read-only plus native delegation/wait/supervisor | assigned scout/reviewer only |
 
-Workers cannot mutate Git/index/branch/STATE, stash, commit, push, switch models,
-start alternate runners or modify unassigned data/processes. `acceptanceRole:
+Workers are forbidden by their assignment to mutate Git/index/branch/STATE,
+stash, commit, push, switch models, start alternate runners or modify unassigned
+data/processes; the profile does not technically prevent those actions. `acceptanceRole:
 writer` is inference, not proof of host checks. Coordinator depth remains bounded
 at two; ordinary leaves cannot inherit delegation or release authority. These
 assignments are **not a filesystem sandbox**. Private inputs require separate
-consent before transmission to an external provider.
+consent before transmission to an external provider. The parent must obtain it
+before dispatch, including before placing private content in a child's task.
 
 Child profiles use **openai-codex/gpt-6.1-sol / xhigh**, preserving this project's
 standing agreement. Parent/global model and thinking settings are unchanged.
@@ -94,8 +96,11 @@ The parent reads verdicts and verifies artifacts independently. For independent
 lanes, reuse `runs.lanes`: a failed/stopped stage stays blocked without cancelling
 healthy siblings. A rejecting `runs.run` promise is not a fulfilled `ok:false`
 receipt; bare `Promise.all` can fail the whole composite. Pass actual owner
-`outputReference` values to later reviewers, never guessed output paths. Proposal-
-only owners need read-only tools and an explicitly appropriate evidence policy,
+`outputReference` values to later reviewers, never guessed output paths. The saved
+review workflow requests complete scout-artifact readback when a reference is
+available, otherwise passes inline output, and labels it untrusted evidence.
+This framing is not an enforced prompt-injection defense. Proposal-only owners
+need read-only tools and an explicitly appropriate evidence policy,
 not an implementation attestation; peer/parent acceptance remains mandatory.
 A per-call `tools` value is not proof of an enforced tool ceiling: in the observed
 source-only worker run, mutation tools remained exposed. Task permissions still
@@ -116,7 +121,8 @@ node --test tests/native_workflows.test.mjs
 ```
 
 These cover task rejection, awaited scout completion, rejection/nonterminal stop,
-ordered fresh review requests, preserved peer failures and smoke sequencing.
+ordered fresh review requests, artifact-reference handoff, six labels, literal
+canary request payloads, preserved peer failures and smoke sequencing.
 They do not establish effective runtime permissions, live provider behavior or
 semantic correctness. Use native validation and actual terminal/artifact readback
 for the separately authorized live wiring check.
