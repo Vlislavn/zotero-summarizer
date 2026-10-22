@@ -19,6 +19,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Bound raw RSS backup attempts to five retained snapshots plus one slot; serialize admission and fail closed at capacity without deleting failed prestate backups. Export/review snapshots before resuming; successful writes still prune to five.
 - Keep optional Zotero read-sync running after backup/retention filesystem errors; log possible committed state and rescan unread rows next tick without replaying the failed batch.
 - Complete the common WAL/integrity backup before raw native RSS read-state updates; prune once after commit, preserve integer/idempotent/no-op behavior and propagate refusal or post-commit retention errors without replay.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.

@@ -1,7 +1,9 @@
 """Real temporary native SQL; no live Zotero, connector or historical launch controller."""
 import sqlite3
+from contextlib import closing
 
 import pytest
+from filelock import FileLock
 
 from tests._zotero_fixtures import add_feed_item, build_zotero_db
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter, ZoteroWriteError
@@ -143,6 +145,92 @@ def test_empty_selection_does_not_probe_backup_or_retry(owned, monkeypatch):
     assert writer.mark_feed_items_read([]) == 0
     assert calls == []
     assert states(writer.db_path) == before
+
+
+def test_repeated_real_sql_failure_bounds_storage_and_preserves_each_admitted_prestate(owned):
+    writer, ids = owned
+    before = states(writer.db_path)
+    with sqlite3.connect(writer.db_path) as conn:
+        conn.execute("CREATE TABLE recovery_probe(sequence INTEGER)")
+        conn.execute("INSERT INTO recovery_probe VALUES (0)")
+        conn.execute("CREATE TRIGGER refuse_read BEFORE UPDATE ON feedItems "
+                     "BEGIN SELECT RAISE(ABORT, 'synthetic persistent refusal'); END")
+    admitted = writer._BACKUP_KEEP + 1
+    retained = None
+    for attempt in range(admitted + 3):
+        with sqlite3.connect(writer.db_path) as conn:
+            conn.execute("UPDATE recovery_probe SET sequence=?", (attempt,))
+        with pytest.raises(ZoteroWriteError):
+            writer.mark_feed_items_read(ids)
+        snapshots = {p.name: p.read_bytes() for p in writer.data_dir.glob(writer._BACKUP_GLOB)}
+        assert len(snapshots) <= admitted
+        if attempt == admitted - 1:
+            retained = snapshots
+        elif attempt >= admitted:
+            assert snapshots == retained
+        assert states(writer.db_path) == before
+
+    sequences = []
+    for path in writer.data_dir.glob(writer._BACKUP_GLOB):
+        with closing(sqlite3.connect(path.as_uri() + "?mode=ro&immutable=1", uri=True)) as conn:
+            assert conn.execute("SELECT itemID,readTime FROM feedItems ORDER BY itemID").fetchall() == before
+            assert conn.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+            sequences.append(conn.execute("SELECT sequence FROM recovery_probe").fetchone()[0])
+    assert sorted(sequences) == list(range(admitted))
+
+    with sqlite3.connect(writer.db_path) as conn:
+        conn.execute("DROP TRIGGER refuse_read")
+    with pytest.raises(ZoteroWriteError, match="backup limit"):
+        writer.mark_feed_items_read(ids)
+    assert {p.name: p.read_bytes() for p in writer.data_dir.glob(writer._BACKUP_GLOB)} == retained
+    oldest = sorted(writer.data_dir.glob(writer._BACKUP_GLOB))[0]
+    exported = writer.data_dir.parent / "exported-recovery.sqlite"
+    oldest.rename(exported)
+    assert writer.mark_feed_items_read(ids) == len(ids)
+    assert states(exported) == before
+    assert len(list(writer.data_dir.glob(writer._BACKUP_GLOB))) == writer._BACKUP_KEEP
+
+
+@pytest.mark.parametrize("artifact_kind", ["file", "directory"])
+def test_full_backup_capacity_refuses_before_new_backup_or_native_effect(owned, artifact_kind):
+    writer, ids = owned
+    before = states(writer.db_path)
+    paths = []
+    for index in range(writer._BACKUP_KEEP + 1):
+        path = writer.data_dir / f"zotero.sqlite.backup_preserved_{index}"
+        path.mkdir() if artifact_kind == "directory" else path.write_bytes(b"preserved forensic artifact")
+        paths.append(path)
+
+    with pytest.raises(ZoteroWriteError, match="backup limit"):
+        writer.mark_feed_items_read(ids)
+
+    assert set(writer.data_dir.glob(writer._BACKUP_GLOB)) == set(paths)
+    assert states(writer.db_path) == before
+    if artifact_kind == "file":
+        assert all(path.read_bytes() == b"preserved forensic artifact" for path in paths)
+
+
+def test_raw_backup_admission_is_nonblocking_and_recovers_after_lock_release(owned):
+    writer, ids = owned
+    before = states(writer.db_path)
+    with FileLock(f"{writer.db_path}.read-state.lock", timeout=0):
+        with pytest.raises(ZoteroWriteError, match="already in progress"):
+            writer.mark_feed_items_read(ids)
+    assert states(writer.db_path) == before
+    assert list(writer.data_dir.glob(writer._BACKUP_GLOB)) == []
+    assert writer.mark_feed_items_read(ids) == len(ids)
+
+
+def test_successful_stream_and_idempotent_calls_continue_at_retention_capacity(owned):
+    writer, _ = owned
+    for index in range(writer._BACKUP_KEEP + 3):
+        item_id = add_feed_item(writer.db_path, feed_library_id=2, guid=f"stream-{index}", title="Stream")
+        assert writer.mark_feed_items_read([item_id]) == 1
+        assert len(list(writer.data_dir.glob(writer._BACKUP_GLOB))) <= writer._BACKUP_KEEP
+    before = states(writer.db_path)
+    assert writer.mark_feed_items_read([item_id]) == 0
+    assert states(writer.db_path) == before
+    assert len(list(writer.data_dir.glob(writer._BACKUP_GLOB))) == writer._BACKUP_KEEP
 
 
 def test_backup_includes_committed_wal_resident_prestate(owned):

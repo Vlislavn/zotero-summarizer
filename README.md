@@ -1,8 +1,10 @@
 # Zotero Summarizer
 
 Native RSS read-state maintenance also completes the existing WAL-consistent,
-integrity-checked backup before changing unread markers. See the
-[raw read-state safety boundary](docs/usage.md#native-rss-read-state-backups).
+integrity-checked backup before changing unread markers. Repeated failures pause
+at six retained app-backup artifacts without deleting recovery snapshots; normal
+success retains five. See the [raw read-state safety boundary](docs/usage.md#native-rss-read-state-backups)
+for explicit export/recovery steps.
 
 A local-first reading assistant for [Zotero](https://www.zotero.org/). It reads the
 RSS feeds you follow, scores each new paper for how worth-reading it is (a cheap ML

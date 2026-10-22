@@ -14,9 +14,23 @@ Backups are pruned only after the write commits; SQL failure retains its complet
 backup and rolls back the write. A later retention error can occur **after** the
 native commit and is not proof of rollback or permission to replay another write.
 Automatic read-sync logs filesystem failures and continues the tick without
-immediately replaying the batch; later ticks rescan only unread rows. Repeated
-failed writes retain their completed backups; the retention cap runs only after
-a successful write, so persistent failures can accumulate backups.
+immediately replaying the batch; later ticks rescan only unread rows.
+
+Raw RSS maintenance admits a new attempt only while at most five app-created
+`zotero.sqlite.backup_*` artifacts exist, reserving one extra slot for its fresh
+backup. A per-library lock makes concurrent raw attempts fail closed rather than
+race this check. Successful writes prune back to five; failed writes retain their
+exact prestate backups. At six artifacts, later attempts log `Read-state backup
+limit reached` without allocating another backup or starting a native write. This
+also counts partial/malformed artifacts and stops growth when pruning fails.
+
+To resume after fixing the underlying write/retention problem, stop automatic
+ticks, preserve/export and inspect the app-created snapshots, then move enough
+outside that backup pattern to leave at most five. Keep exported recovery copies;
+do not remove Zotero's own `.bak` files. The next admitted attempt makes a fresh
+integrity-checked backup before writing. This replaces unbounded failed-attempt
+accumulation with an explicit storage-capacity refusal, not automatic deletion of
+forensic snapshots or a claim that an earlier write rolled back.
 This does not add automatic actions, blanket native-write consent or a new backup
 store, nor make backup and mutation atomic against other writers. Typed Pending
 approval/claims, verdict receipts and cross-database recovery remain separate.
