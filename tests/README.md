@@ -47,3 +47,5 @@ Identifier-linked unmaterialized app notes (direct and transitive DOI/arXiv alia
 are submitted only to the consented model; edits/clears stale and hide prior context.
 Candidate identity regressions also distinguish public metadata changes from later
 derived operation/question-evidence enrichment; source inheritance is not identity.
+
+Original discovery regression oracles are retained without changing assertions. Source-only retention does not establish current-contract compatibility.

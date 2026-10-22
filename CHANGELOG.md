@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Retain original discovery source oracles without changing assertions or overwriting the current implementation.
+
 ### Added
 - Add Find new relevant for saved papers using OpenAlex semantic/lexical retrieval, optional consent-bound seed comments, durable sessions and shared Search UI. New Review/Add require current inputs; usefulness remains unqualified.
 - Reconcile retained Discovery Adds through a fresh enforced existing-only native ACK; stale retries cannot create, back up or prune. Missing/malformed/failed ACKs never finalize; ordinary Add is unchanged.

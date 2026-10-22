@@ -372,3 +372,5 @@ share one finding heading. No semantic classifier, rewritten summary, rubric or
 scoring change is introduced; compact presentation remains unchanged.
 
 Full reading views fold goal findings into one native disclosure; states and citations remain visible. Saved quality/digest source basis is shown literally, with reviewed extent explicitly unrecorded. Rubric-literal warning frames preserve each modifier, complete suffix, and original wording.
+
+Original discovery regression oracles are retained without changing assertions. Source-only retention does not establish current-contract compatibility.
