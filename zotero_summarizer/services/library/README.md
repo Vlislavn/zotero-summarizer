@@ -451,6 +451,9 @@ judge is used during projection; source bytes/config freshness belong to the
 current-review reader. Literal membership is not entailment: proposals and effort
 estimates are AI-generated/unverified, never measured reproduction or user data.
 Review source hashing no longer trusts equal size/mtime as equal bytes.
+Omitted configured projects become explicit unknowns with null evidence; no
+project silently disappears. Feed-context acquisition reuses headless PDF sources
+only (`allow_browser=False`); interactive per-paper acquisition is unchanged.
 
 ## Source admission and attempt diagnostics
 

@@ -47,6 +47,8 @@ quotes; reproduction/impact remain nullable. Cards add assessment/evidence and
 unverified-origin fields without changing saved v1 report keys or rewriting old
 JSON. Unknown/absent assessment evidence spans remain null in cards as in the
 producer/qualifier; they do not discard a paper or valid neighboring proposals.
-Legacy numeric impact zero is not evidence of measured zero benefit.
+Legacy numeric impact zero is not evidence of measured zero benefit. The feed
+context/assessment/response types are also exported through the package facade.
+Blank unknown quotes normalize to empty evidence, retaining valid neighbors.
 
 `MIN_MAP_CHUNK_CHARS` is the shared 1000-character validation/recovery floor; the 8000-character default is unchanged.

@@ -145,12 +145,14 @@ def _assess(
     )
     rows = _latest_rows(settings.triage_db_path)
     assessed, failed = [], []
-    cursor = CandidateCursor(settings)
+    cursor = None
     for candidate in candidates:
         try:
             row = rows.get(candidate.source_id)
             candidate = admit_history(candidate, row)
             if row is None:
+                if cursor is None:
+                    cursor = CandidateCursor(settings)
                 row = cursor.row(candidate, profile, generate=generate)
                 if row is not None:
                     rows[candidate.source_id] = row
@@ -180,7 +182,7 @@ def _ensure_reviews(
             assessment = _feed_assessment.qualify(review, contexts[key]) if profile else {}
             if profile and assessment["status"] == "not_assessed":
                 keys.append(key)
-        except ValueError:
+        except (ValueError, FileNotFoundError):
             keys.append(key)
         except Exception as exc:  # noqa: BLE001 — source/currentness errors stay per-paper errors.
             outcomes[key] = f"current review failed: {type(exc).__name__}: {exc}"
@@ -272,7 +274,8 @@ def _records(
                     "prompt_schema_version": (review.get("provenance") or {}).get("prompt_schema_version"),
                     "generated_at": review.get("reviewed_at"),
                     "basis": (review.get("digest") or {}).get("basis", "unknown"),
-                    "confidence": None,
+                    "confidence": triage.confidence,
+                    "assessment_confidence": None,
                     "abstained": assessment["status"] != "assessed",
                 },
             })

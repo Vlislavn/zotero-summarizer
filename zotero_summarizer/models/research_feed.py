@@ -129,6 +129,8 @@ class FeedProjectAssessment(BaseModel):
             raise ValueError("nonpositive assessment cannot propose a use")
         if self.assessment != "unknown" and not self.evidence_quote.strip():
             raise ValueError("assessed use requires original evidence")
+        if self.assessment == "unknown" and not self.evidence_quote.strip():
+            self.evidence_quote = ""
         return self
 
 
@@ -219,5 +221,6 @@ class ResearchEngineeringCard(BaseModel):
 __all__ = [
     "TOPIC_TAXONOMY", "ResearchCandidate", "ResearchEngineeringCard",
     "ResearchFeedTriage", "ResearchIdea", "ResearchProfile",
-    "parse_run_budgets",
+    "FeedReviewContext", "FeedProjectAssessment", "FeedReproduction", "FeedImpact",
+    "FeedAssessment", "FeedDigestResponse", "parse_run_budgets",
 ]

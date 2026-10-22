@@ -179,7 +179,8 @@ uv run zotero-summarizer faithbench build --max-builder-windows 64  # larger QA-
   quote membership is checked, not scientific truth. Effort estimates are explicitly
   unverified; code alone establishes no duration. `--cached-only` avoids startup/model
   work but needs the existing goals config for current qualification; errors remain
-  visible (CLI exit 1). Saved v1 reports are not rewritten.
+  visible (CLI exit 1). Weekly acquisition never opens a browser; missing abstract
+  stages are errors, and omitted projects remain unknown. Saved v1 reports are not rewritten.
 - **[docs/architecture.md](docs/architecture.md)** — how it works, the layering rules, and
   the dev / verification workflow.
 - **[CHANGELOG.md](CHANGELOG.md)** — notable changes (latest: the guided first-run setup).

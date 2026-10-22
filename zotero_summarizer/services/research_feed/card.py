@@ -102,7 +102,7 @@ def build_card(
               "reproducibility_rationale": "Reproduction effort has not been assessed." if not missing else "; ".join(missing),
               **_assessment_fields(assessment)}
     fields["missing_reproduction_inputs"] = list(dict.fromkeys([*missing, *fields["missing_reproduction_inputs"]]))
-    if any(str(value).strip() for value in quality.get("missing_critical") or []) and assessment.get("content", {}).get("reproduction") is not None:
+    if missing and assessment.get("content", {}).get("reproduction") is not None:
         fields.update(reproducibility_tier="blocked", reproducibility_rationale=
                       "; ".join(missing) + "; " + fields["reproducibility_rationale"])
     return ResearchEngineeringCard(

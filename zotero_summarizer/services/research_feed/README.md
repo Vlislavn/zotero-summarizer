@@ -42,7 +42,8 @@ Legacy reviews without assessments project no positive uses/ideas. Explicit
 impact/reproduction assessments are AI-generated and scientifically unverified;
 null impact means unassessed (legacy numeric zero fields are placeholders).
 Code availability alone never implies effort. Existing blockers and artifact URLs
-remain. `tests/test_reproduction_uncertainty.py` preserves all six prior oracles.
+remain; an effort estimate cannot override missing verified code or critical inputs.
+`tests/test_reproduction_uncertainty.py` preserves all six prior oracles.
 `tests/test_feed_engineering.py` covers producer, binding, cache, rank, error and
 CLI publication contracts using scripted models, not real usefulness evidence.
 
@@ -55,6 +56,11 @@ saved reports are never rewritten. CLI returns 1 when a partial run has errors.
 Successful abstract-stage writes use the existing atomic JSON writer under
 Settings.data_dir; reviews keep their existing owning cache writer. Neither is
 an fsync/power-loss guarantee or a cross-process generation claim.
+Missing abstract-stage caches are explicit cached-only failures, not low-relevance
+rejections. Optional cache errors affect only candidates needing that stage;
+valid history neighbors still publish. Generating runs may reacquire missing PDFs
+through existing headless sources, never a browser. V1 provenance keeps numeric
+triage confidence; assessment confidence remains separately unknown.
 
 Offline acceptance is `uv run python tools/eval_research_feed.py --check`.
 The shipped 30-paper fixture records human inclusion and verified artifact labels

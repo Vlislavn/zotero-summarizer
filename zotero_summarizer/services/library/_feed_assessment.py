@@ -5,7 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from zotero_summarizer.models.research_feed import FeedAssessment, FeedDigestResponse, FeedReviewContext
+from zotero_summarizer.models.research_feed import FeedAssessment, FeedDigestResponse, FeedProjectAssessment, FeedReviewContext
 from zotero_summarizer.services.library._prompt_security import untrusted_input
 
 
@@ -63,6 +63,7 @@ def finish(digest, original, prompt, context, out):
     if content is None:
         out.update(status="invalid" if "feed_assessment" in digest.model_fields_set else "not_assessed")
         return
+    content = content.model_copy(deep=True)
     evidence, keys = {}, set()
     for index, record in enumerate(content.projects):
         if record.source_id != context.source_id or record.target_project not in context.profile.projects or record.target_project in keys:
@@ -70,6 +71,14 @@ def finish(digest, original, prompt, context, out):
             return
         keys.add(record.target_project)
         evidence[f"/projects/{index}"] = record.evidence_quote
+    for project in context.profile.projects:
+        if project not in keys:
+            evidence[f"/projects/{len(content.projects)}"] = ""
+            content.projects.append(FeedProjectAssessment(
+                source_id=context.source_id, target_project=project, assessment="unknown", use_kind=None,
+                rationale="Project assessment was not returned.", mechanism="", target_component="",
+                proposed_change="", minimal_validation_experiment="", evidence_quote="",
+            ))
     for field in ("reproduction", "impact"):
         record = getattr(content, field)
         if record is not None:
@@ -137,7 +146,9 @@ def qualify(entry, context):
                 or not 0 <= span["start"] < span["end"] <= payload["original_characters"]
                 or span["end"] - span["start"] != len(quote)):
             raise ValueError("feed original span invalid")
-    complete = keys == set(context.profile.projects) and all(r.assessment != "unknown" for r in content.projects)
+    if keys != set(context.profile.projects):
+        raise ValueError("feed project coverage incomplete")
+    complete = all(r.assessment != "unknown" for r in content.projects)
     if payload["status"] != ("assessed" if complete else "partial"):
         raise ValueError("feed assessment status invalid")
     return payload

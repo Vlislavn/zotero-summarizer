@@ -20,6 +20,11 @@ missing current config from valid configured cached-only work, keep startup/mode
 calls absent and explicit queue consent intact, and reject a newly ready job that
 omits its required assessment. Parent-owned runtime verification runs these explicitly.
 
+`test_feed_review_regressions.py` covers package exports, omitted/blank unknown
+projects, blocker precedence, missing/corrupt abstract-stage isolation, missing-PDF
+recovery, numeric v1 confidence and real worker/cache binding. It checks feed-only
+browser restrictions while preserving interactive acquisition.
+
 Full verification commands and the known macOS native-library fork baseline are
 in [architecture.md](../docs/architecture.md#verify-a-change). Compare the failed
 set against that baseline rather than hiding failures. Authored/static-checked

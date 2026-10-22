@@ -1,12 +1,7 @@
-"""On-demand DEEP review of the top unread library picks (Stage-2 "Read next").
+"""Opt-in PDF digests cached in deep_reviews.json and surfaced by review_detail.
 
-One opt-in local-PDF digest per item, cached in deep_reviews.json and surfaced
-by review_detail, with best-effort Zotero note writeback. No separate relevance
-scorer. The provider-aware shared pool serializes local work and bounds remote
-concurrency; keyed jobs expose progress and single-flight submission.
-
-Missing PDFs remain needs_pdf, not scientific judgments; per-item failures are
-recorded on their own jobs without affecting another paper's review.
+Missing PDFs and per-item failures are operational outcomes, not scientific
+judgments. Explicit feed contexts disable browser acquisition.
 """
 from __future__ import annotations
 
@@ -385,12 +380,17 @@ def _review_worker(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str)
     """Review and settle one item without affecting another item's cache or job."""
     item_key = str(item["item_key"])
     kwargs = {k: v for k, v in ctx.items() if not k.startswith("_")}
+    context = (ctx.get("_feed_contexts") or {}).get(item_key)
     acquired = None
     try:
         if ctx.get("_acquire_missing") and not item.get("pdf_path"):
             from zotero_summarizer.services.library import _pdf_acquire
             _set_job_progress(item_key, {"phase": "acquire", "phase_label": "Fetching full text…"})
-            acquired = _pdf_acquire.acquire_for_item(item_key, reader=ctx.get("reader"))
+            if context is not None:
+                detail = ctx["reader"].get_item_detail(item_key) or {}
+                acquired = _pdf_acquire.acquire_pdf_for(item_key, detail, allow_browser=False)
+            else:
+                acquired = _pdf_acquire.acquire_for_item(item_key, reader=ctx.get("reader"))
             if acquired.path is not None:
                 item.update({
                     "pdf_path": str(acquired.path), "web_article": acquired.web_article,
@@ -400,7 +400,6 @@ def _review_worker(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str)
                     },
                 })
         from zotero_summarizer.services.library import _feed_assessment
-        context = (ctx.get("_feed_contexts") or {}).get(item_key)
         feed_out = {}
         if context is not None:
             kwargs.update(feed_context=context, feed_out=feed_out)

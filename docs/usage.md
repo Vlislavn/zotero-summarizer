@@ -91,18 +91,24 @@ or backend: each applicable use names a mechanism, component, change, experiment
 and original quote. Partial/unknown differs from assessed no-fit. Literal quote
 membership is not entailment or human validation; proposals stay AI-generated and
 scientifically unverified. Missing legacy assessments supply no invented uses or
-ideas. Legacy numeric impact fields retain zero placeholders; null
+ideas. Omitted projects remain explicit unknowns with null evidence spans.
+Legacy numeric impact fields retain zero placeholders; null
 `impact_assessment` means unassessed, not measured zero benefit.
 
 Reproduction effort stays unknown without an assessment; existing blockers and
 verified artifact links remain. Code availability never establishes a one-week
 duration. Explicit effort estimates are labelled **AI estimate, unverified**;
-no reproduction experiment or scientific/usefulness win is claimed.
+no reproduction experiment or scientific/usefulness win is claimed. Existing
+missing-code/input blockers take precedence over AI effort estimates. Weekly
+acquisition uses headless PDF sources only, never a browser or logged-in session.
 
 `--cached-only` makes no model calls or startup/client initialization. Qualification
 reads the existing valid goals config locally (no creation or credential discovery);
 missing/invalid config or stale source/config is an explicit error, not a qualified
-card. Successful cached abstract triage can be reused without generation. Access,
+card. Successful cached abstract triage can be reused without generation; an absent
+stage is an explicit error, not a relevance rejection. Optional cache errors do
+not stop papers with valid history. Generating runs can retry a missing cached PDF
+through existing headless sources. Access,
 assessment and provider errors are per-paper failures, not scientific rejections;
 CLI exit 1 accompanies a published partial run. JSON schema version 1 and Markdown
 retain their existing shape with additive assessment/provenance fields. New bundles

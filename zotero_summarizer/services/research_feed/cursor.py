@@ -22,7 +22,7 @@ class CandidateCursor:
 
     def row(self, candidate, profile, *, generate=True):
         if not generate and candidate.source_id not in self.entries:
-            return None
+            raise ValueError("cached abstract triage unavailable")
         app = state() if generate else None
         config = app.app_state.config if generate else read_config(self.settings.config_path, self.settings.calibration_path)
         config = config.model_copy(update={"research_goals": [*profile.themes, *profile.projects]})
