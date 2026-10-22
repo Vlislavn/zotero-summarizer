@@ -547,3 +547,5 @@ Map output truncation alone subdivides the failing source chunk sequentially wit
 Existing native/question source stack: typed action history, original writer boundaries and dormant editor/proposal code; activation follows. No new feature or issue-completion work; merge the related parts before using their new workflow.
 
 Existing native/question source stack: original confirmation, mirror/recovery and publication-revision helpers; existing endpoint activation follows. No new feature or issue-completion work; merge the related parts before using their new workflow.
+
+Original native source dependencies include the existing condition marker and unchanged direct-editor SQLite fixtures. Synthetic tests are not private-library or native-acceptance evidence.

@@ -134,3 +134,5 @@ missing/invalid originals raise. The existing short-circuit trace exposes
 `explicit_label`, so the UI explains the label instead of showing additive math.
 The shared short-circuit constructor also handles trash/veto; unlabeled scoring
 and final-label manual-override detection retain their existing semantics.
+
+Existing native/question source stack: original metadata editors, Pending confirmation and mirror activation; corresponding UI/MCP source follows. No new feature or issue-completion work; merge the related parts before using their new workflow.

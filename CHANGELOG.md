@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Package original native/question source part: original metadata editors, Pending confirmation and mirror activation; corresponding UI/MCP source follows.
+
 - Package original native/question source part: original confirmation, mirror/recovery and publication-revision helpers; existing endpoint activation follows.
 
 - Package original native/question source part: typed action history, original writer boundaries and dormant editor/proposal code; activation follows.
