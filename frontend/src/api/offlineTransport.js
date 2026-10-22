@@ -1,3 +1,5 @@
+import { publishStatus } from '../offlineStore.js';
+
 const DEFAULT_SYNC_TIMEOUT_MS = 15_000;
 const MAX_SYNC_TIMEOUT_MS = 60_000;
 
@@ -34,6 +36,7 @@ export async function offlineRequest(path, options, decode) {
       response = await fetchTransport(path, { ...options, signal: controller.signal });
     } catch (error) {
       if (controller.signal.aborted && !options.signal?.aborted) error.transportFailure = true;
+      if (error.transportFailure) await publishStatus('Server unavailable', 'unavailable');
       throw error;
     }
     return await decode(response);

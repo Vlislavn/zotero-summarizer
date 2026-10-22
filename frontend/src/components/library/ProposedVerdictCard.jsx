@@ -32,9 +32,8 @@ export default function ProposedVerdictCard({ itemKey, proposal, onSaved, onOver
     try {
       // Same path as InlineAnnotate's submit: a dont_read also queues the ❌ tag,
       // so there is ONE reject path (Occam's Razor), behind this explicit click.
-      const tasks = [submitVerdict({ item_key: itemKey, user_priority: proposed })];
-      if (isRemove) tasks.push(queueRejectTag(itemKey));
-      await Promise.all(tasks);
+      const result = await submitVerdict({ item_key: itemKey, user_priority: proposed });
+      if (isRemove && !result.saved_offline) await queueRejectTag(itemKey);
       onSaved?.();
     } catch (e) {
       setError(`Couldn’t save: ${e.message || e}`);

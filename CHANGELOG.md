@@ -11,6 +11,9 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Fixed
+- Document conservative comparison after an uncertain online ACK and the separate browser-storage boundary. Protect full canonical verdict comments beyond outbound size caps with explicit assertions.
+- Fence older cross-tab pulls at equal field cursors. Keep offline queue labels/retractions current, run batch saves offline, and avoid native-tag requests after locally saved proposal confirmations.
+- Project offline conflict choices into local views, refuse stale detail on storage-read failure, revoke stale connection status after transport fallback, and drain saves signalled during active sync.
 - Complete disconnected working-set review with the existing PWA/outbox: unopened compact context, draft/owner fences, bounded transport, strict atomic ACK/pull handling and compared conflict resolution. Device/server/native ACKs stay distinct; no PDF/AI sync or physical iOS acceptance.
 - Add version-bound `keep_server` sync resolutions without canonical-body echo or native effects. Preserve stale-choice recovery and canonical provenance, use admitted unscoped membership, retain dirty inline notes, and distinguish fetch failure from a received response.
 - Preserve later durable pending fields when earlier edits conflict and a later batch fails before pull. Canonical evidence/revisions and ACK retirement remain atomic; no outbox rewrite or relaxed acknowledgement.

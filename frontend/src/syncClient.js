@@ -1,10 +1,11 @@
 import { request } from './api/client.js';
 import { offlineRequestBudget } from './api/offlineTransport.js';
 import {
-  applyPull, applyPushResults, getMeta, mutationError, pendingMutations, publishStatus, pushPredecessors,
+  applyPull, applyPushResults, beginPull, getMeta, mutationError, pendingMutations, publishStatus, pushPredecessors,
 } from './offlineStore.js';
 
 let running = null;
+let requestedAgain = false;
 let activeQueryClient = null;
 function failureMessage(error, timedOut, transport) {
   if (error?.status) return `Sync request failed (HTTP ${error.status}): ${error.message}`;
@@ -14,10 +15,11 @@ function failureMessage(error, timedOut, transport) {
 }
 
 export function syncNow(client = activeQueryClient) {
-  if (running) return running;
+  if (running) { requestedAgain = true; return running; }
   running = (async () => {
     if (!navigator.onLine) {
       await publishStatus();
+      await client?.invalidateQueries({ queryKey: ['review-detail'] });
       return;
     }
     const controller = new AbortController();
@@ -55,11 +57,12 @@ export function syncNow(client = activeQueryClient) {
         await applyPushResults(pushed.results);
       }
       const since = await getMeta('cursor', 0);
+      const sequence = await beginPull();
       boundary = 'request';
       const pulled = await request(`/api/sync/pull?protocol=1&since=${since}`, { signal: controller.signal });
       boundary = 'local';
       if (pulled?.protocol !== 1) throw new Error('Sync protocol changed; refresh the app');
-      await applyPull(pulled);
+      await applyPull(pulled, sequence);
       await publishStatus('', 'connected');
       await client?.invalidateQueries({ queryKey: ['review-detail'] });
     } catch (error) {
@@ -70,7 +73,13 @@ export function syncNow(client = activeQueryClient) {
     } finally {
       clearTimeout(timeout);
     }
-  })().finally(() => { running = null; });
+  })().finally(async () => {
+    running = null;
+    if (requestedAgain) {
+      requestedAgain = false;
+      await syncNow(client);
+    }
+  });
   return running;
 }
 

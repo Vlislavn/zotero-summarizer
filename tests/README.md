@@ -7,6 +7,10 @@ within the same500physical-line cap as other Python files.
 
 ## Disconnected review
 
+`test_sync_keep_server.py` checks no-op receipts, stale choices, full canonical
+note/comment evidence beyond outbound caps, and conservative comparison after a
+lost online ACK without duplicate field history or native effects.
+
 `test_offline_review_browser.py` and `_offline_review_browser.py` exercise an
 owned installed Chrome persistent profile against actual local TCP/FastAPI,
 app SQLite and IndexedDB. The fixture stops/restarts only its own listener and

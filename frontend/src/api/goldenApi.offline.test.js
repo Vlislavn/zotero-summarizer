@@ -86,10 +86,10 @@ it('does not treat a protocol or HTTP block as transport-outage authority', asyn
   expect(await offline.pendingMutations()).toEqual([]);
 });
 
-it('keeps the connected server view usable when device storage cannot open, without claiming an offline save', async () => {
+it('refuses a server detail when device storage cannot establish pending local field visibility', async () => {
   vi.spyOn(IDBFactory.prototype, 'open').mockImplementation(() => { throw new DOMException('Storage denied', 'SecurityError'); });
   const data = { item_key: 'P1', title: 'Server view', user_note: 'Server note' };
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => data }));
   const { fetchReviewDetail } = await import('./goldenApi.js');
-  expect(await fetchReviewDetail('P1')).toEqual(data);
+  await expect(fetchReviewDetail('P1')).rejects.toThrow('Storage denied');
 });
