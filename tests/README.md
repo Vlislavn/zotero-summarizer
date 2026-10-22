@@ -23,3 +23,5 @@ critical support, partial quality in new versus legacy snapshots, and Search API
 policy/raw provenance. Search mocks return real `PaperDigest` DTOs, not partial objects.
 
 Use the repository verification commands and scoped source-bound receipts.
+
+Retain original reading source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
