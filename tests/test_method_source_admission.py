@@ -247,8 +247,8 @@ def test_rejection_receipt_failure_propagates_without_repair_or_mutation(
     client.prompt.side_effect = (["{malformed"] if repair else []) + [payload([INVENTED])]
     original_parser = summarization.parse_typed_output
 
-    def parse(text, model):
-        original_parser(text, model)
+    def parse(text, model, **kwargs):
+        original_parser(text, model, **kwargs)
         return parsed
 
     monkeypatch.setattr(summarization, "parse_typed_output", parse)

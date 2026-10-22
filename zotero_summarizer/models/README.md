@@ -42,3 +42,8 @@ shortlist 1–100, cards 1–20, source rows 1–5,000 and wait timeout 1–86,4
 Only omitted shortlist/card overrides use profile defaults; zero is not omission.
 
 `MIN_MAP_CHUNK_CHARS` is the shared 1000-character validation/recovery floor; the 8000-character default is unchanged.
+
+Live refinement passes `preserve_method_artifact_literals` through Pydantic validation
+context so source admission sees the original nonempty artifact strings, including
+surrounding whitespace. Normal decoding without that context retains legacy whitespace
+cleanup; saved summaries are not revalidated against source membership.

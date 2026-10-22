@@ -209,7 +209,10 @@ output capture/telemetry are unchanged. Candidate spans do not overlap: scanning
 and decoding work is bounded by input characters, without suffix retries or regex.
 
 Method/code artifacts are checked after the existing typed parse/one repair,
-before triage, response assembly or persistence. Each candidate must exactly equal
+before triage, response assembly or persistence. Both typed parse attempts retain
+nonempty candidate literals through validation context; whitespace-padded URLs are
+rejected and receipted rather than silently trimmed. Legacy decoding keeps its
+existing cleanup. Each candidate must exactly equal
 a complete HTTP(S) token in the original text or bound title/DOI/abstract, or an
 eligible whole raw PDF annotation URI. Case, percent escapes, query, fragment and
 literal punctuation are not normalized; substring/prefix and nested URLs inside

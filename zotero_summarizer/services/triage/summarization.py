@@ -265,8 +265,9 @@ def _refine_with_retry(
     refined_text = to_text(llm.prompt(refine_prompt))
     check_cancelled(cancel_event)
     phase = "first"
+    validation_context = {"preserve_method_artifact_literals": True}
     try:
-        refined = parse_typed_output(refined_text, RefinedSummary)
+        refined = parse_typed_output(refined_text, RefinedSummary, context=validation_context)
     except ValueError as exc:
         LOGGER.warning("%s refine JSON parse failed, retrying", prefix)
         retry_prompt = (
@@ -280,7 +281,7 @@ def _refine_with_retry(
         check_cancelled(cancel_event)
         retry_text = to_text(llm.prompt(retry_prompt))
         check_cancelled(cancel_event)
-        refined = parse_typed_output(retry_text, RefinedSummary)
+        refined = parse_typed_output(retry_text, RefinedSummary, context=validation_context)
         phase = "repair"
     return _admit_method_artifacts(
         refined, original_text, req, phase=phase, persist_rejections=persist_rejections, original_pdf=original_pdf,
