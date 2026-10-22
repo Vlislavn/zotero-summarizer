@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Retain the existing daemon training-ledger producer and original provenance/cancellation tests; no new training or inference behavior is designed.
+
 - Package existing existing weekly daemon scheduling and recovery from the working changes for dependent review; no behavior redesign.
 
 - Package existing existing manual report command and publication from the working changes for dependent review; no behavior redesign.

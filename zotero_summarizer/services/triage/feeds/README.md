@@ -88,3 +88,5 @@ includes fatal_llm_error. The loop fails on exceptions or failed reports and
 removes its signal handlers on exit; zero ticks does no work.
 
 Existing Feedback weekly scheduling is included by the dependent review stack; this packaging does not repair known original lifecycle limitations.
+
+The existing daemon training-ledger producer is retained with its original synthetic-trainer regression suite. It appends retained artifact identities only after install/rescore; this packaging adds no fitting, inference or new identity authority.

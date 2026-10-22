@@ -17,3 +17,5 @@ Part 2 retains the corresponding original Feedback suites without assertion chan
 Part 3 retains the corresponding original Feedback suites without assertion changes.
 
 Part 4 retains the corresponding original Feedback suites without assertion changes.
+
+The existing daemon training-ledger producer is retained with its original synthetic-trainer regression suite. It appends retained artifact identities only after install/rescore; this packaging adds no fitting, inference or new identity authority.
