@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Package existing existing manual report command and publication from the working changes for dependent review; no behavior redesign.
+
 - Package existing retained history and descriptive analysis from the working changes for dependent review; no behavior redesign.
 
 - Package existing retained input capture and report primitives from the working changes for dependent review; no behavior redesign.
