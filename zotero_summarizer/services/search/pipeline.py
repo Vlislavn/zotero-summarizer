@@ -141,33 +141,48 @@ def run_screen(raw_query: str, questions: list[str], *, deps: SearchDeps, constr
 
 
 def _annotate_library_coverage(candidates: list[Candidate], reader: Any) -> None:
-    """Set each candidate's Zotero-library coverage in place (tri-state, fail-open).
+    """Resolve coverage over every retained DOI/arXiv in each version family.
 
-    Mirrors triage ``_tick_dedup.dedup_against_library``: one reader across the
-    batch, a per-candidate boundary guard. ``in_library`` becomes ``True`` (+ the
-    found key) on a hit; ``False`` ONLY when the candidate carries a supported id
-    (doi/arxiv) and the lookup returned None; otherwise it stays ``None``
-    (unknown — a PMID/PMCID-only row or a failed lookup is never a false
-    "missing"). ``reader is None`` (Zotero absent) leaves every candidate ``None``.
+    A hit owns its returned key. Only complete misses establish False; partial
+    lookup failures remain unknown. No reader or supported ID starts no lookup.
     """
     if reader is None:
         return
     for cand in candidates:
-        doi = cand.doi or None
-        arxiv = cand.arxiv_id or None
-        if not doi and not arxiv:
-            continue  # no supported id → coverage unknown (stays None)
-        try:
-            existing = reader.find_by_external_id(doi=doi, arxiv_id=arxiv)
-        except Exception as exc:  # noqa: BLE001 — external Zotero-read boundary (see _tick_dedup)
-            # fail-open: leave None (unknown), never a false "not in library".
-            LOGGER.warning("library coverage lookup failed for %r; leaving unknown: %s", cand.title[:60], exc)
+        current = (cand.doi or None, cand.arxiv_id or None)
+        queries = [current] if any(current) else []
+        primary = {f"doi:{cand.doi}", f"arxiv:{cand.arxiv_id}"}
+        for key in cand.identifier_keys():
+            if key in primary:
+                continue
+            namespace, _, value = key.partition(":")
+            if namespace == "doi":
+                query = (value, None)
+            elif namespace == "arxiv":
+                query = (None, value)
+            else:
+                continue
+            if query not in queries:
+                queries.append(query)
+        if not queries:
             continue
-        if existing:
-            cand.in_library = True
-            cand.existing_zotero_key = existing
-        else:
-            cand.in_library = False
+        incomplete, existing = False, None
+        for doi, arxiv in queries:
+            if arxiv and ("%" in arxiv or "_" in arxiv):
+                incomplete = True
+                arxiv = None
+                if not doi:
+                    continue
+            try:
+                existing = reader.find_by_external_id(doi=doi, arxiv_id=arxiv)
+            except Exception as exc:  # noqa: BLE001 — external Zotero-read boundary, explicit unknown
+                incomplete = True
+                LOGGER.warning("library coverage lookup failed for %r; leaving unknown: %s", cand.title[:60], exc)
+                continue
+            if existing:
+                break
+        cand.in_library = True if existing else None if incomplete else False
+        cand.existing_zotero_key = existing or None
 
 
 def _max_chars(deps: SearchDeps) -> int:

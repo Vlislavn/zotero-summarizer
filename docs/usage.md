@@ -40,6 +40,23 @@ through to grounded Q&A. The paper artifact stores `figures_count`, not a table
 count; focused Q&A and freshness routing tests passed (39), but live natural-language
 scope accuracy is not measured.
 
+## Library membership in Search
+
+Screening preserves all observed version-family identifiers through preferred
+metadata selection and saved-session reloads. The existing reader checks retained
+DOI/arXiv alternatives, not just the displayed version. A confirmed hit supplies
+its matching library key; partial lookup failure remains unknown, not a known miss.
+ArXiv values containing `%` or `_` are not sent to the native pattern lookup;
+coverage stays unknown unless another safe identifier confirms a saved hit.
+No title-only match is inferred. Old sessions cannot recover identifiers that were
+previously discarded; an explicit new search/refinement can observe them again.
+
+Opt-in agentic refinement (`ZS_SEARCH_AGENTIC`) checks newly retrieved identities
+before merging. A saved match survives richer metadata; explicit Add reuses its
+key. An unresolved newly retrieved identity keeps the family unknown rather than
+borrowing an older version's miss. Refinement writes no Zotero items and starts
+no automatic Add.
+
 ## First-run setup
 
 There's nothing to copy and nothing to migrate by hand. On the first `serve` (or `setup`),
