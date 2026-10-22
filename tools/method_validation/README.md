@@ -13,6 +13,10 @@ coverage separate from decision-only quality and identify synthetic labels plus
 declared/missing provenance counts without claiming independent verification.
 Admission rejects repeated canonical papers even within one family, and ML imports
 require nonempty training-family provenance before any artifacts or requests.
+Priority uses the same public native admission/TLS guard, retaining its four-way
+projector and outcome-work reservation. Its separate aggregate `max_snapshot_bytes`
+cap also bounds each input read before allocation. Priority rows without declared
+human provenance never enter paired estimates; blocked recordings stay unscored.
 
 ## Support comparison (#37)
 
@@ -72,8 +76,3 @@ adapter instances also bound cumulative work. Recorded evaluation rejects blocke
 wrong-kind arms. Remote endpoints require HTTPS (loopback HTTP is retained). All frozen
 input snapshots share `max_input_bytes`; paired inference excludes gold without human
 provenance while retaining descriptive labels and the full coverage denominator.
-
-Priority uses the same public native admission/TLS guard, retaining its four-way
-projector and outcome-work reservation. Its separate aggregate `max_snapshot_bytes`
-cap also bounds each input read before allocation. Priority rows without declared
-human provenance never enter paired estimates; blocked recordings stay unscored.
