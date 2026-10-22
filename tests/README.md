@@ -18,4 +18,8 @@ Injected-PDF review fixtures supply a typed independent full-text quality result
 when asserting full reading. Abstract/not-assessed controls retain the raw A/read
 model digest but require effective skim; a grade/band alone cannot supply basis.
 
+Projection boundaries cover concept-only caveats for all reading actions and missing
+critical support, partial quality in new versus legacy snapshots, and Search API
+policy/raw provenance. Search mocks return real `PaperDigest` DTOs, not partial objects.
+
 Use the repository verification commands and scoped source-bound receipts.

@@ -253,3 +253,54 @@ def test_standalone_cache_identity_includes_reused_checklist_and_policy_sources(
     before = paper_render._compute_renderer_rev()
     source.write_text("second source revision")
     assert paper_render._compute_renderer_rev() != before
+
+
+@pytest.mark.parametrize("decision", ["read", "skim", "skip"])
+@pytest.mark.parametrize("concern", [{"quality_band": "flag"}, {"overstatements": ["Unsupported claim."]},
+                                     {"quality_band": "neutral", "missing_critical": ["scope_match"]}])
+def test_material_evidence_caveat_is_independent_of_raw_reading_action(decision, concern):
+    source = {**DIGEST, "read_decision": decision}
+    quality = {**QUALITY, **concern}
+    applied, raw, flags = propose.apply_reading_policy(source, quality, HIT)
+    assert raw == decision
+    assert "weak_evidence" in flags
+    assert "Concept/hypothesis source only; claims not established." in applied["read_why"]
+    assert applied["read_decision"] == ("skim" if decision == "read" else decision)
+    assert source["read_why"] == DIGEST["read_why"]
+    assert propose.apply_reading_policy(applied, quality, HIT)[0] == applied
+
+
+@pytest.mark.parametrize("quality", [{}, {"quality_band": "neutral"},
+                                     {"basis": "full_text", "quality_band": "highlight"}])
+def test_retained_new_snapshot_cannot_restore_self_grade_from_partial_quality(quality):
+    entry = {"model_digest": DIGEST, "digest": DIGEST, "quality": quality, "goal_summaries": HIT}
+    before = deepcopy(entry)
+    projected = propose.project_review(entry)
+    assert projected["digest"]["grade"] == ""
+    assert propose.propose_verdict(projected["model_digest"], projected["quality"], goal_summaries=HIT).grade == ""
+    assert projected["model_digest"]["grade"] == "A" and entry == before
+    assert propose.project_review({**entry, "model_digest": None})["digest"]["grade"] == "A"
+
+
+@pytest.mark.parametrize("friction, quality, expected, grade", [
+    ("high", QUALITY, "skim", "B"), ("low", QUALITY, "read", "B"), ("low", {}, "skim", ""),
+])
+def test_search_targeted_api_projects_policy_without_changing_raw_digest(monkeypatch, friction, quality, expected, grade):
+    from zotero_summarizer.models import GoalSummary
+    from zotero_summarizer.services.search import _targeted_review as target
+    from zotero_summarizer.services.search._models import Candidate
+
+    source = PaperDigest(**{**DIGEST, "writing_friction": friction,
+                            "writing_reasons": ["Section 2 uses state before defining it."] if friction == "high" else []})
+    before = source.model_dump()
+    calls = []
+    monkeypatch.setattr(target, "assess_digest", lambda **kwargs: calls.append(kwargs) or source)
+    monkeypatch.setattr(target, "summarize_for_goals", lambda **kwargs: [GoalSummary(**HIT[0])])
+    candidate = Candidate(title="Study", quality=quality)
+    target.targeted_review(candidate, full_text="A concept.", query="Evaluation", questions=[],
+                           config=object(), llm=object())
+    payload = candidate.to_dict()["review"]
+    assert payload["brief"]["read_decision"] == expected
+    assert payload["brief"]["grade"] == grade
+    assert payload["model_digest"] == before == source.model_dump()
+    assert len(calls) == 1

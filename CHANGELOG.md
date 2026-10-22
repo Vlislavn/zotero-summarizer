@@ -23,6 +23,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Keep concept-only caveats on skipped reviews and missing critical support; partial quality cannot restore self-grades in new snapshots. Project new Search API briefs through the shared reading policy while retaining raw model output.
 - Use real temporary source identities in quality-policy integration fixtures. Preserve source-byte guards and the original raw-model, grade, note, proposal and cache assertions when composing review features.
 - Keep idea, evidence and writing separate; retain raw model digests and conservative reading caps. Share scientific grade across cached reviews, proposals and saved digest notes; evaluator failures and non-papers stay ungraded. Preserve escaping. Human/scientific acceptance remains unclaimed.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.

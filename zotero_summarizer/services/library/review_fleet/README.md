@@ -44,7 +44,11 @@ The same server grade authority projects applied `digest.grade` and proposal str
 React and saved digest notes consume that projection. Independent grades override
 raw self-grades retained in `model_digest`, including explicit ungraded non-paper,
 unknown and evaluator-failure states. Only real legacy absence permits a self-grade
-fallback. Weak-evidence skims keep a concept-only warning.
+fallback. A retained new-model snapshot with partial quality stays ungraded; it
+cannot borrow the raw self-grade. Material flags, overstatements and missing critical
+support keep a concept-only warning for read, skim and skip alike. The policy never
+promotes a skip merely to display that caveat. Search's new targeted API briefs
+reuse this projection, retaining raw model output separately.
 Calibration also validates injected proposals against `ProposedVerdict` and
 human labels against the supported priority set. Its agreement denominator uses
 only valid human/proposal pairs; malformed rows do not discard healthy neighbors.

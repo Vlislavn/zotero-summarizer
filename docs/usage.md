@@ -32,7 +32,10 @@ Raw validated model digests remain separately cached from applied reading policy
 Reviews, proposals and newly saved digest notes share one scientific-grade projection:
 independent D overrides model self-A; non-paper or failed assessment stays ungraded.
 Failures are not legacy absence and never manufacture scientific quality from the
-self-grade. Existing notes are not silently rewritten on read.
+self-grade. Existing notes are not silently rewritten on read. Material evidence gaps retain a
+concept-only caveat even when the digest already recommends skip. New Search session
+API briefs apply the same reading/grade policy and retain their raw `model_digest`;
+existing saved sessions are not migrated.
 The existing 17-paper legacy capture lacks full source-basis/target provenance and
 cannot certify this full-read gate. Human scientific acceptance on 12–20 papers,
 including the perspective seed arXiv:2606.05925, remains unclaimed; synthetic policy

@@ -118,18 +118,17 @@ def effective_read_decision(
     """Reserve full reading for the intersection of idea, goal, evidence, and effort."""
     d, q = digest or {}, quality or {}
     decision = str(d.get("read_decision") or "").strip().lower()
-    if decision == "skip" and _goal_evidence(goal_summaries) == "unknown":
-        return "", ["goals_not_assessed"]
-    if decision not in {"read", "skim"}:
-        return decision if decision == "skip" else "", []
     flags: list[str] = []
     band = str(q.get("quality_band") or "")
     if q.get("basis") != "non_paper" and (
         band == "flag" or any(str(value).strip() for value in (q.get("overstatements") or []))
+        or bool(q.get("missing_critical"))
     ):
         flags.append("weak_evidence")
-    if decision == "skim":
-        return decision, flags
+    if decision == "skip" and _goal_evidence(goal_summaries) == "unknown":
+        return "", [*flags, "goals_not_assessed"]
+    if decision != "read":
+        return decision if decision in {"skim", "skip"} else "", flags
     if d.get("basis") != "full_text":
         flags.append("full_text_not_confirmed")
     if not str(d.get("original_value") or "").strip():
@@ -185,8 +184,11 @@ def project_review(entry: dict[str, Any]) -> dict[str, Any]:
     if not source:
         return entry
     quality = entry.get("quality")
-    if quality is None and entry.get("model_digest"):
-        quality = QualityEval(quality_band="uncertain", basis="not_assessed").model_dump()
+    if entry.get("model_digest"):
+        if quality is None:
+            quality = QualityEval(quality_band="uncertain", basis="not_assessed").model_dump()
+        elif "grade" not in quality:
+            quality = {**quality, "grade": ""}
     digest, raw, flags = apply_reading_policy(source, quality, entry.get("goal_summaries"))
     retained_flags = [] if entry.get("model_digest") else entry.get("reading_policy_flags", [])
     return {**entry, "digest": digest, "quality": quality, "model_read_decision": entry.get("model_read_decision", raw),
