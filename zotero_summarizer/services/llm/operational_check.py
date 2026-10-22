@@ -33,14 +33,14 @@ def _stage_skeleton(routing: Any, stage: str) -> tuple[Any, dict[str, Any]]:
 
 def probe_provider(provider: ProviderConfig, model: str) -> dict[str, Any]:
     """Probe one provider/model; failures are data so sibling stages still run."""
-    if LLMCapability.text not in provider.available_capabilities:
-        return {"status": "fail", "reason_code": "unsupported_capabilities", "attempted": False,
-                "detail": "Selected provider does not declare text support"}
-    refusal = refused_local_load(provider, model)
-    if refusal:
-        return refusal
     attempted = False
     try:
+        if LLMCapability.text not in provider.available_capabilities:
+            return {"status": "fail", "reason_code": "unsupported_capabilities", "attempted": False,
+                    "detail": "Selected provider does not declare text support"}
+        refusal = refused_local_load(provider, model)
+        if refusal:
+            return refusal
         client = build_client_for_provider(provider, model, verification=True)
         try:
             attempted = True
@@ -68,6 +68,11 @@ def _probe_stage(routing: Any, stage: str) -> dict[str, Any]:
 
 async def _probe_stage_bounded(routing: Any, stage: str) -> dict[str, Any]:
     """Bound one blocking provider call; its orphaned worker exits independently."""
+    from zotero_summarizer.services.setup.load_attempt import current_attempt
+
+    if current_attempt() is not None:
+        # Doctor already owns a bounded waiter; keep the real request in its callback.
+        return _probe_stage(routing, stage)
     resolved, _row = _stage_skeleton(routing, stage)
     timeout = (
         _LOCAL_PROBE_TIMEOUT_SECS

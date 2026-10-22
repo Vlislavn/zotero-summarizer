@@ -25,8 +25,9 @@ triage.py ──(domain)        all three ──*──> __init__.py  ──>  f
 `ProviderConfig.capabilities` is an optional declared set (`text`,
 `native_json_schema`), intersected with enabled adapter paths; omission preserves
 legacy text support without asserting optional support. Loopback detection is
-central and literal-only: localhost, all IPv4 127/8, IPv6 loopback and IPv4-mapped
-IPv6 loopbacks use the same rule for both adapters. Unspecified addresses remain
+central and DNS-free: localhost and its reserved subdomains, numeric IPv4
+shorthand, all IPv4 127/8, IPv6 loopback and IPv4-mapped IPv6 loopbacks use the
+same rule for both adapters. Unspecified addresses remain
 local; remote/private non-loopback literals remain unchanged. No DNS is consulted. `ConnectionResult` distinguishes `listed`, declared
 `capable`, `observed_operational`, `hardware_safe` and `reason_code`; unknown is
 not false or Ready. No ResourceEnvelope is fabricated from these declarations.

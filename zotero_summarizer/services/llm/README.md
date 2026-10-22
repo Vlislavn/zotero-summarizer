@@ -22,7 +22,8 @@ llm_routing → resolve_stage → ResolvedStage → factory → LLMClient
   the server's potentially enabled reasoning default. Unset effort remains a no-op.
 - `operational_check.py` owns the tiny manual inference probe used by stage
   checks, setup validation, and Doctor. Identical routes share one serial probe;
-  local cold starts get 60 seconds and hosted checks 30 seconds. Failures become
+  standalone local checks get 60 seconds and hosted checks 30 seconds. Doctor uses
+  its outer bounded waiter and keeps real requests inside callback exclusion. Failures become
   bounded results, not startup errors. Cheap `/models` reachability remains the
   proactive companion.
 - `model_list.py` lists sorted unique model IDs. Remote discovery accepts a
@@ -39,7 +40,8 @@ Provider capabilities declare adapter paths, not measured model support. Probes
 require nonempty output and observed matching model/terminal metadata, never an
 exact prompt-response phrase. Setup clients own and close their transport, disable
 retries/cache/proxy inheritance/redirects, and reject weights-file URLs. A missing
-completion observation cannot pass. Cancellation fences later calls in a dry-run;
+completion observation cannot pass. Malformed endpoints return failed probe data
+without constructing an adapter. Cancellation fences later calls in a dry-run;
 its waiter cannot prove remote termination. Local probes refuse UNKNOWN before
 construction until an authoritative effective ResourceEnvelope producer exists;
 ordinary loopback clients need no key when none is configured; an explicitly

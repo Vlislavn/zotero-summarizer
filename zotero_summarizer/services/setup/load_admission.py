@@ -1,7 +1,7 @@
 """Setup LLM admission is evidence, not a RAM estimate or a provider declaration."""
 from zotero_summarizer.models.providers import ProviderConfig
 
-ADMISSION_REVISION = "setup-verification-v2"
+ADMISSION_REVISION = "setup-verification-v3"
 
 
 def assess_setup_load(provider: ProviderConfig, model: str) -> dict:

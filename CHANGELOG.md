@@ -21,6 +21,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Keep Setup cancellation bound to callbacks and active run IDs; fence inventory, invalidate changed hosted credentials, align local endpoints, and fail malformed probes. Empty retries recheck; interrupted receipts remain unresolved.
 - Refuse setup inference on all literal IPv4/mapped-IPv6 loopbacks, invalidate older Ready results, and derive mixed-runtime recovery from the failing endpoint without automatic downloads.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.

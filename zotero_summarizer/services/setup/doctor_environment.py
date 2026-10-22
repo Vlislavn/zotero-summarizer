@@ -178,6 +178,22 @@ def _database(settings: Settings) -> dict[str, Any]:
     )
 
 
+def _saved_paths(settings: Settings) -> dict[str, str | None]:
+    from dotenv import dotenv_values
+
+    values = dotenv_values(settings.env_path) if settings.env_path.is_file() else {}
+    return {key: values.get(key) for key in ("ZOTERO_DATA_DIR", "PDF_ROOT")}
+
+
+def _restart_required(settings: Settings) -> bool:
+    saved = _saved_paths(settings)
+    return any(
+        raw and Path(raw).expanduser().resolve() != getattr(settings, attr).resolve()
+        for key, attr in (("ZOTERO_DATA_DIR", "zotero_data_dir"), ("PDF_ROOT", "pdf_root"))
+        if (raw := saved.get(key))
+    )
+
+
 __all__ = [
     "_row",
     "_environment",

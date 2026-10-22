@@ -7,7 +7,6 @@ from contextlib import closing
 from datetime import datetime, timezone
 import shutil
 import sqlite3
-from pathlib import Path
 from threading import Lock
 from typing import Any, Callable
 from urllib.parse import urlsplit
@@ -27,6 +26,8 @@ from zotero_summarizer.services.setup.doctor_environment import (
     _optional_extras,
     _research_goals,
     _row,
+    _restart_required,
+    _saved_paths,
     _zotero,
     redact_diagnostics,
 )
@@ -88,7 +89,10 @@ def _runtime_model(settings: Settings) -> dict[str, Any]:
         )
     resolved = [resolve_stage(config.llm_routing, stage) for stage in STAGES]
     served: dict[str, list[str]] = {}
+    attempt = current_attempt()
     for item in resolved:
+        if attempt:
+            attempt.require_active()
         if item.provider.name in served:
             continue
         ollama = _ollama_endpoint(item.provider)
@@ -265,8 +269,18 @@ def store_credential_and_invalidate(settings: Settings, name: str, key: str) -> 
 def _config_signature(settings: Settings) -> str:
     """Invalidate old Doctor success after routing, goals, or paths change."""
     import hashlib
+    import yaml
+    from zotero_summarizer.services.llm.credentials import get_api_key
 
     digest = hashlib.sha256()
+    if settings.config_path.is_file():
+        try:
+            config = read_config(settings.config_path, settings.calibration_path)
+            for provider in config.llm_routing.providers:
+                if not provider.is_local:
+                    digest.update(repr((provider.name, get_api_key(provider.api_key_env))).encode())
+        except (ValueError, yaml.YAMLError):
+            digest.update(b"invalid-credential-configuration")
     for path in (settings.config_path, settings.calibration_path):
         digest.update(path.read_bytes() if path.is_file() else b"")
     saved = _saved_paths(settings)
@@ -292,25 +306,10 @@ def _config_signature(settings: Settings) -> str:
     return digest.hexdigest()
 
 
-def _saved_paths(settings: Settings) -> dict[str, str | None]:
-    from dotenv import dotenv_values
-
-    values = dotenv_values(settings.env_path) if settings.env_path.is_file() else {}
-    return {key: values.get(key) for key in ("ZOTERO_DATA_DIR", "PDF_ROOT")}
-
-
-def _restart_required(settings: Settings) -> bool:
-    saved = _saved_paths(settings)
-    return any(
-        raw and Path(raw).expanduser().resolve() != getattr(settings, attr).resolve()
-        for key, attr in (("ZOTERO_DATA_DIR", "zotero_data_dir"), ("PDF_ROOT", "pdf_root"))
-        if (raw := saved.get(key))
-    )
-
-
 def doctor_status(settings: Settings) -> dict[str, Any]:
     path = settings.data_dir / "setup_doctor.json"
     payload = read_json_or_empty(path)
+    active = _ACTIVE if _ACTIVE and _ACTIVE.run_id == payload.get("run_id") else None
     restart = _restart_required(settings)
     if (restart or not payload or payload.get("verification_revision") != ADMISSION_REVISION
             or payload.get("config_signature") != _config_signature(settings)):
@@ -326,7 +325,14 @@ def doctor_status(settings: Settings) -> dict[str, Any]:
             "modes": {},
             "last_successful_at": None,
             "config_signature": _config_signature(settings),
+            **({"status": "running", "run_id": active.run_id, "attempt": active.receipt()} if active else {}),
         }
+    if active:
+        payload["attempt"] = active.receipt()
+    elif payload.get("status") == "running":
+        payload.update(status="needs_action", ready=False,
+                       attempt={"run_id": payload.get("run_id"), "ownership": "unresolved",
+                                "callback_state": "unknown", "finished": False, "hold": True})
     by_id = {row["id"]: row for row in payload.get("checks", [])}
     payload["checks"] = [
         by_id.get(check_id, _row(check_id, "not_started", "Not checked yet"))
@@ -409,7 +415,7 @@ def run_doctor(
 ) -> dict[str, Any]:
     global _ACTIVE
     attempt = attempt or SetupAttempt()
-    selected = list(dict.fromkeys(_CHECKS if check_ids is None else check_ids))
+    selected = list(dict.fromkeys(check_ids or _CHECKS))
     unknown = sorted(set(selected) - set(_CHECKS))
     if unknown:
         raise APIError(
@@ -444,6 +450,7 @@ def run_doctor(
             "checks": [by_id[key] for key in _CHECKS],
             "started_at": _now(),
             "run_id": attempt.run_id,
+            "attempt": attempt.receipt(),
             "config_signature": started_signature,
         }
         _save(settings, running)

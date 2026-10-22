@@ -98,8 +98,10 @@ write errors; late checks cannot restore pre-edit Ready. The checklist polls run
 checks, cancels by actual run ID, and links unknown local admission to AI Settings
 separately from a scoped retry. Stop never claims remote termination. Missing
 production ResourceEnvelope keeps local LLM verification unknown, not Ready;
-hosted/no-LLM and nonloading listing remain available. No hardware acceptance is
-claimed by synthetic component tests.
+hosted/no-LLM and nonloading listing remain available. The wizard accepts the same
+127/8, mapped-IPv6, numeric-shorthand and reserved-localhost endpoints as backend
+admission; choosing an existing local endpoint does not require a hosted key.
+No hardware acceptance is claimed by synthetic component tests.
 
 ## Paper review
 

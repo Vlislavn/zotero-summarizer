@@ -18,13 +18,18 @@ callback-owned exclusion. Cancellation/timeout stops later requests, never claim
 remote termination, and retains an unresolved receipt/HOLD. Only the callback can
 release its lock; HOLD is diagnostic, not a cross-process runtime kill/lease.
 Doctor persists each completed check and a version-bound final result; legacy
-success must be reverified. `POST /api/setup/doctor/cancel` accepts the current
+success must be reverified. Inventory uses the same callback exclusion and checks
+cancellation before each endpoint. Doctor inference stays in that callback rather
+than an executor that can detach an unfinished request on shutdown. New runs reset
+their receipt; interrupted ownership stays unresolved. Active cancellation IDs
+remain available after configuration changes. `POST /api/setup/doctor/cancel` accepts the current
 `run_id`, so a stale cancel cannot affect a successor. Web and CLI share this
 boundary; issue #11's hardware-safe Full-local acceptance remains unfulfilled.
 
 The shared provider predicate includes all literal 127/8 and IPv4-mapped IPv6
-loopbacks, with no DNS lookup. Both probe and explicit verification factory paths
-refuse before credentials/adapters. Verification revision v2 invalidates pre-fix
+loopbacks, numeric IPv4 shorthand and the reserved `.localhost` namespace,
+with no DNS lookup. Both probe and explicit verification factory paths
+refuse before credentials/adapters. Verification revision v3 invalidates pre-fix
 Ready. Inventory recovery uses the failing provider/model/endpoint, not any sibling:
 Ollama suggestions apply to that local OpenAI-compatible endpoint on port 11434;
 other runtimes open AI Settings and choose a served model. Model-error prose cannot
@@ -39,7 +44,10 @@ cache-only flags but denies/records outbound TCP attempts during model loads;
 loader raised before returning its inventory. Persisted Doctor success is
 invalidated when goals/routing, calibration or `.env` Zotero/PDF paths
 change. Enabled RSS source IDs/names/URLs, the effective offline mode and in-app
-credential replacement also invalidate Ready. Credential writes serialize
+credential replacement also invalidate Ready. Effective hosted credential values
+and sources contribute only to the opaque signature, so external keyring/env
+replacement also invalidates success; local admission still precedes credential
+resolution. An empty retry selection rechecks all checks. Credential writes serialize
 with Doctor checks, rotate an app-owned `data/setup_credential_revision.json`
 marker **before** the key changes, and clear any cached browser Ready result;
 a concurrent run cannot publish stale success for a new key. A saved path differing from startup Settings demands
@@ -66,7 +74,7 @@ CLI setup/doctor ─┘                    ├─ per-stage inference
 | `profiles.py` | Resolve hardware-gated Ollama profiles into the existing routing schema; never download. |
 | `assets.py` | Shared prefetch targets and fresh-process cache-only load checks. |
 | `doctor.py` | Persisted web/CLI checklist with stable IDs, recovery actions, single-flight execution, interrupted-run recovery, redaction, and real inference gating. Recovery distinguishes absent/stopped Ollama; browser readiness checks the actual `patchright` runtime; the RSS probe is read-only so it cannot collide with daemon schema work. |
-| `doctor_environment.py` | Host/config/Zotero/database Doctor checks and the shared row contract; split from orchestration so both modules fit the code-size gate. |
+| `doctor_environment.py` | Host/config/Zotero/database Doctor checks, saved-path/restart checks and the shared row contract; split from orchestration so both modules fit the code-size gate. |
 | `calibration*.py` | Existing endpoint calibration and its single-flight job. |
 
 An empty `ZOTERO_DATA_DIR` is treated as unset, so path detection falls back to

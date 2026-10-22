@@ -10,6 +10,7 @@ import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import yaml
 
@@ -57,7 +58,8 @@ def _seed(
     settings = Settings.load(project_root=tmp_path)
     _write_valid_goals(settings.config_path)
     settings.data_dir.mkdir()
-    _fake_verified_doctor(settings)
+    with patch.dict("os.environ", {"ZS_TEST_KEY": key_value or ""}):
+        _fake_verified_doctor(settings)
 
     state = RuntimeState()
     state.app_state = AppState(config=read_config(settings.config_path))

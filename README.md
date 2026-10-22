@@ -122,7 +122,10 @@ profile estimates and free RAM are not proof. No download starts automatically a
 loopback needs no API key. Hosted and No LLM verification remain available; issue
 #11's hardware-safe Full-local completion is not yet delivered. Literal 127/8 and
 IPv4-mapped IPv6 loopbacks share this guard; mixed-runtime recovery names the
-failing endpoint rather than borrowing a sibling's Ollama command. See
+failing endpoint rather than borrowing a sibling's Ollama command. Numeric IPv4
+shorthand and reserved `.localhost` names also use local admission without DNS.
+Stop fences later inventory requests, and configuration edits retain the active
+Stop control. External hosted credential changes invalidate earlier success. See
 [setup verification](docs/usage.md#setup-verification-and-recovery).
 Local calibration uses the same admission at both client constructions, including
 cached Tier-1 runs; it cannot bypass UNKNOWN to load a model or publish success.

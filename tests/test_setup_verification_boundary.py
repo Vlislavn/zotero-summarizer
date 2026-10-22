@@ -13,7 +13,9 @@ from zotero_summarizer.settings import Settings
 
 
 _LOCAL_HOSTS = ["localhost", "127.0.0.1", "127.0.0.2", "127.1.2.3", "127.255.255.254",
-                "[::1]", "[::ffff:127.0.0.2]", "[::ffff:7f00:2]", "0.0.0.0", "[::]"]
+                "[::1]", "[::ffff:127.0.0.2]", "[::ffff:7f00:2]", "0.0.0.0", "[::]",
+                "127.1", "2130706433", "0177.0.0.1", "0x7f000001",
+                "localhost.", "model.localhost", "model.localhost."]
 
 
 @pytest.mark.parametrize("host", _LOCAL_HOSTS)
@@ -358,7 +360,8 @@ def test_verification_factory_refuses_local_before_credentials_or_adapter(monkey
     assert error.value.details["hardware_safe"] == "unknown"
 
 
-@pytest.mark.parametrize("host", ["192.0.2.2", "10.0.0.2", "[2001:db8::2]", "[::ffff:192.0.2.2]", "example.test"])
+@pytest.mark.parametrize("host", ["192.0.2.2", "10.0.0.2", "[2001:db8::2]", "[::ffff:192.0.2.2]", "example.test",
+                                 "localhost.example.test", "notlocalhost.test"])
 @pytest.mark.parametrize("kind", ["openai", "anthropic"])
 def test_remote_verification_retains_credential_and_adapter_path(monkeypatch, kind, host):
     from types import SimpleNamespace
@@ -390,10 +393,11 @@ def test_remote_verification_retains_credential_and_adapter_path(monkeypatch, ki
     assert calls == ["credentials", "adapter"]
 
 
-def test_pre_correction_success_cannot_survive_loopback_classification_revision(tmp_path):
+@pytest.mark.parametrize("revision", ["setup-verification-v1", "setup-verification-v2"])
+def test_pre_correction_success_cannot_survive_loopback_classification_revision(tmp_path, revision):
     settings = Settings.load(project_root=tmp_path)
     bootstrap_phase0(settings)
-    previous = {"ready": True, "status": "ready", "verification_revision": "setup-verification-v1",
+    previous = {"ready": True, "status": "ready", "verification_revision": revision,
                 "config_signature": doctor._config_signature(settings),
                 "checks": [doctor._row(key, "ready", "previous") for key in doctor._CHECKS]}
     (settings.data_dir / "setup_doctor.json").write_text(json.dumps(previous))

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from enum import Enum
 from ipaddress import ip_address
+from socket import inet_aton
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
@@ -93,13 +94,16 @@ class ProviderConfig(BaseModel):
         # to populate .hostname, so prepend a dummy scheme when absent.
         if "://" not in raw:
             raw = "http://" + raw
-        host = (urlsplit(raw).hostname or "").lower()
-        if host == "localhost":
+        host = (urlsplit(raw).hostname or "").lower().rstrip(".")
+        if host == "localhost" or host.endswith(".localhost"):
             return True
         try:
             address = ip_address(host)
         except ValueError:
-            return False  # not a literal IP; never resolve DNS during classification
+            try:
+                address = ip_address(inet_aton(host))  # numeric shorthand only; no DNS
+            except OSError:
+                return False
         address = getattr(address, "ipv4_mapped", None) or address
         return address.is_loopback or address.is_unspecified
 

@@ -118,7 +118,7 @@ def checked_rows(settings, selected, runners, attempt):
         try:
             if attempt.is_abandoned():
                 result = attempt._failure()
-            elif check_id in {"llm_inference", "dry_run", "ml_assets"}:
+            elif check_id in {"runtime_model", "llm_inference", "dry_run", "ml_assets"}:
                 result = attempt.run(lambda check_id=check_id: runners[check_id](settings),
                                      timeout=310 if check_id == "ml_assets" else 90)
             else:

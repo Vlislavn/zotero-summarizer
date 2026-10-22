@@ -80,8 +80,9 @@ authoritative ResourceEnvelope (effective context, placement, memory domain).
 Static profiles and host free RAM cannot replace it. Choose Hosted or No LLM in
 Settings to verify another mode; retrying or restarting cannot manufacture that
 evidence. Hardware-safe Full-local completion of issue #11 remains unfulfilled.
-Local detection includes all literal 127/8 and IPv4-mapped IPv6 loopbacks; it does
-not discover DNS aliases. Prior verification revision v1 is no longer accepted.
+Local detection includes all literal 127/8 and IPv4-mapped IPv6 loopbacks, numeric
+IPv4 shorthand and reserved `.localhost` names; it does not resolve DNS aliases.
+The wizard accepts the same local forms. Verification revisions v1/v2 are no longer accepted.
 
 `calibrate` and the HTTP calibration job apply this same admission before both
 local client constructions. Cached Tier-1 output does not grant permission, and
@@ -108,7 +109,12 @@ The synchronous callback retains exclusion until it returns. An unresolved
 receipt/HOLD is not termination evidence, even after restart. Each check's result
 is persisted; interrupted checks need retry. Changes to AI/goals, credentials,
 paths, enabled sources or the verification revision invalidate old success,
-including late browser replies. Technical details retain the actual failed check.
+including late browser replies. External hosted keyring/environment credential
+replacement or source changes also invalidate success without exposing the key.
+Active Stop controls survive configuration edits, and stopping inventory prevents
+later endpoint requests. Interrupted ownership remains unresolved; an empty retry
+selection reruns all checks rather than refreshing the old success timestamp.
+Technical details retain the actual failed check.
 
 ## Two ways to run triage
 
