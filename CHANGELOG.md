@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Carry required Feedback dependency safety into weekly execution: bound CSV parsing, validate retained identities/schema/time, preserve literal Markdown, pin the selected CLI root, and close child-launch/RSS enforcement gaps.
+
 - Recover weekly Feedback after confirmed prepublication failures and delayed first cursor commits; reject unsafe cursor links/incompatible caps, and stop the daemon cleanly on owned analysis signals.
 
 - Package existing existing weekly daemon scheduling and recovery from the working changes for dependent review; no behavior redesign.

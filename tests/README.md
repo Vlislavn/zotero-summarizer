@@ -21,3 +21,8 @@ Part 4 retains the corresponding original Feedback suites without assertion chan
 `test_feedback_scheduler_recovery_regressions.py` covers repaired-source retry,
 unknown-publication holds, delayed initial cursor recovery, cursor symlinks,
 cycle-cap admission and owned daemon shutdown signals.
+
+Weekly end-to-end dependency controls reuse the published capture/history
+regressions and add `test_feedback_weekly_operation_lifecycle.py` (real weekly
+launch/receipt signals and completed-worker peaks), report literalness tests and
+`test_feedback_cli_root_handoff.py` (shell/cwd default-root drift).

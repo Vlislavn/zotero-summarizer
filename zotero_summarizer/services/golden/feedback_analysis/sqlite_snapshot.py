@@ -44,6 +44,8 @@ def inspect_snapshot(path: Path, guard) -> dict:
             rows = conn.execute("SELECT namespace, version FROM schema_migrations ORDER BY namespace").fetchall()
             if any(not isinstance(name, str) or type(version) is not int or version < 0 for name, version in rows):
                 raise ValueError("invalid numbered schema version")
+            if len({name for name, _version in rows}) != len(rows):
+                raise ValueError("duplicate numbered schema namespace")
             versions = {"status": "available", "values": dict(rows)}
         revisions = {"status": "unavailable", "min_revision": None, "max_revision": None}
         if "sync_changes" in tables:

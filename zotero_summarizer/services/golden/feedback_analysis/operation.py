@@ -210,9 +210,22 @@ def _reap(process, budgets):
         raise RuntimeError("operation child group cleanup incomplete")
 
 
+@contextmanager
+def _defer_launch_signals():
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    previous = signal.pthread_sigmask(signal.SIG_BLOCK, (signal.SIGINT, signal.SIGTERM))
+    try:
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous)
+
+
 def _child_command(request):
     root = Path(__file__).resolve().parents[4]
-    bootstrap = ("import sys; sys.path.insert(0,sys.argv[1]); "
+    bootstrap = ("import sys,signal; signal.pthread_sigmask(signal.SIG_UNBLOCK,(signal.SIGINT,signal.SIGTERM)); "
+                 "sys.dont_write_bytecode=True; sys.path.insert(0,sys.argv[1]); "
                  "from zotero_summarizer.services.golden.feedback_analysis.worker import main; "
                  "raise SystemExit(main(sys.argv[2]))")
     return [sys.executable, "-I", "-c", bootstrap, str(root), str(request)]
@@ -223,18 +236,21 @@ def _launch(attempt, request, guard, child):
                    "KMP_DUPLICATE_LIB_OK": "TRUE", "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1"}
     environment["ZS_FEEDBACK_FREEZE_WALL_CAP_SECONDS"] = str(request["budgets"]["freeze"]["wall_cap_seconds"])
     environment["ZS_FEEDBACK_ANALYSIS_WALL_CAP_SECONDS"] = str(request["budgets"]["analysis"]["wall_cap_seconds"])
-    process = subprocess.Popen(_child_command(attempt / "request.json"), cwd=Path(__file__).resolve().parents[4],
-                               env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL, start_new_session=True)
-    child.update(pid=process.pid, reaped=False, group_absent=False)
+    process = None
     try:
+        with _defer_launch_signals():
+            process = subprocess.Popen(_child_command(attempt / "request.json"), cwd=Path(__file__).resolve().parents[4],
+                                       env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL, start_new_session=True)
+            child.update(pid=process.pid, reaped=False, group_absent=False)
         while process.poll() is None:
             guard.check(process)
             time.sleep(min(guard.budgets["poll_seconds"], max(0, guard.deadline - time.monotonic())))
     finally:
-        _reap(process, guard.budgets)
-        child.update(returncode=process.returncode, reaped=True, group_absent=True,
-                     sampled_peak_rss_bytes=guard.peak_rss_bytes)
+        if process is not None:
+            _reap(process, guard.budgets)
+            child.update(returncode=process.returncode, reaped=True, group_absent=True,
+                         sampled_peak_rss_bytes=guard.peak_rss_bytes)
     guard.check()
     status = read_protocol(attempt / "child-status.json", guard)
     if type(status) is not dict or status.keys() != CHILD_KEYS or type(status["schema_version"]) is not int or status["schema_version"] != 1:
@@ -249,6 +265,11 @@ def _launch(attempt, request, guard, child):
         errors = {c.__name__: c for c in (FileNotFoundError, PermissionError, ValueError, RuntimeError,
                                         TimeoutError, BudgetExceeded, sqlite3.DatabaseError, sqlite3.OperationalError)}
         raise errors.get(status["error_class"], ChildProcessError)("feedback child failed; see private attempt receipt")
+    peak = status["peak_rss_bytes"]
+    if type(peak) is not int or peak <= 0:
+        raise ValueError("invalid completed child RSS peak")
+    if peak > guard.budgets["max_rss_bytes"]:
+        raise BudgetExceeded("operation reported child RSS peak cap breached")
     return status
 
 
@@ -322,7 +343,8 @@ def _publication_observation(staging, destination, identity):
 
 def run_feedback_analysis(settings, *, cutoff, provenance, budgets=None) -> dict:
     """Run local capture/analysis only in a clean externally bounded child."""
-    return _run_feedback_analysis(settings, cutoff=cutoff, provenance=provenance, budgets=budgets)
+    with _signals():
+        return _run_feedback_analysis(settings, cutoff=cutoff, provenance=provenance, budgets=budgets)
 
 
 def run_scheduled_feedback_analysis(settings, *, cutoff, provenance, schedule_intent, budgets=None) -> dict:
@@ -330,7 +352,7 @@ def run_scheduled_feedback_analysis(settings, *, cutoff, provenance, schedule_in
     schedule_state.main_thread_only()
     schedule_state.validate_intent(schedule_intent, cutoff)
     admit_sources(settings)
-    with _single_run(schedule_state.private_root(settings)):
+    with _signals(), _single_run(schedule_state.private_root(settings)):
         return _run_feedback_analysis(settings, cutoff=cutoff, provenance=provenance, budgets=budgets,
                                       schedule_intent=schedule_intent)
 
@@ -348,7 +370,7 @@ def _run_feedback_analysis(settings, *, cutoff, provenance, budgets=None, schedu
     try:
         guard = OperationGuard(configured["operation"])
         guard.check()
-        with _signals(), _single_run(root):
+        with _single_run(root):
             write_protocol(attempt / "request.json", request)
             if schedule_intent is not None:
                 schedule_state.begin_attempt(settings, schedule_intent, attempt, request)

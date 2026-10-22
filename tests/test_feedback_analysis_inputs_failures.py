@@ -13,6 +13,27 @@ from zotero_summarizer.services.golden.feedback_analysis import BudgetExceeded, 
 from zotero_summarizer.services.golden.feedback_analysis.provenance import digest_manifest
 
 
+@pytest.mark.parametrize("second_version", [1, 2])
+def test_duplicate_numbered_schema_namespaces_fail_without_changing_sources(tmp_path, second_version):
+    import sqlite3
+    from contextlib import closing
+
+    settings = make_settings(tmp_path)
+    create_current_db(settings)
+    with closing(sqlite3.connect(settings.triage_db_path)) as conn:
+        conn.execute("DROP TABLE schema_migrations")
+        conn.execute("CREATE TABLE schema_migrations(namespace TEXT, version INTEGER)")
+        conn.executemany("INSERT INTO schema_migrations VALUES (?, ?)", [("triage", 1), ("triage", second_version)])
+        conn.commit()
+    before = file_receipt(settings.triage_db_path)
+
+    with pytest.raises(ValueError, match="duplicate numbered schema namespace"):
+        freeze(settings)
+
+    assert file_receipt(settings.triage_db_path) == before
+    assert not (settings.feedback_analysis_dir / "staging").exists()
+
+
 @pytest.mark.parametrize("budgets", [
     {"max_source_bytes": 1}, {"max_snapshot_pages": 1},
     {"backup_pages_per_step": 1, "max_progress_callbacks": 1},

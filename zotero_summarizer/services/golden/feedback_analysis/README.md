@@ -184,7 +184,11 @@ explicit minimal environment is passed; no dotenv or live config parser runs the
 
 New caller provenance accepts **only** `seed` (default 42, env
 `ZS_FEEDBACK_OPERATION_SEED`, unsigned 32-bit integer; booleans rejected). The
-frozen functions' broader provenance contracts are unchanged. Child provenance
+frozen functions' broader provenance contracts are unchanged. This dispatcher
+requires a source checkout with Git HEAD, `pyproject.toml` and `uv.lock`; a
+standalone wheel without that provenance is unsupported. Worker bootstrap
+unblocks the inherited launch signal mask and disables source-tree bytecode writes.
+Child provenance
 contains full HEAD, actual application Python/dependency-file SHA-256 inventory,
 actual import root, Python/SQLite and relevant installed package versions. Selected
 `Settings.config_path` bytes are hashed, or explicitly missing; no values are
@@ -215,17 +219,24 @@ can only shrink. Operation names have `ZS_FEEDBACK_OPERATION_<UPPER_NAME>` env
 forms; malformed env always raises even with explicit overrides. Named defaults /
 hard caps: wall 120/600 seconds; tree RSS 512 MiB/1 GiB (provisional); swap growth
 2 GiB/max 2 GiB; available RAM floor 20%/minimum 20%; poll 1 second/max 1; terminate
-grace 1/max 5 seconds; cumulative I/O 2 GiB/max 2 GiB; source inventory entries (`max_source_files`, including directories/non-Python names)
+grace 1/max 5 seconds; operation artifact I/O 2 GiB/max 2 GiB per guard; source inventory entries (`max_source_files`, including directories/non-Python names)
 4096/max 4096. Application/dependency-file inventory additionally caps 64 MiB;
 selected goals hashing caps 1 MiB. psutil measures available/total,
 tree RSS and swap **growth**, never old absolute swap residue. Child reports actual
-`getrusage` peak RSS separately from parent sampled peak. Parent protocol/inventory
+`getrusage` peak RSS separately from parent sampled peak; a successful child with
+an invalid or over-cap peak cannot publish. Sampling is not instantaneous OS
+memory enforcement. Operation I/O counters cover protocols, provenance and report
+hashing, not whole-process I/O or a shared parent/child cumulative counter.
+Capture and analysis retain their independent work/byte caps. Parent protocol/inventory
 validation is size/work/safety bounded; blocking filesystem calls cannot promise
 an absolute parent deadline. Child blocking calls are externally terminated/reaped.
 
 Main-thread SIGINT/SIGTERM interruption kills/waits only the owned process group,
 verifies absence and restores owned handlers without clobbering an observed foreign
-replacement. Threaded callers do **not** get signal-handler ownership. SIGKILL,
+replacement. Main-thread launch signals are deferred only until the process is
+registered inside armed cleanup, then normal delivery resumes. Dispatcher signal
+ownership includes success/failure receipt persistence.
+Threaded callers do **not** get signal-handler ownership. SIGKILL,
 parent loss, machine crash and foreign signal handlers can prevent normal cleanup
 or receipt writing; no detached work is intentionally launched. Failures retain
 staging/phase/safe class and propagate/nonzero CLI; frozen capture still performs
@@ -351,3 +362,14 @@ Further subtraction: reuse clean-child, atomic publication and signal primitives
 no scheduling surface in ticks/server threads, status flag, dashboard or framework.
 UX source remains issue47's public Laws-of-UX basis: Occam one daemon, Tesler owned
 coordination, Cognitive Load one committed cursor/report pointer.
+
+### Inherited input/report boundaries exercised by weekly work
+
+Capture rejects duplicate migration namespaces rather than silently projecting
+them away. History admission requires journal source and nonblank text SQL
+identities. Unrepresentable UTC conversions remain located invalid/unknown times;
+CSV physical lines/offsets are consumed lazily under the record cap, preserving
+CR/LF/multiline locators. Report evidence uses code delimiters longer than every
+recorded backtick run, so recorded links/markup remain literal local evidence.
+These corrections also apply to manual analysis; they add no model, label write,
+command, framework or private-input permission.

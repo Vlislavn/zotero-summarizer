@@ -169,3 +169,7 @@ Weekly local reports are off by default. Enable them with:
 Reports precede feed ticks; owned SIGINT/SIGTERM during reporting stop
 cleanly after child cleanup, with no cursor advancement. See the Feedback package
 README for cap compatibility and conservative recovery rules.
+
+The dispatcher pins its initially admitted Settings root in handler arguments,
+including default-root commands: a selected `.env` cannot redirect a later
+Feedback/feed Settings reload to another project.

@@ -349,3 +349,18 @@ preserves locators and multiplicity. Durable journal revisions stay distinct fro
 CSV/JSONL content groups. No extra timer/command/callback/runner, server/thread
 activation, model or label mutation. See additive weekly README for exact settings,
 private artifact layout, mode checks, HOLDS and remaining installed-host scope.
+
+## Load-bearing weekly dependency invariants
+
+The actual weekly tree enforces the same retained-source, parser, literal-report
+and operation safety fixes as the independently reviewed prerequisite slices.
+Duplicate migration namespaces and unusable SQL item/alias identities refuse;
+journal source is required. UTC conversion overflow is located invalid input,
+not whole-bundle termination. CSV line/offset consumption is lazy under work caps.
+Recorded Markdown uses delimiter-safe code spans, not backslash-escaped backticks.
+Launch ownership/cleanup is armed before deferred signals resume; the worker
+unblocks its launch mask. A completed worker's positive integer peak RSS must fit
+the configured cap before publication. Signal ownership spans receipt persistence.
+CLI handler arguments preserve the root admitted before dotenv-based reloads.
+No publication, cursor, authentication, total-I/O or scientific guarantee is
+weakened or inferred from a future dependency merge.
