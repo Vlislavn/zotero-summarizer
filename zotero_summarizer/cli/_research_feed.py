@@ -139,6 +139,14 @@ def register_research_feed(subparsers: argparse._SubParsersAction) -> None:
     view.add_argument("--report", required=True)
     view.add_argument("--project-root", default=None)
     view.set_defaults(func=_view)
+    auth = actions.add_parser("telegram-auth", help="One-time interactive Telegram authorization")
+    auth.add_argument("--project-root", default=None)
+    auth.set_defaults(func=_telegram_auth)
+    child = actions.add_parser("_telegram-child", help=argparse.SUPPRESS)
+    child.add_argument("--purpose", choices=("auth", "collect"), required=True)
+    child.add_argument("--receipt", required=True)
+    child.add_argument("--project-root", required=True)
+    child.set_defaults(func=_telegram_child)
 
 
 __all__ = ["register_research_feed"]

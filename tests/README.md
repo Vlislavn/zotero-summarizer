@@ -37,3 +37,5 @@ Existing Telegram source-review part: saved posts, collector/composer/rendering,
 Original native source dependencies include the existing condition marker and unchanged direct-editor SQLite fixtures. Synthetic tests are not private-library or native-acceptance evidence.
 
 Original native-preview client source is retained: displayed approval hashes, explicit refresh/force and direct-editor outcomes use the existing backend; no new controls or protocols are designed. Original synthetic client tests remain unchanged.
+
+The original Telegram private worker/auth command registration and combined schema13 are retained here. Only fake-child command composition is exercised by packaging; armed lifecycle/platform/account tests remain unchanged and deferred.
