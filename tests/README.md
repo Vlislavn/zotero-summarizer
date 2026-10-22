@@ -74,3 +74,5 @@ then failed normally before the correction. Runtime reruns remain separately rec
 AST parsing alone never establishes runtime success.
 
 Packaging retains the original non-shipped `tools.method_validation.client` transport and `practitioner.run_diagnostic` RSS driver with unchanged source and synthetic tests. These require explicit invocation; no app defaults, live inference, data collection, portable-path fixes or scientific acceptance are added. Existing pinned local test dependencies remain for review.
+
+Retain original prefilter-metadata source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.

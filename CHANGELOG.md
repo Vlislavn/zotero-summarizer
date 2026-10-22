@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Retain original prefilter-metadata source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+
 - Retain original RSS partition consumption of the producer-owned private prefilter outcome, not generated tags.
 
 - Retain the existing non-shipped method-validation client and practitioner diagnostic, with original synthetic tests; no new inference, grader, or scientific qualification.
