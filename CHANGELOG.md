@@ -19,6 +19,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Keep Search coverage unknown for arXiv IDs containing SQL-LIKE wildcards instead of reusing an unrelated saved key. Safe DOI checks and genuine alternate-identifier hits still work.
 - Preserve unknown membership through persisted refinement when a newly retrieved identity cannot be checked. Genuine hits still win; older misses cannot certify absence for unresolved family members.
 - Retain every observed version-family identifier through screening, refinement and session reloads. Resolve saved membership across retained DOI/arXiv alternatives; preserve the genuine hit key and distinguish partial lookup failures from complete misses.
 - Preserve identifier-confirmed saved-library membership through Search refinement and version merging. Reuse the existing reader and tri-state coverage; retain reviews and addresses, and let explicit Add reuse the saved key without creating another item.

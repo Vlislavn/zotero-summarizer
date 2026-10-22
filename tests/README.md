@@ -13,5 +13,7 @@ cases are not evidence of execution; report RED/GREEN and runtime limits honestl
 Search family-identifier regressions cover normalized retained IDs, transitive
 merges after JSON reload, positive-key affinity, partial-reader uncertainty, and
 persisted refinement with older misses and newly unresolved identities.
-Controlled identifiers/readers establish machine contracts, not live-library
-completeness or semantic paper equivalence.
+Native-reader tests use in-memory SQLite to check unsafe arXiv wildcard aliases,
+safe DOI fallbacks and ordinary arXiv hits/misses. Controlled identifiers/readers
+establish machine contracts, not live-library completeness or semantic paper
+equivalence.

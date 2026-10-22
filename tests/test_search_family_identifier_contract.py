@@ -1,8 +1,10 @@
 """Durable identifier unions and conservative native-lookup machine contracts."""
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
 
+from zotero_summarizer.integrations._zotero_read_lookup import ZoteroLookupMixin
 from zotero_summarizer.services.search._models import Candidate
 from zotero_summarizer.services.search.dedup import to_version_families
 from zotero_summarizer.services.search.pipeline import _annotate_library_coverage
@@ -85,3 +87,80 @@ def test_unsupported_identifiers_do_not_trigger_a_native_read():
     candidate = Candidate(title="PMID only", pmid="123456")
     _annotate_library_coverage([candidate], SimpleNamespace(find_by_external_id=forbidden))
     assert candidate.in_library is None and candidate.existing_zotero_key is None
+
+
+@pytest.fixture
+def native_reader():
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.executescript("""
+        CREATE TABLE libraries(libraryID INTEGER, type TEXT);
+        INSERT INTO libraries VALUES (1, 'user');
+        CREATE TABLE items(itemID INTEGER, libraryID INTEGER, key TEXT);
+        INSERT INTO items VALUES (1, 1, 'UNRELATED'), (2, 1, 'SAFEKEY1'), (3, 1, 'ARXIV001');
+        CREATE TABLE itemData(itemID INTEGER, fieldID INTEGER, valueID INTEGER);
+        INSERT INTO itemData VALUES (1, 1, 1), (2, 2, 2), (3, 1, 3);
+        CREATE TABLE fields(fieldID INTEGER, fieldName TEXT);
+        INSERT INTO fields VALUES (1, 'url'), (2, 'DOI');
+        CREATE TABLE itemDataValues(valueID INTEGER, value TEXT);
+        INSERT INTO itemDataValues VALUES
+            (1, 'https://example.org/unrelated'), (2, '10.1234/saved'),
+            (3, 'https://arxiv.org/abs/2401.01234v3');
+        CREATE TABLE deletedItems(itemID INTEGER);
+    """)
+
+    class Reader(ZoteroLookupMixin):
+        def _execute_read(self, read):
+            return read(connection)
+
+    yield Reader()
+    connection.close()
+
+
+@pytest.mark.parametrize("unsafe", ["%", "_", "2401.%", "2401.0123_"])
+def test_retained_arxiv_wildcard_cannot_claim_an_unrelated_saved_key(native_reader, unsafe):
+    sparse = Candidate(title="Sparse", doi="10.1234/missing", arxiv_id=unsafe)
+    richer = Candidate(title="Rich", doi="10.1234/missing", arxiv_id="2403.07890",
+                       abstract="Richer public metadata")
+    family = Candidate.from_dict(to_version_families([sparse, richer])[0].to_dict())
+    assert family.arxiv_id == "2403.07890" and f"arxiv:{unsafe}" in family.identifier_keys()
+
+    _annotate_library_coverage([family], native_reader)
+
+    assert family.in_library is None and family.existing_zotero_key is None
+
+
+@pytest.mark.parametrize("unsafe", ["%", "_"])
+@pytest.mark.parametrize("doi,expected,key", [
+    ("10.1234/saved", True, "SAFEKEY1"),
+    ("10.1234/missing", None, None),
+])
+def test_unsafe_primary_arxiv_still_checks_safe_doi(native_reader, unsafe, doi, expected, key):
+    candidate = Candidate(title="Paired identifiers", doi=doi, arxiv_id=unsafe)
+
+    _annotate_library_coverage([candidate], native_reader)
+
+    assert candidate.in_library is expected and candidate.existing_zotero_key == key
+
+
+@pytest.mark.parametrize("alias,expected,key", [
+    ("2401.01234", True, "ARXIV001"),
+    ("2402.05678", False, None),
+])
+def test_native_coverage_keeps_ordinary_retained_arxiv_hit_and_miss(native_reader, alias, expected, key):
+    candidate = Candidate(title="Ordinary alias", doi="10.1234/missing", arxiv_id="2403.07890",
+                          family_identifier_keys=[f"arxiv:{alias}"])
+
+    _annotate_library_coverage([candidate], native_reader)
+
+    assert candidate.in_library is expected and candidate.existing_zotero_key == key
+
+
+@pytest.mark.parametrize("unsafe", ["%", "_"])
+def test_genuine_retained_doi_hit_wins_after_unsafe_arxiv(native_reader, unsafe):
+    candidate = Candidate(title="Later genuine hit", doi="10.1234/missing",
+                          family_identifier_keys=[f"arxiv:{unsafe}", "doi:10.1234/saved"])
+
+    _annotate_library_coverage([candidate], native_reader)
+
+    assert candidate.in_library is True and candidate.existing_zotero_key == "SAFEKEY1"
