@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Refresh the review graph after four existing-ancestor size cuts; preserve original heads and distinguish oracle retention from behavioral acceptance.
+
 - Complete original frontend, test, tool and documentation hunk identities and review dispositions in the bounded audit stack.
 
 - Retain every original service hunk identity and review disposition in the bounded source audit metadata stack.
