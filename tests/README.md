@@ -76,3 +76,5 @@ Source delivery left these tests UNRUN. The first guarded parent execution hit t
 collection errors: Pydantic exports no `AbsolutePath`. The standalone import regression
 then failed normally before the correction. Runtime reruns remain separately recorded;
 AST parsing alone never establishes runtime success.
+
+Original method comparison regression oracles are retained without assertion changes. This source-only packet does not establish compatibility with the newer contracts.

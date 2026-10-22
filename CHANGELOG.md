@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Retain original method comparison oracles without changing assertions or overwriting the current implementation.
+
 ### Added
 - Add offline existing-collection comparison: frozen taxonomy/human-gold firewall, independent native choices, original top3-name baseline, set/calibration/paired reports and verified private replay. No model loads, membership writes or unmeasured winner.
 - Add explicit offline reading-priority comparison: frozen human-label firewall, four-class native/retained readouts, matched ML/LLM artifacts, ranking/calibration/paired reports and verified private replay. No model loads, production writes or winner without empirical/resource qualification.
