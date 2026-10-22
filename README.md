@@ -16,6 +16,11 @@ keep/trash decisions train the model, so tomorrow's slate is sharper.
 the model learns from how you triage). The app owns current decisions and their history;
 Zotero remains the PDF/citation surface and a synced representation of approved tags/notes.
 
+Search Add retains its planned Zotero item identity before native effects, so an
+explicit retry after failed session finalization reuses that key instead of
+creating a duplicate. See the [Search contract](zotero_summarizer/services/search/README.md#explicit-add-recovery)
+for its single-process/configured-library boundary and uncertainty limits.
+
 ## Review recovery and search constraints
 
 Deep review rejects demonstrated access/error/login templates before model calls.

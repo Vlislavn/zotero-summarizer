@@ -8,11 +8,11 @@ The ONE place the Targeted Search domain writes to Zotero — an EXPLICIT user a
   2. builds a create-item payload FROM the Candidate (not ``to_scoring_dict`` — that
      shape is for the ranker: it drops authors to a comma string and emits ``year``,
      but the writer wants a list + ``publication_date``),
-  3. reuses a coverage hit's existing Zotero key, otherwise writes atomically via
-     ``apply_feed_materialization`` (bypasses the pending queue for a new item;
-     retries on a locked DB — no force handshake needed),
-  4. stamps ``materialized_zotero_key`` back on the session under its lock, so a
-     concurrent auto-review can't lose the stamp.
+  3. reuses a coverage hit's key, otherwise saves a planned key before calling
+     ``apply_feed_materialization``; retries reuse that identity,
+  4. stamps ``materialized_zotero_key`` after native return or reuses coverage.
+     The existing lock/merge protects these keys within one app process;
+     session JSON and native SQLite are not one transaction.
 """
 from __future__ import annotations
 
@@ -75,10 +75,9 @@ def materialize_candidate(
     session_id: str, candidate_id: str, collection_key: str | None
 ) -> dict[str, Any]:
     """File one candidate into the chosen Zotero collection (default Inbox). Explicit
-    user action — returns ``{status, zotero_key, collection}``. Idempotent AND
-    concurrency-safe: the check-write-stamp runs under the session lock via
-    ``session_store.materialize_once``, so two simultaneous "Add to library" clicks on
-    the same candidate write to Zotero exactly once."""
+    user action — returns ``{status, zotero_key, collection}``. The session lock
+    serializes same-process Adds; a saved plan survives failed finalization so a
+    retry can reuse the native writer's existing-key no-op, not create a new key."""
     from zotero_summarizer.services.triage.feeds import _generate_zotero_key
 
     collection_name = _resolve_collection_name(collection_key)  # validate → fast 400, before the lock
@@ -97,9 +96,12 @@ def materialize_candidate(
                 message="Zotero is not available to write to",
                 status_code=503,
             ) from exc
-        new_key = _generate_zotero_key(set())
+        if not cand.planned_zotero_key:
+            cand.planned_zotero_key = _generate_zotero_key(set())
+            session_store.save(sess)  # Persist identity before backup or any native write.
+        new_key = cand.planned_zotero_key
         try:
-            writer.apply_feed_materialization(
+            native_result = writer.apply_feed_materialization(
                 new_item_key=new_key,
                 feed_payload=_feed_payload(cand),
                 inbox_collection_name=collection_name,
@@ -107,9 +109,9 @@ def materialize_candidate(
                 note_title=f"Targeted Search: {sess.raw_query[:80]}",
                 note_html=_note_html(cand, sess.raw_query),
             )
+            reused_existing = not native_result["applied_steps"]
         except ZoteroWriteError as exc:
-            # Locked DB after retries (Zotero open) — nothing written, no separate label
-            # to keep. Surface, don't fake success (plan correction #4).
+            # Surface the failure without claiming delivery; retain the plan for retry.
             raise APIError(
                 error="zotero_locked",
                 message="Zotero DB is locked (is Zotero open?) — try again in a moment",

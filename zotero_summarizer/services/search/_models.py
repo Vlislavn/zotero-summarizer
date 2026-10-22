@@ -8,6 +8,7 @@ pipeline), and a status. All are plain dataclasses with explicit ``to_dict`` /
 """
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Annotated, Any
@@ -86,8 +87,10 @@ class Candidate:
     in_library: bool | None = None
     existing_zotero_key: str | None = None  # the found item's key when in_library is True
     candidate_id: str = ""             # persisted address, independent of later metadata enrichment
+    planned_zotero_key: str = ""       # reserved before effects, not proof of delivery
 
     def __post_init__(self) -> None:
+        self._validate_planned_key()
         if not isinstance(self.publication_types, list) or any(
                 not isinstance(term, str) or not term.strip() for term in self.publication_types):
             raise ValueError("Publication types must be a list of nonempty metadata strings")
@@ -116,6 +119,11 @@ class Candidate:
             self.candidate_id = next((ident for ident in (self.doi, self.arxiv_id, self.pmid, self.pmcid,
                                                           self.openalex_id) if ident), "") or f"local:{uuid.uuid4().hex}"
 
+    def _validate_planned_key(self) -> None:
+        key = self.planned_zotero_key
+        if not isinstance(key, str) or (key and re.fullmatch(r"[A-Z0-9]{8}", key) is None):
+            raise ValueError("Planned Zotero key must be empty or eight ASCII uppercase letters/digits")
+
     def identifier_keys(self) -> list[str]:
         """Namespaced identifier tokens for the dedup graph (empty ones dropped)."""
         pairs = (
@@ -125,7 +133,11 @@ class Candidate:
         return list(dict.fromkeys([f"{ns}:{val}" for ns, val in pairs if val] + self.family_identifier_keys))
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        self._validate_planned_key()
+        data = asdict(self)
+        if not self.planned_zotero_key:
+            data.pop("planned_zotero_key")
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Candidate":

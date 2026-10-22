@@ -57,6 +57,18 @@ key. An unresolved newly retrieved identity keeps the family unknown rather than
 borrowing an older version's miss. Refinement writes no Zotero items and starts
 no automatic Add.
 
+## Retrying Search Add
+
+If an explicit Search Add encounters failed session finalization after a native
+commit, retrying that same saved candidate reuses its persisted planned item key.
+It does not blindly create another item or rewrite later user edits. A plan is not
+a success receipt: native failures remain errors, and the UI must not infer rollback
+from a session error. A native replay returns `already_added` and does not move the
+item to a newly selected collection. Conflicting retained and found library keys
+return 409 even after an earlier successful Add. This recovery uses the existing
+one-process session lock and configured library; it is not distributed exactly-once
+or cross-library replay.
+
 ## First-run setup
 
 There's nothing to copy and nothing to migrate by hand. On the first `serve` (or `setup`),
