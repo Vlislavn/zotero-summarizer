@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Retain original Pending preview UI/MCP request/receipt handling and direct-editor client outcomes, with unchanged client tests.
+
 - Package original native/question source part: original metadata editors, Pending confirmation and mirror activation; corresponding UI/MCP source follows.
 
 - Package original native/question source part: original confirmation, mirror/recovery and publication-revision helpers; existing endpoint activation follows.

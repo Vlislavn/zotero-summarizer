@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { updateItemTags, fetchTags } from '../../api/libraryApi.js';
 import { isMachineTag } from '../../utils/tags.js';
 import TagsRow from '../TagsRow.jsx';
+import useServerAvailable from '../../hooks/useServerAvailable.js';
 
 // Quick "tags of interest" — emoji signals from services/emoji_signals.py that
 // also train the gate. Kept short (Hick's Law); free text covers the rest.
@@ -22,12 +23,14 @@ const TAG_CHIPS = [
 // `onChanged` lets the caller refresh its own queries after a write (engagement
 // emoji marks the paper "handled", so the Library queue drops it).
 export default function TagOfInterestEditor({ itemKey, tags = [], onChanged }) {
+  const serverAvailable = useServerAvailable();
   const [tagText, setTagText] = useState('');
   const [error, setError] = useState(null);
   const [busyTag, setBusyTag] = useState('');
   // Shared query key → react-query dedupes with Library/Annotate (no extra call).
   const tagsQuery = useQuery({
     queryKey: ['zotero-tags', 300], queryFn: () => fetchTags({ limit: 300 }), staleTime: 5 * 60_000,
+    enabled: serverAvailable,
   });
   // Hide the app's own machine tags from both the autocomplete and the chips
   // (R5: every option/chip must have a function) — see utils/tags.js.
@@ -64,6 +67,8 @@ export default function TagOfInterestEditor({ itemKey, tags = [], onChanged }) {
     setTagText('');
     await applyTags({ addTags: [t] });
   }
+
+  if (!serverAvailable) return <div><TagsRow tags={shownTags} /><p className="text-xs text-slate-500">Tag changes need the Mac.</p></div>;
 
   return (
     <div className="space-y-1.5">

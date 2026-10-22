@@ -22,6 +22,7 @@ export function syncNow(client = activeQueryClient) {
       await publishStatus();
       return;
     }
+    await publishStatus('', 'syncing');
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), SYNC_TIMEOUT_MS);
     try {
@@ -53,11 +54,12 @@ export function syncNow(client = activeQueryClient) {
       });
       if (pulled.protocol !== 1) throw new Error('Sync protocol changed; refresh the app');
       await applyPull(pulled);
+      await publishStatus('', 'connected');
       await client?.invalidateQueries({ queryKey: ['review-detail'] });
     } finally {
       clearTimeout(timeout);
     }
-  })().catch((error) => publishStatus(failureMessage(error))).finally(() => { running = null; });
+  })().catch((error) => publishStatus(failureMessage(error), 'unavailable')).finally(() => { running = null; });
   return running;
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { updateItemCollections } from '../../api/libraryApi.js';
 import { readStorage, writeStorage } from '../../utils/safeStorage.js';
+import useServerAvailable from '../../hooks/useServerAvailable.js';
 
 // The user files most papers into their "Read Next" reading list, so the picker
 // pre-selects it by default (one click "Add"). Matched by name — robust to the
@@ -28,6 +29,7 @@ function preferredKey(addable) {
 // as the syncs. `current` = [{key,name,path}] from the detail payload;
 // `collections` = the flat [{key,name,depth}] list Library already loads.
 export default function CollectionEditor({ itemKey, current = [], collections = [], onChanged }) {
+  const serverAvailable = useServerAvailable();
   const [target, setTarget] = useState('');
   const [busyKey, setBusyKey] = useState('');
   const [err, setErr] = useState(null);
@@ -72,6 +74,8 @@ export default function CollectionEditor({ itemKey, current = [], collections = 
       setBusyKey('');
     }
   }
+
+  if (!serverAvailable) return <p className="text-xs text-slate-500">Collection changes need the Mac.{current.length > 0 && ` Cached collections: ${current.map(c => c.name).join(', ')}`}</p>;
 
   return (
     <div className="text-xs">

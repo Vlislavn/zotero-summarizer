@@ -35,3 +35,5 @@ Telegram source-review part: original transport/session/credential and runtime c
 Existing Telegram source-review part: saved posts, collector/composer/rendering, model selection and migration11 are retained from the original working source. CLI worker/wiring and combined live-schema/native dependencies follow separately; no live collection, model loading or issue completion is inferred.
 
 Original native source dependencies include the existing condition marker and unchanged direct-editor SQLite fixtures. Synthetic tests are not private-library or native-acceptance evidence.
+
+Original native-preview client source is retained: displayed approval hashes, explicit refresh/force and direct-editor outcomes use the existing backend; no new controls or protocols are designed. Original synthetic client tests remain unchanged.

@@ -325,3 +325,7 @@ share one finding heading. No semantic classifier, rewritten summary, rubric or
 scoring change is introduced; compact presentation remains unchanged.
 
 Full reading views fold goal findings into one native disclosure; states and citations remain visible. Saved quality/digest source basis is shown literally, with reviewed extent explicitly unrecorded. Rubric-literal warning frames preserve each modifier, complete suffix, and original wording.
+
+Original native-preview client source is retained: displayed approval hashes, explicit refresh/force and direct-editor outcomes use the existing backend; no new controls or protocols are designed. Original synthetic client tests remain unchanged.
+
+The native editor imports also retain their original shared server-availability hook and offline/sync plumbing; question-facing UI follows separately. These are existing source dependencies, not a new offline design.
