@@ -86,3 +86,5 @@ automatic review/render work. Existing model/input caches may be read or warmed.
 Tick counts are accumulated in DaemonTickReport itself; dataclass serialization
 includes fatal_llm_error. The loop fails on exceptions or failed reports and
 removes its signal handlers on exit; zero ticks does no work.
+
+Existing Feedback weekly scheduling is included by the dependent review stack; this packaging does not repair known original lifecycle limitations.

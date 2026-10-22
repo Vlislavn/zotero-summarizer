@@ -1,7 +1,7 @@
-# Review stack part 3/4
+# Review stack part 4/4
 
 Existing implementation, mechanically packaged for review. No new feature or issue closure.
-Merge the dependent parts in order; this part is `Feedback: existing manual report command and publication`.
+Merge the dependent parts in order; this part is `Feedback: existing weekly daemon scheduling and recovery`.
 Known original limitations are not repaired by this packaging.
 
 # feedback_analysis — frozen inputs and local descriptive evidence

@@ -5,6 +5,9 @@ import asyncio
 import signal
 import sys
 from typing import Any
+from datetime import datetime, timezone
+
+from zotero_summarizer.settings import Settings
 
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter
@@ -18,6 +21,7 @@ async def run_daemon_loop(
     writer: ZoteroWriter | None = None,
     feed_library_ids: list[int] | None = None,
     max_ticks: int | None = None,
+    feedback_settings: Settings | None = None,
 ) -> None:
     """Long-running daemon: tick every N seconds until shutdown.
 
@@ -52,6 +56,12 @@ async def run_daemon_loop(
                 loop.add_signal_handler(sig, _on_signal)
                 registered.append(sig)
         while not stop_event.is_set():
+            if feedback_settings is not None and feedback_settings.feedback_schedule_enabled:
+                from zotero_summarizer.services.golden.feedback_analysis.scheduler import run_due_feedback
+                feedback = await run_due_feedback(feedback_settings, now=datetime.now(timezone.utc))
+                LOGGER.info("weekly feedback: %s", feedback)
+                if stop_event.is_set():
+                    break
             report = await asyncio.to_thread(
                 run_daemon_tick, reader=reader, writer=writer,
                 feed_library_ids=feed_library_ids, batch_size=daemon_batch,

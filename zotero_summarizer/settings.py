@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,6 +31,15 @@ def _env_int(name: str, default: int) -> int:
         return int(os.getenv(name, str(default)))
     except ValueError:
         return default
+
+
+def _feedback_schedule_env():
+    raw = os.getenv("ZS_FEEDBACK_SCHEDULE_ENABLED", "false").strip().lower()
+    if raw not in {"true", "false", "1", "0"}:
+        raise ValueError("ZS_FEEDBACK_SCHEDULE_ENABLED must be true/false or 1/0")
+    return {"feedback_schedule_enabled": raw in {"true", "1"},
+            "feedback_schedule_max_windows": int(os.getenv("ZS_FEEDBACK_SCHEDULE_MAX_WINDOWS", "2")),
+            "feedback_schedule_wall_cap_seconds": float(os.getenv("ZS_FEEDBACK_SCHEDULE_WALL_CAP_SECONDS", "240"))}
 
 
 @dataclass(frozen=True)
@@ -67,6 +77,18 @@ class Settings:
     # App-owned browser profile for university institutional access (persistent
     # login session). Default under data/; overridable via UniversityAccessConfig.
     browser_profile_dir: Path
+    feedback_schedule_enabled: bool = False
+    feedback_schedule_max_windows: int = 2
+    feedback_schedule_wall_cap_seconds: float = 240.0
+
+    def __post_init__(self):
+        if type(self.feedback_schedule_enabled) is not bool:
+            raise ValueError("feedback schedule enabled must be boolean")
+        if type(self.feedback_schedule_max_windows) is not int or not 1 <= self.feedback_schedule_max_windows <= 4:
+            raise ValueError("feedback schedule windows must be 1..4")
+        wall = self.feedback_schedule_wall_cap_seconds
+        if type(wall) not in (int, float) or not math.isfinite(wall) or not 0 < wall <= 600:
+            raise ValueError("feedback schedule safety wall must be positive and <=600")
 
     @property
     def feedback_schedule_dir(self) -> Path:
@@ -126,4 +148,5 @@ class Settings:
             paper_render_dir=data_dir / "paper_render",
             search_dir=data_dir / "search",
             browser_profile_dir=data_dir / "browser_profile",
+            **_feedback_schedule_env(),
         )

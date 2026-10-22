@@ -140,3 +140,5 @@ Feedback review stack part 1: Feedback: retained input capture and report primit
 Feedback review stack part 2: Feedback: retained history and descriptive analysis. See `zotero_summarizer/services/golden/feedback_analysis/README.md`; later parts supply the remaining existing workflow.
 
 Feedback review stack part 3: Feedback: existing manual report command and publication. See `zotero_summarizer/services/golden/feedback_analysis/README.md`; later parts supply the remaining existing workflow.
+
+Feedback review stack part 4: Feedback: existing weekly daemon scheduling and recovery. See `zotero_summarizer/services/golden/feedback_analysis/README.md`; later parts supply the remaining existing workflow.
