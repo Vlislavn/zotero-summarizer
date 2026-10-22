@@ -244,3 +244,5 @@ Existing-question review stack: original immutable question storage, revision/sy
 Existing Telegram source-review part: saved posts, collector/composer/rendering, model selection and migration11 are retained from the original working source. CLI worker/wiring and combined live-schema/native dependencies follow separately; no live collection, model loading or issue completion is inferred.
 
 Existing native/question source stack: typed action history, original writer boundaries and dormant editor/proposal code; activation follows. No new feature or issue-completion work; merge the related parts before using their new workflow.
+
+Existing native/question source stack: original confirmation, mirror/recovery and publication-revision helpers; existing endpoint activation follows. No new feature or issue-completion work; merge the related parts before using their new workflow.

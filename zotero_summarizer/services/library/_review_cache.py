@@ -13,6 +13,7 @@ import threading
 from contextlib import contextmanager
 from filelock import FileLock
 from typing import Any
+from uuid import uuid4
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services._common import LOGGER, now_iso_z, settings, write_json_atomic
@@ -35,17 +36,13 @@ def _read_all(*, readonly: bool = False) -> dict[str, Any]:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             if readonly:
-                raise ValueError('Invalid deep-review cache bytes') from exc
-            backup = _quarantine_corrupt_cache(path)
-            LOGGER.warning("quarantined corrupt deep-review cache to %s (%s)", backup, exc)
-            return {}
+                raise ValueError("Invalid deep-review cache bytes") from exc
+            return _recover_corrupt_cache(exc)
         reviews = payload.get("reviews") if isinstance(payload, dict) else None
         if not isinstance(reviews, dict):
             if readonly:
-                raise ValueError('Invalid deep-review cache envelope')
-            backup = _quarantine_corrupt_cache(path)
-            LOGGER.warning("quarantined invalid deep-review cache envelope to %s", backup)
-            return {}
+                raise ValueError("Invalid deep-review cache envelope")
+            return _recover_corrupt_cache(ValueError("Invalid deep-review cache envelope"))
         return reviews
 
 
@@ -61,17 +58,28 @@ def _quarantine_corrupt_cache(path) -> Any:
         suffix += 1
 
 
-def _write_all(reviews: dict[str, Any]) -> None:
-    write_json_atomic(_cache_path(), {"updated_at": now_iso_z(), "reviews": reviews})
+def _write_all(reviews: dict[str, Any], *, publication_key: str | None = None) -> None:
+    with review_publication_lock():
+        old = _read_all()
+        envelope = (json.loads(_cache_path().read_text(encoding="utf-8"))
+                    if _cache_path().exists() else {})
+        prior_revisions = envelope.get("review_revisions", {})
+        revisions = {}
+        for key, entry in reviews.items():
+            revision = prior_revisions.get(key)
+            revisions[key] = (str(uuid4()) if key == publication_key or
+                              entry != old.get(key) or not revision else revision)
+        write_json_atomic(_cache_path(), {
+            "updated_at": now_iso_z(), "reviews": reviews, "review_revisions": revisions,
+        })
 
 
 def _write_one(item_key: str, entry: dict[str, Any]) -> None:
-    """Persist ONE review entry via a locked read-merge-write, so concurrent per-item
-    workers never clobber each other's keys in the shared ``deep_reviews.json``."""
-    with _CACHE_LOCK:
+    """Publish a fresh revision even for A→B→A, without changing review DTOs."""
+    with review_publication_lock():
         reviews = _read_all()
         reviews[item_key] = entry
-        _write_all(reviews)
+        _write_all(reviews, publication_key=item_key)
 
 
 def get_cached_review(item_key: str) -> dict[str, Any] | None:
@@ -190,3 +198,35 @@ def review_publication_lock(*, require_publication: bool = True):
         lock = _PUBLICATION_LOCKS.setdefault(name, FileLock(name))
         with lock:
             yield
+
+
+def _recover_corrupt_cache(error: Exception) -> dict[str, Any]:
+    with review_publication_lock():
+        try:
+            return _read_all(readonly=True)  # another process may have repaired it
+        except (ValueError, UnicodeDecodeError):
+            backup = _quarantine_corrupt_cache(_cache_path())
+            LOGGER.warning("quarantined invalid deep-review cache to %s (%s)", backup, error)
+            return {}
+
+
+def publication_snapshot(item_key: str) -> tuple[dict[str, Any] | None, str | None]:
+    """Exact stored entry + publication UUID; callers hold the publication lock."""
+    if not _cache_path().exists():
+        return None, None
+    payload = json.loads(_cache_path().read_text(encoding="utf-8"))
+    reviews = payload["reviews"]
+    return reviews.get(item_key), payload.get("review_revisions", {}).get(item_key)
+
+
+def _entry_condition(entry: dict[str, Any], interpretation_schema: str | None) -> bool:
+    from zotero_summarizer.services.library._review_identity import _condition_matches
+
+    stored = entry.get("review_identity") or {}
+    if not isinstance(stored, dict) or not _condition_matches(stored, interpretation_schema):
+        return False
+    if interpretation_schema is None:
+        audit = entry.get("verification_audit")
+        return not ("interpretation" in entry or "interpretation_qualification" in entry or
+                    isinstance(audit, dict) and "interpretation_evidence" in audit)
+    return True

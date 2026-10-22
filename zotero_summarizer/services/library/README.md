@@ -545,3 +545,5 @@ The HTML brief folds goal findings behind one native disclosure, retains origina
 Map output truncation alone subdivides the failing source chunk sequentially with the existing 200-character overlap. Work sizes halve down to the shared 1000-character floor; exhausted-floor, cancellation, empty-note and other errors propagate. Segment-labelled notes remain generation context, never verification source.
 
 Existing native/question source stack: typed action history, original writer boundaries and dormant editor/proposal code; activation follows. No new feature or issue-completion work; merge the related parts before using their new workflow.
+
+Existing native/question source stack: original confirmation, mirror/recovery and publication-revision helpers; existing endpoint activation follows. No new feature or issue-completion work; merge the related parts before using their new workflow.

@@ -77,3 +77,11 @@ def current_review_identity(item_key: str, stored: dict[str, Any]) -> dict[str, 
         config=config, pdf_path=pdf_path, source_kind=source_kind,
         focus_prompt=str(stored.get("focus_prompt") or ""),
     )
+
+
+def _condition_matches(stored: dict[str, Any], interpretation_schema: str | None) -> bool:
+    if interpretation_schema not in (None, INTERPRETATION_SCHEMA_MARKER):
+        return False
+    if interpretation_schema is None:
+        return "interpretation_schema" not in stored
+    return stored.get("interpretation_schema") == INTERPRETATION_SCHEMA_MARKER
