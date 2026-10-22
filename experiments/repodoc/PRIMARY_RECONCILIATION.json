@@ -96,19 +96,19 @@
     {"path": "tools/precommit/check_import_policy.py", "SHA256": "14723db147518af44193902fa8df19d603a7cf5aea8fe90f9d40c20f07ce7270", "observation": "Policy checks static imports with relative/alias resolution. A calls edge is not an import violation. Current policy gate was not executed."},
     {"path": "docs/architecture.md", "SHA256": "ffbce23ec85ec9e309789bd2df76cab7370406eb4d0ce1055f8604fe1fcbfe9d", "observation": "Unchanged; no verified product architecture correction was needed."}
   ],
-  "upstream": {
+  "historicalUpstream": {
     "head": "306becd0f143211c0dde2bdbd480578356280e28",
     "version": "0.1.0",
     "packet": "data/issue-closure/native-resume43/repodoc-source/source-binding.json",
     "metadataLicense": null,
     "licenseFiles": [],
-    "authority": "Current read-source-only inspection of the exact pinned packet; no import/runtime authority here. The prior narrow import exception belonged only to the completed parent-run parser03 diagnostic. Null license is not permission to copy, patch, adopt or redistribute.",
+    "authority": "Historical read-source-only inspection of the pinned packet, including mechanism and license observations; packet unavailable for current reverification. No import/runtime authority here. The prior narrow import exception belonged only to the reported parent-run parser03 diagnostic. Unknown license is not permission to copy, patch, adopt or redistribute.",
     "inspectedMechanisms": [
       "repodoc/src/analysis/call_graph_analyzer.py:207-225 globally resolves function names and attribute suffixes without lexical/language scope.",
       "repodoc/src/analysis/dependency_graphs_builder.py:24-75 filters clustering leaves to class/interface/struct when any exist; this is not clustering every function.",
       "repodoc/src/clustering/cluster_modules.py:121-138 returns batch fallback after caught failure; its existence does not prove this historical run's provider outcome.",
       "repodoc/src/graph/builder.py:12-37 creates calls edges from caller to callee.",
-      "repodoc/src/incremental/incremental_updater.py:136-162 traverses successors of caller-to-callee calls as dependent impact; retained current direction control fails with callee-only impact.",
+      "repodoc/src/incremental/incremental_updater.py:136-162 traverses successors of caller-to-callee calls as dependent impact; historical direction control reports callee-only impact.",
       "repodoc/src/analysis/analyzers/python.py:_process_function_node reads positional args only and clears rather than restores nested function context; retained keyword-only/flat-scope counterexamples are separate from updater direction.",
       "repodoc/cli/commands.py:369-833 regenerates docs with an agent; no no-model graph/view-refresh CLI mode was found in this inspected command."
     ]

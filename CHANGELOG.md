@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Label RepoDoc upstream inspection and licence observations as historical; clarify unavailable current execution/source proof in README summaries. No replay, adoption or issue closure.
 - Reconcile RepoDoc history with current availability: six graph hashes/counts rechecked; raw execution/source proof unavailable. Preserve historical reported results, explicit unknowns and rejection of the inspected graph as authority. No install, replay, integration or issue23 closure.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.

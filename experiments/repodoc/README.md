@@ -35,9 +35,10 @@ completion, not product delivery, correctness, acceptance or closure.
   in REPORT; no frontend/CLI/comprehension claim.
 
 Pinned RepoDoc is v0.1.0 at
-`306becd0f143211c0dde2bdbd480578356280e28`. The private source packet has null
-license metadata and no license file: no copying, adoption, redistribution,
-installation, dependency or CI change. Existing graphs/PNGs stay in gitignored
+`306becd0f143211c0dde2bdbd480578356280e28`. Historical inspection recorded null
+license metadata and no license file; the packet is now unavailable for reverification
+and its license remains unknown. No copying, adoption, redistribution, installation,
+dependency or CI change. Existing graphs/PNGs stay in gitignored
 `data/issue_runs/23/`; the curated `docs/architecture.md` is unchanged.
 
 A future full experiment still needs current KG/hierarchical domain clustering,

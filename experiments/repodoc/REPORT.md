@@ -30,8 +30,8 @@ source packet are unavailable at their declared locations. The execution/source
 verification statements below are preserved historical checkpoint accounts, **not
 current raw-evidence verification**. Missing files do not prove nonexecution or
 loss everywhere. Historical verifier booleans retain their original scope; JSON
-uses `historicalBackendExecution`, `historicalParserExecution` and
-`historicalSourceCrossChecks`, without old-name aliases. No diagnostic replay,
+uses `historicalBackendExecution`, `historicalParserExecution`,
+`historicalSourceCrossChecks` and `historicalUpstream`, without old-name aliases. No diagnostic replay,
 private-source transmission, installation, model or issue closure is authorized.
 
 Input is source1065 candidate `f66b78dde325a0fc0db1a0fff13302f7efd5e891`,
