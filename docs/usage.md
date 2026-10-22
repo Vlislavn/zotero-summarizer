@@ -57,7 +57,9 @@ scope accuracy is not measured.
    remains a separate explicit action; evidence never adds or labels a paper.
 
 Only AI-verified sufficient answers promote, by number of distinct answered questions,
-within topic-eligible, nonretracted candidates. Stable baseline ordering breaks ties.
+within the original slots of topic-eligible, nonretracted candidates. Other papers
+keep their baseline positions. Identical question lines reuse one check per paper
+and count once; distinct questions retain input order. Stable baseline ordering breaks ties.
 Negative scientific results can answer questions. Partial evidence never promotes;
 missing sources, failed models, abstentions and budget exhaustion are not scientific
 rejections. Not-found concerns only retrieved passages, never absence from a document.
@@ -73,7 +75,8 @@ Questions are checked in input order per candidate, so many questions can exhaus
 budget before later candidates. Hybrid retrieval reuses Library's dense/BM25/RRF/rerank
 owner (up to eight original chunks per question); missing retrieval legs are disclosed.
 Original text exceeding the existing quality-review character budget is unchecked,
-not clipped. Operator overrides: `ZS_SEARCH_EVIDENCE_CANDIDATES` (0–30),
+not clipped. Successfully acquired, admitted originals remain available to ordinary
+review without a second download/extraction. Operator overrides: `ZS_SEARCH_EVIDENCE_CANDIDATES` (0–30),
 `ZS_SEARCH_EVIDENCE_CALLS` (0–120), `ZS_SEARCH_EVIDENCE_TOPIC_FLOOR` (finite 0–1,
 default 0.35). These are provisional work limits, not calibrated answerability thresholds.
 Zero disables work; invalid configuration reports unavailable instead of guessing.

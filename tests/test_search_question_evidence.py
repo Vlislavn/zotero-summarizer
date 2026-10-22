@@ -9,6 +9,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.api.routes import search
 from zotero_summarizer.models import GoalsConfig
 from zotero_summarizer.models.config import LLMConfig
@@ -312,3 +313,78 @@ def test_invalid_utf8_input_is_rejected_before_any_provider(field):
     values[field] = "\ud800" if field == "query" else ["\ud800"]
     with pytest.raises(ValueError):
         ScreenRequest(**values)
+
+
+@pytest.mark.parametrize("duplicate", [True, False])
+def test_promotion_counts_and_checks_distinct_questions_once(journey, monkeypatch, duplicate):
+    questions = [QUESTION, QUESTION if duplicate else "Another question?", "Other question?"]
+    research = stored_session(questions=questions, name="distinct-questions")
+    research.candidates = [research.candidates[0], research.candidates[10]]
+
+    def verify(*, prompt, pydantic_model):
+        payload = json.loads(unescape(prompt.rsplit("<untrusted_input>", 1)[1].split("</untrusted_input>")[0]))
+        paper = payload["original_passages"][0]["text"].split(":", 1)[0]
+        supported = (paper == "P11" and payload["question"] != "Other question?"
+                     or paper == "P01" and payload["question"] == "Other question?")
+        return pydantic_model(state="sufficient" if supported else "unknown",
+                              evidence_ids=[payload["evidence"][0]["passage_id"]] if supported else [], uncovered=[])
+
+    monkeypatch.setattr(journey.verifier, "pydantic_prompt", verify)
+    session.save(research)
+    assessed = pipeline.run_review(research.id, deps=journey.deps)
+    expected = ["P01", "P11"] if duplicate else ["P11", "P01"]
+    assert [c.candidate_id for c in assessed.candidates] == expected
+    assert len(journey.generator.calls) == (4 if duplicate else 6)
+    assert assessed.evidence_status["calls_used"] == (8 if duplicate else 12)
+    for candidate in assessed.candidates:
+        assert [row["question_index"] for row in candidate.question_evidence] == [0, 1, 2]
+        if duplicate:
+            assert candidate.question_evidence[0]["state"] == candidate.question_evidence[1]["state"]
+
+
+def test_promotion_preserves_ineligible_and_retracted_baseline_slots(journey, monkeypatch):
+    monkeypatch.setenv("ZS_SEARCH_EVIDENCE_TOPIC_FLOOR", "0.37")
+    research = stored_session(name="eligible-slots")
+    research.candidates = [research.candidates[0], research.candidates[1], research.candidates[10],
+                           research.candidates[12]]
+    research.candidates[0].query_score = 0.9
+    research.candidates[1].query_score = 0.369
+    research.candidates[1].quality = {"quality_band": "highlight", "grade": "A"}
+    research.candidates[2].query_score = 0.371
+    research.candidates[3].is_retracted = True
+    session.save(research)
+    assessed = pipeline.run_review(research.id, deps=journey.deps)
+    assert [c.candidate_id for c in assessed.candidates] == ["P11", "P02", "P01", "P13"]
+    assert assessed.evidence_status["promoted_candidate_ids"] == ["P11"]
+
+
+def test_over_budget_original_is_reused_by_existing_review(journey, monkeypatch):
+    research = stored_session(name="over-budget-reuse")
+    research.candidates = research.candidates[:1]
+    journey.deps.max_chars = 10
+    reacquire = Mock(side_effect=RuntimeError("second acquisition failed"))
+    retrieve = Mock(side_effect=AssertionError("over-budget evidence cannot retrieve passages"))
+    reviewed_text = []
+    monkeypatch.setattr(pipeline, "acquire_full_text", reacquire)
+    monkeypatch.setattr(evidence, "retrieve_original_passages", retrieve)
+    monkeypatch.setattr(pipeline, "light_review", lambda c, **kw: reviewed_text.append(kw["full_text"]))
+    session.save(research)
+    assessed = pipeline.run_review(research.id, deps=journey.deps)
+    reacquire.assert_not_called()
+    retrieve.assert_not_called()
+    assert len(reviewed_text) == 1 and len(reviewed_text[0]) > journey.deps.max_chars
+    row = assessed.candidates[0].question_evidence[0]
+    assert row["state"] == "unknown" and row["reason"] == "source_character_budget_exceeded"
+    assert not journey.generator.calls and not journey.verifier.calls
+    assert journey.deep == ["P01"]
+
+
+def test_rejected_source_is_not_reused_even_when_over_budget(journey, monkeypatch):
+    text = "<Error><Code>Denied</Code><Message>Not a paper</Message><RequestId>x</RequestId></Error>"
+    journey.deps.max_chars = 10
+    monkeypatch.setattr(evidence, "acquire_full_text", lambda *a, **kw: text)
+    research = stored_session(name="rejected-source")
+    fulltext = {}
+    with pytest.raises(APIError):
+        evidence._snapshot(research.candidates[0], research, journey.deps, fulltext)
+    assert fulltext == {}

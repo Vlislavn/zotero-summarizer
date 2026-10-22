@@ -123,9 +123,11 @@ exactly located, unambiguous original quotes are required. No generated summary
 supplies offsets. Up to eight chunks per question, 12 topic-eligible candidates and
 24 attempted model-client invocations by default; `ZS_SEARCH_EVIDENCE_{CANDIDATES,CALLS,TOPIC_FLOOR}`
 override within 0–30 / 0–120 / finite 0–1. Floor default 0.35 is provisional. Calls
-are reserved in generation/verifier pairs and failures count. Internal provider
-transport retries are outside this invocation cap. Source length uses the
-existing quality-review cap; over-budget originals are unknown, not truncated.
+are reserved in generation/verifier pairs and failures count. Identical question lines
+reuse one assessment per candidate and count once for promotion. Internal provider
+transport retries are outside this invocation cap. Source length uses the existing
+quality-review cap; over-budget originals are unknown, not truncated, while admitted
+acquired text remains reusable by ordinary review.
 
 Per-question receipts preserve unknown/partial/sufficient/not-found-in-checked-text,
 checked original ranges, exact extraction/question/input fingerprints, configured
@@ -143,8 +145,11 @@ not permission to trust stored IDs. New evidence work requires the same current 
 `ResearchSession.evidence_baseline_order` retains the observed candidate sequence before
 promotion. Restoration seeds the existing stable constrained ranker with that sequence;
 current quality/relevance keys still win, missing/new candidate IDs retain observed order,
-and family/Add ownership is unchanged. Legacy receipts without recorded order/binding
-cannot certify current evidence or invent lost ties. No automatic rerun repairs them.
+and family/Add ownership is unchanged. Promotion refills only topic-eligible, nonretracted
+slots; candidates outside that set keep their constrained baseline positions.
+The corrected distinct-question/eligible-slot policy revises the evaluator protocol:
+older bindings become unchecked without losing historical receipts.
+Legacy receipts without recorded order/binding cannot certify current evidence or invent lost ties. No automatic rerun repairs them.
 Invalidation changes only the in-memory snapshot, not files on read. Raw serialization
 keeps exact historical receipts/answers through ordinary saves; only HTTP projection
 suppresses stale answers. Stored extraction identity is historical, not a freshness

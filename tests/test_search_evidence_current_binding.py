@@ -176,6 +176,25 @@ def test_legacy_receipts_without_baseline_seed_do_not_invent_tie_order(journey, 
     assert path.read_bytes() == before
 
 
+def test_previous_policy_protocol_cannot_retain_active_promotions(journey, monkeypatch, tmp_path):
+    with monkeypatch.context() as previous:
+        previous.setattr(evidence, "_EVIDENCE_PROTOCOL", "question-evidence-v2")
+        assessed, baseline = tied(journey)
+    path = tmp_path / "sessions" / f"{assessed.id}.json"
+    before = path.read_bytes()
+    historical = assessed.candidates[0].question_evidence[0]
+
+    wire = get_without_work(monkeypatch, assessed.id)
+
+    assert [c["candidate_id"] for c in wire["candidates"]] == baseline
+    assert wire["evidence_status"]["promoted_candidate_ids"] == []
+    assert all(row["state"] == "unknown" for c in wire["candidates"] for row in c["question_evidence"])
+    assert path.read_bytes() == before
+    session.save_merge(session.load(assessed.id))
+    retained = json.loads(path.read_text())
+    assert next(c for c in retained["candidates"] if c["candidate_id"] == baseline[1])["question_evidence"][0] == historical
+
+
 def test_restore_keeps_current_quality_additions_family_and_concurrent_add_key(journey, monkeypatch, tmp_path):
     assessed, baseline = tied(journey)
     target = assessed.candidates[0]

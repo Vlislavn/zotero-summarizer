@@ -130,6 +130,7 @@ def apply_question_policy(session: Any) -> None:
     session.evidence_baseline_order = [candidate.candidate_id for candidate in session.candidates]
     floor = session.evidence_status["topic_floor"]
     counts = {}
+    eligible = []
     for candidate in session.candidates:
         if (candidate.is_retracted or candidate.query_score is None
                 or not math.isfinite(candidate.query_score) or candidate.query_score < floor):
@@ -137,8 +138,12 @@ def apply_question_policy(session: Any) -> None:
         covered = set()
         for row in candidate.question_evidence:
             if row.get("state") == "sufficient" and current_receipt(row, candidate, session, binding):
-                covered.add(row["question_index"])
+                covered.add(row["question_id"])
         counts[candidate.candidate_id] = len(covered)
-    session.candidates.sort(key=lambda c: counts.get(c.candidate_id, 0), reverse=True)
+        eligible.append(candidate)
+    eligible.sort(key=lambda c: counts[c.candidate_id], reverse=True)
+    promoted_order = iter(eligible)
+    session.candidates[:] = [next(promoted_order) if c.candidate_id in counts else c
+                             for c in session.candidates]
     session.evidence_status["promoted_candidate_ids"] = [c.candidate_id for c in session.candidates
                                                        if counts.get(c.candidate_id)]
