@@ -13,6 +13,10 @@ already-read timestamps, missing-ID behavior and empty-selection no-op remain.
 Backups are pruned only after the write commits; SQL failure retains its completed
 backup and rolls back the write. A later retention error can occur **after** the
 native commit and is not proof of rollback or permission to replay another write.
+Automatic read-sync logs filesystem failures and continues the tick without
+immediately replaying the batch; later ticks rescan only unread rows. Repeated
+failed writes retain their completed backups; the retention cap runs only after
+a successful write, so persistent failures can accumulate backups.
 This does not add automatic actions, blanket native-write consent or a new backup
 store, nor make backup and mutation atomic against other writers. Typed Pending
 approval/claims, verdict receipts and cross-database recovery remain separate.
