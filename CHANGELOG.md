@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Retain original observed-cohort weekly ordering metadata and frozen conditional replay; canonical helper names and caller wiring are mechanically aligned.
+
 ### Changed
 - Preserve null unknown/absent assessment evidence through engineering-card publication instead of dropping valid papers or neighboring proposals. Keep configured cached-only no-startup/explicit-queue controls; missing config or newly missing assessment remains an explicit failed qualification.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.

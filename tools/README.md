@@ -51,3 +51,5 @@ The sweep requires `PAPERS`, `REF_PROVIDER`, and `REF_MODEL`. Its default is the
 remote budget phase only. Local phases (`PHASES=2` or `both`) additionally require
 explicit `CANDIDATES` and `CANDIDATE_PROVIDER`; no local model is selected implicitly.
 Provider names refer to caller-owned saved configuration; this does not rename it.
+
+Original frozen weekly replay/source is retained with its original three-argument cohort ordering contract. Existing source helpers use their canonical number/summary names and the production caller supplies its existing cohort IDs. No new grader, labels, ranking formula or real-data claim is designed.
