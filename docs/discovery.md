@@ -20,9 +20,14 @@ the seed. Detail existence, automatic selection, a key's shape, and a remembered
 materialized key alone do not. Current app decisions are selected before filtering
 and without the general browsing cap; automatic kept families still exclude
 external candidates. Native membership uses live user-library keys and DOI/URL
-fields, not a whole-library note crawl. Retained family identifiers and all-alias
+fields, not a whole-library note crawl. Seed context closes identifier links across
+native and unmaterialized app rows before collecting notes, including transitive
+DOI/arXiv links; edits/clears on those app aliases invalidate prior results.
+Retained family identifiers and all-alias
 coverage reuse Search's existing identity owner. Unknown is not established new;
-equal titles with different identifiers are not merged.
+equal titles with different identifiers are not merged. Without a native reader,
+app-known saved items remain excluded; other membership stays unknown rather than
+being inferred from an app-only miss.
 
 ## Privacy and evidence
 
@@ -30,6 +35,8 @@ This bounded version schedules only existing OpenAlex semantic/lexical retrieval
 using allowlisted public title/abstract/identifiers. It does not search arXiv or
 Europe PMC; ordinary topic Search still does. Unscheduled plan fields are cleared.
 OpenAlex quota/client failures remain visible, not covered by a hidden fallback. Existing public relevance rankers are reused;
+With `ZS_CORPUS_RERANKER_ENABLED=0`, Discovery uses the existing lexical relevance
+fallback without loading a local model; enabled reranker failures remain failures.
 Find does not invoke intent models, default review dependencies, Search screening,
 agentic refinement, full-text review or native Add.
 
@@ -81,9 +88,10 @@ clones. All HTTP session responses, including screen, use controlled projections
 Review kickoff returns a status receipt only. This frozen base has no HTTP refine
 or clone action, and none is introduced here.
 
-Search GET performs no model/provider refresh. Stale/unverified projections hide
-private assessment items, excerpts, IDs and seed comments, keep public metadata
-visible with qualification and disable new actions. Provider receipts distinguish
+Search GET performs no model/provider refresh. Stale/unverified and running/failed
+Discovery projections hide private assessment items, excerpts, IDs, seed comments
+and recommendations, keep public metadata visible with qualification and disable
+new actions. Provider receipts distinguish
 successful empty from failed/not-attempted/unknown work; partial empty results are
 not genuine empty. Provider receipts are request-local under the frozen adapter
 contract, not inferred from candidate counts.
@@ -101,6 +109,8 @@ introduced. A new native Add changes membership, so the next GET may be stale.
 A retained unstamped Add plan may be explicitly reconciled despite stale/unverified
 Discovery. The existing native operation runs in enforced existing-only mode:
 URI read-only/query_only, no materialization, backup, pruning or mutating PRAGMAs.
+This read-only ACK is available while Zotero is running; ordinary new writes still
+require Zotero to be closed.
 Only a fresh exact-key, empty-steps/no-backup ACK finalizes the plan. Missing,
 malformed or failed ACKs refuse; they cannot fall through to a new creation.
 This acknowledges the current no-op, not success of any earlier raised invocation.

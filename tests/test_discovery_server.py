@@ -129,6 +129,10 @@ def begin(journey, *, private=False, retry=False):
 
 def test_api_public_find_get_then_opt_in_reuses_public_pool(journey, monkeypatch):
     monkeypatch.setattr(search, "_kickoff_review", lambda *a: pytest.fail("Find/GET started Review"))
+    monkeypatch.setattr("zotero_summarizer.integrations.zotero_write.ZoteroWriter.apply_feed_materialization",
+                        lambda *a, **kw: pytest.fail("Find/GET started native Add"))
+    with sqlite3.connect(journey.native_db) as conn:
+        native_before = list(conn.iterdump())
     metadata = journey.client.get("/api/library/related/SEED0001/discover").json()
     assert metadata["admission"] == {"state": "saved", "basis": "user_approved"}
     assert journey.requests == journey.payloads == []
@@ -151,6 +155,8 @@ def test_api_public_find_get_then_opt_in_reuses_public_pool(journey, monkeypatch
     assert seed["comments"]["records"][0]["text"] == PRIVATE
     assert all(row["comments"]["availability"] == "unavailable" for row in journey.payloads[0]["candidates"])
     assert journey.client.get(f"/api/search/{result['id']}").json()["discovery"]["freshness"] == "current"
+    with sqlite3.connect(journey.native_db) as conn:
+        assert list(conn.iterdump()) == native_before
 
 
 @pytest.mark.parametrize("body", [{}, {"context_fingerprint": "z" * 64},
@@ -283,6 +289,7 @@ def test_full_native_attribution_and_other_paper_note_not_an_input(journey):
     assert records[2]["paper_excerpt"] == "Highlight is evidence"
     assert all("owned mirror" not in r["text"] for r in records)
     assert "UNRELATED_PRIVATE_SENTINEL" not in json.dumps(journey.payloads)
+    assert "UNRELATED_PRIVATE_SENTINEL" not in json.dumps(journey.requests)
     with sqlite3.connect(journey.native_db) as conn:
         conn.execute("UPDATE itemNotes SET note='Different unrelated body' WHERE itemID=?", (other_note,))
     assert discovery.discovery_view(session.load(first["id"]))["discovery"]["freshness"] == "current"

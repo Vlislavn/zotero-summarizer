@@ -148,7 +148,7 @@ function DiscoveryStatus({ session, trusted }) {
     {discovery.retrieval.empty_reason && <p>{discovery.retrieval.empty_reason === 'providers_empty'
       ? 'Scheduled providers successfully returned no candidates.' : 'Observed candidates were all known saved.'}</p>}
     {trusted && !discovery.retrieval.empty_reason && !discovery.recommended_ids.length && <p>No supported default recommendations; retained observations may still be available below.</p>}
-    {!trusted && <p>Private evidence hidden; freshness is stale, unverified, or awaiting a successful status read. New actions are unavailable.</p>}
+    {!trusted && <p>Private evidence hidden: Discovery is not ready, inputs are stale/unverified, or a status read is pending/failed. New actions are unavailable.</p>}
     {discovery.error && <p role="alert">Discovery error: {discovery.error.stage} · {discovery.error.code}</p>}
     <Link className="text-forest underline" to={`/paper/${encodeURIComponent(discovery.seed_key)}?retryDiscovery=1`}>Return to seed to explicitly retry discovery</Link>
     <details><summary>Provider observations</summary>
@@ -389,7 +389,8 @@ function SearchSession({ urlSearch = '', onPointer }) {
   }, [query, questions, constraints, begin, pollUntilDone, onPointer, current]);
 
   const discovery = hasDiscovery(session) ? session.discovery : null;
-  const trusted = discovery?.freshness === 'current' && !loading && !error;
+  const trusted = discovery?.freshness === 'current' && !loading && !error
+    && ['discovery_ready', 'reviewing', 'reviewed', 'error'].includes(session.status);
   const actionsAllowed = !discovery || Boolean(trusted && discovery.new_actions_allowed);
   const reviewing = session?.status === 'reviewing' && !error;
   // Doherty: name the honest stage. During agentic rounds refinements grow but no

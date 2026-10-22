@@ -452,7 +452,7 @@ class ZoteroItemWriteMixin:
         Existing-only instead acknowledges the user key through a read-only
         lookup, without backup/materialization. Missing keys return item_key=None.
         """
-        if self.is_connector_running():
+        if not existing_only and self.is_connector_running():
             raise ZoteroWriteError(
                 "Zotero is running; close it before adding items to protect its live state"
             )

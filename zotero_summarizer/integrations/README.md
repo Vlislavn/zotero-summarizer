@@ -134,7 +134,9 @@ committed user-library key is a no-op for the whole operation, preserving later
 user edits; callers must reuse a reserved key only for the same creation intent.
 Explicit `existing_only=True` instead opens SQLite URI `mode=ro` with `query_only`
 and acknowledges only that user-library key (missing→None), bypassing backup,
-pruning, mutating PRAGMAs and materialization. This current no-op ACK does not
+pruning, mutating PRAGMAs and materialization. This read-only lookup remains
+available while Zotero is running; the close-Zotero guard still protects ordinary
+materialization. This current no-op ACK does not
 certify an earlier raised attempt, live/untrashed membership or physical DB identity.
 Ordinary WAL-read filesystem effects remain possible.
 Queued feed-read writes verify both item and feed-library IDs and preserve an

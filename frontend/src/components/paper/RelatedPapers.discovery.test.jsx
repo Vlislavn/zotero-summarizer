@@ -112,7 +112,7 @@ it.each(['default', 'declined', 'confirmed'])('captures actual public/comment co
     fireEvent.click(screen.getByText('Discovery processing and optional comments'));
     fireEvent.click(screen.getByRole('checkbox', { name: 'Use private seed comments — experimental' }));
     expect(confirm).toHaveBeenCalledTimes(1);
-    expect(confirm.mock.calls[0][0]).toContain('fixture-provider / fixture-model (https://example.test/v1)');
+    expect(confirm.mock.calls[0][0]).toBe('Send complete private seed comments and your reading verdict/rationale only to fixture-provider / fixture-model (https://example.test/v1)? Providers still receive public metadata only. Full context and results stay locally. Experimental usefulness is unqualified.');
   }
   expect(requests.filter(r => r.init.method === 'POST')).toEqual([]);
 

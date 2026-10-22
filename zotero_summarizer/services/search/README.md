@@ -1,7 +1,7 @@
 # services/search — Targeted Search (the query-driven pull surface)
 
-Discovery reuses identifier union-find for app-linked native seed families,
-including alternating app-alias and DOI/arXiv links until closure. Only that family's complete comments own
+Discovery reuses identifier union-find for seed families across native and
+unmaterialized app rows, including alternating app-alias and DOI/arXiv links until closure. Only that family's complete comments own
 freshness; unrelated notes do not. Candidate identity selects declared public
 metadata, not later operation/question-evidence fields. Ordinary HTTP sessions
 retain empty Discovery objects, distinguished from real Discovery state in the UI.
@@ -59,7 +59,17 @@ work ceilings, invalidation and unqualified semantic judgments.
 `discovery.py` reuses public Search and consent-bound seed context. Raw session
 snapshots serialize only for storage; HTTP uses freshness-qualified views.
 Find V1 schedules only OpenAlex semantic/lexical; ordinary all-source Search remains
-unchanged. Only explicit Review may claim discovery; new Add preflights before effects.
+unchanged. Discovery honors `ZS_CORPUS_RERANKER_ENABLED=0`: existing lexical
+relevance scoring runs without constructing/loading the local cross-encoder.
+Without a native reader, app-known saved identifiers are excluded, but remaining
+membership stays unknown and cannot become a default new-paper recommendation.
+Running/failed Discovery projections hide seed comments, assessment items/IDs and
+recommendations until a successful result; public retained metadata stays visible.
+The Search OpenAlex client obtains its optional cache from RuntimeState, not the
+config-only AppState, so disabling prestige does not prevent real retrieval.
+Startup prepares that existing cache schema before Discovery fingerprints inputs;
+first-client construction cannot stale its own request.
+Only explicit Review may claim discovery; new Add preflights before effects.
 Stale retained plans require an explicit existing-only native ACK (exact key,
 empty steps, no backup) before app finalization, never exception-time readback.
 See [server contract](../../../docs/discovery.md).

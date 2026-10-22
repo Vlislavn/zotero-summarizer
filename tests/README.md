@@ -31,7 +31,19 @@ concurrent variant isolation and unchanged narrow ordinary callers for other sou
 Wider arXiv/Europe PMC receipt scope is deliberately excluded from this version.
 `test_discovery_recovery_joint.py` and `test_discovery_existing_only.py` cover real
 temporary native SQL, strict current no-op ACKs, save gaps, malformed receipts,
-WAL visibility and refusal before mutation/backup/pruning. These
+WAL visibility and refusal before mutation/backup/pruning. Read-only ACKs remain
+available with the connector running; ordinary writes still refuse. These
 machine controls do not qualify live providers or semantic recommendation quality.
+Discovery's disabled-reranker route regression uses the actual scorer and fails
+on any model construction; disabled mode retains real lexical scores. An absent
+native reader leaves external membership unknown, never recommended as new.
+Held-provider and assessment-upgrade reads also hide private context and default
+recommendations until Discovery completes; failed retrieval retains no private view.
+Real RuntimeState client construction is covered with prestige off and with/without
+an existing cache, avoiding fake dependency objects that hide ownership errors.
+Disabled optional metadata clients still prepare the existing cache schema before
+Discovery identity, preventing first-client self-invalidation.
+Identifier-linked unmaterialized app notes (direct and transitive DOI/arXiv aliases)
+are submitted only to the consented model; edits/clears stale and hide prior context.
 Candidate identity regressions also distinguish public metadata changes from later
 derived operation/question-evidence enrichment; source inheritance is not identity.

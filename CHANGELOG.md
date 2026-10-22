@@ -15,6 +15,13 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Reconcile retained Discovery Adds through a fresh enforced existing-only native ACK; stale retries cannot create, back up or prune. Missing/malformed/failed ACKs never finalize; ordinary Add is unchanged.
 
 ### Fixed
+- Prepare the existing OpenAlex cache schema at startup so the first saved-paper Find cannot invalidate its own corpus fingerprint when optional metadata clients are disabled.
+- Include DOI/arXiv-linked unmaterialized app aliases in Discovery seed context; their note edits/clears now invalidate private evidence.
+- Read the Search OpenAlex cache from RuntimeState so saved-paper Discovery works with prestige disabled instead of failing before provider requests.
+- Hide private Discovery context and recommendations during running/failed work; disclose seed reading verdict/rationale in explicit model consent.
+- Allow strictly read-only Discovery Add reconciliation while Zotero is running; ordinary native writes still require Zotero to be closed.
+- Keep external Discovery membership unknown when the native reader is unavailable; an app-only miss no longer qualifies a paper as new.
+- Honor the configured reranker disable switch in saved-paper Discovery; use existing lexical relevance without constructing or downloading a local model.
 - Preserve ordinary Search projection and new-owner actions during restore; close mixed aliases; fingerprint only public candidate metadata; isolate nonfinite provider results; separate touch actions without weakening consent, freshness or effect fences.
 - Fence Related at primary verdict acknowledgement, including dont_read while its secondary reject-tag request is pending. Preserve existing completion/collapse callbacks and saved-verdict warnings; add actual page and hook regressions.
 

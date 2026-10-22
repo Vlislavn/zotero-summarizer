@@ -173,6 +173,18 @@ it.each(['stale', 'unverified'])('hides private postimages and disables effects 
   expect(screen.getAllByRole('button', { name: 'Add to library' }).every(button => button.disabled)).toBe(true);
 });
 
+it.each(['discovery_pending', 'discovery_running', 'discovery_failed', 'discovery_interrupted'])(
+  'hides private projections and recommendations while Discovery is %s', async status => {
+    mount(async () => reply({ ...session(), status }));
+    await screen.findByRole('heading', { name: 'Find new relevant · Fixture seed' });
+    expect(screen.queryByText('Fixture metadata connection.')).toBeNull();
+    expect(screen.queryByText('Comments · available')).toBeNull();
+    expect(screen.queryByText('Synthetic cited seed comment.')).toBeNull();
+    expect(screen.getByText('5 retained candidates ▾').closest('details').open).toBe(false);
+    expect(screen.getByRole('button', { name: 'Review retained candidates' }).disabled).toBe(true);
+  },
+);
+
 it('a failed GET retains its pointer and offers exactly explicit Retry rather than auto-reset/retry', async () => {
   let reads = 0;
   const { requests } = mount(async () => {
