@@ -18,6 +18,11 @@ Injected-PDF review fixtures supply a typed independent full-text quality result
 when asserting full reading. Abstract/not-assessed controls retain the raw A/read
 model digest but require effective skim; a grade/band alone cannot supply basis.
 
+Rubric-admission regressions distinguish complete explicit N/A from missing/invalid
+answers in any self-consistency sample, across contribution families. Sparse output
+must reach the existing unassessed boundary, never shrink into A/highlight coverage.
+The review-family fixture supplies explicit N/A; its original assertions remain.
+
 Projection boundaries cover concept-only caveats for all reading actions and missing
 critical support, partial quality in new versus legacy snapshots, and Search API
 policy/raw provenance. Search mocks return real `PaperDigest` DTOs, not partial objects.

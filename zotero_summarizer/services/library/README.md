@@ -335,6 +335,10 @@ An evaluator exception records `quality` as uncertain/not-assessed with no grade
 not legacy None. Retained-model snapshots with absent quality likewise project
 unassessed without rewriting storage. Only genuine legacy absence can use the old
 digest grade. Non-paper/not-assessed bases remain ungraded even if old fields disagree.
+Every rubric sample must explicitly answer each requested criterion with yes/no/na.
+Missing or invalid verdicts fail before aggregation instead of silently becoming N/A;
+the existing optional-layer boundary records uncertain/not-assessed with no grade.
+Explicit N/A still excludes genuinely inapplicable checks; it is not omission.
 Explicit full-review type uncertainty/failure and zero applicable coverage remain
 ungraded unknowns, not failed empirical studies. Direct legacy evaluator calls that
 omit `paper_type` retain the established ASSUMED generic-empirical rubric; that is

@@ -5,7 +5,7 @@ The headline regression: a review paper is judged on SANRA, never flagged for
 "no ablation / no leakage discussion" (the bug this redesign fixes)."""
 from __future__ import annotations
 
-from zotero_summarizer.services.library import quality_eval
+from zotero_summarizer.services.library import _paper_type_checklists as pc, quality_eval
 from zotero_summarizer.services.library._quality_prompts import (
     OverstatementLLMResponse,
     RubricLLMResponse,
@@ -114,7 +114,8 @@ def test_review_paper_not_judged_on_empirical_criteria():
     gets NO empirical leakage/ablation red flag."""
     body = ("In this review we survey the field and recommend best practices. "
             "One cited study reported 0.99 AUC on a patient cohort.")
-    out = _eval(_FakeLLM([{}, {}, {}]), body=body, paper_type="narrative_review")
+    unassessed = {item.key: "na" for item in pc.spec_for("narrative_review").items}
+    out = _eval(_FakeLLM([unassessed] * 3), body=body, paper_type="narrative_review")
     assert not any("leakage" in f for f in out.red_flags)  # empirical flag suppressed
     assert out.coverage_standard.startswith("SANRA")
     assert out.paper_type == "narrative_review"

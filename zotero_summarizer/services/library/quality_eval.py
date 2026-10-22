@@ -162,8 +162,14 @@ def _dedupe_near(items: list[str], *, jaccard: float = 0.6) -> list[str]:
 
 def _aggregate_rubric(samples: list[qp.RubricLLMResponse], item_keys: list[str], body: str
                       ) -> tuple[dict[str, str], dict[str, str], list[str], set[str]]:
-    """Per-item majority verdict + a grounded evidence quote; returns
-    ``(rubric, evidence, concerns, grounded_yes_keys)``."""
+    """Per-item majority verdict + grounded evidence; reject incomplete model output."""
+    if not samples:
+        raise ValueError("quality rubric returned no samples")
+    for sample in samples:
+        invalid = [key for key in item_keys
+                   if str(sample.checks.get(key, "")).strip().lower() not in {"yes", "no", "na"}]
+        if invalid:
+            raise ValueError("incomplete or invalid rubric criteria: " + ", ".join(invalid))
     rubric: dict[str, str] = {}
     evidence: dict[str, str] = {}
     grounded_yes: set[str] = set()

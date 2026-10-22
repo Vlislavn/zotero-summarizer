@@ -23,6 +23,8 @@ claims. Full reads require confirmed goal support, high idea value, recorded ful
 basis, strong independent evidence and assessed non-high friction. Missing legacy
 assessment/targets shows **REVIEW**, not a fabricated skip or invented section.
 Non-papers are relevance-only; zero applicable scientific checks stays ungraded.
+An evaluator that omits a requested checklist answer stays unassessed, not A/highlight;
+only explicit N/A answers establish that checks are inapplicable.
 Full reviews use the detected paper type, not empirical gaps absent from its rubric;
 uncertain detection stays ungraded. Legacy Search light review and the diagnostic CLI
 retain their assumed generic rubric without an additional type call; that mode does
