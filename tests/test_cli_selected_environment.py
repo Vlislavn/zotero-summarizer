@@ -12,6 +12,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 MARKER = "ZS_TEST_DEFAULT_ROOT_ONLY"
+DEFAULT_CLI_TEST_WALL_SECONDS = 10
+MAX_CLI_TEST_WALL_SECONDS = 60
 
 
 def invoke(tmp_path, body, *, shell=None, selected_env="ZS_OFFLINE=0\nAPP_LOG_LEVEL=WARNING\n", embedding_stub=False):
@@ -21,8 +23,8 @@ def invoke(tmp_path, body, *, shell=None, selected_env="ZS_OFFLINE=0\nAPP_LOG_LE
     (default / ".env").write_text(f"{MARKER}=from_wrong_root\nZS_OFFLINE=1\nSUMMARY_TIMEOUT_SECONDS=123\n")
     (selected / ".env").write_text(selected_env)
     before = {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
-    seconds = float(os.getenv("ZS_CLI_TEST_WALL_SECONDS", "10"))
-    assert 0 < seconds <= 60
+    seconds = float(os.getenv("ZS_CLI_TEST_WALL_SECONDS", str(DEFAULT_CLI_TEST_WALL_SECONDS)))
+    assert 0 < seconds <= MAX_CLI_TEST_WALL_SECONDS
     environment = {key: os.environ[key] for key in ("PATH", "LANG", "TMPDIR") if key in os.environ}
     environment.update(HOME=str(tmp_path / "home"), ZOTERO_SUMMARIZER_HOME=str(default),
                        PYTHON_KEYRING_BACKEND="keyring.backends.null.Keyring")
@@ -33,7 +35,7 @@ def invoke(tmp_path, body, *, shell=None, selected_env="ZS_OFFLINE=0\nAPP_LOG_LE
         "sys.path[:0]=" + repr([str(ROOT), sysconfig.get_path("purelib")]),
         "class NoModels(importlib.abc.MetaPathFinder):",
         "    def find_spec(self,fullname,path=None,target=None):",
-        "        if fullname.split('.')[0] in {'torch','transformers','sentence_transformers','huggingface_hub','onprem','telethon'}:",
+        "        if fullname.split('.')[0] in {'torch','transformers','sentence_transformers','huggingface_hub','onprem','anthropic','telethon'}:",
         "            raise AssertionError('Forbidden model/transport import: '+fullname)",
         "sys.meta_path.insert(0,NoModels())",
         "import types; embedding=types.ModuleType('sentence_transformers')",
@@ -116,6 +118,39 @@ def test_actual_migration_cli_uses_only_selected_root_and_existing_shell(tmp_pat
     ]), shell=shell, embedding_stub=True)
     assert row == {"exit": 0, "root": str(selected), "timeout": expected_timeout,
                    "hf": expected_hf, "wrong": None, "triage": True, "corpus": True, "data": str(selected / "data")}
+
+
+@pytest.mark.parametrize("from_cwd", [False, True])
+def test_default_root_cannot_be_redirected_by_its_dotenv(tmp_path, from_cwd):
+    row, selected = invoke(tmp_path, "\n".join([
+        "import zotero_summarizer.cli as cli",
+        "from zotero_summarizer.runtime import get_context",
+        *(["os.environ.pop('ZOTERO_SUMMARIZER_HOME')", "os.chdir(selected)",
+           "(selected/'goals.yaml').write_text('')"] if from_cwd else []),
+        "assert cli.main(['migrate'])==0",
+        "settings=get_context().settings",
+        "print(json.dumps({'root':str(settings.project_root),'triage':settings.triage_db_path.is_file(),'corpus':settings.corpus_db_path.is_file()}))",
+    ]), shell={"ZOTERO_SUMMARIZER_HOME": str(tmp_path / "selected")},
+        selected_env=f"ZOTERO_SUMMARIZER_HOME={tmp_path / 'default'}\nZS_OFFLINE=1\n", embedding_stub=True)
+    assert row == {"root": str(selected), "triage": True, "corpus": True}
+
+
+def test_serve_factory_uses_the_admitted_default_root(tmp_path):
+    row, selected = invoke(tmp_path, "\n".join([
+        "import zotero_summarizer.cli as cli, types",
+        "from zotero_summarizer.settings import Settings",
+        "def serve(*args,**kwargs):",
+        "    print(json.dumps({'factory_root':str(Settings.load().project_root)}))",
+        "sys.modules['uvicorn']=types.SimpleNamespace(run=serve)",
+        "assert cli.main(['serve'])==0",
+    ]), shell={"ZOTERO_SUMMARIZER_HOME": str(tmp_path / "selected")},
+        selected_env=f"ZOTERO_SUMMARIZER_HOME={tmp_path / 'default'}\nZS_OFFLINE=1\n")
+    assert row == {"factory_root": str(selected)}
+
+
+def test_import_guard_rejects_direct_provider_sdk(tmp_path):
+    with pytest.raises(AssertionError, match="Forbidden model/transport import: anthropic"):
+        invoke(tmp_path, "import anthropic; print(json.dumps({}))")
 
 
 def test_moved_options_source_remains_bound_to_generation_identity(monkeypatch):

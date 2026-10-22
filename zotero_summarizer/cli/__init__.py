@@ -60,7 +60,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         _validate_faithbench_args(args, parser)
     elif args.command == "research-feed":
         _validate_research_feed_args(args, parser)
-    set_context(AppContext(settings=Settings.load(project_root=getattr(args, "project_root", None))))
+    settings = Settings.load(project_root=getattr(args, "project_root", None))
+    args.project_root = str(settings.project_root)
+    set_context(AppContext(settings=settings))
     apply_offline_env()
     return int(args.func(args))
 
