@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Retain original infrastructure source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+
 - Retain original offline PDF/figure controls and exact reading-text selectors; no new offline protocol.
 
 - Retain original question submission, separate manual-note/delivery UI, outbox clients and shared paper assemblies with unchanged tests.
