@@ -22,7 +22,9 @@ Default admission and `--inspect` have zero model calls/writes and bypass app bo
 Only explicit `--run` loads Settings for the selected absolute `project_root`, with
 `.env` disabled, and exclusively reserves a NEW
 `Settings.data_dir/collection_comparison/<attempt>/`. Existing/failed attempts cannot
-be reused. No credentials, provider/model fallback or endpoint discovery is performed.
+be reused. No credentials, provider/model fallback or endpoint discovery is performed. Direct
+native calls reuse consent/guard/work admission; off-host endpoints require HTTPS,
+while explicit loopback HTTP remains available.
 See [frozen schemas and signatures](../tools/method_validation/COLLECTION-INTERFACES.md).
 
 ## Inputs and scope
@@ -102,7 +104,8 @@ Actual model/endpoint/source licences and access must be verified separately.
 
 All paper×question×arm outcomes, baseline rows, calls, declared physical passes,
 complete prompt/request bytes and cumulative snapshots+generated requests are
-reserved BEFORE owner creation/HTTP. No clipping or evidence substitution. Defaults
+reserved BEFORE owner creation/HTTP. Each snapshot read is capped by both its
+per-file limit and the remaining cumulative budget. No clipping or evidence substitution. Defaults
 are configurable admission policies, not empirically validated resource promises:
 1000papers/200nodes/32depth; max4000work units/1000calls, 8MiBper input,
 64MiBcumulative snapshots+requests, 12000prompt characters/64KiBper request or response.

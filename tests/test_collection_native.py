@@ -11,7 +11,7 @@ from tools.method_validation.collections_run import prepare, reopen, run
 
 def native(tmp_path):
     config, inputs, truth, path = bundle(tmp_path)
-    config['arms'][0].update(kind='native', endpoint='http://example.invalid/v1/systemone',
+    config['arms'][0].update(kind='native', endpoint='https://example.invalid/v1/systemone',
         eligibility='qualified', access='qualified', runtime_sha256='0'*64, checkpoint_sha256='0'*64,
         quantization='fixture', model_source='fixture', licence='fixture', context_verified=True,
         forward_passes_bound=1)

@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from time import monotonic
 
-from .decision_adapter import NativeDecisionAdapter, ProviderReply, endpoint
+from .decision_adapter import NativeDecisionAdapter, ProviderReply, admit_native
 from .priority import (BaselineArtifact, BaselineReadout, Config, Inputs, Readout, Result,
                        Truth, admit, payload, project)
 from .priority_report import readable, report
@@ -28,7 +28,7 @@ def prepare(cfg, snapshots=None):
     def read(name, ref, cap):
         nonlocal admitted_bytes
         if snapshots is None:
-            saved[name] = read_bound(ref, cap)
+            saved[name] = read_bound(ref, min(cap, cfg.max_snapshot_bytes - admitted_bytes))
         if name not in saved:
             raise FileNotFoundError('frozen snapshot unavailable')
         raw = saved[name]
@@ -67,7 +67,7 @@ def prepare(cfg, snapshots=None):
                 if (artifact.kind != baseline.kind or artifact.model != baseline.model
                         or artifact.owner_sha256 != owners[baseline.kind]):
                     raise ValueError('baseline model/source binding mismatch')
-                if baseline.kind == 'ml' and (not artifact.trained_at or artifact.training_families is None):
+                if baseline.kind == 'ml' and (not artifact.trained_at or not artifact.training_families):
                     raise ValueError('ML training provenance is required, never infer holdout safety')
                 if held and baseline.kind == 'ml' and (artifact.trained_at >= min(p.observed_at for p in held)
                         or set(artifact.training_families) & {p.family for p in held}):
@@ -83,13 +83,10 @@ def prepare(cfg, snapshots=None):
                 a.arm_id for a in cfg.arms if a.kind == 'recorded'}:
             raise ValueError('duplicate/unmatched recorded response')
         recordings[key] = read(f'recording-{index}.bin', recording.terminal, cfg.max_response_bytes)
-    active = [a for a in cfg.arms if a.kind == 'native' and not a.blockage()]
-    for arm in active:
-        endpoint(arm.endpoint)
-    if active and not (cfg.public_input_consent and cfg.external_guard):
-        raise ValueError('live HTTP requires public-input consent and external resource guard')
-    work = row_work + sum(a.forward_passes_bound for a in active) * len(requests)
-    if len(active) * len(requests) > cfg.max_calls or work > cfg.max_work_units:
+    admit_native(cfg.arms, len(requests), cfg)
+    work = row_work + sum(a.forward_passes_bound for a in cfg.arms
+                         if a.kind == 'native' and not a.blockage()) * len(requests)
+    if work > cfg.max_work_units:
         raise ValueError('whole-workload call/work reservation exceeds budget')
     return inputs, truth, papers, gold, requests, errors, baselines, recordings, saved
 

@@ -33,6 +33,13 @@ def ranking(rows, depth):
                                          sum(r['gold'] == 'must_read' for r in rows))}
 
 
+def status_coverage(rows):
+    evaluated = [r for r in rows if r['status'] != 'blocked']
+    return {'total': len(rows), 'evaluated': len(evaluated),
+            'statuses': dict(Counter(r['status'] for r in rows)),
+            'coverage': divide(sum(r['status'] == 'decision' for r in evaluated), len(evaluated))}
+
+
 def summary(rows, depth):
     decided = [r for r in rows if r['status'] == 'decision' and r['gold'] is not None]
     gold, predicted = [r['gold'] for r in decided], [r['label'] for r in decided]
@@ -47,9 +54,8 @@ def summary(rows, depth):
             bins[min(int(p * 10), 9)].append((p, row['label'] == row['gold']))
     calibration = [{'bin': k, 'n': len(v), 'probability': mean(x[0] for x in v),
                     'accuracy': mean(x[1] for x in v)} for k, v in sorted(bins.items())]
-    evaluated = [r for r in rows if r['status'] != 'blocked']
-    return {'total': len(rows), 'statuses': dict(Counter(r['status'] for r in rows)),
-            'coverage': divide(sum(r['status'] == 'decision' for r in evaluated), len(evaluated)),
+    return {**status_coverage(rows),
+            'class_coverage': {label: status_coverage([r for r in rows if r['gold'] == label]) for label in LABELS},
             'labelled_decisions': len(decided), 'per_class': class_metrics(gold, predicted, LABELS),
             'ordinal_error': distribution([abs(ORDINAL[r['label']] - ORDINAL[r['gold']]) for r in decided]),
             'must_read_retention': divide(sum(r['label'] in LABELS[:2] for r in must), len(must)),
@@ -125,6 +131,10 @@ def report(rows, cfg, inputs, truth):
             'holdout_labelled_cases': len(labelled), 'holdout_labelled_families': len(families),
             'split_frozen_at': truth.split_frozen_at.isoformat(),
             'holdout_opened_at': truth.holdout_opened_at.isoformat(),
+            'synthetic_labels': truth.synthetic,
+            'input_provenance_class_counts': {
+                status: dict(Counter(g.label for g in truth.labels if (g.human_provenance is not None) == declared))
+                for status, declared in (('declared', True), ('missing', False))},
             'input_gold_class_counts': dict(Counter(g.label for g in truth.labels)),
             'input_sampling_counts': dict(Counter(p.stratum for p in inputs.papers)),
             'holdout_gold_class_counts': dict(Counter(r['gold'] for r in held

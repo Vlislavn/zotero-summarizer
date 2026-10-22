@@ -1,10 +1,28 @@
 """Actual source-review counterexamples; synthetic artifacts, no provider or model."""
+from pathlib import Path
+
 import pytest
 
 from tools.method_validation import priority_run
 from tools.method_validation.priority import Config, Paper, identity, project
 from tools.method_validation.support import encoded, loads, sha
 from test_priority_fixtures import LABELS, fixture, write_ref
+
+
+def test_report_names_declared_and_missing_provenance_without_claiming_verification(tmp_path):
+    cfg, _, _ = fixture(tmp_path)
+    truth = loads(Path(cfg['gold']['path']).read_bytes())
+    truth['labels'][0]['human_provenance'] = None
+    cfg['gold'] = write_ref(tmp_path / 'gold.json', truth)
+    owner, result = priority_run.run(Config.model_validate(cfg), encoded(cfg))
+    assert result['synthetic_labels'] is True
+    assert result['input_provenance_class_counts'] == {
+        'declared': {'must_read': 2, 'should_read': 3, 'could_read': 3, 'dont_read': 3},
+        'missing': {'must_read': 1}}
+    assert result['input_gold_class_counts']['must_read'] == 3
+    assert result['holdout_gold_class_counts']['must_read'] == 2
+    assert loads((owner / 'case-0.json').read_bytes())['gold'] is None
+    assert priority_run.reopen(owner) == result
 
 
 def baseline_fixture(tmp_path, kind, *, missing=False):
@@ -19,6 +37,17 @@ def baseline_fixture(tmp_path, kind, *, missing=False):
     baseline['artifact'] = write_ref(tmp_path / 'baseline.json', artifact)
     cfg['ranking_depth'] = 1
     return cfg
+
+
+@pytest.mark.parametrize('families', [None, []])
+def test_ml_requires_nonempty_training_family_provenance_before_effects(tmp_path, families):
+    cfg = baseline_fixture(tmp_path, 'ml')
+    artifact = loads(Path(cfg['baselines'][0]['artifact']['path']).read_bytes())
+    artifact['training_families'] = families
+    cfg['baselines'][0]['artifact'] = write_ref(tmp_path / 'baseline.json', artifact)
+    with pytest.raises(ValueError, match='training provenance'):
+        priority_run.run(Config.model_validate(cfg), encoded(cfg))
+    assert not (tmp_path / 'selected').exists()
 
 
 def test_llm_confidence_is_not_priority_relevance(tmp_path):

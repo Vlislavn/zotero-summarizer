@@ -125,14 +125,16 @@ def test_baseline_import_preserves_regression_without_fake_probabilities(tmp_pat
     assert priority_run.reopen(owner) == result
 
 
-@pytest.mark.parametrize('change', ['family', 'canonical', 'future', 'gold', 'bytes', 'work'])
+@pytest.mark.parametrize('change', ['family', 'canonical', 'canonical_same_family', 'future', 'gold', 'bytes', 'work'])
 def test_whole_workload_firewalls_refuse_before_artifacts(tmp_path, change):
     cfg, papers, _ = fixture(tmp_path)
     bundle = loads(Path(cfg['inputs']['path']).read_bytes())
     if change == 'family':
         bundle['papers'][0].update(split='development', family=bundle['papers'][1]['family'])
-    elif change == 'canonical':
+    elif change in ('canonical', 'canonical_same_family'):
         bundle['papers'][0]['canonical_ids'] = bundle['papers'][1]['canonical_ids']
+        if change == 'canonical_same_family':
+            bundle['papers'][0]['family'] = bundle['papers'][1]['family']
     elif change == 'future':
         bundle['papers'][0].update(split='development', observed_at='2026-12-01T00:00:00Z')
     elif change == 'gold':

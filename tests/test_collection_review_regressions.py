@@ -99,10 +99,11 @@ def test_native_replay_cannot_promote_a_recorded_http_failure_to_decision(tmp_pa
         reopen(owner)
 
 
-def test_trickling_native_response_cannot_escape_the_dispatch_budget(tmp_path, monkeypatch):
+@pytest.mark.parametrize('entry', ['adapter', 'collection_evaluate'])
+def test_trickling_native_response_cannot_escape_the_dispatch_budget(tmp_path, monkeypatch, entry):
     import tools.method_validation.decision_adapter as wire
     cfg, _ = native(tmp_path)
-    cfg = Config.model_validate({**cfg.model_dump(), 'max_run_seconds': 1.0})
+    cfg = Config.model_validate({**cfg.model_dump(), 'max_run_seconds': 1.0 if entry == 'adapter' else 3600.0})
     clock, consumed, retained = [0.0], [], []
     monkeypatch.setattr(wire, 'monotonic', lambda: clock[0])
     raw = response()
@@ -112,11 +113,18 @@ def test_trickling_native_response_cannot_escape_the_dispatch_budget(tmp_path, m
                 clock[0] += .4
                 consumed.append(start)
                 yield raw[start:start + 10]
-    adapter = wire.NativeDecisionAdapter(cfg.arms[0], cfg, projector=project,
-        transport=httpx.MockTransport(lambda _: httpx.Response(200, stream=Trickle())))
-    reply = adapter(b'{}', retained.append, timeout=1.0)
-    assert reply.status == 'timeout'
-    assert reply.readout is None and reply.telemetry['raw_complete'] is False
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, stream=Trickle()))
+    if entry == 'adapter':
+        adapter = wire.NativeDecisionAdapter(cfg.arms[0], cfg, projector=project, transport=transport)
+        reply = adapter(b'{}', retained.append, timeout=1.0)
+        status, readout, telemetry = reply.status, reply.readout, reply.telemetry
+    else:
+        from tools.method_validation.collections_run import evaluate
+        row = {}
+        evaluate(row, cfg.arms[0], cfg, b'{}', retained.append, transport=transport, remaining=1.0)
+        status, readout, telemetry = row['status'], row['readout'], row['telemetry']
+    assert status == 'timeout'
+    assert readout is None and telemetry['raw_complete'] is False
     assert len(consumed) == 3 and retained == [raw[:30]]
 
 

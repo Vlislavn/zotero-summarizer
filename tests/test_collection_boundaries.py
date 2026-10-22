@@ -76,7 +76,7 @@ def test_structural_or_firewall_violation_refuses_before_effects(tmp_path, chang
 def test_whole_work_reservation_refuses_before_owner(tmp_path, budget, value):
     config, inputs, truth, path = prepared(tmp_path)
     if budget == 'max_calls':
-        config['arms'][0].update(kind='native', endpoint='http://example.invalid/v1/systemone',
+        config['arms'][0].update(kind='native', endpoint='https://example.invalid/v1/systemone',
             eligibility='qualified', access='qualified', runtime_sha256='0'*64, checkpoint_sha256='0'*64,
             quantization='fixture', model_source='fixture', licence='fixture', context_verified=True,
             forward_passes_bound=1)

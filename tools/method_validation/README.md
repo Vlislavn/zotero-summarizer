@@ -15,7 +15,11 @@ manifest. Oversized node prompts leave other independent questions and original 
 rows available. Original nested `Parent > Child` suggestions resolve against derived
 paths as well as exact names, refusing collisions. Native streams stop at the first
 observed remaining-run deadline; blocked reads still need the external hard-wall guard.
-No live library/model loading or assignment effects.
+No live library/model loading or assignment effects. Shared native admission enforces
+consent/guard/declared work on direct calls too, with HTTPS off-host and explicit
+loopback HTTP retained. Snapshot reads use the smaller per-file/remaining-total cap;
+canonical duplicates refuse even within one family. Collection gold already excludes
+absent human provenance from paired inference; no second filter is needed.
 See [usage](../../docs/decision-collection-comparison.md) and the frozen
 [collection API](COLLECTION-INTERFACES.md). Synthetic/recorded controls cannot
 establish a model winner, live smoke, resource qualification or full#42 completion.
@@ -35,7 +39,15 @@ and artifact inspection perform zero calls/writes; only explicit `--run` writes 
 new selected-root attempt. See [priority usage](../../docs/decision-priority-comparison.md)
 and [its frozen API](PRIORITY-INTERFACES.md). Missing/invalid/blocked/abstained
 outcomes stay unscored; synthetic controls and unknown resources cannot establish
-a winner, promotion or full #38 completion.
+a winner, promotion or full #38 completion. Reports keep per-gold-class failure
+coverage separate from decision-only quality and identify synthetic labels plus
+declared/missing provenance counts without claiming independent verification.
+Admission rejects repeated canonical papers even within one family, and ML imports
+require nonempty training-family provenance before any artifacts or requests.
+Priority uses the same public native admission/TLS guard, retaining its four-way
+projector and outcome-work reservation. Its separate aggregate `max_snapshot_bytes`
+cap also bounds each input read before allocation. Priority rows without declared
+human provenance never enter paired estimates; blocked recordings stay unscored.
 
 ## Support comparison (#37)
 
@@ -48,7 +60,7 @@ server launch, credential lookup, retry engine, baseline constructor or model lo
 
 ```
 explicit frozen configuration + exact original sources/pairs
-  -> whole-workload admission / development firewall / byte and work reservations
+  -> whole-workload admission / development firewall / shared input-byte and work reservations
   -> configured native HTTP OR recorded terminal bytes + matched binary artifacts
   -> exclusive Settings.data_dir/support_comparison/<attempt>/
   -> per-pair terminal rows + report.json / report.md + manifest / ACK
@@ -89,3 +101,9 @@ for admission, recorded execution, inspection and refusal to reuse an existing o
 Native readouts also pass the existing typed contract inside the provider projection
 boundary: malformed Unicode aliases remain per-pair invalid responses, preserving
 raw bytes and allowing valid neighboring cases to finish.
+
+Direct native calls share the runner's consent/guard and next-call reservation check;
+adapter instances also bound cumulative work. Recorded evaluation rejects blocked or
+wrong-kind arms. Remote endpoints require HTTPS (loopback HTTP is retained). All frozen
+input snapshots share `max_input_bytes`; paired inference excludes gold without human
+provenance while retaining descriptive labels and the full coverage denominator.

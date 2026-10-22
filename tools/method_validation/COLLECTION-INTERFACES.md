@@ -125,7 +125,9 @@ not authenticity, hostile-writer containment or remote-stop confirmation.
 
 All relevant budgets/thresholds are validated Config fields, overridable by
 `ZS_COLLECTION_OVERRIDES`; complete request+snapshot and outcome/call/physical-work
-reservations precede effects. Node-specific prompt limits do not suppress fitting
+reservations precede effects. Reads honor remaining cumulative bytes before allocation.
+The shared adapter also admits direct native consent/guard/work, requiring HTTPS off-host
+(explicit loopback HTTP allowed). Node-specific prompt limits do not suppress fitting
 questions or imported baseline rows. CLI source wall cap additionally uses the shared
 named `ZS_SOURCE_WORK_SAFETY_MS`; native consumption checks the remaining run budget
 between chunks and on completion. Blocking I/O still needs an external hard-wall guard;

@@ -14,7 +14,10 @@ references, no-corpus unknowns and canonical replay without original snapshots.
 `test_collection_review_regressions.py` covers independent oversized questions, original
 nested baseline paths and alias collisions, strict owner freezes, HTTP replay consistency,
 trickling-response deadlines and reordered scored gold; the configured paper-cap control
-also verifies reused priority admission. Real module entry exercises admission/run/inspect/reuse refusal; inert HTTPX
+also verifies reused priority admission. `test_collection_dependencies.py` exercises
+shared direct native consent, same-family canonical refusal and remaining-byte read
+caps; 0/60/100 provenanced-label controls verify the existing paired-inference firewall.
+Real module entry exercises admission/run/inspect/reuse refusal; inert HTTPX
 exercises native raw ACK order and operational states. Original top3 names, duplicate
 workflow names, missing corpus, independent parent/child choice, shortlist recall,
 canonical/time/source-owner joins, cumulative requests+snapshots, closed capabilities,
@@ -36,7 +39,14 @@ firewalls, actual baseline capabilities and verified effect-free reopen. Publish
 write-then-raise is failure, never readback confirmation. The full support selectors
 below remain regression controls for the shared transport/default projection.
 No synthetic score, HTTPX transport or CLI test is a live-provider or scientific
-quality/promotion study.
+quality/promotion study. Priority metric regressions retain class-specific timeout,
+abstention and blocked coverage without invented negatives; mixed-provenance
+sidecars disclose declared/missing class counts separately from synthetic status.
+Same-family canonical duplicates and absent/empty ML training-family provenance
+must fail admission before artifacts or requests. `test_priority_dependencies.py`
+checks shared native authorization under the four-way projector, per-read aggregate
+snapshot limits, already-correct blocked recordings and discriminating 0/60/100
+provenance-qualified paired cohorts.
 
 ## Recorded-input replay regression
 
@@ -48,6 +58,12 @@ identities, and preserve actual blocked/missing/wall/malformed-neighbor states a
 coverage denominators. Numeric perfect cases remain by-construction wiring only.
 Reopening must reject this input-to-output substitution, independently of unsigned
 artifact authenticity. Existing recorded/native/error/reopen controls remain.
+
+## Public support boundary regressions
+
+`test_support_boundaries.py` covers direct native consent/guard/work admission, blocked
+and wrong-kind recorded calls, remote TLS versus loopback HTTP, aggregate frozen-input
+bytes, and 0/60/80 provenance-qualified paired cohorts without shrinking coverage.
 
 ## Offline support comparison (#37)
 

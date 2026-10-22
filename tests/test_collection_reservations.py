@@ -19,7 +19,7 @@ def test_complete_requests_share_cumulative_snapshot_admission_budget(tmp_path):
     required = sum(len(raw) for raw in prepared[-1].values()) + sum(len(raw) for raw in prepared[6].values())
     config['max_snapshot_bytes'] = required - 1
     cfg = Config.model_validate(save(tmp_path, config, inputs, truth))
-    with pytest.raises(ValueError, match='budget'):
+    with pytest.raises(ValueError, match='byte|budget'):
         run(cfg, path.read_bytes())
     assert not (tmp_path / 'data').exists()
 

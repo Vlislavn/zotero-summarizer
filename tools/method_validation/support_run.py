@@ -6,7 +6,7 @@ from math import isfinite
 from pathlib import Path
 from time import monotonic
 
-from .decision_adapter import endpoint, evaluate_support, payload, project
+from .decision_adapter import admit_native, evaluate_support, payload, project
 from .support import (BaselineArtifact, Config, FrozenSupportInput, OWNERS, SupportResult, admit, digest,
                       encoded, gold_identity, loads, read_bound, sha)
 from .support_report import readable, report
@@ -23,14 +23,17 @@ def schema_identity():
 
 def prepare(cfg, snapshots=None):
     saved = {} if snapshots is None else dict(snapshots)
+    remaining = cfg.max_input_bytes
     def read(name, ref, cap):
+        nonlocal remaining
         if snapshots is None:
-            saved[name] = read_bound(ref, cap)
+            saved[name] = read_bound(ref, min(cap, remaining))
         if name not in saved:
             raise FileNotFoundError('input snapshot unavailable')
         raw = saved[name]
-        if len(raw) > cap or sha(raw) != ref.sha256:
-            raise ValueError('snapshot input identity mismatch')
+        if len(raw) > min(cap, remaining) or sha(raw) != ref.sha256:
+            raise ValueError('snapshot input byte budget or identity mismatch')
+        remaining -= len(raw)
         return raw
     bundle = FrozenSupportInput.model_validate(loads(read('inputs.json', cfg.inputs, cfg.max_input_bytes)))
     sources, cases, gold = admit(cfg, bundle)
@@ -63,15 +66,7 @@ def prepare(cfg, snapshots=None):
                 a.arm_id for a in cfg.arms if a.kind == 'recorded'}:
             raise ValueError('unmatched/duplicate recorded native response')
         recordings[key] = read(f'recording-{index}.bin', recording.terminal, cfg.max_response_bytes)
-    active = [a for a in cfg.arms if a.kind == 'native' and not a.blockage()]
-    for arm in active:
-        endpoint(arm.endpoint)
-    if active and not (cfg.external_guard and cfg.public_input_consent):
-        raise ValueError('live HTTP requires public-input consent and external wall/memory guard')
-    calls = len(active) * len(cases)
-    work = sum(a.forward_passes_bound for a in active) * len(cases)
-    if calls > cfg.max_calls or work > cfg.max_work_units:
-        raise ValueError('whole-workload call/forward-pass reservation exceeds budget')
+    admit_native(cfg.arms, len(cases), cfg)
     return bundle, sources, cases, gold, baseline_rows, recordings, saved
 
 

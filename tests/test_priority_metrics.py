@@ -36,6 +36,29 @@ def test_brier_uses_full_vector_and_calibration_preserved_choice_not_vendor_conf
     assert values['calibration'] == [{'bin': 2, 'n': 1, 'probability': 0.2, 'accuracy': 0}]
 
 
+def test_class_coverage_preserves_failures_without_inventing_predictions():
+    rows = [row('a', 'must_read', 'should_read'), row('b', 'should_read', 'should_read')]
+    for index, status in enumerate(('timeout', 'threshold_abstention', 'blocked')):
+        item = row(str(index), 'must_read', None)
+        item.update(status=status, baseline_native=None)
+        rows.append(item)
+    unknown = row('unknown', None, None)
+    unknown.update(status='unavailable', baseline_native=None)
+    rows.append(unknown)
+    result = summary(rows, 1)
+    assert result['class_coverage']['must_read'] == {
+        'total': 4, 'evaluated': 3, 'statuses': {
+            'decision': 1, 'timeout': 1, 'threshold_abstention': 1, 'blocked': 1},
+        'coverage': 1 / 3}
+    assert result['class_coverage']['should_read']['coverage'] == 1
+    assert result['class_coverage']['dont_read'] == {
+        'total': 0, 'evaluated': 0, 'statuses': {}, 'coverage': None}
+    assert result['per_class']['must_read']['support'] == 1
+    assert result['must_read_retention'] == 1
+    assert sum(v['total'] for v in result['class_coverage'].values()) == 5
+    assert all(r['label'] is None for r in rows if r['status'] != 'decision')
+
+
 def test_family_paired_ci_is_reproducible_and_names_its_actual_estimand():
     rows = [r for i in range(100) for r in
             (row(str(i), 'must_read', 'should_read'), row(str(i), 'must_read', 'must_read', arm='reference'))]

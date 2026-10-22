@@ -6,7 +6,7 @@ from time import monotonic
 from .collections import (BaselineArtifact, Config, Inputs, PaperTiming, Readout, Result, Truth,
                           admit, identity, payload, project, reference_safe)
 from .collections_report import readable, report
-from .decision_adapter import NativeDecisionAdapter, ProviderReply, endpoint
+from .decision_adapter import NativeDecisionAdapter, ProviderReply, admit_native
 from .support import digest, encoded, loads, read_bound, sha
 from .support_run import check_unattempted, code_identity, publish, read_owned, unattempted
 
@@ -32,7 +32,7 @@ def prepare(cfg, snapshots=None):
     def read(name, ref, cap):
         nonlocal admitted_bytes
         if snapshots is None:
-            saved[name] = read_bound(ref, cap)
+            saved[name] = read_bound(ref, min(cap, cfg.max_snapshot_bytes - admitted_bytes))
         if name not in saved:
             raise FileNotFoundError('frozen snapshot unavailable')
         raw = saved[name]
@@ -86,15 +86,12 @@ def prepare(cfg, snapshots=None):
         if key not in allowed or key in recordings:
             raise ValueError('duplicate/unmatched question/arm recording')
         recordings[key] = read(f'recording-{index}.bin', recording.terminal, cfg.max_response_bytes)
-    active = [a for a in cfg.arms if a.kind == 'native' and not a.blockage()]
     calls = len(papers) * len(questions)
-    if (len(active) * calls > cfg.max_calls
-            or count + calls * sum(a.forward_passes_bound for a in active) > cfg.max_work_units):
+    admit_native(cfg.arms, calls, cfg)
+    work = count + calls * sum(a.forward_passes_bound for a in cfg.arms
+                               if a.kind == 'native' and not a.blockage())
+    if work > cfg.max_work_units:
         raise ValueError('whole-workload call/physical-work reservation exceeds budget')
-    for arm in active:
-        endpoint(arm.endpoint)
-    if active and not (cfg.public_input_consent and cfg.external_guard):
-        raise ValueError('live HTTP requires public-input consent and external resource guard')
     return inputs, truth, papers, gold, nodes, questions, requests, errors, baselines, recordings, saved
 
 
@@ -166,8 +163,9 @@ def evaluate(row, arm, cfg, request, retain, *, recording=None, transport=None, 
         reply = ProviderReply(recording, status, readout, {'reserved': False, 'dispatched': False,
             'terminal_status': 'received', 'elapsed_seconds': None, 'client_retries': 0})
     else:
-        reply = NativeDecisionAdapter(arm, cfg, transport=transport, projector=project)(
-            request, retain, timeout=min(remaining, cfg.idle_timeout_seconds), max_elapsed_seconds=remaining)
+        reply = NativeDecisionAdapter(arm, cfg, transport=transport, projector=project,
+                                      max_elapsed_seconds=remaining)(
+            request, retain, timeout=min(remaining, cfg.idle_timeout_seconds))
     row.update(status=reply.status, readout=reply.readout, telemetry=reply.telemetry,
                label=reply.readout['label'] if reply.status == 'decision' else None)
     return row
