@@ -86,3 +86,5 @@ unowned rather than retroactively adopting it.
 Digest strength and weakness paragraphs precede the unchanged version-1 quality
 metadata footer. The footer is always the last meaningful paragraph, preserving
 structural ownership after native editors discard HTML comments.
+
+Existing native/question source stack: typed action history, original writer boundaries and dormant editor/proposal code; activation follows. No new feature or issue-completion work; merge the related parts before using their new workflow.

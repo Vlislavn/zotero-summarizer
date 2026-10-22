@@ -543,3 +543,5 @@ Generation schema failures retain ValueError compatibility but report generation
 The HTML brief folds goal findings behind one native disclosure, retains original goal summaries and all quotes, and reports saved quality/digest source basis separately from unrecorded reviewed extent.
 
 Map output truncation alone subdivides the failing source chunk sequentially with the existing 200-character overlap. Work sizes halve down to the shared 1000-character floor; exhausted-floor, cancellation, empty-note and other errors propagate. Segment-labelled notes remain generation context, never verification source.
+
+Existing native/question source stack: typed action history, original writer boundaries and dormant editor/proposal code; activation follows. No new feature or issue-completion work; merge the related parts before using their new workflow.
