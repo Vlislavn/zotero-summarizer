@@ -134,3 +134,5 @@ missing/invalid originals raise. The existing short-circuit trace exposes
 `explicit_label`, so the UI explains the label instead of showing additive math.
 The shared short-circuit constructor also handles trash/veto; unlabeled scoring
 and final-label manual-override detection retain their existing semantics.
+
+Feedback review stack part 1: Feedback: retained input capture and report primitives. See `zotero_summarizer/services/golden/feedback_analysis/README.md`; later parts supply the remaining existing workflow.

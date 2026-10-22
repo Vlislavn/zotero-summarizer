@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Package existing retained input capture and report primitives from the working changes for dependent review; no behavior redesign.
+
 - CLI validates before Settings/.env loading, then applies offline flags from the selected project only. Importing CLI no longer reads another root. Faithbench/Setup exports and pure run options load lazily without changing public objects or benchmark algorithms.
 
 ### Changed

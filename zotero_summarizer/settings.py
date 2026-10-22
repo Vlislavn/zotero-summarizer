@@ -68,6 +68,18 @@ class Settings:
     # login session). Default under data/; overridable via UniversityAccessConfig.
     browser_profile_dir: Path
 
+    @property
+    def feedback_schedule_dir(self) -> Path:
+        return self.feedback_analysis_dir / "schedule"
+
+    @property
+    def feedback_analysis_dir(self) -> Path:
+        return self.data_dir / "feedback-analysis"
+
+    @property
+    def classifier_runs_log_path(self) -> Path:
+        return self.data_dir / "classifier-runs.jsonl"
+
     @classmethod
     def load(
         cls,

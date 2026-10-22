@@ -9,3 +9,5 @@ network. Positive migration cases use real CLI, Settings and SQLite migrations;
 only the embedding SDK symbol is inert and its constructor refuses all model
 work. They verify configuration selection, not actual model compatibility.
 Existing Faithbench exports retain exact defining object identity.
+
+Part 1 retains the corresponding original Feedback suites without assertion changes.
