@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Retain original question submission/read/Q&A receipts and sync API wiring; existing native and data parts supply delivery and persistence.
+
 - Retain original Telegram worker/auth registration and combined migration13; native lifetime, real authorization and platform recovery remain unqualified.
 
 - Retain original Pending preview UI/MCP request/receipt handling and direct-editor client outcomes, with unchanged client tests.
