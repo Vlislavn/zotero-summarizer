@@ -2,8 +2,8 @@ import { KeyVal, Bullets } from './primitives.jsx';
 
 export default function ReadingPlan({ digest, decision }) {
   const opensOriginal = decision !== 'skip';
-  const targets = (digest.read_parts || []).filter(Boolean);
-  const skips = (digest.skip_parts || []).filter(Boolean);
+  const targets = (digest.read_parts || []).filter(part => part.trim());
+  const skips = (digest.skip_parts || []).filter(part => part.trim());
   if (!opensOriginal && !skips.length) return null;
 
   return (

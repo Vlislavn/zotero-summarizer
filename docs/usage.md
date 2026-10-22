@@ -8,7 +8,9 @@ full config reference. (Architecture and dev workflow live in [architecture.md](
 
 The app's review card and full paper page show **Read parts**, **Skip parts** and
 **What the original adds** beside the saved reading verdict, without opening Details.
-Absent targets, added value or time are reported as unrecorded, not invented. Unknown
+Whitespace-only plan entries are omitted. The time is the saved estimate; it is not
+recalculated if current policy caps the action. Absent targets, added value or time
+are reported as unrecorded, not invented. Unknown
 reading decisions show a neutral unavailable state instead of cached action advice,
 including its old rationale. Evidence panels remain available. This display change does not regenerate
 reviews, alter reading policy or update native HTML/Zotero notes.

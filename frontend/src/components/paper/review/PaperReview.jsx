@@ -139,7 +139,7 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
           <span className="font-display text-[22px] font-light tracking-tight text-slate-900">{verdict.label}</span>
           {hasReadingDecision && (
             digest.estimated_read_minutes != null
-              ? <Chip tone="slate" title="Estimated time for the recommended action">{digest.estimated_read_minutes} min</Chip>
+              ? <Chip tone="slate" title="Saved reading-time estimate">{digest.estimated_read_minutes} min</Chip>
               : <span className="text-[12px] text-slate-500">Time not estimated</span>
           )}
           {grade && (

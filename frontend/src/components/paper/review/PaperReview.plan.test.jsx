@@ -31,6 +31,35 @@ it.each([{}, { compact: true }, { flat: true }])('makes the ordered reading plan
   expect(container.textContent).toContain('12 min');
 });
 
+it('omits whitespace-only targets without changing nonblank literal text or order', () => {
+  const target = '  §4 <methods> & results  ';
+  const skip = '  Appendix A — notation  ';
+  const { getByRole } = render(<PaperReview deep={{ digest: { ...digest,
+    read_parts: ['  ', target, '\t', digest.read_parts[1]], skip_parts: ['\n', skip, ' '],
+  } }} />);
+
+  expect(within(getByRole('region', { name: 'Reading plan' })).getAllByRole('listitem').map(el => el.textContent))
+    .toEqual([target, digest.read_parts[1], skip]);
+});
+
+it('does not create an empty skip plan from whitespace-only hints', () => {
+  const { queryByRole } = render(<PaperReview deep={{ digest: { ...digest,
+    read_decision: 'skip', skip_parts: [' ', '\t', '\n'],
+  } }} />);
+
+  expect(queryByRole('region', { name: 'Reading plan' })).toBeNull();
+});
+
+it('labels a retained estimate as saved when the action has been capped', () => {
+  const { getByTitle, getByText } = render(<PaperReview deep={{
+    digest: { ...digest, read_decision: 'skim', estimated_read_minutes: 60 },
+    model_read_decision: 'read', reading_policy_flags: ['strong_evidence_not_confirmed'],
+  }} />);
+
+  expect(getByText('SKIM')).toBeTruthy();
+  expect(getByTitle('Saved reading-time estimate').textContent).toBe('60 min');
+});
+
 it('does not turn absent optional fields in an old cache into zero time or made-up targets', () => {
   const { container, getByRole } = render(<PaperReview deep={{ digest: {
     read_decision: 'skim', read_why: 'A saved rationale.', tldr: 'A saved contribution.',
