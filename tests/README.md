@@ -8,3 +8,5 @@ HTTP job status, hosted calibration and ordinary local application controls.
 exclusion past executor shutdown, active/interrupted attempt identity, external
 credential rotation, empty retries and malformed endpoint failure data.
 No live inference, credentials, network, private library or hardware load occurs.
+
+Retain original setup source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
