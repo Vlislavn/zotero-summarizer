@@ -17,7 +17,10 @@ def canonical_hash(value: Any) -> str:
 def digest_contract_payload(digest: Any) -> dict:
     from zotero_summarizer.models import PaperDigest
 
-    return digest.model_dump(mode='json', include=set(PaperDigest.model_fields))
+    fields = set(PaperDigest.model_fields)
+    if isinstance(digest, dict):
+        return {key: value for key, value in digest.items() if key in fields}
+    return digest.model_dump(mode='json', include=fields)
 
 
 def contract_hashes() -> dict[str, str]:

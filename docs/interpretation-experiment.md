@@ -99,7 +99,9 @@ metadata cannot certify claims. Boolean false is retained. New optional checks
 use strict booleans/indices without changing A's legacy verifier DTO.
 
 A reopened qualified record reaches both actual renderers through one shared
-Finding / Scope / Unproven section. Final brief bytes pass the existing audit
+Finding / Scope / Unproven section. Runtime subtype metadata stays in the saved
+digest but outside declared `PaperDigest` verification authority; metadata alone
+cannot certify a claim or invalidate an otherwise unchanged scientific receipt. Final brief bytes pass the existing audit
 before publication. `zotero-note.html` is an HTML handoff only: no native database,
 writer, consent, target identity or Add permission is supplied by an experiment.
 Original quote/answer authority remains mandatory; a whole card uses unused QA

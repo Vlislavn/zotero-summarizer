@@ -1,5 +1,10 @@
 # Regression tests
 
+`test_interpretation_dependency_retention.py` reproduces typed A/B subtype capture
+and current C receipt handling across both actual HTML renderers. Unrelated null
+or nested metadata stays stored without becoming scientific authority; declared
+finding changes still refuse. These are synthetic contract checks, not a study.
+
 `test_interpretation_experiment_*` uses explicitly synthetic cohorts/clients to
 exercise source/schema/presence, optional failure isolation, current-field and
 passage bindings, unchanged legacy QA authority, saved-record renderer handoff,

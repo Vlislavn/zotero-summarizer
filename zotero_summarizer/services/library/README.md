@@ -32,7 +32,10 @@ actual brief writer (binding the original before presentation/reading-policy
 projection and before its final-byte audit) and native-note builder via an
 explicit keyword. Neither renderer dispatches a native write or authorizes Add.
 Model/source/human/native/scientific acceptance and full experiment execution
-remain separate qualification obligations.
+remain separate qualification obligations. Stored typed-subtype metadata remains
+intact but outside declared `PaperDigest` authority: base qualification, optional
+receipt hashes and both renderers share the same dictionary/model projection.
+Declared-field changes still invalidate qualification.
 
 Accepted digest verification retains `tldr`/`key_findings` checks in the existing
 review cache, including exact original fragments, actual selected extent and
