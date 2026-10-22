@@ -27,3 +27,5 @@ or source-path assertions.
 
 Use the repository verification commands and the local source-bound evidence;
 scoped checks do not substitute for full hooks, backend or hosted CI.
+
+Existing-question review stack: original immutable question storage, revision/sync storage, composite note intents and migrations9/10 are retained here. Original HTTP/UI and native delivery wiring follow separately; this part does not claim complete question submission or native delivery.

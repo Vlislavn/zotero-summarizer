@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Package original immutable-question persistence, composite note intents and migrations9/10; HTTP/UI and native delivery remain dependent review parts.
+
 - Keep tightened interpretation resource caps inclusive with exact token-count and decimal-latency arithmetic. Preserve mean/median reporting, per-paper and independent unknown/refusal gates; no rounding tolerance or threshold changes.
 
 - Reject malformed persisted interpretation states without losing qualified base rendering; evaluate known timing/token breaches independently of unrelated unknown observations.
