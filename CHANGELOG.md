@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Retain every original service hunk identity and review disposition in the bounded source audit metadata stack.
+
 - Index every original change hunk and its review PR or explicit superseded-variant disposition; distinguish source-only oracles from behavioral acceptance.
 
 ### Changed
