@@ -72,3 +72,5 @@ timestamps raise instead of silently becoming absent dates.
 optional pending actions only; default runs are dry-run.
 
 Telegram source-review part: original transport/session/credential and runtime code is retained unchanged. This part registers no Telegram CLI commands; its collection/store/worker dependencies are supplied by following original-source parts. No account/session, network collection or live model is exercised by packaging.
+
+Existing Telegram source-review part: saved posts, collector/composer/rendering, model selection and migration11 are retained from the original working source. Saved-input CLI wiring is included; private worker/auth command registration and combined live-schema/native dependencies follow separately; no live collection, model loading or issue completion is inferred.

@@ -169,3 +169,5 @@ these traces; stage counts are instrumentation, not review-success scores.
 Diagnostic CLI source reads reuse the single-component/no-symlink paper-state guard. Admission happens before provider construction. Legacy full_text is explicitly labelled unverified legacy scope; empty sources retain local failure diagnostics. Diagnostic calls disable thinking without changing app routing.
 
 Telegram source-review part: original transport/session/credential and runtime code is retained unchanged. This part registers no Telegram CLI commands; its collection/store/worker dependencies are supplied by following original-source parts. No account/session, network collection or live model is exercised by packaging.
+
+Existing saved-news CLI options are retained for explicit `--source telegram --input-jsonl ...` and replay. Authentication/private worker command registration follows with the original worker source; no new CLI modes are invented.

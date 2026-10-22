@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Retain original saved Telegram news composition, collection/storage contracts and migration11; CLI and combined live-schema wiring follow separately.
+
 - Retain original optional Telegram transport/session/identity contracts; collection/store/CLI wiring follows in dependent source-review parts.
 
 - Package original immutable-question persistence, composite note intents and migrations9/10; HTTP/UI and native delivery remain dependent review parts.

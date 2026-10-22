@@ -240,3 +240,5 @@ that already recorded the v2 offline-sync schema; new databases also create it
 with the baseline sync schema.
 
 Existing-question review stack: original immutable question storage, revision/sync storage, composite note intents and migrations9/10 are retained here. Original HTTP/UI and native delivery wiring follow separately; this part does not claim complete question submission or native delivery.
+
+Existing Telegram source-review part: saved posts, collector/composer/rendering, model selection and migration11 are retained from the original working source. CLI worker/wiring and combined live-schema/native dependencies follow separately; no live collection, model loading or issue completion is inferred.
