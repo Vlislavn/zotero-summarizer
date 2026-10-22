@@ -114,7 +114,9 @@ through existing headless sources. Access,
 assessment and provider errors are per-paper failures, not scientific rejections;
 CLI exit 1 accompanies a published partial run; stdout remains JSON and runtime
 diagnostics go to stderr. The digest keeps configured reasoning effort while its
-verification calls explicitly request the provider's supported thinking-off mode. JSON schema version 1 and Markdown
+verification calls minimize supported reasoning: declared chat thinking is off,
+while active three-level reasoning uses low (not off). Explicit configured off
+is preserved; no unsupported off value is invented. JSON schema version 1 and Markdown
 retain their existing shape with additive assessment/provenance fields. New bundles
 are immutable; cheap projections are recomputed, never replayed from old reports.
 `--queue-zotero` alone opts into idempotent pending tags for materialized items;

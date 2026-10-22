@@ -42,8 +42,9 @@ project. Model/library caches never resolve an application cache from HOME.
 Existing home-global artifacts are left untouched and are not auto-imported;
 retrain/recompute in the selected project or explicitly copy trusted artifacts.
 
-Per-call thinking-off respects advertised OpenAI reasoning-effort as well as
-chat-template flags; unsupported provider parameters are never invented.
+Per-call verification overrides disable declared chat thinking or lower active
+three-level reasoning to `low`; low is not off. Explicit user off is preserved,
+and unsupported provider parameters are never invented.
 
 Subpackages each have their own README. Start with
 [docs/architecture.md](../docs/architecture.md) for the end-to-end mental model,

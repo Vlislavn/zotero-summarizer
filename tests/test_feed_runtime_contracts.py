@@ -11,8 +11,9 @@ from zotero_summarizer.services.setup.bootstrap import _default_goals_config
 
 
 @pytest.mark.parametrize('extra,effort,expected', [
-    (None, 'high', {'reasoning_effort': 'none'}),
-    ({'reasoning_effort': 'high', 'keep': 1}, None, {'reasoning_effort': 'none', 'keep': 1}),
+    (None, 'high', {'reasoning_effort': 'low'}),
+    ({'reasoning_effort': 'high', 'keep': 1}, None, {'reasoning_effort': 'low', 'keep': 1}),
+    (None, 'off', {'reasoning_effort': 'none'}),  # Never re-enable an explicit user off.
     ({'chat_template_kwargs': {'enable_thinking': True}}, 'high',
      {'chat_template_kwargs': {'enable_thinking': False}}),
     (None, None, None),  # Do not invent a wire parameter for unsupported models.

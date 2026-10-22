@@ -183,8 +183,8 @@ uv run zotero-summarizer faithbench build --max-builder-windows 64  # larger QA-
   stages are errors, and omitted projects remain unknown. Shared abstract prompts
   escape source boundary markup; semantic injection resistance is not established.
   Saved v1 reports are not rewritten. Partial-run diagnostics stay on stderr so
-  CLI stdout remains parseable JSON; verification requests supported thinking-off
-  without changing the digest's configured reasoning effort.
+  CLI stdout remains parseable JSON; verification disables declared chat thinking
+  or minimizes active three-level reasoning to low without changing digest effort.
 - **[docs/architecture.md](docs/architecture.md)** — how it works, the layering rules, and
   the dev / verification workflow.
 - **[CHANGELOG.md](CHANGELOG.md)** — notable changes (latest: the guided first-run setup).

@@ -14,8 +14,10 @@ llm_routing → resolve_stage → ResolvedStage → factory → LLMClient
   secrets from the keyring with env fallback. OpenAI-compatible transports receive
   the process `SUMMARY_TIMEOUT_SECONDS` request deadline; its optional
   `enable_thinking` overrides only clients already advertising that capability.
-  Explicit off also changes an advertised plain `reasoning_effort` to `none`,
-  without injecting unsupported parameters or changing generator configuration.
+  A verification/light-call override lowers an active plain low/medium/high
+  `reasoning_effort` to `low`: reasoning-native models need not support `none`.
+  Explicit configured off stays off; chat-template thinking can be disabled.
+  No unsupported parameter is injected and generator configuration is unchanged.
   Declared `structured_output` applies schema constraints to every Pydantic call
   through the shared adapter, including CLI calls and verifier/correction passes.
 - `thinking.py` translates effort to Anthropic budgets, OpenAI

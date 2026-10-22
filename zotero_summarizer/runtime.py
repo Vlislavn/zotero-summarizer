@@ -79,9 +79,9 @@ class RuntimeState:
         """Return the LLM client for ``stage`` ('feed'|'backlog'|'deep_review'),
         building + caching it on first use from ``app_state.config.llm_routing``.
 
-        ``enable_thinking`` (not ``None``) forces the reasoning flag on/off for the
-        returned client — deep_review uses it to think on the DIGEST (quality) but
-        not on the trivial verification calls (speed) on the same provider. It is a
+        ``enable_thinking=False`` disables declared chat thinking or minimizes
+        active three-level reasoning to low. Deep review retains configured effort
+        for its digest and minimizes verification/light calls. It is a
         no-op for providers that advertise neither ``chat_template_kwargs``
         nor a configured ``reasoning_effort`` parameter.
 
