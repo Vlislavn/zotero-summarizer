@@ -191,9 +191,14 @@ def test_mobile_launcher_passes_only_prebound_socket_with_proxy_processing_disab
 
         class Server:
             started = True
+            should_exit = False
 
             def __init__(self, config):
                 observed["config"] = config
+
+            @contextmanager
+            def capture_signals(self):
+                yield
 
             def run(self, *, sockets):
                 observed["sockets"] = sockets

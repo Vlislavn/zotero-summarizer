@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Capture mobile-server signals before binding and replay them after socket cleanup, preventing stale sockets on startup SIGTERM/SIGINT.
 - Add explicit owner-authenticated Tailscale HTTPS/private-Unix app access. Preserve loopback default and same-origin Vite POST; refuse unsafe LAN shortcuts, directories and socket replacement. Own signal cleanup; no automatic gateway activation or device/revocation acceptance.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.

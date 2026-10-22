@@ -42,7 +42,9 @@ Handlers use lazy imports inside the function bodies to keep CLI startup fast.
 `serve` refuses non-loopback binds at parser and handler boundaries and disables
 proxy-header rewriting. `serve-mobile` is a separate explicit POSIX command;
 project/data ancestry must be owner-controlled, private socket paths are never
-silently replaced, and no foreign process is stopped. `make iphone` only refuses
+silently replaced, and no foreign process is stopped. Signal capture covers the
+whole socket lifetime, including bind and pre-server startup, and replays the
+interruption only after owned cleanup. `make iphone` only refuses
 with guidance; it does not inspect deployed state. Gateway origin/owner, trust,
 manual activation, shutdown and unperformed device checks are described in
 [deployment boundary](../../docs/local-deployment-boundary.md).

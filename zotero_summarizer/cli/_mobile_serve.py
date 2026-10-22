@@ -96,24 +96,23 @@ def _serve_mobile(args: argparse.Namespace) -> int:
     import uvicorn
     from zotero_summarizer.api.app import create_app
 
-    with private_listener(settings) as (listener, _path, release_path):
-        class GatewayServer(uvicorn.Server):
-            @contextmanager
-            def capture_signals(self):
-                with super().capture_signals():
-                    try:
-                        yield
-                    finally:
-                        release_path()
+    class GatewayServer(uvicorn.Server):
+        @contextmanager
+        def capture_signals(self):
+            # The outer capture owns signals for the entire socket lifetime.
+            yield
 
-        config = uvicorn.Config(
-            create_app(settings, mobile_access=policy), uds=str(path),
-            proxy_headers=False, workers=1, http="h11", access_log=False,
-            timeout_graceful_shutdown=shutdown_seconds,
-        )
-        server = GatewayServer(config)
-        server.run(sockets=[listener])
-        return 0 if server.started else 3
+    config = uvicorn.Config(
+        create_app(settings, mobile_access=policy), uds=str(path),
+        proxy_headers=False, workers=1, http="h11", access_log=False,
+        timeout_graceful_shutdown=shutdown_seconds,
+    )
+    server = GatewayServer(config)
+    with uvicorn.Server.capture_signals(server):
+        with private_listener(settings) as (listener, _path, _release_path):
+            if not server.should_exit:
+                server.run(sockets=[listener])
+    return 0 if server.started else 3
 
 
 def register_mobile_serve(subparsers: argparse._SubParsersAction) -> None:

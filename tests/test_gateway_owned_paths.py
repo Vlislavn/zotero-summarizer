@@ -1,5 +1,6 @@
 """Owner-path and launcher failure contracts on disposable POSIX state only."""
 from argparse import Namespace
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 import socket
@@ -148,9 +149,14 @@ def test_server_failure_or_normal_return_always_releases_owned_socket(selected, 
 
     class Server:
         started = outcome == "stopped"
+        should_exit = False
 
         def __init__(self, config):
             captured["config"] = config
+
+        @contextmanager
+        def capture_signals(self):
+            yield
 
         def run(self, *, sockets):
             captured["listener"] = sockets[0]

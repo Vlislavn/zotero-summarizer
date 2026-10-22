@@ -22,6 +22,8 @@ fixture identity headers. `_gateway_process.py` binds child imports to the teste
 source and records their roots; it substitutes a trivial application lifespan.
 Signal assertions require non-success, owned socket removal before fixture cleanup
 and successful rebinding, not one platform-specific signal/exception exit encoding.
+`test_mobile_server_lifetime.py` also injects SIGTERM/SIGINT after bind and before
+server startup, so cleanup is checked before Uvicorn's usual signal-capture point.
 `test_gateway_signal_control.py` retains stock-versus-gateway interruption controls.
 
 `test_gateway_vite_proxy.py` imports the actual Vite configuration and verifies a

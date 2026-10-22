@@ -79,8 +79,9 @@ The launcher supplies a prebound socket to Uvicorn instead of its normal `--uds`
 creation, which would chmod to `0666`. Only its captured socket device/inode can
 be unlinked. Existing/stale sockets, files, symlinks and replacements are preserved
 and cause refusal; no foreign listener is killed. Normal/startup-error and graceful
-SIGTERM/SIGINT paths close/release the owned socket, including release before the
-server re-raises a signal. SIGKILL may leave residue: inspect its owner explicitly
+SIGTERM/SIGINT paths close/release the owned socket, including interruptions during
+bind or before server startup. Signal capture begins before binding and replays the
+interruption only after owned cleanup. SIGKILL may leave residue: inspect its owner explicitly
 before any manual cleanup, rather than deleting a possibly live listener.
 
 `ZS_MOBILE_SHUTDOWN_SECONDS` bounds Uvicorn's graceful task wait: default 30,

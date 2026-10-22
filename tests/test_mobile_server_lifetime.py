@@ -45,6 +45,21 @@ spec = importlib.util.spec_from_file_location('_owned_mobile_launcher', source)
 mobile = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mobile)
 assert Path(mobile.__file__).resolve().is_relative_to(Path(sys.argv[2]).resolve())
+if len(sys.argv) > 3:
+    import os, signal, socket, uvicorn
+    stage, signum = sys.argv[3], int(sys.argv[4])
+    if stage == 'bound':
+        original_bind = socket.socket.bind
+        def bind_then_interrupt(listener, address):
+            original_bind(listener, address)
+            os.kill(os.getpid(), signum)
+        socket.socket.bind = bind_then_interrupt
+    else:
+        original_run = uvicorn.Server.run
+        def interrupt_then_run(server, *args, **kwargs):
+            os.kill(os.getpid(), signum)
+            return original_run(server, *args, **kwargs)
+        uvicorn.Server.run = interrupt_then_run
 raise SystemExit(mobile._serve_mobile(Namespace(project_root=sys.argv[1],
     origin='https://reader.example-tailnet.ts.net', owner_login='owner@example.net')))
 '''
@@ -91,3 +106,21 @@ def test_real_mobile_launcher_signal_cleans_owned_socket_and_allows_restart(tmp_
                 if child.poll() is None:
                     child.kill()
                     child.wait(timeout=SAFETY_SECONDS)
+
+
+@pytest.mark.parametrize('stage', ['bound', 'before-serve'])
+@pytest.mark.parametrize('signum', [signal.SIGTERM, signal.SIGINT], ids=['SIGTERM', 'SIGINT'])
+def test_startup_interruptions_release_socket_before_server_signal_capture(tmp_path, stage, signum):
+    with tempfile.TemporaryDirectory(prefix='zsearly-', dir='/tmp') as directory:
+        settings = Settings.load(project_root=Path(directory))
+        path = settings.data_dir / 'mobile' / 'api.sock'
+        result = subprocess.run(
+            [sys.executable, '-B', '-c', CHILD, directory, str(ROOT), stage, str(int(signum))],
+            cwd=ROOT, env={**os.environ, 'PYTHONPATH': str(ROOT), 'PYTHONDONTWRITEBYTECODE': '1'},
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=SAFETY_SECONDS,
+        )
+        (tmp_path / 'early-interruption.log').write_text(result.stdout + result.stderr)
+        assert result.returncode != 0
+        assert not path.exists(), f'{stage}: interruption left the owned socket behind'
+        with private_listener(settings):
+            assert path.is_socket()
