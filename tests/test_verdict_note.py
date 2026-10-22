@@ -7,21 +7,26 @@ import asyncio
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
+from tests._composite_note_fixtures import CompositeNotes
+from tests._direct_write_fixtures import native
 from tests._zotero_fixtures import add_library_item, build_zotero_db
+from tests.test_review_questions import _database
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.api.routes import golden as golden_routes
-from zotero_summarizer.integrations.zotero_write import ZoteroWriter
+from zotero_summarizer.integrations.zotero_write import ZoteroWriter, ZoteroWriteError
 from zotero_summarizer.services.golden import hybrid_gt
+from zotero_summarizer.services.zotero import zotero
 from zotero_summarizer.services.zotero.pending import (
     USER_NOTE_MARKER,
     VERDICT_NOTE_MARKER,
     build_user_note_html,
     build_verdict_note_html,
 )
-from zotero_summarizer.storage import repositories
+from zotero_summarizer.storage import repositories, review_note_projection
 from zotero_summarizer.storage.migrations import TRIAGE_MIGRATIONS, run_migrations
 
 
@@ -311,10 +316,19 @@ def test_review_note_upsert_get_and_replace_in_place(tmp_path: Path):
     assert rows[0] == 1
 
 
-def _patch_note_basics(monkeypatch, *, mirror_fn):
+@pytest.fixture
+def review_note_resources(tmp_path, monkeypatch):
+    settings = _database(tmp_path)
+    resources = CompositeNotes(settings, tmp_path / "review-note-zotero", monkeypatch)
+    add_library_item(resources.db, item_key="K1", title="Owned review paper")
+    resources.quiet_native = native(resources.db)
+    return resources
+
+
+def _patch_note_basics(monkeypatch):
     """Returns the list that records every local upsert_review_note call, so a test
     proves the durable save actually happened with the right (item_key, note) —
-    not just that the Zotero mirror spy fired."""
+    not just that the native entry was attempted."""
     saves: list[tuple] = []
     _init_triage_db(golden_routes._db_path())
     upsert = repositories.upsert_review_note
@@ -324,43 +338,49 @@ def _patch_note_basics(monkeypatch, *, mirror_fn):
         saves.append((ik, note))
 
     monkeypatch.setattr(repositories, "upsert_review_note", save)
-    monkeypatch.setattr(
-        golden_routes.verdict_effects, "zotero_upsert_user_note", mirror_fn
-    )
     return saves
 
 
-def test_save_review_note_mirrors_to_zotero(monkeypatch):
-    calls = []
-    saves = _patch_note_basics(
-        monkeypatch, mirror_fn=lambda ik, note: calls.append((ik, note))
-    )
+def test_save_review_note_mirrors_to_zotero(monkeypatch, review_note_resources):
+    calls = review_note_resources.writes
+    saves = _patch_note_basics(monkeypatch)
     out = asyncio.run(
         golden_routes.save_review_note(
             golden_routes.ReviewNoteRequest(item_key="K1", note="jot")
         )
     )
-    assert out == {"saved": True, "note_written": True, "note_error": None}
+    revision = repositories.sync_current_fields(golden_routes._db_path())[("K1", "review_note")]["revision"]
+    assert out == {"saved": True, "note_written": True, "note_error": None,
+                   "note_pending": False, "projection_revision": revision, "target_key": "K1"}
     assert saves == [("K1", "jot")]  # the DURABLE local save ran with the right args
     assert calls == [("K1", "jot")]  # and the Zotero mirror got the same
-
-
-def test_save_review_note_mirror_failure_still_saves(monkeypatch):
-    def boom(*_a):
-        raise RuntimeError("Zotero is open")
-
-    saves = _patch_note_basics(monkeypatch, mirror_fn=boom)
-    with pytest.raises(RuntimeError, match="Zotero is open"):
-        asyncio.run(
-            golden_routes.save_review_note(
-                golden_routes.ReviewNoteRequest(item_key="K1", note="jot")
-            )
-        )
-    assert saves == [("K1", "jot")]  # local save happened DESPITE the mirror failing
+    review_note_resources.assert_attempts([("K1", "jot")])
+    assert len(review_note_resources.backups) == len(review_note_resources.dispatches) == 1
     assert repositories.get_review_note(golden_routes._db_path(), "K1") == "jot"
 
 
-def test_save_review_note_swallows_optional_zotero_unavailable(monkeypatch):
+def test_save_review_note_mirror_failure_still_saves(monkeypatch, review_note_resources):
+    def boom(*_a):
+        raise ZoteroWriteError("Zotero is open", expected_io=True)
+
+    review_note_resources.dispatch_hook = boom
+    saves = _patch_note_basics(monkeypatch)
+    out = asyncio.run(golden_routes.save_review_note(
+        golden_routes.ReviewNoteRequest(item_key="K1", note="jot")
+    ))
+    revision = repositories.sync_current_fields(golden_routes._db_path())[("K1", "review_note")]["revision"]
+    assert out == {"saved": True, "note_written": False, "note_error": "ZoteroWriteError",
+                   "note_pending": True, "projection_revision": revision, "target_key": "K1"}
+    with sqlite3.connect(golden_routes._db_path()) as conn:
+        assert review_note_projection.snapshot(conn, "K1")["pending"] is True
+    assert saves == [("K1", "jot")]  # local save happened DESPITE the mirror failing
+    assert repositories.get_review_note(golden_routes._db_path(), "K1") == "jot"
+    review_note_resources.assert_attempts([("K1", "jot")])
+    assert len(review_note_resources.backups) == len(review_note_resources.dispatches) == 1
+    assert review_note_resources.attempts[0]["result"]["failed"][0]["error"] == "Zotero is open"
+
+
+def test_save_review_note_swallows_optional_zotero_unavailable(monkeypatch, review_note_resources):
     def unavailable(*_a):
         raise APIError(
             error="zotero_unavailable",
@@ -368,35 +388,52 @@ def test_save_review_note_swallows_optional_zotero_unavailable(monkeypatch):
             status_code=503,
         )
 
-    saves = _patch_note_basics(monkeypatch, mirror_fn=unavailable)
+    reader_lookup = Mock(wraps=unavailable)
+    writer_lookup = Mock(wraps=zotero.get_zotero_writer_or_raise)
+    monkeypatch.setattr(zotero, "get_zotero_reader_or_raise", reader_lookup)
+    monkeypatch.setattr(zotero, "get_zotero_writer_or_raise", writer_lookup)
+    saves = _patch_note_basics(monkeypatch)
     out = asyncio.run(
         golden_routes.save_review_note(
             golden_routes.ReviewNoteRequest(item_key="K1", note="jot")
         )
     )
-    # A missing Zotero DB is an optional-mirror miss, not an error surfaced to the user.
-    assert out == {"saved": True, "note_written": False, "note_error": None}
+    revision = repositories.sync_current_fields(golden_routes._db_path())[("K1", "review_note")]["revision"]
+    assert out == {"saved": True, "note_written": False, "note_error": "zotero_unavailable",
+                   "note_pending": True, "projection_revision": revision, "target_key": "K1"}
+    with sqlite3.connect(golden_routes._db_path()) as conn:
+        assert review_note_projection.snapshot(conn, "K1")["pending"] is True
     assert saves == [("K1", "jot")]
+    reader_lookup.assert_called_once_with()
+    writer_lookup.assert_not_called()
+    review_note_resources.assert_quiet()
 
 
-def test_save_review_note_feed_key_skips_zotero_mirror(monkeypatch):
+def test_save_review_note_feed_key_skips_zotero_mirror(monkeypatch, review_note_resources):
     def _boom(*_a):
         raise AssertionError("feed key has no Zotero item — must not mirror")
 
-    saves = _patch_note_basics(monkeypatch, mirror_fn=_boom)
+    monkeypatch.setattr(zotero, "get_zotero_reader_or_raise", _boom)
+    monkeypatch.setattr(zotero, "get_zotero_writer_or_raise", _boom)
+    saves = _patch_note_basics(monkeypatch)
     out = asyncio.run(
         golden_routes.save_review_note(
             golden_routes.ReviewNoteRequest(item_key="feed:123", note="jot")
         )
     )
-    assert out == {"saved": True, "note_written": False, "note_error": None}
+    revision = repositories.sync_current_fields(golden_routes._db_path())[("feed:123", "review_note")]["revision"]
+    assert out == {"saved": True, "note_written": False, "note_error": "target_unavailable",
+                   "note_pending": True, "projection_revision": revision, "target_key": None}
+    with sqlite3.connect(golden_routes._db_path()) as conn:
+        assert review_note_projection.snapshot(conn, "feed:123")["pending"] is True
     assert saves == [
         ("feed:123", "jot")
     ]  # still saved locally, mirror correctly skipped
+    review_note_resources.assert_quiet()
 
 
-def test_save_review_note_blank_item_key_is_422(monkeypatch):
-    saves = _patch_note_basics(monkeypatch, mirror_fn=lambda *_a: None)
+def test_save_review_note_blank_item_key_is_422(monkeypatch, review_note_resources):
+    saves = _patch_note_basics(monkeypatch)
     try:
         asyncio.run(
             golden_routes.save_review_note(
@@ -407,6 +444,7 @@ def test_save_review_note_blank_item_key_is_422(monkeypatch):
     except APIError as exc:
         assert exc.status_code == 422
     assert saves == []  # never reached the storage layer
+    review_note_resources.assert_quiet()
 
 
 # --------------------------------------------------------------------------- #

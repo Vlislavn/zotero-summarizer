@@ -331,3 +331,5 @@ Original native-preview client source is retained: displayed approval hashes, ex
 The native editor imports also retain their original shared server-availability hook and offline/sync plumbing; question-facing UI follows separately. These are existing source dependencies, not a new offline design.
 
 Original question/note UI source is retained: immutable submission identity, separate manual notes and source question list, existing outbox replay and signature-bound delivery state. Shared paper/rail assemblies keep the original callbacks; unrelated Related/orthogonal reading changes are not mixed into this slice. No new interaction is designed.
+
+Retain original question-native source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.

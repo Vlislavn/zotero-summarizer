@@ -10,11 +10,13 @@ from zotero_summarizer.integrations.zotero_write import ZoteroWriter
 from zotero_summarizer.services.library import review_eligibility, review_materialize
 from zotero_summarizer.services.triage.feeds import _daily_materialize as dm
 from zotero_summarizer.storage import feeds, repositories
+from zotero_summarizer.storage.migrations import TRIAGE_MIGRATIONS, run_migrations
 
 
 @pytest.fixture
 def stores(tmp_path, monkeypatch):
     triage = tmp_path / "triage.db"
+    run_migrations(triage, "triage", TRIAGE_MIGRATIONS)
     zotero = build_zotero_db(tmp_path / "zotero")
     settings = SimpleNamespace(triage_db_path=triage, zotero_data_dir=zotero.parent)
     monkeypatch.setattr(review_materialize, "get_settings", lambda: settings)

@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Retain original question-native source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+
 - Retain original question submission, separate manual-note/delivery UI, outbox clients and shared paper assemblies with unchanged tests.
 
 - Retain original question submission/read/Q&A receipts and sync API wiring; existing native and data parts supply delivery and persistence.
