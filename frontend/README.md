@@ -258,8 +258,9 @@ supported authenticated HTTPS deployment rather than exposing `/api/sync` direct
 Sequence allocation, mutation insert, optimistic paper state, and cached-detail
 update share one IndexedDB transaction; each full pull replaces the compact
 paper snapshot while retaining local papers with unresolved mutations, and
-refreshes cached review details. A 15-second sync deadline releases a stuck focus sync,
-and protocol incompatibility explicitly asks for an app refresh. The IndexedDB
+refreshes cached review details. The configured sync deadline cancels outstanding
+network work; it does not bound browser-storage operations. Protocol incompatibility
+explicitly asks for an app refresh. The IndexedDB
 test kills/reimports the client module and proves cached context
 plus ordered concurrent mutations survive while the server is absent. Ask Paper sends a
 bounded session history; the backend compacts older evidence to verified
@@ -272,7 +273,8 @@ bodies. Input bounds are checked before optimistic saves. Invalid legacy drafts
 are retained as rejected, with copyable text and paper links in the navigation
 status, while valid rows continue. Unknown acknowledgement IDs/status/revisions
 cannot retire pending rows; HTTP rejections are distinct from connection failure.
-The 15-second deadline still bounds one sync attempt, not all future attempts.
+Each sync round has its own network deadline; future rounds get a new budget.
+Device transaction completion remains a separate prerequisite.
 
 Targeted Search polls one session at a time; transient poll errors keep the last
 session visible and retry, while terminal status and unmount stop further polls.
