@@ -20,9 +20,13 @@ embedded in this document.
   known attempt's telemetry. `NativeDecisionAdapter(arm, cfg, transport=None)` is
   serial caller-owned HTTP, with `adapter(request_bytes, retain, timeout=None)`.
   The required retain callback must return before strict native parsing; callback
-  failure propagates. The runner reserves the complete workload before any call.
+  failure propagates. Both public native entrypoints require consent/guard and next-call
+  reservation; one adapter instance bounds cumulative calls/work. Whole-workload
+  reservation belongs to the runner, not a process-global counter. Off-host HTTP is
+  refused; HTTPS and explicit loopback HTTP are supported.
 - `evaluate_support(case, arm, cfg, retain, recorded=None, transport=None,
   timeout=None)`: actual native/recorded I/O and projection, not semantic grading.
+  Supplying a recording requires an unblocked recorded-kind arm.
 - `SupportResult`: frozen validated per-pair/per-arm terminal projection. Gold is
   added by the runner after generator projection; a semantic decision requires its
   native readout or original binary artifact row. Unscored outcomes have no binary
@@ -46,7 +50,9 @@ original text, criterion and excerpt plus literal character bounds, hashed as ca
 JSON. This is independent of exact UTF-8 source/excerpt hashes. Gold is never matched
 by row position or derived from an arm's verdict. Canonical source aliases must share
 family; whole families/canonical sources cannot cross splits. Human provenance is
-caller-declared, not authenticated by a nonempty string.
+caller-declared, not authenticated by a nonempty string. Non-null provenance is required
+for paired estimates/noninferiority eligibility, not for descriptive per-arm metrics.
+All candidate holdout pairs remain in the matched-coverage denominator.
 
 ## Binary artifacts
 
@@ -62,6 +68,9 @@ scalar unclassified, with descriptive binary Brier available where gold is prese
 MiniCheck, cache, training, golden CSV or label writer is constructed or invoked.
 
 ## Artifact identity
+
+`max_input_bytes` is a shared aggregate cap across frozen inputs, baseline artifacts
+and recordings, enforced before owner creation and on replay admission.
 
 Raw original/effective configuration, frozen inputs (including full original sources),
 imported baseline bytes, recorded bytes and bounded native terminal bytes remain

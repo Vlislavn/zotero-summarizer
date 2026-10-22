@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Enforce support-comparison consent/work admission on public native calls, reject blocked/wrong-mode recordings and off-host plaintext HTTP, share the frozen-input byte cap, and exclude unprovenanced labels from paired inference. Keep descriptive labels and full coverage denominators.
 - Reconstruct terminal-free replay from admission and remaining-budget observations; bind terminal references to row owners, close transport states and reject false blocked coverage. Preserve real wall/missing/blocked outcomes and unsigned-telemetry limits.
 - Bind recorded support replay to its exact admitted case/arm recording and received state before deriving readouts. Self-consistent copied-terminal/report/hash replacement cannot substitute unchanged inputs; retain raw bytes and unsigned-artifact limits.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.

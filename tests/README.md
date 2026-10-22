@@ -13,6 +13,12 @@ blocked/missing/wall/malformed-neighbor states and coverage denominators.
 Reopening must reject this input-to-output substitution, independently of unsigned
 artifact authenticity. Existing recorded/native/error/reopen controls remain.
 
+## Public support boundary regressions
+
+`test_support_boundaries.py` covers direct native consent/guard/work admission, blocked
+and wrong-kind recorded calls, remote TLS versus loopback HTTP, aggregate frozen-input
+bytes, and 0/60/80 provenance-qualified paired cohorts without shrinking coverage.
+
 ## Offline support comparison (#37)
 
 Parent-controlled focused selector (existing pytest installation, no dependency sync):

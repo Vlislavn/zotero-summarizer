@@ -6,7 +6,7 @@ from math import ceil
 from random import Random
 from statistics import mean, median
 
-from .support import SUPPORT_OPTIONS
+from .support import SUPPORT_OPTIONS, digest, gold_identity
 
 
 def divide(n, d):
@@ -115,14 +115,21 @@ def report(rows, cfg, bundle):
              for a in (*cfg.arms, *cfg.baselines)}
     for arm in (*cfg.arms, *cfg.baselines):
         stats[arm.arm_id]['configuration'] = arm.model_dump(mode='json')
-    pairs = {a.arm_id: paired(holdout, a.arm_id, cfg.reference, cfg) for a in cfg.arms}
+    human_gold = {g.identity for g in bundle.gold if g.human_provenance is not None}
+    sources = {s.paper_key: s.text for s in bundle.sources}
+    human_cases = {digest(c.model_dump()) for c in bundle.cases
+                   if gold_identity(c, sources[c.paper_key]) in human_gold}
+    paired_rows = [r if r['case_sha256'] in human_cases else {**r, 'gold': None} for r in holdout]
+    pairs = {a.arm_id: paired(paired_rows, a.arm_id, cfg.reference, cfg) for a in cfg.arms}
     reasons = ['No live-baseline or human holdout/resource qualification study is established.',
                'Cold latency, server peak memory, cost and physical passes/retries are unmeasured.']
     if bundle.synthetic or any(g.human_provenance is None for g in bundle.gold):
         reasons.append('Synthetic or missing human provenance cannot establish a winner.')
     holdout_cases = {r['case_sha256'] for r in holdout if r['gold'] is not None}
     families = {r['family'] for r in holdout if r['gold'] is not None}
-    if len(holdout_cases) < cfg.min_pairs or len(families) < cfg.min_papers:
+    human_holdout = holdout_cases & human_cases
+    human_families = {r['family'] for r in holdout if r['case_sha256'] in human_holdout}
+    if len(human_holdout) < cfg.min_pairs or len(human_families) < cfg.min_papers:
         reasons.append('Below predeclared human-pair/independent-paper floors.')
     gates = {}
     for arm_id, values in stats.items():
@@ -145,6 +152,7 @@ def report(rows, cfg, bundle):
     return {'conclusion': 'no-go' if failed else 'inconclusive', 'action': 'retain_baseline',
             'winner': None, 'reasons': reasons, 'reference': cfg.reference,
             'holdout_labelled_pairs': len(holdout_cases), 'paper_families': len(families),
+            'holdout_human_labelled_pairs': len(human_holdout), 'human_paper_families': len(human_families),
             'arms': stats, 'paired': pairs, 'gates': gates,
             'limitations': 'Offline wiring/comparison, not semantic quality validation or promotion.'}
 
