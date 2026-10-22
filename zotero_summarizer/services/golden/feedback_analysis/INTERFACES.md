@@ -1,7 +1,11 @@
-# Feedback analytic result — version 1
+# Feedback downstream contract — version 1 (reference only in part 1)
 
-Frozen consumer contract for this stage. The existing `freeze_inputs` and
-`verify_inputs` version-1 signatures/content identity remain unchanged.
+This primitive-only checkout implements `freeze_inputs` and `verify_inputs`, plus
+supporting metrics/report helpers. Their version-1 input identity is unchanged.
+Everything below specifies dependent stack parts: `analyze_inputs`, manual and
+weekly dispatchers, workers, CLI and scheduling are **not implemented or runnable
+here**. The future contracts and historical decisions are retained as reference,
+not claims of current functionality, test coverage or issue #47 acceptance.
 
 ```
 verified retained SQLite + CSV + JSONL
@@ -14,6 +18,21 @@ verified retained SQLite + CSV + JSONL
                   |
  analyze_inputs -> local dictionary (no publication or live writes)
 ```
+
+## Current checkout — part 2 implementation status
+
+The opening **reference-only-in-part-1** notice describes prerequisite #162.
+On this part-2 head, the input/history/analysis/metrics and report-library contracts
+are implemented; manual/weekly operation, worker, CLI and scheduling contracts
+remain reference-only and unavailable. `analyze_inputs` returns a dictionary,
+not an integrated operation or issue #47 acceptance.
+
+CSV physical byte lines are consumed lazily before record-budget expansion;
+there is no whole-file line/offset list. SQL item/alias identities must be nonblank
+text and journal `source` is required; incompatible rows/schemas fail admission.
+Aware offsets outside UTC's representable datetime range remain located
+invalid/unknown times. The other frozen envelope, CSV-isolation and provenance
+limits below are unchanged. Reference and implementation status are separate.
 
 ## Entry and failures
 
@@ -71,6 +90,14 @@ readers/setters, not a shared API/daemon CSV thread. This patch does not impleme
 or prove that isolation. No broader reader/scheduler/CLI changes are authorized.
 Verbatim P2 approval and race clarification are retained in
 `data/issue-validation/feedback-analysis/p2/parent-decision.txt`.
+
+## Current checkout — part 3 manual operation
+
+The part-1 and part-2 implementation notices above are prerequisite #162/#163
+references. This head also provides the manual `goldenset analyze-feedback`
+command and its dedicated worker/publication dispatcher. Weekly scheduler
+activation remains a later-stack contract; no overall #47 completion is claimed.
+The input/analysis/report contracts and all prerequisite boundary fixes remain.
 
 ## Exact envelope
 

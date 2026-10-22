@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import io
 import json
+import re
 import sqlite3
 import time
 from collections import defaultdict
 from contextlib import closing, contextmanager
 from datetime import datetime, timezone
+from itertools import chain
 from threading import Lock
 
 from zotero_summarizer.domain import normalize_arxiv_id, normalize_doi
@@ -24,7 +25,7 @@ TABLE_COLUMNS = {
     "triage_results": {"id", "item_id", "reading_priority", "response_json", "created_at"},
     "user_feedback": {"id", "item_id", "signal", "original_priority", "created_at"},
     "label_verdicts": {"id", "item_key", "user_priority", "original_derived_priority", "comment", "source", "created_at"},
-    "sync_changes": {"revision", "item_key", "field", "value", "changed_at"},
+    "sync_changes": {"revision", "item_key", "field", "value", "changed_at", "source"},
     "review_notes": {"item_key", "note", "updated_at"},
     "processed_feed_items": {"id", "feed_item_id", "stable_feed_key", "materialized_zotero_key", "created_at"},
     "feed_key_aliases": {"old_key", "stable_feed_key"},
@@ -47,6 +48,7 @@ def time_fields(value):
             return None, "invalid_time"
         if naive.tzinfo is None:
             return None, "naive_origin_unproven"
+        return None, "invalid_time"
     return None, "missing_time"
 
 
@@ -72,6 +74,9 @@ def gap(state, reason, locator=None):
 
 
 def _record(state, channel, data, locator, guard):
+    for field in ("item_key", "item_id", "old_key"):
+        if field in data and (not isinstance(data[field], str) or not data[field].strip()):
+            raise ValueError(f"invalid retained {field}: {channel}")
     guard.record(data)
     state["records"].append({"channel": channel, "data": data, "locator": locator})
 
@@ -203,32 +208,44 @@ def _next_csv_row(reader, ceiling):
         _check_csv_limit(ceiling)
 
 
+def _csv_lines(raw, guard, position):
+    ends = (match.end() for match in re.finditer(rb"\r\n|\r|\n", raw))
+    for end in chain(ends, (len(raw),)):
+        start = position["byte_end"]
+        if start == end:
+            continue
+        line = raw[start:end]
+        guard.line(line)
+        position["line"] += 1
+        position["byte_end"] = end
+        yield line
+
+
 def _read_csv(path, source, guard, state):
     raw = path.read_bytes()
     guard.decoded(raw)
-    lines = raw.splitlines(keepends=True)
-    for line in lines:
-        guard.line(line)
     try:
-        text = raw.decode("utf-8")
+        raw.decode("utf-8")
     except UnicodeDecodeError:
+        position = {"line": 0, "byte_end": 0}
+        for _line in _csv_lines(raw, guard, position):
+            guard.check()
         guard.record(raw)
         source["malformed"] += 1
-        gap(state, "malformed_csv_encoding", {"path": source["path"], "line": 1, "line_end": len(lines)})
+        gap(state, "malformed_csv_encoding", {"path": source["path"], "line": 1, "line_end": position["line"]})
         return
     # UTF-8 field characters cannot outnumber the already budget-checked raw bytes.
     ceiling = guard.budgets.max_decoded_bytes
     with _csv_field_limit(ceiling, guard):
-        reader = csv.reader(io.StringIO(text, newline=""), strict=True)
-        _csv_rows(reader, raw, lines, source, guard, state)
+        _csv_rows(raw, source, guard, state)
 
 
-def _csv_rows(reader, raw, lines, source, guard, state):
+def _csv_rows(raw, source, guard, state):
     ceiling = guard.budgets.max_decoded_bytes
-    offsets = [0]
-    for line in lines:
-        offsets.append(offsets[-1] + len(line))
-    previous = 0
+    position = {"line": 0, "byte_end": 0}
+    lines = _csv_lines(raw, guard, position)
+    reader = csv.reader((line.decode("utf-8") for line in lines), strict=True)
+    previous = previous_byte = 0
     fields = None
     while True:
         try:
@@ -236,18 +253,21 @@ def _csv_rows(reader, raw, lines, source, guard, state):
         except StopIteration:
             break
         except csv.Error:
+            for _line in lines:
+                guard.check()
             source["records"] += 1
             source["malformed"] += 1
             gap(state, "malformed_csv_record", {"path": source["path"], "line": previous + 1,
-                                               "line_end": len(lines), "byte_start": offsets[previous],
+                                               "line_end": position["line"], "byte_start": previous_byte,
                                                "byte_end": len(raw)})
-            guard.record(raw[offsets[previous]:])
+            guard.record(raw[previous_byte:])
             break
         guard.csv_fields(row)
         end = reader.line_num
         locator = {"path": source["path"], "line": previous + 1, "line_end": end,
-                   "byte_start": offsets[previous], "byte_end": offsets[end]}
+                   "byte_start": previous_byte, "byte_end": position["byte_end"]}
         previous = end
+        previous_byte = position["byte_end"]
         guard.record(row)
         if fields is None:
             fields = row

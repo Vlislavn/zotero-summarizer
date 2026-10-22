@@ -123,8 +123,11 @@ CSV predictions, benchmark reports or run logs are written, including when earli
 rows succeeded. Successful summaries use `rows_skipped` (missing title/abstract),
 not the former `rows_failed`; provider failures are no longer successful summaries.
 
-`main()` installs the selected project's Settings before dispatch, so nested
-provider construction uses the same timeout and model/tuning paths as the command.
+`main()` installs the selected project's Settings and pins its resolved root in
+handler arguments before dispatch. A `.env` value for `ZOTERO_SUMMARIZER_HOME`
+cannot redirect a later handler reload; `serve` passes that same root to its
+factory/reload workers through the environment. Nested provider construction
+uses the same timeout and model/tuning paths as the command.
 Default model/history outputs are `data/models/`; tuning uses
 `data/optuna-best-params.json`. Training publishes `<classifier>.zip` with model
 and metadata together; run logs report the resolved artifact path (legacy joblib
@@ -162,4 +165,4 @@ these traces; stage counts are instrumentation, not review-success scores.
 
 Diagnostic CLI source reads reuse the single-component/no-symlink paper-state guard. Admission happens before provider construction. Legacy full_text is explicitly labelled unverified legacy scope; empty sources retain local failure diagnostics. Diagnostic calls disable thinking without changing app routing.
 
-Feedback review stack part 3: Feedback: existing manual report command and publication. See `zotero_summarizer/services/golden/feedback_analysis/README.md`; later parts supply the remaining existing workflow.
+Feedback review stack part 3: `goldenset analyze-feedback` publishes a local report through the clean child. Admitted-root pinning from #159 remains intact; see `services/golden/feedback_analysis/README.md`.
