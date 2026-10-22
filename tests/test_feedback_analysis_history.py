@@ -240,6 +240,30 @@ def test_real_csv_comment_field_and_recorded_snapshot_categories_are_retained(tm
     assert result["periods"]["all_time"]["outcomes"]["counts"] == {}
 
 
+@pytest.mark.parametrize("key", ["", " \t", None, b"not-text"])
+def test_sql_feedback_without_text_identity_is_rejected(tmp_path, key):
+    settings = project(tmp_path)
+    sql(settings, "DROP TABLE user_feedback")
+    sql(settings, "CREATE TABLE user_feedback(id INTEGER PRIMARY KEY, item_id TEXT, signal TEXT, "
+        "original_priority TEXT, created_at TEXT)")
+    sql(settings, "INSERT INTO user_feedback VALUES (1,?,'explicit_approve','must_read',"
+        "'2026-10-07T00:00:00Z')", (key,))
+
+    with pytest.raises(ValueError, match="invalid retained item_id"):
+        analyze(settings)
+
+
+def test_journal_without_source_column_is_incompatible_not_empty_success(tmp_path):
+    settings = project(tmp_path)
+    sql(settings, "DROP TABLE sync_changes")
+    sql(settings, "CREATE TABLE sync_changes(revision INTEGER PRIMARY KEY, item_key TEXT, "
+        "field TEXT, value TEXT, changed_at TEXT)")
+    sql(settings, "INSERT INTO sync_changes VALUES (1,'A','verdict','must_read','2026-10-07T00:00:00Z')")
+
+    with pytest.raises(ValueError, match="incompatible.*sync_changes"):
+        analyze(settings)
+
+
 def test_optional_incompatible_table_is_error_not_empty_success(tmp_path):
     settings = project(tmp_path)
     sql(settings, "DROP TABLE feed_key_aliases")

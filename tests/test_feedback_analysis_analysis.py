@@ -100,6 +100,43 @@ def test_work_and_output_bounds_do_not_mutate_bundle(tmp_path, bound):
     assert before == {p: p.read_bytes() for p in target.rglob("*") if p.is_file()}
 
 
+@pytest.mark.parametrize("when", ["9999-12-31T23:59:59-23:59", "0001-01-01T00:00:00+23:59"])
+def test_unrepresentable_utc_event_times_remain_located_unknowns(tmp_path, when):
+    settings = project(tmp_path)
+    log(settings, [event("overflow", when), event("valid")])
+
+    result = analyze(settings)
+
+    invalid = next(e for e in result["events"] if e["item_key"] == "overflow")
+    assert invalid["recorded_time"] == when
+    assert invalid["time"] is None
+    assert invalid["time_basis"] == "invalid_time"
+    assert invalid["eligibility"] == "unknown_time"
+    assert invalid["locator"]["line"] == 1
+    assert result["periods"]["all_time"]["interaction_log"]["unique_papers"] == 1
+    with pytest.raises(ValueError, match="split_at"):
+        AnalysisBudgets(split_at=when)
+
+
+def test_csv_record_budget_precedes_line_index_expansion(tmp_path, monkeypatch):
+    from zotero_summarizer.services.golden.feedback_analysis.analysis import _Guard
+
+    settings = project(tmp_path)
+    settings.golden_csv_path.write_bytes(b"item_key\n" + b"\n" * 20000)
+    target = bundle(settings)
+    checked = []
+    original = _Guard.line
+
+    def check_line(guard, raw):
+        checked.append(len(raw))
+        return original(guard, raw)
+
+    monkeypatch.setattr(_Guard, "line", check_line)
+    with pytest.raises(BudgetExceeded, match="record budget"):
+        analyze_inputs(target, budgets={"max_records": 1})
+    assert len(checked) <= 2
+
+
 def test_wire_identity_signature_and_no_model_identity_invention(tmp_path):
     settings = project(tmp_path)
     log(settings, [event("A", gate_sha="current-event-gate")])

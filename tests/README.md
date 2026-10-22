@@ -12,4 +12,6 @@ Existing Faithbench exports retain exact defining object identity.
 
 Part 1 retains the corresponding original Feedback suites without assertion changes.
 
-Part 2 retains the corresponding original Feedback suites without assertion changes.
+Part 2 retains the original Feedback assertions and adds review regressions for
+incremental CSV work bounds, UTC-conversion overflow, missing journal provenance,
+and nonblank SQL paper identities.

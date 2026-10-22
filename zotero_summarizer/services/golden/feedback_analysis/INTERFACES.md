@@ -51,7 +51,9 @@ cannot outnumber those bytes. The finite stdlib parser ceiling is therefore
 `max_decoded_bytes`, independent of entry ambient `csv.field_size_limit`. Each
 parsed header/row field is also checked against `max_csv_field_chars`; a smaller
 cap raises `BudgetExceeded`, never a malformed-record success that drops a valid
-tail. `config` records `csv_parser_ceiling_chars` and `csv_effective_field_chars`
+tail. Physical byte-line boundaries are consumed lazily; no whole-file line or
+offset list is allocated before the record budget applies. `config` records
+`csv_parser_ceiling_chars` and `csv_effective_field_chars`
 (the minimum of the two declared caps). Genuine strict quote damage still yields
 the original malformed remainder line/byte locator, without resynchronization.
 
@@ -123,7 +125,10 @@ categories, feed name or an unconfirmed overlap group.
   records and strict quoting. Missing/invalid headers and torn rows are located;
   a quote failure marks the unreadable remaining record, not invented resynchronization.
 - Optional SQL tables are checked once at the boundary. Absence is unavailable;
-  incompatible present columns raise. No migration/backfill/writable store opener.
+  incompatible present columns raise. Journal `source` is required. SQL item/alias
+  identity columns must contain nonblank text, otherwise admission raises rather
+  than inventing a paper or silently dropping its evidence. No migration/backfill/
+  writable store opener.
 - `snapshot_profiles` counts unique paper/category pairs from **recorded structured
   tags**, labels, feed names and final outcomes. They describe the retained current
   snapshot, including potentially post-cutoff state, not historical topic/source
@@ -173,6 +178,8 @@ A missing action/review failure is not a negative label.
 
 Only aware recorded timestamps enter `[cutoff-window, cutoff]`, including exact
 7/30-day boundaries. Naive/missing/invalid/date-only fields remain unknown.
+Offsets whose UTC conversion falls outside the representable datetime range are
+invalid/unknown too; their raw values and observation locators remain inspectable.
 Even SQLite UTC defaults/triggers do not prove the individual timestamp's origin;
 this stage conservatively excludes **all** naive/backfilled timestamps from
 cutoff claims. No host timezone, browser/navigation/device clock is inferred.
@@ -286,7 +293,7 @@ permission. Identity is private cooperating-namespace observation, not hostile-u
 or inode-reuse authentication. Frozen analytic/input contracts are unchanged.
 Parent loss/SIGKILL/power-loss may leave only partial attempt
 evidence. Unsupported publication platforms fail rather than overwrite. See
-[README](README.md#manual-operation-additive-frozen-analytic-boundary-above-is-unchanged)
+[README](README.md#manual-operation-later-stack-part-unavailable-on-this-head)
 for named caps, environment precedence, signal and safety measurement scope.
 
 ## Additive weekly sidecars — version 1

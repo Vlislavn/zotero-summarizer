@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Bound retained CSV line indexing incrementally; reject missing journal source and invalid SQL paper keys; retain unrepresentable UTC timestamps as unknown. Clarify later-stack CLI/weekly docs.
+
 - Package existing retained history and descriptive analysis from the working changes for dependent review; no behavior redesign.
 
 - Package existing retained input capture and report primitives from the working changes for dependent review; no behavior redesign.

@@ -1,8 +1,9 @@
 # Review stack part 2/4
 
-Existing implementation, mechanically packaged for review. No new feature or issue closure.
+Retained capture and descriptive analysis, with focused review corrections. No new command or issue closure.
 Merge the dependent parts in order; this part is `Feedback: retained history and descriptive analysis`.
-Known original limitations are not repaired by this packaging.
+This head exports the Python library boundary only. The manual/weekly sections below describe later
+stack parts, not commands or dispatchers available here.
 
 # feedback_analysis — frozen inputs and local descriptive evidence
 
@@ -105,6 +106,13 @@ manifest; no live source locator is opened. Replay needs no original stores.
 Marker-only ambiguity candidates and SQL proof remain inspectable without unioning
 alternatives or trusting a stale alias. Invalid marker JSON/type fails at admission.
 
+CSV physical lines and byte positions are consumed lazily, so the record budget stops
+short-row inputs before building a whole-file line/offset index. Invalid UTF-8 and
+strict quote failures retain their located remainder behavior. SQL observation/alias
+keys must be nonblank text; a present journal without `source` is incompatible,
+not a successful empty history. Aware timestamps outside UTC's representable range
+remain located invalid-time observations rather than aborting analysis.
+
 CSV uses a finite parser ceiling derived from the prechecked decoded-byte budget,
 with an explicit `max_csv_field_chars` cap (default/hard cap 64 Mi codepoints) on
 header/row fields. A lower cap raises `BudgetExceeded`; genuine damaged quoting
@@ -119,8 +127,9 @@ restore are unsupported/unverifiable, not a complete no-clobber guarantee.
 
 **Downstream acceptance requires manual CLI/weekly analytics in a dedicated,
 externally bounded analysis process with no unrelated CSV readers/setters, NOT a
-shared API/daemon CSV thread.** The manual/weekly dispatcher below supplies that
-clean-child isolation; callers must not bypass it.
+shared API/daemon CSV thread.** The later manual/weekly dispatcher described below
+supplies that clean-child isolation; it is not implemented on this part-2 head.
+A direct library caller must own its dedicated process and external safety cap.
 See [INTERFACES.md](INTERFACES.md) and the verbatim approval/race clarification in
 `data/issue-validation/feedback-analysis/p2/parent-decision.txt`.
 
@@ -163,7 +172,10 @@ Further subtraction: no parsing framework, inferred model identity, live-store
 alignment lock, scored training evaluation, export knobs or UI. Weekly automation
 below reuses the operation boundary without changing these frozen analytics.
 
-## Manual operation (additive; frozen analytic boundary above is unchanged)
+## Manual operation (later stack part; unavailable on this head)
+
+The following contract is retained for the dependent operation PR. Do not run these
+commands against this library-only head.
 
 ```
 goldenset analyze-feedback --project-root ROOT [--cutoff AWARE_ISO]
@@ -263,7 +275,9 @@ Chronological eligibility and null ranking remain unscored. Weekly confirmation
 and cursor behavior are documented below; daemon training provenance is described
 in `services/model`. First private run, scored usefulness and overall #47 remain open.
 
-## Weekly operation (additive; manual and analytic contracts unchanged)
+## Weekly operation (later stack part; unavailable on this head)
+
+The following contract requires the later manual-operation and scheduler implementations.
 
 ```
 feeds serve -- selected Settings / explicit main-thread capability
