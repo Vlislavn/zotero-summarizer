@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from zotero_summarizer.services.library._digest_audit import (
-    CONTRACT, canonical_hash, contract_hashes, payload_hash, retained_claims,
+    CONTRACT, canonical_hash, contract_hashes, digest_contract_payload, payload_hash, retained_claims,
 )
 
 
@@ -139,7 +139,7 @@ def _validate_audit(entry: dict, audit: dict) -> None:
     verified = PaperDigest.model_validate(audit['verified_digest'])
     final = PaperDigest.model_validate(entry['digest'])
     if (canonical_hash(verified.model_dump(mode='json')) != canonical_hash(audit['verified_digest'])
-        or canonical_hash(final.model_dump(mode='json')) != canonical_hash(entry['digest'])):
+        or canonical_hash(final.model_dump(mode='json')) != canonical_hash(digest_contract_payload(entry['digest']))):
         raise ValueError('Invalid retained digest schema')
     if canonical_hash(audit['verified_digest']) != audit['identity']['verified_digest_sha256']:
         raise ValueError('Invalid verified digest identity')
@@ -150,14 +150,15 @@ def _validate_audit(entry: dict, audit: dict) -> None:
         raise ValueError('Unrecorded human adjudication')
     _source_locations(audit['source'])
     _validate_claims(audit, verified, entry['digest'])
-    changed = sorted(key for key in audit['verified_digest'].keys() | entry['digest'].keys()
-                     if audit['verified_digest'].get(key) != entry['digest'].get(key))
+    final_fields = digest_contract_payload(entry['digest'])
+    changed = sorted(key for key in audit['verified_digest'].keys() | final_fields.keys()
+                     if audit['verified_digest'].get(key) != final_fields.get(key))
     if audit['post_verification_changes'] != changed:
         raise ValueError('Invalid post-verification lineage')
     _validate_lineage(audit)
 
 
-def retained_audit_status(entry: dict) -> tuple[str, str]:
+def retained_audit_status(entry: dict, *, current_identity: dict | None = None) -> tuple[str, str]:
     if entry.get('digest') is not None and not isinstance(entry['digest'], dict):
         raise ValueError('Invalid cached digest')
     audit = entry.get('verification_audit')
@@ -169,7 +170,7 @@ def retained_audit_status(entry: dict) -> tuple[str, str]:
         _audit_shape(audit)
         identity = audit['identity']
         intact = payload_hash(audit) == identity['audit_sha256']
-        bound = canonical_hash(entry['digest']) == identity['cached_digest_sha256']
+        bound = canonical_hash(digest_contract_payload(entry['digest'])) == identity['cached_digest_sha256']
         bound = bound and canonical_hash(entry.get('review_identity')) == identity['review_identity_sha256']
         if not intact or not bound:
             return 'stale', 'cached_artifact_changed'
@@ -190,11 +191,13 @@ def retained_audit_status(entry: dict) -> tuple[str, str]:
             or identity['review_source_sha256'] != review['source_sha256']
             or identity['review_generation_sha256'] != review['generation_sha256']):
             raise ValueError('Invalid review-source binding')
-        path = _allowed_paper_path(review['source_path'])
-        if not path.is_file():
-            return 'unavailable', 'source_unavailable'
-        now = build_review_identity(config=state().app_state.config, pdf_path=str(path),
-                                    source_kind=review['source_kind'], focus_prompt=review['focus_prompt'])
+        now = current_identity
+        if now is None:
+            path = _allowed_paper_path(review['source_path'])
+            if not path.is_file():
+                return 'unavailable', 'source_unavailable'
+            now = build_review_identity(config=state().app_state.config, pdf_path=str(path),
+                                        source_kind=review['source_kind'], focus_prompt=review['focus_prompt'])
         if now['source_sha256'] != review['source_sha256']:
             return 'stale', 'source_bytes_changed'
         if now['generation_sha256'] != review['generation_sha256']:

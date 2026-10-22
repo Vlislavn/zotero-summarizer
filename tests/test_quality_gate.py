@@ -101,7 +101,7 @@ def test_review_callers_preserve_labels_until_explicit_triage_gate(monkeypatch, 
     monkeypatch.setattr(fleet, "_STATE", dict(fleet._STATE))
     monkeypatch.setattr(fleet._flight, "run_in_background", lambda fn: fn())
     monkeypatch.setattr(_review_identity, "current_review_identity", lambda key, stored: stored)
-    monkeypatch.setattr(_digest_audit_export, "retained_audit_status", lambda entry: ("available", ""))
+    monkeypatch.setattr(_digest_audit_export, "retained_audit_status", lambda entry, **kwargs: ("available", ""))
 
     assert deep_review.get_cached_review("REVIEWED") is None
     if caller == "fleet":

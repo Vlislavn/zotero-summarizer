@@ -20,6 +20,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Keep unchanged linked-attachment reviews current outside export roots; reuse their existing source identity instead of hashing PDFs twice. Export remains path-restricted.
+- Reject malformed legacy digest exports without repairing saved bytes. Preserve optional digest-subtype metadata while excluding it from cached audit hashes and verified field changes.
 - Give PDF-override fixtures explicit full-text independent quality evidence. Preserve original injected/attachment path, grade and read-decision assertions under the shared reading policy.
 - Hash attempt lineage and retained evidence through one declared PaperDigest field projection. Extra subtype metadata remains outside verification authority; preserve original models and add generic subtype regressions.
 - Never invoke native readers during audit export: read-only SQLite can write WAL sidecars. Separate validated retained-source evidence from unknown current-item binding; preserve ordinary cache identity checks. Reuse streaming hashes compatible with Python 3.10.

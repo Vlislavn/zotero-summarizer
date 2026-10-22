@@ -5,6 +5,9 @@ review cache, including exact original fragments, actual selected extent and
 correction/fallback lineage. Attempt and retained hashes use the same declared
 `PaperDigest` fields; extra subtype metadata stays outside verifier authority.
 Projection does not mutate the original model or certify optional enrichment.
+Cached subtype metadata remains visible in the exact exported digest, but outside
+receipt hashes and post-verification field changes. Legacy exports validate digest
+schemas without filling in or rewriting saved fields.
 `_digest_audit` assembles/binds receipts;
 `_digest_audit_export` qualifies them without extraction or model calls;
 `_review_cache.export_review_audit(item_key)` supplies the real local HTTP export.
@@ -12,8 +15,9 @@ Export opens no native database and invokes no reader, including initialized
 readers: read-only SQLite can still write WAL shared-memory sidecars. Library
 current-item binding stays unavailable; validated `retained_evidence` exposes the
 complete receipt with `retained_source_only`/`not_established` labels. Overrides
-retain their source-specific contract. Ordinary current-cache reuse still checks
-attachments through its existing owner without generating another review.
+retain their source-specific contract. Ordinary current-cache reuse checks
+attachments through its existing owner and passes that identity to receipt
+qualification, avoiding a second PDF hash or export-only path restrictions.
 Retained source hashing reuses the existing streaming `file_identity` helper,
 including on Python 3.10 without `hashlib.file_digest`.
 Legacy/current/stale/error distinctions and private-output curl usage are in

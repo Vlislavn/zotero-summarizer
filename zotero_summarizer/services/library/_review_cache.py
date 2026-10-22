@@ -90,6 +90,7 @@ def get_cached_review(item_key: str) -> dict[str, Any] | None:
 def export_review_audit(item_key: str) -> dict[str, Any]:
     """Exact-key, read-only export: no policy projection, acquisition or cache repair."""
     import re
+    from zotero_summarizer.models import PaperDigest
     from zotero_summarizer.services.library._digest_audit_export import retained_audit_status
 
     if not re.fullmatch(r'(?:[A-Za-z0-9]{8}|feed:[gdal]:[a-f0-9]{64})', item_key):
@@ -100,6 +101,8 @@ def export_review_audit(item_key: str) -> dict[str, Any]:
             raise APIError('not_found', 'No cached review for this item', 404)
         if not isinstance(entry, dict):
             raise ValueError('Invalid review entry')
+        if entry.get('digest') is not None:
+            PaperDigest.model_validate(entry['digest'])
         status, reason = retained_audit_status(entry)
     except ValueError as exc:
         raise APIError('audit_invalid', 'Cached verification evidence is malformed', 422) from exc
@@ -125,9 +128,12 @@ def review_is_current(entry: dict[str, Any] | None, item_key: str = "") -> bool:
     try:
         from zotero_summarizer.services.library._review_identity import current_review_identity
         from zotero_summarizer.services.library._digest_audit_export import retained_audit_status
-        if entry.get('verification_audit') is not None and retained_audit_status(entry)[0] != 'available':
+        current = current_review_identity(item_key, stored)
+        if current != stored:
             return False
-        return current_review_identity(item_key, stored) == stored
+        if entry.get('verification_audit') is not None:
+            return retained_audit_status(entry, current_identity=current)[0] == 'available'
+        return True
     except (APIError, AttributeError, OSError, RuntimeError, ValueError):
         return False
 

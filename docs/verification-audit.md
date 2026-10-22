@@ -27,6 +27,8 @@ change that conclusion. Explicit override sources retain their existing
 source-specific override-wins identity contract without a native lookup.
 Ordinary current-cache checks still use their existing attachment-identity owner;
 unknown export currentness does not force unchanged native reviews to regenerate.
+Ordinary cache qualification reuses its attachment owner's computed identity,
+including linked PDFs outside export roots; export still enforces those roots.
 Normal review generation retains its existing effects, including optional notes
 and brief rebuilding.
 
@@ -58,8 +60,9 @@ legacy, missing-source or failed validation never produces a successful retained
 payload: `retained_evidence` is null (or malformed evidence is an HTTP error).
 
 Missing review: 404 `not_found`. Invalid exact key: 422 `validation_error`.
-Malformed cache/receipt/schema: 422 `audit_invalid`, never an empty successful
-export or a scientific rejection. Disallowed local/origin boundary: 403
+Malformed cache/receipt/schema: 422 `audit_invalid`, including malformed legacy
+digest fields. Valid partial legacy digests are returned unchanged, without
+invented defaults or receipts. Disallowed local/origin boundary: 403
 `local_only`; a stored source outside Settings' PDF roots returns 403
 `path_not_allowed`. Filesystem/read failures remain operational errors.
 
@@ -72,8 +75,9 @@ The receipt contains:
   sentence-part number, text, numeric-preflight outcome and cited passage IDs.
   `matches_cached_field` prevents presenting changed findings as current support.
   Attempt and retained hashes use this same field contract. Additional runtime
-  subtype metadata is neither silently verified nor included in those hashes;
-  projection leaves the original model untouched.
+  subtype metadata is neither silently verified nor included in those hashes
+  or post-verification field changes; it remains in the exact exported cached
+  digest. Projection leaves the original model untouched.
 - Actual original and selected extraction text hashes/character extents,
   extraction/verifier contract hashes, source-byte and review-generation hashes.
   `complete_extracted_text` means only that every character of this extraction
