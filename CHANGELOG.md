@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Retain original rss source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+
 - Retain original observed-cohort weekly ordering metadata and frozen conditional replay; canonical helper names and caller wiring are mechanically aligned.
 
 ### Changed

@@ -31,3 +31,5 @@ set against that baseline rather than hiding failures. Authored/static-checked
 cases are not evidence of execution; report RED/GREEN and runtime limits honestly.
 
 Original frozen weekly replay/source is retained with its original three-argument cohort ordering contract. Existing source helpers use their canonical number/summary names and the production caller supplies its existing cohort IDs. No new grader, labels, ranking formula or real-data claim is designed.
+
+Retain original rss source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
