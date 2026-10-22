@@ -166,6 +166,21 @@ uv run zotero-summarizer goldenset train-classifier  # retrain the relevance gat
 uv run zotero-summarizer faithbench build --max-builder-windows 64  # larger QA-source budget; more builder calls
 ```
 
+## Before opening a PR
+
+With development dependencies installed and `.venv` activated, run `make lint`
+while your changes are staged, then commit your intended files. From a clean,
+dedicated branch, publish with:
+
+```bash
+tools/create-pr.sh 'Short PR title' /path/to/body.md
+```
+
+This runs `make check` locally, pushes only after every check passes, and opens a
+PR against `main`. It never stashes your work. Hosted Actions is optional/manual;
+GitHub billing is not part of this path. See the [check contract and platform
+limits](docs/architecture.md#verify-a-change). `make check` runs checks without publishing.
+
 ## Going further
 
 - **[docs/usage.md](docs/usage.md)** — the daemon, how the model learns from your labels,

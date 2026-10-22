@@ -11,7 +11,10 @@ npm run dev
 ```
 
 Vite proxies `/api/*` to `http://localhost:8000`; `npm run build` writes
-`dist/` for FastAPI.
+`dist/` for FastAPI. Root `make check` reuses lint, test and build serially,
+with build output in a disposable directory so existing `dist/` stays intact.
+The dependency ignore also permits a shared `node_modules` symlink in worktrees.
+See the [checked PR workflow](../docs/architecture.md#verify-a-change).
 
 ## Product surfaces
 
