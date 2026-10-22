@@ -30,7 +30,9 @@ outside that backup pattern to leave at most five. Keep exported recovery copies
 do not remove Zotero's own `.bak` files. The next admitted attempt makes a fresh
 integrity-checked backup before writing. This replaces unbounded failed-attempt
 accumulation with an explicit storage-capacity refusal, not automatic deletion of
-forensic snapshots or a claim that an earlier write rolled back.
+forensic snapshots on failure or a claim that an earlier write rolled back.
+After a known successful commit, ordinary retention can rotate older snapshots,
+including snapshots originally created by failed attempts.
 This does not add automatic actions, blanket native-write consent or a new backup
 store, nor make backup and mutation atomic against other writers. Typed Pending
 approval/claims, verdict receipts and cross-database recovery remain separate.

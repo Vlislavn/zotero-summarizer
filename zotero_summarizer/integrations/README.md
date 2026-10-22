@@ -14,9 +14,10 @@ Raw `mark_feed_items_read(list[int]) -> int` reuses `backup_database()` before
 its native retry, then `_prune_backups()` only after commit. A nonblocking
 per-library file lock serializes raw admission through commit/pruning. Admission
 allows the existing five retained app backups plus one attempt slot; six existing
-app-pattern artifacts refuse before backup/native effects. Failed-attempt backups
-are never automatically removed: review/export enough to leave at most five before
-retrying. Normal success prunes to five, so successive successful calls continue.
+app-pattern artifacts refuse before backup/native effects. Failure never prunes
+snapshots: review/export enough to leave at most five before retrying. Normal
+success applies shared retention to five, including older failed-attempt copies,
+so successive successful calls continue.
 Empty input has no probe/lock/backup/write. Backup refusal prevents effects; SQL
 failure rolls back and preserves the completed backup. Postcommit retention errors
 propagate outside replay. This is not backup-to-write isolation against other native
