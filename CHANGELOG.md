@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Keep recorded Feedback report evidence literal when it contains Markdown backticks; reject ambiguous duplicate migration namespaces; clarify available capture primitives versus later-stack analysis/CLI/weekly contracts.
+
 - Package existing retained input capture and report primitives from the working changes for dependent review; no behavior redesign.
 
 - CLI validates before Settings/.env loading, then applies offline flags from the selected project only. Importing CLI no longer reads another root. Faithbench/Setup exports and pure run options load lazily without changing public objects or benchmark algorithms.

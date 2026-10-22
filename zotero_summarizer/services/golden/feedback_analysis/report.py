@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import stat
 from pathlib import Path
 
@@ -11,6 +12,11 @@ from zotero_summarizer.services._common import atomic_write
 from .provenance import strict_json
 from .inputs import BudgetExceeded, _no_symlinks, _regular_open
 from .provenance import RETAINED_PATHS, canonical_bytes
+
+__all__ = [
+    "hash_file", "inventory", "make_immutable", "markdown", "read_protocol",
+    "stage_report", "verify_report", "write_private", "write_protocol",
+]
 
 PROTOCOL_MAX_BYTES = 1024 * 1024
 OUTPUT_NAMES = {"result.json", "result.md", "retained/input-manifest.json"}
@@ -60,7 +66,9 @@ def write_protocol(path, payload):
 
 
 def _shown(value):
-    return str(value).replace("\\", "\\\\").replace("`", "\\`").replace("\n", " ").replace("\r", " ")
+    text = str(value).replace("\n", " ").replace("\r", " ")
+    marker = "`" * (max((len(run) for run in re.findall(r"`+", text)), default=0) + 1)
+    return f"{marker} {text} {marker}"
 
 
 def markdown(result, status):
@@ -69,10 +77,10 @@ def markdown(result, status):
              "Historical inference identity is unknown; chronological eligibility is not a scored evaluation.",
              "Ranking remains unscorable without immutable exposure and timed judgments.", "", "## Coverage and unknowns", "",
              f"- Current canonical families: {result['coverage']['unique_current_paper_groups']}",
-             f"- Eligible date coverage: `{_shown(result['coverage']['date_coverage'])}`",
-             f"- Exclusions: `{_shown(result['coverage']['exclusions'])}`",
+             f"- Eligible date coverage: {_shown(result['coverage']['date_coverage'])}",
+             f"- Exclusions: {_shown(result['coverage']['exclusions'])}",
              "- Journal, log and current feedback are separate overlapping channels, never summed as decisions.", ""]
-    lines.extend(f"- `{_shown(g['reason'])}`" + (f" · `{_shown(g['locator'])}`" if "locator" in g else "")
+    lines.extend(f"- {_shown(g['reason'])}" + (f" · {_shown(g['locator'])}" if "locator" in g else "")
                  for g in result["gaps"])
     for window, channels in result["periods"].items():
         lines.extend(["", f"## {window}", ""])
@@ -84,10 +92,10 @@ def markdown(result, status):
                 ci = support["observed_prevalence_ci"]
                 lines.append(f"- {label}: {support['unique_papers']} · Wilson 95% [{ci['low']}, {ci['high']}] "
                              f"(denominator {ci['n_unique_papers']} unique observed papers)")
-            lines.append(f"- Recorded transitions: `{_shown(channel['transitions'])}`")
-            lines.append(f"- Saved-prediction agreement: `{_shown(channel['agreement'])}`")
-            lines.append(f"- Ordinal error mean/median by surface: `{_shown(channel['ordinal_error'])}`")
-            lines.extend(f"- Disagreement observation: `{_shown(locator)}`" for locator in channel["disagreements"])
+            lines.append(f"- Recorded transitions: {_shown(channel['transitions'])}")
+            lines.append(f"- Saved-prediction agreement: {_shown(channel['agreement'])}")
+            lines.append(f"- Ordinal error mean/median by surface: {_shown(channel['ordinal_error'])}")
+            lines.extend(f"- Disagreement observation: {_shown(locator)}" for locator in channel["disagreements"])
     lines.extend(["", "## Local evidence", "",
                   "`result.json` retains comments and observation IDs with exact local SQL/CSV/JSONL locators, relative to `retained/`.",
                   "`retained/input-manifest.json` is the original input manifest; replay uses only `retained/`.",

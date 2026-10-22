@@ -10,4 +10,7 @@ only the embedding SDK symbol is inert and its constructor refuses all model
 work. They verify configuration selection, not actual model compatibility.
 Existing Faithbench exports retain exact defining object identity.
 
-Part 1 retains the corresponding original Feedback suites without assertion changes.
+Part 1 retains the original Feedback capture assertions and adds duplicate
+migration-namespace refusal cases. `test_feedback_analysis_report_primitives.py`
+keeps recorded Markdown content inside literal code spans; downstream
+analysis/operation suites are not present in this primitive-only checkout.

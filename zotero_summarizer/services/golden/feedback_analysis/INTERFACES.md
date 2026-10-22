@@ -1,7 +1,11 @@
-# Feedback analytic result — version 1
+# Feedback downstream contract — version 1 (reference only in part 1)
 
-Frozen consumer contract for this stage. The existing `freeze_inputs` and
-`verify_inputs` version-1 signatures/content identity remain unchanged.
+This primitive-only checkout implements `freeze_inputs` and `verify_inputs`, plus
+supporting metrics/report helpers. Their version-1 input identity is unchanged.
+Everything below specifies dependent stack parts: `analyze_inputs`, manual and
+weekly dispatchers, workers, CLI and scheduling are **not implemented or runnable
+here**. The future contracts and historical decisions are retained as reference,
+not claims of current functionality, test coverage or issue #47 acceptance.
 
 ```
 verified retained SQLite + CSV + JSONL

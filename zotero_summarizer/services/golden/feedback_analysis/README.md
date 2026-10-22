@@ -1,10 +1,30 @@
-# Review stack part 1/4
+# feedback_analysis — retained inputs and report primitives
 
-Existing implementation, mechanically packaged for review. No new feature or issue closure.
-Merge the dependent parts in order; this part is `Feedback: retained input capture and report primitives`.
-Known original limitations are not repaired by this packaging.
+## Available in this PR (stack part 1/4)
 
-# feedback_analysis — frozen inputs and local descriptive evidence
+The callable input boundary is `freeze_inputs` / `verify_inputs`, exported by this
+package. `metrics.py` and `report.py` retain supporting primitives for dependent
+parts; there is no integrated analysis, report operation, CLI command or weekly
+scheduler in this checkout. No overall issue #47 completion is claimed.
+
+`report.__all__` explicitly declares the existing low-level library boundary:
+`hash_file`, `inventory`, `make_immutable`, `markdown`, `read_protocol`,
+`stage_report`, `verify_report`, `write_private`, `write_protocol`. Direct callers
+supply a version-1 result, attempt/run identity and bounded `guard.consume(bytes)`;
+this is not an installed-host operation or analyzer. `stage_report` writes only
+its caller-owned staging tree; `make_immutable` changes that tree's modes. Keep
+raw retained inputs/results local and do not point these helpers at live sources.
+
+Report evidence uses code-span delimiters longer than any recorded backtick run,
+so recorded surfaces/locators remain literal text rather than active Markdown.
+
+**Downstream reference only:** the analysis/manual/weekly flow, contracts and
+sections below describe later stack parts, not functionality available here.
+`history.py`, `analysis.py`, operation/worker/scheduler modules and
+`goldenset analyze-feedback` are absent. Do not run those reference commands or
+bypass the future clean-child isolation requirement. For this part, exercise the
+real Python `freeze_inputs(settings, new_destination, cutoff=..., provenance=...)`
+and `verify_inputs(destination)` boundary described below.
 
 ```
 Settings sources --ro/WAL-aware backup + bounded EOF reads--> NEW private staging
@@ -45,7 +65,8 @@ Database integrity, canonical schema SHA, user_version, page bounds, available
 numbered namespace versions and sync revision min/max come **only from retained
 SQLite**. Old absent migration/sync tables are explicitly unavailable/null.
 Admission requires core triage result, feedback and verdict reading columns, not
-a current migration floor. An uninitialized/empty-file store is refused, not
+a current migration floor. Present migration metadata must have unique namespace
+rows; equal or conflicting duplicate versions are rejected rather than collapsed. An uninitialized/empty-file store is refused, not
 successful empty history; it cannot establish absence of decisions elsewhere.
 No live repository opener or writer backup is used.
 
@@ -93,8 +114,8 @@ unverified. No model/label change or issue closure follows from these functions.
 - `inputs.py`: boundary/path admission, work/safety guard, file capture, replay verification.
 - `sqlite_snapshot.py`: WAL online backup and retained schema/revision metadata.
 - `provenance.py`: JSON wire validation and deterministic identity.
-- `history.py`: strict retained CSV/JSONL/SQL readers and ambiguity-safe current alias graph.
-- `analysis.py`: `analyze_inputs(destination: Path, *, budgets=None) -> dict`, bounded retained-only result.
+- Later parts only — `history.py`: retained readers and ambiguity-safe current alias graph (absent here).
+- Later parts only — `analysis.py`: bounded retained-only `analyze_inputs` result (absent here).
 - `metrics.py`: separate unique-paper descriptive channels, Wilson intervals and eligibility metadata.
 - `__init__.py`: exported boundary functions and budget/error types.
 
@@ -155,15 +176,14 @@ Synthetic `tests/test_feedback_analysis_inputs*.py` cover numbered empty/populat
 stores, committed WAL preservation, unavailable old history, missing versus broken
 optional reads, replay after source removal, capture races, tamper/escape, budgets
 and failed publication. Existing golden CSV snapshot/hash checks remain separate.
-New synthetic `tests/test_feedback_analysis_{history,metrics,analysis}.py` cover
-canonical ambiguity/tombstones, channel/content multiplicity, missing-history
-recovery limits, strict malformed records, saved predictions, temporal exclusions,
-exact boundaries, confidence edges, bounds and read-only deterministic replay.
+`tests/test_feedback_analysis_report_primitives.py` covers safe Markdown evidence
+encoding. History/analysis/metrics suites described by later parts are absent here;
+this checkout does not establish their integrated behavior or coverage.
 Further subtraction: no parsing framework, inferred model identity, live-store
 alignment lock, scored training evaluation, export knobs or UI. Weekly automation
 below reuses the operation boundary without changing these frozen analytics.
 
-## Manual operation (additive; frozen analytic boundary above is unchanged)
+## Manual operation — later-stack reference, unavailable here
 
 ```
 goldenset analyze-feedback --project-root ROOT [--cutoff AWARE_ISO]
@@ -263,7 +283,7 @@ Chronological eligibility and null ranking remain unscored. Weekly confirmation
 and cursor behavior are documented below; daemon training provenance is described
 in `services/model`. First private run, scored usefulness and overall #47 remain open.
 
-## Weekly operation (additive; manual and analytic contracts unchanged)
+## Weekly operation — later-stack reference, unavailable here
 
 ```
 feeds serve -- selected Settings / explicit main-thread capability
