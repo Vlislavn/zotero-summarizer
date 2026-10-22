@@ -17,6 +17,16 @@ const HACKERNOON_FEEDS = [
   { name: 'HackerNoon Agentic AI', url: 'https://hackernoon.com/tagged/agentic-ai/feed' },
 ];
 
+function subscriptionUrlKey(value) {
+  try {
+    const url = new URL(value);
+    url.hash = '';
+    return url.href;
+  } catch {
+    return value;
+  }
+}
+
 export default function RssFeedsSection() {
   const queryClient = useQueryClient();
   const feedsQuery = useQuery({ queryKey: ['rss-feeds'], queryFn: fetchRssFeeds });
@@ -91,6 +101,7 @@ export default function RssFeedsSection() {
   });
 
   const feeds = feedsQuery.data?.feeds || [];
+  const sourceWritePending = addMutation.isPending || importMutation.isPending || updateMutation.isPending || deleteMutation.isPending;
 
   return (
     <SectionCard
@@ -103,7 +114,7 @@ export default function RssFeedsSection() {
             variant="secondary"
             size="sm"
             onClick={() => importMutation.mutate()}
-            disabled={importMutation.isPending}
+            disabled={sourceWritePending}
           >
             {importMutation.isPending ? 'Importing...' : 'Import feeds from Zotero'}
           </Button>
@@ -132,15 +143,15 @@ export default function RssFeedsSection() {
           <p className="text-xs text-slate-500">Add either tag feed explicitly. Upstream feeds can be empty or unavailable; saving is not a fetch or review.</p>
           <div className="flex flex-wrap gap-2">
             {HACKERNOON_FEEDS.map((preset) => {
-              const saved = feeds.find((feed) => feed.url === preset.url);
+              const saved = feeds.find((feed) => subscriptionUrlKey(feed.url) === preset.url);
               const adding = addMutation.isPending && addMutation.variables?.url === preset.url;
               return (
                 <Button
                   key={preset.url}
                   variant="secondary"
                   size="sm"
-                  disabled={Boolean(saved) || feedsQuery.isPending || feedsQuery.isFetching || feedsQuery.isError || addMutation.isPending || importMutation.isPending || updateMutation.isPending || deleteMutation.isPending}
-                  onClick={() => addMutation.mutate({ ...preset, enabled: true })}
+                  disabled={Boolean(saved) || feedsQuery.isPending || feedsQuery.isFetching || feedsQuery.isError || sourceWritePending}
+                  onClick={() => addMutation.mutate({ ...preset, enabled: true, create_only: true })}
                 >
                   {saved ? `${preset.name} saved${saved.enabled ? '' : ' (disabled)'}` : adding ? `Adding ${preset.name}…` : `Add ${preset.name}`}
                 </Button>
@@ -169,7 +180,7 @@ export default function RssFeedsSection() {
             onClick={() => addMutation.mutate(draft, {
               onSuccess: () => setDraft({ name: '', url: '', enabled: true }),
             })}
-            disabled={addMutation.isPending || !draft.name.trim() || !draft.url.trim()}
+            disabled={sourceWritePending || !draft.name.trim() || !draft.url.trim()}
             className="md:mb-0.5"
           >
             Add feed
@@ -214,7 +225,7 @@ export default function RssFeedsSection() {
                         size="sm"
                         variant="secondary"
                         onClick={() => updateMutation.mutate({ id: feed.id, payload: edit })}
-                        disabled={updateMutation.isPending}
+                        disabled={sourceWritePending}
                       >
                         Save
                       </Button>
@@ -222,7 +233,7 @@ export default function RssFeedsSection() {
                         size="sm"
                         variant="danger"
                         onClick={() => deleteMutation.mutate(feed.id)}
-                        disabled={deleteMutation.isPending}
+                        disabled={sourceWritePending}
                       >
                         Delete
                       </Button>

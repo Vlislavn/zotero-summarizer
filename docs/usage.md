@@ -44,7 +44,9 @@ scope accuracy is not measured.
 
 In Settings → Sources, explicitly add HackerNoon AI Agents or Agentic AI, or keep
 using the custom-feed form. Existing disabled subscriptions stay disabled and
-preset clicks do not erase an unfinished custom draft. Saving is not fetching:
+preset clicks do not erase an unfinished custom draft. Presets also preserve a
+subscription saved by another tab, including imported URL host/default-port
+variants. Source writes wait for the current write to finish. Saving is not fetching:
 use **Refresh RSS now**, then **Today → Triage backlog** for the existing pipeline.
 No second ingestion system or automatic source subscription is introduced.
 

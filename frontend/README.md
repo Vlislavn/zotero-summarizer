@@ -258,7 +258,7 @@ when citations are absent/zero throughout, it reduces to relevance. Counts are a
 limited prestige proxy (field/age bias), disclosed beside the selector. Explicit
 sorts show the whole pool in that order; only Recommended collapses weak matches.
 Retracted and unscored candidates stay last. This display preference does not
-change server review selection. RSS refresh distinguishes partial failures, offline skips, zero returned items and an unavailable saved-source list. Persisted per-feed errors reload even when refresh fails. Preset saves retain custom drafts; uncertain writes reread rows without automatically repeating the write.
+change server review selection. RSS refresh distinguishes partial failures, offline skips, zero returned items and an unavailable saved-source list. Persisted per-feed errors reload even when refresh fails. Preset saves retain custom drafts; uncertain writes reread rows without automatically repeating the write. Preset adds are create-only, including stale lists and imported host/default-port variants; existing subscription settings stay unchanged. Source writes are single-flight in the section. Deploy frontend and backend together for the create-only contract.
 
 ```text
 src/

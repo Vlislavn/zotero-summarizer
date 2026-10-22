@@ -58,7 +58,7 @@ it('explicitly adds both exact sources via the common RSS API, preserving a cust
   }
 
   const posts = fetch.mock.calls.filter(([path, options]) => path === '/api/rss/feeds' && options.method === 'POST');
-  expect(posts.map(([, options]) => JSON.parse(options.body))).toEqual(SOURCES.map((source) => ({ ...source, enabled: true })));
+  expect(posts.map(([, options]) => JSON.parse(options.body))).toEqual(SOURCES.map((source) => ({ ...source, enabled: true, create_only: true })));
   expect(screen.getAllByLabelText('Name')[0].value).toBe('My custom source');
   expect(screen.getAllByLabelText('URL')[0].value).toBe('https://example.org/feed');
   expect(screen.getAllByText('Not refreshed yet')).toHaveLength(2);
@@ -194,10 +194,67 @@ it.each(['transport', 'server'])('rereads a committed preset after %s uncertaint
   expect(screen.queryByText('Feed saved. Refresh RSS now to fetch items.')).toBeNull();
 });
 
-it('keeps partial failure distinct from a clean refresh', async () => {
-  refresh = () => response({ feeds: 2, inserted: 1, updated: 1, errors: [{ feed_id: 2, error: '403' }] });
+it('keeps partial failure distinct from a clean refresh and reloads its persisted error', async () => {
+  feeds = [{ id: 2, ...SOURCES[0], enabled: true }];
+  refresh = () => {
+    feeds = [{ ...feeds[0], last_error: '403 Forbidden', last_fetched_at: '2026-10-22T12:00:00Z' }];
+    return response({ feeds: 2, inserted: 1, updated: 1, errors: [{ feed_id: 2, error: '403' }] });
+  };
   mount();
-  fireEvent.click(await screen.findByRole('button', { name: 'Refresh RSS now' }));
+  await screen.findByText('Not refreshed yet');
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh RSS now' }));
 
   await screen.findByText('Checked 2 feeds: 1 new, 1 updated. 1 feed(s) failed — see their errors below.');
+  await screen.findByText('Last error: 403 Forbidden');
+  expect(screen.getByText('Last checked: 2026-10-22T12:00:00Z')).toBeTruthy();
+});
+
+it('recognizes a disabled imported preset with normalized host and default port', async () => {
+  feeds = [{ id: 1, ...SOURCES[0], url: 'https://HACKERNOON.com:443/tagged/ai-agents/feed', enabled: false }];
+  mount();
+
+  expect((await screen.findByRole('button', { name: 'HackerNoon AI Agents saved (disabled)' })).disabled).toBe(true);
+  expect(fetch.mock.calls.some(([, options]) => options.method)).toBe(false);
+});
+
+it('does not overwrite a subscription saved by another tab after this list was read', async () => {
+  const original = fetch.getMockImplementation();
+  fetch.mockImplementation((path, options = {}) => {
+    if (path === '/api/rss/feeds' && options.method === 'POST') {
+      const payload = JSON.parse(options.body);
+      if (!payload.create_only) Object.assign(feeds[0], payload);
+      return Promise.resolve(response(feeds[0]));
+    }
+    return original(path, options);
+  });
+  mount();
+  await screen.findByText('No RSS feeds saved.');
+  feeds = [{ id: 1, ...SOURCES[0], name: 'My disabled subscription', enabled: false }];
+  fireEvent.click(screen.getByRole('button', { name: 'Add HackerNoon AI Agents' }));
+
+  await screen.findByRole('button', { name: /HackerNoon AI Agents saved/ });
+  expect(feeds[0].enabled).toBe(false);
+  expect(feeds[0].name).toBe('My disabled subscription');
+});
+
+it('serializes preset subscriptions with custom save, delete and import controls', async () => {
+  feeds = [{ id: 1, name: 'Custom feed', url: 'https://example.org/feed', enabled: false }];
+  let finish;
+  const original = fetch.getMockImplementation();
+  fetch.mockImplementation((path, options = {}) => {
+    if (options.method === 'POST') return new Promise((resolve) => { finish = () => resolve(response({ id: 2, ...SOURCES[0] })); });
+    return original(path, options);
+  });
+  mount();
+  await screen.findByRole('button', { name: 'Save' });
+  fireEvent.change(screen.getAllByLabelText('Name')[0], { target: { value: 'Draft' } });
+  fireEvent.change(screen.getAllByLabelText('URL')[0], { target: { value: 'https://example.org/draft' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add HackerNoon AI Agents' }));
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save' }).disabled).toBe(true));
+  expect(screen.getByRole('button', { name: 'Delete' }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: 'Import feeds from Zotero' }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: 'Add feed' }).disabled).toBe(true);
+  finish();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Save' }).disabled).toBe(false));
 });

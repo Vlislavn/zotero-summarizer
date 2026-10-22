@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Keep preset subscriptions create-only across stale tabs and imported URL variants; serialize source writes and cover persisted partial-refresh errors. Custom RSS upserts remain unchanged.
 - Add explicit HackerNoon RSS presets using the existing subscription pipeline. Preserve custom drafts, distinguish unavailable/empty/offline/partial refresh states, and reread uncertain source writes without retrying them. Saving never implies fetching, triage or source usefulness.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.
