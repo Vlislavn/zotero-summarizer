@@ -151,7 +151,9 @@ it('does not call an unusable joined digest a failed scientific review', () => {
     needs_pdf: false, digest_usable: false,
   } }) }));
   expect(screen.getByText('Review: not ready')).toBeTruthy();
-  expect(screen.getByText(/Failure and staleness are not recorded here/)).toBeTruthy();
+  expect(screen.getByText(
+    'A current entry matched, but its digest is not usable. Failure and staleness are not recorded here.',
+  )).toBeTruthy();
 });
 
 it('does not upgrade old payload quality to a current review', () => {

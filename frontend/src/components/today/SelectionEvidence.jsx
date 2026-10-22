@@ -32,7 +32,7 @@ function reviewPresentation(paper) {
     };
     if (review.digest_usable === false) return {
       text: 'Review: not ready', tone: 'slate',
-      detail: 'A current entry matched, but its digest is not usable. Failure and staleness are not recorded here; open the full review for recovery.',
+      detail: 'A current entry matched, but its digest is not usable. Failure and staleness are not recorded here.',
     };
   }
   if (review?.quality_origin === 'legacy_row' && grade) return {

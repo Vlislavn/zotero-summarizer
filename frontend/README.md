@@ -25,7 +25,8 @@ Today cards label the unchanged composite bands as **Relevance** (moderate,
 not “Fair”), separately from current AI evidence grades. Legacy row grades are
 unconfirmed; unknown review evidence never means neutral/poor science or proves
 no review was attempted. A current needs-full-text/not-ready entry is explicit;
-a join miss cannot distinguish absent, stale or failed reviews. One native
+a join miss cannot distinguish absent, stale or failed reviews. The not-ready
+explanation reports digest usability without promising a retry action. One native
 **Why selected** disclosure replaces the separate reason-chip row and contains
 existing reasons, the actual slate policy and recorded cohort/picker keys.
 Exploration roles are labelled as exploration. Interleave withholds the new

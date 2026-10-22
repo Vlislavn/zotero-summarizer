@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Remove Today's unsupported recovery promise for unusable cached reviews; keep the observed not-ready state explicit.
 - Today separates relevance from AI evidence and discloses actual policy/picker observations. Unknown review evidence does not distinguish absent/stale/failed; interleave stays blinded. Ranking, thresholds, defaults and labels are unchanged.
 - Keep shared moderate-relevance pills readable: use the existing amber-600 rather than amber-500 token, raising white-text contrast from3.95:1to5.58:1 without changing the palette or score bands.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
