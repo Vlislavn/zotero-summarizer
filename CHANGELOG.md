@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Retain original optional Telegram transport/session/identity contracts; collection/store/CLI wiring follows in dependent source-review parts.
+
 - Package original immutable-question persistence, composite note intents and migrations9/10; HTTP/UI and native delivery remain dependent review parts.
 
 - Keep tightened interpretation resource caps inclusive with exact token-count and decimal-latency arithmetic. Preserve mean/median reporting, per-paper and independent unknown/refusal gates; no rounding tolerance or threshold changes.

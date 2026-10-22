@@ -70,3 +70,5 @@ timestamps raise instead of silently becoming absent dates.
 
 **Boundary:** may compose library services and storage reads. Zotero writes are
 optional pending actions only; default runs are dry-run.
+
+Telegram source-review part: original transport/session/credential and runtime code is retained unchanged. This part registers no Telegram CLI commands; its collection/store/worker dependencies are supplied by following original-source parts. No account/session, network collection or live model is exercised by packaging.
