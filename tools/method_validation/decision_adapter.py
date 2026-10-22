@@ -117,9 +117,12 @@ class NativeDecisionAdapter:
             raise ValueError('only explicitly qualified native arms can construct this adapter')
         endpoint(arm.endpoint)
 
-    def __call__(self, request: bytes, retain, *, timeout=None) -> ProviderReply:
+    def __call__(self, request: bytes, retain, *, timeout=None, max_elapsed_seconds=None) -> ProviderReply:
         if len(request) > self.cfg.max_request_bytes or self.calls >= self.cfg.max_calls:
             raise ValueError('request/call budget exceeded before dispatch')
+        if max_elapsed_seconds is not None and (type(max_elapsed_seconds) not in (int, float)
+                or not isfinite(max_elapsed_seconds) or max_elapsed_seconds <= 0):
+            raise ValueError('positive finite remaining run budget required before dispatch')
         self.calls += 1
         raw = bytearray()
         status, http_status, complete, observed = 'received', None, True, 0
@@ -128,10 +131,13 @@ class NativeDecisionAdapter:
                      'declared_forward_passes_bound': self.arm.forward_passes_bound,
                      'server_peak_memory_bytes': None, 'cost': None, 'cold_seconds': None}
         started = monotonic()
+        budget = min(timeout, self.cfg.idle_timeout_seconds) if timeout is not None else self.cfg.idle_timeout_seconds
+        run_budget = self.cfg.max_run_seconds if max_elapsed_seconds is None else min(max_elapsed_seconds, self.cfg.max_run_seconds)
+        deadline = started + run_budget
         try:
             transport = self.transport or httpx.HTTPTransport(retries=0, trust_env=False)
             with httpx.Client(transport=transport, auth=None, trust_env=False,
-                              follow_redirects=False, timeout=timeout or self.cfg.idle_timeout_seconds) as client:
+                              follow_redirects=False, timeout=budget) as client:
                 telemetry['dispatched'] = True
                 with client.stream('POST', self.arm.endpoint, content=request, headers={
                         'Content-Type': 'application/json', 'Accept-Encoding': 'identity'}) as response:
@@ -144,9 +150,14 @@ class NativeDecisionAdapter:
                         if len(chunk) > remaining:
                             status, complete = 'response_too_large', False
                             break
+                        if monotonic() >= deadline:
+                            status, complete = 'timeout', False
+                            break
+                    if status == 'received' and monotonic() >= deadline:
+                        status, complete = 'timeout', False
                     if status == 'received' and http_status != 200:
                         status = 'unavailable'
-                    if response.headers.get('content-encoding', 'identity') != 'identity':
+                    if status == 'received' and response.headers.get('content-encoding', 'identity') != 'identity':
                         status = 'encoded_response'
         except httpx.TimeoutException:
             status, complete = 'timeout', False

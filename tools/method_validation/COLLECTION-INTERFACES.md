@@ -27,8 +27,9 @@ not full#42 empirical acceptance. See [usage](../../docs/decision-collection-com
 - `collections_run.baseline_owner()` -> digest of current corpus_read.py/corpus_types.py
   source hash map; this is source identity, not actual model-artifact authentication.
 - `prepare(cfg,snapshots=None)` -> `(inputs,truth,papers,gold,nodes,questions,requests,
-  errors,baselines,recordings,saved)`; requests/recordings keyed by independent question
-  identity and arm, errors by paper identity; exact bounded frozen input snapshots.
+  errors,baselines,recordings,saved)`; requests/errors keyed by independent question
+  identity, recordings additionally by arm; missing paper text also marks the baseline
+  unit unscored. Exact bounded frozen input snapshots.
 - `run(cfg,raw_config,*,transport=None)` -> `(new_owner_path,report_dict)`.
 - `reopen(owner)` -> verified report dict; no provider/app/Settings/write effects.
 - `command(args,*,transport=None)` -> exit0 only after its operation returns.
@@ -78,8 +79,10 @@ and other original fields; do not invent numeric collection scores. Any explicit
 effects; no-corpus artifacts may retain an empty inventory and remain unavailable.
 The required projection accepts at most3 original names and an exact boolean corpus state.
 
-Rows join by normalized text identity, never array index. Exact unambiguous names
-resolve against the ENTIRE tree, not a gold-biased eligible subset. Known workflow
+Rows join by normalized text identity, never array index. Original strings resolve
+against exact names and derived `Parent > Child` paths across the ENTIRE tree, not a
+gold-biased eligible subset. Distinct-key alias collisions and repeated resolved keys
+refuse rather than guessing. Known workflow
 suggestions are excluded and reported; ambiguous/unknown names or malformed readouts
 are invalid_response. Missing corpus is unavailable, not no-match. Empty retrieval
 is explicit and cannot claim a native confident global rejection. A missing artifact
@@ -110,7 +113,8 @@ publication target; required writer exceptions leave FAILED regardless of readab
 bytes. Final ACK follows successful required publications. Inspection validates exact
 inventory closed against admitted configuration/input snapshots, canonical case rows,
 verified terminal owners, timing and both reports—not arbitrary manifest-listed extras;
-code/schema/input/source bindings, all terminal and terminal-free branches,
+code/schema/input/source bindings, coherent native HTTP/completion/byte observations,
+all terminal and terminal-free branches,
 row projections, typed `paper-times.json` ownership/completion and both report formats.
 Native paper execution timing spans first question through last case-row ACK, not a
 sum of HTTP observations; common admission/snapshot/startup remains excluded.
@@ -121,8 +125,11 @@ not authenticity, hostile-writer containment or remote-stop confirmation.
 
 All relevant budgets/thresholds are validated Config fields, overridable by
 `ZS_COLLECTION_OVERRIDES`; complete request+snapshot and outcome/call/physical-work
-reservations precede effects. CLI source wall cap additionally uses the shared named
-`ZS_SOURCE_WORK_SAFETY_MS`. No clipped prompts/evidence and no new automatic retries.
+reservations precede effects. Node-specific prompt limits do not suppress fitting
+questions or imported baseline rows. CLI source wall cap additionally uses the shared
+named `ZS_SOURCE_WORK_SAFETY_MS`; native consumption checks the remaining run budget
+between chunks and on completion. Blocking I/O still needs an external hard-wall guard;
+this does not confirm remote computation stopped. No clipping or automatic retries.
 
 Reports separate complete set proposals, binary-question coverage and original top3
 capability. They include class/stratum/collection errors, support/rare metadata,

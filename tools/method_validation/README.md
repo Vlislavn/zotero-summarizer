@@ -9,8 +9,13 @@ retains full native choices/vectors, and imports original top3 NAME suggestions
 without inventing keys/scores or confident no-match. Taxonomy, canonical/time
 lineage, separate human gold, complete request/work budgets and all replay branches
 are validated before scoring. Corpus-backed artifacts require nonempty declared
-reference lineage; replay filenames must match the admitted publication plan, not
-merely a resealed manifest. No live library/model loading or assignment effects.
+reference lineage strictly earlier than its owner; replay filenames and native HTTP
+state/byte observations must match the admitted publication plan, not merely a resealed
+manifest. Oversized node prompts leave other independent questions and original baseline
+rows available. Original nested `Parent > Child` suggestions resolve against derived
+paths as well as exact names, refusing collisions. Native streams stop at the first
+observed remaining-run deadline; blocked reads still need the external hard-wall guard.
+No live library/model loading or assignment effects.
 See [usage](../../docs/decision-collection-comparison.md) and the frozen
 [collection API](COLLECTION-INTERFACES.md). Synthetic/recorded controls cannot
 establish a model winner, live smoke, resource qualification or full#42 completion.

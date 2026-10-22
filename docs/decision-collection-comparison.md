@@ -62,7 +62,9 @@ Prompt data contains ONLY title/abstract, target key/derived full path, its desc
 and development examples. Gold, source lineage, split, stratum and assignment-derived
 tags are not in the payload. Descriptions/examples are untrusted evidence, not action
 permissions. Options, question ordering, preprocessing and zero client retry policy
-are identical across arms. No textual rationale is accepted/generated.
+are identical across arms. A node-specific oversized prompt leaves other questions
+and imported baseline rows available; missing paper text remains unscored everywhere.
+No textual rationale is accepted/generated.
 
 ## Capabilities must not be invented
 
@@ -78,8 +80,10 @@ THREE COLLECTION NAMES, NOT keys, scores or probabilities. `top_k` controls simi
 paper titles, not collection count. Import its original readout unchanged with the
 actual owner/source and model-artifact bindings plus frozen reference corpus. An
 explicit `has_corpus=true` row with an empty reference inventory refuses before effects;
-no-corpus/unavailable artifacts may have no references. Exact name resolution uses the ENTIRE frozen tree, including duplicate workflow names;
-ambiguous/unknown names are unscored, never guessed from gold or parent context.
+no-corpus/unavailable artifacts may have no references. Original strings resolve against
+exact names and derived `Parent > Child` paths across the ENTIRE frozen tree, including
+workflow nodes. Distinct-key alias collisions, duplicate resolved keys and unknown names
+are unscored, never guessed from gold or parent context.
 Known workflow suggestions are explicitly excluded and counted, not assigned. Preserve
 remaining original ordering. `has_corpus=false` is unavailable. Empty retrieval is
 not a native confident rejection. No baseline probability vector/calibration is
@@ -104,8 +108,11 @@ are configurable admission policies, not empirically validated resource promises
 64MiBcumulative snapshots+requests, 12000prompt characters/64KiBper request or response.
 Time safety is 120s idle/3600s run, schema-capped and additionally bounded by
 `ZS_SOURCE_WORK_SAFETY_MS` (default3600000, maximum7200000). External process-tree
-RSS/free-RAM/swap monitoring remains required for live execution; HTTP timeout does
-not prove remote computation stopped. No concurrent local model loading is authorized.
+RSS/free-RAM/swap monitoring remains required for live execution. Native consumption
+checks the remaining run deadline between chunks and on completion, preserving an
+expired stream as timeout. Synchronous I/O can remain blocked for its per-operation
+inactivity timeout; an external process guard supplies the hard wall, and cancellation
+does not prove remote computation stopped. No concurrent local model loading is authorized.
 
 Every raw dispatched/recorded terminal is acknowledged by its required writer BEFORE
 projection. Rows/report/manifest then publish under the new owner; ACK binds the final
@@ -117,7 +124,8 @@ Inspection closes filenames against admitted configuration/input snapshots, cano
 case rows, verified terminals, timing and reports; resealing foreign case/snapshot or
 unrelated filenames cannot make them part of the plan. It verifies hashes, code/schema/source identities, exact
 admitted recording bytes, canonical per-row terminal ownership, request identities,
-closed transport states and every derived row/report. Terminal-free outcomes reconstruct
+closed transport states consistent with HTTP status, completion and retained-byte
+observations, and every derived row/report. Terminal-free outcomes reconstruct
 admitted blockage, recording presence and finite remaining-budget observation: optional
 terminal removal cannot turn malformed responses into blocked coverage. Unsigned local
 time/resource observations are consistency evidence, not authenticated execution history

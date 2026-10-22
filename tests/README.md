@@ -10,7 +10,11 @@ The application fixtures isolate runtime paths and network; see `conftest.py` an
 `test_collection_native.py` use only public synthetic `test_collection_fixtures.py`
 data. `test_collection_review_findings.py` rejects missing corpus-backed reference
 inventory and resealed foreign case/snapshot/unrelated files, preserving safe earlier
-references, no-corpus unknowns and canonical replay without original snapshots. Real module entry exercises admission/run/inspect/reuse refusal; inert HTTPX
+references, no-corpus unknowns and canonical replay without original snapshots.
+`test_collection_review_regressions.py` covers independent oversized questions, original
+nested baseline paths and alias collisions, strict owner freezes, HTTP replay consistency,
+trickling-response deadlines and reordered scored gold; the configured paper-cap control
+also verifies reused priority admission. Real module entry exercises admission/run/inspect/reuse refusal; inert HTTPX
 exercises native raw ACK order and operational states. Original top3 names, duplicate
 workflow names, missing corpus, independent parent/child choice, shortlist recall,
 canonical/time/source-owner joins, cumulative requests+snapshots, closed capabilities,

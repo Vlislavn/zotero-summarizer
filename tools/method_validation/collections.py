@@ -199,7 +199,7 @@ class Config(Frozen):
 def reference_safe(reference, inputs, truth, frozen_at):
     held = [p for p in inputs.papers if p.split == 'holdout']
     held_ids = {normalized(a) for p in held for a in p.canonical_ids}
-    if (reference.split != 'development' or reference.observed_at > frozen_at
+    if (reference.split != 'development' or reference.observed_at >= frozen_at
             or reference.observed_at >= truth.split_frozen_at
             or reference.family in {p.family for p in held}
             or identity(reference) in {identity(p) for p in held}

@@ -123,10 +123,9 @@ def report(rows, cfg, inputs, truth, *, timings=()):
     arms = {a.arm_id: summary([r for r in held if r['arm_id'] == a.arm_id], questions, eligible,
             [t for t in timings if t['arm_id'] == a.arm_id and t['paper_sha256'] in held_keys])
             for a in (*cfg.arms, *cfg.baselines)}
-    workflow_names = {n.name for n in inputs.tree.nodes if n.role == 'workflow'}
     for arm in cfg.baselines:
         arms[arm.arm_id]['workflow_suggestions_excluded'] = sum(
-            len(set(r['baseline_native']['readout']['suggested_collections']) & workflow_names)
+            len(r['baseline_native']['readout']['suggested_collections']) - len(r['selected_keys'])
             for r in held if r['arm_id'] == arm.arm_id and r['status'] == 'decision')
     gates = {}
     for arm, values in arms.items():

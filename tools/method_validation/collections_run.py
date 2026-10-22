@@ -58,7 +58,9 @@ def prepare(cfg, snapshots=None):
             except ValueError as error:
                 if error.args[0] not in ('missing_input', 'input_too_large'):
                     raise
-                errors[key] = error.args[0]
+                errors[digest([key, node])] = error.args[0]
+                if error.args[0] == 'missing_input':
+                    errors[digest([key, None])] = 'missing_input'
     baselines = {}
     for index, arm in enumerate(cfg.baselines):
         rows = {}
@@ -108,6 +110,18 @@ def base_row(unit, paper, node, arm, gold):
             'baseline_native': None, 'telemetry': {'reserved': False, 'dispatched': False, 'elapsed_seconds': None}}
 
 
+def baseline_names(nodes):
+    names = {}
+    for key, node in nodes.items():
+        parts, parent = [node.name.strip()], node.parent
+        while parent is not None:
+            parts.append(nodes[parent].name.strip())
+            parent = nodes[parent].parent
+        for name in {node.name, ' > '.join(reversed(parts))}:
+            names.setdefault(name, set()).add(key)
+    return names
+
+
 def baseline_result(row, arm, native, nodes):
     if native is None:
         return row
@@ -120,13 +134,16 @@ def baseline_result(row, arm, native, nodes):
                 or len(names) > 3 or any(not isinstance(n, str) or not n for n in names)
                 or len(set(names)) != len(names)):
             raise ValueError('malformed original top3 result')
-        selected = []
+        selected, aliases = [], baseline_names(nodes)
         for name in names:
-            matches = [n for n in nodes.values() if n.name == name]
+            matches = aliases.get(name, set())
             if len(matches) != 1:
-                raise ValueError('unknown/ambiguous original collection name')
-            if matches[0].role != 'workflow':
-                selected.append(matches[0].key)
+                raise ValueError('unknown/ambiguous original collection name/path')
+            key = next(iter(matches))
+            if nodes[key].role != 'workflow':
+                if key in selected:
+                    raise ValueError('duplicate original collection aliases')
+                selected.append(key)
         if native['observed_model'] != arm.model:
             row['status'] = 'model_mismatch'
         elif fields['has_corpus']:
@@ -150,7 +167,7 @@ def evaluate(row, arm, cfg, request, retain, *, recording=None, transport=None, 
             'terminal_status': 'received', 'elapsed_seconds': None, 'client_retries': 0})
     else:
         reply = NativeDecisionAdapter(arm, cfg, transport=transport, projector=project)(
-            request, retain, timeout=min(remaining, cfg.idle_timeout_seconds))
+            request, retain, timeout=min(remaining, cfg.idle_timeout_seconds), max_elapsed_seconds=remaining)
     row.update(status=reply.status, readout=reply.readout, telemetry=reply.telemetry,
                label=reply.readout['label'] if reply.status == 'decision' else None)
     return row
@@ -182,8 +199,8 @@ def run(cfg, raw_config, *, transport=None):
                 group_started = monotonic() if arm.kind == 'native' else None
                 group = []
             row = base_row(unit, papers[key], node, arm, gold)
-            if key in errors:
-                row['status'] = errors[key]
+            if unit in errors:
+                row['status'] = errors[unit]
             elif arm.kind == 'similarity':
                 baseline_result(row, arm, baselines[arm.arm_id].get(key), nodes)
             else:
@@ -225,8 +242,8 @@ def verify_row(index, row, plan, prepared, cfg, saved):
     name = f'terminal-{index}.bin'
     if ('terminal' in row) != (name in saved) or ('terminal' in row and row['terminal'] != name):
         raise ValueError('terminal ownership/reference mismatch')
-    if key in errors:
-        base['status'] = errors[key]
+    if unit in errors:
+        base['status'] = errors[unit]
     elif arm.kind == 'similarity':
         baseline_result(base, arm, baselines[arm.arm_id].get(key), nodes)
     elif 'terminal' not in row:
@@ -244,13 +261,32 @@ def verify_row(index, row, plan, prepared, cfg, saved):
                         'elapsed_seconds': None, 'client_retries': 0}
             if telemetry != expected:
                 raise ValueError('recorded transport telemetry mismatch')
-        elif telemetry.get('reserved') is not True or telemetry.get('dispatched') is not True:
-            raise ValueError('native dispatched telemetry mismatch')
+        else:
+            check_native_transport(telemetry, terminal, requests[unit], cfg)
         status, readout = project(terminal, arm, cfg, telemetry['terminal_status'])
         base.update(status=status, readout=readout, telemetry=telemetry, terminal=name,
                     request_sha256=sha(requests[unit]), label=readout['label'] if status == 'decision' else None)
     if base != row:
         raise ValueError('outcome/admitted projection mismatch')
+
+
+def check_native_transport(telemetry, terminal, request, cfg):
+    state = telemetry.get('terminal_status')
+    size = telemetry.get('retained_bytes')
+    observed = telemetry.get('observed_bytes_lower_bound')
+    complete = telemetry.get('raw_complete')
+    http_status = telemetry.get('http_status')
+    if (telemetry.get('reserved') is not True or telemetry.get('dispatched') is not True
+            or telemetry.get('client_retries') != 0 or telemetry.get('attempt') != 1
+            or type(size) is not int or size != len(terminal) or size > cfg.max_response_bytes
+            or type(observed) is not int or observed < size or type(complete) is not bool
+            or telemetry.get('request_bytes') != len(request)):
+        raise ValueError('native transport byte/dispatch telemetry mismatch')
+    if (state == 'received' and (http_status != 200 or not complete or observed != size)
+            or state in ('timeout', 'response_too_large') and complete
+            or state == 'response_too_large' and (size != cfg.max_response_bytes or observed <= size)
+            or state == 'unavailable' and complete and http_status == 200):
+        raise ValueError('native transport status/completion mismatch')
 
 
 def checked_timings(raw, rows, plans, questions):
