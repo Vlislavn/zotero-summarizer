@@ -8,7 +8,11 @@ and artifact inspection perform zero calls/writes; only explicit `--run` writes 
 new selected-root attempt. See [priority usage](../../docs/decision-priority-comparison.md)
 and [its frozen API](PRIORITY-INTERFACES.md). Missing/invalid/blocked/abstained
 outcomes stay unscored; synthetic controls and unknown resources cannot establish
-a winner, promotion or full #38 completion.
+a winner, promotion or full #38 completion. Reports keep per-gold-class failure
+coverage separate from decision-only quality and identify synthetic labels plus
+declared/missing provenance counts without claiming independent verification.
+Admission rejects repeated canonical papers even within one family, and ML imports
+require nonempty training-family provenance before any artifacts or requests.
 
 ## Support comparison (#37)
 

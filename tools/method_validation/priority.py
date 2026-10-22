@@ -183,9 +183,9 @@ def admit(cfg, inputs, truth):
         ids.add(paper.paper_id)
         papers[key] = paper
         for alias in (('text', key), *(('id', normalized(x)) for x in paper.canonical_ids)):
-            if alias in aliases and aliases[alias] != paper.family:
-                raise ValueError('canonical aliases must share a family')
-            aliases[alias] = paper.family
+            if alias in aliases and aliases[alias] != key:
+                raise ValueError('canonical aliases must identify only one paper')
+            aliases[alias] = key
         if paper.family in splits and splits[paper.family] != paper.split:
             raise ValueError('whole-family split leakage')
         splits[paper.family] = paper.split

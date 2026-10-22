@@ -67,7 +67,7 @@ def prepare(cfg, snapshots=None):
                 if (artifact.kind != baseline.kind or artifact.model != baseline.model
                         or artifact.owner_sha256 != owners[baseline.kind]):
                     raise ValueError('baseline model/source binding mismatch')
-                if baseline.kind == 'ml' and (not artifact.trained_at or artifact.training_families is None):
+                if baseline.kind == 'ml' and (not artifact.trained_at or not artifact.training_families):
                     raise ValueError('ML training provenance is required, never infer holdout safety')
                 if held and baseline.kind == 'ml' and (artifact.trained_at >= min(p.observed_at for p in held)
                         or set(artifact.training_families) & {p.family for p in held}):

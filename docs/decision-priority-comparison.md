@@ -56,7 +56,7 @@ All file references have an explicit absolute `path` and exact `sha256`.
 - The generator receives only title, abstract, configured goals and the fixed task/
   options. It does not receive labels, provenance, split, family, sampling stratum
   or gold filenames. External text remains data, never execution authority.
-- Duplicate canonical-text identities, conflicting family aliases, split leakage,
+- Duplicate canonical-text identities or canonical IDs across papers, split leakage,
   future-development leakage, invalid/unmatched labels or calibration using
   holdout families fail before dispatch/artifacts. Thresholds require frozen
   development-only provenance before holdout opening; unknown is not a negative.
@@ -87,8 +87,9 @@ ML/LLM baselines are **imported matched artifacts**, not new inference. Each dec
 `kind` (`ml`/`llm`), model, baseline-owner source hash, model-artifact hash, training
 provenance and rows keyed by the same normalized-text identity. Owner hashes bind
 the actual existing `classifier.py` or `llm_classifier.py` without importing them.
-ML training provenance must exclude holdout families and precede held-out papers.
-Missing training provenance is refused, not inferred. All snapshots are private
+ML training provenance must name a nonempty set of training families, exclude
+holdout families and precede held-out papers. Missing or empty training provenance
+is refused, not inferred. All snapshots are private
 artifacts of this explicit run; hashes provide integrity, not signed authenticity.
 
 Baseline rows preserve observed model, actual label, optional continuous regressor
@@ -110,8 +111,14 @@ strong recommendations, P@k/NDCG@k and top-k must-read retention. Input-wide gol
 sampling counts are named separately from held-out eligible gold/sampling counts. Binary usefulness
 for P@k means human `must_read` or `should_read`; gains for NDCG are `2**ordinal-1`.
 Classification must-read retention counts gold must-read classified into the top
-two priorities. False strong recommendations count gold dont-read among predicted
-top-two priorities. Empty denominators are null, not zero success.
+two priorities, conditional on a scored decision. False strong recommendations
+count gold dont-read among predicted top-two priorities. `class_coverage` separately
+shows total/evaluated counts, statuses and decision coverage for every eligible
+gold class, including unscored failures; blocked cases are not evaluated. Empty
+denominators are null, not zero success. `synthetic_labels` and
+`input_provenance_class_counts` distinguish synthetic labels and declared/missing
+provenance by class. A supplied provenance declaration is not independent human
+verification; its original text remains in the private gold snapshot.
 
 Native Brier/calibration/ECE use the full vector and probability of the preserved
 native choice, not a vendor confidence field. Unsupported baseline probability

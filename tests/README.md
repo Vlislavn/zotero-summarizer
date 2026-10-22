@@ -14,7 +14,11 @@ firewalls, actual baseline capabilities and verified effect-free reopen. Publish
 write-then-raise is failure, never readback confirmation. The full support selectors
 below remain regression controls for the shared transport/default projection.
 No synthetic score, HTTPX transport or CLI test is a live-provider or scientific
-quality/promotion study.
+quality/promotion study. Priority metric regressions retain class-specific timeout,
+abstention and blocked coverage without invented negatives; mixed-provenance
+sidecars disclose declared/missing class counts separately from synthetic status.
+Same-family canonical duplicates and absent/empty ML training-family provenance
+must fail admission before artifacts or requests.
 
 ## Recorded-input replay regression
 

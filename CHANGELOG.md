@@ -14,6 +14,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Add explicit offline reading-priority comparison: frozen human-label firewall, four-class native/retained readouts, matched ML/LLM artifacts, ranking/calibration/paired reports and verified private replay. No model loads, production writes or winner without empirical/resource qualification.
 
 ### Changed
+- Reject duplicate reading-priority canonical papers even within one family, and refuse ML artifacts with empty training-family provenance before calls or writes.
+- Expose reading-priority coverage/status denominators per gold class, plus synthetic-label and declared/missing-provenance counts. Unscored failures remain unscored; decision-only quality metrics are unchanged.
 - Reconstruct terminal-free replay from admission and remaining-budget observations; bind terminal references to row owners, close transport states and reject false blocked coverage. Preserve real wall/missing/blocked outcomes and unsigned-telemetry limits.
 - Bind recorded support replay to its exact admitted case/arm recording and received state before deriving readouts. Self-consistent copied-terminal/report/hash replacement cannot substitute unchanged inputs; retain raw bytes and unsigned-artifact limits.
 - Keep priority ranking capabilities distinct: LLM ordinal priority is not confidence, missing ML regression scores leave ranking unavailable without losing classification. Reopening compares recorded terminals with exact admitted inputs; input-wide and holdout counts are named separately.
