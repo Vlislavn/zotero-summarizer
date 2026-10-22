@@ -38,6 +38,11 @@ const EYEBROW = 'mb-2 text-[11px] uppercase tracking-[0.08em] font-semibold text
 function ReviewZone({ deep, runner, sectionOverlay }) {
   const { status, error, llm, llmAvailable, online, running } = runner;
   const reviewed = deep && !deep.needs_pdf && (deep.digest || deep.quality || (deep.goal_summaries || []).length);
+  const digest = deep?.digest;
+  const usable = !deep?.needs_pdf && !deep?.error && [
+    digest?.tldr, digest?.executive_summary,
+    ...(Array.isArray(digest?.key_findings) ? digest.key_findings : []),
+  ].some((value) => String(value || '').trim());
   return (
     <div className="space-y-3">
       {!online ? (
@@ -62,9 +67,8 @@ function ReviewZone({ deep, runner, sectionOverlay }) {
       )}
       <FullTextAccessNotice deep={deep} />
 
-      {reviewed ? (
-        <PaperReview deep={deep} flat sectionOverlay={sectionOverlay} />
-      ) : running ? (
+      {reviewed && !running && <PaperReview deep={deep} flat sectionOverlay={sectionOverlay} />}
+      {running ? (
         <div className="rounded-lg border border-slate-200 bg-white px-4 py-5 text-[13px] text-slate-600" role="status" aria-live="polite">
           <div className="flex items-center gap-2 font-semibold text-slate-700">
             <Spinner size="sm" color="slate" /> Generating the review…
@@ -82,17 +86,15 @@ function ReviewZone({ deep, runner, sectionOverlay }) {
             </div>
           )}
         </div>
-      ) : (
-        !deep?.needs_pdf && (
-          <button
-            type="button"
-            onClick={() => runner.run()}
-            disabled={!llmAvailable}
-            className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-[13px] font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
-          >
-            Generate review
-          </button>
-        )
+      ) : !usable && (
+        <button
+          type="button"
+          onClick={() => runner.run()}
+          disabled={!llmAvailable}
+          className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-[13px] font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
+        >
+          Generate review
+        </button>
       )}
       <ReviewFailure status={status} />
       {online && status.status === 'unavailable' && status.error && (
