@@ -32,6 +32,11 @@ JSON, at most 1 MiB. `ZS_PRIORITY_OVERRIDES` is an explicit JSON-object override
 malformed values fail. `ZS_SOURCE_WORK_SAFETY_MS` caps configured wall safety
 (default 3,600,000; maximum 7,200,000 ms). Work is limited by case, outcome,
 call/forward-pass and cumulative snapshot-byte budgets, not wall time alone.
+Each input read is limited by the remaining aggregate snapshot budget before
+allocation. Public native adapter/evaluation calls share consent/guard and next-call
+admission; an adapter instance also bounds cumulative calls/declared forward work.
+Whole-workload reservation stays with the runner, not a process-global counter.
+Off-host endpoints require HTTPS; explicit loopback HTTP remains supported.
 Live requests require public-input consent, a separately installed external
 wall/memory guard and qualified existing endpoint/model/runtime/checkpoint/licence/
 context declarations. These declarations are inputs, not independently attested
@@ -123,6 +128,10 @@ verification; its original text remains in the private gold snapshot.
 Native Brier/calibration/ECE use the full vector and probability of the preserved
 native choice, not a vendor confidence field. Unsupported baseline probability
 metrics are null. No cross-model calibration is asserted.
+
+Paired estimates require non-null declared human provenance on the frozen gold;
+missing provenance cannot enter the paired cohort or qualify its uncertainty floor.
+A declaration still does not authenticate human review.
 
 Pairwise ranking uses the **same successful labelled intersection** at the same
 configured depth. Reports show its coverage and selection bias; insufficient

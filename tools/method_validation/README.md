@@ -25,7 +25,7 @@ server launch, credential lookup, retry engine, baseline constructor or model lo
 
 ```
 explicit frozen configuration + exact original sources/pairs
-  -> whole-workload admission / development firewall / byte and work reservations
+  -> whole-workload admission / development firewall / shared input-byte and work reservations
   -> configured native HTTP OR recorded terminal bytes + matched binary artifacts
   -> exclusive Settings.data_dir/support_comparison/<attempt>/
   -> per-pair terminal rows + report.json / report.md + manifest / ACK
@@ -66,3 +66,14 @@ for admission, recorded execution, inspection and refusal to reuse an existing o
 Native readouts also pass the existing typed contract inside the provider projection
 boundary: malformed Unicode aliases remain per-pair invalid responses, preserving
 raw bytes and allowing valid neighboring cases to finish.
+
+Direct native calls share the runner's consent/guard and next-call reservation check;
+adapter instances also bound cumulative work. Recorded evaluation rejects blocked or
+wrong-kind arms. Remote endpoints require HTTPS (loopback HTTP is retained). All frozen
+input snapshots share `max_input_bytes`; paired inference excludes gold without human
+provenance while retaining descriptive labels and the full coverage denominator.
+
+Priority uses the same public native admission/TLS guard, retaining its four-way
+projector and outcome-work reservation. Its separate aggregate `max_snapshot_bytes`
+cap also bounds each input read before allocation. Priority rows without declared
+human provenance never enter paired estimates; blocked recordings stay unscored.

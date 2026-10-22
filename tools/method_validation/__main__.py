@@ -1,4 +1,7 @@
-"""Offline support/priority comparisons; default is read-only admission."""
+"""Opt-in #37 CLI; default is read-only admission, not a model run.
+
+Usage: python -m tools.method_validation support --config /absolute/config.json [--run]
+"""
 import argparse
 import os
 from pathlib import Path

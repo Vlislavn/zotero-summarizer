@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from html import escape
+from ipaddress import ip_address
 from math import fsum, isfinite
 from time import monotonic
 from urllib.parse import urlsplit
@@ -52,10 +53,23 @@ def endpoint(url):
                  and '?' not in url and '#' not in url
                  and not any(c.isspace() or ord(c) < 33 or ord(c) == 127 for c in url))
         httpx.URL(url)
+        if valid and parsed.scheme == 'http' and parsed.hostname != 'localhost':
+            valid = ip_address(parsed.hostname).is_loopback
     except (ValueError, TypeError, httpx.InvalidURL):
         valid = False
     if not valid:
-        raise ValueError('explicit credential-free HTTP(S) /v1/systemone required')
+        raise ValueError('explicit credential-free HTTPS /v1/systemone required (HTTP only on loopback)')
+
+
+def admit_native(arms, pairs, cfg):
+    active = [a for a in arms if a.kind == 'native' and not a.blockage()]
+    for arm in active:
+        endpoint(arm.endpoint)
+    if active and not (cfg.external_guard and cfg.public_input_consent):
+        raise ValueError('live HTTP requires public-input consent and external wall/memory guard')
+    if (len(active) * pairs > cfg.max_calls
+            or sum(a.forward_passes_bound for a in active) * pairs > cfg.max_work_units):
+        raise ValueError('whole-workload call/forward-pass reservation exceeds budget')
 
 
 def fields(value, keys):
@@ -115,11 +129,12 @@ class NativeDecisionAdapter:
         self.calls = 0
         if arm.kind != 'native' or arm.blockage():
             raise ValueError('only explicitly qualified native arms can construct this adapter')
-        endpoint(arm.endpoint)
+        admit_native((arm,), 1, cfg)
 
     def __call__(self, request: bytes, retain, *, timeout=None) -> ProviderReply:
-        if len(request) > self.cfg.max_request_bytes or self.calls >= self.cfg.max_calls:
-            raise ValueError('request/call budget exceeded before dispatch')
+        if (len(request) > self.cfg.max_request_bytes or self.calls >= self.cfg.max_calls
+                or (self.calls + 1) * self.arm.forward_passes_bound > self.cfg.max_work_units):
+            raise ValueError('request/call/forward-pass budget exceeded before dispatch')
         self.calls += 1
         raw = bytearray()
         status, http_status, complete, observed = 'received', None, True, 0
@@ -161,6 +176,8 @@ class NativeDecisionAdapter:
 
 
 def evaluate_support(case, arm, cfg, retain, *, recorded=None, transport=None, timeout=None):
+    if arm.blockage() or (recorded is not None and arm.kind != 'recorded'):
+        raise ValueError('blocked arm or incompatible recorded mode')
     request = payload(case, cfg)
     if recorded is not None:
         retain(recorded)

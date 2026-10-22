@@ -14,8 +14,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Add explicit offline reading-priority comparison: frozen human-label firewall, four-class native/retained readouts, matched ML/LLM artifacts, ranking/calibration/paired reports and verified private replay. No model loads, production writes or winner without empirical/resource qualification.
 
 ### Changed
-- Reject duplicate reading-priority canonical papers even within one family, and refuse ML artifacts with empty training-family provenance before calls or writes.
-- Expose reading-priority coverage/status denominators per gold class, plus synthetic-label and declared/missing-provenance counts. Unscored failures remain unscored; decision-only quality metrics are unchanged.
+- Enforce support-comparison consent/work admission on public native calls, reject blocked/wrong-mode recordings and off-host plaintext HTTP, share the frozen-input byte cap, and exclude unprovenanced labels from paired inference. Keep descriptive labels and full coverage denominators.
 - Reconstruct terminal-free replay from admission and remaining-budget observations; bind terminal references to row owners, close transport states and reject false blocked coverage. Preserve real wall/missing/blocked outcomes and unsigned-telemetry limits.
 - Bind recorded support replay to its exact admitted case/arm recording and received state before deriving readouts. Self-consistent copied-terminal/report/hash replacement cannot substitute unchanged inputs; retain raw bytes and unsigned-artifact limits.
 - Keep priority ranking capabilities distinct: LLM ordinal priority is not confidence, missing ML regression scores leave ranking unavailable without losing classification. Reopening compares recorded terminals with exact admitted inputs; input-wide and holdout counts are named separately.
@@ -27,6 +26,9 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Preserve current support safety fixes in priority comparison: shared direct native admission/TLS controls, pre-read aggregate snapshot limits and provenance-qualified paired estimates. Reconcile the existing dependency without changing its base or feature behavior.
+- Reject duplicate reading-priority canonical papers even within one family, and refuse ML artifacts with empty training-family provenance before calls or writes.
+- Expose reading-priority coverage/status denominators per gold class, plus synthetic-label and declared/missing-provenance counts. Unscored failures remain unscored; decision-only quality metrics are unchanged.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
 - A124: verify section one-liners in a second batch against the same first 700 source characters (up to 24 sections); omit unsupported summaries. Scripted checks do not establish live semantic accuracy.
