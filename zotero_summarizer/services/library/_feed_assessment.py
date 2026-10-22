@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import re
 
 from zotero_summarizer.models.research_feed import FeedAssessment, FeedDigestResponse, FeedProjectAssessment, FeedReviewContext
 from zotero_summarizer.services.library._prompt_security import untrusted_input
@@ -56,6 +57,18 @@ def response_contract(prompt, response_format, context):
     return prompt + PROMPT.replace("{context}", untrusted_input(context.model_dump_json())), extra
 
 
+def _original_span(original, quote):
+    """Locate identical text with layout-only whitespace changes; never fuzzy match."""
+    if not quote.strip():
+        return None
+    start = original.find(quote)
+    if start >= 0:
+        return start, start + len(quote)
+    pattern = r"\s+".join(re.escape(part) for part in quote.split())
+    match = re.search(pattern, original)
+    return match.span() if match else None
+
+
 def finish(digest, original, prompt, context, out):
     """Only the final accepted digest attempt contributes optional content."""
     out.clear()
@@ -64,32 +77,36 @@ def finish(digest, original, prompt, context, out):
         out.update(status="invalid" if "feed_assessment" in digest.model_fields_set else "not_assessed")
         return
     content = content.model_copy(deep=True)
-    evidence, keys = {}, set()
-    for index, record in enumerate(content.projects):
+    keys = set()
+    for record in content.projects:
         if record.source_id != context.source_id or record.target_project not in context.profile.projects or record.target_project in keys:
             out.update(status="invalid")
             return
         keys.add(record.target_project)
-        evidence[f"/projects/{index}"] = record.evidence_quote
     for project in context.profile.projects:
         if project not in keys:
-            evidence[f"/projects/{len(content.projects)}"] = ""
             content.projects.append(FeedProjectAssessment(
                 source_id=context.source_id, target_project=project, assessment="unknown", use_kind=None,
                 rationale="Project assessment was not returned.", mechanism="", target_component="",
                 proposed_change="", minimal_validation_experiment="", evidence_quote="",
             ))
+    evidence = {f"/projects/{index}": record for index, record in enumerate(content.projects)}
     for field in ("reproduction", "impact"):
         record = getattr(content, field)
         if record is not None:
-            evidence[f"/{field}"] = record.evidence_quote
+            evidence[f"/{field}"] = record
     spans = {}
-    for path, quote in evidence.items():
-        start = original.find(quote) if quote.strip() else -1
-        if quote and start < 0:
+    for path, record in evidence.items():
+        if not record.evidence_quote:
+            spans[path] = None
+            continue
+        located = _original_span(original, record.evidence_quote)
+        if located is None:
             out.update(status="invalid")
             return
-        spans[path] = {"quote": quote, "start": start, "end": start + len(quote)} if quote else None
+        start, end = located
+        record.evidence_quote = original[start:end]
+        spans[path] = {"quote": record.evidence_quote, "start": start, "end": end}
     complete = keys == set(context.profile.projects) and all(r.assessment != "unknown" for r in content.projects)
     out.update(status="assessed" if complete else "partial", content=content.model_dump(mode="json"),
                evidence=spans, context=context.model_dump(mode="json"), contract=contract(),

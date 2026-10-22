@@ -446,6 +446,8 @@ Malformed optional content or non-original quotes retain the verified base witho
 another call; weekly qualification reports the assessment failure separately.
 `_feed_assessment` binds context, producer/schema, original-text hash and exact
 spans to the current review identity, digest, timestamp and configured provenance.
+Layout-only whitespace differences are resolved back to the exact original
+substring and offsets before binding; case, punctuation and words must match.
 The existing `_review_cache` remains the writer. No extra source extraction or
 judge is used during projection; source bytes/config freshness belong to the
 current-review reader. Literal membership is not entailment: proposals and effort

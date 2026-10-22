@@ -29,6 +29,10 @@ browser restrictions while preserving interactive acquisition.
 with hostile closing-tag markup across source fields and an unchanged plain-text
 control. These are structural boundary tests, not live semantic safety evidence.
 
+`test_feed_original_spans.py` resolves layout-only quote whitespace to exact
+original substrings/offsets across project, reproduction and impact records;
+changed case, punctuation and words still fail, and accepted digests stay intact.
+
 `test_feed_runtime_contracts.py` covers verifier/generator effort separation,
 advertised wire dialects, unsupported-provider preservation and JSON-only CLI
 stdout when runtime diagnostics are printed. Live model receipts remain separate.

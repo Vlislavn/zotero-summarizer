@@ -20,6 +20,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Resolve feed-assessment quote layout differences back to exact original source substrings and offsets. Preserve case/word/punctuation rejection, null unknown evidence and fail-closed source qualification.
 - Minimize deep-review verification reasoning: disable declared chat thinking or lower active three-level reasoning to low, preserving explicit user off and configured digest effort. Keep research-feed stdout JSON by routing runtime diagnostics to stderr; truncation still fails closed.
 - Escape source-supplied closing-tag markup in shared abstract/full-text refinement and triage prompts before rendering. Preserve complete summary/corpus content and existing scoring; DOI and auxiliary source metadata use the escaped data boundary.
 - Keep weekly acquisition browser-free; retain omitted/blank unknown projects and reproduction blockers. Isolate optional abstract-cache failures, report absent stages, retry missing PDFs, preserve v1 triage confidence, and export feed assessment models.
