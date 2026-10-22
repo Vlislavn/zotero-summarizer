@@ -25,6 +25,10 @@ projects, blocker precedence, missing/corrupt abstract-stage isolation, missing-
 recovery, numeric v1 confidence and real worker/cache binding. It checks feed-only
 browser restrictions while preserving interactive acquisition.
 
+`test_feed_prompt_boundary.py` checks actual refine/triage prompt serialization
+with hostile closing-tag markup across source fields and an unchanged plain-text
+control. These are structural boundary tests, not live semantic safety evidence.
+
 Full verification commands and the known macOS native-library fork baseline are
 in [architecture.md](../docs/architecture.md#verify-a-change). Compare the failed
 set against that baseline rather than hiding failures. Authored/static-checked

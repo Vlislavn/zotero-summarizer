@@ -92,6 +92,8 @@ and original quote. Partial/unknown differs from assessed no-fit. Literal quote
 membership is not entailment or human validation; proposals stay AI-generated and
 scientifically unverified. Missing legacy assessments supply no invented uses or
 ideas. Omitted projects remain explicit unknowns with null evidence spans.
+Abstract triage escapes source-supplied boundary markup before prompting;
+this is structural protection, not proof of semantic injection resistance.
 Legacy numeric impact fields retain zero placeholders; null
 `impact_assessment` means unassessed, not measured zero benefit.
 

@@ -20,6 +20,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Escape source-supplied closing-tag markup in shared abstract/full-text refinement and triage prompts before rendering. Preserve complete summary/corpus content and existing scoring; DOI and auxiliary source metadata use the escaped data boundary.
 - Keep weekly acquisition browser-free; retain omitted/blank unknown projects and reproduction blockers. Isolate optional abstract-cache failures, report absent stages, retry missing PDFs, preserve v1 triage confidence, and export feed assessment models.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
