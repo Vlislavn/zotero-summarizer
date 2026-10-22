@@ -10,11 +10,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
-- Bound retained CSV line indexing incrementally; reject missing journal source and invalid SQL paper keys; retain unrepresentable UTC timestamps as unknown. Clarify later-stack CLI/weekly docs.
-
-- Package existing retained history and descriptive analysis from the working changes for dependent review; no behavior redesign.
-
-- Package existing retained input capture and report primitives from the working changes for dependent review; no behavior redesign.
+- Pin the admitted CLI root through handler reloads and server factory startup; a selected `.env` cannot redirect writes to another project. Cover shell/cwd defaults and direct provider-SDK import rejection; name subprocess safety-cap constants.
 
 - CLI validates before Settings/.env loading, then applies offline flags from the selected project only. Importing CLI no longer reads another root. Faithbench/Setup exports and pure run options load lazily without changing public objects or benchmark algorithms.
 
@@ -27,10 +23,16 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Reconcile Feedback primitives with the current CLI foundation; preserve admitted-root pinning, literal Markdown and duplicate-namespace refusal.
+- Keep recorded Feedback report evidence literal when it contains Markdown backticks; reject ambiguous duplicate migration namespaces; clarify available capture primitives versus later-stack analysis/CLI/weekly contracts.
+- Package existing retained input capture and report primitives from the working changes for dependent review; no behavior redesign.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
 - A124: verify section one-liners in a second batch against the same first 700 source characters (up to 24 sections); omit unsupported summaries. Scripted checks do not establish live semantic accuracy.
 - A136: use figure metadata only for affirmative whole-paper figure-count wording; route scoped, uncertain, table-only, combined, and unmatched counts to grounded Q&A. Live scope accuracy is unmeasured.
+- Reconcile retained analysis with the current capture/report foundation; preserve admitted CLI roots, literal Markdown, duplicate-namespace refusal and analyzer bounds/identity checks.
+- Bound retained CSV line indexing incrementally; reject missing journal source and invalid SQL paper keys; retain unrepresentable UTC timestamps as unknown. Clarify later-stack CLI/weekly docs.
+- Package existing retained history and descriptive analysis from the working changes for dependent review; no behavior redesign.
 - A142: validate persisted and injected review-fleet proposals; skip malformed rows, retain valid neighbors, and calibrate only valid human/proposal pairs.
 - A176: cover admitted Faithbench text with contiguous 6,000-character windows; default 32, maximum 256, with preflight rejection above budget and the effective limit recorded in metadata.
 - FaithBench build resolves window budgets as CLI > shell environment > selected-project `.env` > default before provider setup; warning-call assertions are isolated from root-logger propagation.

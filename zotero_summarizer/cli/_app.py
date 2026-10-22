@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.storage.migrations import migrate_existing
 
 
 def _serve(args: argparse.Namespace) -> int:
+    # The string factory (including reload workers) must use the admitted root.
+    os.environ["ZOTERO_SUMMARIZER_HOME"] = args.project_root
     import uvicorn
 
     # factory=True so the app is built when uvicorn starts (and on each reload),

@@ -327,7 +327,10 @@ SDKs. The dispatcher validates command budgets first, then loads the selected
 `--project-root` through Settings and applies offline flags before handler model
 imports. No additional root is read by the offline helper. Existing Settings
 precedence is unchanged: selected `.env` values override the same inherited keys;
-keys absent from that file retain explicitly inherited shell values. For example:
+keys absent from that file retain explicitly inherited shell values. The admitted
+project root stays fixed for this command, even if its `.env` changes
+`ZOTERO_SUMMARIZER_HOME`; handler reloads and server workers use the admitted root.
+For example:
 
 ```bash
 zotero-summarizer migrate --project-root /path/to/project

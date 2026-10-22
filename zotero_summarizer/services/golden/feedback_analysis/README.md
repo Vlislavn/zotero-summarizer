@@ -1,11 +1,30 @@
-# Review stack part 2/4
+# feedback_analysis — retained inputs and report primitives
 
-Retained capture and descriptive analysis, with focused review corrections. No new command or issue closure.
-Merge the dependent parts in order; this part is `Feedback: retained history and descriptive analysis`.
-This head exports the Python library boundary only. The manual/weekly sections below describe later
-stack parts, not commands or dispatchers available here.
+## Available in this PR (stack part 1/4)
 
-# feedback_analysis — frozen inputs and local descriptive evidence
+The callable input boundary is `freeze_inputs` / `verify_inputs`, exported by this
+package. `metrics.py` and `report.py` retain supporting primitives for dependent
+parts; there is no integrated analysis, report operation, CLI command or weekly
+scheduler in this checkout. No overall issue #47 completion is claimed.
+
+`report.__all__` explicitly declares the existing low-level library boundary:
+`hash_file`, `inventory`, `make_immutable`, `markdown`, `read_protocol`,
+`stage_report`, `verify_report`, `write_private`, `write_protocol`. Direct callers
+supply a version-1 result, attempt/run identity and bounded `guard.consume(bytes)`;
+this is not an installed-host operation or analyzer. `stage_report` writes only
+its caller-owned staging tree; `make_immutable` changes that tree's modes. Keep
+raw retained inputs/results local and do not point these helpers at live sources.
+
+Report evidence uses code-span delimiters longer than any recorded backtick run,
+so recorded surfaces/locators remain literal text rather than active Markdown.
+
+**Downstream reference only:** the analysis/manual/weekly flow, contracts and
+sections below describe later stack parts, not functionality available here.
+`history.py`, `analysis.py`, operation/worker/scheduler modules and
+`goldenset analyze-feedback` are absent. Do not run those reference commands or
+bypass the future clean-child isolation requirement. For this part, exercise the
+real Python `freeze_inputs(settings, new_destination, cutoff=..., provenance=...)`
+and `verify_inputs(destination)` boundary described below.
 
 ```
 Settings sources --ro/WAL-aware backup + bounded EOF reads--> NEW private staging
@@ -13,6 +32,30 @@ Settings sources --ro/WAL-aware backup + bounded EOF reads--> NEW private stagin
 retained bytes --verify_inputs--> analyze_inputs --> local result dictionary
 manual / opt-in weekly --clean child(capture + analyze)--> immutable report + receipt
 ```
+
+## Current checkout — stack part 2/4
+
+The **part-1 availability block above is the prerequisite #162 reference**, not
+this head's scope. This checkout additionally implements and exports
+`analyze_inputs(destination, *, budgets=None)`; `history.py` and `analysis.py`
+are present. `freeze_inputs`/`verify_inputs` and the report primitives remain
+available with their safety contract above. Manual/weekly dispatchers and the
+`goldenset analyze-feedback` command remain absent; do not run those later-stack
+reference commands. No overall #47 completion is claimed.
+
+Analysis must run in a dedicated externally bounded process because its temporary
+CSV parser ceiling is process-global. Physical byte lines/positions are consumed
+lazily, so the record cap stops short-row inputs without a full line/offset list.
+SQL observation/alias keys must be nonblank text and a present journal must have
+`source`. UTC-conversion overflow remains located invalid/unknown time, not a
+whole-analysis failure. Snapshot duplicate-namespace refusal and literal report
+Markdown remain intact.
+
+Current coverage also includes `tests/test_feedback_analysis_{history,metrics,analysis,
+conflicting_cohorts,sync_sources}.py` and the eight analyzer boundary regressions.
+The later text's absent-history/analysis-suite statements describe part 1 only.
+These library tests and synthetic smoke are not operation/weekly, production,
+scientific or private installed-host acceptance.
 
 `freeze_inputs(settings, destination: Path, *, cutoff: datetime, provenance: dict,
 budgets=None) -> dict` creates a new directory beneath
@@ -46,7 +89,8 @@ Database integrity, canonical schema SHA, user_version, page bounds, available
 numbered namespace versions and sync revision min/max come **only from retained
 SQLite**. Old absent migration/sync tables are explicitly unavailable/null.
 Admission requires core triage result, feedback and verdict reading columns, not
-a current migration floor. An uninitialized/empty-file store is refused, not
+a current migration floor. Present migration metadata must have unique namespace
+rows; equal or conflicting duplicate versions are rejected rather than collapsed. An uninitialized/empty-file store is refused, not
 successful empty history; it cannot establish absence of decisions elsewhere.
 No live repository opener or writer backup is used.
 
@@ -94,8 +138,8 @@ unverified. No model/label change or issue closure follows from these functions.
 - `inputs.py`: boundary/path admission, work/safety guard, file capture, replay verification.
 - `sqlite_snapshot.py`: WAL online backup and retained schema/revision metadata.
 - `provenance.py`: JSON wire validation and deterministic identity.
-- `history.py`: strict retained CSV/JSONL/SQL readers and ambiguity-safe current alias graph.
-- `analysis.py`: `analyze_inputs(destination: Path, *, budgets=None) -> dict`, bounded retained-only result.
+- Later parts only — `history.py`: retained readers and ambiguity-safe current alias graph (absent here).
+- Later parts only — `analysis.py`: bounded retained-only `analyze_inputs` result (absent here).
 - `metrics.py`: separate unique-paper descriptive channels, Wilson intervals and eligibility metadata.
 - `__init__.py`: exported boundary functions and budget/error types.
 
@@ -105,13 +149,6 @@ and a configurable safety wall. Cutoff/declared provenance come from the verifie
 manifest; no live source locator is opened. Replay needs no original stores.
 Marker-only ambiguity candidates and SQL proof remain inspectable without unioning
 alternatives or trusting a stale alias. Invalid marker JSON/type fails at admission.
-
-CSV physical lines and byte positions are consumed lazily, so the record budget stops
-short-row inputs before building a whole-file line/offset index. Invalid UTF-8 and
-strict quote failures retain their located remainder behavior. SQL observation/alias
-keys must be nonblank text; a present journal without `source` is incompatible,
-not a successful empty history. Aware timestamps outside UTC's representable range
-remain located invalid-time observations rather than aborting analysis.
 
 CSV uses a finite parser ceiling derived from the prechecked decoded-byte budget,
 with an explicit `max_csv_field_chars` cap (default/hard cap 64 Mi codepoints) on
@@ -127,9 +164,8 @@ restore are unsupported/unverifiable, not a complete no-clobber guarantee.
 
 **Downstream acceptance requires manual CLI/weekly analytics in a dedicated,
 externally bounded analysis process with no unrelated CSV readers/setters, NOT a
-shared API/daemon CSV thread.** The later manual/weekly dispatcher described below
-supplies that clean-child isolation; it is not implemented on this part-2 head.
-A direct library caller must own its dedicated process and external safety cap.
+shared API/daemon CSV thread.** The manual/weekly dispatcher below supplies that
+clean-child isolation; callers must not bypass it.
 See [INTERFACES.md](INTERFACES.md) and the verbatim approval/race clarification in
 `data/issue-validation/feedback-analysis/p2/parent-decision.txt`.
 
@@ -164,18 +200,14 @@ Synthetic `tests/test_feedback_analysis_inputs*.py` cover numbered empty/populat
 stores, committed WAL preservation, unavailable old history, missing versus broken
 optional reads, replay after source removal, capture races, tamper/escape, budgets
 and failed publication. Existing golden CSV snapshot/hash checks remain separate.
-New synthetic `tests/test_feedback_analysis_{history,metrics,analysis}.py` cover
-canonical ambiguity/tombstones, channel/content multiplicity, missing-history
-recovery limits, strict malformed records, saved predictions, temporal exclusions,
-exact boundaries, confidence edges, bounds and read-only deterministic replay.
+`tests/test_feedback_analysis_report_primitives.py` covers safe Markdown evidence
+encoding. History/analysis/metrics suites described by later parts are absent here;
+this checkout does not establish their integrated behavior or coverage.
 Further subtraction: no parsing framework, inferred model identity, live-store
 alignment lock, scored training evaluation, export knobs or UI. Weekly automation
 below reuses the operation boundary without changing these frozen analytics.
 
-## Manual operation (later stack part; unavailable on this head)
-
-The following contract is retained for the dependent operation PR. Do not run these
-commands against this library-only head.
+## Manual operation — later-stack reference, unavailable here
 
 ```
 goldenset analyze-feedback --project-root ROOT [--cutoff AWARE_ISO]
@@ -275,9 +307,7 @@ Chronological eligibility and null ranking remain unscored. Weekly confirmation
 and cursor behavior are documented below; daemon training provenance is described
 in `services/model`. First private run, scored usefulness and overall #47 remain open.
 
-## Weekly operation (later stack part; unavailable on this head)
-
-The following contract requires the later manual-operation and scheduler implementations.
+## Weekly operation — later-stack reference, unavailable here
 
 ```
 feeds serve -- selected Settings / explicit main-thread capability
