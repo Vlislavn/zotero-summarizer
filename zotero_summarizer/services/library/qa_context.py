@@ -76,6 +76,8 @@ def compact_history(
         if verified_quote(item_key, artifact, handle) is None:
             continue
         input_digest = handle.get("input_digest")
+        if isinstance(input_digest, str) and len(input_digest) >= len(raw):
+            return raw, False, 0
         if not isinstance(input_digest, str):
             question = turn.get("question")
             input_digest = _digest(question) if isinstance(question, str) else None

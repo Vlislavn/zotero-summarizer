@@ -202,6 +202,8 @@ Ask Paper processes the latest 20 history turns and keeps the four recent turns
 in their existing conversational rendering. Older handles must resolve against
 the current paper extraction. Only when the complete checkpoint is strictly
 shorter than raw history does it replace older prose; otherwise history stays raw.
+An input identity already as long as raw history triggers that fallback before
+JSON serialization, avoiding a known-discarded copy without truncating identity.
 The first line is `Earlier evidence checkpoint: ` followed by one JSON array;
 the resolution warning stays on the next line, outside the payload.
 

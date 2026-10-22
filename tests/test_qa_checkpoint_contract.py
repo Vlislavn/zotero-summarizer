@@ -161,6 +161,26 @@ def test_oversized_complete_handle_keeps_raw_history(native_history):
     assert dumped == oversized
 
 
+@pytest.mark.parametrize("character", ["x", "\n"], ids=["plain", "json-escaped"])
+def test_nonfitting_input_identity_falls_back_before_serialization(
+    native_history, monkeypatch, character,
+):
+    artifact, history, _ = native_history
+    oversized = deepcopy(history)
+    oversized[0]["evidence_handle"]["input_digest"] = character * len(_render(history))
+    dumped = _dto_turns(oversized)
+    raw = _render(dumped)
+    assert len(dumped[0]["evidence_handle"]["input_digest"]) == len(raw)
+
+    def reject_serialization(*args, **kwargs):
+        pytest.fail("a guaranteed-nonfitting identity must not be serialized")
+
+    monkeypatch.setattr(qa_context.json, "dumps", reject_serialization)
+
+    assert qa_context.compact_history(ITEM_KEY, artifact, dumped) == (raw, False, 0)
+    assert dumped == oversized
+
+
 def test_generated_notes_cannot_replace_original_source_handles(native_history):
     artifact, history, handles = native_history
     generated_quote = "Map notes invented a new benchmark absent from the original source."

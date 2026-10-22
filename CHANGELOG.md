@@ -19,6 +19,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Skip checkpoint serialization when a legacy input identity alone is already as long as raw Q&A history, preserving the same fallback without copying an oversized identity.
 - Preserve complete current-source handles in shorter paper Q&A checkpoints, including original spans, repeated occurrences and legacy input digests. Prior conversation remains untrusted; nonshrinking checkpoints keep raw history.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
