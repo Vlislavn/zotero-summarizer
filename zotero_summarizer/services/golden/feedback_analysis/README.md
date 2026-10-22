@@ -2,7 +2,7 @@
 
 Existing implementation, mechanically packaged for review. No new feature or issue closure.
 Merge the dependent parts in order; this part is `Feedback: existing manual report command and publication`.
-Known original limitations are not repaired by this packaging.
+Manual lifecycle safety fixes retain the existing analytic and publication contracts.
 
 # feedback_analysis — frozen inputs and local descriptive evidence
 
@@ -184,7 +184,9 @@ explicit minimal environment is passed; no dotenv or live config parser runs the
 
 New caller provenance accepts **only** `seed` (default 42, env
 `ZS_FEEDBACK_OPERATION_SEED`, unsigned 32-bit integer; booleans rejected). The
-frozen functions' broader provenance contracts are unchanged. Child provenance
+frozen functions' broader provenance contracts are unchanged. This command requires a source checkout with Git HEAD, `pyproject.toml` and `uv.lock`;
+a standalone wheel without that provenance is unsupported and fails before capture.
+The worker disables bytecode writes to the application source tree. Child provenance
 contains full HEAD, actual application Python/dependency-file SHA-256 inventory,
 actual import root, Python/SQLite and relevant installed package versions. Selected
 `Settings.config_path` bytes are hashed, or explicitly missing; no values are
@@ -215,17 +217,24 @@ can only shrink. Operation names have `ZS_FEEDBACK_OPERATION_<UPPER_NAME>` env
 forms; malformed env always raises even with explicit overrides. Named defaults /
 hard caps: wall 120/600 seconds; tree RSS 512 MiB/1 GiB (provisional); swap growth
 2 GiB/max 2 GiB; available RAM floor 20%/minimum 20%; poll 1 second/max 1; terminate
-grace 1/max 5 seconds; cumulative I/O 2 GiB/max 2 GiB; source inventory entries (`max_source_files`, including directories/non-Python names)
+grace 1/max 5 seconds; operation artifact I/O 2 GiB/max 2 GiB per guard; source inventory entries (`max_source_files`, including directories/non-Python names)
 4096/max 4096. Application/dependency-file inventory additionally caps 64 MiB;
 selected goals hashing caps 1 MiB. psutil measures available/total,
 tree RSS and swap **growth**, never old absolute swap residue. Child reports actual
-`getrusage` peak RSS separately from parent sampled peak. Parent protocol/inventory
+`getrusage` peak RSS separately from parent sampled peak; a completed child with an
+invalid or over-cap peak cannot publish. Sampling is not instantaneous OS memory
+enforcement. Operation I/O counters cover provenance, protocols and report hashing,
+not total OS I/O or a shared parent/child cumulative counter. Capture and analysis
+retain their independent source/page/record/byte/work caps. Parent protocol/inventory
 validation is size/work/safety bounded; blocking filesystem calls cannot promise
 an absolute parent deadline. Child blocking calls are externally terminated/reaped.
 
 Main-thread SIGINT/SIGTERM interruption kills/waits only the owned process group,
 verifies absence and restores owned handlers without clobbering an observed foreign
-replacement. Threaded callers do **not** get signal-handler ownership. SIGKILL,
+replacement. Signal ownership extends through success/failure receipt persistence.
+Main-thread SIGINT/SIGTERM are deferred only while creating/registering the owned
+child; delivery resumes inside armed cleanup. The child unblocks its inherited
+launch mask before imports. Threaded callers do **not** get signal-handler ownership. SIGKILL,
 parent loss, machine crash and foreign signal handlers can prevent normal cleanup
 or receipt writing; no detached work is intentionally launched. Failures retain
 staging/phase/safe class and propagate/nonzero CLI; frozen capture still performs

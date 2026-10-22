@@ -14,4 +14,5 @@ Part 1 retains the corresponding original Feedback suites without assertion chan
 
 Part 2 retains the corresponding original Feedback suites without assertion changes.
 
-Part 3 retains the corresponding original Feedback suites without assertion changes.
+Part 3 retains the original Feedback suites. `test_feedback_operation_lifecycle.py`
+adds real-signal launch/receipt ownership and completed-worker RSS protocol regressions.

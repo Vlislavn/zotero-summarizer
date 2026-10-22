@@ -10,7 +10,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
-- Package existing existing manual report command and publication from the working changes for dependent review; no behavior redesign.
+- Keep Feedback signal cleanup armed during child launch and receipt persistence; reject invalid or over-cap worker RSS peaks before publication. Clarify source-checkout and artifact-I/O limits.
 
 - Package existing retained history and descriptive analysis from the working changes for dependent review; no behavior redesign.
 
