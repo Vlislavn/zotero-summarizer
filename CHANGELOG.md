@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Retain the original separate signal/reason disclosure, replacing the terse line while preserving current policy and grade projection.
+
 - Make injected-PDF full-reading fixtures provide typed independent full-text quality. Preserve path/grade/read assertions and add abstract/unassessed controls; digest grade alone never supplies scientific basis.
 
 - Bind historical coverage comparisons to the frozen main algorithm, preserving old flag and current policy-highlight oracles. Add distinct empty/unknown, explicit-failure and red-flag controls; production grading and paper annotations remain unchanged.
