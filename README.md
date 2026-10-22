@@ -183,3 +183,5 @@ uv run zotero-summarizer faithbench build --max-builder-windows 64  # larger QA-
 - **[CHANGELOG.md](CHANGELOG.md)** — notable changes (latest: the guided first-run setup).
 
 Feedback review stack part 1: Feedback: retained input capture and report primitives. See `zotero_summarizer/services/golden/feedback_analysis/README.md`; later parts supply the remaining existing workflow.
+
+Feedback review stack part 2: Feedback: retained history and descriptive analysis. See `zotero_summarizer/services/golden/feedback_analysis/README.md`; later parts supply the remaining existing workflow.

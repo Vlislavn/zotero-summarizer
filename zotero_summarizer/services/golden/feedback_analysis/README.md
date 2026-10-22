@@ -1,7 +1,7 @@
-# Review stack part 1/4
+# Review stack part 2/4
 
 Existing implementation, mechanically packaged for review. No new feature or issue closure.
-Merge the dependent parts in order; this part is `Feedback: retained input capture and report primitives`.
+Merge the dependent parts in order; this part is `Feedback: retained history and descriptive analysis`.
 Known original limitations are not repaired by this packaging.
 
 # feedback_analysis — frozen inputs and local descriptive evidence
