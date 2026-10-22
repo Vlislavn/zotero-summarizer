@@ -84,3 +84,5 @@ for admission, recorded execution, inspection and refusal to reuse an existing o
 Native readouts also pass the existing typed contract inside the provider projection
 boundary: malformed Unicode aliases remain per-pair invalid responses, preserving
 raw bytes and allowing valid neighboring cases to finish.
+
+Packaging retains the original non-shipped `tools.method_validation.client` transport and `practitioner.run_diagnostic` RSS driver with unchanged source and synthetic tests. These require explicit invocation; no app defaults, live inference, data collection, portable-path fixes or scientific acceptance are added. Existing pinned local test dependencies remain for review.

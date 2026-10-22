@@ -213,3 +213,5 @@ limitations and optional artifacts remain available without new calls or scoring
 changes. Default refinement preserves conditional effect directions and Results
 exceptions, failed versus absent validation, and repository versus reproducibility
 evidence. Instruction-presence tests are not scientific-faithfulness evaluations.
+
+The original private corpus-prefilter provenance marker is retained with the optional practitioner diagnostic; the marker is not an LLM/public JSON field. No new scoring rule is introduced.

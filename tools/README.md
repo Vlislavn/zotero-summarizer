@@ -52,3 +52,5 @@ The sweep requires `PAPERS`, `REF_PROVIDER`, and `REF_MODEL`. Its default is the
 remote budget phase only. Local phases (`PHASES=2` or `both`) additionally require
 explicit `CANDIDATES` and `CANDIDATE_PROVIDER`; no local model is selected implicitly.
 Provider names refer to caller-owned saved configuration; this does not rename it.
+
+Packaging retains the original non-shipped `tools.method_validation.client` transport and `practitioner.run_diagnostic` RSS driver with unchanged source and synthetic tests. These require explicit invocation; no app defaults, live inference, data collection, portable-path fixes or scientific acceptance are added. Existing pinned local test dependencies remain for review.
