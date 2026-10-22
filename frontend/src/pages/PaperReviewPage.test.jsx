@@ -36,6 +36,48 @@ it('keeps Generate disabled and does not claim a review failed on an offline rel
   client.clear();
 });
 
+it.each([['?autoRun=false', false], ['', true]])('paper navigation %s preserves explicit review consent', async (query, automatic) => {
+  const writes = [];
+  vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+  vi.stubGlobal('localStorage', { getItem: () => '["P1","P2"]' });
+  vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('fetch', vi.fn(async (path, options = {}) => {
+    let data;
+    if (path.startsWith('/api/golden/review-detail?')) {
+      const key = new URLSearchParams(path.split('?')[1]).get('item_key');
+      data = { item_key: key, title: `Unreviewed PDF ${key}`, tags: [], collections: [], has_pdf: true };
+    } else if (path === '/api/admin/llm-reachability') {
+      data = { stages: [{ stage: 'deep_review', enabled: true, reachable: true }] };
+    } else if (path === '/api/zotero/collections' || path === '/api/zotero/tags?limit=300') {
+      data = { items: [] };
+    } else if (options.method === 'POST') {
+      writes.push([path, JSON.parse(options.body)]);
+      data = { status: 'running' };
+    } else data = { status: 'idle' };
+    return new Response(JSON.stringify(data), { status: 200 });
+  }));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[`/paper/P1${query}`]}>
+    <Routes><Route path="/paper/:itemKey" element={<PaperReviewPage />} /></Routes>
+  </MemoryRouter></QueryClientProvider>);
+
+  if (!automatic) {
+    const generate = await screen.findByRole('button', { name: 'Generate review' });
+    await waitFor(() => expect(generate.disabled).toBe(false));
+    expect(writes).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Next ›' }));
+    await screen.findByRole('heading', { name: 'Unreviewed PDF P2' });
+    const nextGenerate = await screen.findByRole('button', { name: 'Generate review' });
+    await waitFor(() => expect(nextGenerate.disabled).toBe(false));
+    expect(writes).toEqual([]);
+    fireEvent.click(nextGenerate);
+  }
+  await waitFor(() => expect(writes).toEqual([
+    ['/api/library/deep-review/run', { item_key: automatic ? 'P1' : 'P2' }],
+  ]));
+  client.clear();
+});
+
 it('the single relevance heading counts supported goals, not merely retrieved passages', async () => {
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
   vi.stubGlobal('fetch', vi.fn(async (path) => {

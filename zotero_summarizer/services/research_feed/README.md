@@ -73,8 +73,10 @@ The **Weekly** page opens existing bundles from the CLI, including older v1
 snapshots without optional provenance or grouped ideas. Missing values stay
 unrecorded; reads return saved fields unchanged. The list retains unavailable
 entries without hiding valid neighbors. Missing bundles/files are 404; malformed
-or unsupported JSON is 422, including downloads. Markdown is served verbatim
-only when canonical JSON validates. A missing Markdown file does not prevent
+JSON is 422 `report_unavailable`, while unsupported schema/source is 422
+`report_unsupported`, including downloads. Card counts must match saved cards.
+A missing report folder is empty; directory scan failures are 503, never empty.
+Markdown is served verbatim only when canonical JSON validates. A missing Markdown file does not prevent
 reading valid JSON. There is no browser run/build endpoint or cached-card replay.
 
 **Boundary:** may compose library services and storage reads. Zotero writes are

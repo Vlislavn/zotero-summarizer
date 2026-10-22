@@ -42,7 +42,7 @@ def test_built_weekly_saved_cards_downloads_errors_and_paper_navigation(applicat
     expect(page.get_by_role("heading", name="Weekly agent harness benchmark", exact=True)).to_be_visible()
     expect(page.get_by_role("heading", name="Project use", exact=True)).to_be_visible()
     paper = page.get_by_role("link", name="Open paper review", exact=True)
-    assert paper.get_attribute("href") == f"/paper/{key.replace(':', '%3A')}"
+    assert paper.get_attribute("href") == f"/paper/{key.replace(':', '%3A')}?autoRun=false"
     for extension in ("json", "md"):
         link = page.get_by_role("link", name="Download canonical JSON" if extension == "json" else "Download Markdown")
         download = client.get(link.get_attribute("href"))
@@ -55,7 +55,7 @@ def test_built_weekly_saved_cards_downloads_errors_and_paper_navigation(applicat
     expect(page.get_by_role("heading", name="Weekly agent harness benchmark", exact=True)).to_be_visible()
     paper.click()
     expect(page.get_by_role("heading", name="Weekly agent harness benchmark", exact=True)).to_be_visible()
-    expect(page).to_have_url(f"http://127.0.0.1/paper/{key.replace(':', '%3A')}")
+    expect(page).to_have_url(f"http://127.0.0.1/paper/{key.replace(':', '%3A')}?autoRun=false")
     page.go_back()
     expect(page.get_by_role("combobox", name="Saved digest", exact=True)).to_have_value(run_id)
 

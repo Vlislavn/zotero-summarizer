@@ -140,6 +140,7 @@ zotero-summarizer prefetch-models` once while online — see [docs/usage.md](doc
   publishing with `uv run zotero-summarizer research-feed run --from 2026-08-22
   --to 2026-08-29 --cached-only`. Browsing is read-only and needs the local server;
   missing reviews, unknown evidence and unreadable reports stay explicit.
+  Weekly paper links also stay passive; starting a review requires **Generate review**.
 
 Open PDFs and take notes in Zotero as usual; come back here to triage.
 

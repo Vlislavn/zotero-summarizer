@@ -24,7 +24,7 @@ export default function Weekly() {
           {(runs.data?.items || []).map((item) => <option key={item.run_id} value={item.run_id}>{item.run_id}{item.available ? ` · ${item.counts.cards_generated} cards` : ' · unavailable'}</option>)}
         </select>
       </label><Button variant="secondary" onClick={() => { runs.refetch(); if (runId) report.refetch(); }}>Refresh saved runs</Button></div>
-      <p className="text-sm text-slate-600">Latest 100 saved runs. Bookmark the selected URL to reopen any retained digest.</p>
+      <p className="text-sm text-slate-600">Up to 100 saved runs in reverse bundle-name order. Bookmark the selected URL to reopen any retained digest.</p>
       <Async loading={runs.isPending} error={runs.error} empty={runs.data?.items?.length === 0} emptyMessage="No saved weekly digests yet. Generate one with the existing research-feed CLI, then refresh saved runs." />
     </section>
     {runId && <Async loading={report.isPending} error={report.error}>

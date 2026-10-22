@@ -47,9 +47,9 @@ it('opens a retained CLI run with cards, paper links, downloads and honest unkno
   expect(screen.getByText('Trace release missing')).toBeTruthy();
   expect(screen.getByText('No clinical evaluation')).toBeTruthy();
   expect(screen.getByText(/model: unrecorded/)).toBeTruthy();
-  expect(screen.getByRole('link', { name: 'Open paper review' }).getAttribute('href')).toBe('/paper/feed%3Aone');
-  expect(screen.getByRole('link', { name: 'Missing current review' }).getAttribute('href')).toBe('/paper/feed%3Athree');
-  expect(screen.getByRole('link', { name: 'feed:four' }).getAttribute('href')).toBe('/paper/feed%3Afour');
+  expect(screen.getByRole('link', { name: 'Open paper review' }).getAttribute('href')).toBe('/paper/feed%3Aone?autoRun=false');
+  expect(screen.getByRole('link', { name: 'Missing current review' }).getAttribute('href')).toBe('/paper/feed%3Athree?autoRun=false');
+  expect(screen.getByRole('link', { name: 'feed:four' }).getAttribute('href')).toBe('/paper/feed%3Afour?autoRun=false');
   expect(screen.getByRole('link', { name: 'Download canonical JSON' }).getAttribute('href')).toBe('/download/weekly-cli.json');
   expect(screen.getByRole('link', { name: 'Download Markdown' }).getAttribute('href')).toBe('/download/weekly-cli.md');
   expect(screen.getByRole('link', { name: 'https://example.test/code' }).getAttribute('rel')).toBe('noopener noreferrer');

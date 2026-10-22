@@ -13,7 +13,7 @@ function ExternalLink({ url, children }) {
 }
 
 function PaperLink({ id, children }) {
-  return id ? <Link className="underline break-all" to={`/paper/${encodeURIComponent(id)}`}>{children}</Link> : <span>{children} (paper identity unrecorded)</span>;
+  return id ? <Link className="underline break-all" to={`/paper/${encodeURIComponent(id)}?autoRun=false`}>{children}</Link> : <span>{children} (paper identity unrecorded)</span>;
 }
 
 function Card({ record, index }) {

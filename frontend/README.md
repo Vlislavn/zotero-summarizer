@@ -65,13 +65,17 @@ nested collections; it does not mistake the response envelope for the tree.
 ## Saved weekly digests
 
 Open **Weekly** (`/weekly`), select a saved CLI run, or reopen its bookmark
-`/weekly?run=<bundle-name>`. The latest 100 bundles are listed; older retained
-runs remain reachable by URL. **Refresh saved runs** refreshes both list and
+`/weekly?run=<bundle-name>`. Up to 100 bundles are listed in reverse bundle-name
+order (not publication time); other retained runs remain reachable by URL. **Refresh saved runs** refreshes both list and
 selection after CLI publication. A valid zero-card digest, a missing report and
 an unreadable/unsupported report remain distinct. Legacy missing provenance and
 ideas stay unknown/unrecorded; missing reviews do not imply missing PDFs.
 Cards expose project use, artifacts, reproducibility, ideas and selection audit,
-with current-paper links through the existing `/paper/:itemKey` route.
+with current-paper links through the existing `/paper/:itemKey?autoRun=false`
+route. These links and subsequent Prev/Next navigation never auto-start reviews;
+Generate review remains an explicit action. Other paper entry points are unchanged.
+Unsupported formats and invalid/unreadable reports show different errors; folder
+scan failures never appear as an empty saved-run list.
 
 This page needs the local server and does not persist reports for offline use.
 It never builds a report, acquires sources, calls AI or writes Zotero. Use the

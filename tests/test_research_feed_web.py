@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -93,8 +94,6 @@ def test_legacy_v1_optional_fields_remain_absent_and_artifacts_unchanged(saved_r
 
 @pytest.mark.parametrize(("location", "bad_value"), [
     (("metadata", "schema_version"), True),
-    (("metadata", "schema_version"), 2),
-    (("metadata", "source"), "telegram"),
     (("metadata", "venue"), float("nan")),
     (("metadata", "venue"), float("inf")),
     (("metadata", "from"), "not a date"),
@@ -102,6 +101,8 @@ def test_legacy_v1_optional_fields_remain_absent_and_artifacts_unchanged(saved_r
     (("metadata", "counts"), {}),
     (("metadata", "counts", "discovered"), True),
     (("metadata", "counts", "cards_generated"), -1),
+    (("metadata", "counts", "cards_generated"), 2),
+    (("cards",), []),
     (("cards",), {}),
     (("cards", 0, "candidate", "title"), {}),
     (("cards", 0, "card", "project_use_notes"), {"wrong": "shape"}),
@@ -146,6 +147,41 @@ def test_invalid_json_or_encoding_is_visible(saved_report, raw):
     response = _request(app, f"/api/research-feed/runs/{path.parent.name}")
     assert response.status_code == 422
     assert _request(app, "/api/research-feed/runs").json()["items"][0]["available"] is False
+
+
+@pytest.mark.parametrize(("field", "value"), [("schema_version", 2), ("source", "telegram")])
+def test_unsupported_report_is_distinct_from_invalid_report(saved_report, field, value):
+    _, app, path = saved_report
+    payload = json.loads(path.read_text())
+    payload["metadata"][field] = value
+    path.write_text(json.dumps(payload))
+    base = f"/api/research-feed/runs/{path.parent.name}"
+
+    for suffix in ("", "/download?format=json", "/download?format=md"):
+        response = _request(app, base + suffix)
+        assert response.status_code == 422
+        assert response.json()["error"] == "report_unsupported"
+    assert _request(app, "/api/research-feed/runs").json()["items"][0]["available"] is False
+
+
+@pytest.mark.parametrize("scan_error", [PermissionError("denied"), OSError("I/O failed")])
+def test_failed_directory_scan_is_unavailable_not_empty(saved_report, monkeypatch, scan_error):
+    _, app, path = saved_report
+    root = path.parent.parent
+    scandir = os.scandir
+
+    def scan(directory):
+        if Path(directory) == root:
+            raise scan_error
+        return scandir(directory)
+
+    monkeypatch.setattr(os, "scandir", scan)
+    response = _request(app, "/api/research-feed/runs")
+
+    assert response.status_code == 503
+    assert response.json()["error"] == "reports_unavailable"
+    assert "items" not in response.json()
+    assert str(root) not in response.text
 
 
 def test_valid_empty_digest_preserves_missing_reviews_rejects_and_failures(saved_report):

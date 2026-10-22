@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models import ResearchCandidate, ResearchEngineeringCard, ResearchFeedTriage
@@ -67,6 +67,12 @@ class _Report(BaseModel):
     failed: list[_Failure]
     research_ideas_by_project: dict[str, list[ResearchIdea]] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def _card_count(self):
+        if self.metadata.counts["cards_generated"] != len(self.cards):
+            raise ValueError("card count does not match saved cards")
+        return self
+
 
 def report_path(settings: Settings, run_id: str, extension: str = "json") -> Path:
     root = settings.data_dir / "research_feed"
@@ -92,20 +98,30 @@ def get_report(settings: Settings, run_id: str) -> dict[str, Any]:
     try:
         text = path.read_text(encoding="utf-8")
         payload = json.loads(text, parse_float=_finite_number, parse_constant=_finite_number)
+        metadata = payload.get("metadata") if isinstance(payload, dict) else None
+        if isinstance(metadata, dict) and (
+            (type(metadata.get("schema_version")) is int and metadata["schema_version"] != 1)
+            or (isinstance(metadata.get("source"), str) and metadata["source"] != "app_rss")
+        ):
+            raise APIError(error="report_unsupported", message="Saved weekly digest format is unsupported",
+                           status_code=422)
         _Report.model_validate_json(text, strict=True)
         # Return the saved fields verbatim, not defaults or a migrated projection.
         return payload
     except (OSError, ValueError) as exc:
-        raise APIError(error="report_unavailable", message="Saved weekly digest is unreadable or unsupported",
+        raise APIError(error="report_unavailable", message="Saved weekly digest is unreadable or invalid",
                        status_code=422) from exc
 
 
 def list_reports(settings: Settings, *, limit: int = 50) -> dict[str, Any]:
     root = settings.data_dir / "research_feed"
-    if root.is_symlink() or (root.exists() and not root.is_dir()):
-        raise APIError(error="reports_unavailable", message="Saved weekly digests are unavailable", status_code=503)
     try:
-        bundles = sorted(root.glob("weekly-*"), key=lambda path: path.name, reverse=True)
+        if root.is_symlink():
+            raise APIError(error="reports_unavailable", message="Saved weekly digests are unavailable", status_code=503)
+        bundles = sorted((path for path in root.iterdir() if path.name.startswith("weekly-")),
+                         key=lambda path: path.name, reverse=True)
+    except FileNotFoundError:
+        return {"items": []}
     except OSError as exc:
         raise APIError(error="reports_unavailable", message="Saved weekly digests are unavailable",
                        status_code=503) from exc
