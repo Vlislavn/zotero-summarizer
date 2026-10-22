@@ -1,0 +1,90 @@
+[
+  {
+    "path": "CHANGELOG.md",
+    "workingSHA256": "d47dcb25eb370c4ceefb272846e14d53e86d7ad498871accd682f1adc5294940",
+    "frozenSHA256": "fa0a3f237c78451d75e7386c93398f73241142f091769ba30d6c0905a67a683f",
+    "exactWorkingBlobHeads": [],
+    "disposition": "split documentation; do not overwrite current package/PR-specific descriptions with aggregate historical prose"
+  },
+  {
+    "path": "README.md",
+    "workingSHA256": "72d7bb92028200300bfed9768a0063767431a583bfdabe49dc5f5cca2c7b6526",
+    "frozenSHA256": "20f925378e88b9342e17b22bf6d7acaa6c2c1647c58522b140a18fceff50f0ec",
+    "exactWorkingBlobHeads": [],
+    "disposition": "split documentation; do not overwrite current package/PR-specific descriptions with aggregate historical prose"
+  },
+  {
+    "path": "tests/README.md",
+    "workingSHA256": "505220710ca391835df8ed56a8f1799e2cc4483b37fabe78c2b239a836308b15",
+    "frozenSHA256": "e2c8bcac2c8b5d4dd20884c40c1731fbc67f346974ddf2931232f6c4441176ac",
+    "exactWorkingBlobHeads": [],
+    "disposition": "split documentation; do not overwrite current package/PR-specific descriptions with aggregate historical prose"
+  },
+  {
+    "path": "tests/test_method_validation_client.py",
+    "workingSHA256": "dd0242d191d80f025bf93d2a24b018643887a9ab328010cfe2631e466b5feea1",
+    "frozenSHA256": "2df57f9f3d2340f62d12ca9f64ee0ad7015f8e15f27cff3b374949f3f7d7daa5",
+    "exactWorkingBlobHeads": [
+      198,
+      183,
+      167
+    ],
+    "disposition": "current working-source blob retained at exact public heads"
+  },
+  {
+    "path": "tests/test_portable_validation_paths.py",
+    "workingExists": false,
+    "frozenExists": true,
+    "disposition": "working absence preserved; original frozen oracle preserved byte-exact in 197, not silently lost"
+  },
+  {
+    "path": "tests/test_practitioner_runtime16.py",
+    "workingSHA256": "acb933b55e9595fa779b5153cbcffb61b53386c28bd4289efdfa8df83fea9c56",
+    "frozenSHA256": "c38c623e127c862b1c14abdf039b9cf0de484dbf0306a951e1d338110e8ebede",
+    "exactWorkingBlobHeads": [
+      198,
+      183,
+      167
+    ],
+    "disposition": "current working-source blob retained at exact public heads"
+  },
+  {
+    "path": "tests/test_research_feed_eval.py",
+    "workingSHA256": "47dfda05282082fb4ac5cd707b8c16c2ab4459e100f34c414bfef2a6b23d71f8",
+    "frozenSHA256": "cac0782b33ee683c6b539d0bf0abab91775bb5dccde50ccbea14251854017646",
+    "exactWorkingBlobHeads": [],
+    "disposition": "original current regression retained in 180 with one EOF blank removed; AST equality is the bound formatting-only receipt"
+  },
+  {
+    "path": "zotero_summarizer/services/golden/feedback_analysis/INTERFACES.md",
+    "workingSHA256": "b2eac7076b6127f3baa0abc7dc304af58ec1590c21747c0e12650d1c196b27f9",
+    "frozenSHA256": "3166253f1034ba2ee9ddc307e1fca21803053d3a24f022c541a54be0263be0da",
+    "exactWorkingBlobHeads": [
+      168,
+      166,
+      164,
+      163,
+      162
+    ],
+    "disposition": "current working-source blob retained at exact public heads"
+  },
+  {
+    "path": "zotero_summarizer/services/zotero/generated_notes.py",
+    "workingSHA256": "ae2276cdf875e54323102631c29b4ef1f595b5d62e4f6bc71d1684f884c6fcbe",
+    "frozenSHA256": "ac94187b2a84ac30120b358eca778d496d19d900c1d9c0692b38d5481659b920",
+    "exactWorkingBlobHeads": [
+      197,
+      196,
+      186,
+      182,
+      179,
+      178,
+      177,
+      176,
+      175,
+      174,
+      173
+    ],
+    "disposition": "current working-source blob retained at exact public heads"
+  }
+]

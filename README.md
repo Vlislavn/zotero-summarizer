@@ -177,3 +177,5 @@ uv run zotero-summarizer faithbench build --max-builder-windows 64  # larger QA-
 - **[docs/architecture.md](docs/architecture.md)** — how it works, the layering rules, and
   the dev / verification workflow.
 - **[CHANGELOG.md](CHANGELOG.md)** — notable changes (latest: the guided first-run setup).
+
+Review inventory: [original-change PR index and source dispositions](docs/pr-split-audit/README.md).
