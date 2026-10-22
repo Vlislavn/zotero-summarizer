@@ -329,3 +329,5 @@ Full reading views fold goal findings into one native disclosure; states and cit
 Original native-preview client source is retained: displayed approval hashes, explicit refresh/force and direct-editor outcomes use the existing backend; no new controls or protocols are designed. Original synthetic client tests remain unchanged.
 
 The native editor imports also retain their original shared server-availability hook and offline/sync plumbing; question-facing UI follows separately. These are existing source dependencies, not a new offline design.
+
+Original question/note UI source is retained: immutable submission identity, separate manual notes and source question list, existing outbox replay and signature-bound delivery state. Shared paper/rail assemblies keep the original callbacks; unrelated Related/orthogonal reading changes are not mixed into this slice. No new interaction is designed.
