@@ -522,3 +522,7 @@ Retain original search-evidence source regression oracles for review. No asserti
 Retain original reading source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
 
 Original discovery regression oracles are retained without changing assertions. Source-only retention does not establish current-contract compatibility.
+
+Original native-preview client source is retained: displayed approval hashes, explicit refresh/force and direct-editor outcomes use the existing backend; no new controls or protocols are designed. Original synthetic client tests remain unchanged.
+
+The native editor imports also retain their original shared server-availability hook and offline/sync plumbing; question-facing UI follows separately. These are existing source dependencies, not a new offline design.

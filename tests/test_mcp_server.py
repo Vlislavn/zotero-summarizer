@@ -45,6 +45,13 @@ def test_extract_data_or_error_returns_data_or_passthrough_error():
 
 
 def test_parse_pending_change_parses_payload_json():
+    preview = {
+        "version": 1, "change_id": 42, "item_key": "ABC123", "change_type": "tag_changes",
+        "payload": {"add_tags": ["must_read"]}, "edit_revision": 3,
+        "target": {"database_path": "/owned/zotero.sqlite", "device": 1, "inode": 2,
+                   "library_id": 1, "library_type": "user"},
+        "generated_preview_sha256": None, "preview_sha256": "a" * 64,
+    }
     parsed = _parse_pending_change(
         {
             "id": 42,
@@ -52,6 +59,7 @@ def test_parse_pending_change_parses_payload_json():
             "item_title": "Paper",
             "change_type": "tag_changes",
             "payload_json": '{"add_tags": ["must_read"]}',
+            "approval_preview": preview,
             "status": "pending",
         }
     )
@@ -60,6 +68,12 @@ def test_parse_pending_change_parses_payload_json():
     assert parsed["item_key"] == "ABC123"
     assert parsed["change_type"] == "tag_changes"
     assert parsed["payload"] == {"add_tags": ["must_read"]}
+    assert parsed["approval_preview"] is preview
+
+
+def test_parse_pending_change_preserves_null_approval_for_history_only():
+    parsed = _parse_pending_change({"id": 42, "payload_json": "{}", "approval_preview": None})
+    assert "approval_preview" in parsed and parsed["approval_preview"] is None
 
 
 def test_require_non_empty_text_returns_validation_error_for_blank_values():

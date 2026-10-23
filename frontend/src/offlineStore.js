@@ -1,4 +1,5 @@
 import { PRIORITY_LABELS } from './utils/priorityLabels.js';
+import { mergeQuestions, questionSubmissionError, sameQuestion } from './questionSubmission.js';
 
 const DB_NAME = 'zotero-summarizer-offline';
 const EVENT = 'zs-sync-status';
@@ -74,6 +75,16 @@ function pendingFields(rows) {
   return fieldsByKey;
 }
 
+function localQuestion(mutation) {
+  return { ...mutation.value, submitted_at: mutation.created_at, saved_offline: true, sync_status: mutation.status };
+}
+
+function overlayReviewQuestions(itemKey, detail, mutations) {
+  const local = mutations.filter((row) => row.field === 'review_question' && row.item_key === itemKey)
+    .map(localQuestion);
+  return { ...detail, questions: mergeQuestions(detail.questions || [], local) };
+}
+
 export async function cachedReviewDetail(itemKey) {
   const detail = await cachedResponse(`review:${itemKey}`);
   if (detail && detail.item_key !== itemKey) throw new Error('Cached review identity unavailable; refresh online. Device mutations are retained');
@@ -82,6 +93,10 @@ export async function cachedReviewDetail(itemKey) {
 
 export async function cacheReviewDetail(itemKey, detail) {
   if (detail?.item_key !== itemKey) throw new Error('Review detail identity mismatch; device cache preserved');
+  if (detail.questions != null && (!Array.isArray(detail.questions)
+      || detail.questions.some((row) => questionSubmissionError(row)))) {
+    throw new Error('Invalid review questions array or row');
+  }
   let merged = detail;
   try {
     const db = await openDb();
@@ -90,10 +105,10 @@ export async function cacheReviewDetail(itemKey, detail) {
       const queued = tx.objectStore('mutations').getAll();
       queued.onsuccess = () => {
         const fields = pendingFields(queued.result).get(itemKey) || {};
-        merged = { ...detail,
+        merged = overlayReviewQuestions(itemKey, { ...detail,
           ...(Object.hasOwn(fields, 'verdict') ? { verdict: fields.verdict } : {}),
           ...(Object.hasOwn(fields, 'review_note') ? { user_note: fields.review_note } : {}),
-        };
+        }, queued.result);
         tx.objectStore('meta').put({ key: `response:review:${itemKey}`, value: merged });
       };
       tx.oncomplete = resolve;
@@ -124,6 +139,7 @@ export async function savePapers(rows, refreshDetails = false) {
           if (!cached.result?.value) return;
           meta.put({ key, value: {
             ...cached.result.value, verdict: row.verdict, user_note: row.review_note,
+            questions: row.questions || [],
           } });
         };
       }
@@ -144,8 +160,15 @@ export async function allPapers() {
 }
 
 export function mutationError(row) {
+  const question = row.field === 'review_question';
+  if (question) {
+    const error = questionSubmissionError(row.value);
+    if (error) return error;
+    if (row.operation !== 'create' || row.item_key !== row.value.item_key
+        || row.mutation_id !== row.value.submission_id) return 'Invalid question create mutation';
+  }
   for (const [key, max, required] of [
-    ['device_id', 100, true], ['item_key', 500, true], ['value', 50_000, false],
+    ['device_id', 100, true], ...(!question ? [['item_key', 500, true], ['value', 50_000, false]] : []),
     ['comment', 10_000, false], ['model_priority', 50, false],
   ]) {
     const value = row[key];
@@ -154,8 +177,8 @@ export function mutationError(row) {
       return `${key} must be ${required ? 'a nonblank string' : 'text'} of at most ${max} characters`;
     }
   }
-  if (!['verdict', 'review_note'].includes(row.field)) return 'Unknown mutation field';
-  if (!['set', 'delete', 'keep_server'].includes(row.operation)) return 'Unknown mutation operation';
+  if (!['verdict', 'review_note', 'review_question'].includes(row.field)) return 'Unknown mutation field';
+  if (!question && !['set', 'delete', 'keep_server'].includes(row.operation)) return 'Unknown mutation operation';
   if (row.operation === 'keep_server' && (!row.resolves_mutation_id || row.value !== null || row.comment != null)) {
     return 'keep_server requires a conflict reference and no new content';
   }
@@ -225,6 +248,58 @@ export async function queueMutation({ item_key, field, operation = 'set', value 
     }).catch((error) => { tx.abort(); reject(error); });
     tx.oncomplete = resolve;
     tx.onerror = () => reject(tx.error);
+  });
+  await publishStatus('Saved on device');
+  window.dispatchEvent(new Event('zs-sync-request'));
+  return { saved_offline: true, queued: true };
+}
+
+export async function queueQuestionSubmission(submission) {
+  const error = questionSubmissionError(submission);
+  if (error) throw new Error(error);
+  const payload = structuredClone(submission);
+  const db = await openDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(['papers', 'mutations', 'meta'], 'readwrite');
+    const papers = tx.objectStore('papers');
+    const mutations = tx.objectStore('mutations');
+    const meta = tx.objectStore('meta');
+    const identityKey = `question:${payload.submission_id}`;
+    Promise.all([
+      request(meta.get(identityKey)), request(papers.get(payload.item_key)),
+      request(meta.get('mutation_sequence')), request(meta.get('device_id')),
+      request(meta.get(`response:review:${payload.item_key}`)),
+    ]).then(([identity, storedPaper, storedSequence, storedDevice, storedDetail]) => {
+      if (identity) {
+        if (!sameQuestion(identity.value, payload)) throw new Error('Submission ID has a different immutable payload');
+        return;
+      }
+      const sequence = (storedSequence?.value || 0) + 1;
+      const device = storedDevice?.value || crypto.randomUUID();
+      const mutation = {
+        mutation_id: payload.submission_id, device_id: device, item_key: payload.item_key,
+        field: 'review_question', operation: 'create', value: payload, comment: null,
+        model_priority: null, base_revision: 0, created_at: new Date().toISOString(),
+        sequence, status: 'pending',
+      };
+      const invalid = mutationError(mutation);
+      if (invalid) throw new Error(invalid);
+      const row = localQuestion(mutation);
+      const paper = storedPaper || { item_key: payload.item_key, title: payload.item_key, revisions: {} };
+      paper.questions = mergeQuestions(paper.questions, [row]);
+      const detail = storedDetail?.value || { item_key: payload.item_key, user_note: paper.review_note || '' };
+      meta.put({ key: `response:review:${payload.item_key}`, value: {
+        ...detail, questions: mergeQuestions(detail.questions, [row]),
+      } });
+      meta.put({ key: identityKey, value: payload });
+      meta.put({ key: 'mutation_sequence', value: sequence });
+      meta.put({ key: 'device_id', value: device });
+      mutations.put(mutation);
+      papers.put(paper);
+    }).catch((failure) => { tx.abort(); reject(failure); });
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('IndexedDB question transaction aborted'));
   });
   await publishStatus('Saved on device');
   window.dispatchEvent(new Event('zs-sync-request'));
@@ -371,6 +446,12 @@ export async function applyPull(payload, sequence) {
       const incomingKeys = new Set(incoming.map((row) => row.item_key));
       const retainedKeys = new Set(queued.result.map((row) => row.item_key));
       const pendingByKey = pendingFields(queued.result);
+      const localQuestions = new Map();
+      for (const mutation of queued.result.filter((row) => row.field === 'review_question')) {
+        const rows = localQuestions.get(mutation.item_key) || [];
+        rows.push(localQuestion(mutation));
+        localQuestions.set(mutation.item_key, rows);
+      }
       for (const row of existing.result) {
         if (!incomingKeys.has(row.item_key)) {
           if (retainedKeys.has(row.item_key)) continue;
@@ -381,6 +462,7 @@ export async function applyPull(payload, sequence) {
         const optimistic = pendingByKey.get(row.item_key) || {};
         const merged = {
           ...row,
+          questions: mergeQuestions(row.questions || [], localQuestions.get(row.item_key)),
           ...(Object.hasOwn(optimistic, 'verdict') ? { verdict: optimistic.verdict } : {}),
           ...(Object.hasOwn(optimistic, 'review_note') ? { review_note: optimistic.review_note } : {}),
         };
@@ -397,6 +479,7 @@ export async function applyPull(payload, sequence) {
           };
           meta.put({ key, value: {
             ...detail, verdict: merged.verdict, user_note: merged.review_note,
+            questions: merged.questions,
           } });
         };
       }
