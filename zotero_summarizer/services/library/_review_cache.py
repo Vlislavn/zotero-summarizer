@@ -12,6 +12,7 @@ import json
 import threading
 from typing import Any
 
+from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services._common import LOGGER, now_iso_z, settings, write_json_atomic
 
 _CACHE_FILENAME = "deep_reviews.json"
@@ -23,7 +24,7 @@ def _cache_path():
     return settings().model_dir / _CACHE_FILENAME
 
 
-def _read_all() -> dict[str, Any]:
+def _read_all(*, readonly: bool = False) -> dict[str, Any]:
     path = _cache_path()
     with _CACHE_LOCK:
         if not path.exists():
@@ -31,11 +32,15 @@ def _read_all() -> dict[str, Any]:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            if readonly:
+                raise ValueError('Invalid deep-review cache bytes') from exc
             backup = _quarantine_corrupt_cache(path)
             LOGGER.warning("quarantined corrupt deep-review cache to %s (%s)", backup, exc)
             return {}
         reviews = payload.get("reviews") if isinstance(payload, dict) else None
         if not isinstance(reviews, dict):
+            if readonly:
+                raise ValueError('Invalid deep-review cache envelope')
             backup = _quarantine_corrupt_cache(path)
             LOGGER.warning("quarantined invalid deep-review cache envelope to %s", backup)
             return {}
@@ -76,6 +81,36 @@ def get_cached_review(item_key: str) -> dict[str, Any] | None:
     return project_review(entry) if entry else entry
 
 
+def export_review_audit(item_key: str) -> dict[str, Any]:
+    """Exact-key, read-only export: no policy projection, acquisition or cache repair."""
+    import re
+    from zotero_summarizer.models import PaperDigest
+    from zotero_summarizer.services.library._digest_audit_export import retained_audit_status
+
+    if not re.fullmatch(r'(?:[A-Za-z0-9]{8}|feed:[gdal]:[a-f0-9]{64})', item_key):
+        raise APIError('validation_error', 'Expected an exact Zotero or stable feed key', 422)
+    try:
+        entry = _read_all(readonly=True).get(item_key)
+        if entry is None:
+            raise APIError('not_found', 'No cached review for this item', 404)
+        if not isinstance(entry, dict):
+            raise ValueError('Invalid review entry')
+        if entry.get('digest') is not None:
+            PaperDigest.model_validate(entry['digest'])
+        status, reason = retained_audit_status(entry)
+    except ValueError as exc:
+        raise APIError('audit_invalid', 'Cached verification evidence is malformed', 422) from exc
+    retained = None
+    if status == 'available':
+        retained = {'scope': 'retained_source_only', 'current_item_binding': 'not_established',
+                    'verification_audit': entry['verification_audit']}
+        if entry['review_identity']['source_kind'] != 'override':
+            status, reason = 'unavailable', 'current_item_binding_unavailable'
+    return {'item_key': item_key, 'digest': entry.get('digest'), 'audit_status': status, 'reason': reason,
+            'verification_audit': entry.get('verification_audit') if status == 'available' else None,
+            'retained_evidence': retained}
+
+
 def review_is_current(entry: dict[str, Any] | None, item_key: str = "") -> bool:
     if not entry or entry.get("review_contract_version") != REVIEW_CONTRACT_VERSION:
         return False
@@ -86,8 +121,14 @@ def review_is_current(entry: dict[str, Any] | None, item_key: str = "") -> bool:
         return False
     try:
         from zotero_summarizer.services.library._review_identity import current_review_identity
-        return current_review_identity(item_key, stored) == stored
-    except (AttributeError, OSError, RuntimeError, ValueError):
+        from zotero_summarizer.services.library._digest_audit_export import retained_audit_status
+        current = current_review_identity(item_key, stored)
+        if current != stored:
+            return False
+        if entry.get('verification_audit') is not None:
+            return retained_audit_status(entry, current_identity=current)[0] == 'available'
+        return True
+    except (APIError, AttributeError, OSError, RuntimeError, ValueError):
         return False
 
 

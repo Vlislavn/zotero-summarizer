@@ -46,6 +46,24 @@ def _digest(tldr="The paper evaluates a model on ImageNet."):
     ).model_copy(update={"basis": "full_text"})
 
 
+def _accepted_checks(digest, *_args, **_kwargs):
+    """Orchestration-only stub: retain its existing all-supported verifier isolation."""
+    from zotero_summarizer.services.library._digest_verification import _Checks
+    return _Checks(checks=[{'index': i, 'supported': True, 'evidence': [0]}
+                           for i, _ in enumerate(_claims(digest))])
+
+
+def test_accepted_verifier_returns_actual_indexed_checks():
+    result = verify_digest(_digest(), PAPER, _Verifier())
+    assert [check.index for check in result.checks] == list(range(len(_claims(_digest()))))
+    assert all(check.supported and check.evidence == [0] for check in result.checks)
+
+
+def test_accepted_verifier_retains_repair_count():
+    result = verify_digest(_digest(), PAPER, _EmptyThenValidVerifier())
+    assert result._repair_attempts == 1
+
+
 def test_digest_verification_rejects_missing_literals_and_unsupported_claims():
     with pytest.raises(ValueError, match="source-absent literals"):
         verify_digest(_digest("The model reaches 99% on SecretSet."), PAPER, _Verifier())

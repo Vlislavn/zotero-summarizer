@@ -5,7 +5,7 @@ import asyncio
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -238,6 +238,25 @@ async def run_deep_review(req: DeepReviewRunRequest) -> dict[str, Any]:
     return await asyncio.to_thread(deep_review.start, req.top_k, focus_prompt=req.focus_prompt)
 
 
+async def export_deep_review_audit(item_key: str, request: Request, response: Response) -> dict[str, Any]:
+    """Explicit sensitive local export; deny remote peers/hosts and cross-origin reads."""
+    from ipaddress import ip_address
+    from zotero_summarizer.services.library._review_cache import export_review_audit
+
+    try:
+        local_peer = request.client is not None and ip_address(request.client.host).is_loopback
+        host = request.url.hostname
+        local_host = host == 'localhost' or ip_address(host or '').is_loopback
+    except ValueError:
+        local_peer = local_host = False
+    origin = request.headers.get('origin')
+    if not local_peer or not local_host or origin is not None and origin != str(request.base_url).rstrip('/'):
+        raise APIError('local_only', 'Verification evidence export requires a local same-origin request', 403)
+    response.headers['Cache-Control'] = 'no-store'
+    response.headers['Content-Disposition'] = 'attachment; filename="digest-verification.json"'
+    return await asyncio.to_thread(export_review_audit, item_key)
+
+
 async def get_deep_review_status(item_key: str | None = None) -> dict[str, Any]:
     """Poll a deep review: ``{status, total, completed, error, started_at, progress}``.
     With ``item_key`` set, reports THAT paper's job (so each panel shows its own
@@ -354,6 +373,7 @@ router.add_api_route("/api/library/render/{item_key}/figures/{name}", get_paper_
 router.add_api_route("/api/library/ask", ask_paper, methods=["POST"])
 router.add_api_route("/api/library/deep-review/run", run_deep_review, methods=["POST"])
 router.add_api_route("/api/library/deep-review/status", get_deep_review_status, methods=["GET"])
+router.add_api_route("/api/library/deep-review/{item_key}/audit", export_deep_review_audit, methods=["GET"])
 router.add_api_route("/api/library/review-fleet/run", run_review_fleet, methods=["POST"])
 router.add_api_route("/api/library/review-fleet/status", get_review_fleet_status, methods=["GET"])
 router.add_api_route("/api/library/review-fleet/calibration", get_review_fleet_calibration, methods=["GET"])

@@ -48,6 +48,11 @@ reading decisions show a neutral unavailable state instead of cached action advi
 including its old rationale. Evidence panels remain available. This display change does not regenerate
 reviews, alter reading policy or update native HTML/Zotero notes.
 
+For accepted digest claim/passages and correction lineage, use the
+[local read-only verification export](verification-audit.md). It reads the existing
+review only; unavailable/stale evidence is not a scientific negative. Exported
+original excerpts are sensitive, and no expert time-saving benefit is established.
+
 Full paper reviews lead with contribution and visible material caveats. Findings,
 methods and limitations stay together; the rubric and secondary reference fields
 are under **Full digest and assessment**. **Evidence** retains source quotes, and

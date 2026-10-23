@@ -265,7 +265,8 @@ class PaperChunkIndex:
     """
 
     def __init__(self, text: str, *, chunk_chars: int = CHUNK_CHARS, overlap: int = CHUNK_OVERLAP) -> None:
-        self.chunks = chunk_text(text, chunk_chars=chunk_chars, overlap=overlap)
+        self.spans = chunk_spans(text, chunk_chars=chunk_chars, overlap=overlap)
+        self.chunks = [text[start:end] for start, end in self.spans]
         self._docs = [tokenize(c) for c in self.chunks]
         try:
             from rank_bm25 import BM25Okapi

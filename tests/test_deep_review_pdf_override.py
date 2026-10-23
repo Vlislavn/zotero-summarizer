@@ -30,6 +30,7 @@ def _wire(monkeypatch, *, detail, quality_basis="full_text"):
         "source_kind": kwargs["source_kind"], "source_path": kwargs["pdf_path"],
         "focus_prompt": kwargs["focus_prompt"],
     })
+    monkeypatch.setattr(_review_identity, "_source_sha", lambda _path: "b" * 64)
     reader = types.SimpleNamespace(get_item_detail=lambda k: detail)
     seen = {"extracted": []}
     extractor = types.SimpleNamespace(

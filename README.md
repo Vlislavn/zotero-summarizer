@@ -32,6 +32,14 @@ success. See [usage](docs/usage.md#rejecting-pending-changes).
 
 ## Review recovery and search constraints
 
+Accepted deep reviews retain original-source evidence for their digest findings.
+A [local read-only JSON export](docs/verification-audit.md) exposes those existing
+checks without another model call or native SQLite read. Library receipts expose
+validated retained-source evidence, not current-attachment proof. Legacy evidence
+stays unavailable; literal membership is not scientific validation, and audit-effort
+benefits are unmeasured. Audit identity covers declared digest fields, not
+optional model enrichment.
+
 Deep review rejects demonstrated access/error/login templates before model calls.
 Failures show their stage and recovery separately from scientific quality; a failed
 attempt or missing-source placeholder does not replace a current valid review.

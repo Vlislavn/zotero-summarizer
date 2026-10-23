@@ -1,5 +1,15 @@
 # api/routes — HTTP endpoints (thin)
 
+`GET /api/library/deep-review/{item_key}/audit` exports exact cached digest and
+accepted verification evidence for a local same-origin request. It never runs a
+model, acquires a source, initializes a reader, writes native Zotero or repairs
+the cache. It invokes no native reader or SQLite connection. Library current-item
+binding stays unavailable; `retained_evidence` exposes separately labelled,
+validated retained-source receipts, never current-attachment proof. Explicit
+source overrides retain their own contract. Failed/stale/legacy validation gives
+no retained payload; malformed stores fail.
+See [private export usage and response contract](../../../docs/verification-audit.md).
+
 Search screen optionally accepts confirmed `constraints` (required/excluded phrases
 and publication types). Missing constraints never authorize model-imposed filters;
 legacy sessions disclose unknown origin. Review status adds typed stage/recovery

@@ -11,6 +11,7 @@ from typing import Any
 from zotero_summarizer.models import PaperDigest
 from zotero_summarizer.models.providers import resolve_stage
 from zotero_summarizer.services._common import settings, state
+from zotero_summarizer.services.library._review_attempt import file_identity
 
 
 def _source_sha(path: str) -> str:
@@ -19,7 +20,7 @@ def _source_sha(path: str) -> str:
     source = Path(path)
     if not source.is_file():
         return "missing"
-    return hashlib.sha256(source.read_bytes()).hexdigest()
+    return file_identity(source)['sha256']
 
 
 @lru_cache(maxsize=1)

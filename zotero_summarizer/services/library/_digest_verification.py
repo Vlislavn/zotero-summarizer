@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pydantic import BaseModel, Field, StrictInt
+from pydantic import BaseModel, Field, PrivateAttr, StrictInt
 
 from zotero_summarizer.models import PaperDigest
 from zotero_summarizer.services._common import extract_json_blob, to_text
@@ -20,10 +20,15 @@ class _Check(BaseModel):
 
 class _Checks(BaseModel):
     checks: list[_Check] = Field(default_factory=list)
+    _repair_attempts: int = PrivateAttr(default=0)
 
 
 class DigestSourceRejected(ValueError):
     """A well-formed generated digest failed original-source grounding."""
+
+    def __init__(self, message: str, *, failure_kind: str):
+        super().__init__(message)
+        self.failure_kind = failure_kind
 
 
 class DigestVerifierUnavailable(ValueError):
@@ -122,14 +127,15 @@ def _parse_checks(raw: Any, claim_count: int, passages: list[str], paper_text: s
 
 def verify_digest(
     digest: PaperDigest, paper_text: str, llm: Any, *, research_goals: str = "",
-) -> None:
+) -> _Checks:
     from zotero_summarizer.services.faithbench._corpus import chunk_text
     from zotero_summarizer.services.library._review_attempt import observed_client
 
     claims = _claims(digest)
     unsupported = _unsupported_literals(claims, paper_text)
     if unsupported:
-        raise DigestSourceRejected(f"Digest contains source-absent literals: {unsupported[:3]}")
+        raise DigestSourceRejected(f"Digest contains source-absent literals: {unsupported[:3]}",
+                                   failure_kind="numeric_preflight")
     passages = chunk_text(paper_text)
     prompt = _PROMPT.format(
         claims=untrusted_input("\n".join(f"[{i}] {claim}" for i, claim in enumerate(claims))),
@@ -147,4 +153,7 @@ def verify_digest(
             prompt += "\nYour previous verification was invalid: " + str(exc) + ". Return all indices with valid evidence IDs in JSON."
     failed = [claims[check.index] for check in parsed.checks if not check.supported]
     if failed:
-        raise DigestSourceRejected(f"Digest contains unsupported fields: {failed[:3]}")
+        raise DigestSourceRejected(f"Digest contains unsupported fields: {failed[:3]}",
+                                   failure_kind="verifier_support_not_established")
+    parsed._repair_attempts = attempt
+    return parsed
