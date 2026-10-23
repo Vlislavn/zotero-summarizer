@@ -14,6 +14,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Retain original setup source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
 - Retain original explicit default-no inference consent; use the existing canonical provider verification boundary.
 - Retain original RSS source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+- Retain original search-evidence source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
 
 ### Changed
 - Retain original observed-cohort weekly ordering metadata and frozen conditional replay; canonical helper names and caller wiring are mechanically aligned.
