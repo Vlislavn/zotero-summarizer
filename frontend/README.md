@@ -448,3 +448,5 @@ Retain original setup source regression oracles for review. No assertions/skips 
 Retain original RSS source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
 
 Retain original search-evidence source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+
+Retain original reading source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.

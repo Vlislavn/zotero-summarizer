@@ -54,15 +54,15 @@ def _seed(settings, variant):
     return key
 
 
-CONTRAST = """() => {
+CONTRAST = """(scope = '.paper-reading-page main') => {
  const rgb = s => (s.match(/[\\d.]+/g)||[]).map(Number);
  const blend = (a,b) => a.slice(0,3).map((v,i)=>v*(a[3]??1)+b[i]*(1-(a[3]??1)));
  const lum = a => a.map(v=>v/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4)
    .reduce((s,v,i)=>s+v*[.2126,.7152,.0722][i],0);
- const selector = e => {let parts=[]; while(e && e.tagName!=='MAIN') {
+ const selector = e => {const root=e.closest(scope);let parts=[]; while(e && e!==root) {
    parts.unshift(e.tagName.toLowerCase()+':nth-child('+(Array.from(e.parentElement.children).indexOf(e)+1)+')');
-   e=e.parentElement;} return '.paper-reading-page main > '+parts.join(' > ');};
- return Array.from(document.querySelectorAll('.paper-reading-page main *')).filter(e=>
+   e=e.parentElement;} return scope+' > '+parts.join(' > ');};
+ return Array.from(document.querySelectorAll(scope+' *')).filter(e=>
    e.checkVisibility() && Array.from(e.childNodes).some(n=>n.nodeType===3&&n.textContent.trim())
  ).map(e=>{let chain=[],p=e; while(p){chain.unshift(p);p=p.parentElement;}
    let bg=[255,255,255]; for(const n of chain) bg=blend(rgb(getComputedStyle(n).backgroundColor),bg);
@@ -79,11 +79,12 @@ def _no_overflow(page):
     return receipt
 
 
-def _keyboard_disclosure(page, label):
+def _keyboard_disclosure(page, label, *, exact=False):
     from patchright.sync_api import expect
 
-    summary = page.locator('summary').filter(has_text=label)
+    summary = page.get_by_text(label, exact=True) if exact else page.locator('summary').filter(has_text=label)
     expect(summary).to_have_count(1)
+    assert summary.evaluate("e => e.tagName") == 'SUMMARY'
     assert not summary.evaluate('(e) => e.parentElement.open')
     summary.focus()
     page.keyboard.press('Tab')
@@ -112,7 +113,7 @@ def _full_contract(page):
     expect(page.get_by_text('Synthetic reading rationale.', exact=True)).to_have_count(1)
     _keyboard_disclosure(page, 'Full digest and assessment')
     expect(page.get_by_text('Synthetic reference summary.', exact=True)).to_be_visible()
-    _keyboard_disclosure(page, 'evidence')
+    _keyboard_disclosure(page, 'evidence', exact=True)
     expect(page.get_by_text('“Synthetic evidence quote.”', exact=True)).to_be_visible()
 
 
@@ -164,3 +165,182 @@ def test_real_built_review_reading(application_browser, variant, width):
     overflow = {k: v for k, v in receipt.items() if isinstance(v, dict)
                 and 'scroll' in v and v['scroll'] > v['client']}
     assert not overflow and not failures, {'overflow': overflow, 'contrast': failures}
+
+
+@pytest.mark.parametrize('variant', ['high-friction', 'weak-evidence', 'legacy-unknown'])
+@pytest.mark.parametrize('width', [390, 1440])
+def test_three_signals_in_built_review(application_browser, variant, width):
+    from patchright.sync_api import expect
+
+    page, client, settings, _ = application_browser
+    key = _seed(settings, f'signals-{variant}')
+    entry = _review_cache._read_all()[key]
+    entry['digest'].update(read_decision='read', basis='full_text', novelty=5, significance=4,
+                           writing_friction='low', writing_reasons=[])
+    entry['quality'].update(quality_band='highlight', paper_type='position',
+                            coverage_standard='Argument quality', red_flags=[],
+                            rubric={'thesis': 'yes', 'evidence_cited': 'yes'})
+    entry['goal_summaries'][0]['abstained'] = False
+    reason = 'Synthetic §2 uses the central construct before defining it.'
+    if variant == 'high-friction':
+        entry['digest'].update(writing_friction='high', writing_reasons=[reason])
+    elif variant == 'weak-evidence':
+        entry['quality'].update(quality_band='flag', rubric={'thesis': 'yes', 'evidence_cited': 'no'})
+    else:
+        for field in ['basis', 'writing_friction', 'writing_reasons']:
+            entry['digest'].pop(field)
+    _review_cache._write_one(key, entry)
+    payload = client.get('/api/golden/review-detail', params={'item_key': key}).json()['deep_review']
+    assert payload['digest']['read_decision'] == 'skim'
+    assert payload['model_read_decision'] == 'read'
+    page.set_viewport_size({'width': width, 'height': 900})
+
+    page.goto(f'http://127.0.0.1/paper/{key}')
+
+    signals = page.get_by_role('group', name='Idea, evidence and writing')
+    expect(signals).to_be_visible()
+    expect(signals.locator('summary')).to_contain_text('Idea: high')
+    if variant == 'high-friction':
+        expect(signals.locator('summary')).to_contain_text('Evidence: Highlight · Writing: high friction')
+        expect(signals.get_by_text('Idea preserved', exact=False)).to_be_visible()
+        expect(signals.get_by_text(reason, exact=True)).not_to_be_visible()
+    elif variant == 'weak-evidence':
+        expect(signals.locator('summary')).to_contain_text('Evidence: weak (Flag) · Writing: low friction')
+        expect(signals.get_by_text('Concept/hypothesis source', exact=False)).to_be_visible()
+    else:
+        expect(signals.locator('summary')).to_contain_text('Writing: not assessed')
+    _keyboard_disclosure(page, 'Idea: high')
+    expect(signals.get_by_text('Position / perspective · Argument quality.', exact=True)).to_be_visible()
+    expect(signals.get_by_text('Automatic policy capped', exact=False)).to_be_visible()
+    if variant == 'high-friction':
+        expect(page.get_by_text(reason, exact=True)).to_have_count(1)
+        expect(signals.get_by_text(reason, exact=True)).to_be_visible()
+    if variant == 'legacy-unknown':
+        expect(signals.get_by_text('Digest source basis is unknown or unconfirmed', exact=False)).to_be_visible()
+        assert 'abstract_only' not in payload['reading_policy_flags']
+        assert 'full_text_not_confirmed' in payload['reading_policy_flags']
+    expect(page.get_by_text('Ablations isolate what drives the result', exact=True)).to_have_count(0)
+    overflow = _no_overflow(page)
+    assert overflow['scroll'] <= overflow['client'], overflow
+    root = Path(os.environ.get('ZS_REVIEW_BROWSER_ARTIFACT_ROOT', settings.data_dir / 'review-browser'))
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    screenshot = root / f'signals-{variant}-{width}.png'
+    page.screenshot(path=str(screenshot), full_page=True)
+    screenshot.chmod(0o600)
+
+
+SIGNAL_CONTRAST = """root => {
+ const rgb = s => (s.match(/[\\d.]+/g)||[]).map(Number);
+ const blend = (a,b) => a.slice(0,3).map((v,i)=>v*(a[3]??1)+b[i]*(1-(a[3]??1)));
+ const lum = a => a.map(v=>v/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4)
+   .reduce((s,v,i)=>s+v*[.2126,.7152,.0722][i],0);
+ return Array.from(root.querySelectorAll('summary > span, dt')).filter(e=>e.checkVisibility())
+   .map(e=>{let chain=[],p=e; while(p){chain.unshift(p);p=p.parentElement;}
+     let bg=[255,255,255]; for(const n of chain) bg=blend(rgb(getComputedStyle(n).backgroundColor),bg);
+     const s=getComputedStyle(e),fg=blend(rgb(s.color),bg),a=lum(fg),b=lum(bg);
+     return {tag:e.tagName,text:e.textContent.trim(),color:s.color,background:bg,fontSize:s.fontSize,
+       ratio:(Math.max(a,b)+.05)/(Math.min(a,b)+.05)};
+   });
+}"""
+
+
+@pytest.mark.parametrize('surface', ['compact', 'nonflat'])
+@pytest.mark.parametrize('decision', ['read', 'skim', 'skip'])
+@pytest.mark.parametrize('width', [390, 1440])
+def test_three_signal_contrast_outside_full_reader(application_browser, surface, decision, width):
+    from patchright.sync_api import expect
+
+    page, client, settings, _ = application_browser
+    variant = f'contrast-{surface}-{decision}-{width}'
+    key = _seed(settings, variant)
+    entry = _review_cache._read_all()[key]
+    entry['digest'].update(read_decision='read' if decision == 'skim' else decision,
+                           basis='abstract' if decision == 'skim' else 'full_text',
+                           novelty=5, significance=4, writing_friction='low', writing_reasons=[])
+    entry['quality'].update(quality_band='highlight', red_flags=[])
+    entry['goal_summaries'][0]['abstained'] = False
+    _review_cache._write_one(key, entry)
+    response = client.get('/api/golden/review-detail', params={'item_key': key})
+    assert response.status_code == 200, response.text
+    assert response.json()['deep_review']['digest']['read_decision'] == decision
+    page.set_viewport_size({'width': width, 'height': 900})
+    page.goto('http://127.0.0.1/')
+    page.get_by_role('button', name='Skip for now', exact=True).click()
+    if surface == 'compact':
+        page.get_by_role('button').filter(has_text=f'Synthetic reading {variant}').click()
+    else:
+        page.goto(f'http://127.0.0.1/library?mode=batch&item_key={key}')
+
+    signals = page.get_by_role('group', name='Idea, evidence and writing')
+    expect(signals).to_be_visible()
+    assert not signals.evaluate("e => !!e.closest('.review-reading, .paper-reading-page')")
+    page.mouse.move(0, 0)
+    closed = signals.evaluate(SIGNAL_CONTRAST)
+    assert len(closed) == 1 and closed[0]['tag'] == 'SPAN', closed
+    assert closed[0]['ratio'] >= 4.5, closed
+    _keyboard_disclosure(page, 'Idea: high')
+    for label in ['Idea value', 'Scientific quality', 'Writing friction · low']:
+        expect(signals.locator('dt').filter(has_text=label)).to_be_visible()
+    expanded = signals.evaluate(SIGNAL_CONTRAST)
+    labels = [row for row in expanded if row['tag'] == 'DT']
+    assert len(labels) == (4 if decision == 'skim' else 3), expanded
+    assert all(row['ratio'] >= 4.5 for row in expanded), expanded
+    overflow = _no_overflow(page)
+    assert overflow['scroll'] <= overflow['client'], overflow
+    root = Path(os.environ.get('ZS_REVIEW_BROWSER_ARTIFACT_ROOT', settings.data_dir / 'review-browser'))
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    receipt = root / f'{variant}.json'
+    receipt.write_text(json.dumps({'surface': surface, 'decision': decision, 'width': width,
+                                  'closed': closed, 'expanded': expanded, 'overflow': overflow}, indent=2))
+    receipt.chmod(0o600)
+    screenshot = root / f'{variant}.png'
+    page.screenshot(path=str(screenshot), full_page=True)
+    screenshot.chmod(0o600)
+
+
+@pytest.mark.parametrize('surface', ['full', 'compact'])
+@pytest.mark.parametrize('width', [390, 1440])
+def test_reading_plan_is_visible_once_and_readable_before_opening_original(application_browser, surface, width):
+    from patchright.sync_api import expect
+
+    page, client, settings, seen = application_browser
+    variant = f'plan-{surface}-{width}'
+    key = _seed(settings, variant)
+    entry = _review_cache._read_all()[key]
+    targets = ['§4.2 Held-out evaluation — compare site splits', 'Figure 3 — inspect failure cases']
+    skipped = 'Appendix A — notation recap'
+    extra = 'The site-split protocol and individual failure examples.'
+    entry['digest'].update(read_decision='read', basis='abstract', novelty=5, significance=4,
+                           writing_friction='low', read_parts=targets, skip_parts=[skipped],
+                           original_value=extra, estimated_read_minutes=12)
+    entry['quality'].update(quality_band='highlight', red_flags=[])
+    entry['goal_summaries'][0]['abstained'] = False
+    _review_cache._write_one(key, entry)
+    payload = client.get('/api/golden/review-detail', params={'item_key': key}).json()['deep_review']
+    assert payload['digest']['read_decision'] == 'skim'
+    assert payload['model_read_decision'] == 'read' and 'abstract_only' in payload['reading_policy_flags']
+    page.set_viewport_size({'width': width, 'height': 900})
+    page.goto('http://127.0.0.1/')
+    page.get_by_role('button', name='Skip for now', exact=True).click()
+    if surface == 'compact':
+        page.get_by_role('button').filter(has_text=f'Synthetic reading {variant}').click()
+    else:
+        page.goto(f'http://127.0.0.1/paper/{key}')
+    plan = page.get_by_role('region', name='Reading plan')
+    expect(plan).to_be_visible()
+    assert not plan.evaluate("e => !!e.closest('details')")
+    expect(page.get_by_text('12 min', exact=True)).to_be_visible()
+    for text in [*targets, skipped, extra]:
+        expect(page.get_by_text(text, exact=True)).to_have_count(1)
+        expect(plan.get_by_text(text, exact=True)).to_be_visible()
+    assert plan.locator('ol li').all_text_contents() == targets
+    colors = page.evaluate(CONTRAST, '[aria-label="Reading plan"]')
+    overflow = _no_overflow(page)
+    root = Path(os.environ.get('ZS_REVIEW_BROWSER_ARTIFACT_ROOT', settings.data_dir / 'review-browser'))
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    (root / f'{variant}.json').write_text(json.dumps({'colors': colors, 'overflow': overflow,
+                                                    'requests': seen}, indent=2))
+    page.screenshot(path=str(root / f'{variant}.png'), full_page=True)
+    assert overflow['scroll'] <= overflow['client'], overflow
+    assert colors and all(row['ratio'] >= 4.5 for row in colors), colors
+    assert not any(method != 'GET' for method, _path, _status in seen), seen
