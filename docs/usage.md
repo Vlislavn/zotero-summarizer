@@ -4,6 +4,39 @@ Everything beyond the [README](../README.md) Quickstart: first-run setup, the tw
 run triage, how the model learns from your labels, offline use, the safety model, and the
 full config reference. (Architecture and dev workflow live in [architecture.md](architecture.md).)
 
+## Native RSS read-state backups
+
+A nonempty `ZoteroWriter.mark_feed_items_read(ids)` call completes the existing
+WAL-consistent, integrity-checked backup before entering its native write retry.
+Backup failure prevents that retry and any marker change. The same integer return,
+already-read timestamps, missing-ID behavior and empty-selection no-op remain.
+Backups are pruned only after the write commits; SQL failure retains its completed
+backup and rolls back the write. A later retention error can occur **after** the
+native commit and is not proof of rollback or permission to replay another write.
+Automatic read-sync logs filesystem failures and continues the tick without
+immediately replaying the batch; later ticks rescan only unread rows.
+
+Raw RSS maintenance admits a new attempt only while at most five app-created
+`zotero.sqlite.backup_*` artifacts exist, reserving one extra slot for its fresh
+backup. A per-library lock makes concurrent raw attempts fail closed rather than
+race this check. Successful writes prune back to five; failed writes retain their
+exact prestate backups. At six artifacts, later attempts log `Read-state backup
+limit reached` without allocating another backup or starting a native write. This
+also counts partial/malformed artifacts and stops growth when pruning fails.
+
+To resume after fixing the underlying write/retention problem, stop automatic
+ticks, preserve/export and inspect the app-created snapshots, then move enough
+outside that backup pattern to leave at most five. Keep exported recovery copies;
+do not remove Zotero's own `.bak` files. The next admitted attempt makes a fresh
+integrity-checked backup before writing. This replaces unbounded failed-attempt
+accumulation with an explicit storage-capacity refusal, not automatic deletion of
+forensic snapshots on failure or a claim that an earlier write rolled back.
+After a known successful commit, ordinary retention can rotate older snapshots,
+including snapshots originally created by failed attempts.
+This does not add automatic actions, blanket native-write consent or a new backup
+store, nor make backup and mutation atomic against other writers. Typed Pending
+approval/claims, verdict receipts and cross-database recovery remain separate.
+
 ## Reading reviews and Zotero notes
 
 The app's review card and full paper page show **Read parts**, **Skip parts** and

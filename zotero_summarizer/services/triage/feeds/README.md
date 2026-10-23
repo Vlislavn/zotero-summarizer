@@ -48,6 +48,10 @@ run_daemon_loop ─every N s→ run_daemon_tick (_tick)
 and `storage.feeds`; standard services rules. `_common` is the leaf — siblings
 import from it, never the reverse.
 
+Optional Zotero read-sync logs backup/retention filesystem failures and returns
+zero without interrupting the tick or replaying the batch. Markers may already be
+committed; the next tick rescans unread rows rather than assuming rollback.
+
 App-RSS refresh errors propagate out of the tick: the reader records the failing
 feed and rolls back that feed's item writes before raising. A failed refresh
 cannot silently continue into triage against a stale source pool.
