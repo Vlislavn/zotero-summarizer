@@ -63,7 +63,7 @@ def _operation_keys(members: list[Candidate]) -> tuple[str, str]:
     return next(iter(plans), ""), next(iter(materialized), "")
 
 
-def _merge_family(members: list[Candidate]) -> Candidate:
+def _merge_family(members: list[Candidate], operation_keys: tuple[str, str]) -> Candidate:
     identifiers = list(dict.fromkeys(key for member in members for key in member.identifier_keys()))
     saved_key = next((member.existing_zotero_key for member in members
                       if member.in_library is True and member.existing_zotero_key), None)
@@ -73,7 +73,7 @@ def _merge_family(members: list[Candidate]) -> Candidate:
         membership = False
     else:
         membership = None
-    plan, materialized = _operation_keys(members)
+    plan, materialized = operation_keys
     preferred = max(members, key=_richness)
     preferred.planned_zotero_key = plan
     preferred.materialized_zotero_key = materialized
@@ -140,7 +140,9 @@ def _candidate_groups(
 
 def to_version_families(candidates: list[Candidate]) -> list[Candidate]:
     """Collapse exact identifier families, preserving first appearance; never title-merge."""
-    return [_merge_family(members) for members in _candidate_groups(candidates)]
+    groups = _candidate_groups(candidates)
+    operation_keys = [_operation_keys(members) for members in groups]
+    return [_merge_family(members, keys) for members, keys in zip(groups, operation_keys)]
 
 
 def reconcile_operation_state(candidates: list[Candidate], persisted: list[Candidate]) -> None:

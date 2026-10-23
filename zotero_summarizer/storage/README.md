@@ -229,7 +229,7 @@ key before retention filtering, with timestamp/ID ties. It exposes decisions and
 existing identifiers for saved admission/exclusion; browsing policy is unchanged.
 
 `library_context.read_context` obtains one read-only SQLite transaction for the
-related-paper surface. It reuses `review_notes._keys/current` and the label mirror's
+related-paper surface. It reuses `review_notes.resolve_item_key_aliases/current` and the label mirror's
 current-change query, retaining original keys, revisions and deletion authority.
 It never creates a database, writes a note or acknowledges a mirror. Services
 separately label expected I/O failures; schema/corruption errors remain errors.

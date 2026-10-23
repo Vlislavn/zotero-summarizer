@@ -458,3 +458,23 @@ def test_omitted_unrelated_families_are_not_resurrected_or_reconciled(monkeypatc
     session.save_merge(current)
     assert session.load("recovery").to_dict() == selected
     assert _native_state(db_path) == native_before and _native_keys(db_path) == []
+
+
+@pytest.mark.parametrize("conflict", ["plans", "materialized", "mixed"])
+def test_later_family_conflict_does_not_mutate_earlier_family_inputs(conflict):
+    first = Candidate(title="Preprint", arxiv_id="2501.12345", planned_zotero_key="PLAN1234")
+    richer = Candidate(title="Publication", arxiv_id=first.arxiv_id, doi="10.1/richer",
+                       abstract="Richer record", venue="Journal")
+    left = Candidate(title="Other work", doi="10.1/conflict")
+    right = Candidate(title="Other version", doi=left.doi)
+    if conflict == "plans":
+        left.planned_zotero_key, right.planned_zotero_key = "PLAN5678", "PLAN9012"
+    elif conflict == "materialized":
+        left.materialized_zotero_key, right.materialized_zotero_key = "ADDED001", "ADDED002"
+    else:
+        left.planned_zotero_key, right.materialized_zotero_key = "PLAN5678", "ADDED001"
+    candidates = [first, richer, left, right]
+    before = [candidate.to_dict() for candidate in candidates]
+    with pytest.raises(ValueError, match="Conflicting.*Zotero"):
+        to_version_families(candidates)
+    assert [candidate.to_dict() for candidate in candidates] == before

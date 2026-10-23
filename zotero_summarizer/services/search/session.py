@@ -132,6 +132,13 @@ def materialize_once(
         cand = next((c for c in sess.candidates if c.candidate_id == candidate_id), None)
         if cand is None:
             return None
+        if (cand.existing_zotero_key and cand.planned_zotero_key
+                and cand.planned_zotero_key != cand.existing_zotero_key):
+            raise APIError(
+                error="search_write_conflict", status_code=409,
+                message="Saved library coverage conflicts with the retained Add identity. "
+                        "Reconcile the library before retrying.",
+            )
         if cand.materialized_zotero_key:
             return (False, cand.materialized_zotero_key)
         key = do_write(cand, sess)

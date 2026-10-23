@@ -247,17 +247,19 @@ before backup/native work. A failed prewrite save dispatches nothing. Native
 failure or failed session finalization retains the plan; an explicit retry reuses
 the writer's existing-key transaction no-op instead of generating another key.
 Delivery is stamped only after native return; a planned key is not library coverage
-or a success receipt. Existing coverage hits still reuse their saved key without
-constructing a writer or inventing a new plan.
+or a success receipt. Native no-op retries return `already_added` without claiming
+that the retry's requested collection is the item's destination. Existing coverage
+hits still reuse their saved key without constructing a writer or inventing a new plan.
 
 Exact-identifier families and same persisted candidate addresses preserve planned
 and materialized operation keys across metadata enrichment, absorption, transitive
-merges and stale background saves. Conflicting selected-family identities fail
-before updates; unrelated/unselected families do not hijack the worker's selection,
+merges and stale background saves. Family union validates operation identities for
+every group before mutating any candidate. Conflicting selected-family identities
+fail before updates; unrelated/unselected families do not hijack the worker's selection,
 metadata, order or review. Empty plans preserve the legacy wire shape. Nonempty
 plans must be eight ASCII uppercase letters/digits; invalid persisted values fail.
-If confirmed coverage disagrees with a retained plan, Add returns409 before any
-native write or delivery stamp. Both observations remain available for explicit
+If confirmed coverage disagrees with a retained plan, Add returns 409 before any
+native write or delivery stamp, including when the candidate is already materialized. Both observations remain available for explicit
 library reconciliation; a later background save must not inherit contradictory
 planned/materialized identities.
 

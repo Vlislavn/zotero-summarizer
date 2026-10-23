@@ -10,6 +10,14 @@ from zotero_summarizer.integrations import _zotero_write_items as native
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter, ZoteroWriteError
 from zotero_summarizer.services.search import discovery, materialize, session
 from zotero_summarizer.storage import repositories
+from zotero_summarizer.storage.library_context import read_context
+
+
+def test_discovery_context_reads_note_through_public_alias_family(journey):
+    repositories.upsert_review_note(journey.paths.triage_db_path, "SEED0001", "Alias note")
+    context = read_context(journey.paths.triage_db_path, [STABLE])[STABLE]
+    assert "SEED0001" in context["aliases"]
+    assert context["manual"]["value"] == "Alias note"
 
 
 @pytest.fixture

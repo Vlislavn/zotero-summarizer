@@ -48,7 +48,10 @@ stdout when runtime diagnostics are printed. Live model receipts remain separate
 explicit Search Add with real temporary native SQLite: persistence refusal before
 effects, native commit before failed session finalization, rollback, unchanged
 native replay, backup, concurrency, legacy plans and exact-family/background
-identity preservation. They do not claim distributed or cross-library exactly-once.
+identity preservation. A later-family identity conflict leaves all input candidates
+unchanged. Delivered coverage conflicts and replay responses are checked without
+claiming a changed collection. These tests do not establish distributed or
+cross-library exactly-once.
 
 Full verification commands and the known macOS native-library fork baseline are
 in [architecture.md](../docs/architecture.md#verify-a-change). Compare the failed

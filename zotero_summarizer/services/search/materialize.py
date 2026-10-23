@@ -126,7 +126,7 @@ def materialize_candidate(
                 if (type(receipt) is not dict
                         or receipt != {"item_key": new_key, "applied_steps": [], "backup_path": None}):
                     raise APIError("search_write_unconfirmed", "Retained Add was not acknowledged", status_code=409)
-                reused_existing = True
+            reused_existing = existing_only or not receipt["applied_steps"]
         except ZoteroWriteError as exc:
             # Surface the failure without claiming delivery; retain the plan for retry.
             raise APIError(

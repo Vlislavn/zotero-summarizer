@@ -85,6 +85,7 @@ def test_same_title_cards_are_addressable_over_http_and_do_not_cross_stamp(clien
     _store(monkeypatch, tmp_path)
     monkeypatch.setattr(materialize, "settings", lambda: SimpleNamespace(zotero_data_dir=tmp_path))
     writer = Mock()
+    writer.apply_feed_materialization.return_value = {"applied_steps": ["create_item"]}
     monkeypatch.setattr(materialize, "ZoteroWriter", Mock(return_value=writer))
     research = _session("same-title", Candidate(title="Same title", authors=["Alice"], abstract="<b>First</b>"))
     research.raw_query = "<script>query</script>"

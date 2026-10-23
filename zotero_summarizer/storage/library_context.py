@@ -35,7 +35,7 @@ def read_context(db_path, item_keys):
         conn.execute("BEGIN")
         result = {}
         for key in item_keys:
-            aliases = review_notes._keys(conn, key)
+            aliases = review_notes.resolve_item_key_aliases(conn, key)
             placeholders = ",".join("?" for _ in aliases)
             row = conn.execute(
                 f"WITH changes AS ({label_mirrors._CURRENT_CHANGES}) SELECT c.*, v.source "
