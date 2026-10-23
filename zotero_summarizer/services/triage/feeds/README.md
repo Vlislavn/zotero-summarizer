@@ -98,3 +98,5 @@ without starting a feed tick or advancing the cursor. Other failures propagate.
 The existing daemon training-ledger producer is retained with its original synthetic-trainer regression suite. It appends retained artifact identities only after install/rescore; this packaging adds no fitting, inference or new identity authority.
 
 Retain original RSS partition consumption of the producer-owned private prefilter outcome, not generated tags.
+
+The existing question/native source stack carries the original post-commit materialization/verdict/recovery mirror callers. No new delivery controller or source-derived action is designed here.

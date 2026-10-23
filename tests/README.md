@@ -458,3 +458,5 @@ Original native source dependencies include the existing condition marker and un
 Original native-preview client source is retained: displayed approval hashes, explicit refresh/force and direct-editor outcomes use the existing backend; no new controls or protocols are designed. Original synthetic client tests remain unchanged.
 
 The original Telegram private worker/auth command registration and combined schema13 are retained here. Only fake-child command composition is exercised by packaging; armed lifecycle/platform/account tests remain unchanged and deferred.
+
+Original question API/sync source is retained: immutable save/replay before Q&A, separate receipts and existing composite-note delivery. Related/discovery endpoint additions are not mixed into this question slice. No new requirements or acceptance are implemented.

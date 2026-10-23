@@ -9,7 +9,8 @@ from zotero_summarizer.domain import READING_PRIORITY_SORT_RANK
 from zotero_summarizer.services.golden import label_verdicts, verdict_effects
 from zotero_summarizer.services.library import deep_review, reading_queue
 from zotero_summarizer.services.library.review_eligibility import ReviewRequired, require_feed_review
-from zotero_summarizer.storage import repositories
+from zotero_summarizer.storage import question_sync, repositories
+from zotero_summarizer.storage.question_sync import validate_mutation as validate_question_mutation
 
 _PAPER_FIELDS = (
     "item_key",
@@ -59,6 +60,7 @@ def _paper_snapshots(db_path: Path) -> list[dict[str, Any]]:
         paper["review_note"] = (
             None if note is None or note["value"] is None else note["value"]
         )
+        paper["questions"] = (fields.get((item_key, "review_question")) or {}).get("value", [])
         paper["model_priority"] = (
             verdict.get("model_priority") if verdict else None
         ) or paper.get("reading_priority")
@@ -76,7 +78,7 @@ def _paper_snapshots(db_path: Path) -> list[dict[str, Any]]:
         )
         paper["revisions"] = {
             field: (fields.get((item_key, field)) or {}).get("revision", 0)
-            for field in ("verdict", "review_note")
+            for field in ("verdict", "review_note", "review_question")
         }
     return list(papers.values())
 
@@ -88,7 +90,14 @@ def pull(db_path: Path, since: int) -> dict[str, Any]:
     return {"protocol": 1, **delta, "papers": _paper_snapshots(db_path)}
 
 
+def questions_for_paper(db_path: Path, item_key: str) -> list[dict[str, Any]]:
+    return question_sync.list_for_paper(db_path, item_key)
+
+
 def _validate_mutation(mutation: dict[str, Any]) -> None:
+    if mutation["field"] == "review_question":
+        mutation.update(validate_question_mutation(mutation))
+        return
     for field in ("device_id", "item_key"):
         value = mutation.get(field)
         if not isinstance(value, str) or not value.strip():
@@ -129,8 +138,10 @@ def _log_applied_verdict(mutation: dict[str, Any], result: dict[str, Any]) -> No
 def _run_post_commit_effects(db_path: Path, mutation: dict[str, Any], result: dict[str, Any]) -> None:
     if result["status"] not in {"applied", "already_applied"} or mutation["operation"] == "keep_server":
         return
-    if mutation["field"] == "review_note":
-        verdict_effects.mirror_review_note(db_path, mutation["item_key"])
+    if mutation["field"] in {"review_note", "review_question"}:
+        mirror = verdict_effects.mirror_review_note(db_path, mutation["item_key"])
+        mirror_field = "question_mirror" if mutation["field"] == "review_question" else "review_note_mirror"
+        result[mirror_field] = mirror
         return
     if mutation["operation"] != "set":
         verdict_effects.mirror_current_verdict(db_path, mutation["item_key"])
@@ -147,13 +158,15 @@ def push(db_path: Path, mutations: list[dict[str, Any]], predecessors: list[str]
     results: list[dict[str, Any]] = []
     last_applied = repositories.sync_applied_revisions(db_path, predecessors or [])
     for mutation in mutations:
-        key = (mutation["device_id"], mutation["item_key"], mutation["field"])
         effective = dict(mutation)
-        if (effective["operation"] != "keep_server" and key in last_applied
-                and effective["base_revision"] < last_applied[key]):
-            effective["_effective_base_revision"] = last_applied[key]
+
         try:
             _validate_mutation(effective)
+            identity = effective if effective["field"] == "review_question" else mutation
+            key = (identity["device_id"], identity["item_key"], identity["field"])
+            if (effective["operation"] != "keep_server" and key in last_applied
+                    and effective["base_revision"] < last_applied[key]):
+                effective["_effective_base_revision"] = last_applied[key]
             if (effective["field"] == "verdict" and effective["operation"] == "set"
                     and effective.get("value") != "dont_read"
                     and effective["item_key"].startswith("feed:")

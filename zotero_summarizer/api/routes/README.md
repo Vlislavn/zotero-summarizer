@@ -208,3 +208,5 @@ storage query. `GET /api/triage/jobs?active_only=true` returns persisted running
 and cancelling jobs without limiting the lookup to newest terminal jobs.
 
 Existing native/question source stack: original metadata editors, Pending confirmation and mirror activation; corresponding UI/MCP source follows. No new feature or issue-completion work; merge the related parts before using their new workflow.
+
+Original question API/sync source is retained: immutable save/replay before Q&A, separate receipts and existing composite-note delivery. Related/discovery endpoint additions are not mixed into this question slice. No new requirements or acceptance are implemented.
