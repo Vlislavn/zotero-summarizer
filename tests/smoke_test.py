@@ -254,10 +254,10 @@ def main() -> int:
             raise SmokeFailure("Reject endpoint returned zero updated rows for created pending IDs")
         return f"rejected={updated}"
 
-    def check_apply_endpoint_noop() -> str:
+    def check_apply_requires_snapshot() -> str:
         status, data = _request("POST", "/api/pending/apply", {"change_ids": [2147483647], "force": False})
-        _expect_status(status, 200, "POST /api/pending/apply noop")
-        return f"applied={data.get('applied', 0)} failed={data.get('failed', 0)}"
+        _expect_status(status, 422, "POST /api/pending/apply missing snapshot")
+        return f"missing approval rejected: {data.get('error', 'validation_error')}"
 
     def check_results_endpoints() -> str:
         status, data = _request("GET", "/api/results?scope=latest&limit=10")
@@ -295,7 +295,7 @@ def main() -> int:
         ("triage_jobs", check_triage_jobs_list),
         ("pending_count", check_pending_count),
         ("reject_created_pending", check_reject_created_pending),
-        ("pending_apply_noop", check_apply_endpoint_noop),
+        ("pending_apply_requires_snapshot", check_apply_requires_snapshot),
         ("results", check_results_endpoints),
         ("config_roundtrip", check_config_roundtrip),
     ]

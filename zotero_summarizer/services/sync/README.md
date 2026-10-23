@@ -14,7 +14,12 @@ transitions. `push` applies ordered verdict or
 review-note mutations. Each mutation has a UUID and per-field base revision, so
 replay is idempotent, edits to different fields merge, and same-field divergence
 returns an explicit conflict. A resolution is another mutation naming the
-conflicted mutation. Delete tombstones retain their last revision, so a client
+conflicted mutation. `keep_server` carries no value/comment: it references the
+compared conflict and exact field revision. The same SQLite transaction verifies
+that target/version and records the actual no-op UUID receipt; a changed version
+conflicts again. No canonical field/origin, transition log or native mirror is
+changed by that choice or its replay. Set/delete and their existing effects stay
+separate; canonical readouts are not restricted by outbound mutation size caps. Delete tombstones retain their last revision, so a client
 that has pulled a deletion can edit from that revision without a false conflict;
 replaying a conflict UUID returns the same conflict rather than treating it as
 an applied write.
@@ -72,3 +77,5 @@ bodies or rerunning predecessor effects. Intervening writes still conflict.
 Unknown or conflict receipts reject the request before writes. IndexedDB commits
 these receipt IDs with acknowledgement retirement, so continuation survives a
 restart or the existing 15-second whole-sync deadline. No schema or worker is added.
+
+Original question API/sync source is retained: immutable save/replay before Q&A, separate receipts and existing composite-note delivery. Related/discovery endpoint additions are not mixed into this question slice. No new requirements or acceptance are implemented.

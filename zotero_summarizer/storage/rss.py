@@ -5,7 +5,16 @@ import json
 import sqlite3
 from typing import Any
 
+import httpx
+
 from zotero_summarizer.storage.feed_identity import stable_feed_key_from_item
+
+
+def _subscription_url_key(url: str) -> str:
+    try:
+        return str(httpx.URL(url.strip()).copy_with(fragment=None))
+    except httpx.InvalidURL:
+        return url.strip()
 
 
 def list_rss_feeds(
@@ -33,6 +42,7 @@ def upsert_rss_feed(
     enabled: bool = True,
     source: str = "app",
     imported_zotero_library_id: int | None = None,
+    create_only: bool = False,
 ) -> int:
     safe_name = str(name or "").strip()
     safe_url = str(url or "").strip()
@@ -40,6 +50,13 @@ def upsert_rss_feed(
         raise ValueError("feed name is required")
     if not safe_url:
         raise ValueError("feed url is required")
+    if create_only:
+        if not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        key = _subscription_url_key(safe_url)
+        for row in conn.execute("SELECT id, url FROM rss_feeds"):
+            if _subscription_url_key(row["url"]) == key:
+                return int(row["id"])
     conn.execute(
         """
         INSERT INTO rss_feeds (name, url, enabled, source, imported_zotero_library_id)

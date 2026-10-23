@@ -9,6 +9,7 @@ import {
 } from '../../api/libraryApi.js';
 import Spinner from '../ui/Spinner.jsx';
 import { Disclosure } from '../paper/review/primitives.jsx';
+import useServerAvailable from '../../hooks/useServerAvailable.js';
 
 // Figures & full brief. A build job publishes audited figures and a single-file HTML
 // brief beside its source PDF. The decision content (verdict / quality / goals /
@@ -18,12 +19,13 @@ import { Disclosure } from '../paper/review/primitives.jsx';
 // and links out to the standalone/printable brief, and owns the build controls.
 export default function PaperReaderPane({ itemKey, open, onOpenChange, hasPdf = true }) {
   const queryClient = useQueryClient();
+  const serverAvailable = useServerAvailable();
   const [allowArxivSource, setAllowArxivSource] = useState(false);
   const staleRebuiltRef = useRef(false);
   const renderQuery = useQuery({
     queryKey: ['paper-render', itemKey],
     queryFn: () => fetchPaperRender(itemKey),
-    enabled: Boolean(open && itemKey),
+    enabled: Boolean(open && itemKey && serverAvailable),
     refetchInterval: (query) => (query.state.data?.status === 'running' ? 1500 : false),
   });
   const buildMutation = useMutation({
@@ -39,11 +41,13 @@ export default function PaperReaderPane({ itemKey, open, onOpenChange, hasPdf = 
 
   // A changed PDF, parser setting or renderer triggers one automatic rebuild.
   useEffect(() => {
-    if (render?.stale && !running && !staleRebuiltRef.current) {
+    if (serverAvailable && render?.stale && !running && !staleRebuiltRef.current) {
       staleRebuiltRef.current = true;
       buildMutation.mutate({ force: true });
     }
-  }, [render?.stale, running]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [serverAvailable, render?.stale, running]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!serverAvailable) return <p className="text-xs text-slate-500">Figures &amp; full brief unavailable — needs the Mac. Cached review text remains available.</p>;
 
   const summary = (
     <>

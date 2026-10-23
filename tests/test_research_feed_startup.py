@@ -13,11 +13,12 @@ from zotero_summarizer.services.library import _flight, _review_cache, _review_i
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
 from zotero_summarizer.storage import repositories
 from tests.test_research_feed import _review, _seed, _settings
+from tests.test_feed_engineering import _generated_entry
 
 
 @pytest.fixture(autouse=True)
 def _stable_review_identity(monkeypatch):
-    monkeypatch.setattr(_review_identity, "current_review_identity", lambda key, stored: stored)
+    monkeypatch.setattr(_review_identity, "current_review_identity", lambda key, stored, *, config=None: stored)
 
 
 def _args(settings, *extra):
@@ -26,7 +27,7 @@ def _args(settings, *extra):
 
 
 @pytest.mark.parametrize("queue", [False, True])
-def test_cached_cli_needs_no_startup_config_or_classifier(tmp_path, monkeypatch, capsys, queue):
+def test_cached_cli_without_config_reports_qualification_error_without_startup(tmp_path, monkeypatch, capsys, queue):
     settings = _settings(tmp_path)
     _seed(settings, "a", "Agent evaluation", materialized="Z1")
     set_context(AppContext(settings=settings))
@@ -36,14 +37,39 @@ def test_cached_cli_needs_no_startup_config_or_classifier(tmp_path, monkeypatch,
     startup = Mock(side_effect=AssertionError("cached-only must not initialize models or jobs"))
     monkeypatch.setattr(lifecycle, "startup", startup)
 
+    assert cli.main(_args(settings, "--cached-only", *(["--queue-zotero"] if queue else []))) == 1
+
+    startup.assert_not_called()
+    result = json.loads(capsys.readouterr().out)
+    payload = json.loads(Path(result["json_path"]).read_text())
+    assert result["cards_generated"] == 0 and result["failed"] == 1
+    assert payload["cards"] == [] and payload["failed"][0]["source_id"] == "a"
+    assert payload["failed"][0]["error"].startswith("FileNotFoundError:")
+    assert result["writebacks_queued"] == 0
+    assert not settings.config_path.exists() and not settings.golden_csv_path.exists()
+    with repositories.with_db_path(settings.triage_db_path):
+        assert repositories.get_pending_changes(status=None) == []
+
+
+@pytest.mark.parametrize("queue", [False, True])
+def test_cached_cli_with_existing_config_preserves_explicit_queue_without_startup(tmp_path, monkeypatch, capsys, queue):
+    settings = _settings(tmp_path)
+    _seed(settings, "a", "Agent evaluation", materialized="Z1")
+    write_user_config(settings.config_path, _default_goals_config())
+    set_context(AppContext(settings=settings))
+    _review_cache._write_one("a", _review("a"))
+    startup = Mock(side_effect=AssertionError("cached-only cannot initialize models or jobs"))
+    monkeypatch.setattr(lifecycle, "startup", startup)
+
     assert cli.main(_args(settings, "--cached-only", *(["--queue-zotero"] if queue else []))) == 0
 
     startup.assert_not_called()
     result = json.loads(capsys.readouterr().out)
     payload = json.loads(Path(result["json_path"]).read_text())
-    assert result["cards_generated"] == 1
+    assert result["cards_generated"] == 1 and result["failed"] == 0
     assert payload["cards"][0]["candidate"]["source_id"] == "a"
     assert result["writebacks_queued"] == int(queue)
+    assert not settings.golden_csv_path.exists()
     with repositories.with_db_path(settings.triage_db_path):
         assert len(repositories.get_pending_changes(status=None)) == int(queue)
 
@@ -58,7 +84,8 @@ def _isolate_startup_integrations(monkeypatch, settings):
     monkeypatch.setattr(_flight, "run_in_background", Mock(side_effect=AssertionError("no prewarm")))
 
 
-def test_generated_cli_uses_real_non_background_startup_and_only_selected_review(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("assessment_present", [True, False])
+def test_generated_cli_uses_real_non_background_startup_and_only_selected_review(tmp_path, monkeypatch, capsys, assessment_present):
     settings = _settings(tmp_path)
     _seed(settings, "a", "Agent A")
     _seed(settings, "bb", "Agent B")
@@ -68,19 +95,21 @@ def test_generated_cli_uses_real_non_background_startup_and_only_selected_review
 
     def complete_review(**kwargs):
         for key in kwargs["item_keys"]:
-            _review_cache._write_one(key, _review(key))
+            entry = _generated_entry(key, kwargs["feed_contexts"][key].profile)[0] if assessment_present else _review(key)
+            _review_cache._write_one(key, entry)
         return {"accepted": True, "status": "ready"}
 
     start = Mock(side_effect=complete_review)
     monkeypatch.setattr(deep_review, "start", start)
     monkeypatch.setattr(deep_review, "status", lambda _key: {"status": "ready"})
 
-    assert cli.main(_args(settings)) == 0
+    assert cli.main(_args(settings)) == (0 if assessment_present else 1)
 
     assert gate.call_args.kwargs == {"background": False}
     assert start.call_args.kwargs["item_keys"] == ["bb"]
     result = json.loads(capsys.readouterr().out)
     assert result["cards_generated"] == 1
+    assert result["failed"] == (0 if assessment_present else 1)
     assert _review_cache.get_current_review("bb") is not None
     assert _review_cache.get_current_review("a") is None
 

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { fetchCollections, fetchPaperRender, attachFiguresToZotero } from '../api/libraryApi.js';
 import { flattenCollections } from './pendingHelpers.js';
@@ -11,6 +11,7 @@ import LinksRow from '../components/paper/LinksRow.jsx';
 import AbstractBlock from '../components/paper/PaperDetailView/AbstractBlock.jsx';
 import PaperReview from '../components/paper/review/PaperReview.jsx';
 import ReviewFailure from '../components/paper/ReviewFailure.jsx';
+import RelatedPapers from '../components/paper/RelatedPapers.jsx';
 import PaperFigures from '../components/library/PaperFigures.jsx';
 import SectionMap from '../components/paper/review/SectionMap.jsx';
 import StoryToc from '../components/paper/review/StoryToc.jsx';
@@ -38,6 +39,11 @@ const EYEBROW = 'mb-2 text-[11px] uppercase tracking-[0.08em] font-semibold text
 function ReviewZone({ deep, runner, sectionOverlay }) {
   const { status, error, llm, llmAvailable, online, running } = runner;
   const reviewed = deep && !deep.needs_pdf && (deep.digest || deep.quality || (deep.goal_summaries || []).length);
+  const digest = deep?.digest;
+  const usable = !deep?.needs_pdf && !deep?.error && [
+    digest?.tldr, digest?.executive_summary,
+    ...(Array.isArray(digest?.key_findings) ? digest.key_findings : []),
+  ].some((value) => String(value || '').trim());
   return (
     <div className="space-y-3">
       {!online ? (
@@ -62,9 +68,8 @@ function ReviewZone({ deep, runner, sectionOverlay }) {
       )}
       <FullTextAccessNotice deep={deep} />
 
-      {reviewed ? (
-        <PaperReview deep={deep} flat sectionOverlay={sectionOverlay} />
-      ) : running ? (
+      {reviewed && !running && <PaperReview deep={deep} flat sectionOverlay={sectionOverlay} />}
+      {running ? (
         <div className="rounded-lg border border-slate-200 bg-white px-4 py-5 text-[13px] text-slate-600" role="status" aria-live="polite">
           <div className="flex items-center gap-2 font-semibold text-slate-700">
             <Spinner size="sm" color="slate" /> Generating the review…
@@ -82,17 +87,15 @@ function ReviewZone({ deep, runner, sectionOverlay }) {
             </div>
           )}
         </div>
-      ) : (
-        !deep?.needs_pdf && (
-          <button
-            type="button"
-            onClick={() => runner.run()}
-            disabled={!llmAvailable}
-            className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-[13px] font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
-          >
-            Generate review
-          </button>
-        )
+      ) : !usable && (
+        <button
+          type="button"
+          onClick={() => runner.run()}
+          disabled={!llmAvailable}
+          className="inline-flex items-center gap-2 rounded-lg bg-teal-700 px-4 py-2 text-[13px] font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
+        >
+          Generate review
+        </button>
       )}
       <ReviewFailure status={status} />
       {online && status.status === 'unavailable' && status.error && (
@@ -109,6 +112,8 @@ function ReviewZone({ deep, runner, sectionOverlay }) {
 // tags, ask) lives in the rail and a mobile bottom bar so it's always reachable.
 export default function PaperReviewPage() {
   const { itemKey } = useParams();
+  const [params] = useSearchParams();
+  const autoRun = params.get('autoRun') !== 'false';
   const navigate = useNavigate();
   // Prev/Next through the ranked list the originating page (Read next) stored in
   // localStorage — same tab (useParams re-reads the key, usePaperReview refetches,
@@ -130,13 +135,15 @@ export default function PaperReviewPage() {
   // Stepping to another paper unmounts this page (and the notes textarea), so an
   // unsaved note would be silently lost — confirm first when there are unsaved edits.
   const [notesDirty, setNotesDirty] = useState(false);
+  const [relatedRevision, setRelatedRevision] = useState(0);
+  const fenceRelatedContext = useCallback(() => setRelatedRevision(value => value + 1), []);
   const goToKey = useCallback(
     (key) => {
       if (!key) return;
       if (notesDirty && !window.confirm('You have unsaved notes on this paper. Leave without saving them?')) return;
-      navigate(`/paper/${encodeURIComponent(key)}`);
+      navigate(`/paper/${encodeURIComponent(key)}${autoRun ? '' : '?autoRun=false'}`);
     },
-    [navigate, notesDirty],
+    [navigate, notesDirty, autoRun],
   );
   // j = next, k = prev (auto-disabled while typing in the notes / Ask fields).
   useKeyboardNav({
@@ -179,16 +186,16 @@ export default function PaperReviewPage() {
   });
   const flatCollections = flattenCollections(collectionsQuery.data?.items || []);
   const { detail, isLoading, error, refreshDetail, onTagsChanged, onCollectionsChanged, verdict } =
-    usePaperReview(itemKey, {});
+    usePaperReview(itemKey, { onVerdictAcknowledged: fenceRelatedContext });
   const hasPdf = Boolean(detail?.has_pdf);
   const render = renderQuery.data || null;
   const renderCompleted = render?.status === 'completed';
-  const showFigures = hasPdf || renderCompleted || render?.status === 'running';
   const canAsk = hasPdf || renderCompleted;
   // Auto-generate on open only for papers with a local Zotero PDF (no silent PDF
   // fetch); a no-PDF paper shows the manual Generate path instead, even if an
   // acquired render artifact already exists.
-  const runner = useDeepReviewRunner(itemKey, { deep: detail?.deep_review, onDone: refreshDetail, autoRun: hasPdf });
+  const runner = useDeepReviewRunner(itemKey, { deep: detail?.deep_review, onDone: refreshDetail, autoRun: hasPdf && autoRun });
+  const showFigures = runner.online && runner.serverAvailable && (hasPdf || renderCompleted || render?.status === 'running');
 
   if (isLoading) return <div className="py-4 text-sm text-slate-500">Loading review…</div>;
   if (error) {
@@ -259,6 +266,8 @@ export default function PaperReviewPage() {
             <ReviewZone deep={deep} runner={runner} sectionOverlay={ov} />
           </section>
 
+          <RelatedPapers key={JSON.stringify([itemKey, relatedRevision, detail.user_note, detail.verdict])} itemKey={itemKey} />
+
           {showFigures && (
             <section id="figures" className="scroll-mt-20 py-6">
               <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -300,10 +309,11 @@ export default function PaperReviewPage() {
             verdict={verdict}
             onTagsChanged={onTagsChanged}
             onCollectionsChanged={onCollectionsChanged}
-            onNoteSaved={refreshDetail}
+            onNoteSaved={() => { fenceRelatedContext(); refreshDetail(); }}
             onNotesDirtyChange={setNotesDirty}
             hasPdf={hasPdf}
             canAsk={canAsk}
+            serverAvailable={runner.serverAvailable}
           />
         </aside>
       </div>

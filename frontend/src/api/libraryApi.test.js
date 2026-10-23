@@ -3,6 +3,7 @@ import {
   askPaper,
   buildPaperRender,
   fetchPaperRender,
+  fetchRelatedPapers,
   paperPresentationUrl,
   paperRenderPdfUrl,
   runReviewFleet,
@@ -19,6 +20,18 @@ function mockFetch(body = {}) {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+it('carries the related-query owner cancellation signal through the GET wrapper', async () => {
+  mockFetch({ status: 'ready', items: [] });
+  const owner = new AbortController();
+  await fetchRelatedPapers('SEED 1', { signal: owner.signal });
+  const [url, options] = global.fetch.mock.calls[0];
+  expect(url).toBe('/api/library/related/SEED%201');
+  expect(options.signal).toBe(owner.signal);
+  expect(options.method).toBeUndefined();
+  owner.abort();
+  expect(options.signal.aborted).toBe(true);
 });
 
 describe('explicit fleet selection', () => {

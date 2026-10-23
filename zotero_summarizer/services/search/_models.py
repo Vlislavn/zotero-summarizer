@@ -8,11 +8,12 @@ pipeline), and a status. All are plain dataclasses with explicit ``to_dict`` /
 """
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import asdict, dataclass, field
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from zotero_summarizer.domain import normalize_arxiv_id, normalize_doi
 
@@ -28,8 +29,16 @@ class ScreenRequest(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True, strict=True)
     constraints: ConfirmedConstraints | None = None
+    evidence_policy: Literal["baseline", "question_evidence"] = "baseline"
     query: str = Field(min_length=1, max_length=4000, description="Natural-language research topic")
     questions: list[Annotated[str, Field(min_length=1, max_length=1000)]] = Field(default_factory=list, max_length=10)
+
+    @field_validator("query", "questions")
+    @classmethod
+    def utf8_inputs(cls, value):
+        for text in value if isinstance(value, list) else [value]:
+            text.encode("utf-8")
+        return value
 
 
 @dataclass(slots=True)
@@ -66,6 +75,7 @@ class Candidate:
     publication_types: list[str] = field(default_factory=list)
     version_type: str = "unknown"
     provenance: list[Provenance] = field(default_factory=list)
+    family_identifier_keys: list[str] = field(default_factory=list)
     # Derived downstream:
     query_score: float | None = None   # master key — OUR cross-encoder vs the query
     goal_sim: float | None = None      # weak tiebreak (standing goals); often absent
@@ -85,8 +95,11 @@ class Candidate:
     in_library: bool | None = None
     existing_zotero_key: str | None = None  # the found item's key when in_library is True
     candidate_id: str = ""             # persisted address, independent of later metadata enrichment
+    question_evidence: list[dict[str, Any]] = field(default_factory=list)
+    planned_zotero_key: str = ""       # reserved before effects, not proof of delivery
 
     def __post_init__(self) -> None:
+        self._validate_planned_key()
         if not isinstance(self.publication_types, list) or any(
                 not isinstance(term, str) or not term.strip() for term in self.publication_types):
             raise ValueError("Publication types must be a list of nonempty metadata strings")
@@ -94,9 +107,31 @@ class Candidate:
         self.arxiv_id = normalize_arxiv_id(self.arxiv_id) if self.arxiv_id else ""
         self.pmid = (self.pmid or "").strip()
         self.pmcid = (self.pmcid or "").strip()
+        if not isinstance(self.family_identifier_keys, list):
+            raise ValueError("Family identifiers must be a list of namespaced keys")
+        normalized = []
+        for key in self.family_identifier_keys:
+            if not isinstance(key, str):
+                raise ValueError("Family identifier must be a namespaced string")
+            namespace, separator, value = key.partition(":")
+            if not separator or namespace not in {"doi", "arxiv", "pmid", "pmcid", "openalex"} or not value.strip():
+                raise ValueError("Invalid family identifier namespace or value")
+            if namespace == "doi":
+                value = normalize_doi(value)
+            elif namespace == "arxiv":
+                value = normalize_arxiv_id(value)
+            if not value:
+                raise ValueError("Family identifier normalization produced an empty value")
+            normalized.append(f"{namespace}:{value}")
+        self.family_identifier_keys = list(dict.fromkeys(normalized))
         if not self.candidate_id:
             self.candidate_id = next((ident for ident in (self.doi, self.arxiv_id, self.pmid, self.pmcid,
                                                           self.openalex_id) if ident), "") or f"local:{uuid.uuid4().hex}"
+
+    def _validate_planned_key(self) -> None:
+        key = self.planned_zotero_key
+        if not isinstance(key, str) or (key and re.fullmatch(r"[A-Z0-9]{8}", key) is None):
+            raise ValueError("Planned Zotero key must be empty or eight ASCII uppercase letters/digits")
 
     def identifier_keys(self) -> list[str]:
         """Namespaced identifier tokens for the dedup graph (empty ones dropped)."""
@@ -104,10 +139,14 @@ class Candidate:
             ("doi", self.doi), ("arxiv", self.arxiv_id), ("pmid", self.pmid),
             ("pmcid", self.pmcid), ("openalex", self.openalex_id),
         )
-        return [f"{ns}:{val}" for ns, val in pairs if val]
+        return list(dict.fromkeys([f"{ns}:{val}" for ns, val in pairs if val] + self.family_identifier_keys))
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        self._validate_planned_key()
+        data = asdict(self)
+        if not self.planned_zotero_key:
+            data.pop("planned_zotero_key")
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Candidate":
@@ -246,12 +285,31 @@ class ResearchSession:
     status: str = "created"
     screened_count: int = 0
     refinements: list[dict[str, Any]] = field(default_factory=list)
+    evidence_policy: str = "baseline"
+    evidence_status: dict[str, Any] = field(default_factory=dict)
+    evidence_baseline_order: list[str] = field(default_factory=list)
+    related: dict[str, Any] = field(default_factory=dict)
+    discovery: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        _require_unique_addresses(self.candidates)
+        from zotero_summarizer.services.search._question_policy import invalidate_stale_evidence
 
-    def to_dict(self) -> dict[str, Any]:
         _require_unique_addresses(self.candidates)
+        if (not isinstance(self.evidence_baseline_order, list)
+                or any(not isinstance(key, str) or not key.strip() for key in self.evidence_baseline_order)
+                or len(set(self.evidence_baseline_order)) != len(self.evidence_baseline_order)):
+            raise ValueError("Evidence baseline order must contain unique candidate addresses")
+        invalidate_stale_evidence(self)
+
+    def to_dict(self, *, for_display: bool = False, for_storage: bool = False) -> dict[str, Any]:
+        from zotero_summarizer.services.search._question_policy import evidence_view, invalidate_stale_evidence
+
+        _require_unique_addresses(self.candidates)
+        binding = invalidate_stale_evidence(self)
+        discovery = dict(self.discovery) if for_storage else {}
+        if self.discovery and not for_storage:
+            discovery = {"version": self.discovery.get("version"), "seed_key": self.discovery.get("seed_key"),
+                         "freshness": "unverified", "new_actions_allowed": False}
         return {
             "id": self.id,
             "created_at": self.created_at,
@@ -259,14 +317,23 @@ class ResearchSession:
             "intent": self.intent.to_dict(),
             "plan": self.plan.to_dict(),
             "questions": list(self.questions),
-            "candidates": [c.to_dict() for c in self.candidates],
+            "candidates": [{**c.to_dict(), "question_evidence": evidence_view(c, self, binding)
+                            if for_display else c.question_evidence} for c in self.candidates],
+            "evidence_policy": self.evidence_policy,
+            "evidence_status": dict(self.evidence_status),
+            "evidence_baseline_order": list(self.evidence_baseline_order),
             "status": self.status,
             "screened_count": self.screened_count,
             "refinements": [dict(r) for r in self.refinements],
+            "related": dict(self.related),
+            "discovery": discovery,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ResearchSession":
+        discovery = dict(data.get("discovery") or {})
+        if discovery and not {"snapshot", "context_fingerprint", "candidate_fingerprint"} <= discovery.keys():
+            raise ValueError("Discovery projections cannot restore durable sessions")
         candidates = []
         for index, row in enumerate(data.get("candidates") or []):
             candidate = Candidate.from_dict(row)
@@ -287,4 +354,9 @@ class ResearchSession:
             status=data.get("status", "created"),
             screened_count=int(data.get("screened_count") or 0),
             refinements=[dict(r) for r in data.get("refinements") or []],
+            evidence_policy=data.get("evidence_policy", "baseline"),
+            evidence_status=dict(data.get("evidence_status") or {}),
+            evidence_baseline_order=data.get("evidence_baseline_order", []),
+            related=dict(data.get("related") or {}),
+            discovery=discovery,
         )

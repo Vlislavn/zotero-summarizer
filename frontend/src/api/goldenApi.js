@@ -2,7 +2,8 @@
 // All functions return parsed JSON or throw on non-2xx responses.
 // Designed to be called from React Query's `queryFn` / `mutationFn`.
 
-import { cacheResponse, cachedResponse, queueMutation } from '../offlineStore.js';
+import { cacheReviewDetail, cachedReviewDetail, queueMutation, transportUnavailable } from '../offlineStore.js';
+import { offlineRequest } from './offlineTransport.js';
 
 function requestSync() {
   window.dispatchEvent(new Event('zs-sync-request'));
@@ -10,11 +11,13 @@ function requestSync() {
 
 const BASE = '/api/golden';
 
-async function request(path, options = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-    ...options,
-  });
+async function request(path, options = {}, localFallback = false) {
+  const init = { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options };
+  return localFallback ? offlineRequest(`${BASE}${path}`, init, readResponse)
+    : readResponse(await fetch(`${BASE}${path}`, init));
+}
+
+async function readResponse(res) {
   if (!res.ok) {
     let detail = '';
     let parsedMessage = '';
@@ -66,16 +69,37 @@ export async function fetchProvenanceList({ priority, flag, limit = 200, collect
 export async function fetchReviewDetail(itemKey) {
   if (!itemKey) throw new Error('fetchReviewDetail: itemKey is required');
   const qs = new URLSearchParams({ item_key: itemKey });
-  const key = `review:${itemKey}`;
+  function cacheDiagnostic(error, stage, localQuestionsAvailable) {
+    const diagnostic = { stage, message: error.message || String(error),
+      local_questions_available: localQuestionsAvailable };
+    console.warn('offline detail cache unavailable', { stage, name: error.name, message: diagnostic.message });
+    return diagnostic;
+  }
+  if (!navigator.onLine) {
+    try {
+      const cached = await cachedReviewDetail(itemKey);
+      if (cached) return cached;
+    } catch (cacheError) {
+      cacheDiagnostic(cacheError, 'read', false);
+    }
+  }
+  let data;
   try {
-    const data = await request(`/review-detail?${qs.toString()}`);
-    await cacheResponse(key, data).catch((err) => console.warn('offline detail cache unavailable', err));
-    return data;
+    data = await request(`/review-detail?${qs.toString()}`, {}, true);
   } catch (err) {
-    const cached = !err.status && await cachedResponse(key);
-    if (cached) return cached;
+    if (!err.transportFailure) throw err;
+    try {
+      const cached = await cachedReviewDetail(itemKey);
+      if (cached) return cached;
+    } catch (cacheError) {
+      cacheDiagnostic(cacheError, 'read', false);
+    }
     throw err;
   }
+  const result = await cacheReviewDetail(itemKey, data);
+  if (!result.cacheError) return result.detail || result;
+  return { ...result.detail, offline_cache_error:
+    cacheDiagnostic(result.cacheError, result.stage, result.localQuestionsAvailable) };
 }
 
 /**
@@ -86,15 +110,17 @@ export async function fetchReviewDetail(itemKey) {
 export async function submitVerdict({ item_key, user_priority, comment }) {
   if (!item_key) throw new Error('submitVerdict: item_key is required');
   if (!user_priority) throw new Error('submitVerdict: user_priority is required');
+  const mutation = { item_key, field: 'verdict', value: user_priority, comment: comment ?? '' };
+  if (transportUnavailable()) return queueMutation(mutation);
   try {
     const result = await request('/verdict', {
       method: 'POST', body: JSON.stringify({ item_key, user_priority, comment: comment ?? '' }),
-    });
+    }, true);
     requestSync();
     return result;
   } catch (err) {
-    if (err.status) throw err;
-    return queueMutation({ item_key, field: 'verdict', value: user_priority, comment: comment ?? '' });
+    if (!err.transportFailure) throw err;
+    return queueMutation(mutation);
   }
 }
 
@@ -107,15 +133,17 @@ export async function submitVerdict({ item_key, user_priority, comment }) {
  */
 export async function saveReviewNote({ item_key, note }) {
   if (!item_key) throw new Error('saveReviewNote: item_key is required');
+  const mutation = { item_key, field: 'review_note', value: note ?? '' };
+  if (transportUnavailable()) return queueMutation(mutation);
   try {
     const result = await request('/review-note', {
       method: 'POST', body: JSON.stringify({ item_key, note: note ?? '' }),
-    });
+    }, true);
     requestSync();
     return result;
   } catch (err) {
-    if (err.status) throw err;
-    return queueMutation({ item_key, field: 'review_note', value: note ?? '' });
+    if (!err.transportFailure) throw err;
+    return queueMutation(mutation);
   }
 }
 
@@ -125,14 +153,16 @@ export async function saveReviewNote({ item_key, note }) {
  */
 export async function deleteVerdict(itemKey) {
   if (!itemKey) throw new Error('deleteVerdict: itemKey is required');
+  const mutation = { item_key: itemKey, field: 'verdict', operation: 'delete' };
+  if (transportUnavailable()) return queueMutation(mutation);
   const qs = new URLSearchParams({ item_key: itemKey });
   try {
-    const result = await request(`/verdict?${qs.toString()}`, { method: 'DELETE' });
+    const result = await request(`/verdict?${qs.toString()}`, { method: 'DELETE' }, true);
     requestSync();
     return result;
   } catch (err) {
-    if (err.status) throw err;
-    return queueMutation({ item_key: itemKey, field: 'verdict', operation: 'delete' });
+    if (!err.transportFailure) throw err;
+    return queueMutation(mutation);
   }
 }
 

@@ -26,9 +26,10 @@ def write_outputs(
     quality: dict[str, Any] | None = None,
     goal_summaries: list[dict[str, Any]] | None = None,
     code_link: dict[str, Any] | None = None,
+    interpretation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Publish staged outputs only after all blocking checks pass."""
-    html_text = _render_presentation(content, digest, quality, goal_summaries, code_link)
+    html_text = _render_presentation(content, digest, quality, goal_summaries, code_link, interpretation)
     audit = _audit_presentation(html_text, content, staging / "figures")
     if not _audit_passed(audit):
         raise APIError(error="paper_audit_failed", message="Paper audit failed; rebuild after fixing extraction",
@@ -57,9 +58,17 @@ def _render_presentation(
     quality: dict[str, Any] | None = None,
     goal_summaries: list[dict[str, Any]] | None = None,
     code_link: dict[str, Any] | None = None,
+    interpretation: dict[str, Any] | None = None,
 ) -> str:
     from zotero_summarizer.services.library import _paper_read_brief as brief
+    from zotero_summarizer.services.library.review_fleet.propose import apply_reading_policy
 
+    interpretation_block = ''
+    if interpretation is not None:
+        from zotero_summarizer.services.library._interpretation_html import section
+        interpretation_block = section(interpretation, digest, content=content)
+    if digest:
+        digest, _, _ = apply_reading_policy(digest, quality, goal_summaries)
     title = str(content.get("title") or "Untitled")
     authors = str(content.get("authors") or "")
     figures = [fig for fig in (content.get("figures") or []) if fig.get("name")]
@@ -99,7 +108,7 @@ def _render_presentation(
   </header>
   {code_link_block}
   {brief_block}
-  {quality_block}
+  {quality_block}{interpretation_block}
   {empty_state}
   {_digest_section_html(digest) if digest else ''}
   {_figures_section_html(figures)}

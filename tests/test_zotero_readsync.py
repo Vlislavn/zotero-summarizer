@@ -17,7 +17,7 @@ import pytest
 from tests._zotero_fixtures import add_feed, add_feed_item, build_zotero_db
 from zotero_summarizer.integrations.app_rss import AppRssReader
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
-from zotero_summarizer.integrations.zotero_write import ZoteroWriteError
+from zotero_summarizer.integrations.zotero_write import ZoteroWriteError, ZoteroWriter
 from zotero_summarizer.storage import feeds as feeds_storage
 from zotero_summarizer.storage import rss as rss_storage
 from zotero_summarizer.services.triage.feeds import _common
@@ -97,6 +97,45 @@ def test_sync_lock_failure_returns_zero_not_raise(tmp_path: Path, patched_settin
     """DB-locked posture mirrors mark_processed_read: warn + retry next tick."""
     reader = _zotero_with_unread(tmp_path, ["http://arxiv.org/abs/1"])
     assert sync_zotero_read_state(zotero_reader=reader, writer=_RecordingWriter(fail=True), tick_id="t") == 0
+
+
+@pytest.mark.parametrize("failure_phase", ["backup", "prune"])
+def test_sync_contains_filesystem_failure_without_replaying_committed_items(
+    tmp_path: Path, patched_settings, monkeypatch, caplog, failure_phase
+):
+    reader = _zotero_with_unread(tmp_path, ["http://arxiv.org/abs/1"])
+    writer = ZoteroWriter(reader.data_dir)
+    monkeypatch.setattr(writer, "is_connector_running", lambda: False)
+    original_backup = writer.backup_database
+    original_retry = writer._retry_on_lock
+    native_attempts = []
+    error = OSError("synthetic native backup/retention failure")
+
+    def fail():
+        raise error
+
+    def retry(fn, **kwargs):
+        if kwargs["ctx"] == "mark_feed_items_read":
+            native_attempts.append(True)
+        return original_retry(fn, **kwargs)
+
+    monkeypatch.setattr(writer, "_retry_on_lock", retry)
+    monkeypatch.setattr(writer, "backup_database" if failure_phase == "backup" else "_prune_backups", fail)
+
+    assert sync_zotero_read_state(zotero_reader=reader, writer=writer, tick_id="t") == 0
+    with sqlite3.connect(reader.db_path) as conn:
+        read_time = conn.execute("SELECT readTime FROM feedItems WHERE itemID=100").fetchone()[0]
+    assert (read_time is None) == (failure_phase == "backup")
+    assert len(native_attempts) == (0 if failure_phase == "backup" else 1)
+    assert any(record.levelname == "WARNING" and error in record.args for record in caplog.records)
+
+    monkeypatch.setattr(writer, "backup_database", original_backup)
+    assert sync_zotero_read_state(zotero_reader=reader, writer=writer, tick_id="next") == (
+        1 if failure_phase == "backup" else 0
+    )
+    assert len(native_attempts) == 1
+    assert len(list(writer.data_dir.glob(writer._BACKUP_GLOB))) == 1
+    assert reader.get_unread_feed_guid_map() == {}
 
 
 def test_unread_guid_map_excludes_read(tmp_path: Path):

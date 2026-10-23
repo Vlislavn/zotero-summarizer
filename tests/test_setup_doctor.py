@@ -236,8 +236,9 @@ def test_inference_check_preserves_distinct_failures_and_local_recovery(
 
     assert row["detail"].count(f"{resolved.provider.name}/{resolved.model}") == 2
     assert "feed, backlog" in row["detail"] and "deep_review" in row["detail"]
-    assert row["recovery"]["label"] == "Refresh model"
-    assert row["recovery"]["command"] == f"ollama pull {resolved.model}"
+    # Model prose cannot identify a runtime; actual local probes refuse before inference.
+    assert row["recovery"]["label"] == "Retry inference"
+    assert "command" not in row["recovery"]
 
 
 def test_doctor_rejects_unknown_check_and_marks_interrupted_run(tmp_path):
@@ -258,14 +259,16 @@ def test_doctor_rejects_unknown_check_and_marks_interrupted_run(tmp_path):
 
 
 def test_optional_browser_check_uses_the_actual_runtime_package(monkeypatch):
+    from zotero_summarizer.services.setup import doctor_environment
+
     monkeypatch.setattr(
-        doctor.importlib.util,
+        doctor_environment.importlib.util,
         "find_spec",
         lambda name: object() if name == "patchright" else None,
     )
     assert doctor._optional_extras(None)["status"] == "ready"
 
-    monkeypatch.setattr(doctor.importlib.util, "find_spec", lambda _name: None)
+    monkeypatch.setattr(doctor_environment.importlib.util, "find_spec", lambda _name: None)
     missing = doctor._optional_extras(None)
     assert missing["status"] == "unavailable"
     assert missing["recovery"]["command"] == "uv sync --extra browser"

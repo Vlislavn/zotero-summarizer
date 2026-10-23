@@ -243,3 +243,7 @@ the category-slot restriction. Its `--replay` also compares score keys directly,
 not the production role allocator; neither measures this new ordering policy.
 The new restriction has regression coverage, not a measured user-preference lift;
 bonus magnitudes and feature-flag defaults are unchanged.
+
+The existing daemon training-ledger producer is retained with its original synthetic-trainer regression suite. It appends retained artifact identities only after install/rescore; this packaging adds no fitting, inference or new identity authority.
+
+Existing Telegram source-review part: saved posts, collector/composer/rendering, model selection and migration11 are retained from the original working source. CLI worker/wiring and combined live-schema/native dependencies follow separately; no live collection, model loading or issue completion is inferred.

@@ -6,6 +6,7 @@ import * as api from '../api/libraryApi.js';
 import LibraryReadNext from './LibraryReadNext.jsx';
 
 vi.mock('../api/libraryApi.js');
+vi.mock('../hooks/useServerAvailable.js', () => ({ default: () => true }));
 vi.mock('../hooks/useSetupStatus.js', () => ({
   useSetupStatus: () => ({ status: { zotero: { db_found: true } } }),
 }));

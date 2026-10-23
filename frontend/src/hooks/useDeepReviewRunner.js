@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { runDeepReview, fetchDeepReviewStatus } from '../api/libraryApi.js';
 import { fetchLlmReachability } from '../api/settingsApi.js';
+import useServerAvailable from './useServerAvailable.js';
 
 // One per-paper poll for both review surfaces. Query keys isolate navigation;
 // a failed status request ends the spinner and leaves an explicit retry action.
 export default function useDeepReviewRunner(itemKey, { deep, onDone, autoRun = false } = {}) {
   const client = useQueryClient();
+  const serverAvailable = useServerAvailable();
   const autoRunFiredFor = useRef(null);
   const lastRunning = useRef(null);
   const [online, setOnline] = useState(() => navigator.onLine);
@@ -39,7 +41,7 @@ export default function useDeepReviewRunner(itemKey, { deep, onDone, autoRun = f
     staleTime: 30_000,
   });
   const llm = (reachability.data?.stages || []).find((stage) => stage.stage === 'deep_review') || null;
-  const llmAvailable = online && reachability.isSuccess && Boolean(llm)
+  const llmAvailable = online && serverAvailable && reachability.isSuccess && Boolean(llm)
     && llm.enabled !== false && llm.reachable !== false;
   const { mutate, error: runError, isPending: starting, variables } = useMutation({
     mutationFn: runDeepReview,
@@ -75,5 +77,5 @@ export default function useDeepReviewRunner(itemKey, { deep, onDone, autoRun = f
   }, [autoRun, itemKey, reachability.isPending, statusQuery.isSuccess, reviewed, running, deep, status.status, llmAvailable, run]);
 
   return { status, error: variables?.itemKey === itemKey ? runError?.message || null : null,
-    llm, llmAvailable, online, llmChecked: reachability.isSuccess, running, run };
+    llm, llmAvailable, online, serverAvailable, llmChecked: reachability.isSuccess, running, run };
 }

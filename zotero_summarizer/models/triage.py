@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, ValidationInfo, field_validator, model_validator
 
 from zotero_summarizer.domain import ReadingPriority, normalize_reading_priority
 
@@ -102,12 +102,13 @@ class MethodAndCode(BaseModel):
 
     @field_validator("artifacts")
     @classmethod
-    def _require_absolute_urls(cls, values: List[str]) -> List[str]:
-        cleaned = [value.strip() for value in values if value.strip()]
+    def _require_absolute_urls(cls, values: List[str], info: ValidationInfo) -> List[str]:
+        nonempty = [value for value in values if value.strip()]
+        cleaned = [value.strip() for value in nonempty]
         if any(urlsplit(value).scheme not in {"http", "https"} or not urlsplit(value).hostname
                for value in cleaned):
             raise ValueError("method artifacts must be absolute HTTP(S) URLs")
-        return cleaned
+        return nonempty if (info.context or {}).get("preserve_method_artifact_literals") else cleaned
 
 
 class PaperParameters(BaseModel):
@@ -139,7 +140,7 @@ class PaperDigest(QualityReview):
     skip_parts: List[str] = Field(default_factory=list)
     estimated_read_minutes: Optional[int] = Field(default=None, ge=0)
     original_value: str = Field(default="")
-    writing_friction: Literal["low", "moderate", "high"] = Field(default="low")
+    writing_friction: Optional[Literal["low", "moderate", "high"]] = Field(default=None)
     writing_reasons: List[str] = Field(default_factory=list, max_length=3)
     relevance: str = Field(default="")
     controversies: str = Field(default="")
@@ -165,10 +166,8 @@ class PaperDigest(QualityReview):
 
     @model_validator(mode="after")
     def _reading_contract(self) -> "PaperDigest":
-        if self.writing_friction != "low" and not any(x.strip() for x in self.writing_reasons):
+        if self.writing_friction in {"moderate", "high"} and not any(x.strip() for x in self.writing_reasons):
             raise ValueError("moderate/high writing friction requires a concrete reason")
-        if self.writing_friction == "high" and self.read_decision == "read":
-            self.read_decision = "skim"
         if self.read_decision == "skim" and not any(part.strip() for part in self.read_parts):
             raise ValueError("skim requires at least one exact read target")
         if self.read_decision == "skip":
@@ -201,8 +200,8 @@ class QualityEval(BaseModel):
     """Reference-free, AUTHOR-BLIND full-text quality assessment computed by
     ``services.library.quality_eval`` (not the digest LLM). A coarse 3-band
     verdict — never a fine score — with the decomposed rubric + red flags that
-    justify it, so it stays glassbox. ``uncertain`` = self-consistency runs
-    disagreed (human look)."""
+    justify it, so it stays glassbox. ``uncertain`` = unavailable assessment or
+    self-consistency disagreement (human look)."""
 
     quality_band: Literal["flag", "neutral", "highlight", "uncertain", ""] = Field(default="")
     grade: str = Field(default="")  # A-D (may echo the digest grade)
@@ -227,7 +226,7 @@ class QualityEval(BaseModel):
     coverage_standard: str = Field(default="")   # e.g. "TRIPOD+AI / PROBAST+AI"
     coverage_met: int = Field(default=0)
     coverage_applicable: int = Field(default=0)
-    coverage_fraction: float = Field(default=0.0, ge=0.0, le=1.0)
+    coverage_fraction: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     missing_critical: List[str] = Field(default_factory=list)  # critical items not met
     # Critical items the self-verification 2nd pass OVERTURNED (first pass over-claimed
     # them as met; the quote didn't establish the criterion) — transparency on the check.
@@ -334,6 +333,9 @@ class RefinedSummary(BaseModel):
 
 
 class SummarizeResponse(BaseModel):
+    # Set only by the corpus-prefilter producer; never a generated or public field.
+    _corpus_fast_rejected: bool = PrivateAttr(default=False)
+
     executive_summary: str
     should_deep_read: str = ""
     key_sections_to_read: List[str] = Field(default_factory=list)

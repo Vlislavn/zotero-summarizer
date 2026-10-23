@@ -4,6 +4,7 @@ annotations are not papers and must never appear as library items) and
 from __future__ import annotations
 
 from pathlib import Path
+import sqlite3
 
 import pytest
 
@@ -89,3 +90,34 @@ def test_get_all_items_returns_more_than_one_get_items_page(zotero_dir: Path):
 def test_get_all_items_empty_library(zotero_dir: Path):
     out = ZoteroReader(zotero_dir).get_all_items()
     assert out == {"items": [], "total": 0}
+
+
+def test_item_detail_retains_annotation_comment_identity_and_revision(zotero_dir):
+    from zotero_summarizer.services.library._related_context import collect_comments, fingerprint
+
+    db = zotero_dir / "zotero.sqlite"
+    parent = add_library_item(db, item_key="PAPER001", title="Paper")
+    attachment = add_library_item(db, item_key="ATTACH01", title="PDF", item_type="attachment")
+    annotation = add_library_item(db, item_key="ANNOT001", title="Highlight", item_type="annotation")
+    with sqlite3.connect(db) as conn:
+        conn.execute("INSERT INTO itemAttachments(itemID, parentItemID, contentType) VALUES (?, ?, 'application/pdf')", (attachment, parent))
+        conn.execute("INSERT INTO itemAnnotations(itemID, parentItemID, type, text, comment, pageLabel) "
+                     "VALUES (?, ?, 1, 'Highlighted paper evidence', 'Нет. Do not repeat.', '4')", (annotation, attachment))
+        conn.execute("UPDATE items SET dateModified='2026-01-01' WHERE itemID=?", (annotation,))
+    reader = ZoteroReader(zotero_dir)
+    detail = reader.get_item_detail("PAPER001")
+    record = detail["annotations"][0]
+    assert record["annotation_key"] == "ANNOT001"
+    assert record["attachment_key"] == "ATTACH01"
+    assert record["date_modified"] == "2026-01-01"
+    comments = collect_comments("PAPER001", detail, None, "failed", "observed")
+    assert comments["records"][0]["id"] == "PAPER001:annotation_comment:ANNOT001"
+    assert comments["records"][0]["paper_excerpt"] == "Highlighted paper evidence"
+    before = fingerprint(comments)
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE itemAnnotations SET comment='Still negative, new comment' WHERE itemID=?", (annotation,))
+    edited = collect_comments("PAPER001", reader.get_item_detail("PAPER001"), None, "failed", "observed")
+    assert fingerprint(edited) != before  # same count and clock, different retained body
+    with sqlite3.connect(db) as conn:
+        conn.execute("INSERT INTO deletedItems(itemID) VALUES (?)", (annotation,))
+    assert reader.get_item_detail("PAPER001")["annotations"] == []

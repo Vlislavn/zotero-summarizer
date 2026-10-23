@@ -4,7 +4,59 @@ Everything beyond the [README](../README.md) Quickstart: first-run setup, the tw
 run triage, how the model learns from your labels, offline use, the safety model, and the
 full config reference. (Architecture and dev workflow live in [architecture.md](architecture.md).)
 
+## Native RSS read-state backups
+
+A nonempty `ZoteroWriter.mark_feed_items_read(ids)` call completes the existing
+WAL-consistent, integrity-checked backup before entering its native write retry.
+Backup failure prevents that retry and any marker change. The same integer return,
+already-read timestamps, missing-ID behavior and empty-selection no-op remain.
+Backups are pruned only after the write commits; SQL failure retains its completed
+backup and rolls back the write. A later retention error can occur **after** the
+native commit and is not proof of rollback or permission to replay another write.
+Automatic read-sync logs filesystem failures and continues the tick without
+immediately replaying the batch; later ticks rescan only unread rows.
+
+Raw RSS maintenance admits a new attempt only while at most five app-created
+`zotero.sqlite.backup_*` artifacts exist, reserving one extra slot for its fresh
+backup. A per-library lock makes concurrent raw attempts fail closed rather than
+race this check. Successful writes prune back to five; failed writes retain their
+exact prestate backups. At six artifacts, later attempts log `Read-state backup
+limit reached` without allocating another backup or starting a native write. This
+also counts partial/malformed artifacts and stops growth when pruning fails.
+
+To resume after fixing the underlying write/retention problem, stop automatic
+ticks, preserve/export and inspect the app-created snapshots, then move enough
+outside that backup pattern to leave at most five. Keep exported recovery copies;
+do not remove Zotero's own `.bak` files. The next admitted attempt makes a fresh
+integrity-checked backup before writing. This replaces unbounded failed-attempt
+accumulation with an explicit storage-capacity refusal, not automatic deletion of
+forensic snapshots on failure or a claim that an earlier write rolled back.
+After a known successful commit, ordinary retention can rotate older snapshots,
+including snapshots originally created by failed attempts.
+This does not add automatic actions, blanket native-write consent or a new backup
+store, nor make backup and mutation atomic against other writers. Typed Pending
+approval/claims, verdict receipts and cross-database recovery remain separate.
+
+Remote access is opt-in through the exact-owner HTTPS/private-Unix
+[deployment boundary](local-deployment-boundary.md). Local `serve` refuses LAN
+binds; `make iphone` no longer prints an unauthenticated phone URL. Existing
+relative API/sync clients are reused; physical device/offline checks stay separate.
+
 ## Reading reviews and Zotero notes
+
+The app's review card and full paper page show **Read parts**, **Skip parts** and
+**What the original adds** beside the saved reading verdict, without opening Details.
+Whitespace-only plan entries are omitted. The time is the saved estimate; it is not
+recalculated if current policy caps the action. Absent targets, added value or time
+are reported as unrecorded, not invented. Unknown
+reading decisions show a neutral unavailable state instead of cached action advice,
+including its old rationale. Evidence panels remain available. This display change does not regenerate
+reviews, alter reading policy or update native HTML/Zotero notes.
+
+For accepted digest claim/passages and correction lineage, use the
+[local read-only verification export](verification-audit.md). It reads the existing
+review only; unavailable/stale evidence is not a scientific negative. Exported
+original excerpts are sensitive, and no expert time-saving benefit is established.
 
 Full paper reviews lead with contribution and visible material caveats. Findings,
 methods and limitations stay together; the rubric and secondary reference fields
@@ -14,6 +66,34 @@ unretrieved goals are different states. Goal findings remain under their own dis
 shared caveat wording has one introduction with all distinct scope/context visible.
 Saved source basis is explicit; checklist coverage is not reviewed-source extent.
 Smaller cards keep their compact disclosure.
+
+**Idea / Evidence / Writing** are independent: novelty/significance, type-aware
+scientific checks, and avoidable exposition friction. Advanced mathematics or a
+knowledge gap alone is not a writing failure. High-friction ideas survive as targeted
+skims; weak-evidence ideas are labelled concept/hypothesis sources, not established
+claims. Full reads require confirmed goal support, high idea value, recorded full-text
+basis, strong independent evidence and assessed non-high friction. Missing legacy
+assessment/targets shows **REVIEW**, not a fabricated skip or invented section.
+Non-papers are relevance-only; zero applicable scientific checks stays ungraded.
+An evaluator that omits a requested checklist answer stays unassessed, not A/highlight;
+only explicit N/A answers establish that checks are inapplicable.
+Full reviews use the detected paper type, not empirical gaps absent from its rubric;
+uncertain detection stays ungraded. Legacy Search light review and the diagnostic CLI
+retain their assumed generic rubric without an additional type call; that mode does
+not establish the source's contribution type.
+User overrides still use the explicit verdict editor; no label is written by this policy.
+Raw validated model digests remain separately cached from applied reading policy.
+Reviews, proposals and newly saved digest notes share one scientific-grade projection:
+independent D overrides model self-A; non-paper or failed assessment stays ungraded.
+Failures are not legacy absence and never manufacture scientific quality from the
+self-grade. Existing notes are not silently rewritten on read. Material evidence gaps retain a
+concept-only caveat even when the digest already recommends skip. New Search session
+API briefs apply the same reading/grade policy and retain their raw `model_digest`;
+existing saved sessions are not migrated.
+The existing 17-paper legacy capture lacks full source-basis/target provenance and
+cannot certify this full-read gate. Human scientific acceptance on 12–20 papers,
+including the perspective seed arXiv:2606.05925, remains unclaimed; synthetic policy
+regressions are not read-precision or idea-rescue measurements.
 
 Approved triage notes retain saved summaries across restarts and include available
 methods, findings, relevance, uncertainty and optional implementation/impact sections.
@@ -39,6 +119,126 @@ phrasing; scoped, uncertain, table-only, combined, or unmatched count questions 
 through to grounded Q&A. The paper artifact stores `figures_count`, not a table
 count; focused Q&A and freshness routing tests passed (39), but live natural-language
 scope accuracy is not measured.
+
+## RSS subscriptions
+
+In Settings → Sources, explicitly add HackerNoon AI Agents or Agentic AI, or keep
+using the custom-feed form. Existing disabled subscriptions stay disabled and
+preset clicks do not erase an unfinished custom draft. Presets also preserve a
+subscription saved by another tab, including imported URL host/default-port
+variants. Source writes wait for the current write to finish. Saving is not fetching:
+use **Refresh RSS now**, then **Today → Triage backlog** for the existing pipeline.
+No second ingestion system or automatic source subscription is introduced.
+
+Refresh reports zero/new/updated items separately from offline skips and partial
+or total source failures. A failed source-list read is not an empty subscription
+list; retry loading it. Per-feed errors and last-check time remain visible.
+Uncertain source writes reread saved rows without silently retrying their write.
+These UI/transport contracts do not establish live feed availability, scientific
+quality or human usefulness of a source.
+
+## Rejecting pending changes
+
+Reject selected applies only when every captured ID still exists and is pending.
+A missing or already-applied/rejected/failed/uncertain row returns409 and leaves
+valid siblings unchanged. Reload the queue and explicitly select the current rows.
+SQL failures or triggers preventing a complete update roll back the whole change.
+
+The client announces success only for an integer updated count matching the
+captured distinct IDs. An incomplete/malformed reply is unconfirmed, not success;
+the existing optimistic rollback retains selection for reconciliation. This alters
+only the app queue, not the native Zotero library, labels or other status callers.
+
+## Experimental Search question evidence
+
+1. Enter a topic and one specific question per line in **Search**.
+2. Explicitly check **Experimental original-source question evidence** before Search.
+   This uses your configured Feed generator and Deep review verifier routes; their
+   provider/endpoint/model identities must differ. Public original passages and your
+   questions go to those routes (possibly hosted); no library comments are included.
+3. Initial results stay available while the existing review worker checks evidence.
+   Open **Question evidence** on a card for partial/sufficient/not-found-in-checked-text/
+   unchecked status, quotes, original extracted-character offsets, checked passage
+   ranges, extraction/question fingerprints and model/protocol/capability provenance.
+4. **Recommended** follows the server's evidence-aware review order and keeps promoted
+   weak-band cards visible. Explicit Relevance/prestige sorts still show the whole pool
+   in that display order, without changing the server's selection. **Add to library**
+   remains a separate explicit action; evidence never adds or labels a paper.
+
+Only AI-verified sufficient answers promote, by number of distinct answered questions,
+within the original slots of topic-eligible, nonretracted candidates. Other papers
+keep their baseline positions. Identical question lines reuse one check per paper
+and count once; distinct questions retain input order. Stable baseline ordering breaks ties.
+Negative scientific results can answer questions. Partial evidence never promotes;
+missing sources, failed models, abstentions and budget exhaustion are not scientific
+rejections. Not-found concerns only retrieved passages, never absence from a document.
+Extraction completeness is unknown. Ambiguous repeated quotes or normalized-only
+matches cannot acquire invented original coordinates.
+
+The serial pass checks at most 12 eligible candidates, including candidates outside
+ordinary top-ten review selection, with at most 24 attempted model-client invocations. It reserves
+both generation and verification before starting a question; failures consume attempts.
+This counts client invocations, not hidden provider transport retries; existing client
+timeouts/retry policy remain in force.
+Questions are checked in input order per candidate, so many questions can exhaust the
+budget before later candidates. Hybrid retrieval reuses Library's dense/BM25/RRF/rerank
+owner (up to eight original chunks per question); missing retrieval legs are disclosed.
+Original text exceeding the existing quality-review character budget is unchecked,
+not clipped. Successfully acquired, admitted originals remain available to ordinary
+review without a second download/extraction. Operator overrides: `ZS_SEARCH_EVIDENCE_CANDIDATES` (0–30),
+`ZS_SEARCH_EVIDENCE_CALLS` (0–120), `ZS_SEARCH_EVIDENCE_TOPIC_FLOOR` (finite 0–1,
+default 0.35). These are provisional work limits, not calibrated answerability thresholds.
+Zero disables work; invalid configuration reports unavailable instead of guessing.
+
+Sessions retain policy, receipts and progress under the existing selected-project
+`Settings.search_dir`. Input/source-address changes, changed provider/model/settings
+or a revised local evaluator prompt/schema/protocol make displayed evidence unchecked
+and remove active promotions. Saved reads compare only the already-loaded runtime
+configuration metadata: no client construction, credential lookup, inference, network
+probe or automatic review rerun. Missing, disabled or unavailable current metadata
+also means unchecked. Unchanged available bindings keep valid evidence usable.
+
+Pre-promotion candidate order is retained in the session as the stable tie input to
+the existing constrained ranker. Invalidation restores those ties while preserving
+current relevance/quality keys, family enrichment, new candidates and explicit Add
+keys. Legacy evidence without this order/binding stays historical; the app cannot
+invent a lost historical tie order. Reads do not rewrite session files. Exact old
+receipts, original answers and provenance survive a later ordinary save; only current
+HTTP/display and promotion suppress stale evidence. Add-key merges and deletion
+cancellation still use the existing store. Text is acquired anew for each actual
+evidence pass; saved source hashes describe that extraction, not a live freshness
+probe. Evaluator metadata does not identify mutable remote weights behind unchanged
+provider/model names. Human-held-out answer-bearing P@5/nDCG/recall, false promotions,
+abstention and cold/warm latency are **unmeasured**. This is experimental; #30 stays open.
+
+## Library membership in Search
+
+Screening preserves all observed version-family identifiers through preferred
+metadata selection and saved-session reloads. The existing reader checks retained
+DOI/arXiv alternatives, not just the displayed version. A confirmed hit supplies
+its matching library key; partial lookup failure remains unknown, not a known miss.
+ArXiv values containing `%` or `_` are not sent to the native pattern lookup;
+coverage stays unknown unless another safe identifier confirms a saved hit.
+No title-only match is inferred. Old sessions cannot recover identifiers that were
+previously discarded; an explicit new search/refinement can observe them again.
+
+Opt-in agentic refinement (`ZS_SEARCH_AGENTIC`) checks newly retrieved identities
+before merging. A saved match survives richer metadata; explicit Add reuses its
+key. An unresolved newly retrieved identity keeps the family unknown rather than
+borrowing an older version's miss. Refinement writes no Zotero items and starts
+no automatic Add.
+
+## Retrying Search Add
+
+If an explicit Search Add encounters failed session finalization after a native
+commit, retrying that same saved candidate reuses its persisted planned item key.
+It does not blindly create another item or rewrite later user edits. A plan is not
+a success receipt: native failures remain errors, and the UI must not infer rollback
+from a session error. A native replay returns `already_added` and does not move the
+item to a newly selected collection. Conflicting retained and found library keys
+return 409 even after an earlier successful Add. This recovery uses the existing
+one-process session lock and configured library; it is not distributed exactly-once
+or cross-library replay.
 
 ## First-run setup
 
@@ -68,6 +268,108 @@ AI-assisted setup can finish before the secret/endpoint is live — **Next** gat
 structurally-valid provider (type + base URL + key env-var name + model), not on a passing
 connection test. Environment changes require a restart; keyring saves apply immediately.
 
+## Weekly source-qualified engineering cards
+
+```bash
+uv run zotero-summarizer research-feed run --from 2026-08-22 --to 2026-08-29
+# Conference mode, same pipeline; venue never overrides relevance:
+uv run zotero-summarizer research-feed run --from 2026-08-22 --to 2026-08-29 --venue NeurIPS --cached-only
+```
+
+Invoke the first command from cron/launchd weekly with a bounded window. RSS must
+already be acquired by the app; this adds no feed downloader. Edit
+`data/research_feed/profile.json` to add/remove themes or exact project keys.
+Shortlist/card budgets default to 20/10 and support the existing CLI overrides.
+A new adapter can supply `ResearchCandidate` values at `source.load_candidates`;
+keep source identity/deduplication and bounded selection in that seam.
+
+Missing abstract triage reuses the existing abstract pipeline; successful results
+are source/profile/config/model/prompt-bound in `data/research_feed/triage.json`.
+Selected papers reuse current reviews or generate through existing deep review.
+Project proposals are co-produced in the **same digest response**, not a new judge
+or backend: each applicable use names a mechanism, component, change, experiment
+and original quote. Partial/unknown differs from assessed no-fit. Literal quote
+membership is not entailment or human validation; proposals stay AI-generated and
+scientifically unverified. Missing legacy assessments supply no invented uses or
+ideas. Omitted projects remain explicit unknowns with null evidence spans.
+Abstract triage escapes source-supplied boundary markup before prompting;
+this is structural protection, not proof of semantic injection resistance.
+Legacy numeric impact fields retain zero placeholders; null
+`impact_assessment` means unassessed, not measured zero benefit.
+
+Reproduction effort stays unknown without an assessment; existing blockers and
+verified artifact links remain. Code availability never establishes a one-week
+duration. Explicit effort estimates are labelled **AI estimate, unverified**;
+no reproduction experiment or scientific/usefulness win is claimed. Existing
+missing-code/input blockers take precedence over AI effort estimates. Weekly
+acquisition uses headless PDF sources only, never a browser or logged-in session.
+
+`--cached-only` makes no model calls or startup/client initialization. Qualification
+reads the existing valid goals config locally (no creation or credential discovery);
+missing/invalid config or stale source/config is an explicit error, not a qualified
+card. Successful cached abstract triage can be reused without generation; an absent
+stage is an explicit error, not a relevance rejection. Optional cache errors do
+not stop papers with valid history. Generating runs can retry a missing cached PDF
+through existing headless sources. Access,
+assessment and provider errors are per-paper failures, not scientific rejections;
+CLI exit 1 accompanies a published partial run; stdout remains JSON and runtime
+diagnostics go to stderr. The digest keeps configured reasoning effort while its
+verification calls minimize supported reasoning: declared chat thinking is off,
+while active three-level reasoning uses low (not off). Explicit configured off
+is preserved; no unsupported off value is invented. JSON schema version 1 and Markdown
+retain their existing shape with additive assessment/provenance fields. New bundles
+are immutable; cheap projections are recomputed, never replayed from old reports.
+`--queue-zotero` alone opts into idempotent pending tags for materialized items;
+normal runs never add papers, confirm labels, or apply native writes.
+
+## Setup verification and recovery
+
+Saving config is not a successful pipeline check. The wizard and Settings use
+one Doctor API, also used by `zotero-summarizer doctor --json`. Model listing,
+declared capability, saved configuration, observed operational response, and
+hardware safety are distinct. Local model metadata remains available without a
+key or download, but local LLM requests (including loopback Anthropic) are refused
+with `effective_envelope_unknown`: the production runtime does not provide an
+authoritative ResourceEnvelope (effective context, placement, memory domain).
+Static profiles and host free RAM cannot replace it. Choose Hosted or No LLM in
+Settings to verify another mode; retrying or restarting cannot manufacture that
+evidence. Hardware-safe Full-local completion of issue #11 remains unfulfilled.
+Local detection includes all literal 127/8 and IPv4-mapped IPv6 loopbacks, numeric
+IPv4 shorthand and reserved `.localhost` names; it does not resolve DNS aliases.
+The wizard accepts the same local forms. Verification revisions v1/v2 are no longer accepted.
+
+`calibrate` and the HTTP calibration job apply this same admission before both
+local client constructions. Cached Tier-1 output does not grant permission, and
+a later refusal cannot be reported as a completed calibration. No constructor,
+credential lookup, prompt or calibration write follows initial UNKNOWN refusal.
+Hosted calibration and explicitly configured ordinary application calls are unchanged.
+
+Runtime/model inventory recovery names the failing provider, model and endpoint.
+A healthy Ollama sibling cannot prescribe `ollama serve` or `ollama pull` for a
+failing vLLM, MLX or LM Studio endpoint. Ollama suggestions apply only to the failing
+local OpenAI-compatible endpoint on the supported port 11434; other endpoints link
+to AI Settings to repair the connection or choose a served model. Commands remain
+manual suggestions: nothing is installed or downloaded automatically. Error prose
+alone never identifies a runtime.
+
+Hosted verification requires nonempty inference plus observed matching model
+identity and successful terminal metadata; missing metadata or aliases differing
+from the returned ID need action, not Ready. Use the actual served ID. Cache-only
+ML asset verification retains its bounded, isolated offline load check; it does
+not certify local LLM hardware safety. No model weights are auto-downloaded.
+
+**Stop verification** stops the waiter and later requests, not a remote runtime.
+The synchronous callback retains exclusion until it returns. An unresolved
+receipt/HOLD is not termination evidence, even after restart. Each check's result
+is persisted; interrupted checks need retry. Changes to AI/goals, credentials,
+paths, enabled sources or the verification revision invalidate old success,
+including late browser replies. External hosted keyring/environment credential
+replacement or source changes also invalidate success without exposing the key.
+Active Stop controls survive configuration edits, and stopping inventory prevents
+later endpoint requests. Interrupted ownership remains unresolved; an empty retry
+selection reruns all checks rather than refreshing the old success timestamp.
+Technical details retain the actual failed check.
+
 ## Two ways to run triage
 
 Scoring papers always runs the same pipeline (cheap ML gate → LLM for survivors →
@@ -82,6 +384,14 @@ SQLite). What *triggers* it is your choice:
   if you run the daemon.
 
 The daemon is convenience, not a requirement.
+
+Today separates **Relevance** from AI review evidence. Expand **Why selected**
+for the observed policy and picker keys. If a card says **Review: not ready**,
+open **Open full review** and use **Generate review** to retry explicitly;
+an empty cached digest or old grade does not remove that action. Missing full
+text also keeps the manual retry available after access is restored. Generation
+stays disabled while AI is off, unreachable or offline. Add remains blocked until
+a current usable review exists; missing evidence is not a poor-science grade.
 
 ## Adding sources (arXiv, bioRxiv, PubMed, HackerNoon)
 
@@ -242,6 +552,19 @@ start; quality improves as you label more.
 
 ## Offline / air-gapped use
 
+For a disconnected browser while the Mac is unavailable, first **Sync now** while
+connected, then reopen **Library** from the same app address. The admitted working
+set includes compact context for previously unopened papers. Explicitly save verdicts,
+retractions and manual notes; **Saved on this device** is not a server/Zotero ACK.
+On reconnect, sync and compare both values/comments before **Keep mine / Use server**.
+Observed HTTP refusals and malformed received acknowledgements remain errors, not
+new offline-success mutations. Missing cached context requires reconnection.
+
+See [Offline review](offline-review.md) for the complete flow, persistent-storage
+warnings, the bounded transport check and the separate authenticated HTTPS/device
+requirements. This does not sync PDFs or enable offline AI, acquisition or native
+Zotero operations. Mac inference preparation below is a different boundary.
+
 The app is **local-first**: the UI, Zotero I/O, the ML relevance gate, and Library
 search (BM25 + embeddings + cross-encoder rerank) all run on your machine. There is no
 telemetry and the served UI pulls no external assets (no CDN/fonts). Model
@@ -322,6 +645,22 @@ Two files under the project root, both gitignored and created for you on first r
   **Settings** page; the app serializes the file. (Hand-edits are tolerated but the app is the
   writer of record.)
 
+CLI import and parser construction do not load a default project's `.env` or model
+SDKs. The dispatcher validates command budgets first, then loads the selected
+`--project-root` through Settings and applies offline flags before handler model
+imports. No additional root is read by the offline helper. Existing Settings
+precedence is unchanged: selected `.env` values override the same inherited keys;
+keys absent from that file retain explicitly inherited shell values. The admitted
+project root stays fixed for this command, even if its `.env` changes
+`ZOTERO_SUMMARIZER_HOME`; handler reloads and server workers use the admitted root.
+For example:
+
+```bash
+zotero-summarizer migrate --project-root /path/to/project
+```
+
+This selects configuration; it is not an OS sandbox or process-lifetime guarantee.
+
 ### Settings page — Essentials vs Advanced
 
 Settings is chunked to keep the common path short:
@@ -401,6 +740,10 @@ Other blocks (`corpus`, `prestige`, `feeds`, `quality_review`, `classifier_gate`
 have working defaults — leave them until you need them. `quality_review.shadow_claim_check`
 (default off) opts into the local MiniCheck encoder claim-checker; see
 [services/model/README.md](../zotero_summarizer/services/model/README.md).
+
+With `corpus.enabled: false`, targeted refresh after an edit skips corpus reader,
+cache, lock and inferred-feedback I/O, even if those resources are initialized.
+The explicit edit is unchanged; turning corpus back on retains normal reconciliation.
 
 All app state (the two SQLite DBs, your golden dataset, logs, ML artifacts) lives under
 `data/` (gitignored).

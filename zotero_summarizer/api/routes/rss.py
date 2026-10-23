@@ -24,6 +24,7 @@ class RssFeedRequest(BaseModel):
     name: str = Field(..., min_length=1)
     url: str = Field(..., min_length=1)
     enabled: bool = True
+    create_only: bool = False
 
 
 class RssFeedUpdateRequest(BaseModel):
@@ -63,6 +64,7 @@ async def add_feed(req: RssFeedRequest) -> dict[str, Any]:
         with feeds_storage.open_triage_conn(get_settings().triage_db_path) as conn:
             feed_id = rss_storage.upsert_rss_feed(
                 conn, name=req.name, url=safe_url, enabled=req.enabled, source="app",
+                create_only=req.create_only,
             )
             conn.commit()
             row = conn.execute("SELECT * FROM rss_feeds WHERE id = ?", (feed_id,)).fetchone()

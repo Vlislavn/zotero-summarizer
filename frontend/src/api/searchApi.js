@@ -4,10 +4,11 @@
 import { request } from './client.js';
 
 /** POST /api/search/screen — topic -> ranked, deduped candidates (a ResearchSession). */
-export async function screen({ query, questions = [], constraints }) {
+export async function screen({ query, questions = [], constraints, evidence_policy }) {
   return request('/api/search/screen', {
     method: 'POST',
-    body: JSON.stringify({ query, questions, ...(constraints ? { constraints } : {}) }),
+    body: JSON.stringify({ query, questions, ...(constraints ? { constraints } : {}),
+      ...(evidence_policy ? { evidence_policy } : {}) }),
   });
 }
 
@@ -20,8 +21,11 @@ export async function startReview(sessionId) {
 }
 
 /** GET /api/search/{id} — poll one session (status + candidates + reviews). */
-export async function getSession(sessionId) {
-  return request(`/api/search/${encodeURIComponent(sessionId)}`, { signal: AbortSignal.timeout(15_000) });
+export async function getSession(sessionId, { signal } = {}) {
+  const timeout = AbortSignal.timeout(15_000);
+  return request(`/api/search/${encodeURIComponent(sessionId)}`, {
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+  });
 }
 
 /** POST /api/search/{id}/materialize — file one candidate into a chosen Zotero

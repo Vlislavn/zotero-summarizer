@@ -33,13 +33,16 @@ def _digest(read_decision=None, grade=None, **extra):
             d.setdefault("novelty", 4)
             d.setdefault("significance", 4)
             d.setdefault("writing_friction", "low")
+            d.setdefault("basis", "full_text")
+            d.setdefault("read_parts", ["Methods"])
+            d.setdefault("original_value", "The decisive comparison.")
     if grade is not None:
         d["grade"] = grade
     return d
 
 
 def _quality(*, band="", overstatements=None, red_flags=None, grade=None):
-    q: dict = {"quality_band": band}
+    q: dict = {"quality_band": band, "basis": "full_text"}
     if overstatements is not None:
         q["overstatements"] = overstatements
     if red_flags is not None:
@@ -315,7 +318,7 @@ def test_missing_grade_with_a_decision_takes_a_small_confidence_penalty():
 
 
 def test_grade_falls_back_to_quality_eval_when_digest_lacks_it():
-    """The grade is read from the digest first, then the quality_eval echo."""
+    """Independent quality is the grade authority when it is available."""
     out = propose.propose_verdict(
         _digest(read_decision="read"),  # no grade in the digest
         _quality(band="highlight", grade="B"),  # quality_eval carries it

@@ -34,6 +34,22 @@ queues suggested Zotero changes for you to approve.
 | `runtime.py` | `AppContext` + typed `RuntimeState` — how services reach runtime deps without FastAPI globals. AI actions fail with a typed 409 when `llm_enabled=false`; ML-only services remain available. `RuntimeState.classifier_gate_error` mirrors `zotero_error` so readiness reports why the gate is unavailable. Optional metadata clients: `openalex_client` / `unpaywall_client` / `openreview_client` |
 | `models/config.py` | `QualityReviewConfig` carries tier-aware deep-review cost knobs: `self_consistency_runs`/`lean_self_consistency_runs`/`lean_max_text_chars`/`batch_goal_summaries` — a provider flagged `lean_deep_review` (ollama) uses the cheaper caps + a batched goal-summary call; every other provider (incl. MLX) uses the full settings. Keyed on the provider flag, not `is_local` |
 
+## Model-client cache ownership
+
+`RuntimeState` caches lazy stage clients by a digest of an owned effective
+provider/model snapshot plus the stage and thinking variant. Resolving metadata
+alone does not build a client or read credentials. Construction happens outside
+the cache lock; publication is guarded by the invalidation generation. Config
+or credential invalidation therefore cannot be undone by an old in-flight build,
+even when the replacement has identical routing metadata. An old client may
+return to its original caller, never as a different routing identity's cache hit.
+The keys contain no raw credentials. `ResolvedStage.fingerprint()` supplies the
+shared identity; callers may require `expected_identity` before cache access or
+construction. Related binds its consent token here, so an away-and-back metadata
+change cannot authorize a differently resolved client. Unchanged effective
+routing reuses its client; provider settings and stage/default overrides retain
+their normal roles.
+
 ## More
 
 `Settings.model_dir`, `tuned_params_path`, and `pdf_cache_dir` select
@@ -42,6 +58,13 @@ project. Model/library caches never resolve an application cache from HOME.
 Existing home-global artifacts are left untouched and are not auto-imported;
 retrain/recompute in the selected project or explicitly copy trusted artifacts.
 
+Per-call verification overrides disable declared chat thinking or lower active
+three-level reasoning to `low`; low is not off. Explicit user off is preserved,
+and unsupported provider parameters are never invented.
+
 Subpackages each have their own README. Start with
 [docs/architecture.md](../docs/architecture.md) for the end-to-end mental model,
 then the [README](../README.md) for setup + usage.
+
+Feedback scheduling is opt-in through Settings. Activation rejects a cycle wall
+cap that cannot reserve its fixed operation cap; state remains project-local.

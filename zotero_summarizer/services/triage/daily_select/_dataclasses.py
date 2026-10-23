@@ -64,6 +64,10 @@ class SlatePaper:
     # (the card title stays plain text). Preferred over exposing raw doi/arxiv_id
     # to the frontend, which would need to reconstruct the same logic.
     url: str = ""
+    # Direct constructors have not observed a source, cohort or picker operation.
+    selection_evidence: dict[str, Any] = field(
+        default_factory=lambda: {"basis": "not_observed"},
+    )
 
 
 @dataclass(frozen=True)
@@ -92,6 +96,8 @@ class DailySlate:
     #     band, i.e. nothing strongly matches; the UI nudges a fresh triage.
     low_relevance_hidden: int = 0
     weak_slate: bool = False
+    # Assembly supplies its actually resolved mode, including for an empty slate.
+    selection_policy: str = "not_observed"
 
 
 __all__ = ["SlatePaper", "DailySlate"]

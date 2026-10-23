@@ -58,7 +58,7 @@ async def _llm_status(config: object | None) -> LlmStatus:
         )
     resolved = resolve_stage(config.llm_routing, "deep_review")  # type: ignore[attr-defined]
     provider, model = resolved.provider, resolved.model
-    preset_local = provider.is_local and provider.api_key_env == "OLLAMA_API_KEY"
+    preset_local = provider.is_local
     api_key_present = (
         preset_local or credentials.get_api_key(provider.api_key_env) is not None
     )

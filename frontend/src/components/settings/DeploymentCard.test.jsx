@@ -6,9 +6,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 vi.mock('../../api/setupApi.js', () => ({
   fetchDoctorStatus: vi.fn(),
   runDoctor: vi.fn(),
+  cancelDoctor: vi.fn(),
 }));
 
-import { fetchDoctorStatus, runDoctor } from '../../api/setupApi.js';
+import { fetchDoctorStatus, runDoctor, cancelDoctor } from '../../api/setupApi.js';
 import { DoctorChecklist } from './DeploymentCard.jsx';
 
 const DATA = {
@@ -72,4 +73,28 @@ it('keeps fresh and local-capability states truthful', async () => {
   renderChecklist();
   expect(await screen.findByText('Local inference')).toBeTruthy();
   expect(screen.getByText('Offline-ready')).toBeTruthy();
+});
+
+it('offers real settings recovery separately from a scoped retry for unknown local admission', async () => {
+  fetchDoctorStatus.mockResolvedValue({ ready: false, checks: [{
+    id: 'llm_inference', status: 'needs_action', message: 'Local envelope unknown',
+    detail: 'No inference submitted', recovery: { label: 'Review AI settings', action: 'open_ai_settings' },
+  }] });
+  renderChecklist();
+
+  expect((await screen.findByRole('link', { name: /Review AI settings/ })).getAttribute('href')).toBe('/settings');
+  expect(runDoctor).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  await waitFor(() => expect(runDoctor).toHaveBeenCalledWith(['llm_inference']));
+});
+
+it('stops only the captured running verification and never claims remote termination', async () => {
+  fetchDoctorStatus.mockResolvedValue({ ready: false, status: 'running', run_id: 'actual-run', checks: [] });
+  cancelDoctor.mockResolvedValue({ ready: false });
+  renderChecklist();
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Stop verification' }));
+
+  await waitFor(() => expect(cancelDoctor.mock.calls[0]?.[0]).toBe('actual-run'));
+  expect(screen.queryByText('✓ Setup verified')).toBeNull();
 });

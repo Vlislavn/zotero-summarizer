@@ -37,6 +37,7 @@ def _parse_pending_change(row: dict[str, Any]) -> dict[str, Any]:
         "item_title": str(row.get("item_title") or ""),
         "change_type": str(row.get("change_type") or ""),
         "payload": payload,
+        "approval_preview": row.get("approval_preview"),
         "status": str(row.get("status") or ""),
         "error_message": str(row.get("error_message") or ""),
         "created_at": str(row.get("created_at") or ""),

@@ -1,5 +1,11 @@
 # Zotero Summarizer
 
+Native RSS read-state maintenance also completes the existing WAL-consistent,
+integrity-checked backup before changing unread markers. Repeated failures pause
+at six retained app-backup artifacts without deleting recovery snapshots; normal
+success retains five. See the [raw read-state safety boundary](docs/usage.md#native-rss-read-state-backups)
+for explicit export/recovery steps.
+
 A local-first reading assistant for [Zotero](https://www.zotero.org/). It reads the
 RSS feeds you follow, scores each new paper for how worth-reading it is (a cheap ML
 gate first, an LLM for the survivors), and gives you a small daily slate to cull. Your
@@ -16,7 +22,54 @@ keep/trash decisions train the model, so tomorrow's slate is sharper.
 the model learns from how you triage). The app owns current decisions and their history;
 Zotero remains the PDF/citation surface and a synced representation of approved tags/notes.
 
+Optional HackerNoon tag feeds can be added explicitly in Settings → Sources through
+ordinary RSS subscriptions. Saving does not fetch or triage; see
+[RSS subscriptions](docs/usage.md#rss-subscriptions).
+
+Pending rejection is all-or-none for the captured selection. Missing/stale rows
+return a conflict without changing valid siblings; incomplete replies never claim
+success. See [usage](docs/usage.md#rejecting-pending-changes).
+
+## Offline existing-collection comparison
+
+`python -m tools.method_validation collections --config FILE` admits a frozen
+existing taxonomy and public papers without calls/writes. Explicit `--run` compares
+independent membership choices and original top3 similarity suggestions in a new
+private attempt; `--inspect` verifies retained outcomes without effects. No collection,
+Zotero membership or model is changed. See the [collection contract](docs/decision-collection-comparison.md)
+for lineage, duplicate-name, capability and remaining empirical-qualification limits.
+
+## Offline reading-priority comparison
+
+`python -m tools.method_validation priority --config FILE` admits frozen public
+inputs without calls or writes. Explicit `--run` compares retained/native readouts
+and matched ML/LLM artifacts in a new private attempt; `--inspect` verifies it
+without effects. No production model or ranking is changed. See the
+[priority comparison contract](docs/decision-priority-comparison.md) for input,
+qualification and inconclusive-result boundaries.
+
+Search Add retains its planned Zotero item identity before native effects, so an
+explicit retry after failed session finalization reuses that key instead of
+creating a duplicate. See the [Search contract](zotero_summarizer/services/search/README.md#explicit-add-recovery)
+for its single-process/configured-library boundary and uncertainty limits.
+
+## Opt-in interpretation experiment
+
+[Compare current/caution/card digests and grounded Q&A](docs/interpretation-experiment.md)
+on frozen, human-approved sources. Inspection makes no model calls; execution and
+sensitive capture require explicit flags. Independent human judgments and complete
+operational evidence gate any conditional pilot recommendation. Defaults and native
+write/Add authority remain unchanged; benefit is not established by protocol tests.
+
 ## Review recovery and search constraints
+
+Accepted deep reviews retain original-source evidence for their digest findings.
+A [local read-only JSON export](docs/verification-audit.md) exposes those existing
+checks without another model call or native SQLite read. Library receipts expose
+validated retained-source evidence, not current-attachment proof. Legacy evidence
+stays unavailable; literal membership is not scientific validation, and audit-effort
+benefits are unmeasured. Audit identity covers declared digest fields, not
+optional model enrichment.
 
 Deep review rejects demonstrated access/error/login templates before model calls.
 Failures show their stage and recovery separately from scientific quality; a failed
@@ -28,6 +81,13 @@ evaluation artifacts. Use portable examples and explicitly configured routes.
 It performs no Zotero writes and disables thinking
 for its diagnostic calls. See [library](zotero_summarizer/services/library/README.md)
 and [CLI](zotero_summarizer/cli/README.md) contracts.
+
+Reviews keep idea value, type-applicable evidence and avoidable writing friction separate.
+High-friction or weak-evidence full reads become targeted skims, preserving useful concepts
+without treating them as established claims. Failed independent assessment stays
+explicitly ungraded across reviews, proposals and saved digest notes; the raw model
+self-grade remains separate. No 12–20-paper scientific/human acceptance or model
+superiority is claimed.
 
 Full reviews keep contribution, caveats and findings together before folded assessment.
 Goal evidence remains accessible without repeated summaries; approved Zotero notes use
@@ -48,6 +108,13 @@ replays require `ZS_REVIEW_ACCEPTANCE_MANIFEST=/path/to/frozen-input.json`; with
 that explicit input they skip, not pass. They check literal retention, not scientific
 truth, subjective usability or native Zotero persistence.
 
+Optional triage method/code links must match complete literal URLs in the original
+abstract, PDF text/annotations or supplied metadata—not generated map notes. Rejected
+links are recorded locally under `data/method-artifact-rejections.jsonl`; whitespace-padded
+model candidates are rejected, not silently trimmed. Receipt failures remain errors.
+Exact membership does not prove contribution relevance or reproducibility; legacy
+saved notes are not revalidated. See the [triage contract](zotero_summarizer/services/triage/README.md).
+
 When web-article review is enabled, HTML-only pages can be reviewed from a bounded,
 text-only extraction of the selected main document's body text—not a page facsimile.
 Images, layout, CSS-generated content, embedded frames, and shadow trees are outside
@@ -57,10 +124,45 @@ An unavailable declared scholarly PDF is not replaced by a paywall snapshot. See
 
 Search's folded explicit constraints are user-owned. Model proposals are visible,
 not hard gates; inferred refinement exclusions cannot silently remove results.
+Screening and refinement retain every observed version-family identifier, even
+when the preferred bibliography changes. Confirmed saved matches keep their
+matching library key; a partial lookup failure is not a confirmed new paper.
+Unsafe arXiv wildcard patterns stay unknown instead of selecting unrelated items.
 Confirmed publication types require source metadata, with bounded exact-DOI recovery;
 unconfirmed metadata stays unknown. Legacy saved plans retain their original filters.
 The plan discloses domain context, source accounting and scholarly coverage limits.
 See [search](zotero_summarizer/services/search/README.md).
+
+Search also offers **Experimental original-source question evidence**, off by default
+for each new page visit. With questions and explicit opt-in, a bounded original-text
+pass can promote sufficient answers before review selection. Inspect located quotes,
+partial/unchecked states and evaluator provenance; unknown is not a negative result.
+The configured Feed/Deep review routes must differ. Saved evidence is active only
+while loaded provider/model/settings and local evaluator protocol still match;
+missing metadata means unchecked, not assumed valid. Reads build no clients or
+requests. Historical receipts remain intact, and retained pre-promotion tie order
+restores the constrained baseline when evidence becomes stale. Legacy sessions
+cannot reconstruct an unrecorded tie order. No quality or latency win has been
+measured and issue #30 remains open. [Usage and limits](docs/usage.md#experimental-search-question-evidence).
+
+The shared Today/Library paper page offers **Related in my library** over saved
+metadata, including already-read papers. An optional, explicitly consented
+comment-context experiment uses the configured review model on complete seed and
+candidate notes. It remains unqualified and off by default. Saved seeds additionally
+offer **Find new relevant**: OpenAlex semantic/lexical public-metadata discovery,
+with optional explicitly consented seed comments applied only inside the named
+processing boundary. Ordinary topic Search retains its other sources. Search
+shows qualified evidence and retained candidates; Review and Add are explicit and
+server freshness remains authoritative. See the [server/privacy contract](docs/discovery.md)
+and [discovery UI](docs/discovery-ui.md). Stage-client cache publication is bound to its actual
+effective routing snapshot and invalidation generation, not current metadata alone.
+Saving seed notes/verdicts hides prior related context and fences old reads until
+an explicit fresh load. See [related saved papers](docs/related-saved-papers.md)
+for privacy, budgets, durable results and outstanding owner evaluation.
+
+With corpus disabled, post-edit corpus refresh skips library/cache reads and
+inferred-feedback writes even if resources remain initialized. The explicit edit
+itself is unchanged; see [service boundaries](zotero_summarizer/services/README.md).
 
 ## Requirements
 
@@ -115,24 +217,69 @@ API key in the OS keyring and never returns it to the browser. The headless CLI 
 an env-var name and saves the chosen routing before its optional probe. Use
 `setup --mode no-llm` when you want classifier-only triage without an endpoint.
 
+**Verification is separate from saving.** Doctor now refuses local LLM inference and
+local dry-runs as **unknown**: no adapter supplies the effective runtime context,
+placement and memory domain needed for hardware-safe admission. Listed models,
+profile estimates and free RAM are not proof. No download starts automatically and
+loopback needs no API key. Hosted and No LLM verification remain available; issue
+#11's hardware-safe Full-local completion is not yet delivered. Literal 127/8 and
+IPv4-mapped IPv6 loopbacks share this guard; mixed-runtime recovery names the
+failing endpoint rather than borrowing a sibling's Ollama command. Numeric IPv4
+shorthand and reserved `.localhost` names also use local admission without DNS.
+Stop fences later inventory requests, and configuration edits retain the active
+Stop control. External hosted credential changes invalidate earlier success. See
+[setup verification](docs/usage.md#setup-verification-and-recovery).
+Local calibration uses the same admission at both client constructions, including
+cached Tier-1 runs; it cannot bypass UNKNOWN to load a model or publish success.
+Hosted calibration and ordinary application clients retain their existing behavior.
+
 After setup, go to **Today** and click **Triage backlog**
 to score your unread feed papers, then start culling. *(Going offline? Run `uv run
 zotero-summarizer prefetch-models` once while online — see [docs/usage.md](docs/usage.md).)*
+
+For remote use, explicitly configure the owner-authenticated HTTPS-to-private-Unix
+[deployment boundary](docs/local-deployment-boundary.md). Ordinary `serve` remains
+loopback-only; `make iphone` refuses rather than exposing unauthenticated LAN HTTP.
+This is not a claim of physical-device/offline/revocation acceptance.
 
 ## What you'll do
 
 - **Today — cull.** A ranked slate of fresh feed papers. Generate and inspect a full-text
   review before explicitly **Add to library** (materialized into the Zotero *Inbox*);
   **Trash** remains immediate without a review. Both decisions train the gate.
+  Cards separate **Relevance** from AI evidence; expand **Why selected** for the
+  actual policy/picker observations. Unknown evidence does not distinguish absent,
+  stale or failed reviews. Ranking, thresholds and labels are unchanged; this is
+  observability, not measured recommendation-quality improvement.
 - **Library — read.** Your unread papers, ranked by relevance. For each you get:
   - a **paper brief** — at-a-glance read verdict, goal-match board (which of your goals it
     serves), a reference-free **quality grade** (FLAG / NEUTRAL / HIGHLIGHT), and figures;
+  - a visible **reading plan** — ordered targets, parts to skip and the original's added value beside the saved reading verdict; missing estimates stay unknown;
   - **ask the paper** — grounded Q&A that quotes the text and abstains when the answer isn't there;
+    long conversations retain complete current-source handles only when shorter than raw history.
+    Prior conversation stays untrusted, not evidence; see the
+    [checkpoint contract](zotero_summarizer/services/library/README.md#qa-evidence-checkpoints);
   - **deep review** — an on-demand full-text digest + quality assessment for your top picks;
     map-reduce verifies claims against the original paper, not its generated notes.
     Empty source text or chunk summaries fail rather than becoming a skip recommendation.
 - **Annotate — label.** When you actually read one, give it the fine label
   (`must` / `should` / `could` / `don't`). That's your ground truth; the model retrains on it.
+
+- **Weekly — browse saved digests.** Open **Weekly**, choose a saved research-feed
+  CLI run, follow its paper links, or download canonical JSON and Markdown.
+  Bookmark `/weekly?run=<bundle-name>` to reopen it. Refresh saved runs after
+  publishing with `uv run zotero-summarizer research-feed run --from 2026-08-22
+  --to 2026-08-29 --cached-only`. Browsing is read-only and needs the local server;
+  missing reviews, unknown evidence and unreadable reports stay explicit.
+  Weekly paper links also stay passive; starting a review requires **Generate review**.
+
+**Disconnected review:** sync a working set, then reopen **Library** with the Mac
+unavailable, including papers not previously opened. Compact context, explicit
+verdict changes/retractions and manual notes use the existing device store/outbox.
+Reconnection reconciles typed UUID mutations; compare both versions before resolving
+same-field conflicts. Device saves are not server/Zotero confirmations. PDFs and AI
+remain server-only. See [the offline review workflow](docs/offline-review.md) for
+installation, storage/error boundaries and the separate remote-device requirements.
 
 Open PDFs and take notes in Zotero as usual; come back here to triage.
 
@@ -152,6 +299,10 @@ stage routing, classifier gate, corpus). Secrets stay **name-only** everywhere i
 collects the env-var name, never the raw value. Everything else has working defaults. Full
 reference in [docs/usage.md](docs/usage.md).
 
+CLI commands select `--project-root` before loading its `.env`; an unselected
+project's configuration is not imported into the process. Invalid command budgets
+refuse before Settings loading. See [CLI configuration](docs/usage.md#configuration-reference).
+
 ## Commands
 
 ```bash
@@ -166,7 +317,33 @@ uv run zotero-summarizer goldenset train-classifier  # retrain the relevance gat
 uv run zotero-summarizer faithbench build --max-builder-windows 64  # larger QA-source budget; more builder calls
 ```
 
+## Before opening a PR
+
+With development dependencies installed and `.venv` activated, run `make lint`
+while your changes are staged, then commit your intended files. From a clean,
+dedicated branch, publish with:
+
+```bash
+tools/create-pr.sh 'Short PR title' /path/to/body.md
+```
+
+Prepare the body using the [default PR template](.github/pull_request_template.md):
+record an actually executed feature action and failure/no-op boundary, expected
+versus observed results, environment/revision, evidence and limits. Checks alone
+are not a feature smoke. Edit the existing PR for updates; do not publish it again.
+
+This runs `make check` locally, pushes only after every check passes, and opens a
+PR against `main`. It never stashes your work. Hosted Actions is optional/manual;
+GitHub billing is not part of this path. See the [check contract and platform
+limits](docs/architecture.md#verify-a-change). `make check` runs checks without publishing.
+
 ## Going further
+
+Offline support comparison (#37): `python -m tools.method_validation support --config FILE`
+is read-only by default; `--run` explicitly consents to private reports/configured HTTP.
+See [contract](docs/decision-support-comparison.md). Recorded replay verifies the
+exact case/arm input-to-terminal binding, not just copied output hashes.
+No model loads or product changes.
 
 - **[docs/usage.md](docs/usage.md)** — the daemon, how the model learns from your labels,
   offline / air-gapped use, the safety model, and the full config reference. Faithbench QA
@@ -174,6 +351,30 @@ uv run zotero-summarizer faithbench build --max-builder-windows 64  # larger QA-
   budget and increased call cost are documented there.
 - **[Research-feed evaluation evidence](docs/issue-evidence-research-feed.md)** — why the current
   30-paper fixture is unscorable for production inclusion quality (not a 0%-precision result).
+  `research-feed run --from 2026-08-22 --to 2026-08-29` reuses RSS triage and current
+  reviews, co-producing concrete project proposals in the same digest call. Original
+  quote membership is checked, not scientific truth. Effort estimates are explicitly
+  unverified; code alone establishes no duration. `--cached-only` avoids startup/model
+  work but needs the existing goals config for current qualification; errors remain
+  visible (CLI exit 1). Weekly acquisition never opens a browser; missing abstract
+  stages are errors, and omitted projects remain unknown. Shared abstract prompts
+  escape source boundary markup; semantic injection resistance is not established.
+  Saved v1 reports are not rewritten. Partial-run diagnostics stay on stderr so
+  CLI stdout remains parseable JSON; verification disables declared chat thinking
+  or minimizes active three-level reasoning to low without changing digest effort.
 - **[docs/architecture.md](docs/architecture.md)** — how it works, the layering rules, and
-  the dev / verification workflow.
+  the dev / verification workflow, including owned application-logger isolation
+  between tests.
+- **[Native issue delegation](docs/native-agent-workflow.md)** — pinned async Pi adapter,
+  exclusive workers, independent review, per-child cwd/role checks, isolated failure
+  handling, task-level authority boundaries, scout-artifact readback, restart/activation
+  checks and offline workflow contract tests (not model-quality or sandbox acceptance).
 - **[CHANGELOG.md](CHANGELOG.md)** — notable changes (latest: the guided first-run setup).
+
+Feedback review stack part 1: Feedback: retained input capture and report primitives. See `zotero_summarizer/services/golden/feedback_analysis/README.md`; later parts supply the remaining existing workflow.
+
+Feedback review stack part 2: Feedback: retained history and descriptive analysis. See `zotero_summarizer/services/golden/feedback_analysis/README.md`; later parts supply the remaining existing workflow.
+
+Feedback review stack part 4 (final): opt-in weekly daemon scheduling and recovery. See `zotero_summarizer/services/golden/feedback_analysis/README.md` for activation, bounded catch-up and recovery limits.
+
+Review inventory: [original-change PR index and source dispositions](docs/pr-split-audit/README.md).

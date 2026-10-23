@@ -6,7 +6,7 @@ with a hard metadata signal) falls back to a safe SUPERTYPE — so a review is n
 judged as an empirical paper, and vice-versa, even when the classifier is unsure.
 
 Detection is cheap and gate-independent; the caller (``_deep_review_layers.extra_layers``)
-treats it as one more independently-skippable layer and degrades to ``GENERIC_EMPIRICAL``
+treats it as one more independently-skippable layer and retains an unknown type
 on failure (the module's established background-worker boundary). Within ``detect`` the
 LLM error propagates — we don't silently swallow it here.
 """
@@ -193,7 +193,7 @@ def detect(
 def detect_safe(ctx: Any, sections: list[dict[str, Any]], body: str, logger: Any) -> dict[str, Any]:
     """``detect`` with the deep-review boundary fallback (an independently-skippable
     layer): build the inputs from the review ctx, and on ANY failure log + return the
-    safe GENERIC_EMPIRICAL supertype instead of blocking the review. ``ctx`` is
+    unknown type instead of manufacturing an empirical assessment. ``ctx`` is
     duck-typed (``.title``/``.digest_dump``/``.llm``, optional ``.item_type``/
     ``.paper_type_override``) to avoid importing deep_review's dataclass."""
     try:
@@ -206,7 +206,7 @@ def detect_safe(ctx: Any, sections: list[dict[str, Any]], body: str, logger: Any
                       web_article=bool(getattr(ctx, "web_article", False)))
     except Exception as exc:  # noqa: BLE001 — independently-skippable layer (design)
         logger.warning("paper-type detection failed: %s", exc)
-        return {"type": PaperType.GENERIC_EMPIRICAL.value, "confidence": 0.0,
+        return {"type": "", "confidence": 0.0,
                 "source": "error", "uncertain": True, "reasoning": str(exc)}
 
 

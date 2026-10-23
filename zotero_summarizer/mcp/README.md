@@ -33,3 +33,5 @@ active-job snapshot uses the API's status-filtered lookup instead of a newest-N
 window. MCP numeric environment settings are validated at import: timeout is
 0.1–3600 seconds, item batches 1–500 (matching the API), and per-item estimates
 1–86400 seconds.
+
+Original native-preview client source is retained: displayed approval hashes, explicit refresh/force and direct-editor outcomes use the existing backend; no new controls or protocols are designed. Original synthetic client tests remain unchanged.

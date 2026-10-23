@@ -70,7 +70,8 @@ final, as before. Skipped in `gate_only` mode (no LLM).
 | `feeds/_tick_phases.py` · `feeds/_rescue.py` | the discrete tick phases · capped acquire-before-score policies and shared fetch/re-score primitive |
 | `feeds/_outcomes.py` · `feeds/_loop.py` | outcome detection → feedback · the long-running asyncio loop. `_outcomes` also appends an `outcome_resolved` event to the agentic interaction log (`services.interaction_log.log_behavioural_outcome`) — the daemon-resolved 7-day engaged/moved/trashed signal, joined to the at-triage verdict by `feed_item_id`; this is the second event producer (daemon thread, shared UTC stamp) |
 | `summarization.py` | LLM summarize/refine pipeline, including optional exact-URL `method_and_code`; `run_abstract_dry` reuses its real prompt/scoring path for Doctor but omits corpus context and writes |
-| `prompts.py` | validated injection-safe code defaults; HackerNoon gets the practitioner rubric through the same triage contract; legacy refinement cannot recommend deep/full reading from absent/short full text; `DEFAULT_MAP_PROMPT` serves map-reduce deep review |
+| `_method_admission.py` · `_method_context.py` | exact complete original-source URI admission and local rejection receipts · bounded, escaped whole original URI windows for long-source generation; neither classifies scientific support or contribution relevance |
+| `prompts.py` | security-directed code defaults; HackerNoon gets the practitioner rubric through the same triage contract; legacy refinement cannot recommend deep/full reading from absent/short full text; `DEFAULT_MAP_PROMPT` serves map-reduce deep review |
 | `select.py` | plateau/elbow cutoff for daily materialization |
 | `daily_actions.py` | Today keep/trash → Zotero + training labels. "Add" files into the user-chosen collection (`add_to_library(item_ids, target_collection_key=None)` resolves the picker's key → name via `ZoteroReader.collection_name_for_key`, an unknown key → 400; default None → "Inbox") and writes a PROVISIONAL verdict (`label_verdicts.source='machine_add'`, tier `feed_interest`) — captured as interest but UNCHECKED, so `golden/hybrid_gt` caps its effective training label at weak `could_read` (not the `should_read` shown for display intent) until you verify it or the 7-day materialization outcome resolves; trash stays a deliberate `user` verdict and flows through `golden.label_verdicts`, which preserves its prior→new transition and prevents a later machine-add retry from overwriting it. After a usable cached review, an explicit positive verdict (must/should/could) on a feed paper materializes it into the Inbox — `materialize_feed_verdict(item_key, user_priority, create_if_missing=True)` reuses the same `_materialize_one`/`_mark_pending` core as `add_to_library` but writes NO training label (the verdict is already saved), instead stamping `user_priority` as the new item's ground-truth `label:<priority>` tag in the same write so it reaches Zotero even while Zotero stays open (the standalone `zotero_set_label_tag` refuses to). With `create_if_missing=False`, it resolves an already-materialized target for a negative verdict/comment without creating a rejected paper; `dont_read` never adds. On "Add", an IN-PLACE Today review (cached under `stable_feed_key`) is copied onto the new library `item_key` (`deep_review.copy_review`) so the deep review persists into the library. Both keep (`today_keep`) and trash (`today_trash`) also append a `human_feedback` event to the agentic interaction log via `_record_label` (`services.interaction_log.log_feed_decision`) — the gate's pre-mutation derived priority + the human's keep/trash. The daemon gate retrain (`feeds/_gate`) threads `triage_db_path` into `load_or_train`, so it applies this overlay too (not just `/admin/retrain`). **Trash marks the feed items read best-effort**: the `dont_read` labels are the source of truth and are committed per-row, so a Zotero-DB-lock on `mark_feed_items_read` reports `marked_read: 0` + `marked_read_error` instead of 500-ing the whole batch after the labels already saved (matches the per-row best-effort contract) |
 | `triage_jobs.py` | owns on-demand triage workers and their item task groups; cancellation is `cancelling` until blocking work drains, then `cancelled`; job snapshots and cancellation/start writes serialize under the existing start lock |
@@ -191,6 +192,12 @@ When a triage model's proposed priority differs from composite mapping, the resp
 labels the computed priority as authoritative and retains the model assessment as
 its pre-mapping explanation. This does not change scores or promote suggestions.
 
+Prompt rendering escapes delimiter-like markup in title, abstract, PDF text,
+complete summary JSON and corpus context before insertion into the existing
+untrusted wrappers. DOI and auxiliary goal/collection metadata use the shared
+escaped wrapper. This protects the structural boundary, not semantic immunity to
+prompt injection; custom templates still own their placement of source fields.
+
 **Boundaries:** imports `model/` (gate), `zotero/` (pending), the library's existing
 source mapper, and shared scoring; standard services rules.
 
@@ -207,9 +214,63 @@ attempt (invalid repair propagates). The shared `extract_json_blob` and decoded
 output capture/telemetry are unchanged. Candidate spans do not overlap: scanning
 and decoding work is bounded by input characters, without suffix retries or regex.
 
+Method/code artifacts are checked after the existing typed parse/one repair,
+before triage, response assembly or persistence. Both typed parse attempts retain
+nonempty candidate literals through validation context; whitespace-padded URLs are
+rejected and receipted rather than silently trimmed. Legacy decoding keeps its
+existing cleanup. Each candidate must exactly equal
+a complete HTTP(S) token in the original text or bound title/DOI/abstract, or an
+eligible whole raw PDF annotation URI. Case, percent escapes, query, fragment and
+literal punctuation are not normalized; substring/prefix and nested URLs inside
+containing URI tokens do not authorize links. Markdown labels/destinations retain
+their own bounded scopes. A bare DOI does not authorize a synthesized DOI URL.
+This is source membership, not a contribution-role or scientific-support verdict:
+an unrelated cited repository can be an exact member and must still be excluded
+by refinement/human review. No extra classifier, LLM stage, artifact fetch or execution.
+
+Long PDF maps remain generated context, never admission authority. A suffix of
+whole original URI occurrence windows (200 source characters either side) supplements
+the first refinement call, including custom templates, within the existing
+`quality_review.map_chunk_chars` rendered-character budget. Overlaps share context;
+over-budget windows are skipped intact, not clipped. Matched/retained counts expose
+URI-window coverage only, excluding URI-free and annotation-only evidence; missing
+windows do not prove source absence. Excerpts use the existing escaped untrusted
+data boundary. Direct PDFs, abstract/Doctor and URI-free long inputs add no suffix;
+repair remains schema-only with the original single-call budget.
+
+Rejected candidates append to `Settings.data_dir/method-artifact-rejections.jsonl`
+with field/index, candidate, first/repair phase, grammar version and full original
+text/metadata hashes; PDF cases also record document and annotation-tuple hashes.
+Receipt I/O precedes returning a filtered copy and failures propagate without
+another repair. The process-local lock preserves concurrent JSONL records, not a
+cross-process audit transaction. Logs can contain sensitive source URLs; keep them
+local. Write-free Doctor rejects a nonmember before Settings/state/receipt I/O.
+Access, capture, model and unrecovered schema failures remain errors, never `null`.
+Absent/null, empty legacy objects, artifact-only objects and supported no-code
+methods keep the existing schema behavior; admission does not invent a meaningful
+method or convert a rejected object to null. Existing JSON response, feed payload,
+restart reconstruction and note rendering are reused without migrations or
+retrospective validation of saved summaries.
+
+Regression selectors: `tests/test_method_{source_admission,lexical_preservation,pdf_authority,original_context,context_selection}.py`,
+`tests/test_pdf_source_authority.py`, `tests/test_summarization_repair.py`,
+`tests/test_triage_long_source.py`, `tests/test_triage_job_cancellation.py`,
+`tests/test_method_and_code.py`, `tests/test_method_persistence.py`, and
+`tests/test_delayed_materialization.py`.
+These synthetic/scripted oracles establish mechanical contracts only when run.
+Issue #10's six frozen public papers through effective production refinement,
+source-evidence judgement, useful no-code/null decisions and human/native-note
+acceptance remain separate, unestablished evidence; no issue closure is implied.
+
 Triage receives the complete canonical `RefinedSummary` JSON inside the existing
 untrusted summary boundary, not an executive-only excerpt. Methods, findings,
 limitations and optional artifacts remain available without new calls or scoring
 changes. Default refinement preserves conditional effect directions and Results
 exceptions, failed versus absent validation, and repository versus reproducibility
 evidence. Instruction-presence tests are not scientific-faithfulness evaluations.
+
+The existing daemon training-ledger producer is retained with its original synthetic-trainer regression suite. It appends retained artifact identities only after install/rescore; this packaging adds no fitting, inference or new identity authority.
+
+The original private corpus-prefilter provenance marker is retained with the optional practitioner diagnostic; the marker is not an LLM/public JSON field. No new scoring rule is introduced.
+
+The existing question/native source stack carries the original post-commit materialization/verdict/recovery mirror callers. No new delivery controller or source-derived action is designed here.

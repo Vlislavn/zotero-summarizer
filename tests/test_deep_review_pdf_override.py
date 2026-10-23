@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import types
 
-from zotero_summarizer.models import GoalSummary, PaperDigest
+import pytest
+
+from zotero_summarizer.models import GoalSummary, PaperDigest, QualityEval
 from zotero_summarizer.services.library import deep_review
 
 
@@ -20,7 +22,7 @@ def _config():
     return types.SimpleNamespace(quality_review=qr, research_goals=[])
 
 
-def _wire(monkeypatch, *, detail):
+def _wire(monkeypatch, *, detail, quality_basis="full_text"):
     from zotero_summarizer.services.library import _review_identity
 
     monkeypatch.setattr(_review_identity, "build_review_identity", lambda **kwargs: {
@@ -28,6 +30,7 @@ def _wire(monkeypatch, *, detail):
         "source_kind": kwargs["source_kind"], "source_path": kwargs["pdf_path"],
         "focus_prompt": kwargs["focus_prompt"],
     })
+    monkeypatch.setattr(_review_identity, "_source_sha", lambda _path: "b" * 64)
     reader = types.SimpleNamespace(get_item_detail=lambda k: detail)
     seen = {"extracted": []}
     extractor = types.SimpleNamespace(
@@ -42,8 +45,8 @@ def _wire(monkeypatch, *, detail):
     monkeypatch.setattr(deep_review.quality_review, "assess_digest", lambda **_k: digest)
     goals = [GoalSummary(goal="Fixture goal", relevant=True, retrieval_state="hit", abstained=False).model_dump()]
     monkeypatch.setattr(deep_review._deep_review_layers, "extra_layers",
-                        lambda ctx: ({"quality_band": "highlight"}, goals,
-                                     {"type": "x"}, None, None))
+                        lambda ctx: (QualityEval(grade="A", basis=quality_basis, quality_band="highlight").model_dump(),
+                                     goals, {"type": "x"}, None, None))
     # The note write is a local import inside _review_one — patch the source symbol.
     from zotero_summarizer.services.zotero import zotero as zsvc
     monkeypatch.setattr(zsvc, "zotero_upsert_digest_note", lambda *_a, **_k: None)
@@ -62,6 +65,23 @@ def test_injected_pdf_path_overrides_missing_zotero_attachment(monkeypatch):
     assert entry["needs_pdf"] is False
     assert entry["digest"]["grade"] == "A" and entry["digest"]["read_decision"] == "read"
     assert seen["extracted"] == ["/tmp/cache/k1.pdf"]  # extracted from the INJECTED path
+
+
+@pytest.mark.parametrize("basis", ["abstract", "not_assessed"])
+def test_injected_pdf_digest_grade_cannot_replace_full_text_quality(monkeypatch, basis):
+    detail = {"title": "T", "pdf_path": "", "item_type": "journalArticle"}
+    reader, extractor, seen = _wire(monkeypatch, detail=detail, quality_basis=basis)
+
+    entry = deep_review._review_one(
+        {"item_key": "K1", "title": "T", "pdf_path": "/tmp/cache/k1.pdf"},
+        reader=reader, config=_config(), extractor=extractor, llm=object(), quality_enabled=True,
+    )
+
+    assert entry["needs_pdf"] is False
+    assert entry["model_digest"]["grade"] == "A" and entry["model_digest"]["read_decision"] == "read"
+    assert entry["digest"]["read_decision"] == "skim"
+    assert "strong_evidence_not_confirmed" in entry["reading_policy_flags"]
+    assert seen["extracted"] == ["/tmp/cache/k1.pdf"]
 
 
 def test_no_override_falls_back_to_zotero_attachment(monkeypatch):

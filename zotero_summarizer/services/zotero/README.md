@@ -1,5 +1,11 @@
 # services/zotero — Zotero access + optional read resolver
 
+`build_digest_note_html(..., interpretation=record)` accepts an explicitly supplied
+qualified experiment record whose digest must match the rendered digest. It reuses
+Library's shared three-group projection and keeps ownership metadata as the final
+paragraph. Ordinary callers/default HTML are unchanged. This builds HTML only;
+no experiment result grants native-write consent or target/Add authority.
+
 The only road back into Zotero. Triage never writes directly: it queues
 **pending changes** that you review, then apply. Apply backs up the Zotero DB
 first. Also holds read helpers for the Zotero routes, note interpretation, and
@@ -35,6 +41,12 @@ note_analyzer  : interpret user-written Zotero notes as golden labels
 | `_notes.py` | Zotero-safe triage/verdict/digest/user-note HTML; triage notes retain versioned delayed summaries and optional exact-URL Method & code, while digests include selective-reading action, supported technical parameters and writing-friction reasons; empty sections vanish and distinct markers keep note types idempotent. The independently generated `should_deep_read` advice is omitted to avoid a second competing verdict; the ranked priority and rationale remain visible, and the stored artifact is unchanged. `What to read` section hints remain advisory and may need human verification |
 | `zotero.py` | read-side helpers + the reader/writer accessors for routes. `get_zotero_reader_or_raise` / `get_zotero_writer_or_raise` stay strict for Zotero routes and writes. `get_library_reader()` is the read-path resolver: live Zotero reader when configured, else `services.library.app_library_reader.AppLibraryReader` over kept RSS papers, so the Library queue, paper brief, ask-paper, and deep review still work without Zotero. `resolve_reader_for_key(item_key)` resolves by the KEY's shape instead: a `stable_feed_key` (`feed:<ns>:<sha>`, an un-materialized Today paper) → `AppLibraryReader` EVEN with a live Zotero reader present (only the app library resolves it, decision-independent), anything else → `get_library_reader()` — this is what lets render/detail serve an in-place-reviewed feed paper that has no Zotero item yet. `zotero_set_label_tag` mirrors the app's committed current verdict to the portable `label:<priority>` tag; a direct Zotero/iPad edit reconciles back later, while the app owns decision state/history. `zotero_upsert_user_note` directly upserts the free-text "My notes" review note under `USER_NOTE_MARKER` (refuses while Zotero is open); `zotero_set_item_priority` route writes the `label:*` tag |
 | `note_analyzer.py` | classify user notes into priorities for the golden set |
+
+Reject is one captured all-pending selection: the existing repository setter's
+strict transaction validates every ID/status and the final affected count before
+commit. Missing/stale/partially-updatable selections become409 without changing
+valid siblings. Client receipt validation uses that exact count; it never treats
+zero/partial/malformed200results as success. Other writer/Apply flows are unchanged.
 
 Ownership is plain text in the existing triage/digest footer and a small
 verdict/user-note footer (`zs:note_type=<type>;version=<version>`). Legacy
@@ -77,6 +89,20 @@ impersonating another note kind; existing raw body-text marker spoofing is outsi
 this boundary fix. Removing the ownership footer makes a comment-stripped note
 unowned rather than retroactively adopting it.
 
+Deep review supplies the shared policy-projected digest to the existing digest-note
+renderer: its Quality label uses the independent scientific grade (or stays ungraded
+for non-papers/failed assessment), not the retained `model_digest` self-grade. Genuine
+legacy calls without an independent assessment retain their old grade. This changes
+neither the writer/backup/consent boundary nor previously saved notes on read.
+
 Digest strength and weakness paragraphs precede the unchanged version-1 quality
 metadata footer. The footer is always the last meaningful paragraph, preserving
 structural ownership after native editors discard HTML comments.
+
+Existing native/question source stack: typed action history, original writer boundaries and dormant editor/proposal code; activation follows. No new feature or issue-completion work; merge the related parts before using their new workflow.
+
+Existing native/question source stack: original confirmation, mirror/recovery and publication-revision helpers; existing endpoint activation follows. No new feature or issue-completion work; merge the related parts before using their new workflow.
+
+Existing native/question source stack: original metadata editors, Pending confirmation and mirror activation; corresponding UI/MCP source follows. No new feature or issue-completion work; merge the related parts before using their new workflow.
+
+Pending Reject commits generated audit and ordinary status changes together after validating the entire selection; a stale row or direct/mirror history refuses all selected changes.

@@ -51,6 +51,42 @@ def test_rss_feed_routes_crud(tmp_path, monkeypatch) -> None:
     assert asyncio.run(rss_routes.list_feeds())["total"] == 0
 
 
+@pytest.mark.parametrize("saved_url", [
+    "https://hackernoon.com/tagged/ai-agents/feed",
+    "https://HACKERNOON.com:443/tagged/ai-agents/feed",
+])
+def test_create_only_subscription_preserves_existing_disabled_row(tmp_path, monkeypatch, saved_url) -> None:
+    monkeypatch.setattr(rss_routes, "get_settings", lambda: _settings(tmp_path))
+    monkeypatch.setattr(rss_routes, "validate_rss_url", lambda url: str(url).strip())
+    saved = asyncio.run(rss_routes.add_feed(rss_routes.RssFeedRequest(
+        name="Keep my name", url=saved_url, enabled=False,
+    )))
+
+    result = asyncio.run(rss_routes.add_feed(rss_routes.RssFeedRequest(
+        name="HackerNoon AI Agents", url="https://hackernoon.com/tagged/ai-agents/feed",
+        enabled=True, create_only=True,
+    )))
+
+    assert result == saved
+    assert asyncio.run(rss_routes.list_feeds())["total"] == 1
+
+
+def test_create_only_subscription_creates_a_new_row_and_custom_upsert_still_updates(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(rss_routes, "get_settings", lambda: _settings(tmp_path))
+    monkeypatch.setattr(rss_routes, "validate_rss_url", lambda url: str(url).strip())
+    saved = asyncio.run(rss_routes.add_feed(rss_routes.RssFeedRequest(
+        name="New subscription", url="https://example.com/feed", create_only=True,
+    )))
+    assert saved["enabled"] is True
+
+    updated = asyncio.run(rss_routes.add_feed(rss_routes.RssFeedRequest(
+        name="Custom update", url=saved["url"], enabled=False,
+    )))
+    assert updated["id"] == saved["id"]
+    assert updated["name"] == "Custom update"
+    assert updated["enabled"] is False
+
+
 def test_rss_feed_route_rejects_unsafe_url(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(rss_routes, "get_settings", lambda: _settings(tmp_path))
 

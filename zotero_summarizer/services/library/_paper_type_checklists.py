@@ -304,9 +304,9 @@ class Coverage:
 
     met: int
     applicable: int
-    fraction: float
+    fraction: float | None
     grade: str
-    band: str                       # flag | neutral | highlight  (matches the legacy band space)
+    band: str                       # flag | neutral | highlight | uncertain (no applicable checks)
     missing_critical: list[str] = field(default_factory=list)
 
 
@@ -323,8 +323,8 @@ def coverage_grade(
     missing_critical: list[str] = []
     for item in spec.items:
         verdict = rubric.get(item.key, "na")
-        if verdict == "na":
-            continue  # not applicable to this paper → drops out of both sums
+        if verdict not in {"yes", "no"}:
+            continue  # inapplicable or unassessed, not an empirical failure
         weight = 2.0 if item.critical else 1.0
         den += weight
         met = verdict == "yes" and item.key in grounded_yes
@@ -332,7 +332,9 @@ def coverage_grade(
             num += weight
         elif item.critical:
             missing_critical.append(item.key)
-    fraction = round(num / den, 3) if den else 0.0
+    if not den:
+        return Coverage(0, 0, None, "", "flag" if has_red_flag else "uncertain")
+    fraction = round(num / den, 3)
     grade = next(letter for thresh, letter in _GRADE_BANDS if fraction >= thresh)
     if has_red_flag or missing_critical:
         band = "flag" if (has_red_flag or len(missing_critical) >= 2) else "neutral"
@@ -343,7 +345,7 @@ def coverage_grade(
     else:
         band = "flag"
     met_count = sum(1 for it in spec.items if rubric.get(it.key) == "yes" and it.key in grounded_yes)
-    applicable = sum(1 for it in spec.items if rubric.get(it.key, "na") != "na")
+    applicable = sum(1 for it in spec.items if rubric.get(it.key) in {"yes", "no"})
     return Coverage(met_count, applicable, fraction, grade, band, missing_critical)
 
 

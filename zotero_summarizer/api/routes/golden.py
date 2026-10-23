@@ -30,6 +30,7 @@ from zotero_summarizer.services.golden import (
     verdict_effects,
 )
 from zotero_summarizer.services.library import review_detail as review_detail_svc
+from zotero_summarizer.services.sync.service import questions_for_paper
 from zotero_summarizer.storage import repositories
 from zotero_summarizer.api.routes._golden_border import router as _border_router
 from zotero_summarizer.api.routes._golden_helpers import (
@@ -210,17 +211,18 @@ async def review_detail(item_key: str) -> dict[str, Any]:
     provs = _load_all()
     prov_match = next((p for p in provs if p.item_key == safe_item_key), None)
     verdict_row = repositories.get_label_verdict(_db_path(), safe_item_key)
+    questions = await asyncio.to_thread(questions_for_paper, _db_path(), item_key)
 
     try:
         source_payload = await asyncio.to_thread(_build_source_payload, safe_item_key)
     except review_detail_svc.InvalidItemKey as exc:
-        # A structurally-malformed key (``feed:abc``, ``note:X:notanum``).
-        # Surface as 422 rather than an opaque 500.
-        raise APIError(
-            error="validation_error",
-            message=f"item_key {safe_item_key!r} is malformed: {exc}",
-            status_code=422,
-        ) from exc
+        if not questions:
+            raise APIError(
+                error="validation_error",
+                message=f"item_key {safe_item_key!r} is malformed: {exc}",
+                status_code=422,
+            ) from exc
+        source_payload = None
     except APIError as exc:
         # Zotero unavailable (503) — degrade to the csv_stub so annotation
         # stays usable. Narrow: only the zotero_unavailable case.
@@ -237,11 +239,8 @@ async def review_detail(item_key: str) -> dict[str, Any]:
         )
         if csv_row is not None:
             source_payload = review_detail_svc.build_csv_stub_detail(csv_row)
-        elif verdict_row is not None:
-            # No source row anywhere, but the user cast a manual verdict on
-            # this key (e.g. a Today feed item, or a paper that left the
-            # engaged set). Never 404 a verdict the user owns — return a
-            # minimal stub so it stays viewable + editable + deletable.
+        elif verdict_row is not None or questions:
+            # Durable user-owned comments/verdicts remain readable without a source.
             source_payload = review_detail_svc.build_csv_stub_detail(
                 {"item_key": safe_item_key, "title": "(no longer in current set)"}
             )
@@ -262,6 +261,7 @@ async def review_detail(item_key: str) -> dict[str, Any]:
         ),
         "verdict": verdict_row,
         "user_note": repositories.get_review_note(_db_path(), safe_item_key) or "",
+        "questions": questions,
     }
 
 

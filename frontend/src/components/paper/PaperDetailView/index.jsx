@@ -4,10 +4,13 @@ import TagOfInterestEditor from '../TagOfInterestEditor.jsx';
 import CollectionEditor from '../CollectionEditor.jsx';
 import PaperReaderPane from '../../library/PaperReaderPane.jsx';
 import AskPaperBox from '../../library/AskPaperBox.jsx';
+import ReviewNotes from '../review/ReviewNotes.jsx';
 import OpenBriefButton from '../../library/OpenBriefButton.jsx';
 import VerdictPanel from '../../VerdictPanel.jsx';
+import useServerAvailable from '../../../hooks/useServerAvailable.js';
 import AbstractBlock from './AbstractBlock.jsx';
 import { Section, Disclosure } from '../review/primitives.jsx';
+import useNoteDelivery from '../../../hooks/useNoteDelivery.js';
 
 // ONE configurable paper-detail assembly, extracted from the duplicated bodies
 // of AnnotationVerdict (the "detail" right column) and InlineAnnotate (the
@@ -52,8 +55,8 @@ export default function PaperDetailView({
   detail,
   itemKey,
   show = {},
-  // compact (Library row card): drop the per-goal board, demote Ask behind a
-  // disclosure, and lead the Decide zone with "Open full review" — the full
+  // compact (Library row card): drop the per-goal board and lead the Decide
+  // zone with "Open full review" — the full
   // digest/figures/abstract live in the new-tab brief, not duplicated inline.
   compact = false,
   readerOpen = false,
@@ -62,9 +65,12 @@ export default function PaperDetailView({
   onDeepReviewDone,
   onTagsChanged,
   onCollectionsChanged,
+  onNotesDirtyChange,
   verdict = {},
   extras = null,
 }) {
+  const serverAvailable = useServerAvailable();
+  const { questionMirror, beginNoteDelivery } = useNoteDelivery(itemKey, detail?.user_note || '', detail?.questions || []);
   if (!detail) return null;
   const editable = mode === 'editable';
   const hasPdf = detail.has_pdf;
@@ -72,12 +78,15 @@ export default function PaperDetailView({
   // Per-mode defaults that mirror what each surface renders today.
   const showLinks = show.links ?? true;
   const showDeepReview = show.deepReview ?? true;
-  const showReader = show.reader ?? true;
-  const showAsk = (show.ask ?? true) && hasPdf;
+  const showReader = (show.reader ?? true) && serverAvailable;
+  const showAsk = (show.ask ?? true) && hasPdf && serverAvailable;
   const showAbstract = show.abstract ?? true;
   const showTags = show.tags ?? true; // both surfaces render the tag editor
   const showCollection = (show.collection ?? editable) && editable;
   const showVerdict = (show.verdict ?? editable) && editable;
+  const notes = <ReviewNotes key={itemKey} itemKey={itemKey} initialNote={detail.user_note || ''}
+    questions={detail.questions || []} questionMirror={questionMirror}
+    onMirrorStart={beginNoteDelivery} onSaved={onDeepReviewDone} onDirtyChange={onNotesDirtyChange} />;
 
   // ONE flat, hairline-divided column for both modes (Law of Common Region:
   // a divider, not a box). Editable splits into Decide / Act chunks (Miller's
@@ -109,11 +118,7 @@ export default function PaperDetailView({
                 <PaperReaderPane itemKey={itemKey} open={readerOpen} onOpenChange={onReaderOpenChange} hasPdf={hasPdf} />
               )}
               {showAbstract && <AbstractBlock abstract={detail.abstract} variant="details" />}
-              {showAsk && (
-                compact
-                  ? <Disclosure summary="Ask this paper"><AskPaperBox itemKey={itemKey} /></Disclosure>
-                  : <AskPaperBox itemKey={itemKey} />
-              )}
+              {showAsk && <AskPaperBox itemKey={itemKey} onSaved={onDeepReviewDone} onMirrorStart={beginNoteDelivery} />}
             </div>
           </Section>
 
@@ -137,9 +142,12 @@ export default function PaperDetailView({
                   deleteError={verdict.deleteError}
                 />
               )}
+              {notes}
               {/* Collection lifted OUT of the disclosure — filing into Read Next
                   is a daily primary action, not the long tail (Pareto / Serial
                   Position): one click, default preselected. */}
+              {detail.offline_snapshot && <p className="text-xs text-slate-500">Compact synced context; collection and tag state needs the Mac.</p>}
+              {!detail.offline_snapshot && <fieldset disabled={!serverAvailable} className="space-y-4 min-w-0">
               {showCollection && (
                 <CollectionEditor
                   itemKey={itemKey}
@@ -158,6 +166,7 @@ export default function PaperDetailView({
                   <TagOfInterestEditor itemKey={itemKey} tags={detail.tags} onChanged={onTagsChanged} />
                 </Disclosure>
               )}
+              </fieldset>}
             </div>
           </Section>
         </div>
@@ -192,10 +201,11 @@ export default function PaperDetailView({
               {showReader && (
                 <PaperReaderPane itemKey={itemKey} open={readerOpen} onOpenChange={onReaderOpenChange} hasPdf={hasPdf} />
               )}
-              {showAsk && <AskPaperBox itemKey={itemKey} />}
+              {showAsk && <AskPaperBox itemKey={itemKey} onSaved={onDeepReviewDone} onMirrorStart={beginNoteDelivery} />}
             </div>
           </Section>
         )}
+        <Section>{notes}</Section>
         {showAbstract && (
           <Section label="Abstract">
             <AbstractBlock abstract={detail.abstract} variant="expandable" />
@@ -203,7 +213,9 @@ export default function PaperDetailView({
         )}
         {showTags && (
           <Section label="Tags">
-            <TagOfInterestEditor itemKey={itemKey} tags={detail.tags} onChanged={onTagsChanged} />
+            <fieldset disabled={!serverAvailable || detail.offline_snapshot}>
+              <TagOfInterestEditor itemKey={itemKey} tags={detail.tags} onChanged={onTagsChanged} />
+            </fieldset>
           </Section>
         )}
       </div>

@@ -215,11 +215,11 @@ def build_digest_note_html(digest: Any) -> str:
         values = [parameters.dataset, parameters.sample_size, parameters.architecture,
                   *parameters.baselines, *parameters.metrics]
         parts.append(f"<p><strong>Technical parameters:</strong> {e('; '.join(x for x in values if x))}</p>")
-    read_parts = list(getattr(digest, "read_parts", []) or [])[:3]
+    read_parts = list(getattr(digest, "read_parts", []) or [])
     if read_parts:
         parts.append("<p><strong>Read parts</strong></p><ul>"
                      + "".join(f"<li>{e(str(x))}</li>" for x in read_parts) + "</ul>")
-    skip_parts = list(getattr(digest, "skip_parts", []) or [])[:3]
+    skip_parts = list(getattr(digest, "skip_parts", []) or [])
     if skip_parts:
         parts.append("<p><strong>Skip parts</strong></p><ul>"
                      + "".join(f"<li>{e(str(x))}</li>" for x in skip_parts) + "</ul>")

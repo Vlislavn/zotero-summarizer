@@ -237,17 +237,10 @@ def test_light_review_happy_path(monkeypatch):
     assert cand.coverage["sections_detected"] == ["Methods"]
 
 
-class _FakeDigest:
-    tldr = "the point"
-    executive_summary = ""
-    key_findings = ["f1"]
-    read_decision = "read"
-    read_why = ""
-    methods = ""
-    limitations = ""
-    key_strength = ""
-    key_weakness = ""
-    grade = "B"
+def _fake_digest():
+    from zotero_summarizer.models import PaperDigest
+
+    return PaperDigest(tldr="the point", key_findings=["f1"], read_decision="read", grade="B")
 
 
 class _FakeSummary:
@@ -267,7 +260,7 @@ def test_targeted_review_no_fulltext():
 
 
 def test_targeted_review_happy_path(monkeypatch):
-    monkeypatch.setattr(tr_mod, "assess_digest", lambda **kw: _FakeDigest())
+    monkeypatch.setattr(tr_mod, "assess_digest", lambda **kw: _fake_digest())
     monkeypatch.setattr(
         tr_mod,
         "summarize_for_goals",

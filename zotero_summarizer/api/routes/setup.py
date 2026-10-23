@@ -113,14 +113,31 @@ async def doctor_status() -> dict:
 
 async def run_doctor(req: DoctorRequest) -> dict:
     from zotero_summarizer.services.setup.doctor import run_doctor as run_checks
+    from zotero_summarizer.services.setup.load_attempt import SetupAttempt
 
-    return await asyncio.to_thread(
-        run_checks, get_settings(), check_ids=req.check_ids, fix=req.fix,
-    )
+    attempt = SetupAttempt()
+    try:
+        return await asyncio.to_thread(
+            run_checks, get_settings(), check_ids=req.check_ids, fix=req.fix, attempt=attempt,
+        )
+    except asyncio.CancelledError:
+        attempt.abandon("cancelled")
+        raise
+
+
+class CancelDoctorRequest(BaseModel):
+    run_id: str = Field(min_length=1)
+
+
+async def cancel_doctor(req: CancelDoctorRequest) -> dict:
+    from zotero_summarizer.services.setup.doctor import cancel_doctor as cancel
+
+    return cancel(req.run_id)
 
 
 router.add_api_route("/api/setup/doctor", doctor_status, methods=["GET"])
 router.add_api_route("/api/setup/doctor", run_doctor, methods=["POST"])
+router.add_api_route("/api/setup/doctor/cancel", cancel_doctor, methods=["POST"])
 router.add_api_route("/api/setup/status", setup_status, methods=["GET"])
 router.add_api_route("/api/setup/detect-zotero", detect_zotero, methods=["GET"])
 router.add_api_route("/api/setup/paths", update_paths, methods=["PUT"])

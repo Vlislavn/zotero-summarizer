@@ -32,20 +32,27 @@ export async function fetchPending({ status = 'pending', limit = 500 } = {}) {
   return request(`/api/pending?${qs.toString()}`);
 }
 
-/** POST /api/pending/apply { change_ids, force, retry } */
-export async function applyPending(changeIds, { force = false, retry = false } = {}) {
+/** POST /api/pending/apply with explicit displayed approval hashes. */
+export async function applyPending(changeIds, { previews, force = false, retry = false }) {
+  if (!previews || typeof previews !== 'object' || Array.isArray(previews) || !Object.keys(previews).length) {
+    throw new TypeError('Displayed approval previews are required.');
+  }
   return request('/api/pending/apply', {
     method: 'POST',
-    body: JSON.stringify({ change_ids: changeIds, force, retry }),
+    body: JSON.stringify({ change_ids: changeIds, previews, force, retry }),
   });
 }
 
 /** POST /api/pending/reject { change_ids } */
 export async function rejectPending(changeIds) {
-  return request('/api/pending/reject', {
+  const result = await request('/api/pending/reject', {
     method: 'POST',
     body: JSON.stringify({ change_ids: changeIds }),
   });
+  if (!Number.isInteger(result?.updated) || result.updated !== new Set(changeIds).size) {
+    throw new Error('Selected rejection was not confirmed completely. Reload the queue to reconcile.');
+  }
+  return result;
 }
 
 /** PUT /api/pending/change/{id} { payload } */

@@ -48,6 +48,10 @@ run_daemon_loop ─every N s→ run_daemon_tick (_tick)
 and `storage.feeds`; standard services rules. `_common` is the leaf — siblings
 import from it, never the reverse.
 
+Optional Zotero read-sync logs backup/retention filesystem failures and returns
+zero without interrupting the tick or replaying the batch. Markers may already be
+committed; the next tick rescans unread rows rather than assuming rollback.
+
 App-RSS refresh errors propagate out of the tick: the reader records the failing
 feed and rolls back that feed's item writes before raising. A failed refresh
 cannot silently continue into triage against a stale source pool.
@@ -86,3 +90,13 @@ automatic review/render work. Existing model/input caches may be read or warmed.
 Tick counts are accumulated in DaemonTickReport itself; dataclass serialization
 includes fatal_llm_error. The loop fails on exceptions or failed reports and
 removes its signal handlers on exit; zero ticks does no work.
+
+Weekly Feedback runs only when explicitly enabled for `feeds serve`. Owned
+SIGINT/SIGTERM during analysis drain the child and stop the daemon cleanly
+without starting a feed tick or advancing the cursor. Other failures propagate.
+
+The existing daemon training-ledger producer is retained with its original synthetic-trainer regression suite. It appends retained artifact identities only after install/rescore; this packaging adds no fitting, inference or new identity authority.
+
+Retain original RSS partition consumption of the producer-owned private prefilter outcome, not generated tags.
+
+The existing question/native source stack carries the original post-commit materialization/verdict/recovery mirror callers. No new delivery controller or source-derived action is designed here.

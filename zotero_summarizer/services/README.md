@@ -20,7 +20,9 @@ changes cannot expose the trainer to a half-migrated embedding table.
 
 `lifecycle.startup(background=False)` initializes dry-run clients/caches but
 does not resume persisted jobs, refresh RSS, train/rescore the gate, import the
-corpus or launch prewarm workers. The feed dry-run CLI uses this mode; an absent
+corpus or launch prewarm workers. Startup prepares the existing OpenAlex cache
+schema even when optional metadata clients are disabled, so first Discovery client
+construction cannot mutate the corpus DB after its context fingerprint was read. The feed dry-run CLI uses this mode; an absent
 or incompatible required cached gate fails explicitly instead of training.
 
 ```
@@ -49,6 +51,12 @@ or incompatible required cached gate fails explicitly instead of training.
 | `llm/` | provider presets, OS-keyring/env credential resolution, per-stage clients, model discovery and operational checks. See `llm/README.md`. |
 | `faithbench/` | faithfulness mini-benchmark for the deep-review / paper-Q&A pipeline: span-verified QA + trap questions + review-claim grounding, hard-before-soft judging with a pinned remote judge. CLI-driven (`faithbench build/run/judge/report`); artifacts under `data/faithbench/`. See `faithbench/README.md`. |
 | `setup/` | first-run setup + onboarding: readiness `status`, read-only Zotero-dir `detect`, allowlisted `.env` path `env_writer` (byte-preserving; only `PDF_ROOT`/`ZOTERO_DATA_DIR`), dry-run config `validate`, and the Phase-0 `bootstrap` (creates absent `goals.yaml`/`.env`, runs the DB migration). Backs BOTH `/api/setup/*` and `zotero-summarizer setup`. Secrets never read as a value. See `setup/README.md`. |
+
+Setup-only `_adapters.build_llm(verification=True)` owns an HTTP transport with
+retries, cache, environment proxies and redirects disabled. It installs the
+observed model/terminal guard before OnPrem discards metadata and closes the
+transport on construction failure or callback completion. Ordinary clients keep
+their prior options; all setup local-LLM requests must first pass admission.
 
 Shared files: `_common` (helpers: settings/logging/sqlite-ro/now_iso_z/html_to_text/
 `load_golden_rows` (delegates to `golden.csv_store.read_snapshot`), `atomic_write` (callback) + `write_json_atomic`
@@ -151,7 +159,10 @@ counterfactual cohort, model-version attribution or sampling weights are claimed
 
 An enabled corpus requires a working encoder: startup and config updates propagate
 load/encode failures, without fallback vectors. A disabled corpus does not load
-the encoder or rewrite goals. Background corpus import logs and rethrows failures
+the encoder or rewrite goals. Targeted post-edit refresh also skips reader/cache,
+lock and inferred-feedback I/O while corpus is OFF; it does not undo the preceding
+native edit. Missing reader/cache still returns before configuration access.
+Background corpus import logs and rethrows failures
 to the task owner/event loop instead of reporting a successful partial import.
 
 Background corpus import reads the existing whole-library listing once, unions

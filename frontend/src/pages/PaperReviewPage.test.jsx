@@ -6,8 +6,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import InlineAnnotate from '../components/library/InlineAnnotate.jsx';
 import PaperReviewPage from './PaperReviewPage.jsx';
+import { publishStatus } from '../offlineStore.js';
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(async () => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); await publishStatus('', 'unchecked'); });
 
 it('keeps Generate disabled and does not claim a review failed on an offline reload', async () => {
   vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
@@ -33,6 +34,97 @@ it('keeps Generate disabled and does not claim a review failed on an offline rel
   expect(document.querySelector('main').parentElement.className).toContain('xl:grid-cols-[minmax(0,1fr)_20rem]');
   await screen.findByText(/Offline — cached reviews remain readable/);
   expect(screen.queryByText(/Review failed/)).toBeNull();
+  client.clear();
+});
+
+it.each([
+  [{ digest: {} }, true],
+  [{ digest: { read_decision: 'skim' } }, true],
+  [{ digest: { tldr: 'Body' }, error: 'Incomplete attempt' }, true],
+  [{ digest: null, needs_pdf: true }, true],
+  [{ digest: { tldr: 'Body' } }, false],
+  [{ digest: { executive_summary: 'Body' } }, false],
+  [{ digest: { key_findings: ['Finding'] } }, false],
+])('retains an explicit Generate action for an unusable cached review: %j', async (deep, needsRetry) => {
+  vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+  await publishStatus('', 'connected');
+  vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
+  const writes = [];
+  vi.stubGlobal('fetch', vi.fn(async (path, options = {}) => {
+    let data;
+    if (path === '/api/golden/review-detail?item_key=P1') data = {
+      item_key: 'P1', title: 'Cached paper', tags: [], collections: [], has_pdf: false,
+      deep_review: { quality: { grade: 'B' }, ...deep },
+    };
+    else if (path === '/api/admin/llm-reachability') data = {
+      stages: [{ stage: 'deep_review', enabled: true, reachable: true }],
+    };
+    else if (path === '/api/library/deep-review/run' && options.method === 'POST') {
+      writes.push(JSON.parse(options.body));
+      data = { status: 'running' };
+    } else if (path === '/api/zotero/collections' || path === '/api/zotero/tags?limit=300') data = { items: [] };
+    else data = { status: 'idle' };
+    return new Response(JSON.stringify(data), { status: 200 });
+  }));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/paper/P1']}>
+    <Routes><Route path="/paper/:itemKey" element={<PaperReviewPage />} /></Routes>
+  </MemoryRouter></QueryClientProvider>);
+  await screen.findByRole('heading', { name: 'Cached paper' });
+  expect(writes).toEqual([]);
+  if (needsRetry) {
+    const generate = await screen.findByRole('button', { name: 'Generate review' });
+    await waitFor(() => expect(generate.disabled).toBe(false));
+    fireEvent.click(generate);
+    await waitFor(() => expect(writes).toEqual([{ item_key: 'P1' }]));
+    await screen.findByText('Generating the review…');
+    expect(screen.queryByRole('button', { name: 'Generate review' })).toBeNull();
+  } else {
+    expect(screen.queryByRole('button', { name: 'Generate review' })).toBeNull();
+  }
+  client.clear();
+});
+
+it.each([['?autoRun=false', false], ['', true]])('paper navigation %s preserves explicit review consent', async (query, automatic) => {
+  const writes = [];
+  vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+  await publishStatus('', 'connected');
+  vi.stubGlobal('localStorage', { getItem: () => '["P1","P2"]' });
+  vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('fetch', vi.fn(async (path, options = {}) => {
+    let data;
+    if (path.startsWith('/api/golden/review-detail?')) {
+      const key = new URLSearchParams(path.split('?')[1]).get('item_key');
+      data = { item_key: key, title: `Unreviewed PDF ${key}`, tags: [], collections: [], has_pdf: true };
+    } else if (path === '/api/admin/llm-reachability') {
+      data = { stages: [{ stage: 'deep_review', enabled: true, reachable: true }] };
+    } else if (path === '/api/zotero/collections' || path === '/api/zotero/tags?limit=300') {
+      data = { items: [] };
+    } else if (options.method === 'POST') {
+      writes.push([path, JSON.parse(options.body)]);
+      data = { status: 'running' };
+    } else data = { status: 'idle' };
+    return new Response(JSON.stringify(data), { status: 200 });
+  }));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[`/paper/P1${query}`]}>
+    <Routes><Route path="/paper/:itemKey" element={<PaperReviewPage />} /></Routes>
+  </MemoryRouter></QueryClientProvider>);
+
+  if (!automatic) {
+    const generate = await screen.findByRole('button', { name: 'Generate review' });
+    await waitFor(() => expect(generate.disabled).toBe(false));
+    expect(writes).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Next ›' }));
+    await screen.findByRole('heading', { name: 'Unreviewed PDF P2' });
+    const nextGenerate = await screen.findByRole('button', { name: 'Generate review' });
+    await waitFor(() => expect(nextGenerate.disabled).toBe(false));
+    expect(writes).toEqual([]);
+    fireEvent.click(nextGenerate);
+  }
+  await waitFor(() => expect(writes).toEqual([
+    ['/api/library/deep-review/run', { item_key: automatic ? 'P1' : 'P2' }],
+  ]));
   client.clear();
 });
 
@@ -72,6 +164,9 @@ it.each(['page', 'compact'])('%s keeps verdict comments until an explicit edit i
   vi.stubGlobal('fetch', vi.fn(async (path, options = {}) => {
     let data;
     if (path === '/api/golden/review-detail?item_key=P1') data = detail;
+    else if (path === '/api/library/related/P1/discover' && (!options.method || options.method === 'GET')) {
+      data = { seed_key: 'P1', seed_title: 'Paper', admission: { state: 'unknown', basis: null }, context_fingerprint: null };
+    }
     else if (path === '/api/zotero/collections') data = { items: [] };
     else if (path === '/api/zotero/tags?limit=300') data = { items: [] };
     else if (path === '/api/library/render/P1') data = { status: 'idle' };

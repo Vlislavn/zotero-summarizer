@@ -9,11 +9,10 @@ from tests.test_golden_input_boundaries import _app
 from tests.test_offline_sync import _mutation
 from tests.test_verdict_mirror_retraction import _setup
 from zotero_summarizer.api.routes import sync as sync_routes
-from zotero_summarizer.integrations.zotero_write import ZoteroWriteError
 from zotero_summarizer.services.golden import verdict_effects
 from zotero_summarizer.services.sync import service
 from zotero_summarizer.services.zotero.pending import build_user_note_html
-from zotero_summarizer.storage import repositories as db
+from zotero_summarizer.storage import repositories as db, review_note_projection
 
 
 def _note(zdb):
@@ -82,14 +81,17 @@ def test_library_replay_respects_newer_feed_alias_intent(tmp_path, monkeypatch, 
     assert _note(zdb) == build_user_note_html("" if deleted else "new alias note")
 
 
-def test_failed_delivery_propagates_and_same_uuid_retries_current_note(tmp_path, monkeypatch):
+def test_failed_delivery_is_pending_and_same_uuid_retries_current_note(tmp_path, monkeypatch):
     path, zdb, _, _, writer, _ = _setup(tmp_path, monkeypatch, "offline")
     old = _mutation("PARENT", "review_note", "old note", 0)
     monkeypatch.setattr(writer, "is_connector_running", lambda: True)
 
-    with pytest.raises(ZoteroWriteError, match="Zotero is open"):
-        service.push(path, [old])
-
+    assert service.push(path, [old])["results"][0]["status"] == "applied"
+    failed = verdict_effects.mirror_review_note(path, "PARENT")
+    assert failed["note_written"] is False
+    assert failed["note_pending"] is True and failed["note_error"] == "ZoteroWriteError"
+    with closing(sqlite3.connect(path)) as conn:
+        assert review_note_projection.snapshot(conn, "PARENT")["pending"] is True
     assert db.get_review_note(path, "PARENT") == "old note"
     db.upsert_review_note(path, "PARENT", "new note after failed mirror")
     monkeypatch.setattr(writer, "is_connector_running", lambda: False)
@@ -119,7 +121,7 @@ def test_mirror_holds_writer_lock_until_external_delivery_and_releases_it(tmp_pa
 
 
 @pytest.mark.parametrize("lane", ["online", "offline"])
-def test_http_delivery_failure_is_not_a_successful_sync_receipt(tmp_path, monkeypatch, lane):
+def test_http_delivery_failure_is_separate_from_successful_local_receipt(tmp_path, monkeypatch, lane):
     path, _, _, _, writer, _ = _setup(tmp_path, monkeypatch, lane)
     monkeypatch.setattr(writer, "is_connector_running", lambda: True)
     monkeypatch.setattr(sync_routes, "_db_path", lambda: path)
@@ -132,6 +134,17 @@ def test_http_delivery_failure_is_not_a_successful_sync_receipt(tmp_path, monkey
     with TestClient(app, raise_server_exceptions=False) as client:
         response = client.post(endpoint, json=body)
 
-    assert response.status_code == 503, response.text
-    assert response.json()["error"] == "zotero_write_failed"
+    assert response.status_code == 200, response.text
+    body = response.json()
+    if lane == "online":
+        assert body["saved"] is True
+        mirror = body
+    else:
+        assert body["results"][0]["status"] == "applied"
+        mirror = body["results"][0]["review_note_mirror"]
+    assert mirror["note_written"] is False
+    assert mirror["note_error"] == "ZoteroWriteError" and mirror["note_pending"] is True
+    assert mirror["target_key"] == "PARENT" and mirror["projection_revision"] > 0
+    with closing(sqlite3.connect(path)) as conn:
+        assert review_note_projection.snapshot(conn, "PARENT")["pending"] is True
     assert db.get_review_note(path, "PARENT") == "durable"

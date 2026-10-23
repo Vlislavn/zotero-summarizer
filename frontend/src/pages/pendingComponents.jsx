@@ -4,6 +4,10 @@ import {
   changeBadgeTone,
   changeTypeLabel,
   collectionOptionLabel,
+  hasUnboundGeneratedTarget,
+  hasApprovalPreview,
+  MISSING_APPROVAL_MESSAGE,
+  UNBOUND_GENERATED_TARGET_MESSAGE,
 } from './pendingHelpers.js';
 import { ActionBadge } from '../components/ui/Badge.jsx';
 
@@ -19,7 +23,8 @@ export { StatusBanner } from '../components/library/shared.jsx';
 // tag_changes (add/remove tag inputs), add/remove_from_collection (a collection
 // <select>), and add_note (title + HTML body). Drafts are lazily seeded from
 // the change payload so controlled inputs always have a value.
-export function ChangeEditor({ change, drafts, setDrafts, flatCollections, saving, onSave }) {
+export function ChangeEditor({ change, drafts, setDrafts, flatCollections, saving, onSave, busy }) {
+  if (change.generated_preview) return null;
   const getField = (field) => {
     const existing = drafts[change.id];
     if (existing && Object.prototype.hasOwnProperty.call(existing, field)) {
@@ -50,7 +55,7 @@ export function ChangeEditor({ change, drafts, setDrafts, flatCollections, savin
     <button
       type="button"
       onClick={onSave}
-      disabled={Boolean(saving[change.id])}
+      disabled={busy || Boolean(saving[change.id])}
       className="px-3 py-1.5 rounded bg-slate-900 text-white hover:bg-slate-700 disabled:bg-slate-300 disabled:text-slate-500"
     >
       {saving[change.id] ? 'Saving...' : 'Save edit'}
@@ -164,6 +169,7 @@ export function ChangeGroup({
   saving,
   onSaveEdit,
   onRetry,
+  busy,
 }) {
   return (
     <div
@@ -186,7 +192,7 @@ export function ChangeGroup({
               <input
                 type="checkbox"
                 className="mt-0.5"
-                disabled={!isPending}
+                disabled={!isPending || change.status !== 'pending' || busy}
                 checked={selected.has(change.id)}
                 onChange={() => toggleOne(change.id)}
               />
@@ -200,7 +206,7 @@ export function ChangeGroup({
                   </ActionBadge>
                 </div>
                 <div className="text-xs text-slate-600 mt-1 break-words">
-                  {previewChange(change)}
+                  {change.generated_preview ? 'Generated note — immutable preview below' : previewChange(change)}
                 </div>
                 {change.applied_at && (
                   <div className="text-[11px] text-slate-500 mt-1">
@@ -212,10 +218,11 @@ export function ChangeGroup({
                 )}
                 {/* Retry is the one affordance for a FAILED row — re-apply via the
                     same writer path without re-queuing (Hick's Law: one button). */}
-                {change.status === 'failed' && onRetry && (
+                {change.status === 'failed' && onRetry && hasApprovalPreview(change) && (
                   <button
                     type="button"
                     onClick={() => onRetry(change)}
+                    disabled={busy}
                     className="mt-1.5 px-2 py-1 rounded text-[11px] font-semibold bg-rose-600 text-white hover:bg-rose-700"
                   >
                     Retry
@@ -224,7 +231,35 @@ export function ChangeGroup({
               </div>
             </label>
 
-            {isPending && (
+            {change.generated_preview && (
+              <div className="mt-2 text-xs text-slate-700">
+                <p>{hasUnboundGeneratedTarget(change)
+                  ? UNBOUND_GENERATED_TARGET_MESSAGE
+                  : 'Apply selected approves this exact generated payload and target. Recovery is backup-only, not undo.'}</p>
+                <pre aria-label="Generated mutation preview" className="whitespace-pre-wrap break-words">
+                  {JSON.stringify(change.generated_preview, null, 2)}
+                </pre>
+              </div>
+            )}
+            <div className="mt-2 text-xs text-slate-700">
+              {hasApprovalPreview(change) && (
+                <p>Apply or Retry approves this saved payload and Zotero target, not unsaved edits. Save edits and reselect before applying. Recovery is backup-only, not undo.</p>
+              )}
+              {['pending', 'failed'].includes(change.status) && !hasApprovalPreview(change) && !hasUnboundGeneratedTarget(change) && (
+                <p>{MISSING_APPROVAL_MESSAGE}</p>
+              )}
+              <pre aria-label="Approval mutation preview" className="whitespace-pre-wrap break-words">
+                {JSON.stringify(change.approval_preview || { payload: change.payload_json, target: null }, null, 2)}
+              </pre>
+              {change.status === 'applying' && (
+                <p role="alert">Delivery outcome is uncertain. Reconcile Zotero against the backup before any new action; retry is blocked.</p>
+              )}
+              {change.backup_path && <p>Backup: {change.backup_path}</p>}
+              <details><summary>Mutation audit</summary>
+                <pre className="whitespace-pre-wrap break-words">{JSON.stringify(change.audit || [], null, 2)}</pre>
+              </details>
+            </div>
+            {isPending && change.status === 'pending' && (
               <ChangeEditor
                 change={change}
                 drafts={drafts}
@@ -232,6 +267,7 @@ export function ChangeGroup({
                 flatCollections={flatCollections}
                 saving={saving}
                 onSave={() => onSaveEdit(change)}
+                busy={busy}
               />
             )}
           </div>

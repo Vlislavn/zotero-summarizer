@@ -8,9 +8,10 @@ import pytest
 from zotero_summarizer.services.library import _digest_verification, _map_reduce, _review_cache, deep_review
 from zotero_summarizer.services.zotero import zotero as zotero_svc
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
+from test_digest_verification import _accepted_checks
 @pytest.fixture(autouse=True)
 def _isolate_digest_generation(monkeypatch):
-    monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
+    monkeypatch.setattr(_digest_verification, "verify_digest", _accepted_checks)
 @pytest.fixture(scope="module")
 def config():
     return _default_goals_config()
@@ -90,7 +91,7 @@ def _detail(*, title="T", pdf_path="/x/p.pdf", doi="10.1/x", url="", abstract="a
 
 
 def _wire(monkeypatch, config, *, reader, extractor, note_fn=None):
-    monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
+    monkeypatch.setattr(_digest_verification, "verify_digest", _accepted_checks)
     monkeypatch.setattr(deep_review, "get_state", lambda: _fake_state(config, extractor=extractor, reader=reader))
     monkeypatch.setattr(zotero_svc, "zotero_upsert_digest_note", note_fn or (lambda _ik, _d: None))
     # Keep ORCHESTRATION tests hermetic: stub the heavy enrichment layers (real
@@ -135,7 +136,8 @@ def test_run_job_writes_digest_entry(config, monkeypatch):
 
     entry = deep_review.get_cached_review("K1")
     assert entry is not None
-    assert entry["digest"]["grade"] == "A" and entry["digest"]["basis"] == "full_text"
+    # The stubbed quality layer is neutral, not independent evidence for an A.
+    assert entry["digest"]["grade"] == "" and entry["digest"]["basis"] == "full_text"
     assert entry["model_read_decision"] == "read"
     assert entry["digest"]["read_decision"] == "skim"
     assert "strong_evidence_not_confirmed" in entry["reading_policy_flags"]
@@ -201,7 +203,7 @@ def test_acquire_missing_fetches_pdf_then_reviews(config, monkeypatch):
 
     extractor = types.SimpleNamespace(extract_text=_capture)
     entry = _run_acquiring(monkeypatch, config, extractor=extractor, acquired_path=Path("/cache/acquired.pdf"))
-    assert entry["needs_pdf"] is False and entry["digest"]["grade"] == "A"
+    assert entry["needs_pdf"] is False and entry["digest"]["grade"] == ""
     assert seen["p"] == entry["acquired_pdf"]["path"] == "/cache/acquired.pdf"  # durable handoff
 
 
@@ -226,7 +228,7 @@ def test_run_job_records_note_failure_without_dropping_digest(config, monkeypatc
     _run([{"item_key": "K1", "title": "T"}])
 
     entry = deep_review.get_cached_review("K1")
-    assert entry["digest"]["grade"] == "A"  # digest still produced
+    assert entry["digest"]["grade"] == ""  # digest still produced, but quality is unassessed
     assert entry["zotero_note_written"] is False
     assert "Zotero is open" in entry["zotero_note_error"]
 

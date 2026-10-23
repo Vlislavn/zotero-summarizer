@@ -11,7 +11,7 @@ vi.mock('./offlineStore.js', () => ({
   applyPull: mocks.applyPull, applyPushResults: mocks.applyPushResults,
   getMeta: mocks.getMeta, pendingMutations: mocks.pendingMutations,
   publishStatus: mocks.publishStatus,
-  mutationError: () => null, pushPredecessors: async () => [],
+  mutationError: () => null, pushPredecessors: async () => [], beginPull: async () => 1,
 }));
 
 beforeEach(() => {
@@ -35,6 +35,8 @@ it('refreshes an open review after a rejected offline verdict is reconciled', as
     { mutation_id: 'v1', status: 'rejected', error: 'review_required' },
   ]);
   expect(mocks.applyPull).toHaveBeenCalledOnce();
+  expect(mocks.publishStatus).toHaveBeenNthCalledWith(1, '', 'syncing');
+  expect(mocks.publishStatus).toHaveBeenLastCalledWith('', 'connected');
   expect(client.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['review-detail'] });
 });
 
@@ -44,11 +46,11 @@ it('surfaces a protocol mismatch instead of masking it as an outage', async () =
 
   await syncNow();
 
-  expect(mocks.publishStatus).toHaveBeenCalledWith('Sync protocol changed; refresh the app');
+  expect(mocks.publishStatus).toHaveBeenCalledWith('Sync protocol changed; refresh the app', 'blocked');
 });
 
 it('distinguishes an HTTP rejection from an unavailable server', async () => {
   mocks.request.mockRejectedValue(Object.assign(new Error('Invalid request payload'), { status: 422 }));
   await (await import('./syncClient.js')).syncNow();
-  expect(mocks.publishStatus).toHaveBeenCalledWith('Sync request failed (HTTP 422): Invalid request payload');
+  expect(mocks.publishStatus).toHaveBeenCalledWith('Sync request failed (HTTP 422): Invalid request payload', 'blocked');
 });

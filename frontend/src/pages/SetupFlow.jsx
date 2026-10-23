@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchConfig, updateConfig } from '../api/settingsApi.js';
 import { configToFormState, formStateToConfig } from '../utils/configForm.js';
 import { humanizeError } from '../utils/humanizeError.js';
+import { invalidateSetupDoctor } from '../utils/setupDoctorState.js';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import { dismissSetup } from '../components/setup/SetupGate.jsx';
 import StepProgress from '../components/setup/StepProgress.jsx';
@@ -43,8 +44,10 @@ function modeMatchesStages(routing, mode) {
     let local = false;
     if (provider.base_url) {
       try {
-        const host = new URL(provider.base_url).hostname.replace(/^\[|\]$/g, '').toLowerCase();
-        local = ['localhost', '127.0.0.1', '::1'].includes(host);
+        const host = new URL(provider.base_url).hostname.replace(/^\[|\]$/g, '').toLowerCase().replace(/\.$/, '');
+        local = ['localhost', '0.0.0.0', '::', '::1', '::ffff:0:0'].includes(host)
+          || host.endsWith('.localhost') || /^127(?:\.\d{1,3}){3}$/.test(host)
+          || /^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(host);
       } catch { return false; }
     }
     return mode === 'local' ? local : !local;
@@ -122,6 +125,7 @@ export default function SetupFlow() {
 
   const finishMutation = useMutation({
     mutationFn: (payload) => updateConfig(payload),
+    onSettled: () => invalidateSetupDoctor(queryClient),
     onSuccess: (resp) => {
       if (resp?.config) {
         queryClient.setQueryData(['runtime-config'], resp.config);
@@ -129,7 +133,6 @@ export default function SetupFlow() {
         queryClient.invalidateQueries({ queryKey: ['runtime-config'] });
       }
       queryClient.invalidateQueries({ queryKey: ['setup-status'] });
-      queryClient.removeQueries({ queryKey: ['setup-doctor'] });
       setStep(4);
     },
     onError: (err) => setFinishError(humanizeError(err)),

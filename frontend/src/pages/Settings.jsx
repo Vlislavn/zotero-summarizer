@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchConfig, updateConfig } from '../api/settingsApi.js';
 import { configToFormState, formStateToConfig } from '../utils/configForm.js';
 import { humanizeError } from '../utils/humanizeError.js';
+import { invalidateSetupDoctor } from '../utils/setupDoctorState.js';
 import { useSetupStatus } from '../hooks/useSetupStatus.js';
 import { Banner } from '../components/form/Fields.jsx';
 import Button from '../components/ui/Button.jsx';
@@ -63,6 +64,7 @@ export default function Settings() {
 
   const saveMutation = useMutation({
     mutationFn: (payload) => updateConfig(payload),
+    onSettled: () => invalidateSetupDoctor(queryClient),
     onSuccess: (resp) => {
       if (resp && resp.config) {
         queryClient.setQueryData(['runtime-config'], resp.config);

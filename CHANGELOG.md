@@ -10,7 +10,99 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Retain original pdf source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+- Retain original presentation URI normalization through the canonical raw PDF annotation reader.
+- Retain original setup source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+- Retain original explicit default-no inference consent; use the existing canonical provider verification boundary.
+- Retain original RSS source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+- Retain original search-evidence source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+- Retain original reading source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+- Retain original feed-state source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+- Retain original prefilter-metadata source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+- Retain original RSS partition consumption of the producer-owned private prefilter outcome, not generated tags.
+- Retain the existing non-shipped method-validation client and practitioner diagnostic, with original synthetic tests; no new inference, grader, or scientific qualification.
+- Retain original method comparison oracles without changing assertions or overwriting the current implementation.
+- Retain original discovery source oracles without changing assertions or overwriting the current implementation.
+- Refresh the review graph after four existing-ancestor size cuts; preserve original heads and distinguish oracle retention from behavioral acceptance.
+- Complete original frontend, test, tool and documentation hunk identities and review dispositions in the bounded audit stack.
+- Retain every original service hunk identity and review disposition in the bounded source audit metadata stack.
+- Index every original change hunk and its review PR or explicit superseded-variant disposition; distinguish source-only oracles from behavioral acceptance.
+- Preserve interpretation digest subtype metadata while sharing declared-field authority across qualification, optional receipts and HTML renderers. Reuse the retention prerequisite's dictionary projection; declared/source changes still refuse.
+- Reject interpretation source/run/export symlinks and selected-project escapes before file access, including symlinked manifests. Retain immutable attempts and explicit capture consent.
+- Hide interpretation assignment order in blinded exports; validate approval rows during inspection. Preserve partial-label accuracy bounds, independent conclusive-shortfall gates and actual card-exposure counts; zero exposure cannot recommend a pilot.
+- Retain original infrastructure source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+- Retain original offline PDF/figure controls and exact reading-text selectors; no new offline protocol.
+- Retain original question-native source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+- Retain original question submission, separate manual-note/delivery UI, outbox clients and shared paper assemblies with unchanged tests.
+- Compose question-note delivery with the existing single editable notes surface and server-acknowledged Related fence.
+- Retain original api-storage source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+- Retain original question submission/read/Q&A receipts and sync API wiring; existing native and data parts supply delivery and persistence.
+- Keep version-bound offline keep_server resolutions alongside immutable question sync creates.
+- Retain original Telegram worker/auth registration and combined migration13; native lifetime, real authorization and platform recovery remain unqualified.
+- Retain original Pending preview UI/MCP request/receipt handling and direct-editor client outcomes, with unchanged client tests.
+- Keep strict connected-server gating and ordered offline pulls while adding immutable question drafts to the device store.
+- Package original native/question source part: original metadata editors, Pending confirmation and mirror activation; corresponding UI/MCP source follows.
+- Reject mixed generated and ordinary Pending selections atomically; retain generated audit receipts and refuse direct/mirror history.
+- Package original native/question source part: original confirmation, mirror/recovery and publication-revision helpers; existing endpoint activation follows.
+- Package original native/question source part: typed action history, original writer boundaries and dormant editor/proposal code; activation follows.
+- Retain original saved Telegram news composition, collection/storage contracts and migration11; CLI and combined live-schema wiring follow separately.
+- Retain original optional Telegram transport/session/identity contracts; collection/store/CLI wiring follows in dependent source-review parts.
+- Package original immutable-question persistence, composite note intents and migrations9/10; HTTP/UI and native delivery remain dependent review parts.
+- Retain original interpretation source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+- Keep tightened interpretation resource caps inclusive with exact token-count and decimal-latency arithmetic. Preserve mean/median reporting, per-paper and independent unknown/refusal gates; no rounding tolerance or threshold changes.
+
+### Fixed
+- Keep tightened interpretation resource caps inclusive with exact token-count and decimal-latency arithmetic. Preserve mean/median reporting, per-paper and independent unknown/refusal gates; no rounding tolerance or threshold changes.
+- Reject malformed persisted interpretation states without losing qualified base rendering; evaluate known timing/token breaches independently of unrelated unknown observations.
+- Document conservative comparison after an uncertain online ACK and clarify the network-only timeout/browser-storage boundary in usage docs and README. Protect full canonical verdict comments beyond outbound size caps with explicit assertions.
+- Fence older cross-tab pulls at equal field cursors. Keep offline queue labels/retractions current, run batch saves offline, and avoid native-tag requests after locally saved proposal confirmations.
+- Project offline conflict choices into local views, refuse stale detail on storage-read failure, revoke stale connection status after transport fallback, and drain saves signalled during active sync.
+- Complete disconnected working-set review with the existing PWA/outbox: unopened compact context, draft/owner fences, bounded transport, strict atomic ACK/pull handling and compared conflict resolution. Device/server/native ACKs stay distinct; no PDF/AI sync or physical iOS acceptance.
+- Add version-bound `keep_server` sync resolutions without canonical-body echo or native effects. Preserve stale-choice recovery and canonical provenance, use admitted unscoped membership, retain dirty inline notes, and distinguish fetch failure from a received response.
+- Preserve later durable pending fields when earlier edits conflict and a later batch fails before pull. Canonical evidence/revisions and ACK retirement remain atomic; no outbox rewrite or relaxed acknowledgement.
+
 ### Changed
+- Add opt-in frozen A/B/C interpretation runs, strict independent card checks, original-authority Q&A, audited brief/native HTML and blinded human reporting. Preserve defaults/Add authority and failed-question denominators; human benefit remains unmeasured.
+- Retain original observed-cohort weekly ordering metadata and frozen conditional replay; canonical helper names and caller wiring are mechanically aligned.
+- Retain the separate signal/reason disclosure, replacing the terse line while preserving current policy and grade projection.
+- Retain the existing daemon training-ledger producer and original provenance/cancellation tests; no new training or inference behavior is designed.
+- Reconcile weekly Feedback with the current manual/analysis foundation without losing safe recovery, signal cleanup, parser/identity bounds or admitted-root ownership.
+- Carry required Feedback dependency safety into weekly execution: bound CSV parsing, validate retained identities/schema/time, preserve literal Markdown, pin the selected CLI root, and close child-launch/RSS enforcement gaps.
+- Recover weekly Feedback after confirmed prepublication failures and delayed first cursor commits; reject unsafe cursor links/incompatible caps, and stop the daemon cleanly on owned analysis signals.
+- Package existing weekly daemon scheduling and recovery from the working changes for dependent review; no behavior redesign.
+- Pin the admitted CLI root through handler reloads and server factory startup; a selected `.env` cannot redirect writes to another project. Cover shell/cwd defaults and direct provider-SDK import rejection; name subprocess safety-cap constants.
+- CLI validates before Settings/.env loading, then applies offline flags from the selected project only. Importing CLI no longer reads another root. Faithbench/Setup exports and pure run options load lazily without changing public objects or benchmark algorithms.
+- Hand off native scout artifact references explicitly, mark review evidence untrusted, and clarify task-level worker/consent boundaries. Lock labels and literal canary requests in offline contract tests; no sandbox or injection-resistance claim.
+- Share pinned native Pi profiles and labelled workflows with offline task/order/failure contract tests. Document authority, activation and actual terminal checks; keep dependencies/runtime state out of Git. Canaries are not model-quality, sandbox or writer-safety acceptance.
+- Omit whitespace-only reading-plan entries while preserving other text and order. Label minutes as the saved estimate, not a recalculation for a policy-capped action.
+- Reuse one recognized-action predicate for the review verdict, time and reading plan; remove the presenter's duplicate admission branch without changing the displayed fields or unknown-state behavior.
+- Show saved reading targets, skip hints and original-paper value beside the React review verdict without duplication. Unknown decisions withhold cached action advice and time; reuse existing cache/API without new model calls or writes.
+- Preserve null unknown/absent assessment evidence through engineering-card publication instead of dropping valid papers or neighboring proposals. Keep configured cached-only no-startup/explicit-queue controls; missing config or newly missing assessment remains an explicit failed qualification.
+- Keep preset subscriptions create-only across stale tabs and imported URL variants; serialize source writes and cover persisted partial-refresh errors. Custom RSS upserts remain unchanged.
+- Add explicit HackerNoon RSS presets using the existing subscription pipeline. Preserve custom drafts, distinguish unavailable/empty/offline/partial refresh states, and reread uncertain source writes without retrying them. Saving never implies fetching, triage or source usefulness.
+- Keep Generate review available for unusable cached Today reviews, including empty digests and missing full text. Preserve cached evidence and model/offline guards; retry remains explicit and shows progress.
+- Remove Today's unsupported recovery promise for unusable cached reviews; keep the observed not-ready state explicit.
+- Today separates relevance from AI evidence and discloses actual policy/picker observations. Unknown review evidence does not distinguish absent/stale/failed; interleave stays blinded. Ranking, thresholds, defaults and labels are unchanged.
+- Keep shared moderate-relevance pills readable: use the existing amber-600 rather than amber-500 token, raising white-text contrast from3.95:1to5.58:1 without changing the palette or score bands.
+- Reject Pending rows as one complete transaction: missing/stale members or incomplete SQL updates roll back the selection and return409. Only an exact integer receipt resolves the UI mutation; unconfirmed responses retain rollback/reconciliation instead of false success.
+- Route both local calibration client constructions through existing setup admission, including cached Tier-1 runs. Unknown effective resources refuse before credentials, inference or new calibration output; HTTP jobs expose error, not Ready. Hosted and ordinary application calls are unchanged.
+- Make setup verification evidence-bound: refuse local loads without an envelope before credentials, verify hosted identity, preserve cancellation uncertainty, and fence stale Ready. Ordinary explicitly configured credentials remain intact; local clients still need no key.
+- Retain accepted digest finding checks and exact original-source fragments in the review cache. Add a local read-only audit export with stale/legacy/error distinctions; no extra model calls or measured human-audit benefit.
+- Capture mobile-server signals before binding and replay them after socket cleanup, preventing stale sockets on startup SIGTERM/SIGINT.
+- Add explicit owner-authenticated Tailscale HTTPS/private-Unix app access. Preserve loopback default and same-origin Vite POST; refuse unsafe LAN shortcuts, directories and socket replacement. Own signal cleanup; no automatic gateway activation or device/revocation acceptance.
+- Add a default PR template that leads with executed feature outcomes, expected versus observed smoke results, exact environment/revision, evidence and limits; keep automated checks secondary.
+- Validate locally before PR publication with serial `make check` and a clean-source checked publisher; retain all existing checks plus smoke construction, preserve existing UI build output, and make hosted Actions manual-only.
+- Enforce support-comparison consent/work admission on public native calls, reject blocked/wrong-mode recordings and off-host plaintext HTTP, share the frozen-input byte cap, and exclude unprovenanced labels from paired inference. Keep descriptive labels and full coverage denominators.
+- Reconstruct terminal-free replay from admission and remaining-budget observations; bind terminal references to row owners, close transport states and reject false blocked coverage. Preserve real wall/missing/blocked outcomes and unsigned-telemetry limits.
+- Bind recorded support replay to its exact admitted case/arm recording and received state before deriving readouts. Self-consistent copied-terminal/report/hash replacement cannot substitute unchanged inputs; retain raw bytes and unsigned-artifact limits.
+- Keep priority ranking capabilities distinct: LLM ordinal priority is not confidence, missing ML regression scores leave ranking unavailable without losing classification. Reopening compares recorded terminals with exact admitted inputs; input-wide and holdout counts are named separately.
+- Validate all Search version-family operation identities before merging metadata, so a conflict in a later family cannot partially mutate earlier inputs.
+- Check Search Add's retained-key/coverage conflict before the already-materialized shortcut; conflicting delivered candidates return 409 without effects.
+- Report native Search Add replays as already_added, without claiming the retry-requested collection; preserve the original native destination.
+- Restore Discovery/Related read-only context after note-alias API consolidation: use the existing public family resolver, retaining snapshot identity and deletion authority.
+- Persist Search Add's planned native key before effects and preserve operation identity across exact-family/background merges. Explicit retries reuse the existing native-key no-op after failed session finalization; unknown delivery never becomes an invented rollback or distributed exactly-once claim.
+- Refuse Search Add when enriched library coverage conflicts with its retained operation plan; preserve both observations without stamping contradictory delivery or dispatching another native write. Reconcile the configured library explicitly.
+- Add opt-in, request-local search provider receipts distinguishing valid empty hits from HTTP, transport, malformed payload and unavailable-client outcomes. Ordinary federation callers remain unchanged; live-provider qualification remains open.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.
 - Fold goal findings without losing originals; disclose saved source basis and unknown reviewed extent. Factor literal warning frames into one introduction with expanded scope/context, qualifiers and source links; retain original wording. Compact cards remain unchanged.
@@ -19,10 +111,70 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Retain OpenAlex location DOI/arXiv aliases through Search identity so a changed primary DOI cannot recommend a saved seed as new. No title merging or extra provider calls.
+- Prepare the existing OpenAlex cache schema at startup so the first saved-paper Find cannot invalidate its own corpus fingerprint when optional metadata clients are disabled.
+- Include DOI/arXiv-linked unmaterialized app aliases in Discovery seed context; their note edits/clears now invalidate private evidence.
+- Read the Search OpenAlex cache from RuntimeState so saved-paper Discovery works with prestige disabled instead of failing before provider requests.
+- Hide private Discovery context and recommendations during running/failed work; disclose seed reading verdict/rationale in explicit model consent.
+- Allow strictly read-only Discovery Add reconciliation while Zotero is running; ordinary native writes still require Zotero to be closed.
+- Keep external Discovery membership unknown when the native reader is unavailable; an app-only miss no longer qualifies a paper as new.
+- Honor the configured reranker disable switch in saved-paper Discovery; use existing lexical relevance without constructing or downloading a local model.
+- Preserve ordinary Search projection and new-owner actions during restore; close mixed aliases; fingerprint only public candidate metadata; isolate nonfinite provider results; separate touch actions without weakening consent, freshness or effect fences.
+- Make injected-PDF full-reading fixtures provide typed independent full-text quality. Preserve path/grade/read assertions and add abstract/unassessed controls; digest grade alone never supplies scientific basis.
+- Bind historical coverage comparisons to the frozen main algorithm, preserving old flag and current policy-highlight oracles. Add distinct empty/unknown, explicit-failure and red-flag controls; production grading and paper annotations remain unchanged.
+- Fail Related closed when human eligibility is unreadable; retain private session context with owner-only permissions and invalidate stage clients after credential replacement. Add regressions for all three safety boundaries.
+- Fence Related at primary verdict acknowledgement, including dont_read while its secondary reject-tag request is pending. Preserve existing completion/collapse callbacks and saved-verdict warnings; add actual page and hook regressions.
+- Resolve feed-assessment quote layout differences back to exact original source substrings and offsets. Preserve case/word/punctuation rejection, null unknown evidence and fail-closed source qualification.
+- Minimize deep-review verification reasoning: disable declared chat thinking or lower active three-level reasoning to low, preserving explicit user off and configured digest effort. Keep research-feed stdout JSON by routing runtime diagnostics to stderr; truncation still fails closed.
+- Escape source-supplied closing-tag markup in shared abstract/full-text refinement and triage prompts before rendering. Preserve complete summary/corpus content and existing scoring; DOI and auxiliary source metadata use the escaped data boundary.
+- Keep weekly acquisition browser-free; retain omitted/blank unknown projects and reproduction blockers. Isolate optional abstract-cache failures, report absent stages, retry missing PDFs, preserve v1 triage confidence, and export feed assessment models.
+- Weekly keeps folder read failures distinct from empty lists, unsupported formats distinct from invalid reports, and rejects inconsistent saved card counts.
+- Weekly paper links preserve passive browsing through reload and Prev/Next; reviews start only with Generate review. Other paper entry points keep their existing behavior.
+- Preserve literal method/code URL candidates through live typed parsing, rejecting and recording whitespace-padded values without changing legacy summary decoding or repair budgets.
+- Admit method/code artifact URLs only as complete literal original-source tokens or PDF annotations, not generated notes. Keep bounded original URI context for long PDFs and local rejection receipts; access, model, schema and receipt failures remain errors.
+- Skip checkpoint serialization when a legacy input identity alone is already as long as raw Q&A history, preserving the same fallback without copying an oversized identity.
+- Preserve complete current-source handles in shorter paper Q&A checkpoints, including original spans, repeated occurrences and legacy input digests. Prior conversation remains untrusted; nonshrinking checkpoints keep raw history.
+- Reject missing or invalid rubric answers before scientific grading. Sparse model output stays unassessed instead of earning A/highlight from a smaller denominator; explicit N/A remains compatible.
+- Keep concept-only caveats on skipped reviews and missing critical support; partial quality cannot restore self-grades in new snapshots. Project new Search API briefs through the shared reading policy while retaining raw model output.
+- Use real temporary source identities in quality-policy integration fixtures. Preserve source-byte guards and the original raw-model, grade, note, proposal and cache assertions when composing review features.
+- Keep idea, evidence and writing separate; retain raw model digests and conservative reading caps. Share scientific grade across cached reviews, proposals and saved digest notes; evaluator failures and non-papers stay ungraded. Preserve escaping. Human/scientific acceptance remains unclaimed.
+- Keep Setup cancellation bound to callbacks and active run IDs; fence inventory, invalidate changed hosted credentials, align local endpoints, and fail malformed probes. Empty retries recheck; interrupted receipts remain unresolved.
+- Refuse setup inference on all literal IPv4/mapped-IPv6 loopbacks, invalidate older Ready results, and derive mixed-runtime recovery from the failing endpoint without automatic downloads.
+- Bound raw RSS backup attempts to five retained snapshots plus one slot; serialize admission and fail closed at capacity without deleting failed prestate backups. Export/review snapshots before resuming; successful writes still prune to five.
+- Keep optional Zotero read-sync running after backup/retention filesystem errors; log possible committed state and rescan unread rows next tick without replaying the failed batch.
+- Complete the common WAL/integrity backup before raw native RSS read-state updates; prune once after commit, preserve integer/idempotent/no-op behavior and propagate refusal or post-commit retention errors without replay.
+- Count repeated Search questions once without duplicate model calls; promote only within topic-eligible slots. Prior bindings become unchecked, retaining history. Reuse admitted over-budget originals for ordinary review instead of reacquiring them.
+- Invalidate Search evidence on changed/unavailable evaluator metadata or local protocol without running clients. Preserve historical receipts and pre-promotion tie order; restore constrained baseline order on stale reads.
+- Bind model-client cache publication to effective routing and invalidation generation. Fence Related cached/late comment reads after seed edits; retain complete assessed context with a library eligibility digest. Semantic usefulness remains unqualified.
+- Keep unchanged linked-attachment reviews current outside export roots; reuse their existing source identity instead of hashing PDFs twice. Export remains path-restricted.
+- Reject malformed legacy digest exports without repairing saved bytes. Preserve optional digest-subtype metadata while excluding it from cached audit hashes and verified field changes.
+- Give PDF-override fixtures explicit full-text independent quality evidence. Preserve original injected/attachment path, grade and read-decision assertions under the shared reading policy.
+- Hash attempt lineage and retained evidence through one declared PaperDigest field projection. Extra subtype metadata remains outside verification authority; preserve original models and add generic subtype regressions.
+- Never invoke native readers during audit export: read-only SQLite can write WAL sidecars. Separate validated retained-source evidence from unknown current-item binding; preserve ordinary cache identity checks. Reuse streaming hashes compatible with Python 3.10.
+- Align synthetic SQL/identity/currentness fixtures with audit boundaries; preserve label/override/read-only oracles. Add real initialized-attachment cache acceptance and changed-attachment rejection controls.
+- Restore application logger state between tests, even after handler-close errors; preserve original/shared handlers and close other new handlers. Run ordered regressions in isolated subprocesses with test-owned log paths. Production logging is unchanged.
+- Honor corpus OFF during targeted post-edit refresh before reader/cache, lock and inferred-feedback I/O; preserve enabled reconciliation and the resource-unavailable no-op.
+- Reconcile Feedback primitives with the current CLI foundation; preserve admitted-root pinning, literal Markdown and duplicate-namespace refusal.
+- Keep recorded Feedback report evidence literal when it contains Markdown backticks; reject ambiguous duplicate migration namespaces; clarify available capture primitives versus later-stack analysis/CLI/weekly contracts.
+- Package existing retained input capture and report primitives from the working changes for dependent review; no behavior redesign.
+- Preserve current support safety fixes in priority comparison: shared direct native admission/TLS controls, pre-read aggregate snapshot limits and provenance-qualified paired estimates. Reconcile the existing dependency without changing its base or feature behavior.
+- Reject duplicate reading-priority canonical papers even within one family, and refuse ML artifacts with empty training-family provenance before calls or writes.
+- Expose reading-priority coverage/status denominators per gold class, plus synthetic-label and declared/missing-provenance counts. Unscored failures remain unscored; decision-only quality metrics are unchanged.
+- Keep Search coverage unknown for arXiv IDs containing SQL-LIKE wildcards instead of reusing an unrelated saved key. Safe DOI checks and genuine alternate-identifier hits still work.
+- Preserve unknown membership through persisted refinement when a newly retrieved identity cannot be checked. Genuine hits still win; older misses cannot certify absence for unresolved family members.
+- Retain every observed version-family identifier through screening, refinement and session reloads. Resolve saved membership across retained DOI/arXiv alternatives; preserve the genuine hit key and distinguish partial lookup failures from complete misses.
+- Preserve identifier-confirmed saved-library membership through Search refinement and version merging. Reuse the existing reader and tri-state coverage; retain reviews and addresses, and let explicit Add reuse the saved key without creating another item.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
+- Generate source-bound RSS project proposals in existing review calls; reuse successful stages, recompute cards and retain errors/v1 reports. Cached qualification reads existing goals without startup. Keep effort unknown or explicitly unverified; preserve blockers and artifact links.
 - A124: verify section one-liners in a second batch against the same first 700 source characters (up to 24 sections); omit unsupported summaries. Scripted checks do not establish live semantic accuracy.
+- Preserve independent collection questions and baseline rows when one prompt is oversized; resolve original nested corpus paths without guessing aliases. Refuse source/freeze ties and inconsistent native HTTP replay; stop trickling responses at the observed run deadline.
+- Refuse corpus-backed comparison artifacts lacking declared reference lineage before effects. Close collection replay inventory against admitted snapshots, canonical case rows, owned terminals, timing and reports; resealed foreign files cannot join the plan.
+- Reconcile collection comparison with current support/priority admission, HTTPS and canonical-identity fixes while retaining native deadlines/replay. Bound each snapshot read by the remaining aggregate budget; keep already-correct provenance filtering.
 - A136: use figure metadata only for affirmative whole-paper figure-count wording; route scoped, uncertain, table-only, combined, and unmatched counts to grounded Q&A. Live scope accuracy is unmeasured.
+- Reconcile retained analysis with the current capture/report foundation; preserve admitted CLI roots, literal Markdown, duplicate-namespace refusal and analyzer bounds/identity checks.
+- Bound retained CSV line indexing incrementally; reject missing journal source and invalid SQL paper keys; retain unrepresentable UTC timestamps as unknown. Clarify later-stack CLI/weekly docs.
+- Package existing retained history and descriptive analysis from the working changes for dependent review; no behavior redesign.
 - A142: validate persisted and injected review-fleet proposals; skip malformed rows, retain valid neighbors, and calibrate only valid human/proposal pairs.
 - A176: cover admitted Faithbench text with contiguous 6,000-character windows; default 32, maximum 256, with preflight rejection above budget and the effective limit recorded in metadata.
 - FaithBench build resolves window budgets as CLI > shell environment > selected-project `.env` > default before provider setup; warning-call assertions are isolated from root-logger propagation.
@@ -40,8 +192,22 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Prioritize bounded publication-type recovery with title hints, never title-based eligibility; expose unattempted/confirmed counts. Real source metadata recovered qualifying reviews without increasing lookup budgets.
 - Normalize optional positive signs in source/digest numeric tokens. A real captured review failed on `+3.3` versus `3.3` and `9.6` versus `+9.6`; negative signs, absent magnitudes, arithmetic restrictions and semantic verification remain enforced.
 
+- Reconcile manual Feedback with current retained-analysis prerequisites; preserve admitted roots, parser/identity bounds, literal Markdown and snapshot namespace checks alongside signal/receipt/RSS controls.
+- Keep Feedback signal cleanup armed during child launch and receipt persistence; reject invalid or over-cap worker RSS peaks before publication. Clarify source-checkout and artifact-I/O limits.
+
 ### Added
 
+- Add Find new relevant for saved papers using OpenAlex semantic/lexical retrieval, optional consent-bound seed comments, durable sessions and shared Search UI. New Review/Add require current inputs; usefulness remains unqualified.
+- Reconcile retained Discovery Adds through a fresh enforced existing-only native ACK; stale retries cannot create, back up or prune. Missing/malformed/failed ACKs never finalize; ordinary Add is unchanged.
+- Saved-seed Find new relevant handoff to Search, explicit comment consent, qualified discovery states/evidence and explicit Review/Add. Owned reads/navigation hide obsolete private context; matching backend/provider integration and runtime acceptance are required.
+- Add offline existing-collection comparison: frozen taxonomy/human-gold firewall, independent native choices, original top3-name baseline, set/calibration/paired reports and verified private replay. No model loads, membership writes or unmeasured winner.
+- Add explicit offline reading-priority comparison: frozen human-label firewall, four-class native/retained readouts, matched ML/LLM artifacts, ranking/calibration/paired reports and verified private replay. No model loads, production writes or winner without empirical/resource qualification.
+- Browse saved weekly RSS digests in Weekly: engineering cards, paper links and JSON/Markdown downloads, with explicit empty, legacy and unreadable states. Browsing never starts generation or Zotero writes.
+- Opt-in experimental Search question evidence: bounded original-text retrieval and verification before review selection, located receipts and policy UI. Baseline/Add stay unchanged when disabled; human-held-out quality and latency remain unmeasured (#30).
+- Related saved-paper links plus an opt-in, consented experiment using full seed/candidate comments, durable context identities and honest failure/unknown states. Metadata hybrid stays default; semantic usefulness remains unqualified.
+- Opt-in offline support comparison (#37): frozen original spans, native/recorded readouts, matched binary baseline imports and immutable private no-go reports. No model loads or product-policy changes; human/resource qualification remains open.
+- Frozen support inputs use pathlib absolute-path admission rather than an unavailable Pydantic type. Isolated import and actual module-entry CLI regressions cover recorded execution, read-only inspection and exclusive-owner refusal.
+- Native support readouts validate inside the provider boundary. Malformed Unicode aliases retain raw bytes and fail only their pair, while valid Unicode aliases and neighboring cases continue to the comparative report.
 - Independent HTML-preservation checks and mutation controls; opt-in frozen real-review browser replays skip when inputs are absent. Literal retention proves neither scientific truth nor native-editor compatibility.
 - Review attempts expose typed stage/recovery and metadata-only traces. Explicit local CLI captures retain decoded calls; operational source templates never become scientific reviews, and unavailable placeholders preserve current valid reviews (#32).
 - Search hard constraints require user confirmation; model hints/refinement cannot create bans. Bounded complementary queries, publication metadata recovery and retrieval accounting preserve legacy plans and disclose coverage limits (#31).

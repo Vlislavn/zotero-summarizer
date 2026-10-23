@@ -7,6 +7,8 @@ import { MemoryRouter } from 'react-router-dom';
 import Today from './Today.jsx';
 import LibraryReadNext from './LibraryReadNext.jsx';
 
+vi.mock('../hooks/useServerAvailable.js', () => ({ default: () => true }));
+
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 it.each([

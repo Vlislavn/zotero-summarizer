@@ -188,11 +188,18 @@ def _materialize_one(
     new_key = review.materialize_row(
         row, writer=writer, used_keys=used_keys, reason=reason,
         collection_name=collection_name, label_priority=label_priority, review_proof=review_proof,
+        mirror_note=False,
     )
     sfk = str(row.get("stable_feed_key") or "")
     deep_review.copy_review(sfk, new_key)
     materialized.append((sfk, new_key))
     return new_key
+
+
+def _mirror_row_note(row: dict[str, Any]) -> dict[str, Any]:
+    from zotero_summarizer.services.golden import verdict_effects
+
+    return {"id": row["id"], **verdict_effects.mirror_review_note(_db_path(), row_feed_keys(row)[0])}
 
 
 def add_to_library(item_ids: list[int], target_collection_key: str | None = None) -> dict[str, Any]:
@@ -210,24 +217,24 @@ def add_to_library(item_ids: list[int], target_collection_key: str | None = None
     pending_sync = 0
     materialized: list[tuple[str, str]] = []  # (stable_feed_key, new_zotero_key) for render carry
     failed: list[dict[str, Any]] = []
+    note_mirrors = []
     for row in rows:
+        note_stage = False
+        new_key = None
         try:
             if _materialized_key_for(row):
+                note_stage = True
+                note_mirrors.append(_mirror_row_note(row))
                 LOGGER.info("add_to_library: skipping already-materialized row id=%s", row.get("id"))
                 continue
             review_proof = require_review(row)  # Before a label, pending state or Zotero write.
-            # Capture the gate/model's derived priority BEFORE overriding it, so
-            # the verdict overlay records the original (e.g. "dont_read"), not the
-            # "add" label we're about to write below.
+            # Preserve model provenance before setting the provisional Add label.
             original_priority = (row.get("reading_priority") or "").strip() or "unknown"
             # Gate-rejected rows carry reading_priority="dont_read"; override it
             # so the Zotero tag reflects the user's positive "add" intent, not the
             # gate's verdict.
             row["reading_priority"] = _ADD_PRIORITY
-            # Soft, low-weight training signal: "Add" is pre-read interest, not
-            # endorsement — feed_interest → WEIGHT_INTEREST (0.3). A later read +
-            # label (or Zotero engagement) on the materialized library item
-            # carries full weight and dominates this.
+            # Add is provisional interest; later read/label evidence dominates it.
             _record_label(
                 row, _ADD_PRIORITY, "added from Today",
                 signal_tier="feed_interest", original_priority=original_priority,
@@ -239,7 +246,7 @@ def add_to_library(item_ids: list[int], target_collection_key: str | None = None
             else:
                 try:
                     # Carries the in-place Today review onto the new library key.
-                    _materialize_one(
+                    new_key = _materialize_one(
                         row, writer=writer, used_keys=used_keys,
                         collection_name=collection_name,
                         materialized=materialized, reason="today_add", review_proof=review_proof,
@@ -254,6 +261,9 @@ def add_to_library(item_ids: list[int], target_collection_key: str | None = None
                         row.get("id"), exc,
                     )
             added += 1
+            if new_key:
+                note_stage = True
+                note_mirrors.append(_mirror_row_note(row))
         except Exception as exc:
             # Batch contract: a Zotero-locked / bad row must not strand the
             # rest of the user's selection. Surface per-row failures instead.
@@ -261,17 +271,18 @@ def add_to_library(item_ids: list[int], target_collection_key: str | None = None
             failed.append({
                 "id": row.get("id"),
                 "title": str(row.get("title") or ""),
-                "code": (exc.error if isinstance(exc, APIError) else
+                "code": ("note_delivery_failed" if note_stage else
+                         exc.error if isinstance(exc, APIError) else
                          "superseded" if isinstance(exc, feeds_storage.MaterializationSuperseded) else "add_failed"),
                 "error": str(exc),
             })
     # Optional full-text fetch never undoes an already committed Add.
     fulltext = _attach_fulltext_best_effort(materialized)
-    # Carry the heavy brief onto the library: a feed paper that already had a render
-    # rebuilds under its new Zotero key (after fulltext attach, so the real PDF is present).
+    # Rebuild an existing feed brief under the library key after attaching its PDF.
     _carry_renders_best_effort(materialized)
     return {
         "added": added, "pending_sync": pending_sync,
+        "note_mirrors": note_mirrors,
         "zotero_sync_error": str(writer_error) if writer_error is not None else None,
         "failed_count": len(failed), "failed": failed[:20],
         "fulltext": fulltext,
@@ -352,7 +363,8 @@ def materialize_feed_verdict(
         return {"added": False, "zotero_key": None, "status": "no_feed_row"}
     existing = _materialized_key_for(row)
     if existing:
-        return {"added": False, "zotero_key": existing, "status": "already_in_library"}
+        return {"added": False, "zotero_key": existing, "status": "already_in_library",
+                "review_note_mirror": _mirror_row_note(row)}
     if not create_if_missing:
         return {"added": False, "zotero_key": None, "status": "not_applicable"}
     try:
@@ -383,7 +395,8 @@ def materialize_feed_verdict(
 
     _attach_fulltext_best_effort(materialized)
     _carry_renders_best_effort(materialized)
-    return {"added": True, "zotero_key": new_key, "status": "added"}
+    return {"added": True, "zotero_key": new_key, "status": "added",
+            "review_note_mirror": _mirror_row_note(row)}
 
 
 def _carry_renders_best_effort(pairs: list[tuple[str, str]]) -> None:

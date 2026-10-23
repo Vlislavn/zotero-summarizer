@@ -1,5 +1,39 @@
 # services/faithbench — faithfulness mini-benchmark
 
+`_interpretation_inputs` admits a separate opt-in experiment recipe over existing
+frozen benchmarks, exact approved references and source texts. It requires four
+answerability/stance cells per held-out paper, clinical/agent coverage, nonempty
+family/version/time metadata and a separate earlier tuning cohort. Inspection is
+read-only. Explicit preparation freezes a private attempt and verifies its own
+approved reference before provider construction; existing runs/caches are untouched.
+Recipe limits and stricter-only project thresholds are validated, not silently
+coerced. Declared runtime conditions, unknown physical retries and mutable remote
+weight identity are distinct from observed completion data and scientific benefit.
+Exact duplicate evaluation extractions refuse admission even with different family
+names. Current strategy-selected profiles and `RuntimeState` own model/thinking
+resolution; no second client cache is introduced. Card judgments use independent
+random IDs and a separate source/check/passage packet; review/QA packets omit cards.
+Known refusal gates do not depend on unrelated missing judgments. Timing and token
+caps use independent required evidence; either known breach refuses even when the
+other observation is unknown, while success requires both. Point thresholds
+use exact assigned-count fractions, not rounded/subtracted float rates. Inclusive
+resource caps use exact token counts and captured decimal latency; displayed means
+are unchanged and checked against their count maps. No epsilon relaxes a breach.
+Saved optional acceptance must match its retained invocation tape on reopening.
+Inspection checks actual approval rows, not only the CSV hash. Experiment sources,
+run/export parents and reopened run paths reject symlinks and selected-project
+escapes before I/O; the manifest itself cannot be a symlink. Blind packet and
+label-template order follows independent random IDs, never assignment order.
+Supported counts retain known-correct and unknown totals; null point estimates
+remain unknown. Accuracy bounds and fully observed primary shortfalls can refuse
+independently of unrelated missing review/resource judgments. Reports count actual
+whole-card QA exposures; zero exposure cannot recommend a card pilot (no minimum
+study exposure rate or scientific sufficiency is inferred from a nonzero count).
+
+`_corpus.chunk_spans` exposes the exact stripped coordinates used by `chunk_text`
+and `PaperChunkIndex`; repeated occurrences remain distinct. Digest audit retention
+reuses these offsets without changing chunks, ranking or semantic judgments.
+
 Validates that the local **deep_review** model answers questions about a paper
 and writes review claims **faithfully** (grounded in the paper, no
 hallucination) — the go/no-go gate before building the Library-tab deep-review
@@ -19,6 +53,19 @@ builder LLM ──► [_build_qa] ─► benchmark_vN.jsonl ─► [_runner] ─
                                                    │   full_text|retrieval)  │  LLM judge
                                           [_build_claims] digest→claims      │  (residual only)
 ```
+
+`_corpus.chunk_spans` exposes exact stripped-window original coordinates, including
+repeated occurrences. `chunk_text` projects the same windows, preserving existing
+benchmark/Q&A text behavior. Experimental Search reuses these coordinates through
+Library hybrid retrieval and reuses `ANSWER_PROMPT`/`parse_answer` and shared grounding;
+its bounded independent verifier is a product experiment, not a benchmark oracle or
+a measured improvement. No benchmark score, dataset or reporting policy changes.
+
+Package exports resolve lazily to the same defining objects. Constants and pure
+`_options.RunOptions` validation can be used by CLI admission without importing
+corpus/model/execution modules. The runner imports that same options class;
+benchmark algorithms, defaults, prompts and validation remain unchanged. Code
+identity guards may conservatively require a new run after a source refactor.
 
 ## Stages (all resumable, all artifacts under `data/faithbench/`)
 
@@ -193,6 +240,7 @@ to be re-used:
 | file | role |
 |---|---|
 | `_constants.py` | pinned `DEFAULT_JUDGE_MODEL` + env-var names + thresholds |
+| `_options.py` | pure `RunOptions`, conditions/tracks shared by pre-Settings CLI validation and execution |
 | `_judgment.py` | tri-state `Judgment`, closed `FailureReason`/`JudgeMethod` enums |
 | `_dataset.py` | benchmark schemas, versioned JSONL persistence, review CSV |
 | `_corpus.py` | paper selection/extraction, frozen text, `normalize_text` (shared by gate AND judge), chunking, per-paper BM25 (word `tokenize` reused from `storage.corpus_bm25`); `PaperSubstrate` bundles a paper's text+norm+chunk-index (the trio `_judge`/`_runner` cache per paper) |

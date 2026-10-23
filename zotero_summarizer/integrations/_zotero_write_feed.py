@@ -5,6 +5,8 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+from filelock import FileLock, Timeout
+
 from zotero_summarizer.integrations._zotero_write_common import (
     LOGGER,
     ZoteroWriteError,
@@ -61,14 +63,29 @@ class ZoteroFeedWriteMixin:
                 conn.close()
 
         try:
-            return self._retry_on_lock(_do, ctx="mark_feed_items_read")
-        except sqlite3.OperationalError as exc:
-            raise ZoteroWriteError(
-                "DB still locked after retries — items will remain unread in Zotero "
-                f"until next tick: {exc}"
-            ) from exc
-        except sqlite3.Error as exc:
-            raise ZoteroWriteError(f"Failed to mark feed items read: {exc}") from exc
+            with FileLock(f"{self.db_path}.read-state.lock", timeout=0):
+                retained = sum(1 for _ in self.data_dir.glob(self._BACKUP_GLOB))
+                if retained > self._BACKUP_KEEP:
+                    raise ZoteroWriteError(
+                        f"Read-state backup limit reached ({retained} retained); "
+                        "no backup or native write started. Preserve/export and review "
+                        f"app backups, then leave at most {self._BACKUP_KEEP} before retrying."
+                    )
+                try:
+                    self.backup_database()
+                    changed_count = self._retry_on_lock(_do, ctx="mark_feed_items_read")
+                except sqlite3.OperationalError as exc:
+                    raise ZoteroWriteError(
+                        "DB still locked after retries — items will remain unread in Zotero "
+                        f"until next tick: {exc}"
+                    ) from exc
+                except sqlite3.Error as exc:
+                    raise ZoteroWriteError(f"Failed to mark feed items read: {exc}") from exc
+
+                self._prune_backups()
+                return changed_count
+        except Timeout as exc:
+            raise ZoteroWriteError("Read-state backup/write already in progress; retry later.") from exc
 
 
 __all__ = ["ZoteroFeedWriteMixin"]

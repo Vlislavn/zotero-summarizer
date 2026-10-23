@@ -28,6 +28,8 @@ import {
 import { isMachineTag } from '../utils/tags.js';
 import { fulltextMessage } from './todayHelpers.js';
 import { readStorage, writeStorage } from '../utils/safeStorage.js';
+import useServerAvailable from '../hooks/useServerAvailable.js';
+import { allPapers } from '../offlineStore.js';
 
 // Library page — a single "Read next" surface (Stage 2). The former Browse tab
 // and Triage monitor are merged in: the sidebar collection/tag filters + a
@@ -52,8 +54,8 @@ function flattenCollections(nodes, depth = 0) {
 
 export default function LibraryReadNext() {
   const navigate = useNavigate();
-  const { status, isError: setupStatusError } = useSetupStatus();
-  const setupStatusKnown = Boolean(status) || setupStatusError;
+  const { status } = useSetupStatus();
+  const serverAvailable = useServerAvailable();
   const zoteroConnected = status?.zotero?.db_found === true;
   const [searchParams, setSearchParams] = useSearchParams();
   // Client-side smart filters (Phase 1) — hydrated from the URL on mount so a
@@ -69,6 +71,7 @@ export default function LibraryReadNext() {
     semantic: false, reranker_loading: false, semantic_unavailable: false,
   });
   const pollRef = useRef(null);
+  const queueRequest = useRef(null);
   const [queueLoading, setQueueLoading] = useState(false);
   const [queueErr, setQueueErr] = useState(null);
   const [includeRead, setIncludeRead] = useState(false);
@@ -238,10 +241,24 @@ export default function LibraryReadNext() {
   }, []);
 
   const loadQueue = useCallback(async (force = false) => {
+    const cold = queueRequest.current === null || (!queueRequest.current.active && !queueRequest.current.settled);
+    const request = { active: true, settled: false };
+    queueRequest.current = request;
+    const current = () => queueRequest.current === request && request.active;
+    const options = queueArgs(force);
     setQueueLoading(true);
     setQueueErr(null);
+    if (cold && !force && !options.collection && !options.tag && !options.search) {
+      allPapers().then((items) => {
+        if (current() && !request.settled && items.length) {
+          applyQueueData({ items, status: 'offline', model_ready: false, total_unread: items.length });
+        }
+      }).catch((error) => console.warn('Device working set unavailable', error));
+    }
     try {
-      const data = await fetchReadingQueue(queueArgs(force));
+      const data = await fetchReadingQueue(options);
+      request.settled = true;
+      if (!current()) return;
       applyQueueData(data);
       if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null; }
       // Background scoring in progress → poll the CHEAP status endpoint (no
@@ -255,6 +272,7 @@ export default function LibraryReadNext() {
           } catch {
             running = true;  // transient — keep waiting, don't false-finish
           }
+          if (!current()) return;
           if (running) {
             pollRef.current = setTimeout(tick, 8000);
           } else {
@@ -266,19 +284,21 @@ export default function LibraryReadNext() {
     } catch (err) {
       // Preserve the last-good list on a transient failure (don't blank the page);
       // the banner surfaces the error. err.status drives the message in ReadNextView.
-      setQueueErr(err);
+      if (current()) setQueueErr(err);
     } finally {
-      setQueueLoading(false);
+      request.settled = true;
+      if (current()) setQueueLoading(false);
     }
   }, [queueArgs, applyQueueData]);
 
   useEffect(() => {
-    if (setupStatusKnown) loadQueue();
+    loadQueue();
     return () => {
+      if (queueRequest.current) queueRequest.current.active = false;
       if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null; }
       if (ftPollRef.current) { clearTimeout(ftPollRef.current); ftPollRef.current = null; }
     };
-  }, [loadQueue, setupStatusKnown]);
+  }, [loadQueue]);
 
   // Persist the CURRENTLY-DISPLAYED ranked order so the full-page review (opened
   // in a new tab via window.open) can offer Prev/Next through the same list.
@@ -540,7 +560,8 @@ export default function LibraryReadNext() {
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyUp={(e) => { if (e.key === 'Enter') applySearch(); }}
-              placeholder="Search by meaning… (e.g. hallucination mitigation)"
+              disabled={!serverAvailable}
+              placeholder={serverAvailable ? 'Search by meaning… (e.g. hallucination mitigation)' : 'Meaning search needs the Mac — cached sorting remains available'}
               className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
             {/* Search is semantic by default (hybrid); Enter submits — no Meaning/
@@ -665,6 +686,7 @@ export default function LibraryReadNext() {
         {/* Region B — REVIEW QUEUE: the work surface. Predict lives HERE, atop the
             rows whose Confirm/Override cards it produces, with its own feedback. */}
         <Section label="Review queue">
+          <fieldset disabled={!serverAvailable}>
           <PredictionsBar
             fleetStatus={fleetStatus}
             onRun={handleReviewCool}
@@ -675,6 +697,10 @@ export default function LibraryReadNext() {
             proposedCount={proposedCount}
             queueAtLimit={queue.length >= QUEUE_LIMIT}
           />
+          </fieldset>
+          {!serverAvailable && <p role="status" className="mt-2 text-xs text-amber-800">{queueMeta.status === 'offline'
+            ? 'Cached working set — verdicts and notes save on this device. Review, meaning search and Zotero export need the Mac.'
+            : 'App sync is not confirmed. Use Sync now before server-only actions; local review remains available.'}</p>}
           <div className="mt-3">
             <ReadNextView
           // Remount on a deliberate SERVER filter change so the incremental-reveal
@@ -685,6 +711,8 @@ export default function LibraryReadNext() {
           // the model isn't ready the bar is hidden, so don't silently filter.
           // The explicit Zotero-column sort applies in both cases (displayedQueue).
           items={displayedQueue}
+          serverAvailable={serverAvailable}
+          offline={queueMeta.status === 'offline'}
           sort={sort}
           onSortChange={setSort}
           loading={queueLoading}
@@ -735,7 +763,7 @@ export default function LibraryReadNext() {
           <Section label="Export to Zotero">
             <div className="flex flex-wrap gap-2 items-center">
               <ZoteroActionsMenu
-                disabled={syncingAll}
+                disabled={syncingAll || !serverAvailable}
                 actions={[
                   {
                     label: 'Sync all → Zotero', busy: syncingAll, busyLabel: 'Syncing…',

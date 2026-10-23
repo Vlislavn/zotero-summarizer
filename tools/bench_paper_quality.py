@@ -366,7 +366,7 @@ def build_report(gold: dict[str, Any], responses: list[dict[str, Any]]) -> dict[
             bg = grade_band(r["pred_band"], g["gold_band"])
             band_exact.append(1.0 if bg["exact"] else 0.0)
             band_within1.append(1.0 if bg["within1"] else 0.0)
-            if g.get("gold_coverage_fraction") is not None:
+            if g.get("gold_coverage_fraction") is not None and r.get("coverage_fraction") is not None:
                 cov_abs_err.append(abs(float(r["coverage_fraction"]) - float(g["gold_coverage_fraction"])))
         rep["tracks"]["checklist_coverage"] = {
             "n_trials": len(crows),
@@ -376,6 +376,8 @@ def build_report(gold: dict[str, Any], responses: list[dict[str, Any]]) -> dict[
             "band_exact_match": round(_mean(band_exact), 4),
             "band_within1": round(_mean(band_within1), 4),
             "coverage_fraction_mae": round(_mean(cov_abs_err), 4) if cov_abs_err else None,
+            "coverage_fraction_scored": len(cov_abs_err),
+            "coverage_fraction_unknown": sum(r.get("coverage_fraction") is None for r in crows),
         }
 
     # Track 3: self-verify

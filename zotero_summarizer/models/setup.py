@@ -124,6 +124,11 @@ class ConnectionResult(BaseModel):
     status: str
     detail: str = ""
     models_discovered: int = Field(default=0, ge=0)
+    listed: bool | None = None
+    capable: bool | None = None
+    observed_operational: bool = False
+    hardware_safe: str = "unknown"
+    reason_code: str | None = None
 
 
 class ValidateConfigRequest(BaseModel):
