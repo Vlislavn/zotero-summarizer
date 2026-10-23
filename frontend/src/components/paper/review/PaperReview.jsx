@@ -8,6 +8,7 @@ import {
 } from './briefModel.js';
 import { formatShortDate, timeAgo } from '../../library/shared.jsx';
 import ReadingPlan from './ReadingPlan.jsx';
+import OrthogonalSignals from './OrthogonalSignals.jsx';
 
 const STATE_LABEL = {
   hit: '● addressed', miss: '○ not addressed', not_retrieved: '⚠ not retrieved',
@@ -83,8 +84,6 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
   // legacy quality-only review has no digest; raw model_digest never supplies a grade.
   const grade = isNonPaper ? '' : (digest ? digest.grade || '' : quality?.grade || '');
   const tldr = digest?.tldr || '';
-  const ideaScore = Math.max(Number(digest?.novelty) || 0, Number(digest?.significance) || 0);
-  const ideaLabel = ideaScore >= 4 ? 'high' : ideaScore >= 3 ? 'moderate' : ideaScore > 0 ? 'low' : 'not assessed';
 
   // Located findings (the story page passes the section overlay; the compact card
   // does not → unchanged). Keyed by VALUE (goal/flag text, critical item) so the
@@ -156,11 +155,7 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
           <p className="mt-1.5 text-[13px] leading-relaxed text-slate-700 max-w-[66ch]">{verdict.reason}</p>
         )}
         {hasReadingDecision && <ReadingPlan digest={digest} decision={digestDecision} />}
-        {digest && (
-          <p className="mt-1 text-[11px] text-slate-500">
-            Idea: {ideaLabel} · Evidence: {isNonPaper ? 'not applicable' : BAND_LABEL[band] || 'not assessed'} · Writing: {digest.writing_friction || 'not assessed'}
-          </p>
-        )}
+        {digest && <OrthogonalSignals deep={deep} />}
       </div>
   );
 
