@@ -96,3 +96,5 @@ SIGINT/SIGTERM during analysis drain the child and stop the daemon cleanly
 without starting a feed tick or advancing the cursor. Other failures propagate.
 
 The existing daemon training-ledger producer is retained with its original synthetic-trainer regression suite. It appends retained artifact identities only after install/rescore; this packaging adds no fitting, inference or new identity authority.
+
+Retain original RSS partition consumption of the producer-owned private prefilter outcome, not generated tags.
