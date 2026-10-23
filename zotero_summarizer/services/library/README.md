@@ -8,6 +8,40 @@ from faithbench's `chunk_spans`; section-based goal summaries keep their existin
 behavior. Search, not this retrieval owner, judges answer sufficiency and budgets
 calls. No additional index/store or model is introduced.
 
+## Opt-in interpretation experiment
+
+`interpretation.review` decorates existing strategy generation only for B/caution
+and C/caution+card; A preserves the original call/kwargs/schema contract. Client
+alias identity, required-field presence, parse retries and base correction bounds
+remain intact. `_interpretation_trace` observes each actual client invocation.
+Optional scientific leaves and referenced current basis fields receive separate
+original-source verification only after independent base acceptance. Optional-only
+verifier DTOs reject coercible booleans/indices and unknown fields; A retains its
+existing schema. Shared contract revisions conservatively invalidate old currentness
+fingerprints without modifying retained receipts. Card-only
+invalid/unavailable/rejected states retain the base without regenerating it;
+no contradictory finding is inferred from missing support. Ordinary caches and
+review defaults do not consume experiment records.
+
+`qualify` reuses the existing base-audit validator, reconstructs the selected
+original and binds ordered scientific claims/source/passages/checks to the captured
+accepted invocation. Experiment reopening also compares the independent call tape.
+Common original-body admission rejects mismatched record content; explicit renderer
+content must match. Low-level proof mismatch refuses; higher-level QA/HTML withholds
+only the optional card while preserving an independently qualified base. Persisted
+optional states admit only known strings before any nonaccepted early return;
+malformed states refuse strictly and become controlled high-level unavailability.
+This is
+unsigned receipt consistency, not authentication or semantic re-verification.
+`_interpretation_qa` reuses the legacy context/retry/grounding owners; a whole card
+uses unused context budget only and cannot become quote or answer authority.
+`_interpretation_html` supplies one Finding / Scope / Unproven projection to the
+actual brief writer (binding the original before presentation/reading-policy
+projection and before its final-byte audit) and native-note builder via an
+explicit keyword. Neither renderer dispatches a native write or authorizes Add.
+Model/source/human/native/scientific acceptance and full experiment execution
+remain separate qualification obligations.
+
 Accepted digest verification retains `tldr`/`key_findings` checks in the existing
 review cache, including exact original fragments, actual selected extent and
 correction/fallback lineage. Attempt and retained hashes use the same declared

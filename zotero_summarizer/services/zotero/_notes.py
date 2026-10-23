@@ -189,7 +189,7 @@ def build_user_note_html(note: str) -> str:
 DIGEST_NOTE_MARKER = f"{NOTE_PROVENANCE_NAMESPACE}:note_type=digest"
 
 
-def build_digest_note_html(digest: Any) -> str:
+def build_digest_note_html(digest: Any, *, interpretation: dict | None = None) -> str:
     """Render the condensed deep-review digest as one short Zotero note. Empty
     sections are skipped so it stays tight. Led by ``DIGEST_NOTE_MARKER``."""
     e = html.escape
@@ -244,5 +244,8 @@ def build_digest_note_html(digest: Any) -> str:
         parts.append(f"<p><em>+ {e(digest.key_strength)}</em></p>")
     if getattr(digest, "key_weakness", ""):
         parts.append(f"<p><em>− {e(digest.key_weakness)}</em></p>")
+    if interpretation is not None:
+        from zotero_summarizer.services.library._interpretation_html import section
+        parts.append(section(interpretation, digest))
     parts.append(f"<p><em>{qline} · {DIGEST_NOTE_MARKER};version=1</em></p>")
     return "".join(parts)

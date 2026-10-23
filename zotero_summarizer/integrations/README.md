@@ -209,6 +209,12 @@ model mismatch and cached text cannot establish verification. Verification wrapp
 support cancellation checks before every request and close their owned transport;
 native Anthropic checks its actual response model/stop reason. Ordinary inference
 keeps its existing behavior; no paper text controls these verification options.
+`observe_completions` is an explicit invocation-scoped observer before parsing or
+truncation rejection. The interpretation experiment attaches it inside each
+client call, including parallel map workers; aggregate provider usage is one event,
+not multiplied by generation count. No observer means no decoded/raw retention.
+Missing provider usage/model metadata stays unknown; observed model names do not
+pin mutable remote weights. Ordinary logging remains metadata-only.
 
 Analysis-source serialization correction (CAPA: proven for the checked PDF):
 

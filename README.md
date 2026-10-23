@@ -53,6 +53,14 @@ explicit retry after failed session finalization reuses that key instead of
 creating a duplicate. See the [Search contract](zotero_summarizer/services/search/README.md#explicit-add-recovery)
 for its single-process/configured-library boundary and uncertainty limits.
 
+## Opt-in interpretation experiment
+
+[Compare current/caution/card digests and grounded Q&A](docs/interpretation-experiment.md)
+on frozen, human-approved sources. Inspection makes no model calls; execution and
+sensitive capture require explicit flags. Independent human judgments and complete
+operational evidence gate any conditional pilot recommendation. Defaults and native
+write/Add authority remain unchanged; benefit is not established by protocol tests.
+
 ## Review recovery and search constraints
 
 Accepted deep reviews retain original-source evidence for their digest findings.

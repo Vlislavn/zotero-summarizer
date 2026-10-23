@@ -1,5 +1,11 @@
 # cli — the `zotero-summarizer` command-line interface
 
+`faithbench interpretation` inspects a frozen recipe by default, without provider
+construction or output effects. Explicit `--run --capture-local` records a private
+A/B/C attempt; `--run-id` exports blinded human packets, and `--labels` scores an
+existing run. Inconsistent/unconsented flags refuse at the existing pre-Settings
+validator, including the real dispatcher. See [experiment contract](../../docs/interpretation-experiment.md).
+
 Each command group lives in its own module and owns both its handlers and its
 argparse registration. `__init__.build_parser()` just wires the groups together,
 so no single file holds the whole parser. `feeds tick --force-daily` was removed:

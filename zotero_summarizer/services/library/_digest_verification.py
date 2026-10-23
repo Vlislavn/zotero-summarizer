@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pydantic import BaseModel, Field, PrivateAttr, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictInt
 
 from zotero_summarizer.models import PaperDigest
 from zotero_summarizer.services._common import extract_json_blob, to_text
@@ -21,6 +21,15 @@ class _Check(BaseModel):
 class _Checks(BaseModel):
     checks: list[_Check] = Field(default_factory=list)
     _repair_attempts: int = PrivateAttr(default=0)
+
+
+class _ScientificCheck(_Check):
+    model_config = ConfigDict(strict=True, extra='forbid')
+
+
+class _ScientificChecks(_Checks):
+    model_config = ConfigDict(strict=True, extra='forbid')
+    checks: list[_ScientificCheck] = Field(default_factory=list)
 
 
 class DigestSourceRejected(ValueError):
@@ -127,11 +136,14 @@ def _parse_checks(raw: Any, claim_count: int, passages: list[str], paper_text: s
 
 def verify_digest(
     digest: PaperDigest, paper_text: str, llm: Any, *, research_goals: str = "",
+    scientific_claims: list[str] | None = None,
 ) -> _Checks:
     from zotero_summarizer.services.faithbench._corpus import chunk_text
     from zotero_summarizer.services.library._review_attempt import observed_client
 
-    claims = _claims(digest)
+    claims = _claims(digest) if scientific_claims is None else scientific_claims
+    if scientific_claims is not None and not claims:
+        raise ValueError('Optional verification requires scientific claims')
     unsupported = _unsupported_literals(claims, paper_text)
     if unsupported:
         raise DigestSourceRejected(f"Digest contains source-absent literals: {unsupported[:3]}",
@@ -142,9 +154,12 @@ def verify_digest(
         paper="\n\n".join(f"PASSAGE {i}:\n{untrusted_input(p)}" for i, p in enumerate(passages)),
         goals=untrusted_input(research_goals or "(none)"),
     )
+    model = _Checks if scientific_claims is None else _ScientificChecks
     for attempt in range(2):
         try:
-            raw = observed_client(llm, 'verifier').pydantic_prompt(prompt=prompt, pydantic_model=_Checks)
+            raw = observed_client(llm, 'verifier').pydantic_prompt(prompt=prompt, pydantic_model=model)
+            if scientific_claims is not None and not isinstance(raw, _ScientificChecks):
+                raw = _ScientificChecks.model_validate(raw if isinstance(raw, dict) else extract_json_blob(to_text(raw)))
             parsed = _parse_checks(raw, len(claims), passages, paper_text)
             break
         except ValueError as exc:

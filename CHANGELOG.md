@@ -28,6 +28,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Index every original change hunk and its review PR or explicit superseded-variant disposition; distinguish source-only oracles from behavioral acceptance.
 
 ### Fixed
+- Keep tightened interpretation resource caps inclusive with exact token-count and decimal-latency arithmetic. Preserve mean/median reporting, per-paper and independent unknown/refusal gates; no rounding tolerance or threshold changes.
+- Reject malformed persisted interpretation states without losing qualified base rendering; evaluate known timing/token breaches independently of unrelated unknown observations.
 - Document conservative comparison after an uncertain online ACK and clarify the network-only timeout/browser-storage boundary in usage docs and README. Protect full canonical verdict comments beyond outbound size caps with explicit assertions.
 - Fence older cross-tab pulls at equal field cursors. Keep offline queue labels/retractions current, run batch saves offline, and avoid native-tag requests after locally saved proposal confirmations.
 - Project offline conflict choices into local views, refuse stale detail on storage-read failure, revoke stale connection status after transport fallback, and drain saves signalled during active sync.
@@ -36,6 +38,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Preserve later durable pending fields when earlier edits conflict and a later batch fails before pull. Canonical evidence/revisions and ACK retirement remain atomic; no outbox rewrite or relaxed acknowledgement.
 
 ### Changed
+- Add opt-in frozen A/B/C interpretation runs, strict independent card checks, original-authority Q&A, audited brief/native HTML and blinded human reporting. Preserve defaults/Add authority and failed-question denominators; human benefit remains unmeasured.
 - Retain original observed-cohort weekly ordering metadata and frozen conditional replay; canonical helper names and caller wiring are mechanically aligned.
 - Retain the separate signal/reason disclosure, replacing the terse line while preserving current policy and grade projection.
 - Retain the existing daemon training-ledger producer and original provenance/cancellation tests; no new training or inference behavior is designed.

@@ -1,5 +1,12 @@
 # models — Pydantic contract (config + API shapes)
 
+`interpretation.py` defines the opt-in experiment's strict scientific item and
+typed response schema. Pydantic `SkipValidation` delays only optional transport
+validation until independent base acceptance; malformed sidecars are retained,
+then explicitly rejected, not defaulted away. Base fields remain validated.
+Ordinary `PaperDigest` fields/defaults are unchanged. Origin, source associations
+and verification state are caller-owned, never model claims.
+
 Every request/response body and the `goals.yaml` schema. Split by group; the
 package `__init__` re-exports everything, so `from zotero_summarizer.models
 import X` works unchanged.
