@@ -296,3 +296,5 @@ uv run zotero-summarizer faithbench build --max-builder-windows 64  # larger QA-
   handling, task-level authority boundaries, scout-artifact readback, restart/activation
   checks and offline workflow contract tests (not model-quality or sandbox acceptance).
 - **[CHANGELOG.md](CHANGELOG.md)** — notable changes (latest: the guided first-run setup).
+
+Feedback review stack part 1: Feedback: retained input capture and report primitives. See `zotero_summarizer/services/golden/feedback_analysis/README.md`; later parts supply the remaining existing workflow.

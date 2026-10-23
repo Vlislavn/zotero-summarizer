@@ -73,6 +73,9 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Align synthetic SQL/identity/currentness fixtures with audit boundaries; preserve label/override/read-only oracles. Add real initialized-attachment cache acceptance and changed-attachment rejection controls.
 - Restore application logger state between tests, even after handler-close errors; preserve original/shared handlers and close other new handlers. Run ordered regressions in isolated subprocesses with test-owned log paths. Production logging is unchanged.
 - Honor corpus OFF during targeted post-edit refresh before reader/cache, lock and inferred-feedback I/O; preserve enabled reconciliation and the resource-unavailable no-op.
+- Reconcile Feedback primitives with the current CLI foundation; preserve admitted-root pinning, literal Markdown and duplicate-namespace refusal.
+- Keep recorded Feedback report evidence literal when it contains Markdown backticks; reject ambiguous duplicate migration namespaces; clarify available capture primitives versus later-stack analysis/CLI/weekly contracts.
+- Package existing retained input capture and report primitives from the working changes for dependent review; no behavior redesign.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
 - Generate source-bound RSS project proposals in existing review calls; reuse successful stages, recompute cards and retain errors/v1 reports. Cached qualification reads existing goals without startup. Keep effort unknown or explicitly unverified; preserve blockers and artifact links.
