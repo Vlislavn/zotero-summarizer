@@ -1,11 +1,13 @@
-# PR review index
+# Current PR review index
 
 ```text
-feature/source PRs -> retained corrections -> original source oracles
-                   -> source-disposition index (documentation only)
+bounded source foundation -> retained correction suffix -> original oracle source
+                          -> complete original hunk/disposition index
 ```
 
-Snapshot: 66 existing OPEN/non-draft/unmerged PRs before adding the three bounded review-metadata index PRs. Config/assets count; tests/docs do not. The table is not a feature-acceptance score.
+Current snapshot: 71 preceding OPEN/non-draft/unmerged PRs; this final graph-refresh PR is Markdown-only. Config/assets and TSV/JSON review metadata count; tests/Markdown docs do not. This is not a feature-acceptance score.
+
+The original identity ledgers retain their pinned earlier snapshot. This table reflects the later no-head-change cuts #204/#205 as well as #199/#200. Original oracle PRs are source-only and do not claim behavioral compatibility.
 
 | PR | Production A+D | Base | Role |
 |---|---:|---|---|
@@ -34,10 +36,10 @@ Snapshot: 66 existing OPEN/non-draft/unmerged PRs before adding the three bounde
 | [#154](https://github.com/Vlislavn/zotero-summarizer/pull/154) | 720 | #152 | feat(priority): explicit offline reading-priority comparison |
 | [#155](https://github.com/Vlislavn/zotero-summarizer/pull/155) | 864 | #154 | Add offline existing-collection comparison |
 | [#156](https://github.com/Vlislavn/zotero-summarizer/pull/156) | 2 | `main` | Respect corpus OFF during targeted post-edit refresh |
-| [#157](https://github.com/Vlislavn/zotero-summarizer/pull/157) | 1000 | `main` | Complete disconnected paper review and conflict recovery |
-| [#158](https://github.com/Vlislavn/zotero-summarizer/pull/158) | 1000 | #149 | Experiment: test whether interpretation cards improve AI answers |
-| [#159](https://github.com/Vlislavn/zotero-summarizer/pull/159) | 169 | `main` | Honor selected CLI configuration before model imports |
-| [#162](https://github.com/Vlislavn/zotero-summarizer/pull/162) | 949 | #159 | Feedback: retained input capture and report primitives |
+| [#157](https://github.com/Vlislavn/zotero-summarizer/pull/157) | 87 | #204 | Complete disconnected paper review and conflict recovery |
+| [#158](https://github.com/Vlislavn/zotero-summarizer/pull/158) | 54 | #205 | Experiment: test whether interpretation cards improve AI answers |
+| [#159](https://github.com/Vlislavn/zotero-summarizer/pull/159) | 176 | `main` | Honor selected CLI configuration before model imports |
+| [#162](https://github.com/Vlislavn/zotero-summarizer/pull/162) | 959 | #159 | Feedback: retained input capture and report primitives |
 | [#163](https://github.com/Vlislavn/zotero-summarizer/pull/163) | 829 | #162 | Feedback: retained history and descriptive analysis |
 | [#164](https://github.com/Vlislavn/zotero-summarizer/pull/164) | 998 | #163 | Feedback: existing manual report command and publication |
 | [#166](https://github.com/Vlislavn/zotero-summarizer/pull/166) | 159 | #164 | Feedback: existing weekly daemon scheduling and recovery |
@@ -75,3 +77,8 @@ Snapshot: 66 existing OPEN/non-draft/unmerged PRs before adding the three bounde
 | [#198](https://github.com/Vlislavn/zotero-summarizer/pull/198) | 0 | #183 | original oracle source only; API/behavior unqualified |
 | [#199](https://github.com/Vlislavn/zotero-summarizer/pull/199) | 987 | `main` | Support: existing source foundation before retained corrections |
 | [#200](https://github.com/Vlislavn/zotero-summarizer/pull/200) | 994 | `stack/discovery-prerequisites-bbeac9bd` | Discovery: existing source foundation before retained corrections |
+| [#201](https://github.com/Vlislavn/zotero-summarizer/pull/201) | 606 | `main` | Index original change files and explicit source dispositions (1/3) |
+| [#202](https://github.com/Vlislavn/zotero-summarizer/pull/202) | 827 | #201 | Index original service hunks and review owners (2/3) |
+| [#203](https://github.com/Vlislavn/zotero-summarizer/pull/203) | 902 | #202 | Complete original hunk review and disposition registry (3/3) |
+| [#204](https://github.com/Vlislavn/zotero-summarizer/pull/204) | 1000 | `main` | Offline: existing source foundation before retained corrections |
+| [#205](https://github.com/Vlislavn/zotero-summarizer/pull/205) | 1000 | #149 | Interpretation: existing source foundation before retained corrections |
