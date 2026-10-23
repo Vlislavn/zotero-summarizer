@@ -47,10 +47,11 @@ async def screen(req: ScreenRequest) -> dict[str, Any]:
     reviews fill in."""
     require_online()
     deps = await asyncio.to_thread(default_deps)
-    sess = await asyncio.to_thread(run_screen, req.query, req.questions, deps=deps, constraints=req.constraints)
+    sess = await asyncio.to_thread(run_screen, req.query, req.questions, deps=deps, constraints=req.constraints,
+                                   evidence_policy=req.evidence_policy)
     await asyncio.to_thread(_kickoff_review, sess.id)
     fresh = await asyncio.to_thread(session_store.load, sess.id)
-    return fresh.to_dict()
+    return fresh.to_dict(for_display=True)
 
 
 def _review_worker(session_id: str) -> None:
@@ -100,7 +101,7 @@ async def get_session(session_id: str) -> dict[str, Any]:
             message=f"no such search session: {session_id}",
             status_code=404,
         ) from exc
-    return sess.to_dict()
+    return sess.to_dict(for_display=True)
 
 
 async def materialize(session_id: str, req: MaterializeRequest) -> dict[str, Any]:

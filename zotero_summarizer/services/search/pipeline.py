@@ -28,6 +28,8 @@ from zotero_summarizer.services.search import require_online
 from zotero_summarizer.services.search._fulltext import acquire_full_text
 from zotero_summarizer.services.search._models import Candidate, ResearchSession, ScreenRequest, ConfirmedConstraints
 from zotero_summarizer.services.search._relevance import attach_relevance
+from zotero_summarizer.services.search._question_evidence import run_question_evidence
+from zotero_summarizer.services.search._question_policy import apply_question_policy
 from zotero_summarizer.services.search._targeted_review import targeted_review
 from zotero_summarizer.services.search.federate import LibraryFinder, federate
 from zotero_summarizer.services.search.intent import build_query_plan, parse_intent
@@ -108,10 +110,11 @@ def default_deps() -> SearchDeps:
     )
 
 
-def run_screen(raw_query: str, questions: list[str], *, deps: SearchDeps, constraints: ConfirmedConstraints | None = None) -> ResearchSession:
+def run_screen(raw_query: str, questions: list[str], *, deps: SearchDeps, constraints: ConfirmedConstraints | None = None,
+               evidence_policy: str = "baseline") -> ResearchSession:
     """Phase 1: intent → plan → federate → score → rank → persist. Returns a saved
     ``ResearchSession`` with candidates ordered by the constrained contract."""
-    request = ScreenRequest(query=raw_query, questions=questions)
+    request = ScreenRequest(query=raw_query, questions=questions, evidence_policy=evidence_policy)
     raw_query, questions = request.query, request.questions
     require_online()
     intent = parse_intent(raw_query, questions, llm=deps.llm)
@@ -135,6 +138,7 @@ def run_screen(raw_query: str, questions: list[str], *, deps: SearchDeps, constr
 
     sess = session_store.new_session(raw_query=raw_query, intent=intent, plan=plan, questions=questions)
     sess.candidates = candidates
+    sess.evidence_policy = request.evidence_policy
     sess.status = "screened"
     session_store.save(sess)
     return sess
@@ -180,13 +184,16 @@ def run_review(session_id: str, *, deps: SearchDeps, top_n: int = LIGHT_REVIEW_N
     heavy local-model calls is unsafe on a unified-memory box (memory-safety rule)."""
     require_online()
     sess = session_store.load(session_id)
-    request = ScreenRequest(query=sess.raw_query, questions=sess.questions)
+    request = ScreenRequest(query=sess.raw_query, questions=sess.questions, evidence_policy=sess.evidence_policy)
     fulltext: dict[str, str] = {}
+    run_question_evidence(sess, deps, fulltext)
     for cand in sess.candidates[:top_n]:
         if session_store.is_deleted(session_id):
             return sess
         try:
-            text = acquire_full_text(cand, extractor=deps.extractor, unpaywall=deps.unpaywall_client)
+            text = fulltext.get(cand.candidate_id)
+            if text is None:
+                text = acquire_full_text(cand, extractor=deps.extractor, unpaywall=deps.unpaywall_client)
             fulltext[cand.candidate_id] = text
             light_review(cand, full_text=text, sections=[], llm=deps.llm_light, max_chars=_max_chars(deps))
         except Exception as exc:  # noqa: BLE001 — isolate failures to this paper
@@ -195,6 +202,7 @@ def run_review(session_id: str, *, deps: SearchDeps, top_n: int = LIGHT_REVIEW_N
             return sess
 
     rank_candidates(sess.candidates)  # quality now populated → re-rank the band
+    apply_question_policy(sess)
     attach_relevance(sess.candidates)  # re-derive bands/why now that quality chips exist
     # Persist the re-ranked, quality-scored band before the slow deep reads so the UI
     # shows bands immediately (save_merge keeps a concurrent Add's materialized key).

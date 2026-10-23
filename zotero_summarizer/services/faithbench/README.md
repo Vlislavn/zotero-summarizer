@@ -20,6 +20,13 @@ builder LLM ──► [_build_qa] ─► benchmark_vN.jsonl ─► [_runner] ─
                                           [_build_claims] digest→claims      │  (residual only)
 ```
 
+`_corpus.chunk_spans` exposes exact stripped-window original coordinates, including
+repeated occurrences. `chunk_text` projects the same windows, preserving existing
+benchmark/Q&A text behavior. Experimental Search reuses these coordinates through
+Library hybrid retrieval and reuses `ANSWER_PROMPT`/`parse_answer` and shared grounding;
+its bounded independent verifier is a product experiment, not a benchmark oracle or
+a measured improvement. No benchmark score, dataset or reporting policy changes.
+
 ## Stages (all resumable, all artifacts under `data/faithbench/`)
 
 1. **build** (`_corpus` + `_build_qa`): select papers with local PDFs, extract

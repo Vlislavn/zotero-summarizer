@@ -57,6 +57,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Bound raw RSS backup attempts to five retained snapshots plus one slot; serialize admission and fail closed at capacity without deleting failed prestate backups. Export/review snapshots before resuming; successful writes still prune to five.
 - Keep optional Zotero read-sync running after backup/retention filesystem errors; log possible committed state and rescan unread rows next tick without replaying the failed batch.
 - Complete the common WAL/integrity backup before raw native RSS read-state updates; prune once after commit, preserve integer/idempotent/no-op behavior and propagate refusal or post-commit retention errors without replay.
+- Count repeated Search questions once without duplicate model calls; promote only within topic-eligible slots. Prior bindings become unchecked, retaining history. Reuse admitted over-budget originals for ordinary review instead of reacquiring them.
+- Invalidate Search evidence on changed/unavailable evaluator metadata or local protocol without running clients. Preserve historical receipts and pre-promotion tie order; restore constrained baseline order on stale reads.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
 - Generate source-bound RSS project proposals in existing review calls; reuse successful stages, recompute cards and retain errors/v1 reports. Cached qualification reads existing goals without startup. Keep effort unknown or explicitly unverified; preserve blockers and artifact links.
@@ -82,6 +84,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ### Added
 
 - Browse saved weekly RSS digests in Weekly: engineering cards, paper links and JSON/Markdown downloads, with explicit empty, legacy and unreadable states. Browsing never starts generation or Zotero writes.
+- Opt-in experimental Search question evidence: bounded original-text retrieval and verification before review selection, located receipts and policy UI. Baseline/Add stay unchanged when disabled; human-held-out quality and latency remain unmeasured (#30).
 - Independent HTML-preservation checks and mutation controls; opt-in frozen real-review browser replays skip when inputs are absent. Literal retention proves neither scientific truth nor native-editor compatibility.
 - Review attempts expose typed stage/recovery and metadata-only traces. Explicit local CLI captures retain decoded calls; operational source templates never become scientific reviews, and unavailable placeholders preserve current valid reviews (#32).
 - Search hard constraints require user confirmation; model hints/refinement cannot create bans. Bounded complementary queries, publication metadata recovery and retrieval accounting preserve legacy plans and disclose coverage limits (#31).

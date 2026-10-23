@@ -5,6 +5,7 @@ import {
   materialize as materializeApi,
 } from '../api/searchApi.js';
 import CollectionPicker from '../components/CollectionPicker.jsx';
+import QuestionEvidence, { EvidencePolicyStatus } from '../components/search/QuestionEvidence.jsx';
 import { ErrorBanner, StatusBanner } from '../components/library/shared.jsx';
 import { humanizeError } from '../utils/humanizeError.js';
 import { sortSearchCandidates } from '../utils/searchSort.js';
@@ -107,7 +108,7 @@ function ReviewPanel({ review }) {
   );
 }
 
-function CandidateCard({ cand, onAdd }) {
+function CandidateCard({ cand, onAdd, questions }) {
   const sources = [...new Set((cand.provenance || []).map((p) => p.source))];
   const band = (cand.quality?.quality_band || '').toLowerCase();
   const meta = [cand.venue, cand.year].filter(Boolean).join(' · ');
@@ -165,6 +166,7 @@ function CandidateCard({ cand, onAdd }) {
       </div>
       {cand.abstract && <p className="mt-2 text-[12px] text-slate-600 line-clamp-3">{cand.abstract}</p>}
       <ReviewPanel review={cand.review} />
+      <QuestionEvidence candidate={cand} questions={questions} />
       <div className="mt-2 flex items-center gap-2">
         {added ? (
           <span className="text-[12px] text-emerald-700 font-semibold">✓ In library</span>
@@ -200,6 +202,7 @@ export default function Search() {
   const [saved] = useState(loadSaved);   // snapshot once, at mount
   const [query, setQuery] = useState(saved.q || '');
   const [questions, setQuestions] = useState(saved.qs || '');
+  const [evidenceEnabled, setEvidenceEnabled] = useState(false);
   const [session, setSession] = useState(null);
   const [constraints, setConstraints] = useState({ must_include: "", must_not_include: "", study_types: "" });
   const [loading, setLoading] = useState(false);
@@ -208,10 +211,11 @@ export default function Search() {
   const [targetCollection, setTargetCollection] = useState(saved.tc || '');
   const [sort, setSort] = useState(saved.sort || 'recommended');
   const pollRef = useRef(null);
+  const requestRef = useRef(0);
   // The id to persist while no live session exists yet (cleared if it turns out dead).
   const savedIdRef = useRef(saved.id || null);
 
-  useEffect(() => () => pollRef.current?.(), []);
+  useEffect(() => () => { requestRef.current += 1; pollRef.current?.(); }, []);
 
   // Mirror pointer + drafts to sessionStorage on every change.
   useEffect(() => {
@@ -225,7 +229,7 @@ export default function Search() {
   const materializeCard = useCallback(async (candidateId) => {
     if (!session) return;
     const res = await materializeApi(session.id, candidateId, targetCollection);
-    setSession((prev) => (prev ? {
+    setSession((prev) => (prev?.id === session.id ? {
       ...prev,
       candidates: (prev.candidates || []).map((c) =>
         c.candidate_id === candidateId ? { ...c, materialized_zotero_key: res.zotero_key } : c),
@@ -251,14 +255,15 @@ export default function Search() {
   useEffect(() => {
     if (!saved.id) return undefined;
     let cancelled = false;
+    const request = requestRef.current;
     getSession(saved.id)
       .then((sess) => {
-        if (cancelled) return;
+        if (cancelled || request !== requestRef.current) return;
         setSession(sess);
         if (sess.status === 'reviewing') pollUntilDone(sess.id);
       })
       .catch(() => {
-        if (cancelled) return;
+        if (cancelled || request !== requestRef.current) return;
         savedIdRef.current = null;          // dead pointer — stop persisting it
         removeStorage(SS_KEY, 'sessionStorage');
       });
@@ -268,8 +273,9 @@ export default function Search() {
   const runScreen = useCallback(async (e) => {
     e?.preventDefault();
     if (!query.trim()) return;
+    const request = ++requestRef.current;
     setLoading(true);
-    clearInterval(pollRef.current);
+    pollRef.current?.();
     setError(null);
     setSession(null);
     try {
@@ -277,16 +283,18 @@ export default function Search() {
       const confirmed = Object.fromEntries(Object.entries(constraints).map(([key, value]) =>
         [key, value.split('\n').map((term) => term.trim()).filter(Boolean)]));
       const sess = await screenApi({ query: query.trim(), questions: qs,
+        ...(evidenceEnabled ? { evidence_policy: 'question_evidence' } : {}),
         ...(Object.values(confirmed).some((values) => values.length) ? { constraints: confirmed } : {}) });
+      if (request !== requestRef.current) return;
       savedIdRef.current = sess.id;
       setSession(sess);
       if (sess.status === 'reviewing') pollUntilDone(sess.id);  // auto deep-review started server-side
     } catch (err) {
-      setError(err);
+      if (request === requestRef.current) setError(err);
     } finally {
-      setLoading(false);
+      if (request === requestRef.current) setLoading(false);
     }
-  }, [query, questions, constraints, pollUntilDone]);
+  }, [query, questions, constraints, evidenceEnabled, pollUntilDone]);
 
   const reviewing = session?.status === 'reviewing' && !error;
   // Doherty: name the honest stage. During agentic rounds refinements grow but no
@@ -311,6 +319,12 @@ export default function Search() {
           placeholder="Optional — one specific question per line"
           value={questions} onChange={(e) => setQuestions(e.target.value)}
         />
+        <label className="text-[12px] text-slate-600">
+          <input type="checkbox" checked={evidenceEnabled} onChange={(e) => setEvidenceEnabled(e.target.checked)} />
+          {' '}Experimental original-source question evidence (opt-in for this search)
+          <span className="block">Uses configured Feed and Deep review routes; requires different model routes.
+            Sends questions and public original passages to those routes. Extra bounded work; quality/latency unmeasured.</span>
+        </label>
         <details className="text-[12px]">
           <summary>Explicit constraints (optional)</summary>
           <p>Only these confirmed filters are mandatory. One exact phrase per line; types require source metadata.
@@ -342,6 +356,7 @@ export default function Search() {
           )}
           <QueryPlan plan={session.plan || {}} />
           <Refinements rounds={session.refinements} />
+          <EvidencePolicyStatus session={session} />
           <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
             <div className="text-[12px] text-slate-500">{(session.candidates || []).length} candidates</div>
             <label className="text-[12px] text-slate-600">
@@ -367,12 +382,15 @@ export default function Search() {
           {sort === 'relevance_prestige' && <p className="mb-2 text-[12px] text-slate-500">85% relevance + 15% citation prestige (log-scaled within these results; unknown citations use the median). Citation counts favor older papers and vary by field.</p>}
           {(() => {
             const cands = sortSearchCandidates(session.candidates || [], sort);
-            const strong = sort === 'recommended' ? cands.filter((c) => c.relevance_band !== 'weak') : cands;
-            const weak = sort === 'recommended' ? cands.filter((c) => c.relevance_band === 'weak') : [];
+            const promoted = new Set(session.evidence_status?.promoted_candidate_ids || []);
+            const isWeak = (c) => c.relevance_band === 'weak' && !promoted.has(c.candidate_id);
+            const strong = sort === 'recommended' ? cands.filter((c) => !isWeak(c)) : cands;
+            const weak = sort === 'recommended' ? cands.filter(isWeak) : [];
             return (
               <>
                 <div className="grid gap-3">
-                  {strong.map((c) => <CandidateCard key={c.candidate_id} cand={c} onAdd={materializeCard} />)}
+                  {strong.map((c) => <CandidateCard key={c.candidate_id} cand={c} onAdd={materializeCard}
+                    questions={session.evidence_policy === 'question_evidence' ? session.questions : []} />)}
                 </div>
                 {weak.length > 0 && (
                   <details className="mt-3">
@@ -380,7 +398,8 @@ export default function Search() {
                       {weak.length} weaker match{weak.length === 1 ? '' : 'es'} ▾
                     </summary>
                     <div className="grid gap-3 mt-2">
-                      {weak.map((c) => <CandidateCard key={c.candidate_id} cand={c} onAdd={materializeCard} />)}
+                      {weak.map((c) => <CandidateCard key={c.candidate_id} cand={c} onAdd={materializeCard}
+                        questions={session.evidence_policy === 'question_evidence' ? session.questions : []} />)}
                     </div>
                   </details>
                 )}

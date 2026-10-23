@@ -1,5 +1,13 @@
 # services/library — Stage-2 reading + feed review
 
+Search's opt-in question evidence reuses `_paper_goal_summaries`' shared retrieval
+context, BM25/dense fusion and reranker without goal-facet generation or its cosine
+answer gate. `retrieve_original_passages` returns original chunk coordinates and
+separate dense/BM25/reranker capability flags. Whole-body chunks derive coordinates
+from faithbench's `chunk_spans`; section-based goal summaries keep their existing
+behavior. Search, not this retrieval owner, judges answer sufficiency and budgets
+calls. No additional index/store or model is introduced.
+
 Public documentation describes grounding contracts and regression controls;
 private provider-specific evaluation narratives stay outside the shared source.
 Generation identity includes the analysis PDF adapter's source fingerprint, so

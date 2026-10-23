@@ -139,6 +139,68 @@ captured distinct IDs. An incomplete/malformed reply is unconfirmed, not success
 the existing optimistic rollback retains selection for reconciliation. This alters
 only the app queue, not the native Zotero library, labels or other status callers.
 
+## Experimental Search question evidence
+
+1. Enter a topic and one specific question per line in **Search**.
+2. Explicitly check **Experimental original-source question evidence** before Search.
+   This uses your configured Feed generator and Deep review verifier routes; their
+   provider/endpoint/model identities must differ. Public original passages and your
+   questions go to those routes (possibly hosted); no library comments are included.
+3. Initial results stay available while the existing review worker checks evidence.
+   Open **Question evidence** on a card for partial/sufficient/not-found-in-checked-text/
+   unchecked status, quotes, original extracted-character offsets, checked passage
+   ranges, extraction/question fingerprints and model/protocol/capability provenance.
+4. **Recommended** follows the server's evidence-aware review order and keeps promoted
+   weak-band cards visible. Explicit Relevance/prestige sorts still show the whole pool
+   in that display order, without changing the server's selection. **Add to library**
+   remains a separate explicit action; evidence never adds or labels a paper.
+
+Only AI-verified sufficient answers promote, by number of distinct answered questions,
+within the original slots of topic-eligible, nonretracted candidates. Other papers
+keep their baseline positions. Identical question lines reuse one check per paper
+and count once; distinct questions retain input order. Stable baseline ordering breaks ties.
+Negative scientific results can answer questions. Partial evidence never promotes;
+missing sources, failed models, abstentions and budget exhaustion are not scientific
+rejections. Not-found concerns only retrieved passages, never absence from a document.
+Extraction completeness is unknown. Ambiguous repeated quotes or normalized-only
+matches cannot acquire invented original coordinates.
+
+The serial pass checks at most 12 eligible candidates, including candidates outside
+ordinary top-ten review selection, with at most 24 attempted model-client invocations. It reserves
+both generation and verification before starting a question; failures consume attempts.
+This counts client invocations, not hidden provider transport retries; existing client
+timeouts/retry policy remain in force.
+Questions are checked in input order per candidate, so many questions can exhaust the
+budget before later candidates. Hybrid retrieval reuses Library's dense/BM25/RRF/rerank
+owner (up to eight original chunks per question); missing retrieval legs are disclosed.
+Original text exceeding the existing quality-review character budget is unchecked,
+not clipped. Successfully acquired, admitted originals remain available to ordinary
+review without a second download/extraction. Operator overrides: `ZS_SEARCH_EVIDENCE_CANDIDATES` (0–30),
+`ZS_SEARCH_EVIDENCE_CALLS` (0–120), `ZS_SEARCH_EVIDENCE_TOPIC_FLOOR` (finite 0–1,
+default 0.35). These are provisional work limits, not calibrated answerability thresholds.
+Zero disables work; invalid configuration reports unavailable instead of guessing.
+
+Sessions retain policy, receipts and progress under the existing selected-project
+`Settings.search_dir`. Input/source-address changes, changed provider/model/settings
+or a revised local evaluator prompt/schema/protocol make displayed evidence unchecked
+and remove active promotions. Saved reads compare only the already-loaded runtime
+configuration metadata: no client construction, credential lookup, inference, network
+probe or automatic review rerun. Missing, disabled or unavailable current metadata
+also means unchecked. Unchanged available bindings keep valid evidence usable.
+
+Pre-promotion candidate order is retained in the session as the stable tie input to
+the existing constrained ranker. Invalidation restores those ties while preserving
+current relevance/quality keys, family enrichment, new candidates and explicit Add
+keys. Legacy evidence without this order/binding stays historical; the app cannot
+invent a lost historical tie order. Reads do not rewrite session files. Exact old
+receipts, original answers and provenance survive a later ordinary save; only current
+HTTP/display and promotion suppress stale evidence. Add-key merges and deletion
+cancellation still use the existing store. Text is acquired anew for each actual
+evidence pass; saved source hashes describe that extraction, not a live freshness
+probe. Evaluator metadata does not identify mutable remote weights behind unchanged
+provider/model names. Human-held-out answer-bearing P@5/nDCG/recall, false promotions,
+abstention and cold/warm latency are **unmeasured**. This is experimental; #30 stays open.
+
 ## First-run setup
 
 There's nothing to copy and nothing to migrate by hand. On the first `serve` (or `setup`),
