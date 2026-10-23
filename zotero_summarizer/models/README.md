@@ -73,3 +73,5 @@ Live refinement passes `preserve_method_artifact_literals` through Pydantic vali
 context so source admission sees the original nonempty artifact strings, including
 surrounding whitespace. Normal decoding without that context retains legacy whitespace
 cleanup; saved summaries are not revalidated against source membership.
+
+The original private corpus-prefilter provenance marker is retained with the optional practitioner diagnostic; the marker is not an LLM/public JSON field. No new scoring rule is introduced.

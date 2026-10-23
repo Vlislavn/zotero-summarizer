@@ -68,3 +68,5 @@ explicit `CANDIDATES` and `CANDIDATE_PROVIDER`; no local model is selected impli
 Provider names refer to caller-owned saved configuration; this does not rename it.
 
 Original frozen weekly replay/source is retained with its original three-argument cohort ordering contract. Existing source helpers use their canonical number/summary names and the production caller supplies its existing cohort IDs. No new grader, labels, ranking formula or real-data claim is designed.
+
+Packaging retains the original non-shipped `tools.method_validation.client` transport and `practitioner.run_diagnostic` RSS driver with unchanged source and synthetic tests. These require explicit invocation; no app defaults, live inference, data collection, portable-path fixes or scientific acceptance are added. Existing pinned local test dependencies remain for review.

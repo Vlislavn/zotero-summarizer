@@ -107,3 +107,5 @@ adapter instances also bound cumulative work. Recorded evaluation rejects blocke
 wrong-kind arms. Remote endpoints require HTTPS (loopback HTTP is retained). All frozen
 input snapshots share `max_input_bytes`; paired inference excludes gold without human
 provenance while retaining descriptive labels and the full coverage denominator.
+
+Packaging retains the original non-shipped `tools.method_validation.client` transport and `practitioner.run_diagnostic` RSS driver with unchanged source and synthetic tests. These require explicit invocation; no app defaults, live inference, data collection, portable-path fixes or scientific acceptance are added. Existing pinned local test dependencies remain for review.

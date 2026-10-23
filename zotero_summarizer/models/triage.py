@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, ValidationInfo, field_validator, model_validator
 
 from zotero_summarizer.domain import ReadingPriority, normalize_reading_priority
 
@@ -333,6 +333,9 @@ class RefinedSummary(BaseModel):
 
 
 class SummarizeResponse(BaseModel):
+    # Set only by the corpus-prefilter producer; never a generated or public field.
+    _corpus_fast_rejected: bool = PrivateAttr(default=False)
+
     executive_summary: str
     should_deep_read: str = ""
     key_sections_to_read: List[str] = Field(default_factory=list)

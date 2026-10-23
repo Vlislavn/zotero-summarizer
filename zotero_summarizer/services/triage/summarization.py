@@ -226,9 +226,9 @@ def _abstract_only_empty_response(reason: str) -> SummarizeResponse:
 def _fast_reject_response(
     req: SummarizeRequest, corpus_context: dict[str, Any], paper_text: str
 ) -> SummarizeResponse:
-    """Build a low-priority response when corpus pre-filter rejects."""
+    """Build a low-priority response with machine-owned prefilter provenance."""
     summary_seed = (req.abstract or paper_text).strip()[:2000] or "Low corpus affinity."
-    return SummarizeResponse(
+    response = SummarizeResponse(
         executive_summary=summary_seed,
         should_deep_read="No. Low corpus affinity against your engaged library.",
         relevance_to_research="Fast-rejected by corpus similarity pre-filter.",
@@ -246,6 +246,8 @@ def _fast_reject_response(
         suggested_collections=list(corpus_context.get("suggested_collections", [])),
         top_similar_items=list(corpus_context.get("top_similar_items", [])),
     )
+    response._corpus_fast_rejected = True
+    return response
 
 
 def _refine_with_retry(
