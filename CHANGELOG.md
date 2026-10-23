@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Retain original presentation URI normalization through the canonical raw PDF annotation reader.
+
 ### Changed
 - Retain original observed-cohort weekly ordering metadata and frozen conditional replay; canonical helper names and caller wiring are mechanically aligned.
 - Retain the separate signal/reason disclosure, replacing the terse line while preserving current policy and grade projection.
