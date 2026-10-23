@@ -176,4 +176,8 @@ uv run zotero-summarizer faithbench build --max-builder-windows 64  # larger QA-
   30-paper fixture is unscorable for production inclusion quality (not a 0%-precision result).
 - **[docs/architecture.md](docs/architecture.md)** — how it works, the layering rules, and
   the dev / verification workflow.
+- **[Native issue delegation](docs/native-agent-workflow.md)** — pinned async Pi adapter,
+  exclusive workers, independent review, per-child cwd/role checks, isolated failure
+  handling, task-level authority boundaries, scout-artifact readback, restart/activation
+  checks and offline workflow contract tests (not model-quality or sandbox acceptance).
 - **[CHANGELOG.md](CHANGELOG.md)** — notable changes (latest: the guided first-run setup).
