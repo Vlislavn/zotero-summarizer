@@ -72,10 +72,16 @@ an unsigned observation, not authenticated execution or external resource proof.
 
 Defaults: at most 120 pairs (maximum 10,000), 32 total arms, 12,000 full-prompt
 characters (maximum 131,072), 65,536 request/response bytes (maximum 1 MiB each),
-8 MiB input files (maximum 64 MiB), 200 logical HTTP calls (maximum 10,000), and
+8 MiB total frozen-input bytes (maximum 64 MiB, shared by inputs, baselines and
+recordings), 200 logical HTTP calls (maximum 10,000), and
 400 reserved forward-pass work units. Native qualified arms declare a per-request
 forward-pass upper bound; the entire call/work reservation must fit before execution.
-The bound is caller-declared, not an observed physical-pass count. Oversize pairs,
+The bound is caller-declared, not an observed physical-pass count. Public native
+entrypoints also require consent/guard and reserve at least their next call; one adapter
+instance enforces its cumulative call/work limit. The runner owns whole-workload
+reservation; separate direct invocations do not share process-global counters.
+Recorded evaluation accepts only an unblocked recorded arm. Off-host endpoints require
+HTTPS; explicit loopback HTTP remains available for local llama.cpp. Oversize pairs,
 source drift and total reservation failures refuse the whole workload, without clipping
 or partial model execution. Config files are bounded at 1 MiB in the CLI.
 
@@ -146,7 +152,10 @@ Latency summaries include every dispatched success/failure, not success-only sam
 recorded or imported arms have no invented runtime latency. Warm/cold qualification
 is unknown; the separate warm-latency/resource gates stay null.
 
-Paired comparison uses only jointly decided human-labelled holdout identities. It
+Paired comparison uses only jointly decided holdout identities whose frozen gold has
+non-null human provenance. Unprovenanced labels remain in descriptive per-arm metrics,
+not paired estimates/noninferiority; matched coverage still uses all candidate holdout
+pairs as its denominator. Provenance is a declaration, not authenticated human review. It
 reports matched coverage and disagreements, the equal-paper-family mean binary-support
 loss difference, and a seeded percentile family-bootstrap 95% CI only above both
 predeclared floors (at least 80 pairs and 20 independent families). This is not a BCa
