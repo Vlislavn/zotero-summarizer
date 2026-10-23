@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 - Retain original presentation URI normalization through the canonical raw PDF annotation reader.
+- Retain original explicit default-no inference consent; use the existing canonical provider verification boundary.
 
 ### Changed
 - Retain original observed-cohort weekly ordering metadata and frozen conditional replay; canonical helper names and caller wiring are mechanically aligned.
