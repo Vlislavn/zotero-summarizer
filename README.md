@@ -144,6 +144,9 @@ zotero-summarizer prefetch-models` once while online — see [docs/usage.md](doc
     serves), a reference-free **quality grade** (FLAG / NEUTRAL / HIGHLIGHT), and figures;
   - a visible **reading plan** — ordered targets, parts to skip and the original's added value beside the saved reading verdict; missing estimates stay unknown;
   - **ask the paper** — grounded Q&A that quotes the text and abstains when the answer isn't there;
+    long conversations retain complete current-source handles only when shorter than raw history.
+    Prior conversation stays untrusted, not evidence; see the
+    [checkpoint contract](zotero_summarizer/services/library/README.md#qa-evidence-checkpoints);
   - **deep review** — an on-demand full-text digest + quality assessment for your top picks;
     map-reduce verifies claims against the original paper, not its generated notes.
     Empty source text or chunk summaries fail rather than becoming a skip recommendation.
