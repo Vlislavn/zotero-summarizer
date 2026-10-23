@@ -147,9 +147,9 @@ def _signals():
         yield
         return
     def interrupt(signum, frame):
-        if signum == signal.SIGINT:
-            raise KeyboardInterrupt()
-        raise InterruptedError("feedback operation interrupted")
+        interruption = KeyboardInterrupt() if signum == signal.SIGINT else InterruptedError("feedback operation interrupted")
+        interruption.feedback_signal = signum
+        raise interruption
     original = {signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)}
     for signum in original:
         signal.signal(signum, interrupt)

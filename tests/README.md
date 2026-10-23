@@ -3,7 +3,7 @@
 This checkout includes retained history/analysis tests plus incremental CSV,
 UTC-overflow, journal-source and SQL-identity regressions. The part-1 paragraph
 below is the prerequisite #162 coverage record, not this checkout's suite limit.
-Operation suites are covered by part 3 below; weekly activation remains later-stack work.
+Operation suites are covered by part 3 below; weekly scheduling is covered by #166.
 
 # Tests
 
@@ -190,7 +190,7 @@ subsequent optional corpus refresh, not the explicit edit.
 The part-1/part-2 availability statements above are prerequisite #162/#163
 references. This head includes manual CLI and actual-child operation suites;
 `test_feedback_operation_lifecycle.py` retains the six signal launch/receipt and
-completed-worker RSS regressions. Weekly activation remains later-stack work.
+completed-worker RSS regressions. Weekly scheduling is covered by the later section.
 Current dependency controls preserve all root, snapshot, report and analyzer
 regressions without claiming a fresh full-suite run.
 
@@ -202,7 +202,7 @@ known macOS native-library failures to the unchanged baseline.
 Part 1 retains the original Feedback capture assertions and adds duplicate
 migration-namespace refusal cases. `test_feedback_analysis_report_primitives.py`
 keeps recorded Markdown content inside literal code spans; downstream
-analysis/operation suites are not present in this primitive-only checkout.
+the statement describes the prerequisite #162 checkout, not this integrated branch.
 
 `test_cli_selected_environment.py` exercises fresh isolated interpreters against
 synthetic default/selected projects. Import/invalid-input paths deny model SDKs and
@@ -213,3 +213,8 @@ Existing Faithbench exports retain exact defining object identity. Default-root
 redirect cases cover shell/cwd admission and the server factory handoff. The import
 guard also denies the direct Anthropic SDK; subprocess safety defaults to 10 seconds,
 with `ZS_CLI_TEST_WALL_SECONDS` overrides capped at 60 seconds.
+
+## Current part 4 coverage
+
+Weekly scheduling/recovery and manual/weekly signal/RSS controls are covered by
+the #166 fixtures; the part-1/2/3 notices above are prerequisite-stage records.

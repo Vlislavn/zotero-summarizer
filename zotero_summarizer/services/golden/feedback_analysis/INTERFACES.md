@@ -233,6 +233,27 @@ judgments: P@10/NDCG@10 are null with those exact reasons. Triage rank/batch fie
 alone are not exposure. No unbiased improvement claim, scheduler, CLI, Markdown,
 publication, cursor, model fit, label mutation or overall #47 acceptance.
 
+## Current checkout — part 4 weekly amendments
+
+The part-1/2/3 implementation notices above are prerequisite review records.
+This head implements manual and opt-in weekly entrypoints; all input, analysis,
+report and operation safety contracts remain. This is not issue #47 acceptance.
+
+The weekly runtime validates cursor paths before existence checks. Its aggregate
+wall cap must strictly exceed the fixed operation cap before schedule output.
+Without a cursor, the oldest retained active intent is selected by a work/byte/
+safety-bounded inventory before newer closed cutoffs. Catch-up remains bounded.
+Missing/failed candidate success receipts HOLD. Before candidate creation only,
+a matching persisted no-publication failure, a reaped/absent child group and
+an absent destination permit a fresh bounded attempt; this negative evidence
+is never report confirmation or cursor permission. Unknown evidence still HOLDs.
+Only explicitly tagged owned analysis SIGINT/SIGTERM interrupts are clean daemon
+shutdowns after drain, without tick/cursor; unrelated errors propagate.
+
+These amendments supersede only the inherited weekly activation/retry/signal
+wording. No wire envelope, hash identity, live mutation, authentication or
+scientific guarantee changes; old attempts and immutable reports remain intact.
+
 ## Reference/method binding
 
 - CLOSE recorded clocks/locators and explicit unknowns: ARE

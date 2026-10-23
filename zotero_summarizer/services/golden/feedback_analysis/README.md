@@ -136,6 +136,35 @@ same-user namespace races. SQLite may use its normal WAL shared-memory read
 coordination; this layer performs no explicit live-file writes or mode changes.
 It requires ordinary read-only WAL access, never live `immutable=1`.
 
+## Current checkout — stack part 4/4 (weekly daemon)
+
+The part-1/2/3 availability notices and later-stack/unavailable headings above
+are preserved prerequisite #162/#163/#164 review-stage references. This head
+provides both the manual CLI and opt-in weekly scheduler through the existing
+`feeds serve` daemon, with selected Settings and a dedicated clean child.
+The callable library/report boundaries, parser/source admission, launch/receipt
+ownership and completed-worker peak controls above remain in force.
+No overall #47 completion, private installed-host or scientific acceptance follows.
+
+Current weekly behavior supplements the inherited reference contract:
+
+- The aggregate schedule wall cap must exceed the resolved fixed operation cap
+  before output; incompatible settings fail rather than staying pending forever.
+- With no committed cursor, bounded lookup recovers the oldest retained active
+  intent across a weekly rollover before processing newer closed windows.
+- Missing/failed success receipts HOLD a candidate. Before any candidate exists,
+  an identity-bound failure proving no publication, a reaped/absent child group
+  and no destination permits one fresh bounded attempt; missing/ambiguous
+  evidence still HOLDs. Old attempts and failure evidence remain intact.
+- Only explicitly tagged owned SIGINT/SIGTERM interruptions stop the daemon
+  cleanly after drain, without a feed tick or cursor advancement. Other faults
+  propagate. Cursor links are refused before child launch.
+
+All source paths, bounds, immutable publication and authoritative cursor rules
+remain unchanged. No timer, dashboard, command family or new runner is added.
+See the existing weekly reference section for Settings/env names and artifact
+layout; this current section supersedes its older activation/retry wording.
+
 ## Budgets and permissions
 
 `FreezeBudgets` or a known-field dict accepts smaller work bounds:

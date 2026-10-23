@@ -11,6 +11,10 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Reconcile weekly Feedback with the current manual/analysis foundation without losing safe recovery, signal cleanup, parser/identity bounds or admitted-root ownership.
+- Carry required Feedback dependency safety into weekly execution: bound CSV parsing, validate retained identities/schema/time, preserve literal Markdown, pin the selected CLI root, and close child-launch/RSS enforcement gaps.
+- Recover weekly Feedback after confirmed prepublication failures and delayed first cursor commits; reject unsafe cursor links/incompatible caps, and stop the daemon cleanly on owned analysis signals.
+- Package existing weekly daemon scheduling and recovery from the working changes for dependent review; no behavior redesign.
 - Pin the admitted CLI root through handler reloads and server factory startup; a selected `.env` cannot redirect writes to another project. Cover shell/cwd defaults and direct provider-SDK import rejection; name subprocess safety-cap constants.
 - CLI validates before Settings/.env loading, then applies offline flags from the selected project only. Importing CLI no longer reads another root. Faithbench/Setup exports and pure run options load lazily without changing public objects or benchmark algorithms.
 - Hand off native scout artifact references explicitly, mark review evidence untrusted, and clarify task-level worker/consent boundaries. Lock labels and literal canary requests in offline contract tests; no sandbox or injection-resistance claim.

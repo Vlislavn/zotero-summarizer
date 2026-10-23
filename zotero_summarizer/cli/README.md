@@ -170,6 +170,13 @@ persists a valid ML-only choice that can later be changed in Settings.
 5000-row cutoff. Dry-run and apply use the same list; library-only checks, connector
 guard, idempotent tag comparison and the single batch backup remain unchanged.
 
+Feedback review stack part 4: weekly local reports are off by default. Enable with
+`ZS_FEEDBACK_SCHEDULE_ENABLED=true python -m zotero_summarizer.cli feeds serve --project-root ROOT`.
+Reports precede feed ticks. Owned SIGINT/SIGTERM during reporting stop cleanly
+after child drain, with no cursor advancement; unrelated interruptions propagate.
+The prerequisite admitted-root handler/factory pin remains intact. See the
+Feedback package README for cap compatibility and conservative recovery rules.
+
 ### Local review attempt capture
 
 `verify-deep-review --item-key KEY` uses the production strategy dispatcher,

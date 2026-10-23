@@ -90,3 +90,7 @@ automatic review/render work. Existing model/input caches may be read or warmed.
 Tick counts are accumulated in DaemonTickReport itself; dataclass serialization
 includes fatal_llm_error. The loop fails on exceptions or failed reports and
 removes its signal handlers on exit; zero ticks does no work.
+
+Weekly Feedback runs only when explicitly enabled for `feeds serve`. Owned
+SIGINT/SIGTERM during analysis drain the child and stop the daemon cleanly
+without starting a feed tick or advancing the cursor. Other failures propagate.

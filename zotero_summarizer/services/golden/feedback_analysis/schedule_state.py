@@ -310,19 +310,71 @@ def read_result(path, guard):
     return strict_json(raw)
 
 
+def _active_reference(path, guard):
+    reference = read_protocol(path, guard)
+    if (type(reference) is not dict or reference.keys() != {"schema_version", "attempt_id", "intent"} or
+            type(reference["schema_version"]) is not int or reference["schema_version"] != 1):
+        raise ValueError("invalid active schedule reference")
+    _name(reference["attempt_id"])
+    intent = reference["intent"]
+    validate_intent(intent, aware_time(intent["cutoff"]))
+    if path.parent.name != intent["intent_id"]:
+        raise ValueError("active intent directory differs from reference")
+    return reference
+
+
+def pending_cutoff(settings, guard):
+    directory = _no_symlinks(settings.feedback_schedule_dir / "intents")
+    if not directory.exists():
+        return None
+    oldest = None
+    with os.scandir(directory) as entries:
+        for count, entry in enumerate(entries, 1):
+            guard.consume(0)
+            if count > guard.budgets["max_source_files"]:
+                raise ValueError("schedule intent inventory cap exhausted")
+            active = _no_symlinks(Path(entry.path) / "active.json")
+            if active.exists():
+                reference = _active_reference(active, guard)
+                cutoff = aware_time(reference["intent"]["cutoff"])
+                oldest = cutoff if oldest is None else min(oldest, cutoff)
+    return oldest
+
+
+def _failed_before_candidate(settings, attempt, intent, guard):
+    path = attempt / "failure.json"
+    try:
+        failure = read_protocol(path, guard)
+    except FileNotFoundError:
+        return False
+    expected = {"schema_version": 1, "attempt_id": attempt.name, "status": "failure", "published": False,
+                "publication_state": "not_published", "attempt_path": str(attempt), "receipt_path": str(path),
+                "cutoff": intent["cutoff"]}
+    if (type(failure) is not dict or any(type(failure.get(key)) is not type(value) or failure[key] != value
+            for key, value in expected.items()) or failure.get("phase") not in
+            {"child", "request", "provenance", "freeze", "analysis", "report", "validation"}):
+        return False
+    child = failure.get("child")
+    if type(child) is not dict or child.get("reaped") is not True or child.get("group_absent") is not True:
+        return False
+    run = settings.feedback_analysis_dir / "runs" / _name(failure.get("run_id"))
+    return failure.get("run_path") == str(run) and not _no_symlinks(run).exists()
+
+
 def recover(settings, intent, guard, *, previous_cutoff=None):
     directory = _intent_dir(settings, intent)
-    active = directory / "active.json"
+    active = _no_symlinks(directory / "active.json")
     if not active.exists():
         return None
-    reference = read_protocol(active, guard)
-    if (type(reference) is not dict or reference.keys() != {"schema_version", "attempt_id", "intent"} or
-            type(reference["schema_version"]) is not int or reference["schema_version"] != 1 or reference["intent"] != intent):
-        raise ValueError("invalid active schedule reference")
-    attempt = settings.feedback_analysis_dir / "attempts" / _name(reference["attempt_id"])
+    reference = _active_reference(active, guard)
+    if reference["intent"] != intent:
+        raise ValueError("active schedule rules differ")
+    attempt = settings.feedback_analysis_dir / "attempts" / reference["attempt_id"]
     try:
         record = read_protocol(attempt / "schedule-candidate.json", guard)
     except FileNotFoundError as exc:
+        if _failed_before_candidate(settings, attempt, intent, guard):
+            return None
         raise UnconfirmedPublication("prepared attempt has no confirmed candidate") from exc
     record = _candidate(settings, record)
     _verify_finalization(attempt, record, guard)

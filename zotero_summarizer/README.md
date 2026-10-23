@@ -65,3 +65,6 @@ and unsupported provider parameters are never invented.
 Subpackages each have their own README. Start with
 [docs/architecture.md](../docs/architecture.md) for the end-to-end mental model,
 then the [README](../README.md) for setup + usage.
+
+Feedback scheduling is opt-in through Settings. Activation rejects a cycle wall
+cap that cannot reserve its fixed operation cap; state remains project-local.
