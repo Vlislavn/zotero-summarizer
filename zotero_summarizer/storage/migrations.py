@@ -113,6 +113,12 @@ def _migration_saved_telegram_news(conn: sqlite3.Connection) -> None:
     apply_schema(conn)
 
 
+def _migration_generated_write_review(conn: sqlite3.Connection) -> None:
+    from zotero_summarizer.storage.pending_actions import apply_schema
+
+    apply_schema(conn)
+
+
 # Append-only, version-ordered. To change the schema, add a new Migration with
 # the next version number — never edit a shipped one or add inline ALTERs.
 TRIAGE_MIGRATIONS: list[Migration] = [
@@ -127,6 +133,7 @@ TRIAGE_MIGRATIONS: list[Migration] = [
     Migration(9, "review_questions", _migration_review_questions),
     Migration(10, "review_note_projection", _migration_review_note_projection),
     Migration(11, "saved_telegram_news", _migration_saved_telegram_news),
+    Migration(12, "generated_write_review", _migration_generated_write_review),
 ]
 CORPUS_MIGRATIONS: list[Migration] = [
     Migration(1, "baseline_embedding_cache", _migration_baseline_corpus),
@@ -140,6 +147,7 @@ CORPUS_MIGRATIONS: list[Migration] = [
     Migration(9, "review_questions_alignment", _migration_baseline_corpus),
     Migration(10, "review_note_projection_alignment", _migration_baseline_corpus),
     Migration(11, "saved_telegram_news_alignment", _migration_baseline_corpus),
+    Migration(12, "generated_write_review_alignment", _migration_baseline_corpus),
 ]
 
 # Both namespaces advance in lockstep so one reported target stays meaningful;

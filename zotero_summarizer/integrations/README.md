@@ -252,3 +252,5 @@ Source-length-dependent budgets must use the new extracted length, not old
 Markdown counts. Prompts, settings, limits and models are unchanged.
 
 Telegram source-review part: original transport/session/credential and runtime code is retained unchanged. This part registers no Telegram CLI commands; its collection/store/worker dependencies are supplied by following original-source parts. No account/session, network collection or live model is exercised by packaging.
+
+Existing native/question source stack: typed action history, original writer boundaries and dormant editor/proposal code; activation follows. No new feature or issue-completion work; merge the related parts before using their new workflow.

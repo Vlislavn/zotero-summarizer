@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import threading
+from contextlib import contextmanager
+from filelock import FileLock
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
@@ -171,3 +173,21 @@ __all__ = [
     "REVIEW_CONTRACT_VERSION", "get_cached_review", "get_current_review",
     "review_is_current", "cached_review_keys", "current_review_keys", "current_reviews", "copy_review",
 ]
+
+
+_PUBLICATION_LOCKS: dict[str, FileLock] = {}
+
+
+@contextmanager
+def review_publication_lock(*, require_publication: bool = True):
+    """Process coordination, plus publication-file locking when source requires it."""
+    with _CACHE_LOCK:
+        if not require_publication:
+            yield
+            return
+        path = _cache_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        name = str(path) + ".lock"
+        lock = _PUBLICATION_LOCKS.setdefault(name, FileLock(name))
+        with lock:
+            yield
