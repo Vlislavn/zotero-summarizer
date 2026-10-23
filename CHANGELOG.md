@@ -105,6 +105,9 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
 - Generate source-bound RSS project proposals in existing review calls; reuse successful stages, recompute cards and retain errors/v1 reports. Cached qualification reads existing goals without startup. Keep effort unknown or explicitly unverified; preserve blockers and artifact links.
 - A124: verify section one-liners in a second batch against the same first 700 source characters (up to 24 sections); omit unsupported summaries. Scripted checks do not establish live semantic accuracy.
+- Preserve independent collection questions and baseline rows when one prompt is oversized; resolve original nested corpus paths without guessing aliases. Refuse source/freeze ties and inconsistent native HTTP replay; stop trickling responses at the observed run deadline.
+- Refuse corpus-backed comparison artifacts lacking declared reference lineage before effects. Close collection replay inventory against admitted snapshots, canonical case rows, owned terminals, timing and reports; resealed foreign files cannot join the plan.
+- Reconcile collection comparison with current support/priority admission, HTTPS and canonical-identity fixes while retaining native deadlines/replay. Bound each snapshot read by the remaining aggregate budget; keep already-correct provenance filtering.
 - A136: use figure metadata only for affirmative whole-paper figure-count wording; route scoped, uncertain, table-only, combined, and unmatched counts to grounded Q&A. Live scope accuracy is unmeasured.
 - Reconcile retained analysis with the current capture/report foundation; preserve admitted CLI roots, literal Markdown, duplicate-namespace refusal and analyzer bounds/identity checks.
 - Bound retained CSV line indexing incrementally; reject missing journal source and invalid SQL paper keys; retain unrepresentable UTC timestamps as unknown. Clarify later-stack CLI/weekly docs.
@@ -131,6 +134,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ### Added
 
+- Add offline existing-collection comparison: frozen taxonomy/human-gold firewall, independent native choices, original top3-name baseline, set/calibration/paired reports and verified private replay. No model loads, membership writes or unmeasured winner.
 - Add explicit offline reading-priority comparison: frozen human-label firewall, four-class native/retained readouts, matched ML/LLM artifacts, ranking/calibration/paired reports and verified private replay. No model loads, production writes or winner without empirical/resource qualification.
 - Browse saved weekly RSS digests in Weekly: engineering cards, paper links and JSON/Markdown downloads, with explicit empty, legacy and unreadable states. Browsing never starts generation or Zotero writes.
 - Opt-in experimental Search question evidence: bounded original-text retrieval and verification before review selection, located receipts and policy UI. Baseline/Add stay unchanged when disabled; human-held-out quality and latency remain unmeasured (#30).

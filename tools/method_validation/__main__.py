@@ -13,13 +13,16 @@ from .support_run import prepare, reopen, run
 def main(argv=None, *, transport=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
-    for name in ('support', 'priority'):
+    for name in ('support', 'priority', 'collections'):
         task = commands.add_parser(name)
         source = task.add_mutually_exclusive_group(required=True)
         source.add_argument('--config', type=Path)
         source.add_argument('--inspect', type=Path)
         task.add_argument('--run', action='store_true', help='consent to private writes and configured HTTP')
     args = parser.parse_args(argv)
+    if args.command == 'collections':
+        from .collections_run import command
+        return command(args, transport=transport)
     if args.command == 'priority':
         from .priority_run import command
         return command(args, transport=transport)

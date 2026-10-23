@@ -30,6 +30,15 @@ Pending rejection is all-or-none for the captured selection. Missing/stale rows
 return a conflict without changing valid siblings; incomplete replies never claim
 success. See [usage](docs/usage.md#rejecting-pending-changes).
 
+## Offline existing-collection comparison
+
+`python -m tools.method_validation collections --config FILE` admits a frozen
+existing taxonomy and public papers without calls/writes. Explicit `--run` compares
+independent membership choices and original top3 similarity suggestions in a new
+private attempt; `--inspect` verifies retained outcomes without effects. No collection,
+Zotero membership or model is changed. See the [collection contract](docs/decision-collection-comparison.md)
+for lineage, duplicate-name, capability and remaining empirical-qualification limits.
+
 ## Offline reading-priority comparison
 
 `python -m tools.method_validation priority --config FILE` admits frozen public
