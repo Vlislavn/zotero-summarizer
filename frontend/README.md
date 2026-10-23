@@ -530,3 +530,4 @@ The native editor imports also retain their original shared server-availability 
 Original question/note UI source is retained: immutable submission identity, separate manual notes and source question list, existing outbox replay and signature-bound delivery state. Shared paper/rail assemblies keep the original callbacks and one editable notes surface; unrelated Related/orthogonal reading changes are not mixed into this slice. Cached question detail reports local-storage failure explicitly without claiming a device save.
 
 Retain original offline PDF/figure controls and exact reading-text selectors; no new offline protocol.
+Retain original question-native source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.

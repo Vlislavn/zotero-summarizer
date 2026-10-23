@@ -460,3 +460,5 @@ Original native-preview client source is retained: displayed approval hashes, ex
 The original Telegram private worker/auth command registration and combined schema13 are retained here. Only fake-child command composition is exercised by packaging; armed lifecycle/platform/account tests remain unchanged and deferred.
 
 Original question API/sync source is retained: immutable save/replay before Q&A, separate receipts and existing composite-note delivery. Related/discovery endpoint additions are not mixed into this question slice. No new requirements or acceptance are implemented.
+
+Retain original question-native source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
