@@ -11,7 +11,7 @@ vi.mock('./offlineStore.js', () => ({
   applyPull: mocks.applyPull, applyPushResults: mocks.applyPushResults,
   getMeta: mocks.getMeta, pendingMutations: mocks.pendingMutations,
   publishStatus: mocks.publishStatus,
-  mutationError: () => null, pushPredecessors: async () => [],
+  mutationError: () => null, pushPredecessors: async () => [], beginPull: async () => 1,
 }));
 
 beforeEach(() => {

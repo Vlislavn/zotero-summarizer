@@ -49,10 +49,31 @@ def _changes(db):
         return conn.execute("SELECT * FROM sync_changes ORDER BY revision").fetchall()
 
 
-def test_server_conflict_readout_can_exceed_outbound_limits(store):
+@pytest.mark.parametrize("field", ["review_note", "verdict"])
+def test_server_conflict_readout_can_exceed_outbound_limits(store, field):
     db, effects, transitions = store
-    _original, result = _conflict(db, "review_note")
-    assert len(result["canonical"]["value"]) > 50_000
+    _original, result = _conflict(db, field)
+    if field == "review_note":
+        assert result["canonical"]["value"] == "Canonical server note " * 2500
+        assert len(result["canonical"]["value"]) > 50_000
+    else:
+        assert result["canonical"]["comment"] == "Server rationale " * 800
+        assert len(result["canonical"]["comment"]) > 10_000
+    assert not effects and not transitions
+
+
+def test_lost_online_ack_requires_comparison_without_reapplying_the_same_intent(store):
+    db, effects, transitions = store
+    repositories.insert_or_update_label_verdict(db, item_key="P1", user_priority="must_read",
+        original_derived_priority="should_read", comment="Same intent")
+    changes = _changes(db)
+    retry = _mutation("P1", "verdict", "must_read", 0, comment="Same intent")
+    conflict = service.push(db, [retry])["results"][0]
+    assert conflict["status"] == "conflict"
+    assert _changes(db) == changes
+    choice = _choice(retry, conflict)
+    assert service.push(db, [choice])["results"][0]["status"] == "applied"
+    assert _changes(db) == changes
     assert not effects and not transitions
 
 

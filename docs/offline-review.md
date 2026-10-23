@@ -35,7 +35,8 @@ Sync now -> device working set -> Library -> explicit verdict / manual note
    the original device intent retained locally for comparison/recovery. Its
    successful no-op receipt changes no field/history/native mirror and confirms
    no past native delivery. A missing/invalid conflict or failed local resolution
-   transaction does not discard either version.
+   transaction does not discard either version. **Keep mine** immediately updates
+   the durable device paper and detail, even if the Mac is unavailable.
 
 ## What is and is not retained
 
@@ -54,7 +55,9 @@ Existing Zotero PDF/annotation/citation workflows remain usable separately.
 
 - Do not clear site data or uninstall the browser profile with unsynced work.
   Browser storage can be denied, quota-limited or evicted; a storage error is not
-  a confirmed device save. Keep unsaved text until storage works.
+  a confirmed device save. Keep unsaved text until storage works. If pending local
+  fields cannot be read, a server detail refresh also refuses rather than hiding
+  a durable device edit behind stale server text.
 - Refresh must not overwrite an edited note/verdict. Late completions for a
   previous paper must not update the current editor or collapse its review.
   Prev/Next and inline-close warnings protect dirty manual notes. Other navigation
@@ -64,7 +67,10 @@ Existing Zotero PDF/annotation/citation workflows remain usable separately.
   A protocol/HTTP/storage block is distinct from a transport outage. Received
   HTTP refusals and malformed acknowledgements do not mint offline-success
   mutations. After a reported transport outage, local capture need not repeat a
-  blocking network attempt; it still cannot claim server acknowledgement.
+  blocking network attempt; it still cannot claim server acknowledgement. If the
+  server committed an online write but its response was lost, reconciliation may
+  conservatively ask you to compare identical text. **Use server** records a no-op
+  receipt; the unconfirmed response is not proof of native delivery.
 - Full pulls validate their identities/cursor and commit context plus cursor
   together. Pending local fields overlay incoming context. A malformed/stale pull
   or invalid/foreign acknowledgement preserves device state rather than advancing
@@ -74,7 +80,9 @@ Offline-capable requests and the existing sync round use the same named safety
 budget. Build-time `VITE_SYNC_TIMEOUT_MS` defaults to15000ms and must be finite,
 positive and at most60000ms. Invalid configuration fails before a network effect.
 Ordinary slower APIs keep their existing policy. This cap is not a performance
-measurement or a substitute for successful sync.
+measurement or a substitute for successful sync. It cancels network work, not
+browser storage operations; storage availability and transaction completion remain
+separate requirements.
 
 ## Installation and acceptance
 

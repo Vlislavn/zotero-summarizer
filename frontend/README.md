@@ -353,7 +353,16 @@ filters/rescoring refuse rather than showing an unfiltered set as a verified mat
 React Query network scheduling. Shared verdict/note editors preserve dirty text
 across refetch and fence late completions by owner/request. Full-detail cache writes
 reuse the same pending-field/order projection as pull, not a second form store.
-Compact snapshots do not claim synchronized tag/collection/PDF state.
+Compact snapshots do not claim synchronized tag/collection/PDF state. A failed
+pending-field read refuses the incoming detail rather than displaying stale server
+text. Keep mine projects the resolution into both durable local views atomically;
+its refresh also works disconnected. A transport fallback revokes stale connected
+status, and saves signalled during a sync round schedule a follow-up round. Pull
+request ordering lives in the existing meta store across tabs, fencing older
+responses even when membership changes without a field-cursor increment. Queue
+rows project nested verdicts into their flat display contract, including clears.
+Batch verdict/retraction callbacks also run offline; local proposal confirmations
+skip the server-only reject-tag request. Batch feedback names device vs app saves.
 
 Only fetch transport failures or an already reported transport outage admit local
 capture. Observed HTTP refusals, malformed received ACKs and mismatched detail IDs
@@ -394,8 +403,9 @@ physical device/offline/revocation acceptance remains separate. Never expose
 Sequence allocation, mutation insert, optimistic paper state, and cached-detail
 update share one IndexedDB transaction; each full pull replaces the compact
 paper snapshot while retaining local papers with unresolved mutations, and
-refreshes cached review details. A 15-second sync deadline releases a stuck focus sync,
-and protocol incompatibility explicitly asks for an app refresh. The IndexedDB
+refreshes cached review details. The configured sync deadline cancels outstanding
+network work; it does not bound browser-storage operations. Protocol incompatibility
+explicitly asks for an app refresh. The IndexedDB
 test kills/reimports the client module and proves cached context
 plus ordered concurrent mutations survive while the server is absent. Ask Paper sends a
 bounded session history; the backend compacts older evidence to verified
@@ -408,7 +418,8 @@ bodies. Input bounds are checked before optimistic saves. Invalid legacy drafts
 are retained as rejected, with copyable text and paper links in the navigation
 status, while valid rows continue. Unknown acknowledgement IDs/status/revisions
 cannot retire pending rows; HTTP rejections are distinct from connection failure.
-The 15-second deadline still bounds one sync attempt, not all future attempts.
+Each sync round has its own network deadline; future rounds get a new budget.
+Device transaction completion remains a separate prerequisite.
 
 Targeted Search polls one session at a time; transient poll errors keep the last
 session visible and retry, while terminal status and unmount stop further polls.

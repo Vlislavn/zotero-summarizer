@@ -104,6 +104,7 @@ export async function cacheReviewDetail(itemKey, detail) {
     if (typeof window !== 'undefined') {
       await publishStatus(`Device review cache unavailable: ${error.message || String(error)}; local change visibility is unconfirmed`, 'blocked');
     }
+    throw error;
   }
   return merged;
 }
@@ -137,7 +138,9 @@ export async function allPapers() {
     request((await store('papers')).getAll()), getMeta('paper_order', []),
   ]);
   const order = new Map(keys.map((key, index) => [key, index]));
-  return rows.sort((a, b) => (order.get(a.item_key) ?? Infinity) - (order.get(b.item_key) ?? Infinity));
+  return rows.map((row) => Object.hasOwn(row, 'verdict')
+    ? { ...row, user_priority: row.verdict?.user_priority ?? null } : row)
+    .sort((a, b) => (order.get(a.item_key) ?? Infinity) - (order.get(b.item_key) ?? Infinity));
 }
 
 export function mutationError(row) {
@@ -321,7 +324,25 @@ export async function applyPushResults(results) {
   });
 }
 
-export async function applyPull(payload) {
+export async function beginPull() {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('meta', 'readwrite');
+    const meta = tx.objectStore('meta');
+    const previous = meta.get('pull_request_sequence');
+    let sequence;
+    previous.onsuccess = () => {
+      sequence = (previous.result?.value ?? 0) + 1;
+      if (!Number.isSafeInteger(sequence) || sequence < 1) { tx.abort(); return; }
+      meta.put({ key: 'pull_request_sequence', value: sequence });
+    };
+    tx.oncomplete = () => resolve(sequence);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('Device pull sequence unavailable'));
+  });
+}
+
+export async function applyPull(payload, sequence) {
   if (!Number.isSafeInteger(payload?.cursor) || payload.cursor < 0 || !Array.isArray(payload.papers)
       || payload.papers.some((row) => !row || typeof row.item_key !== 'string' || !row.item_key.trim())
       || new Set(payload.papers.map((row) => row.item_key)).size !== payload.papers.length) {
@@ -337,11 +358,16 @@ export async function applyPull(payload) {
     const existing = papers.getAll();
     const queued = mutations.getAll();
     const cursor = meta.get('cursor');
+    const appliedSequence = meta.get('pull_applied_sequence');
     let reads = 0;
     const reconcile = () => {
-      if (++reads !== 3) return;
+      if (++reads !== 4) return;
       const current = cursor.result?.value ?? 0;
-      if (!Number.isSafeInteger(current) || current < 0 || payload.cursor < current) { tx.abort(); return; }
+      const applied = appliedSequence.result?.value ?? 0;
+      if (!Number.isSafeInteger(current) || current < 0 || payload.cursor < current
+          || (sequence != null && (!Number.isSafeInteger(sequence) || sequence < 1
+            || (payload.cursor === current && sequence < applied)))) { tx.abort(); return; }
+      if (sequence != null) meta.put({ key: 'pull_applied_sequence', value: Math.max(sequence, applied) });
       const incomingKeys = new Set(incoming.map((row) => row.item_key));
       const retainedKeys = new Set(queued.result.map((row) => row.item_key));
       const pendingByKey = pendingFields(queued.result);
@@ -381,6 +407,7 @@ export async function applyPull(payload) {
     existing.onsuccess = reconcile;
     queued.onsuccess = reconcile;
     cursor.onsuccess = reconcile;
+    appliedSequence.onsuccess = reconcile;
     tx.oncomplete = resolve;
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error || new Error('IndexedDB snapshot transaction aborted'));
@@ -391,7 +418,7 @@ export async function applyPull(payload) {
 export async function resolveConflict(mutationId, keepLocal) {
   const db = await openDb();
   await new Promise((resolve, reject) => {
-    const tx = db.transaction(['mutations', 'meta'], 'readwrite');
+    const tx = db.transaction(['mutations', 'meta', 'papers'], 'readwrite');
     const mutations = tx.objectStore('mutations');
     const meta = tx.objectStore('meta');
     Promise.all([request(mutations.get(mutationId)), request(meta.get('mutation_sequence'))])
@@ -422,6 +449,20 @@ export async function resolveConflict(mutationId, keepLocal) {
         if (!keepLocal) resolution.original_intent = {
           operation: intent.operation, value: intent.value, comment: intent.comment,
         };
+        if (keepLocal) {
+          const projected = pendingFields([resolution]).get(conflict.item_key)[conflict.field];
+          const papers = tx.objectStore('papers');
+          const paper = papers.get(conflict.item_key);
+          paper.onsuccess = () => {
+            if (paper.result) papers.put({ ...paper.result, [conflict.field]: projected });
+          };
+          const key = `response:review:${conflict.item_key}`;
+          const cached = meta.get(key);
+          cached.onsuccess = () => {
+            if (cached.result?.value) meta.put({ key, value: { ...cached.result.value,
+              [conflict.field === 'verdict' ? 'verdict' : 'user_note']: projected } });
+          };
+        }
         mutations.delete(conflict.mutation_id);
         mutations.put(resolution);
         meta.put({ key: 'mutation_sequence', value: resolution.sequence });

@@ -3,9 +3,11 @@ import 'fake-indexeddb/auto';
 import { QueryClient, QueryClientProvider, onlineManager } from '@tanstack/react-query';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { createElement } from 'react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import usePaperReview from './usePaperReview.js';
-import { cacheResponse, pendingMutations, savePapers } from '../offlineStore.js';
+import { cacheResponse, pendingMutations, publishStatus, savePapers } from '../offlineStore.js';
+
+beforeEach(async () => { await publishStatus('', 'unchecked'); });
 
 const clients = [];
 function mount(key, initial) {
@@ -91,7 +93,7 @@ it('persists ordered verdicts and retraction offline without attempting a second
   expect(await changes(key)).toEqual(rows);
 });
 
-it('separates a durable deletion ACK from its asynchronous detail refresh', async () => {
+it('refreshes a durable deletion locally once its transport outage is known', async () => {
   const key = 'DELETION_REFRESH_BOUNDARY';
   const detail = { item_key: key, user_note: 'Retained', verdict: { user_priority: 'could_read' } };
   await savePapers([{ item_key: key, revisions: { verdict: 4 } }]);
@@ -105,10 +107,9 @@ it('separates a durable deletion ACK from its asynchronous detail refresh', asyn
   act(() => hook.result.current.verdict.onDelete());
   await waitFor(async () => expect((await changes(key)).length).toBe(1));
   await waitFor(() => expect(hook.result.current.verdict.deleting).toBe(false));
-  await waitFor(() => expect(reads).toHaveLength(2));
-  expect(hook.result.current.detail.verdict).toEqual(detail.verdict);
-  await act(async () => { reads.forEach(reject => reject(new TypeError('Disconnected test transport'))); });
   await waitFor(() => expect(hook.result.current.detail.verdict).toBeNull());
+  expect(reads).toHaveLength(1); // the initial read; known outage avoids another blocking request
+  await act(async () => { reads.forEach(reject => reject(new TypeError('Disconnected test transport'))); });
 });
 
 it('settles a missing local detail as a transport error instead of remaining paused', async () => {
