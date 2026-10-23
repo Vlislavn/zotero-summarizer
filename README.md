@@ -291,6 +291,12 @@ limits](docs/architecture.md#verify-a-change). `make check` runs checks without 
 
 ## Going further
 
+Offline support comparison (#37): `python -m tools.method_validation support --config FILE`
+is read-only by default; `--run` explicitly consents to private reports/configured HTTP.
+See [contract](docs/decision-support-comparison.md). Recorded replay verifies the
+exact case/arm input-to-terminal binding, not just copied output hashes.
+No model loads or product changes.
+
 - **[docs/usage.md](docs/usage.md)** — the daemon, how the model learns from your labels,
   offline / air-gapped use, the safety model, and the full config reference. Faithbench QA
   builds cover contiguous 6,000-character windows (32 per paper by default); its CLI/env
