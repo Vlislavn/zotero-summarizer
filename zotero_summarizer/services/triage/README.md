@@ -268,3 +268,5 @@ limitations and optional artifacts remain available without new calls or scoring
 changes. Default refinement preserves conditional effect directions and Results
 exceptions, failed versus absent validation, and repository versus reproducibility
 evidence. Instruction-presence tests are not scientific-faithfulness evaluations.
+
+The existing daemon training-ledger producer is retained with its original synthetic-trainer regression suite. It appends retained artifact identities only after install/rescore; this packaging adds no fitting, inference or new identity authority.

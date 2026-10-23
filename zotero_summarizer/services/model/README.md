@@ -243,3 +243,5 @@ the category-slot restriction. Its `--replay` also compares score keys directly,
 not the production role allocator; neither measures this new ordering policy.
 The new restriction has regression coverage, not a measured user-preference lift;
 bonus magnitudes and feature-flag defaults are unchanged.
+
+The existing daemon training-ledger producer is retained with its original synthetic-trainer regression suite. It appends retained artifact identities only after install/rescore; this packaging adds no fitting, inference or new identity authority.

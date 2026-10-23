@@ -94,3 +94,5 @@ removes its signal handlers on exit; zero ticks does no work.
 Weekly Feedback runs only when explicitly enabled for `feeds serve`. Owned
 SIGINT/SIGTERM during analysis drain the child and stop the daemon cleanly
 without starting a feed tick or advancing the cursor. Other failures propagate.
+
+The existing daemon training-ledger producer is retained with its original synthetic-trainer regression suite. It appends retained artifact identities only after install/rescore; this packaging adds no fitting, inference or new identity authority.

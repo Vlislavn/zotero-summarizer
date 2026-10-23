@@ -218,3 +218,11 @@ with `ZS_CLI_TEST_WALL_SECONDS` overrides capped at 60 seconds.
 
 Weekly scheduling/recovery and manual/weekly signal/RSS controls are covered by
 the #166 fixtures; the part-1/2/3 notices above are prerequisite-stage records.
+
+Part 2 retains the corresponding original Feedback suites without assertion changes.
+
+Part 3 retains the corresponding original Feedback suites without assertion changes.
+
+Part 4 retains the corresponding original Feedback suites without assertion changes.
+
+The existing daemon training-ledger producer is retained with its original synthetic-trainer regression suite. It appends retained artifact identities only after install/rescore; this packaging adds no fitting, inference or new identity authority.

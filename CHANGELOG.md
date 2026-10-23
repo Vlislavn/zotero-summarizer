@@ -11,6 +11,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 ## [Unreleased]
 
 ### Changed
+- Retain the existing daemon training-ledger producer and original provenance/cancellation tests; no new training or inference behavior is designed.
 - Reconcile weekly Feedback with the current manual/analysis foundation without losing safe recovery, signal cleanup, parser/identity bounds or admitted-root ownership.
 - Carry required Feedback dependency safety into weekly execution: bound CSV parsing, validate retained identities/schema/time, preserve literal Markdown, pin the selected CLI root, and close child-launch/RSS enforcement gaps.
 - Recover weekly Feedback after confirmed prepublication failures and delayed first cursor commits; reject unsafe cursor links/incompatible caps, and stop the daemon cleanly on owned analysis signals.
