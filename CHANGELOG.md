@@ -10,9 +10,9 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
-
-
 ### Changed
+- Pin the admitted CLI root through handler reloads and server factory startup; a selected `.env` cannot redirect writes to another project. Cover shell/cwd defaults and direct provider-SDK import rejection; name subprocess safety-cap constants.
+- CLI validates before Settings/.env loading, then applies offline flags from the selected project only. Importing CLI no longer reads another root. Faithbench/Setup exports and pure run options load lazily without changing public objects or benchmark algorithms.
 - Hand off native scout artifact references explicitly, mark review evidence untrusted, and clarify task-level worker/consent boundaries. Lock labels and literal canary requests in offline contract tests; no sandbox or injection-resistance claim.
 - Share pinned native Pi profiles and labelled workflows with offline task/order/failure contract tests. Document authority, activation and actual terminal checks; keep dependencies/runtime state out of Git. Canaries are not model-quality, sandbox or writer-safety acceptance.
 - Omit whitespace-only reading-plan entries while preserving other text and order. Label minutes as the saved estimate, not a recalculation for a policy-capped action.

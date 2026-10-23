@@ -1,18 +1,17 @@
-"""First-run setup + onboarding domain.
+"""Setup exports resolve on use; importing path/deployment validation starts no services."""
+from importlib import import_module
 
-The primitives behind ``/api/setup/*`` AND the ``zotero-summarizer setup`` CLI —
-one implementation, two front-ends. See README.md for the flow.
-"""
-from zotero_summarizer.services.setup.bootstrap import bootstrap_phase0
-from zotero_summarizer.services.setup.detect import detect_zotero_data_dirs
-from zotero_summarizer.services.setup.env_writer import write_env_paths
-from zotero_summarizer.services.setup.status import get_setup_status
-from zotero_summarizer.services.setup.validate import validate_config_draft
+_EXPORTS = {
+    "bootstrap_phase0": "bootstrap", "detect_zotero_data_dirs": "detect",
+    "get_setup_status": "status", "validate_config_draft": "validate",
+    "write_env_paths": "env_writer",
+}
+__all__ = list(_EXPORTS)
 
-__all__ = [
-    "bootstrap_phase0",
-    "detect_zotero_data_dirs",
-    "get_setup_status",
-    "validate_config_draft",
-    "write_env_paths",
-]
+
+def __getattr__(name):
+    if name not in _EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(f"{__name__}.{_EXPORTS[name]}"), name)
+    globals()[name] = value
+    return value

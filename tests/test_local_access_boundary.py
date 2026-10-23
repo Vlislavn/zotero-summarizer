@@ -161,12 +161,14 @@ def test_programmatic_remote_bind_cannot_launch(monkeypatch):
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1"])
-def test_supported_launcher_preserves_host_port_and_disables_proxy_headers(monkeypatch, host):
+def test_supported_launcher_preserves_host_port_and_disables_proxy_headers(monkeypatch, tmp_path, host):
     import uvicorn
 
     calls = []
     monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
     args = build_parser().parse_args(["serve", "--host", host, "--port", "8765"])
+    args.project_root = str(tmp_path)  # main() normally resolves and admits this root.
+    monkeypatch.setenv("ZOTERO_SUMMARIZER_HOME", str(tmp_path))
     assert args.func(args) == 0
     assert calls == [(("zotero_summarizer.api.app:create_app",), {
         "factory": True, "host": host, "port": 8765, "reload": False, "proxy_headers": False,

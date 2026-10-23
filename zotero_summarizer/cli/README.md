@@ -18,7 +18,7 @@ __init__.build_parser()
           └─ register_goldenset_setup_tag_colors(gs_sub)  # _goldenset_setup_colors.py: setup-tag-colors
    ├─ register_faithbench(subparsers)  # _faithbench.py: faithbench build/run/judge/report
    └─ register_research_feed(...)      # _research_feed.py: research-feed run
-main() = parse args → validate command budgets → install Settings → dispatch
+main() = parse args → validate command budgets → selected Settings/.env → offline flags → dispatch
 ```
 
 | file | responsibility |
@@ -26,7 +26,7 @@ main() = parse args → validate command budgets → install Settings → dispat
 | `__init__.py` | `build_parser()` + `main()` (the entry point `zotero-summarizer`) |
 | `__main__.py` | enables `python -m zotero_summarizer.cli` |
 | `_helpers.py` | shared CLI helpers: feed-id resolution, run-log writing, slugs |
-| `_app.py` | `serve` (uvicorn `api.app:create_app`, `factory=True`; leaves existing listeners intact and reports a bind error on an occupied port; the process-killing helper and `--no-kill` option are removed) / `mcp` / `migrate` / `smoke-test` / `prefetch-models` (download the ML models for offline use; `--check` reports cache status; includes the MiniCheck claim-checker only when `quality_review.shadow_claim_check` is on). `__init__.apply_offline_env()` (called at CLI import, before any transformers import) turns `ZS_OFFLINE`/`HF_HUB_OFFLINE` into cache-only model loading. `verify-deep-review` runs the real digest + quality path headlessly against the live `deep_review` model on ONE already-built paper's cached `qa_text` (`--item-key`, default `4NIMLFMV`; `--with-goals` adds the heavier goal board) — prints per-phase timing + the digest JSON; the end-to-end "does a review actually produce a digest" check without Zotero or the server. It computes `sub_concurrency` via the SAME `_common.deep_review_sub_concurrency` helper the background job uses (and prints it in the tier line), so its wall-clock is a faithful production receipt — a remote provider's rubric/goal sub-calls run in parallel here exactly as they would in the app. `--provider`/`--model` override the deep_review stage for THIS run only (e.g. `--provider default --model qwen3.5:4b` to drive the pipeline against a local ollama model when the configured provider is unreachable/over-budget) |
+| `_app.py` | `serve` (uvicorn `api.app:create_app`, `factory=True`; leaves existing listeners intact and reports a bind error on an occupied port; the process-killing helper and `--no-kill` option are removed) / `mcp` / `migrate` / `smoke-test` / `prefetch-models` (download the ML models for offline use; `--check` reports cache status; includes the MiniCheck claim-checker only when `quality_review.shadow_claim_check` is on). `__init__.apply_offline_env()` projects the selected Settings environment before handler model imports; importing CLI or building its parser reads no default `.env` or model SDK. `ZS_OFFLINE`/`HF_HUB_OFFLINE` still select cache-only model loading. `verify-deep-review` runs the real digest + quality path headlessly against the live `deep_review` model on ONE already-built paper's cached `qa_text` (`--item-key`, default `4NIMLFMV`; `--with-goals` adds the heavier goal board) — prints per-phase timing + the digest JSON; the end-to-end "does a review actually produce a digest" check without Zotero or the server. It computes `sub_concurrency` via the SAME `_common.deep_review_sub_concurrency` helper the background job uses (and prints it in the tier line), so its wall-clock is a faithful production receipt — a remote provider's rubric/goal sub-calls run in parallel here exactly as they would in the app. `--provider`/`--model` override the deep_review stage for THIS run only (e.g. `--provider default --model qwen3.5:4b` to drive the pipeline against a local ollama model when the configured provider is unreachable/over-budget) |
 | `_mobile_serve.py` | Explicit `serve-mobile --origin HTTPS_TS_ORIGIN --owner-login EXACT_LOGIN`: existing app through an owned private Unix listener, never a TCP fallback or automatic Tailscale configuration. Bound directory/socket ownership and signal cleanup; configurable graceful wait, not downstream cancellation proof. |
 | `_setup.py` | `setup` reuses bootstrap/path/goals services; `--mode local --profile light\|balanced\|existing` resolves the same hardware-gated profile definitions as web and prints (never runs) an explicit model pull command. Hosted and skip/no-LLM paths remain. `doctor [--json|--fix|--check id]` runs the shared persisted real-pipeline checklist; `calibrate` retains measured hardware/endpoint tuning. |
 | `_feeds.py` | the `feeds` subcommands (drive the RSS daemon) |
@@ -146,8 +146,11 @@ CSV predictions, benchmark reports or run logs are written, including when earli
 rows succeeded. Successful summaries use `rows_skipped` (missing title/abstract),
 not the former `rows_failed`; provider failures are no longer successful summaries.
 
-`main()` installs the selected project's Settings before dispatch, so nested
-provider construction uses the same timeout and model/tuning paths as the command.
+`main()` installs the selected project's Settings and pins its resolved root in
+handler arguments before dispatch. A `.env` value for `ZOTERO_SUMMARIZER_HOME`
+cannot redirect a later handler reload; `serve` passes that same root to its
+factory/reload workers through the environment. Nested provider construction
+uses the same timeout and model/tuning paths as the command.
 Default model/history outputs are `data/models/`; tuning uses
 `data/optuna-best-params.json`. Training publishes `<classifier>.zip` with model
 and metadata together; run logs report the resolved artifact path (legacy joblib

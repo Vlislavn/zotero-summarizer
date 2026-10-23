@@ -1,30 +1,18 @@
-"""Faithfulness mini-benchmark for the deep-review / paper-Q&A pipeline.
+"""Faithfulness benchmark exports; lightweight input admission never starts execution."""
+from importlib import import_module
 
-See README.md in this package for the build → run → judge → report flow.
-"""
-from zotero_summarizer.services.faithbench._build_qa import build_items
-from zotero_summarizer.services.faithbench._corpus import PaperChunkIndex, select_papers
-from zotero_summarizer.services.faithbench._judge import judge_run
-from zotero_summarizer.services.faithbench._report import build_report
-from zotero_summarizer.services.faithbench._runner import (
-    ANSWER_PROMPT,
-    RunInputs,
-    RunOptions,
-    RunPaths,
-    answer_with_retry,
-    run_benchmark,
-)
+_EXPORTS = {
+    "ANSWER_PROMPT": "_runner", "PaperChunkIndex": "_corpus", "RunInputs": "_runner",
+    "RunOptions": "_options", "RunPaths": "_runner", "answer_with_retry": "_runner",
+    "build_items": "_build_qa", "build_report": "_report", "judge_run": "_judge",
+    "run_benchmark": "_runner", "select_papers": "_corpus",
+}
+__all__ = list(_EXPORTS)
 
-__all__ = [
-    "ANSWER_PROMPT",
-    "PaperChunkIndex",
-    "RunInputs",
-    "RunOptions",
-    "RunPaths",
-    "answer_with_retry",
-    "build_items",
-    "build_report",
-    "judge_run",
-    "run_benchmark",
-    "select_papers",
-]
+
+def __getattr__(name):
+    if name not in _EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(f"{__name__}.{_EXPORTS[name]}"), name)
+    globals()[name] = value
+    return value

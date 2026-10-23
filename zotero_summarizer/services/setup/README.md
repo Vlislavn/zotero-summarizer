@@ -56,6 +56,10 @@ partial write, so an old-key client or in-flight builder cannot repopulate it. A
 restart before checks can pass. Zotero remains diagnostic but optional for
 RSS-only setups; an enabled RSS source is still required for Today.
 
+The package façade resolves its existing exported functions lazily to the same
+defining objects. Importing lightweight deployment/path validation does not import
+status, Zotero or model services; actual setup/Doctor calls retain their behavior.
+
 Web and CLI share profile, validation, and Doctor services. State lives under
 `Settings.data_dir`; secrets stay in the keyring or legacy environment.
 
