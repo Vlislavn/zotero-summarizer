@@ -5,16 +5,15 @@ from __future__ import annotations
 import asyncio
 from contextlib import closing
 from datetime import datetime, timezone
-import importlib.util
 import shutil
 import sqlite3
-from pathlib import Path
 from threading import Lock
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models import SummarizeRequest
-from zotero_summarizer.models.providers import STAGES, resolve_stage
+from zotero_summarizer.models.providers import STAGES, ProviderConfig, ProviderType, resolve_stage
 from zotero_summarizer.services._common import (
     read_config,
     read_json_or_empty,
@@ -24,11 +23,19 @@ from zotero_summarizer.services.setup.doctor_environment import (
     _database,
     _environment,
     _local_profile,
+    _optional_extras,
     _research_goals,
     _row,
+    _restart_required,
+    _saved_paths,
     _zotero,
+    redact_diagnostics,
 )
 from zotero_summarizer.settings import Settings, offline_requested
+from zotero_summarizer.services.setup.load_admission import (
+    ADMISSION_REVISION, refused_local_load, verification_row,
+)
+from zotero_summarizer.services.setup.load_attempt import SetupAttempt, checked_rows, current_attempt
 
 _CHECKS = (
     "environment",
@@ -45,10 +52,28 @@ _CHECKS = (
 )
 _REQUIRED = frozenset(_CHECKS) - {"local_profile", "optional_extras", "zotero"}
 _LOCK = Lock()
+_ACTIVE: SetupAttempt | None = None
+
+
+def cancel_doctor(run_id: str) -> dict:
+    attempt = _ACTIVE
+    if attempt is None or attempt.run_id != run_id:
+        raise APIError("doctor_not_running", "This verification is no longer running", status_code=409)
+    receipt = attempt.abandon("cancelled")
+    if receipt["finished"]:
+        raise APIError("doctor_not_running", "Verification already finished", status_code=409)
+    return {"ready": False, "status": "cancelling", "attempt": receipt}
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _ollama_endpoint(provider: ProviderConfig) -> bool:
+    """The supported local OpenAI-compatible default port, not a sibling's runtime."""
+    endpoint = provider.base_url or ""
+    parsed = urlsplit(endpoint if "://" in endpoint else "http://" + endpoint)
+    return provider.type == ProviderType.openai and provider.is_local and parsed.port == 11434
 
 
 def _runtime_model(settings: Settings) -> dict[str, Any]:
@@ -63,58 +88,51 @@ def _runtime_model(settings: Settings) -> dict[str, Any]:
             "ML-only triage remains available.",
         )
     resolved = [resolve_stage(config.llm_routing, stage) for stage in STAGES]
-    local = [item for item in resolved if item.provider.is_local]
-    uses_ollama = local and any(
-        "localhost:11434" in (item.provider.base_url or "") for item in local
-    )
-    if uses_ollama and shutil.which("ollama") is None:
-        return _row(
-            "runtime_model",
-            "needs_action",
-            "Ollama is not installed",
-            "The selected profile uses localhost:11434.",
-            action="Install Ollama",
-            command="brew install ollama",
-        )
     served: dict[str, list[str]] = {}
+    attempt = current_attempt()
     for item in resolved:
-        if item.provider.name not in served:
-            try:
-                served[item.provider.name] = list_models_for_provider(item.provider)
-            except Exception as exc:
-                if item.provider.is_local and uses_ollama:
-                    return _row(
-                        "runtime_model",
-                        "needs_action",
-                        "Ollama is not running",
-                        f"{type(exc).__name__}: {exc}",
-                        action="Start Ollama",
-                        command="ollama serve",
-                    )
-                raise
+        if attempt:
+            attempt.require_active()
+        if item.provider.name in served:
+            continue
+        ollama = _ollama_endpoint(item.provider)
+        identity = f"{item.provider.name}/{item.model} at {item.provider.base_url}"
+        if ollama and shutil.which("ollama") is None:
+            return _row("runtime_model", "needs_action", "Ollama is not installed", identity,
+                        action="Install Ollama", command="brew install ollama")
+        try:
+            served[item.provider.name] = list_models_for_provider(item.provider)
+        except Exception as exc:  # noqa: BLE001 — inventory failures retain the failing route
+            row = _row(
+                "runtime_model", "needs_action",
+                "Ollama is not running" if ollama else f"Endpoint for {item.provider.name} is unavailable",
+                f"{identity}: {type(exc).__name__}: {exc}",
+                action="Start Ollama" if ollama else "Review endpoint settings",
+                command="ollama serve" if ollama else None,
+            )
+            if not ollama:
+                row["recovery"]["action"] = "open_ai_settings"
+            return row
     missing = [
         item for item in resolved if item.model not in served[item.provider.name]
     ]
     if missing:
         item = missing[0]
-        command = (
-            f"ollama pull {item.model}"
-            if item.provider.is_local and uses_ollama
-            else None
-        )
-        return _row(
-            "runtime_model",
-            "needs_action",
-            "Configured model is not available",
-            ", ".join(f"{row.provider.name}/{row.model}" for row in missing),
-            action="Download model" if command else "Choose a served model",
+        command = f"ollama pull {item.model}" if _ollama_endpoint(item.provider) else None
+        row = _row(
+            "runtime_model", "needs_action", "Configured model is not available",
+            ", ".join(f"{row.provider.name}/{row.model} at {row.provider.base_url}" for row in missing),
+            action="Download model" if command else f"Choose a served model for {item.provider.name}",
             command=command,
         )
+        if not command:
+            row["recovery"]["action"] = "open_ai_settings"
+        return row
     identities = ", ".join(
         sorted({f"{item.provider.name}/{item.model}" for item in resolved})
     )
     return _row(
-        "runtime_model", "ready", "Runtime serves every configured model", identities
+        "runtime_model", "ready", "Every configured model is listed; inference is not yet verified", identities
     )
 
 
@@ -129,36 +147,10 @@ def _llm_inference(settings: Settings) -> dict[str, Any]:
             "AI inference check skipped by choice",
             "Enable AI later in Settings to run model-backed features.",
         )
-    result = asyncio.run(check_routing_stages(config.llm_routing))
-    failed = [row for row in result["stages"] if row["status"] != "operational"]
-    grouped: dict[tuple[str, str, str], list[str]] = {}
-    for row in result["stages"]:
-        key = (row["provider"], row["model"], row.get("detail") or row["status"])
-        grouped.setdefault(key, []).append(row["stage"])
-    detail = "; ".join(
-        f"{provider}/{model} ({', '.join(stages)}): {outcome}"
-        for (provider, model, outcome), stages in grouped.items()
-    )
-    providers = {row.name: row for row in config.llm_routing.providers}
-    stale = next(
-        (
-            row
-            for row in failed
-            if providers[row["provider"]].is_local
-            and "does not support chat" in row.get("detail", "")
-        ),
-        None,
-    )
-    return _row(
-        "llm_inference",
-        "needs_action" if failed else "ready",
-        "Inference failed for a configured stage"
-        if failed
-        else "Every LLM stage returned a real response",
-        detail,
-        action="Refresh model" if stale else "Retry inference",
-        command=f"ollama pull {stale['model']}" if stale else None,
-    )
+    attempt = current_attempt()
+    result = asyncio.run(check_routing_stages(config.llm_routing,
+        **({"should_stop": attempt.is_abandoned} if attempt else {})))
+    return verification_row(result["stages"])
 
 
 def _ml_assets(settings: Settings) -> dict[str, Any]:
@@ -215,6 +207,12 @@ def _dry_run(settings: Settings) -> dict[str, Any]:
             "The classifier-only backlog path does not call an LLM.",
         )
     resolved = resolve_stage(config.llm_routing, "feed")
+    refusal = refused_local_load(resolved.provider, resolved.model)
+    if refusal:
+        row = _row("dry_run", "needs_action", "Local dry-run was not submitted", refusal["detail"], action="Review AI settings")
+        row["recovery"]["action"] = "open_ai_settings"
+        row["load_receipts"] = [refusal]
+        return row
     request = SummarizeRequest(
         title="Dry-run paper: reproducible local research triage",
         abstract=(
@@ -222,24 +220,14 @@ def _dry_run(settings: Settings) -> dict[str, Any]:
             "ablation studies, confidence intervals, and public code."
         ),
     )
-    result = run_abstract_dry(config, request, build_client_for_stage(resolved))
+    client = build_client_for_stage(resolved, verification=True)
+    try:
+        result = run_abstract_dry(config, request, client)
+    finally:
+        client.close()
     detail = f"priority={result.reading_priority}; score={result.relevance_score}"
     return _row(
         "dry_run", "ready", "Dry-run triage completed without a Zotero write", detail
-    )
-
-
-def _optional_extras(_: Settings) -> dict[str, Any]:
-    browsers = importlib.util.find_spec("patchright") is not None
-    return _row(
-        "optional_extras",
-        "ready" if browsers else "unavailable",
-        "Browser/PDF extras are available"
-        if browsers
-        else "Browser automation is optional and unavailable",
-        "Core local triage does not require browser automation.",
-        action="Install browser extras",
-        command=None if browsers else "uv sync --extra browser",
     )
 
 
@@ -281,8 +269,18 @@ def store_credential_and_invalidate(settings: Settings, name: str, key: str) -> 
 def _config_signature(settings: Settings) -> str:
     """Invalidate old Doctor success after routing, goals, or paths change."""
     import hashlib
+    import yaml
+    from zotero_summarizer.services.llm.credentials import get_api_key
 
     digest = hashlib.sha256()
+    if settings.config_path.is_file():
+        try:
+            config = read_config(settings.config_path, settings.calibration_path)
+            for provider in config.llm_routing.providers:
+                if not provider.is_local:
+                    digest.update(repr((provider.name, get_api_key(provider.api_key_env))).encode())
+        except (ValueError, yaml.YAMLError):
+            digest.update(b"invalid-credential-configuration")
     for path in (settings.config_path, settings.calibration_path):
         digest.update(path.read_bytes() if path.is_file() else b"")
     saved = _saved_paths(settings)
@@ -308,39 +306,33 @@ def _config_signature(settings: Settings) -> str:
     return digest.hexdigest()
 
 
-def _saved_paths(settings: Settings) -> dict[str, str | None]:
-    from dotenv import dotenv_values
-
-    values = dotenv_values(settings.env_path) if settings.env_path.is_file() else {}
-    return {key: values.get(key) for key in ("ZOTERO_DATA_DIR", "PDF_ROOT")}
-
-
-def _restart_required(settings: Settings) -> bool:
-    saved = _saved_paths(settings)
-    return any(
-        raw and Path(raw).expanduser().resolve() != getattr(settings, attr).resolve()
-        for key, attr in (("ZOTERO_DATA_DIR", "zotero_data_dir"), ("PDF_ROOT", "pdf_root"))
-        if (raw := saved.get(key))
-    )
-
-
 def doctor_status(settings: Settings) -> dict[str, Any]:
     path = settings.data_dir / "setup_doctor.json"
     payload = read_json_or_empty(path)
+    active = _ACTIVE if _ACTIVE and _ACTIVE.run_id == payload.get("run_id") else None
     restart = _restart_required(settings)
-    if restart or not payload or payload.get("config_signature") != _config_signature(settings):
+    if (restart or not payload or payload.get("verification_revision") != ADMISSION_REVISION
+            or payload.get("config_signature") != _config_signature(settings)):
         checks = [_row(check_id, "not_started", "Not checked yet") for check_id in _CHECKS]
         if restart:
             checks[0] = _row("environment", "needs_action", "Restart app to apply new Zotero/PDF paths",
                              action="Retry after restart")
         return {
+            "verification_revision": ADMISSION_REVISION,
             "status": "needs_action" if restart else "not_started",
             "ready": False,
             "checks": checks,
             "modes": {},
             "last_successful_at": None,
             "config_signature": _config_signature(settings),
+            **({"status": "running", "run_id": active.run_id, "attempt": active.receipt()} if active else {}),
         }
+    if active:
+        payload["attempt"] = active.receipt()
+    elif payload.get("status") == "running":
+        payload.update(status="needs_action", ready=False,
+                       attempt={"run_id": payload.get("run_id"), "ownership": "unresolved",
+                                "callback_state": "unknown", "finished": False, "hold": True})
     by_id = {row["id"]: row for row in payload.get("checks", [])}
     payload["checks"] = [
         by_id.get(check_id, _row(check_id, "not_started", "Not checked yet"))
@@ -408,13 +400,10 @@ def _redact_details(settings: Settings, rows: list[dict[str, Any]]) -> None:
             for provider in providers
             if (resolved := get_api_key(provider.api_key_env))
         ]
-    except Exception:  # noqa: BLE001 — redaction must not break the diagnostic
-        secrets = []
-    for row in rows:
-        detail = str(row.get("detail") or "")
-        for secret in secrets:
-            detail = detail.replace(secret, "[redacted]")
-        row["detail"] = detail
+    except Exception:  # noqa: BLE001 — withhold diagnostics rather than risk leaking a secret
+        rows[:] = [_row(row["id"], "needs_action", "Credential redaction failed; review AI settings") for row in rows]
+        return
+    rows[:] = redact_diagnostics(rows, secrets)
 
 
 def run_doctor(
@@ -422,7 +411,10 @@ def run_doctor(
     *,
     check_ids: list[str] | None = None,
     fix: bool = False,
+    attempt: SetupAttempt | None = None,
 ) -> dict[str, Any]:
+    global _ACTIVE
+    attempt = attempt or SetupAttempt()
     selected = list(dict.fromkeys(check_ids or _CHECKS))
     unknown = sorted(set(selected) - set(_CHECKS))
     if unknown:
@@ -436,6 +428,7 @@ def run_doctor(
             "doctor_running", "Setup checks are already running", status_code=409
         )
     try:
+        _ACTIVE = attempt
         if fix:
             from zotero_summarizer.services.setup.bootstrap import bootstrap_phase0
 
@@ -456,23 +449,20 @@ def run_doctor(
             "ready": False,
             "checks": [by_id[key] for key in _CHECKS],
             "started_at": _now(),
+            "run_id": attempt.run_id,
+            "attempt": attempt.receipt(),
             "config_signature": started_signature,
         }
         _save(settings, running)
-        for check_id in selected:
-            try:
-                by_id[check_id] = _RUNNERS[check_id](settings)
-            except Exception as exc:  # noqa: BLE001 — diagnostic status boundary
-                by_id[check_id] = _row(
-                    check_id,
-                    "needs_action",
-                    f"{check_id.replace('_', ' ').title()} failed",
-                    f"{type(exc).__name__}: {exc}",
-                )
+        for check_id, result in checked_rows(settings, selected, _RUNNERS, attempt):
+            by_id[check_id] = result
+            rows = [by_id[key] for key in _CHECKS]
+            _redact_details(settings, rows)
+            _save(settings, {**running, "checks": rows, "attempt": attempt.receipt()})
         rows = [by_id[key] for key in _CHECKS]
-        changed = _config_signature(settings) != started_signature
+        changed = attempt.is_abandoned() or _config_signature(settings) != started_signature
         if changed:
-            rows[0] = _row("environment", "needs_action", "Setup changed during checks",
+            rows[0] = _row("environment", "needs_action", "Setup changed or verification was abandoned",
                            action="Run checks again")
         _redact_details(settings, rows)
         ready = not changed and all(row["status"] == "ready" for row in rows if row["id"] in _REQUIRED)
@@ -481,13 +471,16 @@ def run_doctor(
             "ready": ready,
             "checks": rows,
             "modes": _modes(settings, rows),
+            "verification_revision": ADMISSION_REVISION,
+            "attempt": attempt.receipt(),
             "finished_at": _now(),
             "last_successful_at": _now()
             if ready
             else current.get("last_successful_at"),
             "config_signature": started_signature,
         }
-        _save(settings, payload)
-        return payload
+        return attempt.publish(payload, lambda value: _save(settings, value),
+                               previous_success=current.get("last_successful_at"))
     finally:
+        _ACTIVE = None
         _LOCK.release()

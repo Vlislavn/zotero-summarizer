@@ -135,6 +135,18 @@ simply disables reload restoration for that tab.
 Offline sync pulls use the complete paper snapshot and revision cursor; the
 protocol's legacy `changes` field is empty because the PWA does not consume history.
 
+`utils/setupDoctorState.js` owns Doctor request generations per QueryClient.
+Wizard/Settings consume only that query cache, never a completed mutation fallback.
+Config, credentials, paths and source writes invalidate health even after ambiguous
+write errors; late checks cannot restore pre-edit Ready. The checklist polls running
+checks, cancels by actual run ID, and links unknown local admission to AI Settings
+separately from a scoped retry. Stop never claims remote termination. Missing
+production ResourceEnvelope keeps local LLM verification unknown, not Ready;
+hosted/no-LLM and nonloading listing remain available. The wizard accepts the same
+127/8, mapped-IPv6, numeric-shorthand and reserved-localhost endpoints as backend
+admission; choosing an existing local endpoint does not require a hosted key.
+No hardware acceptance is claimed by synthetic component tests.
+
 ## Paper review
 
 The card and full-page verdict show the saved reading plan without opening Details:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.integrations.llm import LLMClient
 from zotero_summarizer.models.providers import (
+    LLMCapability,
     ProviderConfig,
     ProviderType,
     ResolvedStage,
@@ -21,9 +22,9 @@ from zotero_summarizer.services.llm.thinking import (
 def resolve_api_key(provider: ProviderConfig) -> str:
     """Resolve a key from OS storage or the legacy environment fallback."""
     resolved = get_api_key(provider.api_key_env)
-    if not resolved and provider.is_local and provider.api_key_env == "OLLAMA_API_KEY":
-        return "local"
     if not resolved:
+        if provider.is_local:
+            return "local"
         raise APIError(
             error="missing_api_key",
             message=f"No saved credential or environment value found for {provider.api_key_env}",
@@ -45,9 +46,24 @@ def _override_thinking(extra_body: dict | None, enable: bool) -> dict | None:
 
 
 def build_client_for_provider(
-    provider: ProviderConfig, model: str, *, enable_thinking: bool | None = None
+    provider: ProviderConfig, model: str, *, enable_thinking: bool | None = None,
+    verification: bool = False,
 ) -> LLMClient:
     """Construct the live client for one provider/model pair."""
+    if LLMCapability.text not in provider.available_capabilities:
+        raise APIError("unsupported_capabilities", "Selected provider does not declare text support", status_code=422)
+    verification_options = {}
+    if verification:
+        from zotero_summarizer.services.setup.load_admission import refused_local_load
+        from zotero_summarizer.services.setup.load_attempt import current_attempt
+
+        if refusal := refused_local_load(provider, model):
+            raise APIError(refusal["reason_code"], refusal["detail"], status_code=409,
+                           details={"attempted": False, "hardware_safe": "unknown"})
+        attempt = current_attempt()
+        if attempt:
+            attempt.require_active()
+        verification_options = {"verification": True, "before_request": attempt.require_active if attempt else None}
     api_key = resolve_api_key(provider)
 
     if provider.type == ProviderType.openai:
@@ -67,6 +83,7 @@ def build_client_for_provider(
             extra_body=extra_body,
             request_timeout_seconds=settings().summary_timeout_seconds,
             structured_output=provider.structured_output,
+            **verification_options,
         )
 
     if provider.type == ProviderType.anthropic:
@@ -78,6 +95,7 @@ def build_client_for_provider(
             max_tokens=provider.max_tokens,
             base_url=provider.base_url,
             thinking_budget=effort_to_anthropic_budget(provider.thinking_effort),
+            **({**verification_options, "timeout": settings().summary_timeout_seconds} if verification else {}),
         )
 
     raise APIError(
@@ -88,6 +106,7 @@ def build_client_for_provider(
     )
 
 
-def build_client_for_stage(resolved: ResolvedStage) -> LLMClient:
+def build_client_for_stage(resolved: ResolvedStage, *, verification: bool = False) -> LLMClient:
     """Build the client for a stage already resolved to provider+model."""
-    return build_client_for_provider(resolved.provider, resolved.model)
+    return build_client_for_provider(resolved.provider, resolved.model,
+                                     **({"verification": True} if verification else {}))

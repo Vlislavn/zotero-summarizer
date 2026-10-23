@@ -50,6 +50,12 @@ or incompatible required cached gate fails explicitly instead of training.
 | `faithbench/` | faithfulness mini-benchmark for the deep-review / paper-Q&A pipeline: span-verified QA + trap questions + review-claim grounding, hard-before-soft judging with a pinned remote judge. CLI-driven (`faithbench build/run/judge/report`); artifacts under `data/faithbench/`. See `faithbench/README.md`. |
 | `setup/` | first-run setup + onboarding: readiness `status`, read-only Zotero-dir `detect`, allowlisted `.env` path `env_writer` (byte-preserving; only `PDF_ROOT`/`ZOTERO_DATA_DIR`), dry-run config `validate`, and the Phase-0 `bootstrap` (creates absent `goals.yaml`/`.env`, runs the DB migration). Backs BOTH `/api/setup/*` and `zotero-summarizer setup`. Secrets never read as a value. See `setup/README.md`. |
 
+Setup-only `_adapters.build_llm(verification=True)` owns an HTTP transport with
+retries, cache, environment proxies and redirects disabled. It installs the
+observed model/terminal guard before OnPrem discards metadata and closes the
+transport on construction failure or callback completion. Ordinary clients keep
+their prior options; all setup local-LLM requests must first pass admission.
+
 Shared files: `_common` (helpers: settings/logging/sqlite-ro/now_iso_z/html_to_text/
 `load_golden_rows` (delegates to `golden.csv_store.read_snapshot`), `atomic_write` (callback) + `write_json_atomic`
 (dict→JSON) for tmp+replace artifact/cache writes. JSON publication delegates to

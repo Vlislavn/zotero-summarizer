@@ -148,11 +148,13 @@ def run_full_calibration(
     if progress is not None:
         progress({"phase": "measuring endpoint", "completed": 0, "total": 0})
     # Remote endpoints are always 'full' (no probe); only a local provider is measured.
-    probe_llm = build_client_for_provider(provider, model, enable_thinking=False) if provider.is_local else None
+    probe_llm = (build_client_for_provider(provider, model, enable_thinking=False, verification=True)
+                 if provider.is_local else None)
     tier1 = tier1_env_calibrate(config, settings.calibration_path, llm=probe_llm, is_local=provider.is_local)
     if provider.is_local:
         memory_preflight()  # remote endpoints skip this — they load no local model
-    digest_llm = build_client_for_provider(provider, model, enable_thinking=provider.thinking_on)
+    digest_llm = build_client_for_provider(provider, model, enable_thinking=provider.thinking_on,
+                                           verification=provider.is_local)
 
     def run_digest(title: str, text: str, budget: int) -> tuple[Any, float]:
         start = perf_counter()

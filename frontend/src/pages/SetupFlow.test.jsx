@@ -61,7 +61,8 @@ it('completes ML-only setup after validation and saves the personalized goal', a
   expect(saved.llm_enabled).toBe(false);
   expect(saved.research_goals).toEqual(['Evidence synthesis for clinical agents']);
   expect(saved.prestige).toEqual(config.prestige);
-  expect(client.getQueryData(['setup-doctor'])).toBeUndefined();
+  // A shared invalidation tombstone fences late checks; removed cache entries cannot do that.
+  expect(client.getQueryData(['setup-doctor'])?.ready).toBe(false);
   client.clear();
 });
 
@@ -98,6 +99,25 @@ it.each([
   expect(screen.getByRole('button', { name: 'Next' }).disabled).toBe(true);
   client.clear();
 });
+
+it.each(['127.0.0.2', '127.1.2.3', '[::ffff:127.0.0.2]', '0.0.0.0', '[::]',
+  '127.1', '2130706433', '0177.0.0.1', '0x7f000001', 'localhost.', 'model.localhost'])(
+  'accepts backend-supported literal loopback %s in Full local mode', async (host) => {
+    api.fetchConfig.mockResolvedValue({ ...config, llm_routing: {
+      providers: [{ name: 'local', type: 'openai', base_url: `http://${host}:8080/v1`, api_key_env: 'LOCAL_KEY' }],
+      default: { provider: 'local', model: 'fixture' },
+    } });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><MemoryRouter><SetupFlow /></MemoryRouter></QueryClientProvider>);
+    fireEvent.click(await screen.findByRole('radio', { name: /Full local/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('Zotero step');
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('AI provider step');
+    expect(screen.getByRole('button', { name: 'Next' }).disabled).toBe(false);
+    client.clear();
+  },
+);
 
 it('returns to the research step on validation errors and does not save invalid setup', async () => {
   api.validateSetup.mockResolvedValue({ valid: false, field_errors: [
