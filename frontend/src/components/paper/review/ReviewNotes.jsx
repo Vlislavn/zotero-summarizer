@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { saveReviewNote } from '../../../api/goldenApi.js';
+import { noteDeliveryText } from '../../../hooks/useNoteDelivery.js';
 
-export default function ReviewNotes({ itemKey, initialNote = '', onSaved, onDirtyChange }) {
+export default function ReviewNotes({ itemKey, initialNote = '', questions = [], questionMirror, onMirrorStart, onSaved, onDirtyChange }) {
   const [draft, setDraft] = useState({ itemKey, note: initialNote, baseline: initialNote });
   const { note, baseline } = draft;
   const pendingSave = useRef(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
+
 
   useEffect(() => {
     setDraft((previous) => previous.itemKey !== itemKey || previous.note === previous.baseline
@@ -30,10 +32,12 @@ export default function ReviewNotes({ itemKey, initialNote = '', onSaved, onDirt
     const savedNote = note;
     setSaving(true);
     setStatus(null);
+    const reportMirror = onMirrorStart?.({ note: savedNote });
     try {
       const res = await saveReviewNote({ item_key: savedKey, note: savedNote });
       if (!current()) return;
       setDraft((previous) => ({ ...previous, baseline: savedNote }));
+      reportMirror?.(res.saved_offline ? null : res);
       if (res.saved_offline) {
         setStatus({ tone: 'soft', text: 'Saved on this device.' });
       } else if (res.note_written) {
@@ -60,6 +64,22 @@ export default function ReviewNotes({ itemKey, initialNote = '', onSaved, onDirt
   return (
     <div>
       <h3 className="text-sm font-medium text-slate-900 mb-3">My notes</h3>
+      {questions.length > 0 && (
+        <ul aria-label="Saved review questions" className="mb-3 space-y-2 text-sm text-slate-700">
+          {questions.map((row) => (
+            <li key={row.submission_id} className="break-words [overflow-wrap:anywhere]">
+              <p>{row.question}</p>
+              <span className="text-xs text-slate-500">
+                {row.saved_offline
+                  ? `Saved on this device — ${row.sync_status === 'rejected' ? 'sync rejected'
+                    : row.sync_status === 'conflict' ? 'sync conflict' : 'waiting to sync'}`
+                  : 'Saved question'}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {questions.length > 0 && <p className="mb-3 text-xs text-slate-500">{noteDeliveryText(questionMirror)}</p>}
       <textarea
         aria-label="Manual notes"
         rows={5}

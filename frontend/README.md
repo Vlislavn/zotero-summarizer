@@ -526,3 +526,5 @@ Original discovery regression oracles are retained without changing assertions. 
 Original native-preview client source is retained: displayed approval hashes, explicit refresh/force and direct-editor outcomes use the existing backend; no new controls or protocols are designed. Original synthetic client tests remain unchanged.
 
 The native editor imports also retain their original shared server-availability hook and offline/sync plumbing; question-facing UI follows separately. These are existing source dependencies, not a new offline design.
+
+Original question/note UI source is retained: immutable submission identity, separate manual notes and source question list, existing outbox replay and signature-bound delivery state. Shared paper/rail assemblies keep the original callbacks and one editable notes surface; unrelated Related/orthogonal reading changes are not mixed into this slice. Cached question detail reports local-storage failure explicitly without claiming a device save.

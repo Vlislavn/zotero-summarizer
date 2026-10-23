@@ -69,19 +69,37 @@ export async function fetchProvenanceList({ priority, flag, limit = 200, collect
 export async function fetchReviewDetail(itemKey) {
   if (!itemKey) throw new Error('fetchReviewDetail: itemKey is required');
   const qs = new URLSearchParams({ item_key: itemKey });
-  if (transportUnavailable()) {
-    const cached = await cachedReviewDetail(itemKey);
-    if (cached) return cached;
+  function cacheDiagnostic(error, stage, localQuestionsAvailable) {
+    const diagnostic = { stage, message: error.message || String(error),
+      local_questions_available: localQuestionsAvailable };
+    console.warn('offline detail cache unavailable', { stage, name: error.name, message: diagnostic.message });
+    return diagnostic;
   }
+  if (!navigator.onLine) {
+    try {
+      const cached = await cachedReviewDetail(itemKey);
+      if (cached) return cached;
+    } catch (cacheError) {
+      cacheDiagnostic(cacheError, 'read', false);
+    }
+  }
+  let data;
   try {
-    const data = await request(`/review-detail?${qs.toString()}`, {}, true);
-    return cacheReviewDetail(itemKey, data);
+    data = await request(`/review-detail?${qs.toString()}`, {}, true);
   } catch (err) {
     if (!err.transportFailure) throw err;
-    const cached = await cachedReviewDetail(itemKey);
-    if (cached) return cached;
+    try {
+      const cached = await cachedReviewDetail(itemKey);
+      if (cached) return cached;
+    } catch (cacheError) {
+      cacheDiagnostic(cacheError, 'read', false);
+    }
     throw err;
   }
+  const result = await cacheReviewDetail(itemKey, data);
+  if (!result.cacheError) return result.detail || result;
+  return { ...result.detail, offline_cache_error:
+    cacheDiagnostic(result.cacheError, result.stage, result.localQuestionsAvailable) };
 }
 
 /**

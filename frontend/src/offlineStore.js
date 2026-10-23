@@ -15,12 +15,18 @@ function openDb() {
       req.result.createObjectStore('mutations', { keyPath: 'mutation_id' });
       req.result.createObjectStore('meta', { keyPath: 'key' });
     };
+    let blocked = false;
+    req.onblocked = () => {
+      blocked = true;
+      reject(new Error('IndexedDB open blocked; close other app tabs and retry'));
+    };
     req.onsuccess = () => {
+      if (blocked) { req.result.close(); return; }
       req.result.onversionchange = () => req.result.close();
       resolve(req.result);
     };
     req.onerror = () => reject(req.error);
-  });
+  }).catch((error) => { database = undefined; throw error; });
   return database;
 }
 
@@ -93,15 +99,20 @@ export async function cachedReviewDetail(itemKey) {
 
 export async function cacheReviewDetail(itemKey, detail) {
   if (detail?.item_key !== itemKey) throw new Error('Review detail identity mismatch; device cache preserved');
-  if (detail.questions != null && (!Array.isArray(detail.questions)
+  const questionPayload = Object.hasOwn(detail, 'questions');
+  if (questionPayload && (!Array.isArray(detail.questions)
       || detail.questions.some((row) => questionSubmissionError(row)))) {
     throw new Error('Invalid review questions array or row');
   }
   let merged = detail;
+  let db;
+  let stage = 'open';
   try {
-    const db = await openDb();
+    db = await openDb();
+    stage = 'transaction';
     await new Promise((resolve, reject) => {
       const tx = db.transaction(['mutations', 'meta'], 'readwrite');
+      stage = 'read';
       const queued = tx.objectStore('mutations').getAll();
       queued.onsuccess = () => {
         const fields = pendingFields(queued.result).get(itemKey) || {};
@@ -109,19 +120,36 @@ export async function cacheReviewDetail(itemKey, detail) {
           ...(Object.hasOwn(fields, 'verdict') ? { verdict: fields.verdict } : {}),
           ...(Object.hasOwn(fields, 'review_note') ? { user_note: fields.review_note } : {}),
         }, queued.result);
-        tx.objectStore('meta').put({ key: `response:review:${itemKey}`, value: merged });
+        stage = 'write';
+        const write = tx.objectStore('meta').put({ key: `response:review:${itemKey}`, value: merged });
+        write.onerror = () => reject(write.error || new Error('Device detail cache write failed'));
       };
       tx.oncomplete = resolve;
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error || new Error('Device detail cache transaction aborted'));
     });
   } catch (error) {
-    if (typeof window !== 'undefined') {
-      await publishStatus(`Device review cache unavailable: ${error.message || String(error)}; local change visibility is unconfirmed`, 'blocked');
+    if (!questionPayload) {
+      if (typeof window !== 'undefined') {
+        await publishStatus(`Device review cache unavailable: ${error.message || String(error)}; local change visibility is unconfirmed`, 'blocked');
+      }
+      throw error;
     }
-    throw error;
+    if (stage === 'transaction') {
+      try {
+        const rows = await request(db.transaction('mutations', 'readonly').objectStore('mutations').getAll());
+        const fields = pendingFields(rows).get(itemKey) || {};
+        merged = overlayReviewQuestions(itemKey, { ...detail,
+          ...(Object.hasOwn(fields, 'verdict') ? { verdict: fields.verdict } : {}),
+          ...(Object.hasOwn(fields, 'review_note') ? { user_note: fields.review_note } : {}),
+        }, rows);
+      } catch (readError) {
+        return { detail, cacheError: readError, stage: 'read', localQuestionsAvailable: false };
+      }
+    }
+    return { detail: merged, cacheError: error, stage, localQuestionsAvailable: stage === 'write' || stage === 'transaction' };
   }
-  return merged;
+  return questionPayload ? { detail: merged } : merged;
 }
 
 export async function savePapers(rows, refreshDetails = false) {

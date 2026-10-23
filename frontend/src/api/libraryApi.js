@@ -383,9 +383,22 @@ export function paperFigureUrl(itemKey, name) {
  * answered deterministically; model answers require grounded evidence.
  * Resolves to the grounded answer plus citation verification and an evidence handle.
  */
-export async function askPaper(itemKey, question, { mode = 'comprehensive', history = [] } = {}) {
+export async function askPaper(itemKey, question, {
+  submissionId, origin = 'typed', presetId = null, mode = 'comprehensive', history = [],
+} = {}) {
   return request('/api/library/ask', {
     method: 'POST',
-    body: JSON.stringify({ item_key: itemKey, question, mode, history }),
+    body: JSON.stringify({ item_key: itemKey, question, submission_id: submissionId,
+      origin, preset_id: presetId, mode, history }),
+  });
+}
+
+export async function fetchReviewQuestions(itemKey) {
+  return request(`/api/library/questions?${new URLSearchParams({ item_key: itemKey })}`);
+}
+
+export async function saveReviewQuestion(submission) {
+  return request('/api/library/questions', {
+    method: 'POST', body: JSON.stringify(submission),
   });
 }

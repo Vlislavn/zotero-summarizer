@@ -35,6 +35,8 @@ it('refreshes an open review after a rejected offline verdict is reconciled', as
     { mutation_id: 'v1', status: 'rejected', error: 'review_required' },
   ]);
   expect(mocks.applyPull).toHaveBeenCalledOnce();
+  expect(mocks.publishStatus).toHaveBeenNthCalledWith(1, '', 'syncing');
+  expect(mocks.publishStatus).toHaveBeenLastCalledWith('', 'connected');
   expect(client.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['review-detail'] });
 });
 
