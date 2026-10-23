@@ -189,7 +189,7 @@ def build_user_note_html(note: str) -> str:
 DIGEST_NOTE_MARKER = f"{NOTE_PROVENANCE_NAMESPACE}:note_type=digest"
 
 
-def build_digest_note_html(digest: Any, *, interpretation: dict | None = None) -> str:
+def build_digest_note_html(digest: Any) -> str:
     """Render the condensed deep-review digest as one short Zotero note. Empty
     sections are skipped so it stays tight. Led by ``DIGEST_NOTE_MARKER``."""
     e = html.escape
@@ -215,11 +215,11 @@ def build_digest_note_html(digest: Any, *, interpretation: dict | None = None) -
         values = [parameters.dataset, parameters.sample_size, parameters.architecture,
                   *parameters.baselines, *parameters.metrics]
         parts.append(f"<p><strong>Technical parameters:</strong> {e('; '.join(x for x in values if x))}</p>")
-    read_parts = list(getattr(digest, "read_parts", []) or [])[:3]
+    read_parts = list(getattr(digest, "read_parts", []) or [])
     if read_parts:
         parts.append("<p><strong>Read parts</strong></p><ul>"
                      + "".join(f"<li>{e(str(x))}</li>" for x in read_parts) + "</ul>")
-    skip_parts = list(getattr(digest, "skip_parts", []) or [])[:3]
+    skip_parts = list(getattr(digest, "skip_parts", []) or [])
     if skip_parts:
         parts.append("<p><strong>Skip parts</strong></p><ul>"
                      + "".join(f"<li>{e(str(x))}</li>" for x in skip_parts) + "</ul>")
@@ -244,8 +244,5 @@ def build_digest_note_html(digest: Any, *, interpretation: dict | None = None) -
         parts.append(f"<p><em>+ {e(digest.key_strength)}</em></p>")
     if getattr(digest, "key_weakness", ""):
         parts.append(f"<p><em>− {e(digest.key_weakness)}</em></p>")
-    if interpretation is not None:
-        from zotero_summarizer.services.library._interpretation_html import section
-        parts.append(section(interpretation, digest))
     parts.append(f"<p><em>{qline} · {DIGEST_NOTE_MARKER};version=1</em></p>")
     return "".join(parts)

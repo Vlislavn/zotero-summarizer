@@ -141,6 +141,9 @@ publication and export; optional metadata stays intact but outside audit authori
 Use the repository verification commands and the local source-bound evidence;
 scoped checks do not substitute for full hooks, backend or hosted CI.
 
+`test_pending_rejection_atomic.py` covers mixed generated and ordinary rejection,
+including stale-selection rollback without changing generated audit history.
+
 ## Explicit local/gateway boundary
 
 ```text
@@ -449,3 +452,5 @@ Existing-question review stack: original immutable question storage, revision/sy
 Telegram source-review part: original transport/session/credential and runtime code is retained unchanged. This part registers no Telegram CLI commands; its collection/store/worker dependencies are supplied by following original-source parts. No account/session, network collection or live model is exercised by packaging.
 
 Existing Telegram source-review part: saved posts, collector/composer/rendering, model selection and migration11 are retained from the original working source. CLI worker/wiring and combined live-schema/native dependencies follow separately; no live collection, model loading or issue completion is inferred.
+
+Original native source dependencies include the existing condition marker and unchanged direct-editor SQLite fixtures. Synthetic tests are not private-library or native-acceptance evidence.

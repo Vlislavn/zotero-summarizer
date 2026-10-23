@@ -206,3 +206,5 @@ description above; the explicit unconfigured-Zotero boundary remains local-first
 `GET /api/pending?item_key=...` passes the item filter through to the indexed
 storage query. `GET /api/triage/jobs?active_only=true` returns persisted running
 and cancelling jobs without limiting the lookup to newest terminal jobs.
+
+Existing native/question source stack: original metadata editors, Pending confirmation and mirror activation; corresponding UI/MCP source follows. No new feature or issue-completion work; merge the related parts before using their new workflow.

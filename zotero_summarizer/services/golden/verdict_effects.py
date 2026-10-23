@@ -14,10 +14,9 @@ from zotero_summarizer.services.zotero.zotero import (
     get_library_reader,
     get_zotero_reader_or_raise,
     zotero_set_label_tag,
-    zotero_upsert_user_note,
     zotero_upsert_verdict_note,
 )
-from zotero_summarizer.storage import feeds as feeds_storage, label_mirrors, repositories, review_notes
+from zotero_summarizer.storage import feeds as feeds_storage, label_mirrors, repositories
 from zotero_summarizer.storage.feed_identity import LEGACY_FEED_PREFIX
 
 LOGGER = logging.getLogger(__name__)
@@ -114,6 +113,7 @@ def add_feed_verdict_to_library(item_key: str, priority: str, db_path: Path | No
         "add_status": str(result.get("status") or ""),
         "add_error": None,
         "_zotero_key": result.get("zotero_key"),
+        "review_note_mirror": result.get("review_note_mirror"),
     }
 
 
@@ -196,17 +196,7 @@ def apply_verdict_effects(db_path: Path, item_key: str, priority: str, comment: 
 
 
 def mirror_review_note(db_path: Path, item_key: str) -> dict[str, Any]:
-    """Deliver current committed note intent, never a historical request body."""
-    source = review_detail.classify_item_key(item_key)
-    if source in (review_detail.SOURCE_FEED, review_detail.SOURCE_NOTE):
-        return {"note_written": False, "note_error": None}
-    try:
-        with review_notes.current_for_mirror(db_path, item_key) as note:
-            # The app's clear-body contract also applies to sync deletion tombstones.
-            zotero_upsert_user_note(item_key, "" if note is None else note)
-        return {"note_written": True, "note_error": None}
-    except APIError as exc:
-        # Unconfigured Zotero is optional for the existing local-first workflow.
-        if not _optional_zotero(exc):
-            raise
-        return {"note_written": False, "note_error": None}
+    """Deliver the current composite through its native receipt owner."""
+    from zotero_summarizer.services.zotero.mirror_notes import mirror_review_note as deliver
+
+    return deliver(db_path, item_key)

@@ -49,8 +49,11 @@ services/ ─call→ storage/
 `set_pending_changes_status(..., require_all=True)` validates all selected IDs and
 source statuses under BEGIN IMMEDIATE, then verifies the complete affected count
 before commit. A stale/missing row or trigger-shortened update raises and rolls
-back everything. Pending Reject uses this boundary; other status callers retain
-their existing default behavior. No new queue/schema or native write is involved.
+back everything. Pending Reject now uses `pending_actions.reject_pending_selection`:
+one transaction validates the complete selection and direct/mirror history, audits
+generated rejection and updates ordinary rows; failures roll back both families.
+Other status callers retain their existing default behavior. No new queue/schema
+or native write is involved.
 
 **Boundaries:** must NOT import `services/` or `api/` (enforced). Connection
 hardening (WAL once per process/path + busy_timeout=10s + 0600) is shared by

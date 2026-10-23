@@ -83,6 +83,9 @@ def current_review_identity(item_key: str, stored: dict[str, Any], *, config: An
     )
 
 
+INTERPRETATION_SCHEMA_MARKER = "interpretation-digest-response-v1"
+
+
 def _condition_matches(stored: dict[str, Any], interpretation_schema: str | None) -> bool:
     if interpretation_schema not in (None, INTERPRETATION_SCHEMA_MARKER):
         return False

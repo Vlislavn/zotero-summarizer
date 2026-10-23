@@ -1,5 +1,6 @@
 """Reject is one complete app-queue selection, never a partial success."""
 import asyncio
+import hashlib
 from contextlib import closing
 from copy import deepcopy
 
@@ -7,8 +8,9 @@ import pytest
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models import PendingChangeMutationRequest
+from zotero_summarizer.models.zotero_actions import DigestNotePayload, GeneratedNoteProposal
 from zotero_summarizer.services.zotero import pending
-from zotero_summarizer.storage import repositories
+from zotero_summarizer.storage import pending_actions, repositories
 
 
 @pytest.fixture
@@ -53,6 +55,39 @@ def test_current_complete_selection_returns_exact_count_and_leaves_other_rows(qu
     rows = {row["id"]: row["status"] for row in repositories.get_pending_changes(status=None)}
     assert rows == {first: "rejected", second: "pending"}
     assert reject([second]) == {"updated": 1}
+
+
+def test_mixed_generated_and_ordinary_rejection_is_one_audited_selection(queue):
+    first, second = queue
+    body = '<p>Owned synthetic note</p>'
+    generated = pending_actions.stage('Synthetic', GeneratedNoteProposal(
+        item_key='THIRD001', review_revision='00000000-0000-0000-0000-000000000001',
+        source_sha256=hashlib.sha256(b'synthetic source').hexdigest(),
+        body_sha256=hashlib.sha256(body.encode()).hexdigest(),
+        payload=DigestNotePayload(marker='zs:note_type=digest', note_html=body),
+    ))
+    assert reject([first, generated]) == {'updated': 2}
+    rows = {row['id']: row for row in repositories.get_pending_changes(status=None)}
+    assert rows[first]['status'] == rows[generated]['status'] == 'rejected'
+    assert rows[second]['status'] == 'pending'
+    assert any(event['event'] == 'rejected' for event in rows[generated]['audit'])
+
+
+def test_mixed_stale_sibling_leaves_generated_audit_and_ordinary_untouched(queue):
+    first, second = queue
+    body = '<p>Owned synthetic note</p>'
+    generated = pending_actions.stage('Synthetic', GeneratedNoteProposal(
+        item_key='THIRD001', review_revision='00000000-0000-0000-0000-000000000001',
+        source_sha256=hashlib.sha256(b'synthetic source').hexdigest(),
+        body_sha256=hashlib.sha256(body.encode()).hexdigest(),
+        payload=DigestNotePayload(marker='zs:note_type=digest', note_html=body),
+    ))
+    repositories.set_pending_changes_status([second], 'failed')
+    before = repositories.get_pending_changes(status=None)
+    with pytest.raises(APIError) as error:
+        reject([first, generated, second])
+    assert error.value.status_code == 409
+    assert repositories.get_pending_changes(status=None) == before
 
 
 def test_trigger_preventing_one_update_rolls_back_the_entire_selection(queue):

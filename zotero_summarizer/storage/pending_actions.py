@@ -85,19 +85,33 @@ def stage(item_title: str, proposal: GeneratedNoteProposal) -> int:
         return change_id
 
 
-def reject_generated(change_ids: list[int]) -> int:
+def reject_pending_selection(change_ids: list[int]) -> int:
+    if any(type(change_id) is not int or change_id <= 0 for change_id in change_ids):
+        raise ValueError("Pending selection requires positive integer IDs")
+    selected = list(dict.fromkeys(change_ids))
+    if not selected:
+        raise ValueError("Pending selection cannot be empty")
     with locked_queue() as conn:
-        slots = ",".join("?" for _ in change_ids)
-        ensure_pending(conn.execute(
-            f"SELECT * FROM pending_changes WHERE id IN ({slots})", change_ids,
-        ))
+        slots = ",".join("?" for _ in selected)
         rows = conn.execute(
-            f"SELECT id FROM pending_changes WHERE id IN ({slots})"
-            " AND proposal_json IS NOT NULL AND status='pending'", change_ids,
+            f"SELECT * FROM pending_changes WHERE id IN ({slots})", selected,
         ).fetchall()
+        if len(rows) != len(selected) or any(row["status"] != "pending" for row in rows):
+            raise ValueError("Pending selection changed; reload before rejecting")
+        ensure_pending(rows)
         for row in rows:
-            record(conn, row["id"], {"event": "rejected", "actor": "current_user",
-                                    "source": "pending_rejection"}, status="rejected")
+            if row["proposal_json"] is not None:
+                record(conn, row["id"], {"event": "rejected", "actor": "current_user",
+                                        "source": "pending_rejection"}, status="rejected")
+            elif conn.execute(
+                "UPDATE pending_changes SET status='rejected',error_message='' "
+                "WHERE id=? AND status='pending' AND proposal_json IS NULL", (row["id"],),
+            ).rowcount != 1:
+                raise ValueError("Pending selection could not be rejected completely")
+        if conn.execute(
+            f"SELECT COUNT(*) FROM pending_changes WHERE id IN ({slots}) AND status='rejected'", selected,
+        ).fetchone()[0] != len(selected):
+            raise ValueError("Pending selection could not be rejected completely")
         return len(rows)
 
 

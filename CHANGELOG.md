@@ -29,6 +29,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Preserve interpretation digest subtype metadata while sharing declared-field authority across qualification, optional receipts and HTML renderers. Reuse the retention prerequisite's dictionary projection; declared/source changes still refuse.
 - Reject interpretation source/run/export symlinks and selected-project escapes before file access, including symlinked manifests. Retain immutable attempts and explicit capture consent.
 - Hide interpretation assignment order in blinded exports; validate approval rows during inspection. Preserve partial-label accuracy bounds, independent conclusive-shortfall gates and actual card-exposure counts; zero exposure cannot recommend a pilot.
+- Package original native/question source part: original metadata editors, Pending confirmation and mirror activation; corresponding UI/MCP source follows.
+- Reject mixed generated and ordinary Pending selections atomically; retain generated audit receipts and refuse direct/mirror history.
 - Package original native/question source part: original confirmation, mirror/recovery and publication-revision helpers; existing endpoint activation follows.
 - Package original native/question source part: typed action history, original writer boundaries and dormant editor/proposal code; activation follows.
 - Retain original saved Telegram news composition, collection/storage contracts and migration11; CLI and combined live-schema wiring follow separately.
