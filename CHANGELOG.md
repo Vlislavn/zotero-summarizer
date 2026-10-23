@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Retain original pdf source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+
 - Retain original presentation URI normalization through the canonical raw PDF annotation reader.
 - Retain original setup source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
 - Retain original explicit default-no inference consent; use the existing canonical provider verification boundary.

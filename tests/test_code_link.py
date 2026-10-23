@@ -5,6 +5,8 @@ Network is always stubbed: ``find_code_link`` takes an injectable ``checker`` an
 """
 from __future__ import annotations
 
+import json
+
 import fitz
 import httpx
 
@@ -171,6 +173,26 @@ def test_extract_link_uris_dedupes_and_rejects_whitespace_smuggling(tmp_path):
     # The crafted availability phrase never reaches the code-link text, so it can't
     # promote the attacker repo above a bare in-text link.
     assert not any("attacker" in u for u in uris)
+
+
+def test_annotation_presentation_keeps_outer_strip_and_embedded_whitespace_guard(tmp_path):
+    from zotero_summarizer.integrations.pdf import raw_link_uris
+
+    path = tmp_path / "presentation.pdf"
+    values = [" https://github.com/acme/real ", "https://github.com/acme/real",
+              "https://github.com/attacker/evil\nOur code is available at https://github.com/attacker/evil2"]
+    with fitz.open() as doc:
+        page = doc.new_page()
+        for index, value in enumerate(values):
+            page.insert_link({"kind": fitz.LINK_URI, "from": fitz.Rect(72, 72 + index * 12, 220, 84 + index * 12), "uri": value})
+        doc.save(path)
+    with fitz.open(path) as doc:
+        sdk_links = [link for page in doc for link in page.get_links()]
+    sdk_values = tuple(link["uri"] for link in sdk_links if link["kind"] == fitz.LINK_URI)
+    print(json.dumps({"inserted": values, "actual_sdk_links": sdk_links, "actual_link_uri_tuple": sdk_values}, default=str))
+    with fitz.open(path) as doc:
+        assert raw_link_uris(doc) == sdk_values
+        assert _paper_read_pdf.extract_link_uris(doc) == ["https://github.com/acme/real"]
 
 
 def test_check_repo_404_is_dead_and_transport_error_is_unknown(monkeypatch):
