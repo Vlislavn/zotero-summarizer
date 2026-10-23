@@ -35,6 +35,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Minimize deep-review verification reasoning: disable declared chat thinking or lower active three-level reasoning to low, preserving explicit user off and configured digest effort. Keep research-feed stdout JSON by routing runtime diagnostics to stderr; truncation still fails closed.
 - Escape source-supplied closing-tag markup in shared abstract/full-text refinement and triage prompts before rendering. Preserve complete summary/corpus content and existing scoring; DOI and auxiliary source metadata use the escaped data boundary.
 - Keep weekly acquisition browser-free; retain omitted/blank unknown projects and reproduction blockers. Isolate optional abstract-cache failures, report absent stages, retry missing PDFs, preserve v1 triage confidence, and export feed assessment models.
+- Weekly keeps folder read failures distinct from empty lists, unsupported formats distinct from invalid reports, and rejects inconsistent saved card counts.
+- Weekly paper links preserve passive browsing through reload and Prev/Next; reviews start only with Generate review. Other paper entry points keep their existing behavior.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
 - Generate source-bound RSS project proposals in existing review calls; reuse successful stages, recompute cards and retain errors/v1 reports. Cached qualification reads existing goals without startup. Keep effort unknown or explicitly unverified; preserve blockers and artifact links.
@@ -59,6 +61,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ### Added
 
+- Browse saved weekly RSS digests in Weekly: engineering cards, paper links and JSON/Markdown downloads, with explicit empty, legacy and unreadable states. Browsing never starts generation or Zotero writes.
 - Independent HTML-preservation checks and mutation controls; opt-in frozen real-review browser replays skip when inputs are absent. Literal retention proves neither scientific truth nor native-editor compatibility.
 - Review attempts expose typed stage/recovery and metadata-only traces. Explicit local CLI captures retain decoded calls; operational source templates never become scientific reviews, and unavailable placeholders preserve current valid reviews (#32).
 - Search hard constraints require user confirmation; model hints/refinement cannot create bans. Bounded complementary queries, publication metadata recovery and retrieval accounting preserve legacy plans and disclose coverage limits (#31).

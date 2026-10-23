@@ -17,6 +17,7 @@ Vite proxies `/api/*` to `http://localhost:8000`; `npm run build` writes
 
 - **Library** — Read next, labels, reviews, figures, paper Q&A, and acquisition.
 - **Search** — query-driven discovery and review.
+- **Weekly** — read-only saved RSS research digests, engineering cards, paper links, and JSON/Markdown downloads.
 - **Today** — feed triage and Zotero filing. Author h-index badges render only for positive OpenAlex evidence; unresolved author metadata is not shown as `h=0`.
 - **Settings** — AI, research profile, Zotero, sources, and advanced controls. Sources offers explicit HackerNoon tag-feed subscriptions through the existing RSS API; saving, fetching and Today triage remain separate actions.
 - **Ops** — feeds, jobs, pending writes, diagnostics, and retraining.
@@ -82,6 +83,27 @@ nested collections; it does not mistake the response envelope for the tree.
 The shared moderate-relevance pill uses the existing amber-600 palette token:
 white text contrast is 5.58:1 (amber-500 was 3.95:1). This display-only correction
 does not change score bands, ordering or saved labels.
+
+## Saved weekly digests
+
+Open **Weekly** (`/weekly`), select a saved CLI run, or reopen its bookmark
+`/weekly?run=<bundle-name>`. Up to 100 bundles are listed in reverse bundle-name
+order (not publication time); other retained runs remain reachable by URL. **Refresh saved runs** refreshes both list and
+selection after CLI publication. A valid zero-card digest, a missing report and
+an unreadable/unsupported report remain distinct. Legacy missing provenance and
+ideas stay unknown/unrecorded; missing reviews do not imply missing PDFs.
+Cards expose project use, artifacts, reproducibility, ideas and selection audit,
+with current-paper links through the existing `/paper/:itemKey?autoRun=false`
+route. These links and subsequent Prev/Next navigation never auto-start reviews;
+Generate review remains an explicit action. Other paper entry points are unchanged.
+Unsupported formats and invalid/unreadable reports show different errors; folder
+scan failures never appear as an empty saved-run list.
+
+This page needs the local server and does not persist reports for offline use.
+It never builds a report, acquires sources, calls AI or writes Zotero. Use the
+existing `research-feed run` CLI to publish a new bundle. The focused tests are
+`src/pages/Weekly.test.jsx`, `src/api/researchFeedApi.test.js` and the optional
+`tests/test_research_feed_browser.py` built-app check using the existing fixture.
 
 ## Setup and AI
 

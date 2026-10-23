@@ -20,6 +20,7 @@ rss_items → source/dedupe → prior triage → budget → existing deep_review
 | `runner.py` | Budgeted triage, optional missing deep reviews through `library.deep_review`, per-paper failure isolation, metrics/watermark, and dry-run/idempotent writeback. Tag idempotency looks up pending changes by target Zotero item, so unrelated older queue rows cannot push a matching writeback beyond a global scan cap. |
 | `card.py` | Pure engineering-card projection; only exact validated artifact URLs survive. |
 | `render.py` | Canonical JSON and compact Markdown persistence. |
+| `reports.py` | Read-only list/detail/download lookup of published v1 RSS bundles, validated with existing candidate/triage/card models. Reject malformed reports and symlink/path escapes; never generate or migrate artifacts. |
 
 Run weekly: `uv run zotero-summarizer research-feed run --from 2026-08-22
 --to 2026-08-29`. Add `--venue NeurIPS` for conference mode, `--cached-only`
@@ -102,6 +103,16 @@ budget. `discovered`/`deduplicated` count admitted unique matching papers, not a
 raw rows in the date window. Cursor consumption stops at the cap; sorting/scanning
 the underlying window can still require database work. Malformed nonempty source
 timestamps raise instead of silently becoming absent dates.
+
+The **Weekly** page opens existing bundles from the CLI, including older v1
+snapshots without optional provenance or grouped ideas. Missing values stay
+unrecorded; reads return saved fields unchanged. The list retains unavailable
+entries without hiding valid neighbors. Missing bundles/files are 404; malformed
+JSON is 422 `report_unavailable`, while unsupported schema/source is 422
+`report_unsupported`, including downloads. Card counts must match saved cards.
+A missing report folder is empty; directory scan failures are 503, never empty.
+Markdown is served verbatim only when canonical JSON validates. A missing Markdown file does not prevent
+reading valid JSON. There is no browser run/build endpoint or cached-card replay.
 
 **Boundary:** may compose library services and storage reads. Zotero writes are
 optional pending actions only; default runs are dry-run.

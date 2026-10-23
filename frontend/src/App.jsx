@@ -4,6 +4,7 @@ import Today from './pages/Today.jsx';
 import Settings from './pages/Settings.jsx';
 import Library from './pages/Library.jsx';
 import Search from './pages/Search.jsx';
+import Weekly from './pages/Weekly.jsx';
 import PaperReviewPage from './pages/PaperReviewPage.jsx';
 import Ops from './pages/Ops.jsx';
 import SetupFlow from './pages/SetupFlow.jsx';
@@ -43,6 +44,7 @@ export default function App() {
             <Route path="/library" element={<Library />} />
             {/* Targeted Search — query-driven pull surface (services/search). */}
             <Route path="/search" element={<Search />} />
+            <Route path="/weekly" element={<Weekly />} />
             {/* Full-page interactive deep review — opened in a new tab from a
                 row's "Open full review ↗" (replaces the old static HTML brief as
                 the in-app open target; the HTML artifact still ships for Zotero). */}

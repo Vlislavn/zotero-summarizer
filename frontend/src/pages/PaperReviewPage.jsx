@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { fetchCollections, fetchPaperRender, attachFiguresToZotero } from '../api/libraryApi.js';
 import { flattenCollections } from './pendingHelpers.js';
@@ -111,6 +111,8 @@ function ReviewZone({ deep, runner, sectionOverlay }) {
 // tags, ask) lives in the rail and a mobile bottom bar so it's always reachable.
 export default function PaperReviewPage() {
   const { itemKey } = useParams();
+  const [params] = useSearchParams();
+  const autoRun = params.get('autoRun') !== 'false';
   const navigate = useNavigate();
   // Prev/Next through the ranked list the originating page (Read next) stored in
   // localStorage — same tab (useParams re-reads the key, usePaperReview refetches,
@@ -136,9 +138,9 @@ export default function PaperReviewPage() {
     (key) => {
       if (!key) return;
       if (notesDirty && !window.confirm('You have unsaved notes on this paper. Leave without saving them?')) return;
-      navigate(`/paper/${encodeURIComponent(key)}`);
+      navigate(`/paper/${encodeURIComponent(key)}${autoRun ? '' : '?autoRun=false'}`);
     },
-    [navigate, notesDirty],
+    [navigate, notesDirty, autoRun],
   );
   // j = next, k = prev (auto-disabled while typing in the notes / Ask fields).
   useKeyboardNav({
@@ -190,7 +192,7 @@ export default function PaperReviewPage() {
   // Auto-generate on open only for papers with a local Zotero PDF (no silent PDF
   // fetch); a no-PDF paper shows the manual Generate path instead, even if an
   // acquired render artifact already exists.
-  const runner = useDeepReviewRunner(itemKey, { deep: detail?.deep_review, onDone: refreshDetail, autoRun: hasPdf });
+  const runner = useDeepReviewRunner(itemKey, { deep: detail?.deep_review, onDone: refreshDetail, autoRun: hasPdf && autoRun });
 
   if (isLoading) return <div className="py-4 text-sm text-slate-500">Loading review…</div>;
   if (error) {
