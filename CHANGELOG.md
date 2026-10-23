@@ -15,6 +15,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Reconcile retained Discovery Adds through a fresh enforced existing-only native ACK; stale retries cannot create, back up or prune. Missing/malformed/failed ACKs never finalize; ordinary Add is unchanged.
 
 ### Fixed
+- Retain OpenAlex location DOI/arXiv aliases through Search identity so a changed primary DOI cannot recommend a saved seed as new. No title merging or extra provider calls.
 - Prepare the existing OpenAlex cache schema at startup so the first saved-paper Find cannot invalidate its own corpus fingerprint when optional metadata clients are disabled.
 - Include DOI/arXiv-linked unmaterialized app aliases in Discovery seed context; their note edits/clears now invalidate private evidence.
 - Read the Search OpenAlex cache from RuntimeState so saved-paper Discovery works with prestige disabled instead of failing before provider requests.

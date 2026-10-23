@@ -19,6 +19,42 @@ from zotero_summarizer.services.search import discovery, session
 from zotero_summarizer.services.search._models import Candidate, QueryPlan, ResearchSession, SearchIntent
 
 
+@pytest.mark.parametrize("alias", [
+    {"doi": "https://doi.org/10.1/SEED"},
+    {"landing_page_url": "http://arxiv.org/abs/2501.12345v2"},
+    {"pdf_url": "https://arxiv.org/pdf/2501.12345v3.pdf"},
+])
+def test_real_openalex_location_alias_excludes_seed_without_title_matching(journey, monkeypatch, alias):
+    with sqlite3.connect(journey.native_db) as conn:
+        conn.execute("INSERT INTO itemDataValues(value) VALUES ('https://arxiv.org/abs/2501.12345')")
+        conn.execute("INSERT OR REPLACE INTO itemData(itemID,fieldID,valueID) "
+                     "SELECT itemID,3,last_insert_rowid() FROM items WHERE key='SEED0001'")
+    requested = []
+
+    def provider(request):
+        requested.append(request)
+        return httpx.Response(200, json={"results": [
+            {"id": "W900", "doi": "10.9/new-primary", "title": "Renamed seed", "locations": [alias]},
+            {"id": "W901", "doi": "10.9/distinct", "title": "Renamed seed", "locations": []},
+        ]})
+
+    with httpx.Client(transport=httpx.MockTransport(provider), trust_env=False) as http:
+        client = openalex.OpenAlexClient(object(), http_client=http)
+        monkeypatch.setattr(discovery, "federate", federation.federate)
+        monkeypatch.setattr(discovery, "_search_openalex_client", lambda *args: client)
+        metadata = discovery.discovery_metadata("SEED0001")
+        response = journey.client.post("/api/library/related/SEED0001/discover", json={
+            "context_fingerprint": metadata["context_fingerprint"],
+        })
+    assert response.status_code == 200
+    result = response.json()
+    assert result["status"] == "discovery_ready"
+    assert [row["doi"] for row in result["candidates"]] == ["10.9/distinct"]
+    assert result["discovery"]["recommended_ids"] == ["10.9/distinct"]
+    assert requested and all("locations" in row.url.params["select"].split(",") for row in requested)
+    assert session.load(result["id"]).candidates[0].doi == "10.9/distinct"
+
+
 def test_ordinary_http_wire_fixture(journey, tmp_path):
     ordinary = ResearchSession(
         id="ordinary-wire", created_at="2026-10-19T00:00:00Z", raw_query="Public ordinary query",

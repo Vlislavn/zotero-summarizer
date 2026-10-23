@@ -159,6 +159,10 @@ See [server contract](../../../docs/discovery.md).
 | `refine.py` | bounded opt-in agentic PRF before auto-review; no-ops under strict offline |
 | `session.py` | one-JSON-per-session persistence under `settings().search_dir` + per-session lock: `claim` (status CAS, single-flights the worker), `save_merge` (whole-session save that preserves a concurrent Add's `materialized_zotero_key`), `update` (read-modify-write), `materialize_once` (Add's check-write-stamp under the lock, single-write). Malformed id → `APIError(400)` |
 
+OpenAlex location DOI/arXiv aliases flow into the same persisted family keys as
+other source identifiers. A changed primary DOI cannot resurface a saved seed when
+the provider declares its existing identifier; equal titles alone never merge.
+
 Refinement annotates newly fetched DOI/arXiv observations before merging.
 `Candidate.family_identifier_keys` retains the complete normalized identifier
 union independently of the preferred bibliography and survives session JSON.

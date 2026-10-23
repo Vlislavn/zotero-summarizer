@@ -45,5 +45,8 @@ Disabled optional metadata clients still prepare the existing cache schema befor
 Discovery identity, preventing first-client self-invalidation.
 Identifier-linked unmaterialized app notes (direct and transitive DOI/arXiv aliases)
 are submitted only to the consented model; edits/clears stale and hide prior context.
+OpenAlex location-alias controls use real leaf parsing/federation to exclude a
+renamed/re-DOIed saved seed by DOI or versioned arXiv location while retaining a
+same-title distinct-ID paper. Receipt-on/off and lookalike-host cases are covered.
 Candidate identity regressions also distinguish public metadata changes from later
 derived operation/question-evidence enrichment; source inheritance is not identity.

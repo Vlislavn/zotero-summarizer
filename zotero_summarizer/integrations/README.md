@@ -153,6 +153,11 @@ appropriate for tag creation/reuse, but cannot implement complete removal.
 Adapters are leaves — they depend only on stdlib, third-party clients, and
 `models`/`domain`.
 
+OpenAlex search retains declared DOI/arXiv aliases from work `locations` in
+`OpenAlexSearchHit.family_identifier_keys`, including versioned arXiv URLs. URLs
+are parsed for identity only, never followed; no title-based identity inference or
+extra lookup request is introduced. Missing locations preserve legacy empty aliases.
+
 OpenAlex search accepts optional request-local `outcome` receipts; ordinary calls
 and all other source leaves stay unchanged. HTTP, transport and malformed payloads are not successful empty
 responses. See [provider receipts](../../docs/discovery-provider-receipts.md).

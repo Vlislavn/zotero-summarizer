@@ -24,7 +24,9 @@ fields, not a whole-library note crawl. Seed context closes identifier links acr
 native and unmaterialized app rows before collecting notes, including transitive
 DOI/arXiv links; edits/clears on those app aliases invalidate prior results.
 Retained family identifiers and all-alias
-coverage reuse Search's existing identity owner. Unknown is not established new;
+coverage reuse Search's existing identity owner. OpenAlex's declared location
+DOIs/arXiv URLs are retained too, so a changed primary DOI does not hide a known
+saved/seed alias. Location URLs are not fetched; titles are not identity evidence. Unknown is not established new;
 equal titles with different identifiers are not merged. Without a native reader,
 app-known saved items remain excluded; other membership stays unknown rather than
 being inferred from an app-only miss.
