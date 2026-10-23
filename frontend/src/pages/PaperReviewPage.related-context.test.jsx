@@ -22,6 +22,8 @@ it.each(['note', 'verdict'])('an acknowledged %s save fences related context bef
       detailReads += 1;
       if (detailReads > 1) return new Promise(resolve => { releaseDetail = () => resolve(new Response(JSON.stringify(detail), { status: 200 })); });
       data = detail;
+    } else if (path === '/api/library/related/P1/discover' && (!options.method || options.method === 'GET')) {
+      data = { seed_key: 'P1', seed_title: 'Paper', admission: { state: 'unknown', basis: null }, context_fingerprint: null };
     } else if (path === '/api/library/related/P1') {
       relatedGets.push(path);
       data = { status: 'ready', context_fingerprint: 'old', boundary: { enabled: false }, items: [], seed_comments: comments };

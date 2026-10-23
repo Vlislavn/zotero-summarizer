@@ -57,6 +57,9 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Reconstruct terminal-free replay from admission and remaining-budget observations; bind terminal references to row owners, close transport states and reject false blocked coverage. Preserve real wall/missing/blocked outcomes and unsigned-telemetry limits.
 - Bind recorded support replay to its exact admitted case/arm recording and received state before deriving readouts. Self-consistent copied-terminal/report/hash replacement cannot substitute unchanged inputs; retain raw bytes and unsigned-artifact limits.
 - Keep priority ranking capabilities distinct: LLM ordinal priority is not confidence, missing ML regression scores leave ranking unavailable without losing classification. Reopening compares recorded terminals with exact admitted inputs; input-wide and holdout counts are named separately.
+- Persist Search Add's planned native key before effects and preserve operation identity across exact-family/background merges. Explicit retries reuse the existing native-key no-op after failed session finalization; unknown delivery never becomes an invented rollback or distributed exactly-once claim.
+- Refuse Search Add when enriched library coverage conflicts with its retained operation plan; preserve both observations without stamping contradictory delivery or dispatching another native write. Reconcile the configured library explicitly.
+- Add opt-in, request-local search provider receipts distinguishing valid empty hits from HTTP, transport, malformed payload and unavailable-client outcomes. Ordinary federation callers remain unchanged; live-provider qualification remains open.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.
 - Fold goal findings without losing originals; disclose saved source basis and unknown reviewed extent. Factor literal warning frames into one introduction with expanded scope/context, qualifiers and source links; retain original wording. Compact cards remain unchanged.
@@ -65,6 +68,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Preserve ordinary Search projection and new-owner actions during restore; close mixed aliases; fingerprint only public candidate metadata; isolate nonfinite provider results; separate touch actions without weakening consent, freshness or effect fences.
 - Make injected-PDF full-reading fixtures provide typed independent full-text quality. Preserve path/grade/read assertions and add abstract/unassessed controls; digest grade alone never supplies scientific basis.
 - Bind historical coverage comparisons to the frozen main algorithm, preserving old flag and current policy-highlight oracles. Add distinct empty/unknown, explicit-failure and red-flag controls; production grading and paper annotations remain unchanged.
 - Fail Related closed when human eligibility is unreadable; retain private session context with owner-only permissions and invalidate stage clients after credential replacement. Add regressions for all three safety boundaries.
@@ -105,6 +109,9 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Preserve current support safety fixes in priority comparison: shared direct native admission/TLS controls, pre-read aggregate snapshot limits and provenance-qualified paired estimates. Reconcile the existing dependency without changing its base or feature behavior.
 - Reject duplicate reading-priority canonical papers even within one family, and refuse ML artifacts with empty training-family provenance before calls or writes.
 - Expose reading-priority coverage/status denominators per gold class, plus synthetic-label and declared/missing-provenance counts. Unscored failures remain unscored; decision-only quality metrics are unchanged.
+- Preserve unknown membership through persisted refinement when a newly retrieved identity cannot be checked. Genuine hits still win; older misses cannot certify absence for unresolved family members.
+- Retain every observed version-family identifier through screening, refinement and session reloads. Resolve saved membership across retained DOI/arXiv alternatives; preserve the genuine hit key and distinguish partial lookup failures from complete misses.
+- Preserve identifier-confirmed saved-library membership through Search refinement and version merging. Reuse the existing reader and tri-state coverage; retain reviews and addresses, and let explicit Add reuse the saved key without creating another item.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
 - Generate source-bound RSS project proposals in existing review calls; reuse successful stages, recompute cards and retain errors/v1 reports. Cached qualification reads existing goals without startup. Keep effort unknown or explicitly unverified; preserve blockers and artifact links.
@@ -138,6 +145,9 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ### Added
 
+- Add Find new relevant for saved papers using OpenAlex semantic/lexical retrieval, optional consent-bound seed comments, durable sessions and shared Search UI. New Review/Add require current inputs; usefulness remains unqualified.
+- Reconcile retained Discovery Adds through a fresh enforced existing-only native ACK; stale retries cannot create, back up or prune. Missing/malformed/failed ACKs never finalize; ordinary Add is unchanged.
+- Saved-seed Find new relevant handoff to Search, explicit comment consent, qualified discovery states/evidence and explicit Review/Add. Owned reads/navigation hide obsolete private context; matching backend/provider integration and runtime acceptance are required.
 - Add offline existing-collection comparison: frozen taxonomy/human-gold firewall, independent native choices, original top3-name baseline, set/calibration/paired reports and verified private replay. No model loads, membership writes or unmeasured winner.
 - Add explicit offline reading-priority comparison: frozen human-label firewall, four-class native/retained readouts, matched ML/LLM artifacts, ranking/calibration/paired reports and verified private replay. No model loads, production writes or winner without empirical/resource qualification.
 - Browse saved weekly RSS digests in Weekly: engineering cards, paper links and JSON/Markdown downloads, with explicit empty, legacy and unreadable states. Browsing never starts generation or Zotero writes.

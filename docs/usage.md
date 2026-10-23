@@ -211,6 +211,30 @@ probe. Evaluator metadata does not identify mutable remote weights behind unchan
 provider/model names. Human-held-out answer-bearing P@5/nDCG/recall, false promotions,
 abstention and cold/warm latency are **unmeasured**. This is experimental; #30 stays open.
 
+## Library membership in Search
+
+Screening preserves all observed version-family identifiers through preferred
+metadata selection and saved-session reloads. The existing reader checks retained
+DOI/arXiv alternatives, not just the displayed version. A confirmed hit supplies
+its matching library key; partial lookup failure remains unknown, not a known miss.
+No title-only match is inferred. Old sessions cannot recover identifiers that were
+previously discarded; an explicit new search/refinement can observe them again.
+
+Opt-in agentic refinement (`ZS_SEARCH_AGENTIC`) checks newly retrieved identities
+before merging. A saved match survives richer metadata; explicit Add reuses its
+key. An unresolved newly retrieved identity keeps the family unknown rather than
+borrowing an older version's miss. Refinement writes no Zotero items and starts
+no automatic Add.
+
+## Retrying Search Add
+
+If an explicit Search Add encounters failed session finalization after a native
+commit, retrying that same saved candidate reuses its persisted planned item key.
+It does not blindly create another item or rewrite later user edits. A plan is not
+a success receipt: native failures remain errors, and the UI must not infer rollback
+from a session error. This recovery uses the existing one-process session lock and
+configured library; it is not distributed exactly-once or cross-library replay.
+
 ## First-run setup
 
 There's nothing to copy and nothing to migrate by hand. On the first `serve` (or `setup`),

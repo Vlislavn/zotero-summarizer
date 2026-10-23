@@ -161,6 +161,9 @@ it.each(['page', 'compact'])('%s keeps verdict comments until an explicit edit i
   vi.stubGlobal('fetch', vi.fn(async (path, options = {}) => {
     let data;
     if (path === '/api/golden/review-detail?item_key=P1') data = detail;
+    else if (path === '/api/library/related/P1/discover' && (!options.method || options.method === 'GET')) {
+      data = { seed_key: 'P1', seed_title: 'Paper', admission: { state: 'unknown', basis: null }, context_fingerprint: null };
+    }
     else if (path === '/api/zotero/collections') data = { items: [] };
     else if (path === '/api/zotero/tags?limit=300') data = { items: [] };
     else if (path === '/api/library/render/P1') data = { status: 'idle' };

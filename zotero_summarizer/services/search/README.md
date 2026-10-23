@@ -1,5 +1,11 @@
 # services/search — Targeted Search (the query-driven pull surface)
 
+Discovery reuses identifier union-find for app-linked native seed families,
+including alternating app-alias and DOI/arXiv links until closure. Only that family's complete comments own
+freshness; unrelated notes do not. Candidate identity selects declared public
+metadata, not later operation/question-evidence fields. Ordinary HTTP sessions
+retain empty Discovery objects, distinguished from real Discovery state in the UI.
+
 The library/triage domains are *push*: papers arrive from feeds and you cull them.
 This domain is *pull*: you give a research topic, and it federates the open
 literature + (later) your library, ranks by real relevance, and deep-reads a few —
@@ -51,6 +57,14 @@ atomic replacement retains that mode. Existing files are protected by the direct
 Search review or materialization is started by that flow. See
 [related saved papers](../../../docs/related-saved-papers.md) for consent,
 work ceilings, invalidation and unqualified semantic judgments.
+
+`discovery.py` reuses public Search and consent-bound seed context. Raw session
+snapshots serialize only for storage; HTTP uses freshness-qualified views.
+Find V1 schedules only OpenAlex semantic/lexical; ordinary all-source Search remains
+unchanged. Only explicit Review may claim discovery; new Add preflights before effects.
+Stale retained plans require an explicit existing-only native ACK (exact key,
+empty steps, no backup) before app finalization, never exception-time readback.
+See [server contract](../../../docs/discovery.md).
 
 ## Why this shape
 
@@ -195,6 +209,48 @@ Human-held-out answerability and latency remain unmeasured; issue #30 remains op
 | `refine.py` | bounded opt-in agentic PRF before auto-review; no-ops under strict offline |
 | `session.py` | one-JSON-per-session persistence under `settings().search_dir` + per-session lock: `claim` (status CAS, single-flights the worker), `save_merge` (whole-session save that preserves a concurrent Add's `materialized_zotero_key`), `update` (read-modify-write), `materialize_once` (Add's check-write-stamp under the lock, single-write). Malformed id → `APIError(400)` |
 
+Refinement annotates newly fetched DOI/arXiv observations before merging.
+`Candidate.family_identifier_keys` retains the complete normalized identifier
+union independently of the preferred bibliography and survives session JSON.
+`identifier_keys()` reuses that union in later transitive merges. Coverage checks
+all retained DOI/arXiv alternatives: any actual hit supplies its returned key,
+only complete misses establish False, and partial failures stay unknown. Family
+merging also preserves unknown members instead of borrowing another version's
+older miss; a genuine positive still dominates. A genuine positive key is captured before preferred-member mutation; stale miss keys cannot
+replace it. No title-only merge or candidate-address-as-identifier inference.
+Legacy sessions default to no extra observed identities; discarded aliases are not
+reconstructed. Existing reviews, addresses and scores survive; explicit Add reuses
+a confirmed saved key. The refinement/family-identifier tests use controlled
+readers and JSON round trips, not live sources, native writes or scientific truth.
+
+## Explicit Add recovery
+
+An explicit new-item Add saves `planned_zotero_key` in the existing session JSON
+before backup/native work. A failed prewrite save dispatches nothing. Native
+failure or failed session finalization retains the plan; an explicit retry reuses
+the writer's existing-key transaction no-op instead of generating another key.
+Delivery is stamped only after native return; a planned key is not library coverage
+or a success receipt. Existing coverage hits still reuse their saved key without
+constructing a writer or inventing a new plan.
+
+Exact-identifier families and same persisted candidate addresses preserve planned
+and materialized operation keys across metadata enrichment, absorption, transitive
+merges and stale background saves. Conflicting selected-family identities fail
+before updates; unrelated/unselected families do not hijack the worker's selection,
+metadata, order or review. Empty plans preserve the legacy wire shape. Nonempty
+plans must be eight ASCII uppercase letters/digits; invalid persisted values fail.
+If confirmed coverage disagrees with a retained plan, Add returns409 before any
+native write or delivery stamp. Both observations remain available for explicit
+library reconciliation; a later background save must not inherit contradictory
+planned/materialized identities.
+
+The existing per-session lock serializes one app process. Session JSON and native
+SQLite are not one transaction; no distributed exactly-once, historical receipt
+repair or cross-library replay guarantee is claimed. Retrying a committed item
+never repairs later user edits. Tests use real temporary native SQLite to cover
+commit/final-save gaps, prewrite refusal, rollback, backup, repeat, concurrency and
+family/session preservation; no live user library is needed.
+
 ## Execution and identity boundaries
 
 Screening accepts a nonblank topic of at most 4,000 characters and up to ten
@@ -297,8 +353,10 @@ existing two-lexical-pass cap remains. No additional provider framework.
 
 Accounting snapshots observations before mutable family merging. Every scheduled
 variant records its query, allocation, observations and state, including zero hits.
-Best-effort leaves do not distinguish transport failure from a genuine empty
-result: those states stay `unknown`, never successful. Source family counts are
+Ordinary calls keep best-effort empty states `unknown`. Opt-in
+`observe_outcomes=True` retains distinct per-request OpenAlex channel/outcome receipts;
+see [provider receipts](../../../docs/discovery-provider-receipts.md).
+Source family counts are
 cross-source attributed (not globally additive); type-unknown and other rejection
 counts survive persistence. Refinement stores its round's accounting separately.
 

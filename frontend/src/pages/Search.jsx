@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Link, useInRouterContext, useLocation, useNavigate } from 'react-router-dom';
 import {
   screen as screenApi,
   getSession,
+  startReview,
   materialize as materializeApi,
 } from '../api/searchApi.js';
 import CollectionPicker from '../components/CollectionPicker.jsx';
@@ -9,7 +11,8 @@ import QuestionEvidence, { EvidencePolicyStatus } from '../components/search/Que
 import { ErrorBanner, StatusBanner } from '../components/library/shared.jsx';
 import { humanizeError } from '../utils/humanizeError.js';
 import { sortSearchCandidates } from '../utils/searchSort.js';
-import { readStoredJson, removeStorage, writeStorage } from '../utils/safeStorage.js';
+import { readStoredJson, writeStorage } from '../utils/safeStorage.js';
+import { Comments } from '../components/paper/RelatedPapers.jsx';
 import { pollSessionUntilDone } from '../searchPolling.js';
 
 // Targeted Search — the query-driven pull surface (services/search). Give a
@@ -88,8 +91,10 @@ function GroundedRow({ label, row }) {
 }
 
 function ReviewPanel({ review }) {
-  if (!review || review.state === 'needs_full_text') {
-    return <div className="mt-2 text-[12px] text-slate-500">No open-access full text — not deep-reviewed.</div>;
+  if (!review || !Object.keys(review).length) return <p className="mt-2 text-xs">Not reviewed.</p>;
+  if (review.state === 'error') return <p role="alert">Review failed: {review.error}</p>;
+  if (review.state === 'needs_full_text') {
+    return <div className="mt-2 text-[12px] text-slate-500">Full text unavailable after acquisition — not deep-reviewed.</div>;
   }
   const brief = review.brief || {};
   return (
@@ -108,7 +113,57 @@ function ReviewPanel({ review }) {
   );
 }
 
-function CandidateCard({ cand, onAdd, questions }) {
+const RETRIEVAL = {
+  observed: 'Scheduled providers returned observed results.', partial: 'Partial provider coverage; this is not a complete search.',
+  failed: 'Provider retrieval failed.', unknown: 'Provider availability is unknown.', not_attempted: 'Provider retrieval was not attempted.',
+};
+const ASSESSMENT = {
+  not_requested: 'Private comment assessment was not requested.', assessed: 'Metadata-bound model judgment; not a full-text review or quality finding.',
+  no_comments: 'Observed empty seed comments.', no_candidates: 'No candidates available for assessment.', disabled: 'Comment assessment is disabled.',
+  budget_exceeded: 'Complete context exceeds the budget; it was not clipped.', context_unavailable: 'Seed context is unavailable or incomplete.',
+  failed: 'Comment assessment failed.', interrupted: 'Assessment was interrupted; no successful completion is established.', stale: 'Assessment context changed.',
+};
+
+function DiscoveryEvidence({ row }) {
+  if (!row) return null;
+  return <div className="mt-2 text-sm">
+    <p>{row.sentence}</p><p>Metadata-bound model judgment · relevance: {row.relevance}; preference: {row.preference}.</p>
+    <details><summary>Metadata evidence</summary>
+      <p>Quote membership is checked; entailment is not independently verified. Comments are context, not paper evidence.</p>
+      {Object.entries(row.evidence || {}).map(([side, quote]) => <blockquote key={side} className="border-l pl-3">
+        {side} · {quote.item_key} · {quote.field} [{quote.start}, {quote.end}]: “{quote.excerpt}”
+      </blockquote>)}
+      <p>Model-cited comment IDs: {(row.used_context_ids || []).join(', ') || 'none'}.</p>
+    </details>
+  </div>;
+}
+
+function DiscoveryStatus({ session, trusted }) {
+  const discovery = session.discovery;
+  const cited = trusted ? discovery.assessment.items.flatMap(row => row.used_context_ids || []) : [];
+  return <section aria-label="Discovery status" className="mb-4 text-sm break-words">
+    <h2 className="font-display text-xl">Find new relevant · {discovery.seed_title}</h2>
+    <p role="status">Session: {session.status} · Freshness: {discovery.freshness}</p>
+    <p aria-label="Retrieval status">OpenAlex semantic + lexical only · Retrieval: {discovery.retrieval.status}. {RETRIEVAL[discovery.retrieval.status]}</p>
+    <p aria-label="Assessment status">Assessment: {discovery.assessment.status}. {ASSESSMENT[discovery.assessment.status]}</p>
+    {discovery.retrieval.empty_reason && <p>{discovery.retrieval.empty_reason === 'providers_empty'
+      ? 'Scheduled providers successfully returned no candidates.' : 'Observed candidates were all known saved.'}</p>}
+    {trusted && !discovery.retrieval.empty_reason && !discovery.recommended_ids.length && <p>No supported default recommendations; retained observations may still be available below.</p>}
+    {!trusted && <p>Private evidence hidden; freshness is stale, unverified, or awaiting a successful status read. New actions are unavailable.</p>}
+    {discovery.error && <p role="alert">Discovery error: {discovery.error.stage} · {discovery.error.code}</p>}
+    <Link className="text-forest underline" to={`/paper/${encodeURIComponent(discovery.seed_key)}?retryDiscovery=1`}>Return to seed to explicitly retry discovery</Link>
+    <details><summary>Provider observations</summary>
+      {discovery.retrieval.variants.map((variant, index) => <p key={index}>{variant.channel} · {variant.outcome?.status || 'unknown'} · count: {variant.outcome?.count ?? 'unknown'} · {variant.outcome?.error_code}</p>)}
+    </details>
+    {trusted && <>
+      <p>{discovery.comments_in_ranking ? 'Model reported comment use; influence is unverified.' : 'No model-cited comment use reported.'}</p>
+      <p>Submitted comment IDs (not proof of use): {discovery.assessment.submitted_context_ids.join(', ') || 'none'}.</p>
+      <Comments comments={discovery.seed_comments} used={cited} submitted={discovery.assessment.submitted_context_ids} />
+    </>}
+  </section>;
+}
+
+function CandidateCard({ cand, onAdd, questions = [], discovery, actionsAllowed = true, trusted = false }) {
   const sources = [...new Set((cand.provenance || []).map((p) => p.source))];
   const band = (cand.quality?.quality_band || '').toLowerCase();
   const meta = [cand.venue, cand.year].filter(Boolean).join(' · ');
@@ -130,7 +185,7 @@ function CandidateCard({ cand, onAdd, questions }) {
   }, [onAdd, cand.candidate_id]);
   const cardCls = cand.is_retracted ? 'bg-rose-50 border-rose-300' : (rel?.card || 'bg-white border-slate-200');
   return (
-    <div className={`border rounded-xl p-3 ${cardCls}`}>
+    <article aria-label={cand.title} className={`border rounded-xl p-3 ${cardCls}`}>
       <div className="flex items-baseline justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-slate-900">
@@ -165,6 +220,11 @@ function CandidateCard({ cand, onAdd, questions }) {
         {cand.is_retracted && <span className="px-1.5 py-0.5 bg-rose-200 text-rose-900 rounded font-semibold">RETRACTED</span>}
       </div>
       {cand.abstract && <p className="mt-2 text-[12px] text-slate-600 line-clamp-3">{cand.abstract}</p>}
+      {discovery && <>
+        {(discovery.unresolved_membership || []).includes(cand.candidate_id) || cand.in_library == null
+          ? <p>Membership unknown — not established new.</p> : <p>{cand.in_library ? 'Known saved paper.' : 'Not saved in the checked membership snapshot.'}</p>}
+        <DiscoveryEvidence row={trusted ? discovery.assessment.items.find(row => row.item_key === cand.candidate_id) : null} />
+      </>}
       <ReviewPanel review={cand.review} />
       <QuestionEvidence candidate={cand} questions={questions} />
       <div className="mt-2 flex items-center gap-2">
@@ -172,23 +232,21 @@ function CandidateCard({ cand, onAdd, questions }) {
           <span className="text-[12px] text-emerald-700 font-semibold">✓ In library</span>
         ) : (
           <button
-            type="button" onClick={add} disabled={adding}
+            type="button" onClick={add} disabled={adding || !actionsAllowed}
             className="px-2.5 py-1 rounded-lg text-[12px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40"
           >
-            {adding ? 'Adding…' : 'Add to library'}
+            {adding ? 'Adding…' : discovery && cand.planned_zotero_key ? 'Reconcile retained Add' : 'Add to library'}
           </button>
         )}
         {addErr && <span className="text-[11px] text-rose-700">{humanizeError(addErr)}</span>}
       </div>
-    </div>
+    </article>
   );
 }
 
-// The search session lives on the SERVER; the page only needs to survive a tab
-// switch with the POINTER (session id) + the typed drafts (Working Memory: the
-// system remembers, not the user). sessionStorage, not URL — a session id is not
-// a shareable address, and it dies with the browser tab, matching its lifetime.
+// The server owns sessions. URL pointers win; tab storage is best-effort restoration.
 const SS_KEY = 'zs.searchSession';
+const hasDiscovery = session => Boolean(session?.discovery && Object.keys(session.discovery).length);
 function loadSaved() {
   return readStoredJson(
     SS_KEY,
@@ -199,6 +257,16 @@ function loadSaved() {
 }
 
 export default function Search() {
+  return useInRouterContext() ? <SearchRoute /> : <SearchSession />;
+}
+
+function SearchRoute() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return <SearchSession urlSearch={location.search} onPointer={id => navigate(`/search?session=${encodeURIComponent(id)}`, { replace: true })} />;
+}
+
+function SearchSession({ urlSearch = '', onPointer }) {
   const [saved] = useState(loadSaved);   // snapshot once, at mount
   const [query, setQuery] = useState(saved.q || '');
   const [questions, setQuestions] = useState(saved.qs || '');
@@ -211,102 +279,133 @@ export default function Search() {
   const [targetCollection, setTargetCollection] = useState(saved.tc || '');
   const [sort, setSort] = useState(saved.sort || 'recommended');
   const pollRef = useRef(null);
-  const requestRef = useRef(0);
-  // The id to persist while no live session exists yet (cleared if it turns out dead).
-  const savedIdRef = useRef(saved.id || null);
-
-  useEffect(() => () => { requestRef.current += 1; pollRef.current?.(); }, []);
+  const savedIdRef = useRef(new URLSearchParams(urlSearch).get('session') || saved.id || null);
+  const ownerRef = useRef(null);
+  const begin = useCallback((id, busy = false) => {
+    pollRef.current?.();
+    ownerRef.current?.controller.abort();
+    const owner = { id, controller: new AbortController() };
+    ownerRef.current = owner;
+    setLoading(busy);
+    setError(null);
+    return owner;
+  }, []);
+  const current = useCallback(owner => Boolean(owner && ownerRef.current === owner && !owner.controller.signal.aborted), []);
+  useLayoutEffect(() => () => { pollRef.current?.(); ownerRef.current?.controller.abort(); }, []);
 
   // Mirror pointer + drafts to sessionStorage on every change.
   useEffect(() => {
     writeStorage(SS_KEY, JSON.stringify(
       { id: session?.id || savedIdRef.current, q: query, qs: questions, tc: targetCollection, sort },
     ), 'sessionStorage');
-  }, [session?.id, query, questions, targetCollection, sort]);
+  }, [session?.id, query, questions, targetCollection, sort, urlSearch]);
 
-  // File one candidate into the chosen collection, then stamp its returned key on
-  // the local session so the card flips to "✓ In library" without waiting for a poll.
-  const materializeCard = useCallback(async (candidateId) => {
-    if (!session) return;
-    const res = await materializeApi(session.id, candidateId, targetCollection);
-    setSession((prev) => (prev?.id === session.id ? {
-      ...prev,
-      candidates: (prev.candidates || []).map((c) =>
-        c.candidate_id === candidateId ? { ...c, materialized_zotero_key: res.zotero_key } : c),
-    } : prev));
-  }, [session, targetCollection]);
-
-  // Poll a reviewing session until the deep reviews finish (screen auto-starts them).
-  const pollUntilDone = useCallback((id) => {
+  const pollUntilDone = useCallback((owner, discovery) => {
     pollRef.current?.();
-    pollRef.current = pollSessionUntilDone(id, {
-      fetchSession: getSession,
-      onSession: (fresh) => {
-        setSession(fresh);
-        setError(null);
+    pollRef.current = pollSessionUntilDone(owner.id, {
+      fetchSession: async (id, options) => {
+        const fresh = await getSession(id, options);
+        if (fresh.id !== id) throw new Error('Session identity mismatch');
+        return fresh;
+      }, stopOnError: discovery,
+      onSession: fresh => {
+        if (!current(owner) || fresh.id !== owner.id) return;
+        setSession(fresh); setError(null);
       },
-      onError: setError,
+      onError: error => { if (current(owner)) setError(error); },
     });
-  }, []);
+  }, [current]);
 
-  // Rehydrate the last session on remount (tab switch / reload): refetch from the
-  // server (source of truth) and resume polling if the review is still running.
-  // A dead pointer (server restarted, session GC'd) clears itself silently.
-  useEffect(() => {
-    if (!saved.id) return undefined;
-    let cancelled = false;
-    const request = requestRef.current;
-    getSession(saved.id)
-      .then((sess) => {
-        if (cancelled || request !== requestRef.current) return;
-        setSession(sess);
-        if (sess.status === 'reviewing') pollUntilDone(sess.id);
-      })
-      .catch(() => {
-        if (cancelled || request !== requestRef.current) return;
-        savedIdRef.current = null;          // dead pointer — stop persisting it
-        removeStorage(SS_KEY, 'sessionStorage');
-      });
-    return () => { cancelled = true; };
-  }, [saved.id, pollUntilDone]);
+  const readSession = useCallback(async owner => {
+    try {
+      const fresh = await getSession(owner.id, { signal: owner.controller.signal });
+      if (!current(owner)) return;
+      if (fresh.id !== owner.id) throw new Error('Session identity mismatch');
+      savedIdRef.current = fresh.id;
+      setSession(fresh);
+      if (fresh.status === 'reviewing') pollUntilDone(owner, hasDiscovery(fresh));
+    } catch (error) {
+      if (current(owner)) setError(error);
+    } finally {
+      if (current(owner)) setLoading(false);
+    }
+  }, [pollUntilDone, current]);
+
+  useLayoutEffect(() => {
+    const id = new URLSearchParams(urlSearch).get('session') || savedIdRef.current;
+    if (!id || (ownerRef.current?.id === id && current(ownerRef.current))) return;
+    savedIdRef.current = id;
+    setSession(null);
+    readSession(begin(id));
+  }, [urlSearch, begin, readSession, current]);
+
+  const materializeCard = async candidateId => {
+    if (ownerRef.current?.id !== session?.id || loading || (hasDiscovery(session) && error)) return;
+    const owner = hasDiscovery(session) ? begin(session.id, true) : ownerRef.current;
+    try {
+      const res = await materializeApi(owner.id, candidateId, targetCollection);
+      if (!current(owner)) return;
+      if (hasDiscovery(session)) await readSession(owner);
+      else setSession(prev => prev?.id === owner.id ? { ...prev, candidates: prev.candidates.map(c =>
+        c.candidate_id === candidateId ? { ...c, materialized_zotero_key: res.zotero_key } : c) } : prev);
+    } catch (error) {
+      if (current(owner)) {
+        setLoading(false);
+        if (hasDiscovery(session)) setError(error);
+        throw error;
+      }
+    }
+  };
+  const review = async () => {
+    const owner = begin(session.id, true);
+    try {
+      await startReview(owner.id);
+      if (current(owner)) await readSession(owner);
+    } catch (error) {
+      if (current(owner)) { setError(error); setLoading(false); }
+    }
+  };
 
   const runScreen = useCallback(async (e) => {
     e?.preventDefault();
     if (!query.trim()) return;
-    const request = ++requestRef.current;
-    setLoading(true);
-    pollRef.current?.();
-    setError(null);
+    const owner = begin(null, true);
+    savedIdRef.current = null;
     setSession(null);
     try {
       const qs = questions.split('\n').map((q) => q.trim()).filter(Boolean);
       const confirmed = Object.fromEntries(Object.entries(constraints).map(([key, value]) =>
         [key, value.split('\n').map((term) => term.trim()).filter(Boolean)]));
       const sess = await screenApi({ query: query.trim(), questions: qs,
-        ...(evidenceEnabled ? { evidence_policy: 'question_evidence' } : {}),
+        ...(evidenceEnabled && qs.length ? { evidence_policy: 'question_evidence' } : {}),
         ...(Object.values(confirmed).some((values) => values.length) ? { constraints: confirmed } : {}) });
-      if (request !== requestRef.current) return;
+      if (!current(owner)) return;
+      owner.id = sess.id;
       savedIdRef.current = sess.id;
       setSession(sess);
-      if (sess.status === 'reviewing') pollUntilDone(sess.id);  // auto deep-review started server-side
+      onPointer?.(sess.id);
+      if (sess.status === 'reviewing') pollUntilDone(owner, false);  // ordinary Search still auto-reviews
     } catch (err) {
-      if (request === requestRef.current) setError(err);
+      if (current(owner)) setError(err);
     } finally {
-      if (request === requestRef.current) setLoading(false);
+      if (current(owner)) setLoading(false);
     }
-  }, [query, questions, constraints, evidenceEnabled, pollUntilDone]);
+  }, [query, questions, constraints, evidenceEnabled, begin, pollUntilDone, onPointer, current]);
 
+  const discovery = hasDiscovery(session) ? session.discovery : null;
+  const trusted = discovery?.freshness === 'current' && !loading && !error;
+  const actionsAllowed = !discovery || Boolean(trusted && discovery.new_actions_allowed);
   const reviewing = session?.status === 'reviewing' && !error;
   // Doherty: name the honest stage. During agentic rounds refinements grow but no
   // review has landed yet — showing "Deep-reviewing…" then would mislabel the wait.
   const anyReviewed = (session?.candidates || []).some((c) => c.review && c.review.state);
-  const refining = reviewing && (session?.refinements || []).length > 0 && !anyReviewed;
+  const refining = !discovery && reviewing && (session?.refinements || []).length > 0 && !anyReviewed;
   return (
     <div className="max-w-3xl mx-auto">
       <h1 className="text-lg font-semibold text-slate-900 mb-1">Targeted Search</h1>
       <p className="text-[12px] text-slate-500 mb-3">
-        Describe a research topic. We plan a query per source, federate the open literature,
-        dedupe version families, rank by real relevance, then deep-read the best few.
+        {discovery ? 'Discovery uses public metadata, not full-text quality. Review and Add require explicit actions.'
+          : 'Describe a research topic. We plan a query per source, federate the open literature, dedupe version families, rank by real relevance, then deep-read the best few.'}
       </p>
       <form onSubmit={runScreen} className="mb-4 grid gap-2">
         <textarea
@@ -345,28 +444,37 @@ export default function Search() {
         </button>
       </form>
 
-      {error && <ErrorBanner error={humanizeError(error)} />}
+      {loading && <p role="status">Waiting for the current request…</p>}
+      {error && <><ErrorBanner error={humanizeError(error)} />
+        <p>Status unavailable; the server may still be working. This is not a cancellation or successful completion.</p>
+        {savedIdRef.current && <button type="button" onClick={() => readSession(begin(savedIdRef.current, hasDiscovery(session)))}>Retry session status</button>}
+      </>}
 
       {session && (
         <div>
+          {discovery && <>
+            <DiscoveryStatus session={session} trusted={trusted} />
+            <button type="button" className="mb-3 mr-2 rounded-lg border border-slate-300 px-3 py-3 text-sm text-forest-800 disabled:opacity-40" disabled={loading} onClick={() => readSession(begin(session.id, true))}>Refresh session status</button>
+            <button type="button" className="mb-3 mr-2 rounded-lg border border-slate-300 px-3 py-3 text-sm text-forest-800 disabled:opacity-40" disabled={!actionsAllowed || reviewing || session.status !== 'discovery_ready'} onClick={review}>Review retained candidates</button>
+          </>}
           {session.intent && session.intent.parse_ok === false && (
             <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
               Couldn’t structure this topic — searched your raw query as-is. Try rephrasing for a sharper plan.
             </div>
           )}
           <QueryPlan plan={session.plan || {}} />
-          <Refinements rounds={session.refinements} />
-          <EvidencePolicyStatus session={session} />
+          {!discovery && <Refinements rounds={session.refinements} />}
+          {!discovery && <EvidencePolicyStatus session={session} />}
           <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
             <div className="text-[12px] text-slate-500">{(session.candidates || []).length} candidates</div>
-            <label className="text-[12px] text-slate-600">
+            {!discovery && <label className="text-[12px] text-slate-600">
               Sort by{' '}
               <select value={sort} onChange={(e) => setSort(e.target.value)} className="rounded border border-slate-300 p-1">
                 <option value="recommended">Recommended</option>
                 <option value="relevance">Relevance</option>
                 <option value="relevance_prestige">Relevance + prestige</option>
               </select>
-            </label>
+            </label>}
             <div className="flex items-center gap-2">
               {reviewing && (
                 <div className="text-[12px] text-slate-500 flex items-center gap-1.5">
@@ -379,27 +487,32 @@ export default function Search() {
             </div>
           </div>
           {session.status === 'error' && <StatusBanner isError message="Review failed — see server log." />}
-          {sort === 'relevance_prestige' && <p className="mb-2 text-[12px] text-slate-500">85% relevance + 15% citation prestige (log-scaled within these results; unknown citations use the median). Citation counts favor older papers and vary by field.</p>}
+          {!discovery && sort === 'relevance_prestige' && <p className="mb-2 text-[12px] text-slate-500">85% relevance + 15% citation prestige (log-scaled within these results; unknown citations use the median). Citation counts favor older papers and vary by field.</p>}
           {(() => {
-            const cands = sortSearchCandidates(session.candidates || [], sort);
+            const cands = discovery ? session.candidates || [] : sortSearchCandidates(session.candidates || [], sort);
+            const recommended = trusted ? discovery.recommended_ids.slice(0, 3) : [];
             const promoted = new Set(session.evidence_status?.promoted_candidate_ids || []);
-            const isWeak = (c) => c.relevance_band === 'weak' && !promoted.has(c.candidate_id);
-            const strong = sort === 'recommended' ? cands.filter((c) => !isWeak(c)) : cands;
-            const weak = sort === 'recommended' ? cands.filter(isWeak) : [];
+            const isWeak = c => c.relevance_band === 'weak' && !promoted.has(c.candidate_id);
+            const strong = discovery ? recommended.map(id => cands.find(c => c.candidate_id === id)).filter(Boolean)
+              : sort === 'recommended' ? cands.filter(c => !isWeak(c)) : cands;
+            const weak = discovery ? cands.filter(c => !recommended.includes(c.candidate_id))
+              : sort === 'recommended' ? cands.filter(isWeak) : [];
+            const card = c => <CandidateCard key={`${session.id}:${c.candidate_id}`} cand={c} onAdd={materializeCard}
+              questions={!discovery && session.evidence_policy === 'question_evidence' ? session.questions : []}
+              discovery={discovery} trusted={trusted}
+              actionsAllowed={!loading && (!discovery || !error) && (actionsAllowed || Boolean(c.planned_zotero_key))} />;
             return (
               <>
                 <div className="grid gap-3">
-                  {strong.map((c) => <CandidateCard key={c.candidate_id} cand={c} onAdd={materializeCard}
-                    questions={session.evidence_policy === 'question_evidence' ? session.questions : []} />)}
+                  {strong.map(card)}
                 </div>
                 {weak.length > 0 && (
                   <details className="mt-3">
                     <summary className="cursor-pointer text-[12px] text-slate-500 font-semibold py-1">
-                      {weak.length} weaker match{weak.length === 1 ? '' : 'es'} ▾
+                      {discovery ? `${weak.length} retained candidates` : `${weak.length} weaker match${weak.length === 1 ? '' : 'es'}`} ▾
                     </summary>
                     <div className="grid gap-3 mt-2">
-                      {weak.map((c) => <CandidateCard key={c.candidate_id} cand={c} onAdd={materializeCard}
-                        questions={session.evidence_policy === 'question_evidence' ? session.questions : []} />)}
+                      {weak.map(card)}
                     </div>
                   </details>
                 )}

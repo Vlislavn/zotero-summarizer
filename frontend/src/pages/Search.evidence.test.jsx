@@ -21,9 +21,9 @@ function savedSession(overrides = {}) {
     id: 'evidence', status: 'reviewed', questions: [question], evidence_policy: 'question_evidence',
     evidence_status: { state: 'complete', promoted_candidate_ids: ['answer'], topic_floor: 0.35 },
     candidates: [
-      { candidate_id: 'topic', title: 'Top terminology match', url: 'https://example.org/topic', query_score: 0.95 },
       { candidate_id: 'answer', title: 'Lower-ranked answer', url: 'https://example.org/answer', query_score: 0.5,
         relevance_band: 'weak', question_evidence: [receipt] },
+      { candidate_id: 'topic', title: 'Top terminology match', url: 'https://example.org/topic', query_score: 0.95 },
     ], ...overrides,
   };
   sessionStorage.setItem('zs.searchSession', JSON.stringify({ id: session.id }));
@@ -33,12 +33,11 @@ function savedSession(overrides = {}) {
   return session;
 }
 
-it('keeps a promoted weak answer visible and explicitly sorts the complete pool using server policy', async () => {
+it('keeps a server-promoted weak answer visible in the recommended order', async () => {
   savedSession();
   render(<Search />);
   await screen.findByText('Lower-ranked answer');
   expect(screen.queryByText(/weaker match/)).toBeNull();
-  fireEvent.change(screen.getByRole('combobox', { name: 'Sort by' }), { target: { value: 'question_evidence' } });
   expect(screen.getAllByRole('link').filter((link) => link.target === '_blank').map((link) => link.textContent))
     .toEqual(['Lower-ranked answer', 'Top terminology match']);
   const card = screen.getByText('Lower-ranked answer').closest('.border.rounded-xl');
@@ -46,10 +45,10 @@ it('keeps a promoted weak answer visible and explicitly sorts the complete pool 
   expect(within(card).getByText('Sufficient evidence (AI-verified)')).toBeTruthy();
   expect(within(card).getByText('The treatment did not improve the outcome.')).toBeTruthy();
   expect(within(card).getByText(/Extracted characters 1500–1600/)).toBeTruthy();
-  expect(within(card).getByText(/extraction completeness is unknown/)).toBeTruthy();
+  expect(within(card).getByText(/Only retrieved original passages checked/)).toBeTruthy();
   fireEvent.click(within(card).getByText('Source and evaluator provenance'));
-  expect(within(card).getByText('configured-deep-verifier')).toBeTruthy();
-  expect(within(card).getByText('question-fingerprint')).toBeTruthy();
+  expect(within(card).getByText(/Verifier: configured-deep-verifier/)).toBeTruthy();
+  expect(within(card).getByText(/Question SHA-256: question-fingerprint/)).toBeTruthy();
   expect(screen.getAllByText('Unchecked')).toHaveLength(1);
   expect(fetch.mock.calls.some(([path]) => path.includes('materialize'))).toBe(false);
 });
@@ -64,16 +63,16 @@ it('submits evidence policy only after explicit selection and with questions', a
     return new Response(JSON.stringify({ items: [] }));
   }));
   render(<Search />);
-  fireEvent.change(screen.getByLabelText('Research topic'), { target: { value: 'treatment studies' } });
-  fireEvent.change(screen.getByLabelText('Questions'), { target: { value: question } });
+  fireEvent.change(screen.getByPlaceholderText(/LLM agents for clinical decision support/), { target: { value: 'treatment studies' } });
+  fireEvent.change(screen.getByPlaceholderText(/one specific question per line/), { target: { value: question } });
   fireEvent.click(screen.getByRole('button', { name: 'Search' }));
   await waitFor(() => expect(bodies).toHaveLength(1));
   expect(bodies[0].evidence_policy).toBeUndefined();
-  fireEvent.click(screen.getByRole('checkbox', { name: /Promote evidence-backed answers/ }));
+  fireEvent.click(screen.getByRole('checkbox', { name: /Experimental original-source question evidence/ }));
   fireEvent.click(screen.getByRole('button', { name: 'Search' }));
   await waitFor(() => expect(bodies).toHaveLength(2));
   expect(bodies[1].evidence_policy).toBe('question_evidence');
-  fireEvent.change(screen.getByLabelText('Questions'), { target: { value: '' } });
+  fireEvent.change(screen.getByPlaceholderText(/one specific question per line/), { target: { value: '' } });
   fireEvent.click(screen.getByRole('button', { name: 'Search' }));
   await waitFor(() => expect(bodies).toHaveLength(3));
   expect(bodies[2].evidence_policy).toBeUndefined();
@@ -88,10 +87,11 @@ it('distinguishes unavailable routing, partial evidence and retrieval misses fro
       ] },
     ] });
   render(<Search />);
-  expect(await screen.findByRole('status')).toHaveProperty('textContent', expect.stringContaining('Baseline review order is preserved'));
-  expect(screen.getByRole('status').textContent).toContain('different Feed (generator) and Deep review (verifier)');
+  expect(await screen.findByText('Partial')).toBeTruthy();
+  expect(screen.getByRole('status').textContent).toContain('Baseline order is preserved');
+  expect(screen.getByRole('status').textContent).toContain('separate generator verifier required');
   expect(screen.getByText('Partial evidence')).toBeTruthy();
-  expect(screen.getByText('Still uncovered: second outcome')).toBeTruthy();
-  expect(screen.getByText(/No answer located in retrieved passages; the rest is unchecked/)).toBeTruthy();
+  expect(screen.getByText('Uncovered: second outcome')).toBeTruthy();
+  expect(screen.getByText(/Unavailable or missing passages do not establish absence/)).toBeTruthy();
   expect(screen.queryByText('Not found in checked text')).toBeNull();
 });

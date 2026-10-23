@@ -44,6 +44,12 @@ changed case, punctuation and words still fail, and accepted digests stay intact
 advertised wire dialects, unsupported-provider preservation and JSON-only CLI
 stdout when runtime diagnostics are printed. Live model receipts remain separate.
 
+`test_search_materialize_recovery.py` and `test_search_planned_identity.py` exercise
+explicit Search Add with real temporary native SQLite: persistence refusal before
+effects, native commit before failed session finalization, rollback, unchanged
+native replay, backup, concurrency, legacy plans and exact-family/background
+identity preservation. They do not claim distributed or cross-library exactly-once.
+
 Full verification commands and the known macOS native-library fork baseline are
 in [architecture.md](../docs/architecture.md#verify-a-change). Compare the failed
 set against that baseline rather than hiding failures. Authored/static-checked
@@ -335,3 +341,23 @@ Packaging retains the original non-shipped `tools.method_validation.client` tran
 Original method comparison regression oracles are retained without assertion changes. This source-only packet does not establish compatibility with the newer contracts.
 
 Retain original prefilter-metadata source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+
+Search family-identifier regressions cover normalized retained IDs, transitive
+merges after JSON reload, positive-key affinity, partial-reader uncertainty, and
+persisted refinement with older misses and newly unresolved identities.
+Controlled identifiers/readers establish machine contracts, not live-library
+completeness or semantic paper equivalence.
+
+`test_discovery_server*.py` covers API/SQL/privacy/race/effect contracts, including
+all-response sentinels and alternate-action fences, using synthetic stores and
+a controlled provider bridge. Scripted judgments do not prove usefulness.
+
+`test_discovery_provider_*.py` covers inert OpenAlex JSON receipt contracts,
+concurrent variant isolation and unchanged narrow ordinary callers for other sources.
+Wider arXiv/Europe PMC receipt scope is deliberately excluded from this version.
+`test_discovery_recovery_joint.py` and `test_discovery_existing_only.py` cover real
+temporary native SQL, strict current no-op ACKs, save gaps, malformed receipts,
+WAL visibility and refusal before mutation/backup/pruning. These
+machine controls do not qualify live providers or semantic recommendation quality.
+Candidate identity regressions also distinguish public metadata changes from later
+derived operation/question-evidence enrichment; source inheritance is not identity.

@@ -221,6 +221,10 @@ no body copy or migration, and reads do not rewrite historical data. Ambiguous
 legacy IDs are not guessed. This changes local note identity, not Zotero mirror
 delivery. Snapshot identity resolution is per note family, not one batched join.
 
+`library_context.read_discovery_membership` reads uncapped latest rows per durable
+key before retention filtering, with timestamp/ID ties. It exposes decisions and
+existing identifiers for saved admission/exclusion; browsing policy is unchanged.
+
 `library_context.read_context` obtains one read-only SQLite transaction for the
 related-paper surface. It reuses `review_notes._keys/current` and the label mirror's
 current-change query, retaining original keys, revisions and deletion authority.

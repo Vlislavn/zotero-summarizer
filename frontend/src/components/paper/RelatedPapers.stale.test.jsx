@@ -6,7 +6,10 @@ import { MemoryRouter } from 'react-router-dom';
 import RelatedPapers from './RelatedPapers.jsx';
 import { fetchRelatedPapers, assessRelatedPapers } from '../../api/libraryApi.js';
 
-vi.mock('../../api/libraryApi.js', () => ({ fetchRelatedPapers: vi.fn(), assessRelatedPapers: vi.fn() }));
+vi.mock('../../api/libraryApi.js', () => ({ fetchRelatedPapers: vi.fn(), assessRelatedPapers: vi.fn(),
+  fetchDiscovery: async () => ({ admission: { state: 'unknown', basis: null }, context_fingerprint: null }),
+  findNewRelevant: vi.fn(),
+}));
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 const old = { status: 'ready', context_fingerprint: 'old', comments_in_ranking: false,
   boundary: { enabled: false }, items: [], seed_comments: { availability: 'available', app_state: 'observed',

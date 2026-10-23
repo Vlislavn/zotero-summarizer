@@ -10,6 +10,10 @@ source overrides retain their own contract. Failed/stale/legacy validation gives
 no retained payload; malformed stores fail.
 See [private export usage and response contract](../../../docs/verification-audit.md).
 
+Search replies use each session domain's own projection: Discovery applies its
+context/privacy view; ordinary Search retains its existing serialization boundary.
+No private Discovery snapshot is exposed through screen or session GET.
+
 Search screen optionally accepts confirmed `constraints` (required/excluded phrases
 and publication types). Missing constraints never authorize model-imposed filters;
 legacy sessions disclose unknown origin. Review status adds typed stage/recovery
@@ -81,6 +85,11 @@ the existing session store, never Search auto-review or Add. Full private seed
 and candidate notes stay out of provider search queries. Unknown, failed,
 interrupted, stale and over-budget assessments are distinct from genuine empty.
 See [contract](../../../docs/related-saved-papers.md).
+
+Discovery GET/strict POST: `/api/library/related/{item_key}/discover`.
+All session responses use controlled views; raw snapshots are storage-only.
+Discovery cannot auto-review; explicit Review/new Add preflight freshness.
+See [Discovery](../../../docs/discovery.md).
 
 Ask Paper additionally accepts up to 20 typed prior turns. The library service
 keeps a recent tail, compacts older evidence to extraction-versioned handles,

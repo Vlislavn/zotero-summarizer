@@ -3,6 +3,8 @@
 React 18 + Vite 5 + Tailwind 3, served by FastAPI at the app root.
 Public tests use generic provider/model fixtures; private deployment identities
 and live-library screenshots do not belong in the shared source.
+Discovery status rechecks hide prior private evidence; ordinary session restoration
+does not block a new explicit search. Both use the same request-owner fence.
 
 ```bash
 cd frontend
@@ -307,8 +309,36 @@ query identity. Closed, loading and failed reads do not display retained comment
 bodies; an old cached or pending GET cannot publish into the replacement owner.
 GETs consume React Query's cancellation signal, including unmount cancellation.
 An explicit fresh load/refresh/retry is still available, without an automatic
-semantic POST. No second client store, external discovery or Add is introduced.
-[Usage/privacy/qualification](../docs/related-saved-papers.md).
+semantic POST. No second client store is introduced.
+[Saved-paper usage/privacy/qualification](../docs/related-saved-papers.md).
+
+### Saved-seed discovery
+
+The same Related section independently reads discovery admission. Only a server-positive
+saved seed enables **Find new relevant**. Reads never POST; eligibility errors, unavailable
+context and failed requests have explicit recovery, not focus/reconnect retries.
+The folded boundary disclosure optionally confirms private **seed** comments to the
+named model; otherwise the one Find action sends a null consent token and uses public
+metadata only. Providers never receive those comments. ACK/remount/navigation abort and
+fence obsolete discovery completions before they can navigate.
+
+`/search?session=<id>` adopts the server DTO before tab storage, including when storage
+is blocked. Discovery shows three server recommendations, the retained pool, typed
+retrieval/assessment/freshness, metadata quotes and attributed seed comments. Submitted
+IDs are not model-cited IDs; quote membership is not entailment or a full-text review.
+Stale/unverified/failed-status reads hide private evidence and disable new effects.
+Review and Add are explicit; Add is followed by a fresh server read. A retained plan
+uses the same action as explicit **Reconcile retained Add**, with server-enforced
+existing-only recovery when stale. Find V1 searches only OpenAlex semantic/lexical;
+ordinary topic Search retains all sources. Discovery polling
+stops on read failure and offers Retry; ordinary Search still auto-reviews and retries
+transient polling failures. A retry link returns to fresh seed eligibility and unchecked
+consent; URL retry intent alone never starts work.
+
+This source seam requires the matching discovery backend/provider changes in the same
+feature; it is not a standalone UI release. Controlled DOM/API/polling tests, build,
+browser and independent review are required; their scope is not live-provider,
+private-user usefulness or scientific acceptance. See [UI contract](../docs/discovery-ui.md).
 
 ## Offline boundary
 

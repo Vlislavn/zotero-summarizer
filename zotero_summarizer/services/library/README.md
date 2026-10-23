@@ -553,6 +553,11 @@ Omitted configured projects become explicit unknowns with null evidence; no
 project silently disappears. Feed-context acquisition reuses headless PDF sources
 only (`allow_browser=False`); interactive per-paper acquisition is unchanged.
 
+Discovery reuses the attributed seed-comment and consent/quote validation owners.
+External candidates have unavailable private context, not observed-empty notes.
+Only explicit Find consent invokes assessment; saved Related behavior is unchanged.
+See [Discovery](../../../docs/discovery.md).
+
 ## Related saved papers
 
 `related.py` reuses `_search.hybrid_search` for up to three saved-paper links on

@@ -26,6 +26,8 @@ from zotero_summarizer.services.search._models import (
     SearchIntent,
 )
 
+from zotero_summarizer.services.search.dedup import reconcile_operation_state
+
 # Per-session-id locks so the background review worker (whole-session saves) and a
 # concurrent "Add to library" (stamps one candidate's materialized key) never
 # lost-update each other. In-process only — sessions are served by one app process.
@@ -79,28 +81,21 @@ def save(session: ResearchSession) -> None:
         tmp = path.with_suffix(".tmp")
         with tmp.open("w", encoding="utf-8") as handle:
             os.fchmod(handle.fileno(), 0o600)
-            json.dump(session.to_dict(), handle, indent=2, ensure_ascii=False)
+            json.dump(session.to_dict(for_storage=True), handle, indent=2, ensure_ascii=False)
         tmp.replace(path)
 
 
 def save_merge(session: ResearchSession) -> ResearchSession:
-    """Persist under the session lock, preserving any ``materialized_zotero_key`` that
-    a concurrent "Add to library" stamped since this in-memory copy was loaded. The
-    key is add-only/monotonic, so the review worker's whole-session saves must never
-    drop it. Everything else (order, quality, reviews) is owned by the worker."""
+    """Preserve operation keys across saved/current exact families under the lock.
+
+    Selection, order, metadata, quality and reviews remain worker-owned.
+    """
     with _lock_for(session.id):
         with _locks_guard:
             if session.id in _deleted:
                 return session
         persisted = load(session.id)
-        keyed = {
-            c.candidate_id: c.materialized_zotero_key
-            for c in persisted.candidates
-            if c.materialized_zotero_key
-        }
-        for cand in session.candidates:
-            if not cand.materialized_zotero_key and keyed.get(cand.candidate_id):
-                cand.materialized_zotero_key = keyed[cand.candidate_id]
+        reconcile_operation_state(session.candidates, persisted.candidates)
         save(session)
     return session
 
@@ -164,6 +159,37 @@ def load(session_id: str) -> ResearchSession:
     """Load one session. Raises ``FileNotFoundError`` when it does not exist (the
     route maps that to a 404 — an unknown id is a client error, not a silent None)."""
     return ResearchSession.from_dict(json.loads(_path(session_id).read_text(encoding="utf-8")))
+
+
+def find_discovery(context_fingerprint: str) -> ResearchSession | None:
+    """Strict namespace lookup; corrupt/ambiguous matches are never cache misses."""
+    if len(context_fingerprint) != 64 or any(c not in "0123456789abcdef" for c in context_fingerprint):
+        raise ValueError("Invalid discovery fingerprint")
+    matches = []
+    for path in _dir().glob(f"discovery_{context_fingerprint}_*.json"):
+        with _lock_for(path.stem):
+            if is_deleted(path.stem):
+                continue
+            try:
+                sess = load(path.stem)
+            except FileNotFoundError:
+                if is_deleted(path.stem):
+                    continue
+                raise
+            discovery = sess.discovery
+            suffix = path.stem[len(f"discovery_{context_fingerprint}_"):]
+            if (sess.id != path.stem or len(suffix) != 12 or any(c not in "0123456789abcdef" for c in suffix)
+                    or type(discovery.get("version")) is not int or discovery["version"] != 1
+                    or discovery.get("context_fingerprint") != context_fingerprint
+                    or not {"seed_key", "seed_title", "snapshot", "boundary", "retrieval", "assessment",
+                            "candidate_fingerprint", "membership_digest", "phase", "attempts", "error"} <= discovery.keys()
+                    or sess.status not in {"discovery_pending", "discovery_running", "discovery_ready",
+                                           "discovery_failed", "discovery_interrupted", "reviewing", "reviewed", "error"}):
+                raise ValueError("Invalid persisted discovery identity/state")
+            matches.append(sess)
+    if len(matches) > 1:
+        raise APIError("discovery_identity_conflict", "Multiple discovery sessions match this context", status_code=409)
+    return matches[0] if matches else None
 
 
 def list_sessions() -> list[dict[str, object]]:

@@ -48,6 +48,11 @@ without effects. No production model or ranking is changed. See the
 [priority comparison contract](docs/decision-priority-comparison.md) for input,
 qualification and inconclusive-result boundaries.
 
+Search Add retains its planned Zotero item identity before native effects, so an
+explicit retry after failed session finalization reuses that key instead of
+creating a duplicate. See the [Search contract](zotero_summarizer/services/search/README.md#explicit-add-recovery)
+for its single-process/configured-library boundary and uncertainty limits.
+
 ## Review recovery and search constraints
 
 Accepted deep reviews retain original-source evidence for their digest findings.
@@ -111,6 +116,9 @@ An unavailable declared scholarly PDF is not replaced by a paywall snapshot. See
 
 Search's folded explicit constraints are user-owned. Model proposals are visible,
 not hard gates; inferred refinement exclusions cannot silently remove results.
+Screening and refinement retain every observed version-family identifier, even
+when the preferred bibliography changes. Confirmed saved matches keep their
+matching library key; a partial lookup failure is not a confirmed new paper.
 Confirmed publication types require source metadata, with bounded exact-DOI recovery;
 unconfirmed metadata stays unknown. Legacy saved plans retain their original filters.
 The plan discloses domain context, source accounting and scholarly coverage limits.
@@ -131,8 +139,13 @@ measured and issue #30 remains open. [Usage and limits](docs/usage.md#experiment
 The shared Today/Library paper page offers **Related in my library** over saved
 metadata, including already-read papers. An optional, explicitly consented
 comment-context experiment uses the configured review model on complete seed and
-candidate notes. It remains unqualified and off by default; no external discovery
-or automatic Add occurs. Stage-client cache publication is bound to its actual
+candidate notes. It remains unqualified and off by default. Saved seeds additionally
+offer **Find new relevant**: OpenAlex semantic/lexical public-metadata discovery,
+with optional explicitly consented seed comments applied only inside the named
+processing boundary. Ordinary topic Search retains its other sources. Search
+shows qualified evidence and retained candidates; Review and Add are explicit and
+server freshness remains authoritative. See the [server/privacy contract](docs/discovery.md)
+and [discovery UI](docs/discovery-ui.md). Stage-client cache publication is bound to its actual
 effective routing snapshot and invalidation generation, not current metadata alone.
 Saving seed notes/verdicts hides prior related context and fences old reads until
 an explicit fresh load. See [related saved papers](docs/related-saved-papers.md)
