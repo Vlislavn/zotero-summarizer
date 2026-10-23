@@ -33,6 +33,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Retain original question-native source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
 - Retain original question submission, separate manual-note/delivery UI, outbox clients and shared paper assemblies with unchanged tests.
 - Compose question-note delivery with the existing single editable notes surface and server-acknowledged Related fence.
+- Retain original api-storage source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
 - Retain original question submission/read/Q&A receipts and sync API wiring; existing native and data parts supply delivery and persistence.
 - Keep version-bound offline keep_server resolutions alongside immutable question sync creates.
 - Retain original Telegram worker/auth registration and combined migration13; native lifetime, real authorization and platform recovery remain unqualified.
