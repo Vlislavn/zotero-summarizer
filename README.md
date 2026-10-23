@@ -20,6 +20,10 @@ Optional HackerNoon tag feeds can be added explicitly in Settings → Sources th
 ordinary RSS subscriptions. Saving does not fetch or triage; see
 [RSS subscriptions](docs/usage.md#rss-subscriptions).
 
+Pending rejection is all-or-none for the captured selection. Missing/stale rows
+return a conflict without changing valid siblings; incomplete replies never claim
+success. See [usage](docs/usage.md#rejecting-pending-changes).
+
 ## Review recovery and search constraints
 
 Deep review rejects demonstrated access/error/login templates before model calls.

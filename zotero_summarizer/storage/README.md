@@ -46,6 +46,12 @@ services/ ─call→ storage/
 | `interleave.py` | `interleave_log` sidecar for the P3 quality-first online experiment: per-day, per-slot arm attribution (`team` ∈ `a0`/`a2`/`both` + competitive `pair_id`) written by the Today slate when `ZS_RANK_INTERLEAVE` is on. `record_interleave_slate` is DAY-level write-once (`BEGIN IMMEDIATE` existence check → first recorded slate of a day is the ONLY write; later same-day assemblies are complete no-ops) — row-level `INSERT OR IGNORE` alone would let intra-day pool drift mix two merges' per-merge `pair_id`s into one corrupt `(day, pair_id)` group and crash the scorer (adversarial review 2026-07-08). Attribution therefore never changes after the user may have seen the slate. `fetch_interleave_log` opens read-only and returns `[]` only when the table doesn't exist yet (experiment never ran — explicit `sqlite_master` check, not a swallowed error). Table is self-creating (sidecar, additive; no `migrations.py` step needed). Sole consumer: `tools/eval_interleave.py` |
 | `migrations.py` | `migrate_existing()` + `run_migrations()` — ordered, version-gated steps recorded in `schema_migrations`. Add a schema change as a new numbered `Migration`, never an inline ALTER. v3 reconciles databases whose old v1 marker predates later baseline/feed columns; routine feed connections skip those O(N) legacy backfills. |
 
+`set_pending_changes_status(..., require_all=True)` validates all selected IDs and
+source statuses under BEGIN IMMEDIATE, then verifies the complete affected count
+before commit. A stale/missing row or trigger-shortened update raises and rolls
+back everything. Pending Reject uses this boundary; other status callers retain
+their existing default behavior. No new queue/schema or native write is involved.
+
 **Boundaries:** must NOT import `services/` or `api/` (enforced). Connection
 hardening (WAL once per process/path + busy_timeout=10s + 0600) is shared by
 `_get_conn` and `_connect_to`, avoiding concurrent WAL-mode lock races.

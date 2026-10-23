@@ -66,6 +66,18 @@ Uncertain source writes reread saved rows without silently retrying their write.
 These UI/transport contracts do not establish live feed availability, scientific
 quality or human usefulness of a source.
 
+## Rejecting pending changes
+
+Reject selected applies only when every captured ID still exists and is pending.
+A missing or already-applied/rejected/failed/uncertain row returns409 and leaves
+valid siblings unchanged. Reload the queue and explicitly select the current rows.
+SQL failures or triggers preventing a complete update roll back the whole change.
+
+The client announces success only for an integer updated count matching the
+captured distinct IDs. An incomplete/malformed reply is unconfirmed, not success;
+the existing optimistic rollback retains selection for reconciliation. This alters
+only the app queue, not the native Zotero library, labels or other status callers.
+
 ## First-run setup
 
 There's nothing to copy and nothing to migrate by hand. On the first `serve` (or `setup`),
