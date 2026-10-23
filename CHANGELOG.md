@@ -29,6 +29,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Preserve interpretation digest subtype metadata while sharing declared-field authority across qualification, optional receipts and HTML renderers. Reuse the retention prerequisite's dictionary projection; declared/source changes still refuse.
 - Reject interpretation source/run/export symlinks and selected-project escapes before file access, including symlinked manifests. Retain immutable attempts and explicit capture consent.
 - Hide interpretation assignment order in blinded exports; validate approval rows during inspection. Preserve partial-label accuracy bounds, independent conclusive-shortfall gates and actual card-exposure counts; zero exposure cannot recommend a pilot.
+- Retain original infrastructure source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
 - Retain original offline PDF/figure controls and exact reading-text selectors; no new offline protocol.
 - Retain original question-native source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
 - Retain original question submission, separate manual-note/delivery UI, outbox clients and shared paper assemblies with unchanged tests.

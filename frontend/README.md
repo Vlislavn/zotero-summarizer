@@ -531,3 +531,4 @@ Original question/note UI source is retained: immutable submission identity, sep
 
 Retain original offline PDF/figure controls and exact reading-text selectors; no new offline protocol.
 Retain original question-native source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+Retain original infrastructure source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.

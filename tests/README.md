@@ -464,3 +464,4 @@ Original question API/sync source is retained: immutable save/replay before Q&A,
 Retain original question-native source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
 Retain original interpretation source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
 Retain original api-storage source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+Retain original infrastructure source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
