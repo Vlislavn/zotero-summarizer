@@ -226,3 +226,5 @@ Part 3 retains the corresponding original Feedback suites without assertion chan
 Part 4 retains the corresponding original Feedback suites without assertion changes.
 
 The existing daemon training-ledger producer is retained with its original synthetic-trainer regression suite. It appends retained artifact identities only after install/rescore; this packaging adds no fitting, inference or new identity authority.
+
+Original frozen weekly replay/source is retained with its original three-argument cohort ordering contract. Existing source helpers use their canonical number/summary names and the production caller supplies its existing cohort IDs. No new grader, labels, ranking formula or real-data claim is designed.

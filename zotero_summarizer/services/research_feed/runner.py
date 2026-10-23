@@ -330,7 +330,7 @@ def run_weekly(
     profile, candidates, rows, assessed, assess_failed = _assess(
         settings, start, end, source_limit, venue, generate=generate_reviews,
     )
-    included, ranking, ranking_failed = rank_candidates(assessed, rows)
+    included, ranking, ranking_failed = rank_candidates(assessed, rows, [candidate.source_id for candidate in candidates])
     shortlist = included[:profile.shortlist_budget if shortlist_budget is None else shortlist_budget]
     reviewed = shortlist[:profile.card_budget if card_budget is None else card_budget]
     review_outcomes: dict[str, str] = {}

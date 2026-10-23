@@ -116,3 +116,5 @@ reading valid JSON. There is no browser run/build endpoint or cached-card replay
 
 **Boundary:** may compose library services and storage reads. Zotero writes are
 optional pending actions only; default runs are dry-run.
+
+Original frozen weekly replay/source is retained with its original three-argument cohort ordering contract. Existing source helpers use their canonical number/summary names and the production caller supplies its existing cohort IDs. No new grader, labels, ranking formula or real-data claim is designed.

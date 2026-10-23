@@ -10,6 +10,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Retain original observed-cohort weekly ordering metadata and frozen conditional replay; canonical helper names and caller wiring are mechanically aligned.
+
 ### Changed
 - Retain the existing daemon training-ledger producer and original provenance/cancellation tests; no new training or inference behavior is designed.
 - Reconcile weekly Feedback with the current manual/analysis foundation without losing safe recovery, signal cleanup, parser/identity bounds or admitted-root ownership.
