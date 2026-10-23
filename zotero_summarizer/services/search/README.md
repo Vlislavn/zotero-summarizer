@@ -77,6 +77,11 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
   on the session (`refinements`) and render in the plan panel.
 - **Targeted review reuses read-only layers, not `deep_review.start`**: no Zotero
   note write to suppress, no corpus-membership requirement, and the query is the lens.
+  New session `review.brief` actions/grades use the shared reading projection with
+  the existing light quality result and query summaries. High-friction reads become
+  skims; absent quality cannot restore a self-grade. `review.model_digest` retains
+  raw validated output and `reading_policy_flags` explains the cap. No extra model
+  calls, classifier, ranking change or migration of saved sessions is introduced.
 - **Library coverage is annotated, not filtered** (`_annotate_library_coverage`):
   each candidate gets `in_library` (tri-state) + `existing_zotero_key` + OpenAlex
   `cited_by_count`. It's advisory — a paper already in Zotero still ranks; the

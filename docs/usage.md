@@ -24,6 +24,34 @@ shared caveat wording has one introduction with all distinct scope/context visib
 Saved source basis is explicit; checklist coverage is not reviewed-source extent.
 Smaller cards keep their compact disclosure.
 
+**Idea / Evidence / Writing** are independent: novelty/significance, type-aware
+scientific checks, and avoidable exposition friction. Advanced mathematics or a
+knowledge gap alone is not a writing failure. High-friction ideas survive as targeted
+skims; weak-evidence ideas are labelled concept/hypothesis sources, not established
+claims. Full reads require confirmed goal support, high idea value, recorded full-text
+basis, strong independent evidence and assessed non-high friction. Missing legacy
+assessment/targets shows **REVIEW**, not a fabricated skip or invented section.
+Non-papers are relevance-only; zero applicable scientific checks stays ungraded.
+An evaluator that omits a requested checklist answer stays unassessed, not A/highlight;
+only explicit N/A answers establish that checks are inapplicable.
+Full reviews use the detected paper type, not empirical gaps absent from its rubric;
+uncertain detection stays ungraded. Legacy Search light review and the diagnostic CLI
+retain their assumed generic rubric without an additional type call; that mode does
+not establish the source's contribution type.
+User overrides still use the explicit verdict editor; no label is written by this policy.
+Raw validated model digests remain separately cached from applied reading policy.
+Reviews, proposals and newly saved digest notes share one scientific-grade projection:
+independent D overrides model self-A; non-paper or failed assessment stays ungraded.
+Failures are not legacy absence and never manufacture scientific quality from the
+self-grade. Existing notes are not silently rewritten on read. Material evidence gaps retain a
+concept-only caveat even when the digest already recommends skip. New Search session
+API briefs apply the same reading/grade policy and retain their raw `model_digest`;
+existing saved sessions are not migrated.
+The existing 17-paper legacy capture lacks full source-basis/target provenance and
+cannot certify this full-read gate. Human scientific acceptance on 12–20 papers,
+including the perspective seed arXiv:2606.05925, remains unclaimed; synthetic policy
+regressions are not read-precision or idea-rescue measurements.
+
 Approved triage notes retain saved summaries across restarts and include available
 methods, findings, relevance, uncertainty and optional implementation/impact sections.
 A blank rationale falls back to a usable overview, not a generic placeholder. Full

@@ -47,7 +47,7 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
   const goals = deep.goal_summaries || [];
 
   // Legacy cache (pre-digest): show the old grade, nudge a re-run.
-  if (!digest && quality && quality.grade && !goals.length) {
+  if (!digest && quality && quality.grade && quality.basis !== 'non_paper' && !goals.length) {
     return (
       <div className={`text-[13px] text-slate-600 ${flat ? 'review-reading' : ''}`}>
         <Chip tone={gradeTone(quality.grade)}>Quality {quality.grade}</Chip>
@@ -68,28 +68,20 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
 
   // The API projects cached decisions through the current policy; absence stays unknown.
   let verdict;
-  const rawDigestDecision = String(digest?.read_decision || '').toLowerCase();
-  const weakEvidence = band === 'flag' || (quality?.overstatements || []).some(Boolean);
-  const capped = rawDigestDecision === 'read' && (weakEvidence || digest?.writing_friction === 'high');
-  const digestDecision = capped ? 'skim' : rawDigestDecision;
+  const digestDecision = String(digest?.read_decision || '').toLowerCase();
   const hasReadingDecision = ['read', 'skim', 'skip'].includes(digestDecision);
   if (hasReadingDecision) {
     verdict = {
       key: digestDecision === 'read' ? 'deep' : digestDecision,
       label: { read: 'READ', skim: 'SKIM', skip: 'DIGEST IS ENOUGH' }[digestDecision],
-      reason: capped
-        ? `${weakEvidence ? `Concept interesting; evidence weak${redFlags[0] ? ` — ${redFlags[0]}` : ''}.` : 'Idea preserved; writing friction is high.'} ${digest.read_why || ''}`
-        : digest.read_why || '',
+      reason: digest.read_why || '',
     };
   } else {
     verdict = { key: 'skip', label: 'REVIEW', reason: 'Reading decision unavailable; review the evidence.' };
   }
-  // Deterministic checklist grade FIRST: quality.grade comes from grounded
-  // coverage (stable run-to-run); digest.grade is the LLM's holistic guess and can
-  // flip A↔B between reviews. The chip's tooltip says "reference-free", which is
-  // quality.grade — so show that, and only fall back to the digest for legacy
-  // caches. None for non-papers.
-  const grade = isNonPaper ? '' : (quality?.grade || digest?.grade || '');
+  // The server projects scientific grade with the reading action. A separate
+  // legacy quality-only review has no digest; raw model_digest never supplies a grade.
+  const grade = isNonPaper ? '' : (digest ? digest.grade || '' : quality?.grade || '');
   const tldr = digest?.tldr || '';
   const ideaScore = Math.max(Number(digest?.novelty) || 0, Number(digest?.significance) || 0);
   const ideaLabel = ideaScore >= 4 ? 'high' : ideaScore >= 3 ? 'moderate' : ideaScore > 0 ? 'low' : 'not assessed';
@@ -143,7 +135,7 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
               : <span className="text-[12px] text-slate-500">Time not estimated</span>
           )}
           {grade && (
-            <Chip tone={gradeTone(grade)} title="Reference-free full-text quality grade">
+            <Chip tone={gradeTone(grade)} title="Saved quality grade">
               {compact ? grade : `Quality ${grade}`}
             </Chip>
           )}
@@ -166,7 +158,7 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
         {hasReadingDecision && <ReadingPlan digest={digest} decision={digestDecision} />}
         {digest && (
           <p className="mt-1 text-[11px] text-slate-500">
-            Idea: {ideaLabel} · Evidence: {BAND_LABEL[band] || 'not assessed'} · Writing: {digest.writing_friction || 'not assessed'}
+            Idea: {ideaLabel} · Evidence: {isNonPaper ? 'not applicable' : BAND_LABEL[band] || 'not assessed'} · Writing: {digest.writing_friction || 'not assessed'}
           </p>
         )}
       </div>
@@ -233,7 +225,7 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
         {/* Full quality headline on the full surfaces; in compact the band +
             red-flag count already live as chips in the banner row above, so the
             standalone section is dropped (gloss/coverage move into Details). */}
-        {quality && !compact && (
+        {quality && !isNonPaper && !compact && (
           <Section label={`Quality — ${BAND_LABEL[band] || '—'}`}>
             <QualityHeadline quality={quality} band={band} flagLoc={flagLoc} missLoc={missLoc} />
           </Section>

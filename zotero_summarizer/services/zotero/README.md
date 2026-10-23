@@ -83,6 +83,12 @@ impersonating another note kind; existing raw body-text marker spoofing is outsi
 this boundary fix. Removing the ownership footer makes a comment-stripped note
 unowned rather than retroactively adopting it.
 
+Deep review supplies the shared policy-projected digest to the existing digest-note
+renderer: its Quality label uses the independent scientific grade (or stays ungraded
+for non-papers/failed assessment), not the retained `model_digest` self-grade. Genuine
+legacy calls without an independent assessment retain their old grade. This changes
+neither the writer/backup/consent boundary nor previously saved notes on read.
+
 Digest strength and weakness paragraphs precede the unchanged version-1 quality
 metadata footer. The footer is always the last meaningful paragraph, preserving
 structural ownership after native editors discard HTML comments.

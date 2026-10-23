@@ -168,7 +168,15 @@ priority remains visible as a manual override.
 
 Library rows share `PaperDetailView`; `/paper/:key` adds located findings,
 Paper map, figures, actions, and grounded Q&A. Independent Idea/Evidence/Writing
-signals cap recommendations while provenance retains raw output. HTML briefs and
+signals display the server's shared policy projection, not a second client policy.
+The server projects the scientific grade into `digest.grade`, shared with proposals
+and saved notes; React does not repeat its fallback rule. Independent failure returns
+explicit unassessed/grade-empty state, never a new self-grade fallback.
+`model_digest` retains the original self-grade but cannot supply a displayed grade.
+Deploy with the matching backend; unprojected raw digests are not review UI inputs. Checklist summaries use only supplied applicable criteria: a position
+paper never acquires invented ablation gaps. Missing writing assessments stay unknown;
+non-papers have no scientific grade. Compact/full/legacy layouts remain intact.
+HTML briefs and
 figures live beside source PDFs for Zotero compatibility.
 
 Compact cards and the full paper page share the explicit verdict editor. Picking

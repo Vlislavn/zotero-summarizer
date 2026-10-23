@@ -37,12 +37,6 @@ def test_rank_invalid_environment_epsilon_falls_back(monkeypatch):
     assert rank._epsilon() == rank.DEFAULT_EPSILON
 
 
-class _Digest:
-    tldr = executive_summary = read_why = methods = limitations = key_strength = key_weakness = ""
-    key_findings = []
-    read_decision = grade = ""
-
-
 class _Summary:
     def __init__(self, text: str):
         self.summary = text
@@ -54,9 +48,10 @@ class _Summary:
 
 
 def test_targeted_review_keeps_answer_aligned_after_blank_question(monkeypatch):
+    from zotero_summarizer.models import PaperDigest
     from zotero_summarizer.services.search import _targeted_review as target
 
-    monkeypatch.setattr(target, "assess_digest", lambda **kw: _Digest())
+    monkeypatch.setattr(target, "assess_digest", lambda **kw: PaperDigest())
     monkeypatch.setattr(
         target, "summarize_for_goals",
         lambda **kw: [_Summary("lens"), _Summary("answer")],

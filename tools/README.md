@@ -19,7 +19,7 @@ Prestige validation uses the shared ZIP/legacy-joblib artifact resolver.
 | `eval_slate_blend.py` | offline eval of the Today-slate ranking blend. |
 | `eval_temporal_objective.py` | offline eval of the temporal-split training objective; reuses production's aligned training matrix and train-only engagement-column rebuild for shuffled folds and both temporal objectives. |
 | `eval_quality_promote.py` | offline eval of the quality→must_read promotion (`rank_blend.promote_band`) against firewalled user verdicts — precision + flooding per (goal, relevance) floor. Gates the `quality_promote` flip. |
-| `eval_reading_policy.py` | offline 17-paper, user-labelled gate for the conservative reading cap: before/after read rate, full-read precision, idea rescue, and zero high-friction/weak-evidence full reads. Uses `reading_policy_fixture_v2.json`, captured from matching real cache entries with unchanged human annotations; `--check` retains the original thresholds. This is not a full recommendation-accuracy gate. |
+| `eval_reading_policy.py` | offline 17-paper, user-labelled gate for the conservative reading cap: before/after read rate, full-read precision, idea rescue, and zero high-friction/weak-evidence full reads. Uses `reading_policy_fixture_v2.json`, captured from matching real cache entries with unchanged human annotations; `--check` retains the original thresholds. The legacy capture lacks full-text basis/targets and therefore cannot certify the current full-read gate; human scientific acceptance is unclaimed. |
 | `eval_research_feed.py` | honest Research Intelligence acceptance gate: 30-paper fixture currently lacks frozen pre-human machine/review inputs, so production inclusion, artifact, project-use and review-time metrics are `null`/unscorable (nonzero exit), not invented 0/100% scores. Frozen machine projections, when supplied, rank by score/confidence/title; separate 17-paper reading-policy agreement is labelled diagnostic only. |
 | `validate_prestige_upgrade.py` | sanity-check the OpenAlex prestige enrichment. |
 | `precommit/` | the repo's custom pre-commit checks (LOC cap, layering, README freshness, dead-code, AI-slop). |
@@ -31,7 +31,12 @@ its bare `relevant=true` cells do not establish assessed goal evidence. V2 captu
 all policy-consumed inputs from all 17 matching legacy reviews, including unknowns,
 with source timestamps and cache/annotation SHA-256 hashes. It uses no new model
 calls and never derives input signals from expected labels. The compact projection
-was checked against full cache entries for identical actions, flags and metrics.
+was historically checked against full cache entries for identical actions, flags and metrics.
+Paper-quality benchmark reports keep nullable coverage unscored, with explicit
+scored/unknown counts; unknown is not coerced into numeric error zero.
+The reading fixture lacks recorded digest source basis and exact targets; missing provenance now
+withholds full reads, so its `--check` cannot certify the current policy. This is
+not a new measured read-precision/idea-rescue result.
 Research-feed action agreement reads the same v2 snapshot; its separate inclusion
 oracle leakage and incomplete acceptance criteria remain tracked as A163.
 

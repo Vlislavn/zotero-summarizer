@@ -55,10 +55,11 @@ def _compute_renderer_rev() -> str:
     invalidates cached artifacts automatically (the cache key folds this in)."""
     digest = hashlib.sha256()
     digest.update(Path(__file__).read_bytes())
-    from zotero_summarizer.services.library import _source_admission, _auth_envelope
+    from zotero_summarizer.services.library import _source_admission, _auth_envelope, _paper_type_checklists
+    from zotero_summarizer.services.library.review_fleet import propose
 
     for module in (_paper_read_brief, _paper_docling, _paper_read_html, _paper_read_meta, _paper_read_pdf,
-                   _paper_read_tex, _source_admission, _auth_envelope):
+                   _paper_read_tex, _source_admission, _auth_envelope, _paper_type_checklists, propose):
         digest.update(Path(module.__file__).read_bytes())
     return digest.hexdigest()[:8]
 

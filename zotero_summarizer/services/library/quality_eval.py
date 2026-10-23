@@ -162,8 +162,14 @@ def _dedupe_near(items: list[str], *, jaccard: float = 0.6) -> list[str]:
 
 def _aggregate_rubric(samples: list[qp.RubricLLMResponse], item_keys: list[str], body: str
                       ) -> tuple[dict[str, str], dict[str, str], list[str], set[str]]:
-    """Per-item majority verdict + a grounded evidence quote; returns
-    ``(rubric, evidence, concerns, grounded_yes_keys)``."""
+    """Per-item majority verdict + grounded evidence; reject incomplete model output."""
+    if not samples:
+        raise ValueError("quality rubric returned no samples")
+    for sample in samples:
+        invalid = [key for key in item_keys
+                   if str(sample.checks.get(key, "")).strip().lower() not in {"yes", "no", "na"}]
+        if invalid:
+            raise ValueError("incomplete or invalid rubric criteria: " + ", ".join(invalid))
     rubric: dict[str, str] = {}
     evidence: dict[str, str] = {}
     grounded_yes: set[str] = set()
@@ -246,7 +252,7 @@ def _self_verify(llm: Any, *, spec: pc.ChecklistSpec, rubric: dict[str, str],
 
 def evaluate_quality(
     *, title: str, full_text: str, sections: list[dict[str, Any]], digest: dict[str, Any],
-    llm: Any, max_chars: int, paper_type: str | None = None,
+    llm: Any, max_chars: int, paper_type: str | None = pc.PaperType.GENERIC_EMPIRICAL.value,
     prestige_score: float | None = None, prestige_known: bool = False,
     prestige_floor: float | None = None, self_consistency_runs: int = 3, exemplars: str = "",
     shadow_claim_check: bool = False, claim_check_model: str = "flan-t5-large",
@@ -257,13 +263,14 @@ def evaluate_quality(
     judged on ablations/leakage). The band is derived from CHECKLIST COVERAGE, not an
     LLM number. ``prestige_*`` are accepted for call-site compatibility but no longer
     affect the quality band — prestige is a ranking signal, not a reporting-quality
-    one. Errors propagate — the caller wraps this layer."""
-    # Resolve the type (unknown / None → safe GENERIC_EMPIRICAL supertype) and its
-    # checklist; ``resolved`` is what we record so the UI shows the standard applied.
+    one. Omitted type retains the legacy ASSUMED generic-empirical mode; it is not
+    a verified type finding. Explicit None/invalid type stays ungraded unknown.
+    Errors propagate — the caller wraps this layer."""
+    # A missing/failed type assessment cannot license an empirical checklist.
     try:
         resolved = pc.PaperType(paper_type or "").value
     except ValueError:
-        resolved = pc.PaperType.GENERIC_EMPIRICAL.value
+        return QualityEval(quality_band="uncertain", basis="not_assessed")
 
     # Non-paper (web article / blog / news): no scientific reporting standard applies,
     # so SHORT-CIRCUIT the rubric — no A–D grade, no red flags, zero LLM calls. The

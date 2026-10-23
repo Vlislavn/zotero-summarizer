@@ -10,6 +10,10 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Make injected-PDF full-reading fixtures provide typed independent full-text quality. Preserve path/grade/read assertions and add abstract/unassessed controls; digest grade alone never supplies scientific basis.
+
+- Bind historical coverage comparisons to the frozen main algorithm, preserving old flag and current policy-highlight oracles. Add distinct empty/unknown, explicit-failure and red-flag controls; production grading and paper annotations remain unchanged.
+
 ### Changed
 - Hand off native scout artifact references explicitly, mark review evidence untrusted, and clarify task-level worker/consent boundaries. Lock labels and literal canary requests in offline contract tests; no sandbox or injection-resistance claim.
 - Share pinned native Pi profiles and labelled workflows with offline task/order/failure contract tests. Document authority, activation and actual terminal checks; keep dependencies/runtime state out of Git. Canaries are not model-quality, sandbox or writer-safety acceptance.
@@ -42,6 +46,10 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Admit method/code artifact URLs only as complete literal original-source tokens or PDF annotations, not generated notes. Keep bounded original URI context for long PDFs and local rejection receipts; access, model, schema and receipt failures remain errors.
 - Skip checkpoint serialization when a legacy input identity alone is already as long as raw Q&A history, preserving the same fallback without copying an oversized identity.
 - Preserve complete current-source handles in shorter paper Q&A checkpoints, including original spans, repeated occurrences and legacy input digests. Prior conversation remains untrusted; nonshrinking checkpoints keep raw history.
+- Reject missing or invalid rubric answers before scientific grading. Sparse model output stays unassessed instead of earning A/highlight from a smaller denominator; explicit N/A remains compatible.
+- Keep concept-only caveats on skipped reviews and missing critical support; partial quality cannot restore self-grades in new snapshots. Project new Search API briefs through the shared reading policy while retaining raw model output.
+- Use real temporary source identities in quality-policy integration fixtures. Preserve source-byte guards and the original raw-model, grade, note, proposal and cache assertions when composing review features.
+- Keep idea, evidence and writing separate; retain raw model digests and conservative reading caps. Share scientific grade across cached reviews, proposals and saved digest notes; evaluator failures and non-papers stay ungraded. Preserve escaping. Human/scientific acceptance remains unclaimed.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
 - Generate source-bound RSS project proposals in existing review calls; reuse successful stages, recompute cards and retain errors/v1 reports. Cached qualification reads existing goals without startup. Keep effort unknown or explicitly unverified; preserve blockers and artifact links.

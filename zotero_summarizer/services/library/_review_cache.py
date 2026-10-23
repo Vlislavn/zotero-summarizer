@@ -72,14 +72,8 @@ def get_cached_review(item_key: str) -> dict[str, Any] | None:
     if not item_key:
         return None
     entry = _read_all().get(item_key)
-    if not entry or not entry.get("digest"):
-        return entry
-    from zotero_summarizer.services.library.review_fleet.propose import apply_reading_policy
-    digest, raw, flags = apply_reading_policy(entry["digest"], entry.get("quality"), entry.get("goal_summaries"))
-    if digest == entry["digest"] and not flags:
-        return entry
-    return {**entry, "digest": digest, "model_read_decision": entry.get("model_read_decision", raw),
-            "reading_policy_flags": list(dict.fromkeys([*entry.get("reading_policy_flags", []), *flags]))}
+    from zotero_summarizer.services.library.review_fleet.propose import project_review
+    return project_review(entry) if entry else entry
 
 
 def review_is_current(entry: dict[str, Any] | None, item_key: str = "") -> bool:
@@ -113,7 +107,8 @@ def current_review_keys() -> set[str]:
 
 
 def current_reviews() -> dict[str, Any]:
-    return {key: entry for key, entry in _read_all().items() if review_is_current(entry, key)}
+    from zotero_summarizer.services.library.review_fleet.propose import project_review
+    return {key: project_review(entry) for key, entry in _read_all().items() if review_is_current(entry, key)}
 
 
 def copy_review(src_key: str, dst_key: str) -> bool:

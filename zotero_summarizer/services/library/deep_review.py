@@ -207,8 +207,7 @@ def _review_one(
     source_identity = build_review_identity(config=config, pdf_path=pdf_path, source_kind=source_kind,
                                             focus_prompt=focus_prompt) if feed_context is not None else None
 
-    digest_dump = quality_dump = goal_dump = paper_type_dump = section_overlay = code_link_dump = None
-    model_read_decision = ""
+    model_digest = digest_dump = quality_dump = goal_dump = paper_type_dump = section_overlay = code_link_dump = None
     reading_policy_flags: list[str] = []
     note_written = False
     note_error: str | None = None
@@ -233,7 +232,7 @@ def _review_one(
                 ),
                 focus_prompt=focus_prompt, response_format=response_format,
                 **({"feed_context": feed_context, "feed_out": feed_out} if feed_context is not None else {}))
-            digest_dump = digest.model_dump()
+            model_digest = digest_dump = digest.model_dump()
             quality_dump, goal_dump, paper_type_dump, section_overlay, code_link_dump = _deep_review_layers.extra_layers(_deep_review_layers.ExtraLayersCtx(
                 item_key=item_key, title=title, pdf_path=pdf_path, text=text,
                 digest_dump=digest_dump, llm=llm, llm_light=llm_map, config=config,
@@ -243,7 +242,7 @@ def _review_one(
                 web_article=bool(item.get("web_article")),
             ))  # noqa: E501
             from zotero_summarizer.services.library.review_fleet.propose import apply_reading_policy
-            digest_dump, model_read_decision, reading_policy_flags = apply_reading_policy(
+            digest_dump, _, reading_policy_flags = apply_reading_policy(
                 digest_dump, quality_dump, goal_dump,
             )
             digest = PaperDigest.model_validate(digest_dump)
@@ -272,7 +271,8 @@ def _review_one(
         "paper_type": paper_type_dump,
         "section_overlay": section_overlay,
         "code_link": code_link_dump,
-        "model_read_decision": model_read_decision,
+        "model_digest": model_digest,
+        "model_read_decision": str((model_digest or {}).get("read_decision") or ""),
         "reading_policy_flags": reading_policy_flags,
         "needs_pdf": not bool(pdf_path),
         # Set by _review_worker from the acquire result when a fetch was DECLARED-but-
