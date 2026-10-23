@@ -269,3 +269,5 @@ resolution reference to count unresolved conflicts, not every historical receipt
 Migration v8 adds `idx_sync_mutations_resolution` for upgrades from databases
 that already recorded the v2 offline-sync schema; new databases also create it
 with the baseline sync schema.
+
+Existing-question review stack: original immutable question storage, revision/sync storage, composite note intents and migrations9/10 are retained here. Original HTTP/UI and native delivery wiring follow separately; this part does not claim complete question submission or native delivery.

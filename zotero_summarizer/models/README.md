@@ -82,3 +82,5 @@ surrounding whitespace. Normal decoding without that context retains legacy whit
 cleanup; saved summaries are not revalidated against source membership.
 
 The original private corpus-prefilter provenance marker is retained with the optional practitioner diagnostic; the marker is not an LLM/public JSON field. No new scoring rule is introduced.
+
+Existing-question review stack: original immutable question storage, revision/sync storage, composite note intents and migrations9/10 are retained here. Original HTTP/UI and native delivery wiring follow separately; this part does not claim complete question submission or native delivery.
