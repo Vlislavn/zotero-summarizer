@@ -52,6 +52,13 @@ replays require `ZS_REVIEW_ACCEPTANCE_MANIFEST=/path/to/frozen-input.json`; with
 that explicit input they skip, not pass. They check literal retention, not scientific
 truth, subjective usability or native Zotero persistence.
 
+Optional triage method/code links must match complete literal URLs in the original
+abstract, PDF text/annotations or supplied metadata—not generated map notes. Rejected
+links are recorded locally under `data/method-artifact-rejections.jsonl`; whitespace-padded
+model candidates are rejected, not silently trimmed. Receipt failures remain errors.
+Exact membership does not prove contribution relevance or reproducibility; legacy
+saved notes are not revalidated. See the [triage contract](zotero_summarizer/services/triage/README.md).
+
 When web-article review is enabled, HTML-only pages can be reviewed from a bounded,
 text-only extraction of the selected main document's body text—not a page facsimile.
 Images, layout, CSS-generated content, embedded frames, and shadow trees are outside

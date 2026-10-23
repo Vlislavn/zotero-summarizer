@@ -1,6 +1,6 @@
 import json
 from collections.abc import Iterator
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -38,14 +38,14 @@ def _outer_json(text: str) -> Iterator[str]:
                 start = None
 
 
-def parse_typed_output(text: str, model: type[Model]) -> Model:
+def parse_typed_output(text: str, model: type[Model], *, context: dict[str, Any] | None = None) -> Model:
     """Validate whole JSON or one unambiguous outer root; allow identical repeats."""
     try:
         payload = json.loads(text)
     except json.JSONDecodeError:
         payload = None
     else:
-        return model.model_validate(payload)
+        return model.model_validate(payload, context=context)
 
     selected = None
     selected_payload = None
@@ -56,7 +56,7 @@ def parse_typed_output(text: str, model: type[Model]) -> Model:
         except json.JSONDecodeError:
             continue
         try:
-            validated = model.model_validate(payload)
+            validated = model.model_validate(payload, context=context)
         except ValidationError as exc:
             if failure is None:
                 failure = exc

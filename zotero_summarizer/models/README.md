@@ -52,3 +52,8 @@ context/assessment/response types are also exported through the package facade.
 Blank unknown quotes normalize to empty evidence, retaining valid neighbors.
 
 `MIN_MAP_CHUNK_CHARS` is the shared 1000-character validation/recovery floor; the 8000-character default is unchanged.
+
+Live refinement passes `preserve_method_artifact_literals` through Pydantic validation
+context so source admission sees the original nonempty artifact strings, including
+surrounding whitespace. Normal decoding without that context retains legacy whitespace
+cleanup; saved summaries are not revalidated against source membership.

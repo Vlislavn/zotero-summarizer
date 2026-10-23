@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from zotero_summarizer.domain import ReadingPriority, normalize_reading_priority
 
@@ -102,12 +102,13 @@ class MethodAndCode(BaseModel):
 
     @field_validator("artifacts")
     @classmethod
-    def _require_absolute_urls(cls, values: List[str]) -> List[str]:
-        cleaned = [value.strip() for value in values if value.strip()]
+    def _require_absolute_urls(cls, values: List[str], info: ValidationInfo) -> List[str]:
+        nonempty = [value for value in values if value.strip()]
+        cleaned = [value.strip() for value in nonempty]
         if any(urlsplit(value).scheme not in {"http", "https"} or not urlsplit(value).hostname
                for value in cleaned):
             raise ValueError("method artifacts must be absolute HTTP(S) URLs")
-        return cleaned
+        return nonempty if (info.context or {}).get("preserve_method_artifact_literals") else cleaned
 
 
 class PaperParameters(BaseModel):
