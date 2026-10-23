@@ -142,6 +142,30 @@ def test_openalex_publication_year_cannot_publish_nonfinite_wire_values(literal)
         assert_receipt(outcome, "failed", code="parse_error")
 
 
+@pytest.mark.parametrize("observe", [False, True])
+def test_openalex_retains_location_aliases_without_following_urls(observe):
+    payload = {"results": [{"id": "W900", "title": "Different bibliography", "doi": "10.9/current",
+        "locations": [
+            {"doi": "https://doi.org/10.1/ALIAS/"},
+            {"landing_page_url": "https://arxiv.org/abs/2501.12345v2"},
+            {"pdf_url": "http://arxiv.org/pdf/2501.12345v3.pdf"},
+            {"landing_page_url": "https://doi.org/10.2/PUBLISHED"},
+            {"landing_page_url": "https://example.test/arxiv.org/abs/2501.99999"},
+        ]}]}
+    calls = []
+    def provider(request):
+        calls.append(request)
+        return response(payload)
+    outcome = {}
+    with leaf("openalex", provider) as search:
+        hits = search(PUBLIC_QUERY, **({"outcome": outcome} if observe else {}))
+    assert len(calls) == len(hits) == 1
+    assert "locations" in calls[0].url.params["select"].split(",")
+    assert hits[0].family_identifier_keys == ["arxiv:2501.12345", "doi:10.1/alias", "doi:10.2/published"]
+    if observe:
+        assert_receipt(outcome, "success_nonempty", 1)
+
+
 def test_openalex_disabled_never_attempts_http():
     def unexpected(request):
         pytest.fail("network-disabled client attempted HTTP")

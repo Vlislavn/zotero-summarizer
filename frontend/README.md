@@ -317,8 +317,8 @@ semantic POST. No second client store is introduced.
 The same Related section independently reads discovery admission. Only a server-positive
 saved seed enables **Find new relevant**. Reads never POST; eligibility errors, unavailable
 context and failed requests have explicit recovery, not focus/reconnect retries.
-The folded boundary disclosure optionally confirms private **seed** comments to the
-named model; otherwise the one Find action sends a null consent token and uses public
+The folded boundary disclosure optionally confirms private **seed** comments and
+your reading verdict/rationale to the named model; otherwise the one Find action sends a null consent token and uses public
 metadata only. Providers never receive those comments. ACK/remount/navigation abort and
 fence obsolete discovery completions before they can navigate.
 

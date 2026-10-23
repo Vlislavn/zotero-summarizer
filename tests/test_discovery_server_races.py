@@ -31,7 +31,11 @@ def test_concurrent_repeat_coalesces_and_get_does_not_interrupt_live_owner(journ
         first = pool.submit(discovery.find_new, "SEED0001", **kwargs)
         assert entered.wait(5)
         running = session.find_discovery(kwargs["context_fingerprint"])
-        assert discovery.discovery_view(running)["status"] == "discovery_running"
+        view = discovery.discovery_view(running)
+        assert view["status"] == "discovery_running"
+        assert view["discovery"]["seed_comments"] is None
+        assert view["discovery"]["recommended_ids"] == []
+        assert view["discovery"]["assessment"]["items"] == []
         second = pool.submit(discovery.find_new, "SEED0001", **kwargs)
         release.set()
         one, two = first.result(5), second.result(5)
@@ -112,11 +116,37 @@ def test_failures_reuse_and_explicit_assessment_retry_reuses_public_pool(journey
     assert session.load(first["id"]).discovery["attempts"][0]["assessment"]["status"] == "failed"
 
 
+def test_assessment_upgrade_hides_prior_pool_until_discovery_completes(journey):
+    first = begin(journey).json()
+    assert first["discovery"]["recommended_ids"]
+    entered, release = Event(), Event()
+    journey.controls.model_hook = lambda: (entered.set(), release.wait(5))
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(discovery.find_new, "SEED0001", **request(journey))
+        assert entered.wait(5)
+        try:
+            running = journey.client.get(f"/api/search/{first['id']}").json()
+            assert running["status"] == "discovery_running"
+            assert running["discovery"]["freshness"] == "current"
+            assert running["discovery"]["seed_comments"] is None
+            assert running["discovery"]["recommended_ids"] == []
+            assert running["discovery"]["assessment"]["items"] == []
+        finally:
+            release.set()
+        finished = discovery.discovery_view(future.result(5))
+    assert finished["status"] == "discovery_ready"
+    assert finished["discovery"]["assessment"]["status"] == "assessed"
+    assert finished["discovery"]["seed_comments"]["records"]
+    assert finished["discovery"]["recommended_ids"]
+
+
 def test_failed_providers_require_explicit_retry_and_keep_prior_receipts(journey):
     journey.controls.provider_status = "failed"
     first = begin(journey).json()
     assert begin(journey).json()["id"] == first["id"]
     assert len(journey.requests) == 1
+    assert first["discovery"]["seed_comments"] is None
+    assert first["discovery"]["recommended_ids"] == []
     journey.controls.provider_status = "success_nonempty"
     second = begin(journey, retry=True).json()
     assert second["id"] == first["id"] and len(journey.requests) == 2

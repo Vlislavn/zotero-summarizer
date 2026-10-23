@@ -20,7 +20,9 @@ changes cannot expose the trainer to a half-migrated embedding table.
 
 `lifecycle.startup(background=False)` initializes dry-run clients/caches but
 does not resume persisted jobs, refresh RSS, train/rescore the gate, import the
-corpus or launch prewarm workers. The feed dry-run CLI uses this mode; an absent
+corpus or launch prewarm workers. Startup prepares the existing OpenAlex cache
+schema even when optional metadata clients are disabled, so first Discovery client
+construction cannot mutate the corpus DB after its context fingerprint was read. The feed dry-run CLI uses this mode; an absent
 or incompatible required cached gate fails explicitly instead of training.
 
 ```

@@ -20,10 +20,11 @@ import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
-from zotero_summarizer.domain import normalize_doi
+from zotero_summarizer.domain import normalize_arxiv_id, normalize_doi
 from zotero_summarizer.integrations._rate_limiter import RateLimiter
 from zotero_summarizer.integrations.openalex_cache import OpenAlexCache
 
@@ -86,6 +87,7 @@ class OpenAlexSearchHit:
     is_retracted: bool = False
     source_rank: int = 0
     publication_types: list[str] = field(default_factory=list)
+    family_identifier_keys: list[str] = field(default_factory=list)
 
 
 _RATE_LIMITER = RateLimiter(_RATE_LIMIT_PER_SEC)
@@ -170,7 +172,7 @@ class OpenAlexClient:
             param_key: query[:2000] if semantic else query,
             "per_page": max(1, min(per_page, 50)),
             "select": "id,doi,title,display_name,publication_year,authorships,"
-            "primary_location,abstract_inverted_index,cited_by_count,is_retracted,open_access,type",
+            "primary_location,locations,abstract_inverted_index,cited_by_count,is_retracted,open_access,type",
         }
         payload = self._get("/works", params=params, **({"outcome": outcome} if outcome is not None else {}))
         if payload is None:
@@ -393,6 +395,27 @@ def _abstract_from_inverted_index(inv: dict[str, list[int]] | None) -> str | Non
     return " ".join(word for _, word in positions)
 
 
+def _location_identifiers(locations: list[dict[str, Any]]) -> list[str]:
+    identifiers = set()
+    for location in locations:
+        doi = normalize_doi(location.get("doi") or "")
+        if doi:
+            identifiers.add(f"doi:{doi}")
+        for field in ("landing_page_url", "pdf_url"):
+            parsed = urlsplit(location.get(field) or "")
+            if parsed.scheme not in {"http", "https"}:
+                continue
+            if parsed.hostname in {"doi.org", "dx.doi.org"}:
+                doi = normalize_doi(parsed.path.lstrip("/"))
+                if doi:
+                    identifiers.add(f"doi:{doi}")
+            elif parsed.hostname == "arxiv.org" and parsed.path.startswith(("/abs/", "/pdf/")):
+                arxiv = normalize_arxiv_id(parsed.path.split("/", 2)[2])
+                if arxiv:
+                    identifiers.add(f"arxiv:{arxiv}")
+    return sorted(identifiers)
+
+
 def _search_hit_from_payload(raw: dict[str, Any], *, source_rank: int) -> OpenAlexSearchHit | None:
     """Shape one ``/works`` result into an :class:`OpenAlexSearchHit`. None when
     it has no id or title (unusable as a candidate)."""
@@ -422,6 +445,7 @@ def _search_hit_from_payload(raw: dict[str, Any], *, source_rank: int) -> OpenAl
         is_retracted=bool(raw.get("is_retracted")),
         source_rank=source_rank,
         publication_types=[raw["type"]] if isinstance(raw.get("type"), str) and raw["type"].strip() else [],
+        family_identifier_keys=_location_identifiers(raw.get("locations") or []),
     )
 
 

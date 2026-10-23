@@ -78,11 +78,12 @@ export default function RelatedPapers({ itemKey }) {
         disabled={finding || !discovery.context_fingerprint}>Find new relevant</button>
       <details className="mt-2"><summary className="cursor-pointer text-forest">Discovery processing and optional comments</summary>
         <p>Providers receive public paper metadata only. No review or Add starts. Full context and results are retained locally.</p>
+        <p>Optional private context includes seed comments and your reading verdict/rationale.</p>
         <p>Private seed context: {discovery.private_context.status} · {discovery.private_context.record_count ?? 'unknown'} records.</p>
         <p>Processing boundary: {discovery.boundary?.provider} / {discovery.boundary?.model} · {discovery.boundary?.endpoint || 'native provider API'}.</p>
         <label><input type="checkbox" checked={Boolean(consent && consent === discovery.boundary?.token)}
           disabled={finding || !discovery.boundary?.enabled} onChange={event => setConsent(event.target.checked && window.confirm(
-            `Send complete private seed comments only to ${discovery.boundary.provider} / ${discovery.boundary.model} (${discovery.boundary.endpoint || 'native provider API'})? Providers still receive public metadata only. Full context and results stay locally. Experimental usefulness is unqualified.`
+            `Send complete private seed comments and your reading verdict/rationale only to ${discovery.boundary.provider} / ${discovery.boundary.model} (${discovery.boundary.endpoint || 'native provider API'})? Providers still receive public metadata only. Full context and results stay locally. Experimental usefulness is unqualified.`
           ) ? discovery.boundary.token : null)} /> Use private seed comments — experimental</label>
         <p>Unchecked means public metadata only. Up to 10 candidates / 30,000 input characters; over-budget contexts are not clipped.</p>
       </details>

@@ -32,15 +32,19 @@ def _unavailable():
     raise APIError("discovery_unverified", "Discovery inputs could not be verified", status_code=409)
 
 
+def _app_identifiers(row):
+    return (related._identifiers({"doi": row["doi"], "arxiv_id": row["arxiv_id"], "url": row["url"]})
+            | related._identifiers({"doi": row["rss_doi"], "arxiv_id": row["rss_arxiv_id"],
+                                    "url": row["canonical_url"]}))
+
+
 def _membership(reader):
     rows = read_discovery_membership(settings().triage_db_path)
     kept = [row for row in rows if row["decision"] in KEPT_DECISIONS]
     keys, identifiers = set(), set()
     for row in kept:
         keys.update(value for value in (row["stable_feed_key"], row["materialized_zotero_key"]) if value)
-        for doi, arxiv, url in ((row["doi"], row["arxiv_id"], row["url"]),
-                                (row["rss_doi"], row["rss_arxiv_id"], row["canonical_url"])):
-            identifiers.update(related._identifiers({"doi": doi, "arxiv_id": arxiv, "url": url}))
+        identifiers.update(_app_identifiers(row))
     native = []
     if reader is not None:
         live = {row["item_key"] for row in reader.get_all_items(include_abstract=False)["items"]}
@@ -61,28 +65,36 @@ def _inputs(item_key):
         if detail is None or native_state == "failed":
             _unavailable()
         families, root = _Union(), f"seed:{item_key}"
+        native_keys = {row["item_key"] for row in native}
+        known_keys = native_keys | {row["stable_feed_key"] for row in rows}
         for row in native:
             for ident in row["identifiers"]:
-                families.union(f"native:{row['item_key']}", ident)
+                families.union(f"paper:{row['item_key']}", ident)
+        for row in rows:
+            node = f"paper:{row['stable_feed_key']}"
+            if row["materialized_zotero_key"]:
+                families.union(node, f"paper:{row['materialized_zotero_key']}")
+            for ident in _app_identifiers(row):
+                families.union(node, ident)
+        families.union(root, f"paper:{item_key}")
         for ident in related._identifiers(detail):
             families.union(root, ident)
-        contexts, native_aliases = {}, {item_key}
-        while pending := native_aliases - contexts.keys():
+        contexts, family_keys = {}, {item_key}
+        while pending := family_keys - contexts.keys():
             contexts.update(read_context(settings().triage_db_path, sorted(pending)))
             for alias in {alias for context in contexts.values() for alias in context["aliases"]}:
-                families.union(root, f"native:{alias}")
-            native_aliases = {row["item_key"] for row in native
-                              if families.find(f"native:{row['item_key']}") == families.find(root)}
+                families.union(root, f"paper:{alias}")
+            family_keys = {key for key in known_keys if families.find(f"paper:{key}") == families.find(root)}
         context = contexts[item_key]
         aliases = set(context["aliases"])
         approved = any(row["decision"] == "user_approved" and
-                       {row["stable_feed_key"], row["materialized_zotero_key"]} & aliases for row in rows)
-        basis = "user_approved" if approved else "native" if native_aliases else None
-        context = {**context, "aliases": sorted(aliases | native_aliases)}
+                       {row["stable_feed_key"], row["materialized_zotero_key"]} & (aliases | family_keys) for row in rows)
+        basis = "user_approved" if approved else "native" if family_keys & native_keys else None
+        context = {**context, "aliases": sorted(aliases | family_keys)}
         comments = related._comments(item_key, detail, native_state, context, "observed",
                                      reader or AppLibraryReader(settings().triage_db_path))
         records = {record["id"]: record for record in comments["records"]}
-        for alias in sorted(native_aliases - aliases):
+        for alias in sorted(family_keys - aliases):
             extra = collect_comments(alias, None, contexts[alias], "observed", "unavailable")
             records.update((record["id"], record) for record in extra["records"])
         comments["records"] = list(records.values())
@@ -225,11 +237,10 @@ def _retrieve(sess, inputs):
         if (set(cand.identifier_keys()) & inputs["saved_identifiers"]
                 or cand.existing_zotero_key in inputs["saved_keys"]):
             cand.in_library = True
-        elif app.zotero_reader is None and any(key.startswith(("doi:", "arxiv:")) for key in cand.identifier_keys()):
-            cand.in_library = False
     retained = [cand for cand in candidates if cand.in_library is not True
                 and not set(cand.identifier_keys()) & set(seed["identifiers"])]
-    score_query_relevance(public, retained, reranker_model=config.corpus.reranker_model)
+    score_query_relevance(public, retained, reranker_model=config.corpus.reranker_model,
+                          reranker_enabled=config.corpus.reranker_enabled)
     rank_candidates(retained)
     attach_relevance(retained)
     sess.candidates = retained[:semantic.budgets()["candidates"]]
@@ -348,9 +359,12 @@ def discovery_view(sess: ResearchSession) -> dict:
         return sess.to_dict(for_display=True)
     durable, freshness = sess.discovery, _freshness(sess)
     current, interrupted = freshness == "current", _interrupted(sess)
+    publish = current and not interrupted and sess.status not in {
+        "discovery_pending", "discovery_running", "discovery_failed"}
     assessment = deepcopy(durable["assessment"])
-    if not current or interrupted:
-        assessment = {"status": "stale" if not current else "interrupted", "items": [], "submitted_context_ids": []}
+    if not publish:
+        status = "stale" if not current else "interrupted" if interrupted else assessment["status"]
+        assessment = {"status": status, "items": [], "submitted_context_ids": []}
     candidates = {c.candidate_id: c for c in sess.candidates}
     public_ids = [c.candidate_id for c in sess.candidates if c.in_library is False]
     recommended = []
@@ -361,10 +375,10 @@ def discovery_view(sess: ResearchSession) -> dict:
         recommended = public_ids
     projection = {key: durable[key] for key in ("version", "seed_key", "seed_title", "context_fingerprint", "candidate_fingerprint", "boundary", "retrieval", "error")}
     projection.update(freshness=freshness, assessment=assessment,
-                      recommended_ids=recommended[:3] if current else [],
+                      recommended_ids=recommended[:3] if publish else [],
                       unresolved_membership=[key for key, c in candidates.items() if c.in_library is None],
-                      seed_comments=durable["snapshot"]["comments"] if current and not interrupted else None,
-                      comments_in_ranking=current and any(row["used_context_ids"] for row in assessment["items"]),
+                      seed_comments=durable["snapshot"]["comments"] if publish else None,
+                      comments_in_ranking=publish and any(row["used_context_ids"] for row in assessment["items"]),
                       new_actions_allowed=current and not interrupted and sess.status in {"discovery_ready", "reviewing", "reviewed", "error"})
     result = sess.to_dict(for_display=True)
     result["discovery"] = projection

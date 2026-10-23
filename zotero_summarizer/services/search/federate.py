@@ -78,6 +78,7 @@ def _openalex_channel(client: Any, query: str, quota: int, at: str, *, semantic:
             authors=h.authors, year=h.year, venue=h.venue, is_open_access=h.is_oa,
             is_retracted=h.is_retracted, cited_by_count=h.cited_by_count,
             publication_types=list(h.publication_types),
+            family_identifier_keys=getattr(h, "family_identifier_keys", []),
         )
         for h in hits
     ]

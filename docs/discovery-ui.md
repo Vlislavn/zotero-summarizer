@@ -16,8 +16,8 @@ live-provider, native-user or scientific usefulness.
    and an explicit eligibility refresh.
 3. The folded processing disclosure names the configured provider/model/endpoint.
    By default the action sends `consent_token=null`: public metadata only. The
-   optional seed-comments checkbox requires explicit confirmation to that exact
-   boundary. Declining leaves public-only discovery available. External candidates
+   optional seed-comments checkbox explicitly discloses comments plus the reader's
+   seed verdict/rationale and requires confirmation to that exact boundary. Declining leaves public-only discovery available. External candidates
    have no saved private comments; other library papers' notes are not inputs.
 4. Click Find. The POST includes only `context_fingerprint`, `consent_token` and
    strict `retry`; no query/private text is assembled in the UI. Providers receive

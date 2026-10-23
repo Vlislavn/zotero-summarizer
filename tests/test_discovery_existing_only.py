@@ -53,6 +53,19 @@ def arguments(key):
                 inbox_collection_name="Inbox", tags=[], note_title="", note_html="", existing_only=True)
 
 
+def test_existing_only_ack_is_available_while_connector_is_running(journey, monkeypatch):
+    writer = ZoteroWriter(journey.paths.zotero_data_dir)
+    monkeypatch.setattr(writer, "is_connector_running", lambda: True)
+    before = native_snapshot(journey.native_db)
+    assert writer.apply_feed_materialization(**arguments("SEED0001")) == {
+        "item_key": "SEED0001", "applied_steps": [], "backup_path": None}
+    assert native_snapshot(journey.native_db) == before
+    ordinary = {**arguments("SEED0001"), "existing_only": False}
+    with pytest.raises(ZoteroWriteError, match="running"):
+        writer.apply_feed_materialization(**ordinary)
+    assert native_snapshot(journey.native_db) == before
+
+
 @pytest.mark.parametrize("key,found", [("SEED0001", True), ("MISSING1", False),
                                       ("FOREIGN1", False), ("GROUP001", False)])
 def test_existing_only_is_enforced_at_native_execution(journey, monkeypatch, key, found):

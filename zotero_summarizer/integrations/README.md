@@ -147,7 +147,9 @@ committed user-library key is a no-op for the whole operation, preserving later
 user edits; callers must reuse a reserved key only for the same creation intent.
 Explicit `existing_only=True` instead opens SQLite URI `mode=ro` with `query_only`
 and acknowledges only that user-library key (missing→None), bypassing backup,
-pruning, mutating PRAGMAs and materialization. This current no-op ACK does not
+pruning, mutating PRAGMAs and materialization. This read-only lookup remains
+available while Zotero is running; the close-Zotero guard still protects ordinary
+materialization. This current no-op ACK does not
 certify an earlier raised attempt, live/untrashed membership or physical DB identity.
 Ordinary WAL-read filesystem effects remain possible.
 Queued feed-read writes verify both item and feed-library IDs and preserve an
@@ -163,6 +165,11 @@ shared tag records or links belonging to other items. A one-row lookup is still
 appropriate for tag creation/reuse, but cannot implement complete removal.
 Adapters are leaves — they depend only on stdlib, third-party clients, and
 `models`/`domain`.
+
+OpenAlex search retains declared DOI/arXiv aliases from work `locations` in
+`OpenAlexSearchHit.family_identifier_keys`, including versioned arXiv URLs. URLs
+are parsed for identity only, never followed; no title-based identity inference or
+extra lookup request is introduced. Missing locations preserve legacy empty aliases.
 
 OpenAlex search accepts optional request-local `outcome` receipts; ordinary calls
 and all other source leaves stay unchanged. HTTP, transport and malformed payloads are not successful empty

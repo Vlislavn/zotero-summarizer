@@ -68,6 +68,14 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Retain OpenAlex location DOI/arXiv aliases through Search identity so a changed primary DOI cannot recommend a saved seed as new. No title merging or extra provider calls.
+- Prepare the existing OpenAlex cache schema at startup so the first saved-paper Find cannot invalidate its own corpus fingerprint when optional metadata clients are disabled.
+- Include DOI/arXiv-linked unmaterialized app aliases in Discovery seed context; their note edits/clears now invalidate private evidence.
+- Read the Search OpenAlex cache from RuntimeState so saved-paper Discovery works with prestige disabled instead of failing before provider requests.
+- Hide private Discovery context and recommendations during running/failed work; disclose seed reading verdict/rationale in explicit model consent.
+- Allow strictly read-only Discovery Add reconciliation while Zotero is running; ordinary native writes still require Zotero to be closed.
+- Keep external Discovery membership unknown when the native reader is unavailable; an app-only miss no longer qualifies a paper as new.
+- Honor the configured reranker disable switch in saved-paper Discovery; use existing lexical relevance without constructing or downloading a local model.
 - Preserve ordinary Search projection and new-owner actions during restore; close mixed aliases; fingerprint only public candidate metadata; isolate nonfinite provider results; separate touch actions without weakening consent, freshness or effect fences.
 - Make injected-PDF full-reading fixtures provide typed independent full-text quality. Preserve path/grade/read assertions and add abstract/unassessed controls; digest grade alone never supplies scientific basis.
 - Bind historical coverage comparisons to the frozen main algorithm, preserving old flag and current policy-highlight oracles. Add distinct empty/unknown, explicit-failure and red-flag controls; production grading and paper annotations remain unchanged.

@@ -80,7 +80,7 @@ def _search_openalex_client(app: Any, config: GoalsConfig) -> Any:
         from zotero_summarizer.integrations.openalex import OpenAlexClient
         from zotero_summarizer.integrations.openalex_cache import OpenAlexCache
 
-        cache = app.app_state.openalex_cache or OpenAlexCache(settings().corpus_db_path)
+        cache = app.openalex_cache or OpenAlexCache(settings().corpus_db_path)
         _SEARCH_OPENALEX = OpenAlexClient(cache, mailto=config.prestige.user_agent_email or None)
     return _SEARCH_OPENALEX
 
