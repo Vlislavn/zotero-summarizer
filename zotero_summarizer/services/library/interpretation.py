@@ -6,7 +6,7 @@ from zotero_summarizer.models import PaperDigest
 from zotero_summarizer.models.interpretation import InterpretationDigest, InterpretationItem
 from zotero_summarizer.services._common import extract_json_blob, to_text
 from zotero_summarizer.services.faithbench._corpus import chunk_text, sha256_text
-from zotero_summarizer.services.library._digest_audit import canonical_hash, contract_hashes
+from zotero_summarizer.services.library._digest_audit import canonical_hash, contract_hashes, digest_contract_payload
 from zotero_summarizer.services.library._digest_audit_export import _validate_audit
 from zotero_summarizer.services.library._digest_verification import (
     DigestSourceRejected, DigestVerifierUnavailable, _ScientificChecks, _claim_parts, _parse_checks, _unsupported_literals, verify_digest,
@@ -88,7 +88,7 @@ def selected_original(result):
                        text[loc['original_span']['start']:loc['original_span']['end']] for loc in source['locations'])
     if len(selected) != source['selected_characters'] or sha256_text(selected) != source['selected_text_sha256']:
         raise ValueError('Selected original changed')
-    verified, final = audit['verified_digest'], result['digest']
+    verified, final = audit['verified_digest'], digest_contract_payload(result['digest'])
     if (any(identity.get(key) != value for key, value in contract_hashes().items()) or
         canonical_hash(final) != canonical_hash(verified | {'basis': final['basis']}) or
         final['basis'] not in {'full_text', 'map_reduce'}):
@@ -114,7 +114,7 @@ def qualify(result, *, strict=True):
             return card
         items = [InterpretationItem.model_validate(item).model_dump(mode='json') for item in card['items']]
         claims = scientific_claims(items, result['digest'])
-        if (not items or card['origin'] != 'ai_draft' or card['digest_sha256'] != canonical_hash(result['digest']) or
+        if (not items or card['origin'] != 'ai_draft' or card['digest_sha256'] != canonical_hash(digest_contract_payload(result['digest'])) or
             card['source'] != result['verification_audit']['source'] or claims != card['claims'] or
             result['scientific_call']['scientific_binding'] != canonical_hash(
                 [claims, card['source'], chunk_text(selected), card['checks']]) or _unsupported_literals(claims, selected)):
@@ -160,6 +160,6 @@ def review(paper, config, clients, budget, condition, trace):
     result['scientific_call'] = deepcopy(trace.calls[-1])
     result['interpretation'] = {'status': 'accepted', 'origin': 'ai_draft', 'items': items, 'claims': claims,
                                 'checks': checks.model_dump(mode='json'), 'source': audit['source'],
-                                'digest_sha256': canonical_hash(result['digest'])}
+                                'digest_sha256': canonical_hash(digest_contract_payload(result['digest']))}
     qualify(result)
     return result

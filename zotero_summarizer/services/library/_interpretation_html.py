@@ -1,7 +1,7 @@
 """One qualified projection shared by experimental briefs and native-note HTML."""
 from html import escape
 
-from zotero_summarizer.services.library._digest_audit import canonical_hash
+from zotero_summarizer.services.library._digest_audit import canonical_hash, digest_contract_payload
 from zotero_summarizer.services.library.interpretation import qualify
 
 
@@ -9,8 +9,7 @@ def section(record, digest, *, content=None):
     card = qualify(record, strict=False)
     if content is not None and content != record['content']:
         raise ValueError('Renderer content differs from the qualified record')
-    payload = digest.model_dump(mode='json') if hasattr(digest, 'model_dump') else digest
-    if canonical_hash(payload) != canonical_hash(record['digest']):
+    if canonical_hash(digest_contract_payload(digest)) != canonical_hash(digest_contract_payload(record['digest'])):
         raise ValueError('Renderer digest differs from the qualified experiment')
     if card['status'] == 'disabled':
         return ''

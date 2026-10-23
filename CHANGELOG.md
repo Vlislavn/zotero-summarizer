@@ -26,6 +26,10 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Complete original frontend, test, tool and documentation hunk identities and review dispositions in the bounded audit stack.
 - Retain every original service hunk identity and review disposition in the bounded source audit metadata stack.
 - Index every original change hunk and its review PR or explicit superseded-variant disposition; distinguish source-only oracles from behavioral acceptance.
+- Preserve interpretation digest subtype metadata while sharing declared-field authority across qualification, optional receipts and HTML renderers. Reuse the retention prerequisite's dictionary projection; declared/source changes still refuse.
+- Reject interpretation source/run/export symlinks and selected-project escapes before file access, including symlinked manifests. Retain immutable attempts and explicit capture consent.
+- Hide interpretation assignment order in blinded exports; validate approval rows during inspection. Preserve partial-label accuracy bounds, independent conclusive-shortfall gates and actual card-exposure counts; zero exposure cannot recommend a pilot.
+- Keep tightened interpretation resource caps inclusive with exact token-count and decimal-latency arithmetic. Preserve mean/median reporting, per-paper and independent unknown/refusal gates; no rounding tolerance or threshold changes.
 
 ### Fixed
 - Keep tightened interpretation resource caps inclusive with exact token-count and decimal-latency arithmetic. Preserve mean/median reporting, per-paper and independent unknown/refusal gates; no rounding tolerance or threshold changes.

@@ -20,6 +20,15 @@ use exact assigned-count fractions, not rounded/subtracted float rates. Inclusiv
 resource caps use exact token counts and captured decimal latency; displayed means
 are unchanged and checked against their count maps. No epsilon relaxes a breach.
 Saved optional acceptance must match its retained invocation tape on reopening.
+Inspection checks actual approval rows, not only the CSV hash. Experiment sources,
+run/export parents and reopened run paths reject symlinks and selected-project
+escapes before I/O; the manifest itself cannot be a symlink. Blind packet and
+label-template order follows independent random IDs, never assignment order.
+Supported counts retain known-correct and unknown totals; null point estimates
+remain unknown. Accuracy bounds and fully observed primary shortfalls can refuse
+independently of unrelated missing review/resource judgments. Reports count actual
+whole-card QA exposures; zero exposure cannot recommend a card pilot (no minimum
+study exposure rate or scientific sufficiency is inferred from a nonzero count).
 
 `_corpus.chunk_spans` exposes the exact stripped coordinates used by `chunk_text`
 and `PaperChunkIndex`; repeated occurrences remain distinct. Digest audit retention

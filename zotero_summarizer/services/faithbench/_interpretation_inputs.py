@@ -96,21 +96,34 @@ def _cohort(recipe, meta, items, texts):
     return sorted(evaluation)
 
 
+def project_path(settings, path):
+    root, path = settings.faithbench_dir, Path(path)
+    if not path.is_relative_to(root) or not path.resolve().is_relative_to(root.resolve()):
+        raise ValueError('Interpretation path escapes selected project')
+    boundary = getattr(settings, 'project_root', root.parent)
+    for ancestor in (path, *path.parents):
+        if ancestor.is_symlink():
+            raise ValueError('Symlinked interpretation paths are not admitted')
+        if ancestor == boundary:
+            break
+    return path
+
+
 def inspect(settings, recipe_path):
     raw = Path(recipe_path).read_bytes()
     recipe = Recipe.model_validate_json(raw)
     if set(recipe.model_profiles) != {'map', 'reduce', 'qa'} or set(recipe.labels) != {'A', 'B', 'C'}:
         raise ValueError('All three profiles and conditions are required')
-    root = settings.faithbench_dir.resolve()
-    benchmark = (root / recipe.benchmark).resolve()
-    if not benchmark.is_relative_to(root) or benchmark.is_symlink():
-        raise ValueError('Benchmark must belong to selected Settings')
+    root = settings.faithbench_dir
+    benchmark = project_path(settings, root / recipe.benchmark)
     meta, items = _dataset.load_benchmark(benchmark, expected_sha256=recipe.benchmark_sha256)
     texts = {p.item_key: load_frozen_text(root / 'papers', p.item_key, expected_sha256=p.text_sha256) for p in meta.papers}
     evaluation = _cohort(recipe, meta, items, texts)
-    csv = _dataset.review_path(benchmark).read_bytes()
+    csv = project_path(settings, _dataset.review_path(benchmark)).read_bytes()
     if hashlib.sha256(csv).hexdigest() != recipe.review_sha256:
         raise ValueError('Approved reference CSV changed')
+    if _dataset.require_review_approval(benchmark, items) != recipe.review_sha256:
+        raise ValueError('Approved reference CSV changed during inspection')
     return {'recipe': recipe, 'recipe_bytes': raw, 'meta': meta, 'items': items, 'texts': texts,
             'evaluation': evaluation, 'benchmark': benchmark.read_bytes(), 'review_csv': csv}
 
@@ -152,7 +165,7 @@ def prepare(settings, snapshot, config, profiles):
         raise ValueError('Resolved model profiles changed before client construction')
     if recipe.sub_concurrency > 1 and any(profile.provider.is_local for profile in profiles.values()):
         raise ValueError('Local model calls must remain single-instance and serial')
-    parent = settings.faithbench_dir / 'interpretation'
+    parent = project_path(settings, settings.faithbench_dir / 'interpretation')
     parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     root = parent / uuid4().hex
     root.mkdir(mode=0o700)
