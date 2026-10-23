@@ -462,3 +462,4 @@ The original Telegram private worker/auth command registration and combined sche
 Original question API/sync source is retained: immutable save/replay before Q&A, separate receipts and existing composite-note delivery. Related/discovery endpoint additions are not mixed into this question slice. No new requirements or acceptance are implemented.
 
 Retain original question-native source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+Retain original interpretation source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
