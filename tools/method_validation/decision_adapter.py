@@ -123,8 +123,9 @@ def project(raw, arm, cfg, status='received'):
 
 
 class NativeDecisionAdapter:
-    def __init__(self, arm, cfg, *, transport=None):
+    def __init__(self, arm, cfg, *, transport=None, projector=project):
         self.arm, self.cfg, self.transport = arm, cfg, transport
+        self.projector = projector
         self.calls = 0
         if arm.kind != 'native' or arm.blockage():
             raise ValueError('only explicitly qualified native arms can construct this adapter')
@@ -170,7 +171,7 @@ class NativeDecisionAdapter:
                          terminal_status=status, raw_complete=complete, retained_bytes=len(raw),
                          observed_bytes_lower_bound=observed, request_bytes=len(request))
         retain(bytes(raw))  # Failure propagates; no readable-file-as-ACK fallback.
-        status, readout = project(bytes(raw), self.arm, self.cfg, status)
+        status, readout = self.projector(bytes(raw), self.arm, self.cfg, status)
         return ProviderReply(bytes(raw), status, readout, telemetry)
 
 

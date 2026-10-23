@@ -30,6 +30,15 @@ Pending rejection is all-or-none for the captured selection. Missing/stale rows
 return a conflict without changing valid siblings; incomplete replies never claim
 success. See [usage](docs/usage.md#rejecting-pending-changes).
 
+## Offline reading-priority comparison
+
+`python -m tools.method_validation priority --config FILE` admits frozen public
+inputs without calls or writes. Explicit `--run` compares retained/native readouts
+and matched ML/LLM artifacts in a new private attempt; `--inspect` verifies it
+without effects. No production model or ranking is changed. See the
+[priority comparison contract](docs/decision-priority-comparison.md) for input,
+qualification and inconclusive-result boundaries.
+
 ## Review recovery and search constraints
 
 Accepted deep reviews retain original-source evidence for their digest findings.

@@ -52,6 +52,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Enforce support-comparison consent/work admission on public native calls, reject blocked/wrong-mode recordings and off-host plaintext HTTP, share the frozen-input byte cap, and exclude unprovenanced labels from paired inference. Keep descriptive labels and full coverage denominators.
 - Reconstruct terminal-free replay from admission and remaining-budget observations; bind terminal references to row owners, close transport states and reject false blocked coverage. Preserve real wall/missing/blocked outcomes and unsigned-telemetry limits.
 - Bind recorded support replay to its exact admitted case/arm recording and received state before deriving readouts. Self-consistent copied-terminal/report/hash replacement cannot substitute unchanged inputs; retain raw bytes and unsigned-artifact limits.
+- Keep priority ranking capabilities distinct: LLM ordinal priority is not confidence, missing ML regression scores leave ranking unavailable without losing classification. Reopening compares recorded terminals with exact admitted inputs; input-wide and holdout counts are named separately.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.
 - Fold goal findings without losing originals; disclose saved source basis and unknown reviewed extent. Factor literal warning frames into one introduction with expanded scope/context, qualifiers and source links; retain original wording. Compact cards remain unchanged.
@@ -97,6 +98,9 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Reconcile Feedback primitives with the current CLI foundation; preserve admitted-root pinning, literal Markdown and duplicate-namespace refusal.
 - Keep recorded Feedback report evidence literal when it contains Markdown backticks; reject ambiguous duplicate migration namespaces; clarify available capture primitives versus later-stack analysis/CLI/weekly contracts.
 - Package existing retained input capture and report primitives from the working changes for dependent review; no behavior redesign.
+- Preserve current support safety fixes in priority comparison: shared direct native admission/TLS controls, pre-read aggregate snapshot limits and provenance-qualified paired estimates. Reconcile the existing dependency without changing its base or feature behavior.
+- Reject duplicate reading-priority canonical papers even within one family, and refuse ML artifacts with empty training-family provenance before calls or writes.
+- Expose reading-priority coverage/status denominators per gold class, plus synthetic-label and declared/missing-provenance counts. Unscored failures remain unscored; decision-only quality metrics are unchanged.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
 - Generate source-bound RSS project proposals in existing review calls; reuse successful stages, recompute cards and retain errors/v1 reports. Cached qualification reads existing goals without startup. Keep effort unknown or explicitly unverified; preserve blockers and artifact links.
@@ -127,6 +131,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ### Added
 
+- Add explicit offline reading-priority comparison: frozen human-label firewall, four-class native/retained readouts, matched ML/LLM artifacts, ranking/calibration/paired reports and verified private replay. No model loads, production writes or winner without empirical/resource qualification.
 - Browse saved weekly RSS digests in Weekly: engineering cards, paper links and JSON/Markdown downloads, with explicit empty, legacy and unreadable states. Browsing never starts generation or Zotero writes.
 - Opt-in experimental Search question evidence: bounded original-text retrieval and verification before review selection, located receipts and policy UI. Baseline/Add stay unchanged when disabled; human-held-out quality and latency remain unmeasured (#30).
 - Related saved-paper links plus an opt-in, consented experiment using full seed/candidate comments, durable context identities and honest failure/unknown states. Metadata hybrid stays default; semantic usefulness remains unqualified.

@@ -240,13 +240,34 @@ Retain original reading source regression oracles for review. No assertions/skip
 The application fixtures isolate runtime paths and network; see `conftest.py` and
 `docs/architecture.md`. No test is permission for live models or private data.
 
+## Offline reading-priority comparison (part of #38)
+
+`test_priority_comparison.py`, `test_priority_boundaries.py` and
+`test_priority_replay.py` use `test_priority_fixtures.py` public synthetic data.
+They exercise real module entry, default no-effect admission, recorded and inert
+HTTP execution, exact raw ACKs, native choice versus argmax, malformed neighbors,
+model/time/resource failures, independent gold-sidecar ordering, whole-workload
+firewalls, actual baseline capabilities and verified effect-free reopen. Publisher
+write-then-raise is failure, never readback confirmation. The full support selectors
+below remain regression controls for the shared transport/default projection.
+No synthetic score, HTTPX transport or CLI test is a live-provider or scientific
+quality/promotion study. Priority metric regressions retain class-specific timeout,
+abstention and blocked coverage without invented negatives; mixed-provenance
+sidecars disclose declared/missing class counts separately from synthetic status.
+Same-family canonical duplicates and absent/empty ML training-family provenance
+must fail admission before artifacts or requests. `test_priority_dependencies.py`
+checks shared native authorization under the four-way projector, per-read aggregate
+snapshot limits, already-correct blocked recordings and discriminating 0/60/100
+provenance-qualified paired cohorts.
+
 ## Recorded-input replay regression
 
 `test_recorded_support_binding.py` replaces a copied terminal and recomputes all
 derived rows/report/hashes/ACK while leaving the frozen recording unchanged.
-`test_support_replay_states.py` additionally removes terminal references/bytes,
-forges recorded/native blocked states and request identities, and preserves actual
-blocked/missing/wall/malformed-neighbor states and coverage denominators.
+`test_support_replay_states.py` and `test_priority_replay_states.py` additionally
+remove terminal references/bytes, forge recorded/native blocked states and request
+identities, and preserve actual blocked/missing/wall/malformed-neighbor states and
+coverage denominators. Numeric perfect cases remain by-construction wiring only.
 Reopening must reject this input-to-output substitution, independently of unsigned
 artifact authenticity. Existing recorded/native/error/reopen controls remain.
 
