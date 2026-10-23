@@ -444,3 +444,5 @@ Full reading views fold goal findings into one native disclosure; states and cit
 The original OrthogonalSignals disclosure replaces the abbreviated signal line. It presents stored idea/evidence/writing assessments and reading-policy reasons without changing the current server decision or projected grade. No second scoring rule or new inference is added.
 
 Retain original setup source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
+
+Retain original RSS source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
