@@ -13,8 +13,9 @@ import { Disclosure } from './primitives.jsx';
 // (same grounded/abstaining logic, no re-generation).
 export default function ActionRail({
   itemKey, detail, collections, verdict, onTagsChanged, onCollectionsChanged, hasPdf, canAsk = hasPdf,
-  onNoteSaved = () => {}, onNotesDirtyChange = () => {},
+  onNoteSaved = () => {}, onNotesDirtyChange = () => {}, serverAvailable = false,
 }) {
+  const remoteAllowed = serverAvailable && !detail.offline_snapshot;
   return (
     <div className="space-y-5">
       <VerdictPanel
@@ -37,6 +38,8 @@ export default function ActionRail({
           onDirtyChange={onNotesDirtyChange}
         />
       </div>
+      {detail.offline_snapshot && <p className="text-xs text-slate-500">Compact synced context; collection and tag state needs the Mac.</p>}
+      {!detail.offline_snapshot && <fieldset disabled={!remoteAllowed} className="space-y-5 min-w-0">
       <div className="border-t border-slate-200/60 pt-4">
         <CollectionEditor
           itemKey={itemKey}
@@ -50,7 +53,8 @@ export default function ActionRail({
           <TagOfInterestEditor itemKey={itemKey} tags={detail.tags} onChanged={onTagsChanged} />
         </Disclosure>
       </div>
-      {canAsk && (
+      </fieldset>}
+      {canAsk && remoteAllowed && (
         <div className="border-t border-slate-200/60 pt-4">
           <AskPaperBox itemKey={itemKey} variant="rail" allowRawPdfModes={hasPdf} />
         </div>

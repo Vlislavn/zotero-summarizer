@@ -6,8 +6,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import InlineAnnotate from '../components/library/InlineAnnotate.jsx';
 import PaperReviewPage from './PaperReviewPage.jsx';
+import { publishStatus } from '../offlineStore.js';
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(async () => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); await publishStatus('', 'unchecked'); });
 
 it('keeps Generate disabled and does not claim a review failed on an offline reload', async () => {
   vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
@@ -46,6 +47,7 @@ it.each([
   [{ digest: { key_findings: ['Finding'] } }, false],
 ])('retains an explicit Generate action for an unusable cached review: %j', async (deep, needsRetry) => {
   vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+  await publishStatus('', 'connected');
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
   const writes = [];
   vi.stubGlobal('fetch', vi.fn(async (path, options = {}) => {
@@ -86,6 +88,7 @@ it.each([
 it.each([['?autoRun=false', false], ['', true]])('paper navigation %s preserves explicit review consent', async (query, automatic) => {
   const writes = [];
   vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+  await publishStatus('', 'connected');
   vi.stubGlobal('localStorage', { getItem: () => '["P1","P2"]' });
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} });
   vi.stubGlobal('fetch', vi.fn(async (path, options = {}) => {

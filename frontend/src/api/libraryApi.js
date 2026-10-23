@@ -1,13 +1,15 @@
 // Thin fetch wrappers for the /api/zotero/*, /api/library/*, and
 // /api/triage/run endpoints used by the Library and Annotate pages.
 
-import { allPapers, cacheResponse, cachedResponse } from '../offlineStore.js';
+import { allPapers, cacheResponse, cachedResponse, getMeta, transportUnavailable } from '../offlineStore.js';
+import { offlineRequest } from './offlineTransport.js';
 
-async function request(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-    ...options,
-  });
+async function request(path, options = {}, localFallback = false) {
+  const init = { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options };
+  return localFallback ? offlineRequest(path, init, readResponse) : readResponse(await fetch(path, init));
+}
+
+async function readResponse(res) {
   const text = await res.text();
   let data = null;
   if (text) {
@@ -97,6 +99,21 @@ export function itemPdfUrl(itemKey) {
   return `/api/library/pdf/${encodeURIComponent(itemKey)}`;
 }
 
+async function offlineReadingQueue(path, refresh, scoped) {
+  if (refresh) throw new Error('Rescore needs the Mac; cached working set unchanged');
+  const papers = await allPapers();
+  if (!scoped && (await getMeta('paper_order')) !== null) {
+    return { status: 'offline', offline: true, model_ready: false, total_unread: papers.length, items: papers };
+  }
+  const cached = await cachedResponse(path);
+  if (!cached && scoped) throw new Error('This server filter needs the Mac. Clear the scope to open the cached working set.');
+  if (cached && !Array.isArray(cached.items)) throw new Error('Invalid cached reading scope; device data preserved');
+  const local = new Map(papers.map((row) => [row.item_key, row]));
+  return { ...cached, status: 'offline', offline: true, model_ready: cached?.model_ready ?? false,
+    items: cached ? cached.items.map((row) => ({ ...row, ...local.get(row.item_key) })) : papers,
+  };
+}
+
 /**
  * GET /api/library/reading-queue?include_read=&limit=&refresh=&collection=&tag=&search=
  * Ranked "what to read next" from the library (Stage 2). Read items (engagement
@@ -122,15 +139,16 @@ export async function fetchReadingQueue({
     if (semantic) qs.set('semantic', 'true');
   }
   const path = `/api/library/reading-queue?${qs.toString()}`;
+  const scoped = Boolean(collection || tag || search.trim());
+  if (transportUnavailable()) return offlineReadingQueue(path, refresh, scoped);
   try {
-    const data = await request(path);
+    const data = await request(path, {}, true);
+    if (!data || !Array.isArray(data.items)) throw new Error('Invalid reading queue response');
     await cacheResponse(path, data).catch((err) => console.warn('offline queue cache unavailable', err));
     return data;
   } catch (err) {
-    const cached = !err.status && await cachedResponse(path);
-    if (cached) return { ...cached, offline: true };
-    if (!err.status) return { status: 'offline', items: await allPapers(), offline: true };
-    throw err;
+    if (!err.transportFailure) throw err;
+    return offlineReadingQueue(path, refresh, scoped);
   }
 }
 

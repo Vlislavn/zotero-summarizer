@@ -255,6 +255,14 @@ item_title, change_type, payload)` performs that check and insert under one
 `BEGIN IMMEDIATE` transaction, so concurrent callers cannot both queue the same
 change. The read-only existence helper is for reporting, not check-then-insert.
 
+`keep_server` is a reference-only sync resolution, not a disguised set/delete.
+The existing writer transaction requires a stored conflict for the same item/field
+and exactly its compared revision. It records/replays the actual invocation's UUID
+without changing value, origin or field history; a changed current version returns
+a new conflict. It cannot acknowledge a missing reference or carry new content.
+The existing TEXT operation column suffices; no migration/table/worker is added.
+This app-field receipt does not confirm any past native delivery.
+
 Sync snapshot pulls read only the maximum `sync_changes.revision` as their cursor;
 the legacy `changes` response field stays empty. Conflict status uses the indexed
 resolution reference to count unresolved conflicts, not every historical receipt.

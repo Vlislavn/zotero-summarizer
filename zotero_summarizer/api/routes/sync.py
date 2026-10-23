@@ -6,7 +6,7 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Query
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services._common import settings
@@ -20,13 +20,21 @@ class _Mutation(BaseModel):
     device_id: str = Field(min_length=1, max_length=100)
     item_key: str = Field(min_length=1, max_length=500)
     field: Literal["verdict", "review_note"]
-    operation: Literal["set", "delete"]
+    operation: Literal["set", "delete", "keep_server"]
     value: str | None = Field(default=None, max_length=50_000)
     comment: str | None = Field(default=None, max_length=10_000)
     model_priority: str | None = Field(default=None, max_length=50)
     base_revision: int = Field(ge=0)
     resolves_mutation_id: UUID | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @model_validator(mode="after")
+    def require_bound_server_choice(self):
+        if self.operation == "keep_server" and (
+            self.resolves_mutation_id is None or self.value is not None or self.comment is not None
+        ):
+            raise ValueError("keep_server requires a conflict reference and no new content")
+        return self
 
     @field_validator("device_id", "item_key")
     @classmethod

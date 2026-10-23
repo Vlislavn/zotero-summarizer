@@ -94,6 +94,10 @@ def _validate_mutation(mutation: dict[str, Any]) -> None:
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{field} must contain non-whitespace characters")
         mutation[field] = value.strip()
+    if mutation["operation"] == "keep_server" and (
+        not mutation.get("resolves_mutation_id") or mutation.get("value") is not None or mutation.get("comment") is not None
+    ):
+        raise ValueError("keep_server requires a conflict reference and no new content")
     if mutation["operation"] == "set" and mutation["field"] == "verdict":
         if mutation.get("value") not in READING_PRIORITY_SORT_RANK:
             raise ValueError("verdict value must be a reading priority")
@@ -103,7 +107,7 @@ def _validate_mutation(mutation: dict[str, Any]) -> None:
 
 
 def _log_applied_verdict(mutation: dict[str, Any], result: dict[str, Any]) -> None:
-    if result["status"] != "applied":
+    if result["status"] != "applied" or mutation["operation"] == "keep_server":
         return
     previous = result["previous"]
     current = result["canonical"]
@@ -123,7 +127,7 @@ def _log_applied_verdict(mutation: dict[str, Any], result: dict[str, Any]) -> No
 
 
 def _run_post_commit_effects(db_path: Path, mutation: dict[str, Any], result: dict[str, Any]) -> None:
-    if result["status"] not in {"applied", "already_applied"}:
+    if result["status"] not in {"applied", "already_applied"} or mutation["operation"] == "keep_server":
         return
     if mutation["field"] == "review_note":
         verdict_effects.mirror_review_note(db_path, mutation["item_key"])
@@ -145,7 +149,8 @@ def push(db_path: Path, mutations: list[dict[str, Any]], predecessors: list[str]
     for mutation in mutations:
         key = (mutation["device_id"], mutation["item_key"], mutation["field"])
         effective = dict(mutation)
-        if key in last_applied and effective["base_revision"] < last_applied[key]:
+        if (effective["operation"] != "keep_server" and key in last_applied
+                and effective["base_revision"] < last_applied[key]):
             effective["_effective_base_revision"] = last_applied[key]
         try:
             _validate_mutation(effective)

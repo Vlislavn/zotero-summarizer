@@ -6,6 +6,8 @@ import PaperReaderPane from '../../library/PaperReaderPane.jsx';
 import AskPaperBox from '../../library/AskPaperBox.jsx';
 import OpenBriefButton from '../../library/OpenBriefButton.jsx';
 import VerdictPanel from '../../VerdictPanel.jsx';
+import ReviewNotes from '../review/ReviewNotes.jsx';
+import useServerAvailable from '../../../hooks/useServerAvailable.js';
 import AbstractBlock from './AbstractBlock.jsx';
 import { Section, Disclosure } from '../review/primitives.jsx';
 
@@ -62,9 +64,11 @@ export default function PaperDetailView({
   onDeepReviewDone,
   onTagsChanged,
   onCollectionsChanged,
+  onNotesDirtyChange,
   verdict = {},
   extras = null,
 }) {
+  const serverAvailable = useServerAvailable();
   if (!detail) return null;
   const editable = mode === 'editable';
   const hasPdf = detail.has_pdf;
@@ -72,8 +76,8 @@ export default function PaperDetailView({
   // Per-mode defaults that mirror what each surface renders today.
   const showLinks = show.links ?? true;
   const showDeepReview = show.deepReview ?? true;
-  const showReader = show.reader ?? true;
-  const showAsk = (show.ask ?? true) && hasPdf;
+  const showReader = (show.reader ?? true) && serverAvailable;
+  const showAsk = (show.ask ?? true) && hasPdf && serverAvailable;
   const showAbstract = show.abstract ?? true;
   const showTags = show.tags ?? true; // both surfaces render the tag editor
   const showCollection = (show.collection ?? editable) && editable;
@@ -140,6 +144,10 @@ export default function PaperDetailView({
               {/* Collection lifted OUT of the disclosure — filing into Read Next
                   is a daily primary action, not the long tail (Pareto / Serial
                   Position): one click, default preselected. */}
+              <ReviewNotes itemKey={itemKey} initialNote={detail.user_note || ''}
+                onSaved={onDeepReviewDone} onDirtyChange={onNotesDirtyChange} />
+              {detail.offline_snapshot && <p className="text-xs text-slate-500">Compact synced context; collection and tag state needs the Mac.</p>}
+              {!detail.offline_snapshot && <fieldset disabled={!serverAvailable} className="space-y-4 min-w-0">
               {showCollection && (
                 <CollectionEditor
                   itemKey={itemKey}
@@ -158,6 +166,7 @@ export default function PaperDetailView({
                   <TagOfInterestEditor itemKey={itemKey} tags={detail.tags} onChanged={onTagsChanged} />
                 </Disclosure>
               )}
+              </fieldset>}
             </div>
           </Section>
         </div>
@@ -203,7 +212,9 @@ export default function PaperDetailView({
         )}
         {showTags && (
           <Section label="Tags">
-            <TagOfInterestEditor itemKey={itemKey} tags={detail.tags} onChanged={onTagsChanged} />
+            <fieldset disabled={!serverAvailable || detail.offline_snapshot}>
+              <TagOfInterestEditor itemKey={itemKey} tags={detail.tags} onChanged={onTagsChanged} />
+            </fieldset>
           </Section>
         )}
       </div>

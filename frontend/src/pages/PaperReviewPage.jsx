@@ -190,12 +190,12 @@ export default function PaperReviewPage() {
   const hasPdf = Boolean(detail?.has_pdf);
   const render = renderQuery.data || null;
   const renderCompleted = render?.status === 'completed';
-  const showFigures = hasPdf || renderCompleted || render?.status === 'running';
   const canAsk = hasPdf || renderCompleted;
   // Auto-generate on open only for papers with a local Zotero PDF (no silent PDF
   // fetch); a no-PDF paper shows the manual Generate path instead, even if an
   // acquired render artifact already exists.
   const runner = useDeepReviewRunner(itemKey, { deep: detail?.deep_review, onDone: refreshDetail, autoRun: hasPdf && autoRun });
+  const showFigures = runner.online && runner.serverAvailable && (hasPdf || renderCompleted || render?.status === 'running');
 
   if (isLoading) return <div className="py-4 text-sm text-slate-500">Loading review…</div>;
   if (error) {
@@ -313,6 +313,7 @@ export default function PaperReviewPage() {
             onNotesDirtyChange={setNotesDirty}
             hasPdf={hasPdf}
             canAsk={canAsk}
+            serverAvailable={runner.serverAvailable}
           />
         </aside>
       </div>

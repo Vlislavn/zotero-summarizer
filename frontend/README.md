@@ -342,10 +342,39 @@ private-user usefulness or scientific acceptance. See [UI contract](../docs/disc
 
 ## Offline boundary
 
-The installable local-first PWA caches only its shell. IndexedDB holds compact
-snapshots, a sync cursor, and a UUID mutation outbox. Verdicts/notes queue only
-on network failure; conflicts require Keep mine / Use server. PDFs, AI,
-annotation, acquisition, and rescoring remain server-only.
+The PWA keeps one existing IndexedDB papers/meta/outbox authority and v1 typed
+sync protocol. Full pulls validate unique identities/monotone cursor and atomically
+publish snapshots, order, compact detail for unopened papers and cursor. The
+unscoped cold Library hydrates that working set while a bounded network check is
+pending; an old scope/poll cannot overwrite the current view. Uncached server
+filters/rescoring refuse rather than showing an unfiltered set as a verified match.
+
+`usePaperReview` admits local-capable detail/set/delete callbacks independently of
+React Query network scheduling. Shared verdict/note editors preserve dirty text
+across refetch and fence late completions by owner/request. Full-detail cache writes
+reuse the same pending-field/order projection as pull, not a second form store.
+Compact snapshots do not claim synchronized tag/collection/PDF state.
+
+Only fetch transport failures or an already reported transport outage admit local
+capture. Observed HTTP refusals, malformed received ACKs and mismatched detail IDs
+remain errors. `api/offlineTransport.js` shares the existing sync safety budget:
+finite positive build-time `VITE_SYNC_TIMEOUT_MS`, default15000/max60000ms. It bounds
+only offline-capable requests; ordinary long-running APIs keep their old policy.
+A decode failure after receiving a response cannot mint another offline mutation.
+
+The existing sync event owns unchecked/syncing/connected/unavailable/blocked state;
+HTTP/protocol/storage blocks are not transport-outage evidence. Connected follows
+valid pull and a completed device transaction, not initial navigator.onLine or an
+assumed zero pending count. Conflict controls compare both versions/comments before
+one explicit resolution UUID/sequence; invalid/foreign ACKs roll back atomically.
+Canonical evidence uses read-side types, not outbound text-size caps. `keep_server`
+references the compared server revision without echoing its body; local recovery
+intent survives another conflict but is stripped from the wire. A no-op app receipt
+never changes a field/transition/native mirror or acknowledges past native work.
+The UI reuses those states to disable Mac/model-only controls, without granting
+backend authorization. PDFs, AI, annotations, acquisition and native Zotero work
+remain server-only. See [offline-review.md](../docs/offline-review.md). Fake-indexeddb,
+owned Chrome/TCP/SQLite, physical iOS and authenticated remote acceptance are distinct.
 
 After reconnect, the server gives queued verdicts and notes the same training,
 feed-materialization, and Zotero-mirror effects as online saves. Once a snapshot

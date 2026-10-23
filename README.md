@@ -264,6 +264,14 @@ This is not a claim of physical-device/offline/revocation acceptance.
   missing reviews, unknown evidence and unreadable reports stay explicit.
   Weekly paper links also stay passive; starting a review requires **Generate review**.
 
+**Disconnected review:** sync a working set, then reopen **Library** with the Mac
+unavailable, including papers not previously opened. Compact context, explicit
+verdict changes/retractions and manual notes use the existing device store/outbox.
+Reconnection reconciles typed UUID mutations; compare both versions before resolving
+same-field conflicts. Device saves are not server/Zotero confirmations. PDFs and AI
+remain server-only. See [the offline review workflow](docs/offline-review.md) for
+installation, storage/error boundaries and the separate remote-device requirements.
+
 Open PDFs and take notes in Zotero as usual; come back here to triage.
 
 ## Configuration
