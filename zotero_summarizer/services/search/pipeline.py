@@ -172,6 +172,11 @@ def _annotate_library_coverage(candidates: list[Candidate], reader: Any) -> None
             continue
         incomplete, existing = False, None
         for doi, arxiv in queries:
+            if arxiv and ("%" in arxiv or "_" in arxiv):
+                incomplete = True
+                arxiv = None
+                if not doi:
+                    continue
             try:
                 existing = reader.find_by_external_id(doi=doi, arxiv_id=arxiv)
             except Exception as exc:  # noqa: BLE001 — external Zotero-read boundary, explicit unknown

@@ -217,6 +217,8 @@ Screening preserves all observed version-family identifiers through preferred
 metadata selection and saved-session reloads. The existing reader checks retained
 DOI/arXiv alternatives, not just the displayed version. A confirmed hit supplies
 its matching library key; partial lookup failure remains unknown, not a known miss.
+ArXiv values containing `%` or `_` are not sent to the native pattern lookup;
+coverage stays unknown unless another safe identifier confirms a saved hit.
 No title-only match is inferred. Old sessions cannot recover identifiers that were
 previously discarded; an explicit new search/refinement can observe them again.
 

@@ -38,4 +38,4 @@ def test_persisted_refinement_keeps_new_identity_failure_unknown(
     assert restored[0].in_library is expected
     assert restored[0].existing_zotero_key == key
     assert restored[0].review == old.review
-    assert len(reader.calls) == 1
+    assert reader.calls == [(new.doi or None, new.arxiv_id or None)]

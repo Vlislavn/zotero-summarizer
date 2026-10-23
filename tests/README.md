@@ -374,7 +374,8 @@ Retain original prefilter-metadata source regression oracles for review. No asse
 Search family-identifier regressions cover normalized retained IDs, transitive
 merges after JSON reload, positive-key affinity, partial-reader uncertainty, and
 persisted refinement with older misses and newly unresolved identities.
-Controlled identifiers/readers establish machine contracts, not live-library
+Native-reader tests use in-memory SQLite to check unsafe arXiv wildcard aliases,
+safe DOI fallbacks and ordinary arXiv hits/misses. Controlled identifiers/readers establish machine contracts, not live-library
 completeness or semantic paper equivalence.
 
 `test_discovery_server*.py` covers API/SQL/privacy/race/effect contracts, including

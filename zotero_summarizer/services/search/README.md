@@ -228,7 +228,10 @@ Refinement annotates newly fetched DOI/arXiv observations before merging.
 union independently of the preferred bibliography and survives session JSON.
 `identifier_keys()` reuses that union in later transitive merges. Coverage checks
 all retained DOI/arXiv alternatives: any actual hit supplies its returned key,
-only complete misses establish False, and partial failures stay unknown. Family
+only complete misses establish False, and partial failures stay unknown. ArXiv
+values containing SQL-LIKE wildcards are withheld from the native reader and keep
+coverage unknown unless another safe identifier confirms a hit; a paired DOI is
+still checked. Family
 merging also preserves unknown members instead of borrowing another version's
 older miss; a genuine positive still dominates. A genuine positive key is captured before preferred-member mutation; stale miss keys cannot
 replace it. No title-only merge or candidate-address-as-identifier inference.
