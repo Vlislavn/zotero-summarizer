@@ -23,6 +23,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Retain the existing non-shipped method-validation client and practitioner diagnostic, with original synthetic tests; no new inference, grader, or scientific qualification.
 - Retain original method comparison oracles without changing assertions or overwriting the current implementation.
 - Retain original discovery source oracles without changing assertions or overwriting the current implementation.
+- Index every original change hunk and its review PR or explicit superseded-variant disposition; distinguish source-only oracles from behavioral acceptance.
 
 ### Changed
 - Retain original observed-cohort weekly ordering metadata and frozen conditional replay; canonical helper names and caller wiring are mechanically aligned.
