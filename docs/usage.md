@@ -77,6 +77,60 @@ AI-assisted setup can finish before the secret/endpoint is live — **Next** gat
 structurally-valid provider (type + base URL + key env-var name + model), not on a passing
 connection test. Environment changes require a restart; keyring saves apply immediately.
 
+## Weekly source-qualified engineering cards
+
+```bash
+uv run zotero-summarizer research-feed run --from 2026-08-22 --to 2026-08-29
+# Conference mode, same pipeline; venue never overrides relevance:
+uv run zotero-summarizer research-feed run --from 2026-08-22 --to 2026-08-29 --venue NeurIPS --cached-only
+```
+
+Invoke the first command from cron/launchd weekly with a bounded window. RSS must
+already be acquired by the app; this adds no feed downloader. Edit
+`data/research_feed/profile.json` to add/remove themes or exact project keys.
+Shortlist/card budgets default to 20/10 and support the existing CLI overrides.
+A new adapter can supply `ResearchCandidate` values at `source.load_candidates`;
+keep source identity/deduplication and bounded selection in that seam.
+
+Missing abstract triage reuses the existing abstract pipeline; successful results
+are source/profile/config/model/prompt-bound in `data/research_feed/triage.json`.
+Selected papers reuse current reviews or generate through existing deep review.
+Project proposals are co-produced in the **same digest response**, not a new judge
+or backend: each applicable use names a mechanism, component, change, experiment
+and original quote. Partial/unknown differs from assessed no-fit. Literal quote
+membership is not entailment or human validation; proposals stay AI-generated and
+scientifically unverified. Missing legacy assessments supply no invented uses or
+ideas. Omitted projects remain explicit unknowns with null evidence spans.
+Abstract triage escapes source-supplied boundary markup before prompting;
+this is structural protection, not proof of semantic injection resistance.
+Legacy numeric impact fields retain zero placeholders; null
+`impact_assessment` means unassessed, not measured zero benefit.
+
+Reproduction effort stays unknown without an assessment; existing blockers and
+verified artifact links remain. Code availability never establishes a one-week
+duration. Explicit effort estimates are labelled **AI estimate, unverified**;
+no reproduction experiment or scientific/usefulness win is claimed. Existing
+missing-code/input blockers take precedence over AI effort estimates. Weekly
+acquisition uses headless PDF sources only, never a browser or logged-in session.
+
+`--cached-only` makes no model calls or startup/client initialization. Qualification
+reads the existing valid goals config locally (no creation or credential discovery);
+missing/invalid config or stale source/config is an explicit error, not a qualified
+card. Successful cached abstract triage can be reused without generation; an absent
+stage is an explicit error, not a relevance rejection. Optional cache errors do
+not stop papers with valid history. Generating runs can retry a missing cached PDF
+through existing headless sources. Access,
+assessment and provider errors are per-paper failures, not scientific rejections;
+CLI exit 1 accompanies a published partial run; stdout remains JSON and runtime
+diagnostics go to stderr. The digest keeps configured reasoning effort while its
+verification calls minimize supported reasoning: declared chat thinking is off,
+while active three-level reasoning uses low (not off). Explicit configured off
+is preserved; no unsupported off value is invented. JSON schema version 1 and Markdown
+retain their existing shape with additive assessment/provenance fields. New bundles
+are immutable; cheap projections are recomputed, never replayed from old reports.
+`--queue-zotero` alone opts into idempotent pending tags for materialized items;
+normal runs never add papers, confirm labels, or apply native writes.
+
 ## Two ways to run triage
 
 Scoring papers always runs the same pipeline (cheap ML gate → LLM for survivors →

@@ -25,6 +25,7 @@ def markdown(payload: dict[str, Any]) -> str:
             card["problem"], "",
             f"**Core idea:** {card['core_idea'] or 'not established'}", "",
             f"**Project use:** {'; '.join(card['project_use_notes'])}", "",
+            f"**Reproduction:** {card['reproducibility_tier']} — {card['reproducibility_rationale']}", "",
             f"**Artifacts:** {', '.join(card['code_urls'] + card['dataset_urls'] + card['model_urls']) or 'none verified'}", "",
         ]
     rejected = payload.get("rejected_near_threshold") or []
@@ -35,6 +36,10 @@ def markdown(payload: dict[str, Any]) -> str:
     missing = payload.get("manual_full_text_required") or []
     if missing:
         lines += ["## Needs full text", ""] + [f"- {row['title']}" for row in missing] + [""]
+    failures = payload.get("failed") or []
+    if failures:
+        lines += ["## Failed assessments (not scientific rejections)", ""]
+        lines += [f"- {row['source_id']}: {row['error']}" for row in failures]
     return "\n".join(lines)
 
 

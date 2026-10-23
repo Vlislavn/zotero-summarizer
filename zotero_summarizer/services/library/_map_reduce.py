@@ -83,6 +83,7 @@ def digest_for_strategy(
     budget: ChunkBudget,
     focus_prompt: str = "",
     response_format: dict[str, Any] | None = None,
+    feed_context: Any = None, feed_out: dict | None = None,
 ) -> PaperDigest:
     """Dispatch ``config.quality_review.chunk_strategy`` to the right digest path.
 
@@ -103,11 +104,13 @@ def digest_for_strategy(
             reduce_llm=reduce_llm, chunk_chars=budget.chunk_chars,
             sub_concurrency=budget.sub_concurrency, focus_prompt=focus_prompt,
             response_format=response_format,
+            **({"feed_context": feed_context, "feed_out": feed_out} if feed_context is not None else {}),
         )
     return assess_digest(
         title=title, full_text=full_text, config=config, llm=reduce_llm,
         focus_prompt=focus_prompt, max_chars=budget.max_chars, prefix=(strategy == "prefix"),
         response_format=response_format, verifier_llm=map_llm,
+        **({"feed_context": feed_context, "feed_out": feed_out} if feed_context is not None else {}),
     )
 
 
@@ -122,6 +125,7 @@ def map_reduce_digest(
     sub_concurrency: int = 1,
     focus_prompt: str = "",
     response_format: dict[str, Any] | None = None,
+    feed_context: Any = None, feed_out: dict | None = None,
 ) -> PaperDigest:
     """MAP each chunk on ``map_llm`` (parallel up to ``sub_concurrency``), REDUCE the notes into
     a ``PaperDigest`` on ``reduce_llm``. The reduce reuses ``quality_review.assess_digest`` (its
@@ -151,5 +155,6 @@ def map_reduce_digest(
         title=title, full_text=combined, config=config, llm=reduce_llm,
         max_chars=len(combined) + 1, verifier_llm=map_llm,
         focus_prompt=focus_prompt, verification_text=full_text, **extra,
+        **({"feed_context": feed_context, "feed_out": feed_out} if feed_context is not None else {}),
     )
     return digest.model_copy(update={"basis": "map_reduce"})

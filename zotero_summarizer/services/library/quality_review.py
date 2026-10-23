@@ -151,6 +151,7 @@ def assess_digest(
     *, title: str, full_text: str, config: GoalsConfig, llm: Any, focus_prompt: str = "",
     max_chars: int | None = None, prefix: bool = False, response_format: dict[str, Any] | None = None,
     verifier_llm: Any = None, verification_text: str | None = None,
+    feed_context: Any = None, feed_out: dict | None = None,
 ) -> PaperDigest:
     """Condensed paper digest (quality + the user's 7-point investigation) from
     the full text (must be non-empty). Personalised to ``config.research_goals``.
@@ -168,6 +169,12 @@ def assess_digest(
     from zotero_summarizer.services.library._source_admission import admit_source
     from zotero_summarizer.services.library._review_attempt import identity, observed_client, record
 
+    if feed_context is not None:
+        from zotero_summarizer.models.research_feed import FeedReviewContext
+        feed_context = FeedReviewContext.model_validate(feed_context)
+        if not isinstance(feed_out, dict):
+            raise ValueError("feed context requires an attempt-local output collector")
+        feed_out.clear()
     record('config', identity(config.model_dump_json()), kind='identity')
     admit_source(full_text if verification_text is None else verification_text)
     template = config.prompts.paper_digest or _DEFAULT_DIGEST_PROMPT
@@ -207,14 +214,26 @@ def assess_digest(
     # also fails, the error RAISES, caught at deep_review's per-item boundary and surfaced
     # (never a fabricated review). ``response_format`` (decoder-level constraint) makes a
     # parse failure rare on a supporting endpoint, but the retry still re-asks with it.
+    response_model = PaperDigest
     extra = {"response_format": response_format} if response_format else {}
+    if feed_context is not None:
+        from zotero_summarizer.models.research_feed import FeedDigestResponse
+        from zotero_summarizer.services.library import _feed_assessment
+        response_model = FeedDigestResponse
+        prompt, extra = _feed_assessment.response_contract(prompt, response_format, feed_context)
+    def coerce(raw):
+        if feed_context is not None and not isinstance(raw, response_model):
+            raw = response_model.model_validate(raw.model_dump(exclude_unset=True) if isinstance(raw, PaperDigest)
+                                                else extract_json_blob(to_text(raw)))
+        return _coerce_digest(raw)
     try:
-        digest = _coerce_digest(observed_client(llm, 'generator').pydantic_prompt(prompt=prompt, pydantic_model=PaperDigest, **extra))
+        digest = coerce(observed_client(llm, 'generator').pydantic_prompt(prompt=prompt, pydantic_model=response_model, **extra))
     except ValueError:
+        prompt += _STRICT_RETRY_SUFFIX
         retry = observed_client(llm, 'generator_parse_retry').pydantic_prompt(
-            prompt=prompt + _STRICT_RETRY_SUFFIX, pydantic_model=PaperDigest, **extra,
+            prompt=prompt, pydantic_model=response_model, **extra,
         )
-        digest = _coerce_digest(retry)
+        digest = coerce(retry)
     digest = digest.model_copy(update={"basis": "full_text"})
     verifier = verifier_llm or llm
     try:
@@ -222,14 +241,14 @@ def assess_digest(
     except DigestVerifierUnavailable:
         raise
     except ValueError as exc:
+        prompt += "\n\nThe previous digest failed source verification: " + str(exc) + "\nReturn a corrected, fully source-grounded JSON digest only."
         correction = observed_client(llm, 'correction').pydantic_prompt(
-            prompt=(
-                prompt + "\n\nThe previous digest failed source verification: "
-                + str(exc) + "\nReturn a corrected, fully source-grounded JSON digest only."
-            ),
-            pydantic_model=PaperDigest,
-            **extra,
+            prompt=prompt, pydantic_model=response_model, **extra,
         )
-        digest = _coerce_digest(correction).model_copy(update={"basis": "full_text"})
+        digest = coerce(correction).model_copy(update={"basis": "full_text"})
         _verify_generated_digest(digest, source_text, verifier, llm, goals)
+    if feed_context is not None:
+        _feed_assessment.finish(digest, full_text if verification_text is None else verification_text,
+                                prompt, feed_context, feed_out)
+        digest = PaperDigest.model_validate(digest.model_dump(exclude={"feed_assessment"}))
     return digest

@@ -436,6 +436,32 @@ Cached empty digests without `needs_pdf` are stale and recomputed; legitimate
 no-PDF entries remain current. Dense goal-encoder inference failures disable only
 that retrieval leg so an available BM25 leg can still produce a result.
 
+## Same-response research-feed proposals
+
+Explicit `feed_contexts` must match the complete requested item-key set; stored
+paper content cannot select the schema. `quality_review` and all three strategy
+paths co-produce optional typed project/reproduction/impact assessments in the
+existing digest response. Only the final accepted base attempt contributes.
+Malformed optional content or non-original quotes retain the verified base without
+another call; weekly qualification reports the assessment failure separately.
+`_feed_assessment` binds context, producer/schema, original-text hash and exact
+spans to the current review identity, digest, timestamp and configured provenance.
+Layout-only whitespace differences are resolved back to the exact original
+substring and offsets before binding; case, punctuation and words must match.
+The existing `_review_cache` remains the writer. No extra source extraction or
+judge is used during projection; source bytes/config freshness belong to the
+current-review reader. Literal membership is not entailment: proposals and effort
+estimates are AI-generated/unverified, never measured reproduction or user data.
+Review source hashing no longer trusts equal size/mtime as equal bytes.
+Deep-review verification and light/map calls minimize optional reasoning;
+the digest retains the provider's configured effort. Declared chat-template
+thinking is disabled; active plain three-level reasoning uses `low`, not an
+unsupported `none`. Explicit user off remains off. Low is not no reasoning.
+Output truncation still fails closed; no verifier check or retry cap is bypassed.
+Omitted configured projects become explicit unknowns with null evidence; no
+project silently disappears. Feed-context acquisition reuses headless PDF sources
+only (`allow_browser=False`); interactive per-paper acquisition is unchanged.
+
 ## Source admission and attempt diagnostics
 
 `_source_admission` checks the untruncated original before strategy dispatch or

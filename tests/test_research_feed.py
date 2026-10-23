@@ -57,7 +57,8 @@ def _seed(settings: Settings, key: str, title: str, *, materialized: str = "") -
 def _review(key: str) -> dict:
     return {
         "review_contract_version": 3, "reviewed_at": "2026-08-26T00:00:00Z",
-        "review_identity": {"fixture": key},
+        "review_identity": {"source_kind": "override", "source_path": f"/fixture/{key}.pdf",
+                            "source_sha256": "a" * 64, "generation_sha256": "b" * 64},
         "provenance": {"provider": "local", "model": "model", "prompt_schema_version": 2},
         "digest": {
             "tldr": f"Review {key}", "key_strength": "Reliable benchmark",

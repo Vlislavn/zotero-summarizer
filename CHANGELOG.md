@@ -16,6 +16,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Omit whitespace-only reading-plan entries while preserving other text and order. Label minutes as the saved estimate, not a recalculation for a policy-capped action.
 - Reuse one recognized-action predicate for the review verdict, time and reading plan; remove the presenter's duplicate admission branch without changing the displayed fields or unknown-state behavior.
 - Show saved reading targets, skip hints and original-paper value beside the React review verdict without duplication. Unknown decisions withhold cached action advice and time; reuse existing cache/API without new model calls or writes.
+- Preserve null unknown/absent assessment evidence through engineering-card publication instead of dropping valid papers or neighboring proposals. Keep configured cached-only no-startup/explicit-queue controls; missing config or newly missing assessment remains an explicit failed qualification.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.
 - Fold goal findings without losing originals; disclose saved source basis and unknown reviewed extent. Factor literal warning frames into one introduction with expanded scope/context, qualifiers and source links; retain original wording. Compact cards remain unchanged.
@@ -24,8 +25,13 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Resolve feed-assessment quote layout differences back to exact original source substrings and offsets. Preserve case/word/punctuation rejection, null unknown evidence and fail-closed source qualification.
+- Minimize deep-review verification reasoning: disable declared chat thinking or lower active three-level reasoning to low, preserving explicit user off and configured digest effort. Keep research-feed stdout JSON by routing runtime diagnostics to stderr; truncation still fails closed.
+- Escape source-supplied closing-tag markup in shared abstract/full-text refinement and triage prompts before rendering. Preserve complete summary/corpus content and existing scoring; DOI and auxiliary source metadata use the escaped data boundary.
+- Keep weekly acquisition browser-free; retain omitted/blank unknown projects and reproduction blockers. Isolate optional abstract-cache failures, report absent stages, retry missing PDFs, preserve v1 triage confidence, and export feed assessment models.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
+- Generate source-bound RSS project proposals in existing review calls; reuse successful stages, recompute cards and retain errors/v1 reports. Cached qualification reads existing goals without startup. Keep effort unknown or explicitly unverified; preserve blockers and artifact links.
 - A124: verify section one-liners in a second batch against the same first 700 source characters (up to 24 sections); omit unsupported summaries. Scripted checks do not establish live semantic accuracy.
 - A136: use figure metadata only for affirmative whole-paper figure-count wording; route scoped, uncertain, table-only, combined, and unmatched counts to grounded Q&A. Live scope accuracy is unmeasured.
 - A142: validate persisted and injected review-fleet proposals; skip malformed rows, retain valid neighbors, and calibrate only valid human/proposal pairs.

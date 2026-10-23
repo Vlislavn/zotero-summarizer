@@ -106,12 +106,24 @@ Research-feed uses the same pre-Settings validation point: shortlist 1–100,
 cards 1–20 and review timeout 1–86,400 seconds, sharing the model's budget types
 with direct service calls. Zero/negative/oversized overrides exit 2 before startup.
 The handler reuses the dispatcher's Settings instead of loading it a second time.
-`research-feed --cached-only` skips app startup: existing RSS/review data can be
-projected without a goals file, classifier, provider setup or background work.
+`research-feed --cached-only` skips app startup and client/classifier setup.
+Current cache qualification reads the existing goals config in invocation-local
+context, without config creation, dotenv/keyring discovery or background work.
+Absent/invalid config and stale source/config are explicit qualification failures;
+config-free viewing of already published reports is a separate outcome.
 Generation uses existing `startup(background=False)`, so it does not prewarm,
 recover server jobs, retrain or rescore unrelated papers. Normal configured model
 prerequisites still apply to generation: an enabled classifier with an existing
 golden dataset needs a compatible cached artifact, prepared explicitly beforehand.
+
+Research-feed generation co-produces source-bound project proposals in the
+existing review response; cached-only projects qualified current reviews without
+model work. Each run publishes a new schema-v1 bundle, never rewrites/replays an
+old card. Partial failures stay in JSON/Markdown and return CLI status 1, including
+failed assessment attempts with a reusable base review. Default dry-run and
+explicit idempotent `--queue-zotero` pending-tag consent are unchanged. Runtime
+and dependency diagnostics go to stderr; stdout remains one JSON result even
+when a model callback prints a warning during a failed partial run.
 
 `predict-feed` no longer accepts unused `--calibration`/`--threshold-strategy`;
 its regressor has no such tuning step. `classify` retains its used options.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from html import escape
 from pathlib import Path
 from threading import Event
 from time import perf_counter
@@ -23,6 +24,7 @@ from zotero_summarizer.services.model import scoring
 from zotero_summarizer.services.triage.prompts import DEFAULT_REFINE_PROMPT, DEFAULT_TRIAGE_PROMPT
 from zotero_summarizer.services.triage._execution import check_cancelled
 from zotero_summarizer.services.triage._json_output import parse_typed_output
+from zotero_summarizer.services.library._prompt_security import untrusted_input
 from zotero_summarizer.services._common import (
     LOGGER,
     build_log_prefix,
@@ -63,10 +65,10 @@ def _build_refine_prompt(config: GoalsConfig, req: SummarizeRequest, paper_text:
     # directive) — see services/triage/prompts.py. A null override = use it.
     template = config.prompts.refine or DEFAULT_REFINE_PROMPT
     return template.format(
-        title=req.title,
-        doi=req.doi or "N/A",
-        abstract=req.abstract or "N/A",
-        paper_text=paper_text,
+        title=escape(req.title, quote=False),
+        doi=untrusted_input(req.doi or "N/A"),
+        abstract=escape(req.abstract or "N/A", quote=False),
+        paper_text=escape(paper_text, quote=False),
         research_goals="\n".join(f"- {g}" for g in config.research_goals),
         summary_structure="\n".join(f"- {s}" for s in config.summary_structure),
         output_language=config.output_language,
@@ -89,14 +91,14 @@ def _build_triage_prompt(
         triage_criteria="\n".join(f"- {c}" for c in config.triage_criteria),
         relevance_scale="\n".join(f"{score}: {desc}" for score, desc in sorted(config.relevance_scale.items())),
         reading_priority_scale="\n".join(f"{key}: {desc}" for key, desc in config.reading_priority_scale.items()),
-        title=req.title,
-        doi=req.doi or "N/A",
-        summary=json.dumps(refined.model_dump(mode="json"), ensure_ascii=False),
-        corpus_context=corpus.build_corpus_context_text(corpus_context),
+        title=escape(req.title, quote=False),
+        doi=untrusted_input(req.doi or "N/A"),
+        summary=escape(json.dumps(refined.model_dump(mode="json"), ensure_ascii=False), quote=False),
+        corpus_context=escape(corpus.build_corpus_context_text(corpus_context), quote=False),
         corpus_affinity=f"{corpus_context.get('affinity_score', 0.0):.3f}",
-        matched_goal=corpus_context.get("matched_goal", ""),
+        matched_goal=untrusted_input(corpus_context.get("matched_goal", "")),
         matched_goal_similarity=f"{corpus_context.get('matched_goal_similarity', 0.0):.3f}",
-        suggested_collections=", ".join(corpus_context.get("suggested_collections", [])),
+        suggested_collections=untrusted_input(", ".join(corpus_context.get("suggested_collections", []))),
         output_language=config.output_language,
     )
 

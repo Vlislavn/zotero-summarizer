@@ -14,11 +14,13 @@ from typing import Any, Callable
 from zotero_summarizer.models import ResearchCandidate, ResearchFeedTriage
 from zotero_summarizer.models.research_feed import parse_run_budgets
 from zotero_summarizer.services._common import now_iso_z, write_json_atomic
-from zotero_summarizer.services.library import _review_cache
+from zotero_summarizer.services.library import _feed_assessment
+from zotero_summarizer.services.research_feed.cursor import CandidateCursor
 from zotero_summarizer.services.research_feed.card import build_card
 from zotero_summarizer.services.research_feed.profile import load_profile
 from zotero_summarizer.services.research_feed.render import persist
-from zotero_summarizer.services.research_feed.source import load_candidates
+from zotero_summarizer.services.research_feed.source import CandidateReader, admit_history, load_candidates, number, summary
+from zotero_summarizer.services.research_feed.ranking import rank_candidates
 from zotero_summarizer.settings import Settings
 
 
@@ -51,21 +53,6 @@ def _latest_rows(db_path: Path) -> dict[str, dict[str, Any]]:
     return latest
 
 
-def _summary(row: dict[str, Any] | None) -> dict[str, Any]:
-    if not row:
-        return {}
-    try:
-        payload = json.loads(row.get("shap_contribs_json") or "{}")
-        if not isinstance(payload, dict):
-            raise ValueError("stored triage summary must be a JSON object")
-        summary = payload.get("summary") or {}
-        if not isinstance(summary, dict):
-            raise ValueError("stored triage summary field must be an object")
-        return summary
-    except (json.JSONDecodeError, TypeError) as exc:
-        raise ValueError("stored triage summary is invalid JSON") from exc
-
-
 def _contributions(text: str) -> list[str]:
     lower = text.lower()
     kinds = [kind for kind in ("method", "benchmark", "dataset", "evaluation", "analysis")
@@ -74,29 +61,33 @@ def _contributions(text: str) -> list[str]:
 
 
 def triage_candidate(candidate: ResearchCandidate, row: dict[str, Any] | None, profile) -> ResearchFeedTriage:
-    summary = _summary(row)
-    text = " ".join([candidate.title, candidate.abstract, str(summary.get("executive_summary") or ""),
-                     str(summary.get("methods") or "")])
+    stored = summary(row)
+    text = " ".join([candidate.title, candidate.abstract, str(stored.get("executive_summary") or ""),
+                     str(stored.get("methods") or "")])
     themes, projects = _matches(profile.themes, text), _matches(profile.projects, text)
     priority_score = {"must_read": 5, "should_read": 4, "could_read": 3, "dont_read": 1}
-    raw_score = float((row or {}).get("composite_score") or summary.get("composite_relevance_score") or 1)
+    raw_score = (row or {}).get("composite_score")
+    raw_score = number(stored.get("composite_relevance_score") if raw_score is None else raw_score, default=1)
     score = priority_score.get(str((row or {}).get("reading_priority") or ""), round(raw_score))
     score = max(1, min(5, score))
-    method = summary.get("method_and_code")
+    method = stored.get("method_and_code")
     if isinstance(method, dict) and method.get("artifacts"):
         artifact = "present"
-    elif "method_and_code" in summary:
+    elif "method_and_code" in stored:
         artifact = "absent"
     else:
         artifact = "unknown"
     decision = str((row or {}).get("decision") or "")
-    include = decision == "selected" or (
-        decision not in {"user_rejected", "gate_rejected"} and score >= 3 and bool(themes or projects)
-    )
-    reason = str(summary.get("triage_rationale") or (row or {}).get("decision_reason") or "No prior triage evidence.")
+    if decision not in {"", "selected", "black_swan", "user_approved", "user_rejected", "gate_rejected",
+                        "rejected_low_score", "rejected_dedup_library", "rejected_dedup_processed", "triaged_pending",
+                        "awaiting_review", "rejected_daily_cutoff", "rejected_elbow"}:
+        raise ValueError("prior triage decision failed or invalid")
+    veto = {"user_rejected", "gate_rejected", "rejected_low_score", "rejected_dedup_library", "rejected_dedup_processed"}
+    include = decision == "selected" or (decision not in veto and score >= 3 and bool(themes or projects))
+    reason = str(stored.get("triage_rationale") or (row or {}).get("decision_reason") or "No prior triage evidence.")
     return ResearchFeedTriage(
         include=include, score=score,
-        confidence=float(summary.get("triage_confidence") or 0.5),
+        confidence=number(stored.get("triage_confidence"), default=0.5, maximum=1),
         matched_themes=themes, matched_projects=projects,
         contribution_kind=_contributions(text), artifact_signal=artifact,
         novelty_claim=str(method.get("what_is_new") or "") if isinstance(method, dict) else "",
@@ -146,6 +137,7 @@ def _queue_tags(
 
 def _assess(
     settings: Settings, start: datetime, end: datetime, source_limit: int, venue: str,
+    *, generate: bool = False,
 ) -> tuple[Any, list[ResearchCandidate], dict[str, dict[str, Any]], list[tuple[Any, Any]], list[dict[str, str]]]:
     profile = load_profile(settings.data_dir)
     candidates = load_candidates(
@@ -153,9 +145,18 @@ def _assess(
     )
     rows = _latest_rows(settings.triage_db_path)
     assessed, failed = [], []
+    cursor = None
     for candidate in candidates:
         try:
-            assessed.append((candidate, triage_candidate(candidate, rows.get(candidate.source_id), profile)))
+            row = rows.get(candidate.source_id)
+            candidate = admit_history(candidate, row)
+            if row is None:
+                if cursor is None:
+                    cursor = CandidateCursor(settings)
+                row = cursor.row(candidate, profile, generate=generate)
+                if row is not None:
+                    rows[candidate.source_id] = row
+            assessed.append((candidate, triage_candidate(candidate, row, profile)))
         except Exception as exc:  # noqa: BLE001 — malformed history is isolated per paper.
             LOGGER.warning("research-feed triage failed source=%s: %s", candidate.source_id, exc)
             failed.append({"source_id": candidate.source_id, "error": f"{type(exc).__name__}: {exc}"})
@@ -163,25 +164,40 @@ def _assess(
 
 
 def _ensure_reviews(
-    settings: Settings, candidates: list[ResearchCandidate], timeout_seconds: int,
+    settings: Settings, candidates: list[ResearchCandidate], timeout_seconds: int, profile: Any = None,
 ) -> dict[str, str]:
     """Run reviews for cache misses and return per-key timeout/error outcomes."""
     from zotero_summarizer.services.library import deep_review
     from zotero_summarizer.services.library.app_library_reader import AppLibraryReader
 
-    keys = [candidate.source_id for candidate in candidates
-            if deep_review.get_current_review(candidate.source_id) is None]
+    keys, outcomes, overrides = [], {}, {}
+    contexts = {_c.source_id: _feed_assessment.context_for(_c.source_id, profile) for _c in candidates} if profile else {}
+    for candidate in candidates:
+        key = candidate.source_id
+        try:
+            review = _feed_assessment.current_review(key) if profile else deep_review.get_current_review(key)
+            if review and review.get("review_identity", {}).get("source_path"):
+                overrides[key] = review["review_identity"]["source_path"]
+            _feed_assessment.review_evidence(review)
+            assessment = _feed_assessment.qualify(review, contexts[key]) if profile else {}
+            if profile and assessment["status"] == "not_assessed":
+                keys.append(key)
+        except (ValueError, FileNotFoundError):
+            keys.append(key)
+        except Exception as exc:  # noqa: BLE001 — source/currentness errors stay per-paper errors.
+            outcomes[key] = f"current review failed: {type(exc).__name__}: {exc}"
     if not keys:
-        return {}
+        return outcomes
     try:
         deep_review.start(
-            item_keys=keys, reader=AppLibraryReader(settings.triage_db_path), acquire_missing=True,
+            item_keys=keys, acquire_missing=True,
+            reader=CandidateReader(settings.triage_db_path, candidates) if profile else AppLibraryReader(settings.triage_db_path),
+            **({"feed_contexts": {key: contexts[key] for key in keys}, "pdf_overrides": overrides} if profile else {}),
         )
     except Exception as exc:  # noqa: BLE001 — report start failure per affected paper.
-        return {key: f"deep review start failed: {type(exc).__name__}: {exc}" for key in keys}
+        return {**outcomes, **{key: f"deep review start failed: {type(exc).__name__}: {exc}" for key in keys}}
     deadline = time.monotonic() + timeout_seconds
     pending = set(keys)
-    outcomes = {}
     while pending:
         for key in tuple(pending):
             job = deep_review.status(key)
@@ -190,6 +206,14 @@ def _ensure_reviews(
             pending.remove(key)
             if job.get("status") == "error":
                 outcomes[key] = str(job.get("error") or "deep review failed")
+            elif profile:
+                try:
+                    review = _feed_assessment.current_review(key)
+                    _feed_assessment.review_evidence(review)
+                    if _feed_assessment.qualify(review, contexts[key])["status"] == "not_assessed":
+                        raise ValueError("feed assessment missing after generation")
+                except Exception as exc:  # noqa: BLE001 — do not publish failed qualification as science.
+                    outcomes[key] = f"review qualification failed: {type(exc).__name__}: {exc}"
         if not pending:
             break
         if time.monotonic() >= deadline:
@@ -205,21 +229,33 @@ def _records(
     review_loader: ReviewLoader,
     profile: Any,
     review_outcomes: dict[str, str] | None = None,
+    *, evidence: dict | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, str]]]:
     records: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
     failed: list[dict[str, str]] = []
     for candidate, triage in shortlist:
+        if evidence is not None:
+            evidence[candidate.source_id] = {"availability": "unknown"}
+        failure = (review_outcomes or {}).get(candidate.source_id)
+        if failure:
+            failed.append({"source_id": candidate.source_id, "error": failure})
         try:
             review = review_loader(candidate.source_id)
-            if review is None or not review.get("digest"):
-                failure = (review_outcomes or {}).get(candidate.source_id)
-                if failure:
-                    failed.append({"source_id": candidate.source_id, "error": failure})
-                else:
+            if review is None:
+                if not failure:
                     missing.append(candidate.model_dump(mode="json"))
                 continue
-            card = build_card(candidate, triage, review, profile)
+            if review.get("needs_pdf"):
+                missing.append(candidate.model_dump(mode="json"))
+                if evidence is not None:
+                    evidence[candidate.source_id] = {"availability": "unavailable"}
+                raise ValueError("source unavailable: " + str(review.get("acquire_outcome") or "not_observed"))
+            _feed_assessment.review_evidence(review)
+            if evidence is not None:
+                evidence[candidate.source_id] = {"availability": "available", "basis": review["digest"]["basis"]}
+            assessment = _feed_assessment.qualify(review, _feed_assessment.context_for(candidate.source_id, profile))
+            card = build_card(candidate, triage, review, profile, assessment=assessment)
             records.append({
                 "candidate": candidate.model_dump(mode="json"),
                 "triage": triage.model_dump(mode="json"),
@@ -228,17 +264,24 @@ def _records(
                     "source_id": candidate.source_id,
                     "pipeline_stage": "deep_review_projection",
                     "review_contract_version": review.get("review_contract_version"),
+                    "source_binding": review["review_identity"],
+                    "triage": {"basis": "stored_abstract_triage", "confidence": triage.confidence},
+                    "feed_generation": review.get("feed_assessment"),
+                    "project_use_assessment": assessment["status"],
+                    "scientific_verification": "unverified",
                     "provider": (review.get("provenance") or {}).get("provider"),
                     "model": (review.get("provenance") or {}).get("model"),
                     "prompt_schema_version": (review.get("provenance") or {}).get("prompt_schema_version"),
                     "generated_at": review.get("reviewed_at"),
                     "basis": (review.get("digest") or {}).get("basis", "unknown"),
                     "confidence": triage.confidence,
-                    "abstained": False,
+                    "assessment_confidence": None,
+                    "abstained": assessment["status"] != "assessed",
                 },
             })
         except Exception as exc:  # noqa: BLE001 - one paper never fails the weekly run.
-            failed.append({"source_id": candidate.source_id, "error": f"{type(exc).__name__}: {exc}"})
+            if not failure:
+                failed.append({"source_id": candidate.source_id, "error": f"{type(exc).__name__}: {exc}"})
     return records, missing, failed
 
 
@@ -272,7 +315,7 @@ def run_weekly(
     queue_zotero: bool = False,
     generate_reviews: bool = False,
     review_timeout_seconds: int = 3600,
-    review_loader: ReviewLoader = _review_cache.get_current_review,
+    review_loader: ReviewLoader | None = None,
 ) -> dict[str, Any]:
     try:
         if start > end:
@@ -282,20 +325,28 @@ def run_weekly(
     shortlist_budget, card_budget, source_limit, review_timeout_seconds = parse_run_budgets(
         shortlist_budget, card_budget, source_limit, review_timeout_seconds,
     )
+    if review_loader is None:
+        review_loader = _feed_assessment.current_review if generate_reviews else _feed_assessment.cached_reader(settings)
     profile, candidates, rows, assessed, assess_failed = _assess(
-        settings, start, end, source_limit, venue,
+        settings, start, end, source_limit, venue, generate=generate_reviews,
     )
-    included = sorted((pair for pair in assessed if pair[1].include),
-                      key=lambda pair: (pair[1].score, pair[1].confidence, pair[0].title), reverse=True)
+    included, ranking, ranking_failed = rank_candidates(assessed, rows)
     shortlist = included[:profile.shortlist_budget if shortlist_budget is None else shortlist_budget]
     reviewed = shortlist[:profile.card_budget if card_budget is None else card_budget]
     review_outcomes: dict[str, str] = {}
     if generate_reviews:
         review_outcomes = _ensure_reviews(
-            settings, [candidate for candidate, _triage in reviewed], review_timeout_seconds,
+            settings, [candidate for candidate, _triage in reviewed], review_timeout_seconds, profile,
         )
-    records, missing, failed = _records(reviewed, review_loader, profile, review_outcomes)
-    failed = [*assess_failed, *failed]
+    evidence = {}
+    records, missing, failed = _records(reviewed, review_loader, profile, review_outcomes, evidence=evidence)
+    failed = [*assess_failed, *ranking_failed, *failed]
+    for record in records:
+        row = rows.get(record["candidate"]["source_id"]) or {}
+        record["provenance"]["triage"] = row.get("triage_provenance") or {
+            "basis": "stored_abstract_triage", "row_id": row.get("id"), "run_id": row.get("run_id"),
+            "model": row.get("model_version"), "generated_at": row.get("created_at"), "currentness": "not_attested"}
+
     rejects = sorted((pair for pair in assessed if not pair[1].include),
                      key=lambda pair: pair[1].score, reverse=True)[:10]
     writebacks = (
@@ -309,10 +360,11 @@ def run_weekly(
         "counts": {
             "discovered": len(candidates), "deduplicated": len(candidates),
             "triaged": len(assessed), "shortlisted": len(shortlist),
-            "full_text_available": len(records), "cards_generated": len(records),
+            "full_text_available": sum(value["availability"] == "available" for value in evidence.values()),
+            "cards_generated": len(records),
             "failed": len(failed),
         },
-        "writebacks": writebacks,
+        "writebacks": writebacks, "ranking": ranking, "full_text_evidence": evidence,
     }
     payload = _payload(metadata, records, missing, failed, rejects)
     output_dir = settings.data_dir / "research_feed"

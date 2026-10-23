@@ -175,6 +175,17 @@ uv run zotero-summarizer faithbench build --max-builder-windows 64  # larger QA-
   budget and increased call cost are documented there.
 - **[Research-feed evaluation evidence](docs/issue-evidence-research-feed.md)** — why the current
   30-paper fixture is unscorable for production inclusion quality (not a 0%-precision result).
+  `research-feed run --from 2026-08-22 --to 2026-08-29` reuses RSS triage and current
+  reviews, co-producing concrete project proposals in the same digest call. Original
+  quote membership is checked, not scientific truth. Effort estimates are explicitly
+  unverified; code alone establishes no duration. `--cached-only` avoids startup/model
+  work but needs the existing goals config for current qualification; errors remain
+  visible (CLI exit 1). Weekly acquisition never opens a browser; missing abstract
+  stages are errors, and omitted projects remain unknown. Shared abstract prompts
+  escape source boundary markup; semantic injection resistance is not established.
+  Saved v1 reports are not rewritten. Partial-run diagnostics stay on stderr so
+  CLI stdout remains parseable JSON; verification disables declared chat thinking
+  or minimizes active three-level reasoning to low without changing digest effort.
 - **[docs/architecture.md](docs/architecture.md)** — how it works, the layering rules, and
   the dev / verification workflow.
 - **[Native issue delegation](docs/native-agent-workflow.md)** — pinned async Pi adapter,
