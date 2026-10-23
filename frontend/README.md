@@ -21,6 +21,24 @@ Vite proxies `/api/*` to `http://localhost:8000`; `npm run build` writes
 - **Settings** — AI, research profile, Zotero, sources, and advanced controls. Sources offers explicit HackerNoon tag-feed subscriptions through the existing RSS API; saving, fetching and Today triage remain separate actions.
 - **Ops** — feeds, jobs, pending writes, diagnostics, and retraining.
 
+Today cards label the unchanged composite bands as **Relevance** (moderate,
+not “Fair”), separately from current AI evidence grades. Legacy row grades are
+unconfirmed; unknown review evidence never means neutral/poor science or proves
+no review was attempted. A current needs-full-text/not-ready entry is explicit;
+a join miss cannot distinguish absent, stale or failed reviews. The full-review
+page retains an explicit **Generate review** action for empty, failed or
+needs-full-text cached entries, even when a legacy grade remains visible. It
+stays disabled while AI is off, unreachable or offline; cached placeholders do
+not trigger an automatic retry. A running retry shows progress instead. One native
+**Why selected** disclosure replaces the separate reason-chip row and contains
+existing reasons, the actual slate policy and recorded cohort/picker keys.
+Exploration roles are labelled as exploration. Interleave withholds the new
+review/selection diagnostics. Rendering preserves server order, scores and labels.
+The opt-in `tests/test_today_selection_browser.py` reuses the existing isolated
+application-browser fixture for real API/SQLite, keyboard, contrast and reflow
+checks with synthetic cache variants; it does not demonstrate scientific ranking
+quality or native-user comprehension.
+
 Legacy `/annotate`, `/review`, `/triage`, and `/pending` links redirect without
 dropping query parameters. `/review?state=gate_rejected` reaches the Feed Review
 tab in Ops with its pile filter intact.
@@ -60,6 +78,10 @@ by title. The query panel consumes `plan.display` so tight/broad variants and
 OpenReview are not omitted. Backend and frontend must be deployed together.
 Today/Search's shared collection picker consumes the API's `items` tree, including
 nested collections; it does not mistake the response envelope for the tree.
+
+The shared moderate-relevance pill uses the existing amber-600 palette token:
+white text contrast is 5.58:1 (amber-500 was 3.95:1). This display-only correction
+does not change score bands, ordering or saved labels.
 
 ## Setup and AI
 

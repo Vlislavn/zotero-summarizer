@@ -163,6 +163,14 @@ SQLite). What *triggers* it is your choice:
 
 The daemon is convenience, not a requirement.
 
+Today separates **Relevance** from AI review evidence. Expand **Why selected**
+for the observed policy and picker keys. If a card says **Review: not ready**,
+open **Open full review** and use **Generate review** to retry explicitly;
+an empty cached digest or old grade does not remove that action. Missing full
+text also keeps the manual retry available after access is restored. Generation
+stays disabled while AI is off, unreachable or offline. Add remains blocked until
+a current usable review exists; missing evidence is not a poor-science grade.
+
 ## Adding sources (arXiv, bioRxiv, PubMed, HackerNoon)
 
 A "source" is just an **RSS feed the app subscribes to itself** — the app fetches
