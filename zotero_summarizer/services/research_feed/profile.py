@@ -25,12 +25,13 @@ def profile_path(data_dir: Path) -> Path:
     return data_dir / "research_feed" / "profile.json"
 
 
-def load_profile(data_dir: Path) -> ResearchProfile:
+def load_profile(data_dir: Path, *, persist_default: bool = True) -> ResearchProfile:
     path = profile_path(data_dir)
     if path.exists():
         return ResearchProfile.model_validate(json.loads(path.read_text(encoding="utf-8")))
     profile = ResearchProfile(themes=DEFAULT_THEMES, projects=DEFAULT_PROJECTS)
-    write_json_atomic(path, profile.model_dump(mode="json"))
+    if persist_default:
+        write_json_atomic(path, profile.model_dump(mode="json"))
     return profile
 
 

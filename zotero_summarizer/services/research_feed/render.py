@@ -1,10 +1,11 @@
 """Canonical JSON + compact Markdown rendering for a weekly research feed."""
 from __future__ import annotations
 
+import json
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from zotero_summarizer.services._common import write_json_atomic
 
@@ -28,6 +29,14 @@ def markdown(payload: dict[str, Any]) -> str:
             f"**Reproduction:** {card['reproducibility_tier']} — {card['reproducibility_rationale']}", "",
             f"**Artifacts:** {', '.join(card['code_urls'] + card['dataset_urls'] + card['model_urls']) or 'none verified'}", "",
         ]
+        for label, value in (
+            ("Reproducibility tier", card.get("reproducibility_tier")),
+            ("Reproducibility rationale", card.get("reproducibility_rationale")),
+            ("Missing reproduction inputs",
+             "; ".join(card.get("missing_reproduction_inputs") or [])),
+            ("Evidence gaps", "; ".join(card.get("evidence_gaps") or [])),
+        ):
+            lines += [f"**{label}:** {value or 'not recorded (not assessed)'}", ""]
     rejected = payload.get("rejected_near_threshold") or []
     if rejected:
         lines += ["## Near-threshold rejects", ""]
@@ -40,10 +49,20 @@ def markdown(payload: dict[str, Any]) -> str:
     if failures:
         lines += ["## Failed assessments (not scientific rejections)", ""]
         lines += [f"- {row['source_id']}: {row['error']}" for row in failures]
+    unqualified = payload.get("unqualified_reviews") or []
+    if unqualified:
+        lines += ["## Review qualification pending", ""]
+        lines += [f"- {row['candidate']['title']} — {row['reason']} (not evidence of unavailable full text)"
+                  for row in unqualified]
+        lines.append("")
     return "\n".join(lines)
 
 
-def persist(payload: dict[str, Any], output_dir: Path, slug: str) -> tuple[Path, Path]:
+def persist(
+    payload: dict[str, Any], output_dir: Path, slug: str, *,
+    render_markdown: Callable[[dict[str, Any]], str] | None = None,
+    inputs: list[dict[str, Any]] | None = None,
+) -> tuple[Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{slug}-", dir=output_dir))
     published = output_dir / slug
@@ -51,7 +70,12 @@ def persist(payload: dict[str, Any], output_dir: Path, slug: str) -> tuple[Path,
         staged_json = staging / f"{slug}.json"
         staged_markdown = staging / f"{slug}.md"
         write_json_atomic(staged_json, payload)
-        staged_markdown.write_text(markdown(payload), encoding="utf-8")
+        renderer = markdown if render_markdown is None else render_markdown
+        staged_markdown.write_text(renderer(payload), encoding="utf-8")
+        if inputs is not None:
+            with (staging / "inputs.jsonl").open("w", encoding="utf-8") as source:
+                for post in inputs:
+                    source.write(json.dumps(post, ensure_ascii=False, allow_nan=False) + "\n")
         staging.replace(published)
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)

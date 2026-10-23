@@ -156,6 +156,23 @@ class TelegramTransportError(Exception):
         super().__init__(code)
 
 
+class TelegramNewsVerdict(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    decision: Literal["keep", "drop", "uncertain"]
+    matched_interests: list[str]
+    reason: str = Field(min_length=1)
+    evidence_quote: str = Field(min_length=1)
+    summary: str = ""
+
+    @model_validator(mode="after")
+    def _required_text(self) -> TelegramNewsVerdict:
+        if not self.reason.strip() or not self.evidence_quote.strip():
+            raise ValueError("verdict requires a reason and original evidence quote")
+        if self.decision == "keep" and not self.summary.strip():
+            raise ValueError("keep requires a summary")
+        return self
+
+
 class ResearchCandidate(BaseModel):
     source_id: str
     source: str
@@ -331,4 +348,5 @@ __all__ = [
     "ResearchFeedTriage", "ResearchIdea", "ResearchProfile",
     "FeedReviewContext", "FeedProjectAssessment", "FeedReproduction", "FeedImpact",
     "FeedAssessment", "FeedDigestResponse", "parse_run_budgets", "TelegramPost",
+    "TelegramNewsVerdict",
 ]
