@@ -10,9 +10,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
-- Make injected-PDF full-reading fixtures provide typed independent full-text quality. Preserve path/grade/read assertions and add abstract/unassessed controls; digest grade alone never supplies scientific basis.
 
-- Bind historical coverage comparisons to the frozen main algorithm, preserving old flag and current policy-highlight oracles. Add distinct empty/unknown, explicit-failure and red-flag controls; production grading and paper annotations remain unchanged.
 
 ### Changed
 - Hand off native scout artifact references explicitly, mark review evidence untrusted, and clarify task-level worker/consent boundaries. Lock labels and literal canary requests in offline contract tests; no sandbox or injection-resistance claim.
@@ -38,6 +36,10 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Make injected-PDF full-reading fixtures provide typed independent full-text quality. Preserve path/grade/read assertions and add abstract/unassessed controls; digest grade alone never supplies scientific basis.
+- Bind historical coverage comparisons to the frozen main algorithm, preserving old flag and current policy-highlight oracles. Add distinct empty/unknown, explicit-failure and red-flag controls; production grading and paper annotations remain unchanged.
+- Fail Related closed when human eligibility is unreadable; retain private session context with owner-only permissions and invalidate stage clients after credential replacement. Add regressions for all three safety boundaries.
+- Fence Related at primary verdict acknowledgement, including dont_read while its secondary reject-tag request is pending. Preserve existing completion/collapse callbacks and saved-verdict warnings; add actual page and hook regressions.
 - Resolve feed-assessment quote layout differences back to exact original source substrings and offsets. Preserve case/word/punctuation rejection, null unknown evidence and fail-closed source qualification.
 - Minimize deep-review verification reasoning: disable declared chat thinking or lower active three-level reasoning to low, preserving explicit user off and configured digest effort. Keep research-feed stdout JSON by routing runtime diagnostics to stderr; truncation still fails closed.
 - Escape source-supplied closing-tag markup in shared abstract/full-text refinement and triage prompts before rendering. Preserve complete summary/corpus content and existing scoring; DOI and auxiliary source metadata use the escaped data boundary.
@@ -59,6 +61,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Complete the common WAL/integrity backup before raw native RSS read-state updates; prune once after commit, preserve integer/idempotent/no-op behavior and propagate refusal or post-commit retention errors without replay.
 - Count repeated Search questions once without duplicate model calls; promote only within topic-eligible slots. Prior bindings become unchecked, retaining history. Reuse admitted over-budget originals for ordinary review instead of reacquiring them.
 - Invalidate Search evidence on changed/unavailable evaluator metadata or local protocol without running clients. Preserve historical receipts and pre-promotion tie order; restore constrained baseline order on stale reads.
+- Bind model-client cache publication to effective routing and invalidation generation. Fence Related cached/late comment reads after seed edits; retain complete assessed context with a library eligibility digest. Semantic usefulness remains unqualified.
 - Keep text-only browser snapshots in `article-snapshots/<SHA-256(raw URL)>.pdf`, separate from publisher PDFs; reuse persistent snapshots only with explicit render fallback and leave legacy prefixed files untouched.
 - Classify browser acquisitions by exact snapshot-cache path; captured publisher PDFs use the raw URL cache in either browser entrypoint, and declared non-2xx PDFs never fall back to text.
 - Generate source-bound RSS project proposals in existing review calls; reuse successful stages, recompute cards and retain errors/v1 reports. Cached qualification reads existing goals without startup. Keep effort unknown or explicitly unverified; preserve blockers and artifact links.
@@ -85,6 +88,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 - Browse saved weekly RSS digests in Weekly: engineering cards, paper links and JSON/Markdown downloads, with explicit empty, legacy and unreadable states. Browsing never starts generation or Zotero writes.
 - Opt-in experimental Search question evidence: bounded original-text retrieval and verification before review selection, located receipts and policy UI. Baseline/Add stay unchanged when disabled; human-held-out quality and latency remain unmeasured (#30).
+- Related saved-paper links plus an opt-in, consented experiment using full seed/candidate comments, durable context identities and honest failure/unknown states. Metadata hybrid stays default; semantic usefulness remains unqualified.
 - Independent HTML-preservation checks and mutation controls; opt-in frozen real-review browser replays skip when inputs are absent. Literal retention proves neither scientific truth nor native-editor compatibility.
 - Review attempts expose typed stage/recovery and metadata-only traces. Explicit local CLI captures retain decoded calls; operational source templates never become scientific reviews, and unavailable placeholders preserve current valid reviews (#32).
 - Search hard constraints require user confirmation; model hints/refinement cannot create bans. Bounded complementary queries, publication metadata recovery and retrieval accounting preserve legacy plans and disclose coverage limits (#31).

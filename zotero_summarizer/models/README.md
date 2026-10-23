@@ -32,6 +32,12 @@ local; remote/private non-loopback literals remain unchanged. No DNS is consulte
 `capable`, `observed_operational`, `hardware_safe` and `reason_code`; unknown is
 not false or Ready. No ResourceEnvelope is fabricated from these declarations.
 
+`ResolvedStage.fingerprint()` is the shared opaque identity of effective stage,
+provider settings and model. It reads no environment/keyring credential values.
+Consent and runtime cache admission use the same definition; callers can bind
+`resolve_stage_client(expected_identity=...)` to their expected processing
+snapshot instead of treating current metadata as proof about an opaque client.
+
 `GoalsConfig.llm_enabled` is user-owned. `LlmStatus.enabled=false` is the
 deliberate ML-only state, not an unreachable-provider error.
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 from zotero_summarizer.settings import Settings
@@ -69,12 +70,14 @@ class RuntimeState:
     # Serialises concurrent corpus writes (set to an asyncio.Lock at startup).
     corpus_write_lock: "asyncio.Lock | None" = None
 
-    # Per-stage LLM client cache, keyed by (stage, enable_thinking). Built lazily
-    # on first use so startup never depends on a provider being reachable.
+    # Effective routing is part of the key; invalidation also fences in-flight builds.
     _stage_clients: dict[Any, Any] = field(default_factory=dict)
+    _stage_clients_generation: int = 0
+    _stage_clients_lock: Any = field(default_factory=Lock, repr=False)
 
     def resolve_stage_client(
-        self, stage: str, *, enable_thinking: bool | None = None
+        self, stage: str, *, enable_thinking: bool | None = None,
+        expected_identity: str | None = None,
     ) -> Any:
         """Return the LLM client for ``stage`` ('feed'|'backlog'|'deep_review'),
         building + caching it on first use from ``app_state.config.llm_routing``.
@@ -84,38 +87,48 @@ class RuntimeState:
         for its digest and minimizes verification/light calls. It is a
         no-op for providers that advertise neither ``chat_template_kwargs``
         nor a configured ``reasoning_effort`` parameter.
+        ``expected_identity`` binds a caller's consent to the owned snapshot,
+        including when current config changes away and back around resolution.
 
         Raises (APIError / provider error) only here, on first use — never at
         startup. Callers run inside their own worker boundaries, so a missing
         key or unreachable endpoint degrades that stage without crashing the app.
         """
-        if not self.app_state.config.llm_enabled:
-            from zotero_summarizer.api.errors import APIError
-
-            raise APIError(
-                "llm_disabled",
-                "AI features are disabled; enable AI in Settings to run this action",
-                status_code=409,
-            )
-        cache_key = (stage, enable_thinking)
-        cached = self._stage_clients.get(cache_key)
-        if cached is not None:
-            return cached
+        from zotero_summarizer.api.errors import APIError
         from zotero_summarizer.models.providers import resolve_stage
+
+        with self._stage_clients_lock:
+            config = self.app_state.config
+            if not config.llm_enabled:
+                raise APIError(
+                    "llm_disabled",
+                    "AI features are disabled; enable AI in Settings to run this action",
+                    status_code=409,
+                )
+            resolved = resolve_stage(config.llm_routing, stage).model_copy(deep=True)
+            identity = resolved.fingerprint()
+            if expected_identity is not None and identity != expected_identity:
+                raise APIError("processing_boundary_changed", "Resolved stage differs from the requested processing boundary", status_code=409)
+            cache_key = (stage, enable_thinking, identity)
+            generation = self._stage_clients_generation
+            cached = self._stage_clients.get(cache_key)
+            if cached is not None:
+                return cached
         from zotero_summarizer.services.llm.factory import (
             build_client_for_provider,
             build_client_for_stage,
         )
 
-        routing = self.app_state.config.llm_routing
-        resolved = resolve_stage(routing, stage)
+        # Provider/credential construction must not block config invalidation.
         if enable_thinking is None:
             client = build_client_for_stage(resolved)
         else:
             client = build_client_for_provider(
                 resolved.provider, resolved.model, enable_thinking=enable_thinking
             )
-        self._stage_clients[cache_key] = client
+        with self._stage_clients_lock:
+            if generation == self._stage_clients_generation:
+                return self._stage_clients.setdefault(cache_key, client)
         return client
 
     def resolve_stage_provider(self, stage: str) -> Any:
@@ -130,7 +143,9 @@ class RuntimeState:
     def invalidate_stage_clients(self) -> None:
         """Drop cached stage clients so the next use rebuilds from current config
         (call after a config PUT swaps ``app_state``)."""
-        self._stage_clients.clear()
+        with self._stage_clients_lock:
+            self._stage_clients_generation += 1
+            self._stage_clients.clear()
 
 
 @dataclass

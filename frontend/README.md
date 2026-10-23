@@ -284,6 +284,23 @@ folded; explicit abstention is separate from unsupported and not-retrieved evide
 Synthetic browser checks exercise 390/1024/1440px, 320px reflow, text resizing,
 spacing and computed contrast. They are not native-user comprehension acceptance.
 
+The shared `/paper/:key` page includes `RelatedPapers`: explicitly load up to
+three saved links, then optionally confirm **Try with comments — experimental**.
+The confirmation names the configured review provider/model/endpoint and complete
+private seed/candidate context. Metadata hybrid remains default. The panel retains
+comment-source identity and failed/unknown/empty distinctions; failures and
+budget/interruption/staleness do not masquerade as successful contextual ranking.
+Acknowledged note/verdict saves immediately fence the panel, before the detail
+refetch returns. Verdict fencing consumes the primary acknowledgement through
+`usePaperReview.onVerdictAcknowledged`, not completion of the secondary reject-tag
+request. Existing `onSaved` completion/collapse and secondary warnings stay intact. Changed saved detail also remounts it with a new React-owned
+query identity. Closed, loading and failed reads do not display retained comment
+bodies; an old cached or pending GET cannot publish into the replacement owner.
+GETs consume React Query's cancellation signal, including unmount cancellation.
+An explicit fresh load/refresh/retry is still available, without an automatic
+semantic POST. No second client store, external discovery or Add is introduced.
+[Usage/privacy/qualification](../docs/related-saved-papers.md).
+
 ## Offline boundary
 
 The installable local-first PWA caches only its shell. IndexedDB holds compact

@@ -221,6 +221,13 @@ no body copy or migration, and reads do not rewrite historical data. Ambiguous
 legacy IDs are not guessed. This changes local note identity, not Zotero mirror
 delivery. Snapshot identity resolution is per note family, not one batched join.
 
+`library_context.read_context` obtains one read-only SQLite transaction for the
+related-paper surface. It reuses `review_notes._keys/current` and the label mirror's
+current-change query, retaining original keys, revisions and deletion authority.
+It never creates a database, writes a note or acknowledges a mirror. Services
+separately label expected I/O failures; schema/corruption errors remain errors.
+No new table, migration, comment index or secondary note owner is introduced.
+
 `review_notes.current_for_mirror` holds SQLite's writer lock over delivery of the
 current note body, reusing the same alias/revision reader. Closing the connection
 releases the lock on both success and failure; no note body or delivery receipt

@@ -11,6 +11,7 @@ import LinksRow from '../components/paper/LinksRow.jsx';
 import AbstractBlock from '../components/paper/PaperDetailView/AbstractBlock.jsx';
 import PaperReview from '../components/paper/review/PaperReview.jsx';
 import ReviewFailure from '../components/paper/ReviewFailure.jsx';
+import RelatedPapers from '../components/paper/RelatedPapers.jsx';
 import PaperFigures from '../components/library/PaperFigures.jsx';
 import SectionMap from '../components/paper/review/SectionMap.jsx';
 import StoryToc from '../components/paper/review/StoryToc.jsx';
@@ -134,6 +135,8 @@ export default function PaperReviewPage() {
   // Stepping to another paper unmounts this page (and the notes textarea), so an
   // unsaved note would be silently lost — confirm first when there are unsaved edits.
   const [notesDirty, setNotesDirty] = useState(false);
+  const [relatedRevision, setRelatedRevision] = useState(0);
+  const fenceRelatedContext = useCallback(() => setRelatedRevision(value => value + 1), []);
   const goToKey = useCallback(
     (key) => {
       if (!key) return;
@@ -183,7 +186,7 @@ export default function PaperReviewPage() {
   });
   const flatCollections = flattenCollections(collectionsQuery.data?.items || []);
   const { detail, isLoading, error, refreshDetail, onTagsChanged, onCollectionsChanged, verdict } =
-    usePaperReview(itemKey, {});
+    usePaperReview(itemKey, { onVerdictAcknowledged: fenceRelatedContext });
   const hasPdf = Boolean(detail?.has_pdf);
   const render = renderQuery.data || null;
   const renderCompleted = render?.status === 'completed';
@@ -263,6 +266,8 @@ export default function PaperReviewPage() {
             <ReviewZone deep={deep} runner={runner} sectionOverlay={ov} />
           </section>
 
+          <RelatedPapers key={JSON.stringify([itemKey, relatedRevision, detail.user_note, detail.verdict])} itemKey={itemKey} />
+
           {showFigures && (
             <section id="figures" className="scroll-mt-20 py-6">
               <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -304,7 +309,7 @@ export default function PaperReviewPage() {
             verdict={verdict}
             onTagsChanged={onTagsChanged}
             onCollectionsChanged={onCollectionsChanged}
-            onNoteSaved={refreshDetail}
+            onNoteSaved={() => { fenceRelatedContext(); refreshDetail(); }}
             onNotesDirtyChange={setNotesDirty}
             hasPdf={hasPdf}
             canAsk={canAsk}

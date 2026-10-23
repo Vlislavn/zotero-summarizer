@@ -10,6 +10,7 @@ JSON dir; move to SQLite only if sessions ever number in the thousands.
 from __future__ import annotations
 
 import json
+import os
 import threading
 import uuid
 from collections.abc import Callable
@@ -44,7 +45,8 @@ def _lock_for(session_id: str) -> threading.Lock:
 
 def _dir() -> Path:
     d = settings().search_dir
-    d.mkdir(parents=True, exist_ok=True)
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    d.chmod(0o700)
     return d
 
 
@@ -75,7 +77,9 @@ def save(session: ResearchSession) -> None:
             return
         path = _path(session.id)
         tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(session.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+        with tmp.open("w", encoding="utf-8") as handle:
+            os.fchmod(handle.fileno(), 0o600)
+            json.dump(session.to_dict(), handle, indent=2, ensure_ascii=False)
         tmp.replace(path)
 
 
@@ -168,6 +172,8 @@ def list_sessions() -> list[dict[str, object]]:
     for path in _dir().glob("*.json"):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
+            if data.get("related"):
+                continue  # Related assessments have their own paper surface, never auto-review.
             rows.append({
                 "id": data["id"],
                 "created_at": data["created_at"],

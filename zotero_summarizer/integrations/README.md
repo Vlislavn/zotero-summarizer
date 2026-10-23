@@ -125,6 +125,13 @@ RSS requests negotiate identity/gzip and cap both wire and decoded bodies at
 8 MiB; gzip output is bounded during decompression. Invalid/trailing gzip and
 unnegotiated encodings are errors. Original XML bytes preserve declared encodings.
 
+`_read_item_annotations` projects native annotation key, parent attachment key and
+`dateModified` alongside complete comment/highlight text in item detail. Related
+saved-paper context can therefore retain original source identity and observe
+same-count edits; it never invents IDs from positions or treats a highlight as a
+user comment. Existing ordering and deleted annotation/attachment exclusions are
+preserved. `tests/test_zotero_read_items.py` covers this read-only contract.
+
 Item lists, details, notes and annotations exclude trashed children (including
 annotations on trashed PDFs); note lists/detail share one query. Collection lookup
 belongs to the collection mixin and scopes key/name/every path segment to the user

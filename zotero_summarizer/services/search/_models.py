@@ -258,6 +258,7 @@ class ResearchSession:
     evidence_policy: str = "baseline"
     evidence_status: dict[str, Any] = field(default_factory=dict)
     evidence_baseline_order: list[str] = field(default_factory=list)
+    related: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         from zotero_summarizer.services.search._question_policy import invalidate_stale_evidence
@@ -289,6 +290,7 @@ class ResearchSession:
             "status": self.status,
             "screened_count": self.screened_count,
             "refinements": [dict(r) for r in self.refinements],
+            "related": dict(self.related),
         }
 
     @classmethod
@@ -316,4 +318,5 @@ class ResearchSession:
             evidence_policy=data.get("evidence_policy", "baseline"),
             evidence_status=dict(data.get("evidence_status") or {}),
             evidence_baseline_order=data.get("evidence_baseline_order", []),
+            related=dict(data.get("related") or {}),
         )

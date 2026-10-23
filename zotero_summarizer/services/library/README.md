@@ -528,6 +528,37 @@ Omitted configured projects become explicit unknowns with null evidence; no
 project silently disappears. Feed-context acquisition reuses headless PDF sources
 only (`allow_browser=False`); interactive per-paper acquisition is unchanged.
 
+## Related saved papers
+
+`related.py` reuses `_search.hybrid_search` for up to three saved-paper links on
+the shared Today/Library page. Default retrieval uses public seed metadata, not
+comments; read items remain eligible, self aliases/identifiers and current human
+`dont_read` candidates are excluded, and collection/tag scopes stay intact.
+`_related_context` reads current manual/verdict notes through the existing SQLite
+alias/revision owners, plus structurally unowned native notes and annotation
+comments, retaining full text and original source identity. Generated reviews and
+app mirrors are not user evidence; failed/unknown reads never become empty.
+Unreadable app context blocks retrieval and assessment with a source error: seed
+aliases and current human exclusions cannot safely be inferred from missing data.
+
+Only an explicit provider/model-bound consent action invokes `_related_assessment`
+through the existing deep-review client. Full seed and candidate notes enter the
+bounded semantic assessment, not provider search queries. Typed negative/unknown
+assessments cannot promote candidates. Both-paper metadata quote membership and
+comment IDs are checked; semantic entailment is not proven. Search's existing
+session/claim/atomic save owns private snapshots, fingerprints, terminal results,
+coalescing and explicit recovery. Full stored context is limited to the seed and
+assessed pool; a digest of complete library metadata/current app context preserves
+eligibility and revision/deletion invalidation without copying every library note
+into each new session. Existing sessions are not rewritten. Actual client cache
+identity/publication belongs to `RuntimeState`, not a Related-only resolver;
+Related passes the shared resolved-stage consent fingerprint as `expected_identity`
+to bind the actual client snapshot before cache access/construction.
+No user-data/Zotero writer or review start is called. See
+[usage and qualification](../../../docs/related-saved-papers.md):
+metadata remains default, comment-only recall and owner usefulness evaluation are
+outstanding. No new index, model or state engine.
+
 ## Source admission and attempt diagnostics
 
 `_source_admission` checks the untruncated original before strategy dispatch or

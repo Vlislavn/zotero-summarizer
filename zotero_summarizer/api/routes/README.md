@@ -62,6 +62,16 @@ __init__.include_routes(app)
 | `_golden_helpers.py` | pure (non-HTTP) helpers for `golden.py` |
 | `_golden_border.py` | the `/api/golden/border-suggestions` active-learning endpoint, split out of `golden.py` to keep it under the 500-LOC cap; mounted on `golden.router` via `include_router` |
 
+`GET /api/library/related/{item_key}?collection=&tag=` returns metadata-hybrid
+saved-paper connections, comment availability and the configured processing
+boundary, without a semantic call. `POST /api/library/related/{item_key}/assess`
+requires that boundary's `consent_token`; optional `retry` explicitly recovers a
+failed/interrupted attempt. It persists/coalesces contextual assessments through
+the existing session store, never Search auto-review or Add. Full private seed
+and candidate notes stay out of provider search queries. Unknown, failed,
+interrupted, stale and over-budget assessments are distinct from genuine empty.
+See [contract](../../../docs/related-saved-papers.md).
+
 Ask Paper additionally accepts up to 20 typed prior turns. The library service
 keeps a recent tail, compacts older evidence to extraction-versioned handles,
 and returns separate claimed/quote-verified/location-verified citation state.

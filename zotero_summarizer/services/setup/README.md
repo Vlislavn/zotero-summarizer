@@ -50,7 +50,9 @@ replacement also invalidates success; local admission still precedes credential
 resolution. An empty retry selection rechecks all checks. Credential writes serialize
 with Doctor checks, rotate an app-owned `data/setup_credential_revision.json`
 marker **before** the key changes, and clear any cached browser Ready result;
-a concurrent run cannot publish stale success for a new key. A saved path differing from startup Settings demands
+a concurrent run cannot publish stale success for a new key. Credential replacement
+also invalidates the shared stage-client cache, including if storage raises after a
+partial write, so an old-key client or in-flight builder cannot repopulate it. A saved path differing from startup Settings demands
 restart before checks can pass. Zotero remains diagnostic but optional for
 RSS-only setups; an enabled RSS source is still required for Today.
 
