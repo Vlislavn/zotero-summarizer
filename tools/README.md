@@ -1,6 +1,15 @@
 # tools/ — developer scripts (run via `uv run`, not shipped)
 
-One-off eval / ops scripts. Not imported by the app; each has a module docstring with usage.
+One-off eval / ops scripts. Not imported by the app; Python scripts have module docstrings with usage.
+
+`tools/create-pr.sh 'Title' /path/to/body.md` is the checked PR publisher: from a
+clean committed branch it runs `make check`, non-force pushes the checked commit
+to the same branch on `origin`, then invokes `gh pr create` against `main`.
+It forwards the two input values literally and returns failures without publishing
+past a failed check/push. It never stages, stashes or reverts source. It requires
+existing Python/frontend development dependencies, `make`, `git`, and authenticated
+`gh`; it does not repair hosted billing. See the canonical
+[verification contract](../docs/architecture.md#verify-a-change).
 
 Prestige validation and quality-promotion evaluation read model artifacts and
 library caches through `Settings.model_dir` (`data/models/`), not a HOME constant.

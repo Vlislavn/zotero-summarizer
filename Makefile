@@ -1,4 +1,4 @@
-.PHONY: ui api iphone dev ui-build test lint scan scan-diff
+.PHONY: ui api iphone dev ui-build test lint check scan scan-diff
 
 # Prefer the project venv binary so targets work without activating it; fall
 # back to PATH if there's no venv.
@@ -52,6 +52,18 @@ test:
 # Pre-commit checks (LOC, layering, README freshness)
 lint:
 	pre-commit run --all-files
+
+# Canonical PR checks: recipe lines stay serial even with `make -j check`.
+# Build into disposable output, leaving an existing frontend/dist untouched.
+check:
+	$(MAKE) lint
+	KMP_DUPLICATE_LIB_OK=TRUE $(MAKE) test
+	cd frontend && npm run lint
+	cd frontend && npm test
+	@build=$$(mktemp -d "$${TMPDIR:-/tmp}/zs-pr-build.XXXXXX") || exit $$?; \
+	  trap 'rm -rf "$$build"' EXIT; \
+	  cd frontend && npm run build -- --outDir "$$build"
+	PYTHONPATH="$(CURDIR)$${PYTHONPATH:+:$$PYTHONPATH}" $(ZS) smoke-test --project-root .
 
 # ┌──────────────────────────────────────────────────────────────────────────────┐
 # │ CODE-HEALTH SCAN — two commands, one choice (scope). Both are advisory REPORTS │

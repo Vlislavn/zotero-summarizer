@@ -36,6 +36,8 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Retain accepted digest finding checks and exact original-source fragments in the review cache. Add a local read-only audit export with stale/legacy/error distinctions; no extra model calls or measured human-audit benefit.
 - Capture mobile-server signals before binding and replay them after socket cleanup, preventing stale sockets on startup SIGTERM/SIGINT.
 - Add explicit owner-authenticated Tailscale HTTPS/private-Unix app access. Preserve loopback default and same-origin Vite POST; refuse unsafe LAN shortcuts, directories and socket replacement. Own signal cleanup; no automatic gateway activation or device/revocation acceptance.
+- Add a default PR template that leads with executed feature outcomes, expected versus observed smoke results, exact environment/revision, evidence and limits; keep automated checks secondary.
+- Validate locally before PR publication with serial `make check` and a clean-source checked publisher; retain all existing checks plus smoke construction, preserve existing UI build output, and make hosted Actions manual-only.
 - Record final text-only browser-article proof: 18 live cases passed, 217 CDP calls, zero print calls; retain text-only scope and no OS-RSS guarantee.
 - Complete GitHub #25 code verification at 42/42 medium findings; retain semantic-accuracy and memory-boundary caveats in the local acceptance report.
 - Fold goal findings without losing originals; disclose saved source basis and unknown reviewed extent. Factor literal warning frames into one introduction with expanded scope/context, qualifiers and source links; retain original wording. Compact cards remain unchanged.

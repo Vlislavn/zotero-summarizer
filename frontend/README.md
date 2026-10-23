@@ -17,6 +17,11 @@ The deployed SPA keeps relative API/sync URLs at the explicitly approved gateway
 origin, without frontend credentials or a second mode selector. See
 [deployment boundary](../docs/local-deployment-boundary.md).
 
+Root `make check` reuses lint, test and build serially,
+with build output in a disposable directory so existing `dist/` stays intact.
+The dependency ignore also permits a shared `node_modules` symlink in worktrees.
+See the [checked PR workflow](../docs/architecture.md#verify-a-change).
+
 ## Product surfaces
 
 - **Library** — Read next, labels, reviews, figures, paper Q&A, and acquisition.
