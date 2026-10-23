@@ -1,6 +1,9 @@
 """Contracts for the source-neutral weekly Research Intelligence feed."""
 from __future__ import annotations
 
+from pydantic import ConfigDict
+from pydantic import model_validator
+
 from datetime import datetime
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
@@ -37,6 +40,7 @@ class ResearchProfile(BaseModel):
     projects: list[str]
     shortlist_budget: _ShortlistBudget = 20
     card_budget: _CardBudget = 10
+    telegram_channels: list[str] = Field(default_factory=list)
     topic_taxonomy: list[str] = Field(default_factory=lambda: sorted(TOPIC_TAXONOMY))
 
     @field_validator("topic_taxonomy")
@@ -46,6 +50,110 @@ class ResearchProfile(BaseModel):
         if unknown:
             raise ValueError(f"unknown research-feed topics: {sorted(unknown)}")
         return list(dict.fromkeys(values))
+
+
+LiveTelegramChannelId = Annotated[
+    int, Field(strict=True, ge=-(2**63), lt=-1000000000000),
+]
+
+def validate_live_telegram_channel_id(value: int) -> int:
+    """Validate a marked live channel ID without converting saved identities."""
+    try:
+        return TypeAdapter(LiveTelegramChannelId).validate_python(value)
+    except ValueError:
+        raise ValueError("invalid live Telegram channel ID") from None
+
+def normalize_telegram_username(value: str) -> str:
+    """Application binding key, not proof of Telegram API/public-channel validity."""
+    if not isinstance(value, str):
+        raise ValueError("invalid Telegram username")
+    bare = value.strip().removeprefix("@")
+    if (not 1 <= len(bare) <= 32 or not bare.isascii()
+            or not all(char.isalnum() or char == "_" for char in bare)
+            or not any(char.isalpha() for char in bare)):
+        raise ValueError("invalid Telegram username")
+    return bare.lower()
+
+class TelegramPost(BaseModel):
+    """Canonical saved input only: no embedded assessments or private session fields."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    schema_version: Literal[1]
+    channel_id: int = Field(ge=-(2**63), le=2**63 - 1)
+    message_id: int = Field(ge=1, le=2**63 - 1)
+    username: str | None = None
+    permalink: str
+    text: str
+    published_at: str
+    updated_at: str | None = None
+    urls: list[str] = Field(default_factory=list)
+    skip_reason: str | None = None
+
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def _version(cls, value):
+        if type(value) is not int or value != 1:
+            raise ValueError("saved Telegram input requires schema_version=1")
+        return value
+
+    @field_validator("published_at", "updated_at")
+    @classmethod
+    def _aware_date(cls, value: str | None) -> str | None:
+        if value is not None:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.utcoffset() is None:
+                raise ValueError("post dates require a timezone")
+        return value
+
+    @model_validator(mode="after")
+    def _original_fields(self) -> TelegramPost:
+        if self.channel_id == 0:
+            raise ValueError("channel_id must be nonzero")
+        if self.skip_reason is not None and not self.skip_reason.strip():
+            raise ValueError("skip_reason must be nonempty when supplied")
+        if not self.text.strip() and self.skip_reason is None:
+            raise ValueError("empty posts require an explicit skip_reason")
+        for value in [self.permalink, *self.urls]:
+            parsed = urlsplit(value)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                raise ValueError("post locators must be absolute HTTP(S) URLs")
+        return self
+
+    @property
+    def source_id(self) -> str:
+        return f"telegram:{self.channel_id}:{self.message_id}"
+
+class TelegramPage(BaseModel):
+    """One requested page, not a claim of complete channel history."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    posts: tuple[TelegramPost, ...] = Field(max_length=100)
+    complete: bool
+
+class ResolvedTelegramChannel(BaseModel):
+    """Application resolution result, without SDK or session metadata."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    channel_id: LiveTelegramChannelId
+    public_broadcast: bool
+
+class TelegramTransportError(Exception):
+    """Bounded injected-transport failure; never carries an upstream message."""
+
+    def __init__(self, code: str, *, retry_seconds: int | None = None):
+        if type(code) is not str or code not in {
+            "missing_session", "session_unauthorized", "revoked_session",
+            "network_error", "channel_unavailable", "flood_wait",
+        }:
+            raise ValueError("invalid Telegram transport error code")
+        if code == "flood_wait":
+            if type(retry_seconds) is not int or retry_seconds <= 0:
+                raise ValueError("invalid Telegram retry seconds")
+        elif retry_seconds is not None:
+            raise ValueError("retry seconds require Telegram flood_wait")
+        self.code = code
+        self.retry_seconds = retry_seconds
+        super().__init__(code)
 
 
 class ResearchCandidate(BaseModel):
@@ -222,5 +330,5 @@ __all__ = [
     "TOPIC_TAXONOMY", "ResearchCandidate", "ResearchEngineeringCard",
     "ResearchFeedTriage", "ResearchIdea", "ResearchProfile",
     "FeedReviewContext", "FeedProjectAssessment", "FeedReproduction", "FeedImpact",
-    "FeedAssessment", "FeedDigestResponse", "parse_run_budgets",
+    "FeedAssessment", "FeedDigestResponse", "parse_run_budgets", "TelegramPost",
 ]

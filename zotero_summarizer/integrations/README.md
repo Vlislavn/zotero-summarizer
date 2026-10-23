@@ -250,3 +250,5 @@ page joining, and the real OnPrem backend on an original generated PDF with
 signed superscript/subscript uncertainty, title/Methods text and a URL.
 Source-length-dependent budgets must use the new extracted length, not old
 Markdown counts. Prompts, settings, limits and models are unchanged.
+
+Telegram source-review part: original transport/session/credential and runtime code is retained unchanged. This part registers no Telegram CLI commands; its collection/store/worker dependencies are supplied by following original-source parts. No account/session, network collection or live model is exercised by packaging.

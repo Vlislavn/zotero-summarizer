@@ -204,3 +204,5 @@ Diagnostic CLI source reads reuse the single-component/no-symlink paper-state gu
 Feedback review stack part 3: `goldenset analyze-feedback` publishes a local report through the clean child. Admitted-root pinning from #159 remains intact; see `services/golden/feedback_analysis/README.md`.
 
 Retain original explicit default-no inference consent; use the existing canonical provider verification boundary.
+
+Telegram source-review part: original transport/session/credential and runtime code is retained unchanged. This part registers no Telegram CLI commands; its collection/store/worker dependencies are supplied by following original-source parts. No account/session, network collection or live model is exercised by packaging.

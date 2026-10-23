@@ -29,6 +29,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Preserve interpretation digest subtype metadata while sharing declared-field authority across qualification, optional receipts and HTML renderers. Reuse the retention prerequisite's dictionary projection; declared/source changes still refuse.
 - Reject interpretation source/run/export symlinks and selected-project escapes before file access, including symlinked manifests. Retain immutable attempts and explicit capture consent.
 - Hide interpretation assignment order in blinded exports; validate approval rows during inspection. Preserve partial-label accuracy bounds, independent conclusive-shortfall gates and actual card-exposure counts; zero exposure cannot recommend a pilot.
+- Retain original optional Telegram transport/session/identity contracts; collection/store/CLI wiring follows in dependent source-review parts.
 - Package original immutable-question persistence, composite note intents and migrations9/10; HTTP/UI and native delivery remain dependent review parts.
 - Keep tightened interpretation resource caps inclusive with exact token-count and decimal-latency arithmetic. Preserve mean/median reporting, per-paper and independent unknown/refusal gates; no rounding tolerance or threshold changes.
 

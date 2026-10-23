@@ -118,3 +118,5 @@ reading valid JSON. There is no browser run/build endpoint or cached-card replay
 optional pending actions only; default runs are dry-run.
 
 Original frozen weekly replay/source is retained with its original three-argument cohort ordering contract. Existing source helpers use their canonical number/summary names and the production caller supplies its existing cohort IDs. No new grader, labels, ranking formula or real-data claim is designed.
+
+Telegram source-review part: original transport/session/credential and runtime code is retained unchanged. This part registers no Telegram CLI commands; its collection/store/worker dependencies are supplied by following original-source parts. No account/session, network collection or live model is exercised by packaging.
