@@ -9,6 +9,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from zotero_summarizer.api.errors import APIError, install_error_handlers
+from zotero_summarizer.api.local_access import LocalAccessMiddleware
+from zotero_summarizer.api.mobile_access import MobileAccessMiddleware, MobileAccessPolicy
 from zotero_summarizer.api.routes import include_routes
 from zotero_summarizer.runtime import AppContext, set_context
 from zotero_summarizer.services import lifecycle
@@ -73,7 +75,9 @@ def _install_spa(app: FastAPI) -> None:
         return FileResponse(str(index_html))
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, *, mobile_access: MobileAccessPolicy | None = None,
+) -> FastAPI:
     effective_settings = settings or Settings.load()
 
     @asynccontextmanager
@@ -93,6 +97,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    if mobile_access is None:
+        app.add_middleware(LocalAccessMiddleware)
+    else:
+        app.add_middleware(MobileAccessMiddleware, policy=mobile_access)
     install_error_handlers(app)
     include_routes(app)
     _install_spa(app)

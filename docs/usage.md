@@ -37,6 +37,11 @@ This does not add automatic actions, blanket native-write consent or a new backu
 store, nor make backup and mutation atomic against other writers. Typed Pending
 approval/claims, verdict receipts and cross-database recovery remain separate.
 
+Remote access is opt-in through the exact-owner HTTPS/private-Unix
+[deployment boundary](local-deployment-boundary.md). Local `serve` refuses LAN
+binds; `make iphone` no longer prints an unauthenticated phone URL. Existing
+relative API/sync clients are reused; physical device/offline checks stay separate.
+
 ## Reading reviews and Zotero notes
 
 The app's review card and full paper page show **Read parts**, **Skip parts** and

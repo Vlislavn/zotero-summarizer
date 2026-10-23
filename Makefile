@@ -24,14 +24,13 @@ ui:
 api:
 	$(ZS) serve --host 127.0.0.1 --port 8000
 
-# Serve to your phone on the same WiFi: binds all interfaces (0.0.0.0) so other
-# LAN devices can reach it, and prints the URL to open. Serves the BUILT SPA —
-# run `make ui-build` first if you changed the frontend. Remote access: use
-# Tailscale (http://<tailscale-ip>:8000), never port-forward (the API has no auth).
+# Remote access requires explicit authenticated HTTPS gateway configuration.
 iphone:
-	@ip=$$(ipconfig getifaddr en0 || ipconfig getifaddr en1); \
-	  echo "Open on your phone (same WiFi):  http://$$ip:8000"; \
-	  $(ZS) serve --host 0.0.0.0 --port 8000
+	@printf '%s\n' \
+	  'make iphone does not configure authenticated HTTPS mobile access.' \
+	  'For this Mac, run make api and open http://127.0.0.1:8000.' \
+	  'See docs/local-deployment-boundary.md for the mobile deployment requirements.' >&2
+	@exit 2
 
 # Run backend + frontend together (Ctrl+C stops both). This is what you want
 # for local UI work: the Vite proxy has a live backend to talk to.
