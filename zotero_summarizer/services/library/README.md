@@ -682,3 +682,5 @@ Map output truncation alone subdivides the failing source chunk sequentially wit
 Retain original presentation URI normalization through the canonical raw PDF annotation reader.
 
 Existing native/question source stack: typed action history, original writer boundaries and dormant editor/proposal code; activation follows. No new feature or issue-completion work; merge the related parts before using their new workflow.
+
+Existing native/question source stack: original confirmation, mirror/recovery and publication-revision helpers; existing endpoint activation follows. No new feature or issue-completion work; merge the related parts before using their new workflow.
