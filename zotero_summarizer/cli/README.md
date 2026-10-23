@@ -187,3 +187,5 @@ Default events contain hashes/counts only. No online accuracy claim follows from
 these traces; stage counts are instrumentation, not review-success scores.
 
 Diagnostic CLI source reads reuse the single-component/no-symlink paper-state guard. Admission happens before provider construction. Legacy full_text is explicitly labelled unverified legacy scope; empty sources retain local failure diagnostics. Diagnostic calls disable thinking without changing app routing.
+
+Feedback review stack part 3: `goldenset analyze-feedback` publishes a local report through the clean child. Admitted-root pinning from #159 remains intact; see `services/golden/feedback_analysis/README.md`.

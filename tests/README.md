@@ -3,7 +3,7 @@
 This checkout includes retained history/analysis tests plus incremental CSV,
 UTC-overflow, journal-source and SQL-identity regressions. The part-1 paragraph
 below is the prerequisite #162 coverage record, not this checkout's suite limit.
-Operation/weekly suites remain later-stack work.
+Operation suites are covered by part 3 below; weekly activation remains later-stack work.
 
 # Tests
 
@@ -184,6 +184,15 @@ Existing engagement/reconciliation fixtures explicitly declare corpus enabled.
 Their assertion trees and parametrizations are unchanged. Existing manual-edit
 and pending tests retain their native-write assertions; OFF only suppresses the
 subsequent optional corpus refresh, not the explicit edit.
+
+## Current part 3 coverage
+
+The part-1/part-2 availability statements above are prerequisite #162/#163
+references. This head includes manual CLI and actual-child operation suites;
+`test_feedback_operation_lifecycle.py` retains the six signal launch/receipt and
+completed-worker RSS regressions. Weekly activation remains later-stack work.
+Current dependency controls preserve all root, snapshot, report and analyzer
+regressions without claiming a fresh full-suite run.
 
 ## Selected CLI test boundary
 

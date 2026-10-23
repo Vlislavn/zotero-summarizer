@@ -101,6 +101,9 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Prioritize bounded publication-type recovery with title hints, never title-based eligibility; expose unattempted/confirmed counts. Real source metadata recovered qualifying reviews without increasing lookup budgets.
 - Normalize optional positive signs in source/digest numeric tokens. A real captured review failed on `+3.3` versus `3.3` and `9.6` versus `+9.6`; negative signs, absent magnitudes, arithmetic restrictions and semantic verification remain enforced.
 
+- Reconcile manual Feedback with current retained-analysis prerequisites; preserve admitted roots, parser/identity bounds, literal Markdown and snapshot namespace checks alongside signal/receipt/RSS controls.
+- Keep Feedback signal cleanup armed during child launch and receipt persistence; reject invalid or over-cap worker RSS peaks before publication. Clarify source-checkout and artifact-I/O limits.
+
 ### Added
 
 - Browse saved weekly RSS digests in Weekly: engineering cards, paper links and JSON/Markdown downloads, with explicit empty, legacy and unreadable states. Browsing never starts generation or Zotero writes.

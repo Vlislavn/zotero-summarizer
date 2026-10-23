@@ -74,6 +74,31 @@ SQLite metadata. It never reads source locators. It refuses incomplete, changed,
 extra or symlinked artifacts. This is integrity checking, not authentication
 against an attacker who can replace the bytes **and** recompute the manifest.
 
+## Current checkout — stack part 3/4 (manual CLI)
+
+The part-1/part-2 availability blocks above are prerequisite #162/#163 references,
+not this head's scope. This checkout also provides `goldenset analyze-feedback`
+and the dedicated operation/worker that freezes inputs, analyzes them, validates
+hashes, then atomically publishes an immutable private report and receipt. The
+manual-operation section below is available here despite its inherited
+later-stack heading; weekly scheduler activation remains unavailable. No overall
+#47 completion, installed private-data acceptance or production claim is made.
+
+The source-checkout command requires Git HEAD, `pyproject.toml` and `uv.lock`;
+a standalone wheel without that provenance fails before capture. Its worker
+suppresses source-tree bytecode writes. Signal ownership covers success/failure
+receipt persistence; main-thread SIGINT/SIGTERM are deferred during child launch
+until cleanup is armed, and the child unblocks the inherited launch mask.
+Completed-worker RSS peaks must be positive integers within the configured cap,
+in addition to live tree sampling; this is not instantaneous OS RSS enforcement.
+The operation I/O bound counts provenance/protocol/report artifacts per guard,
+not whole-process or shared parent/child cumulative I/O. Independent capture and
+analysis source/page/record/byte/work caps are unchanged. These current controls
+supersede the older operation wording retained below as prerequisite reference.
+
+Parent lazy CSV, UTC-overflow, journal-source/SQL-identity, literal Markdown and
+duplicate-namespace protections are preserved in the actual manual CLI path.
+
 ## Capture and identity
 
 | Source key | Retained path | Capture boundary |

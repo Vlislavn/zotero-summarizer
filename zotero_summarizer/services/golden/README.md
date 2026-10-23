@@ -138,3 +138,5 @@ and final-label manual-override detection retain their existing semantics.
 Feedback review stack part 1: Feedback: retained input capture and report primitives. See `zotero_summarizer/services/golden/feedback_analysis/README.md`; later parts supply the remaining existing workflow.
 
 Feedback review stack part 2: Feedback: retained history and descriptive analysis. See `zotero_summarizer/services/golden/feedback_analysis/README.md`; later parts supply the remaining existing workflow.
+
+Feedback review stack part 3: Feedback: existing manual report command and publication. See `zotero_summarizer/services/golden/feedback_analysis/README.md`; later parts supply the remaining existing workflow.

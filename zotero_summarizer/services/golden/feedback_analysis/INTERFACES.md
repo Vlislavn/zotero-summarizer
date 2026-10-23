@@ -91,6 +91,14 @@ or prove that isolation. No broader reader/scheduler/CLI changes are authorized.
 Verbatim P2 approval and race clarification are retained in
 `data/issue-validation/feedback-analysis/p2/parent-decision.txt`.
 
+## Current checkout — part 3 manual operation
+
+The part-1 and part-2 implementation notices above are prerequisite #162/#163
+references. This head also provides the manual `goldenset analyze-feedback`
+command and its dedicated worker/publication dispatcher. Weekly scheduler
+activation remains a later-stack contract; no overall #47 completion is claimed.
+The input/analysis/report contracts and all prerequisite boundary fixes remain.
+
 ## Exact envelope
 
 Top-level keys are exactly:
