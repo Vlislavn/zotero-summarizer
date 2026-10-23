@@ -4,6 +4,8 @@ import sys
 import types
 import os
 import socket
+import logging
+from contextlib import ExitStack
 from tempfile import TemporaryDirectory
 from pathlib import Path
 
@@ -66,10 +68,25 @@ def pytest_configure(config):
     config.add_cleanup(patch.undo)
 
 
+def _handlers_on_other_loggers(app_logger):
+    root = logging.getLogger()
+    return {
+        handler
+        for logger in [root, *root.manager.loggerDict.copy().values()]
+        if isinstance(logger, logging.Logger) and logger is not app_logger
+        for handler in logger.handlers
+    }
+
+
 @pytest.fixture(autouse=True)
 def _isolate_app_and_network(monkeypatch, tmp_path):
     import keyring
     from zotero_summarizer import runtime
+    from zotero_summarizer.services._common import LOGGER
+
+    level, propagate, disabled = LOGGER.level, LOGGER.propagate, LOGGER.disabled
+    handlers = LOGGER.handlers[:]
+    existing_handlers = set(handlers) | _handlers_on_other_loggers(LOGGER)
 
     monkeypatch.setenv("ZOTERO_SUMMARIZER_HOME", str(tmp_path))
     monkeypatch.setattr(runtime, "_context", None)
@@ -92,6 +109,19 @@ def _isolate_app_and_network(monkeypatch, tmp_path):
 
     monkeypatch.setattr(socket.socket, "connect", guarded_connect)
     monkeypatch.setattr(socket.socket, "connect_ex", guarded_connect_ex)
+
+    try:
+        yield
+    finally:
+        preserved_handlers = existing_handlers | _handlers_on_other_loggers(LOGGER)
+        new_handlers = [handler for handler in LOGGER.handlers if handler not in preserved_handlers]
+        LOGGER.handlers[:] = handlers
+        LOGGER.setLevel(level)
+        LOGGER.propagate = propagate
+        LOGGER.disabled = disabled
+        with ExitStack() as closing:
+            for handler in new_handlers:
+                closing.callback(handler.close)
 
 
 @pytest.fixture(autouse=True)

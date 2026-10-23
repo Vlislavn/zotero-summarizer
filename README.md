@@ -281,7 +281,8 @@ uv run zotero-summarizer faithbench build --max-builder-windows 64  # larger QA-
   CLI stdout remains parseable JSON; verification disables declared chat thinking
   or minimizes active three-level reasoning to low without changing digest effort.
 - **[docs/architecture.md](docs/architecture.md)** — how it works, the layering rules, and
-  the dev / verification workflow.
+  the dev / verification workflow, including owned application-logger isolation
+  between tests.
 - **[Native issue delegation](docs/native-agent-workflow.md)** — pinned async Pi adapter,
   exclusive workers, independent review, per-child cwd/role checks, isolated failure
   handling, task-level authority boundaries, scout-artifact readback, restart/activation
