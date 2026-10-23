@@ -208,3 +208,5 @@ Retain original explicit default-no inference consent; use the existing canonica
 Telegram source-review part: original transport/session/credential and runtime code is retained unchanged. This part registers no Telegram CLI commands; its collection/store/worker dependencies are supplied by following original-source parts. No account/session, network collection or live model is exercised by packaging.
 
 Existing saved-news CLI options are retained for explicit `--source telegram --input-jsonl ...` and replay. Authentication/private worker command registration follows with the original worker source; no new CLI modes are invented.
+
+The original Telegram private worker/auth command registration and combined schema13 are retained here. Only fake-child command composition is exercised by packaging; armed lifecycle/platform/account tests remain unchanged and deferred.

@@ -29,6 +29,7 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Preserve interpretation digest subtype metadata while sharing declared-field authority across qualification, optional receipts and HTML renderers. Reuse the retention prerequisite's dictionary projection; declared/source changes still refuse.
 - Reject interpretation source/run/export symlinks and selected-project escapes before file access, including symlinked manifests. Retain immutable attempts and explicit capture consent.
 - Hide interpretation assignment order in blinded exports; validate approval rows during inspection. Preserve partial-label accuracy bounds, independent conclusive-shortfall gates and actual card-exposure counts; zero exposure cannot recommend a pilot.
+- Retain original Telegram worker/auth registration and combined migration13; native lifetime, real authorization and platform recovery remain unqualified.
 - Retain original Pending preview UI/MCP request/receipt handling and direct-editor client outcomes, with unchanged client tests.
 - Keep strict connected-server gating and ordered offline pulls while adding immutable question drafts to the device store.
 - Package original native/question source part: original metadata editors, Pending confirmation and mirror activation; corresponding UI/MCP source follows.
