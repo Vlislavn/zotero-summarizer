@@ -103,6 +103,17 @@ def test_today_library_questions_offline_restart_and_real_sync(question_browser)
     expect(page.get_by_role("button", name="Is there external validation?", exact=True)).to_be_visible()
     draft = "Dirty manual draft <must survive>"
     _notes_editor(page).fill(draft)
+    save_style = page.get_by_role("button", name="Save", exact=True).evaluate("""el => {
+      const reference = document.createElement('span');
+      reference.className = 'text-white'; document.body.append(reference);
+      const expected = getComputedStyle(reference).color; reference.remove();
+      return {actual: getComputedStyle(el).color, expected,
+        background: getComputedStyle(el).backgroundColor, disabled: el.disabled};
+    }""")
+    write_json(lab.artifact / "active-save-foreground.json", save_style)
+    lab.checkpoint("active-save-foreground", page)
+    assert save_style["disabled"] is False
+    assert save_style["actual"] == save_style["expected"], save_style
     with page.expect_response(lambda response: response.url.endswith("/api/library/ask")) as answered:
         page.get_by_role("button", name="Is there external validation?", exact=True).click()
     assert answered.value.status == 409
@@ -126,7 +137,6 @@ def test_today_library_questions_offline_restart_and_real_sync(question_browser)
     page.get_by_role("button").filter(has_text="Synthetic library paper").first.click()
     expect(_notes_editor(page)).to_have_value("Initial manual note")
     _notes_editor(page).fill(draft)
-    page.get_by_text("Ask this paper", exact=True).click()
     page.get_by_text("Ask the paper", exact=True).click()
     with page.expect_response(lambda response: response.url.endswith("/api/library/ask")) as counted:
         _submit(page)
@@ -192,7 +202,7 @@ def test_today_library_questions_offline_restart_and_real_sync(question_browser)
     _assert_offline_transport(lab, page)
     offline_text = "Offline original question <durable>"
     _submit(page, offline_text)
-    expect(page.get_by_text("Saved on this device — server comment pending. Zotero note delivery: unknown.", exact=True)).to_be_visible()
+    expect(page.get_by_text("Saved on this device — server comment pending.", exact=True)).to_be_visible()
     device = indexeddb(page)
     lab.checkpoint("genuine-offline-device-save", page)
     same_page_visible, same_page_failure = True, None
@@ -248,7 +258,12 @@ def test_today_library_questions_offline_restart_and_real_sync(question_browser)
     assert page.evaluate("navigator.onLine") is False
     assert indexeddb(page)["mutations"] == device["mutations"]
     assert len(_questions(lab)) == 3 and _post_count(lab, "/api/library/ask") == baseline_asks
-    lab.context.set_offline(False)
+    with page.expect_response(lambda response: response.url == lab.server.origin + "/api/sync/push") as synced:
+        lab.context.set_offline(False)
+    reconnect = synced.value.json()
+    assert synced.value.status == 200 and reconnect["protocol"] == 1
+    question_result = next(row for row in reconnect["results"] if row["mutation_id"] == mutation["mutation_id"])
+    assert question_result["status"] == "applied" and question_result["question_mirror"]["note_pending"] is False
     expect(_saved_questions(page).locator("li")).to_have_count(4)
     page.wait_for_function("""async id => {
       const req = indexedDB.open('zotero-summarizer-offline', 1);
@@ -304,9 +319,22 @@ def test_acknowledged_retry_preserves_the_composite_delivery_receipt(question_br
     assert _questions(lab) == original
     assert _assert_native_projection(lab, 1) == native_note
     assert _post_count(lab, "/api/library/ask") == 2
-    lab.checkpoint("acknowledged-no-op-retry", page)
+    _notes_editor(page).fill("A newer manual note after Ask")
+    with page.expect_response(lambda response: response.url.endswith("/api/golden/review-note")) as changed:
+        page.get_by_role("button", name="Save", exact=True).click()
+    current = changed.value.json()
+    assert current["note_written"] is True and current["note_pending"] is False
+    assert current["projection_revision"] > first["projection_revision"]
+    current_caption = f'Zotero note delivery: acknowledged (revision {current["projection_revision"]}).'
+    expect(page.get_by_text(current_caption, exact=True)).to_be_visible()
+    expect(page.get_by_text(caption, exact=False)).to_have_count(0)
+    assert _assert_native_projection(lab, 1) == native_note
+    assert _post_count(lab, "/api/library/ask") == 2
+    assert _questions(lab) == original
+    lab.checkpoint("acknowledged-no-op-retry-and-new-manual-projection", page)
     write_json(lab.artifact / "delivery-result.json", {
-        "first_mirror": first, "retry_mirror": second, "visible_caption": caption,
+        "first_mirror": first, "retry_mirror": second, "manual_mirror": current,
+        "visible_caption": current_caption, "obsolete_caption_absent": True,
         "same_submission_rows": True, "same_native_note_id": native_note,
         "boundary": "installed Chrome/actual API/owned synthetic Zotero; AI disabled",
     })
@@ -344,7 +372,7 @@ def test_local_storage_rejection_and_invalid_input_never_start_http(question_bro
     expect(page.get_by_role("alert").filter(has_text="Question not saved on this device")).to_be_visible()
     assert _questions(lab) == before and indexeddb(page)["mutations"] == []
     assert (_post_count(lab, "/api/library/questions"), _post_count(lab, "/api/library/ask")) == (saves, asks)
-    expect(page.get_by_text("Question saved in the app. Zotero note delivery: unknown.", exact=True)).to_have_count(0)
+    expect(page.get_by_text("Question saved in the app — see My notes for Zotero delivery.", exact=True)).to_have_count(0)
     main_world(page, "() => { IDBDatabase.prototype.transaction = window.restoreTransaction; return true; }")
     invalid = {"submission_id": str(uuid4()), "item_key": LIBRARY_KEY, "question": " ", "origin": "typed"}
     assert _http(page, "/api/library/questions", "POST", invalid)["status"] == 422

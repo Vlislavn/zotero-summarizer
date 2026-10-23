@@ -10,7 +10,7 @@ the gate and confused users); the digest is the whole output.
 
 Results land in ``deep_reviews.json`` keyed by ``item_key`` and are surfaced by
 ``review_detail.build_library_detail``. The digest is also upserted to the Zotero
-item as one short note (best-effort).
+item only after its immutable pending preview is explicitly approved.
 
 **Concurrency: per-item jobs over one provider-aware pool** (mirrors
 ``paper_render``). Each requested paper becomes its own ``_JOBS[item_key]`` entry
@@ -192,17 +192,11 @@ def _try_rebuild_render(item_key: str) -> None:
 
 
 def _mirror_digest_note(item_key: str, digest: PaperDigest) -> tuple[bool, str | None]:
-    """Best-effort mirror for library items; feed items never write notes."""
-    from zotero_summarizer.services.library import review_detail
-    if review_detail.classify_item_key(item_key) != review_detail.SOURCE_LIBRARY:
-        return False, None
-    try:
-        from zotero_summarizer.services.zotero.zotero import zotero_upsert_digest_note
-        zotero_upsert_digest_note(item_key, digest)
-        return True, None
-    except Exception as exc:  # noqa: BLE001 — note write must not fail the digest
-        LOGGER.warning("digest note write for %s failed: %s", item_key, exc)
-        return False, f"{type(exc).__name__}: {exc}"
+    """Compatibility name: stage a published library digest, never mirror it."""
+    from zotero_summarizer.services.zotero.generated_notes import stage_current_digest
+
+    stage_current_digest(item_key, digest)
+    return False, None
 
 
 def _review_one(
@@ -223,8 +217,19 @@ def _review_one(
     sub_concurrency: int = 1,
     progress_sink: Any = None,
     provenance: dict[str, Any] | None = None,
+    interpretation_schema: str | None = None,
+    feed_context: Any = None,
 ) -> dict[str, Any] | None:
-    """Review one item; missing items return None and absent PDFs skip generation."""
+    """Review one item; explicit private C never authorizes automatic native notes."""
+    _review_identity._validate_interpretation_schema(interpretation_schema)
+    condition = {"interpretation_schema": interpretation_schema} if interpretation_schema is not None else {}
+    interpretation_out: dict[str, Any] | None = {} if interpretation_schema is not None else None
+    collector = {"interpretation_out": interpretation_out} if interpretation_out is not None else {}
+    if feed_context is not None:
+        from zotero_summarizer.services.library import _feed_assessment
+
+        collector.update(_feed_assessment.review_collector(feed_context, str(item["item_key"]), interpretation_schema))
+    feed_out = collector.get("feed_out")
     item_key = str(item["item_key"])
     detail = reader.get_item_detail(item_key)
     if detail is None:
@@ -234,7 +239,7 @@ def _review_one(
     pdf_path = str(item.get("pdf_path") or detail.get("pdf_path") or "")
     source_kind = "override" if item.get("pdf_path") else ("library" if pdf_path else "none")
     review_identity = _review_identity.build_review_identity(
-        config=config, pdf_path=pdf_path, source_kind=source_kind, focus_prompt=focus_prompt)
+        config=config, pdf_path=pdf_path, source_kind=source_kind, focus_prompt=focus_prompt, **condition)
 
     digest_dump = quality_dump = goal_dump = paper_type_dump = section_overlay = code_link_dump = None
     model_read_decision = ""
@@ -260,7 +265,7 @@ def _review_one(
                 max_chars=max_chars, chunk_chars=qr.map_chunk_chars, sub_concurrency=sub_concurrency,
             ),
             focus_prompt=focus_prompt, response_format=response_format,
-            verification_audit=verification_audit)
+            verification_audit=verification_audit, **collector)
         digest_dump = digest.model_dump()
         quality_dump, goal_dump, paper_type_dump, section_overlay, code_link_dump = _deep_review_layers.extra_layers(_deep_review_layers.ExtraLayersCtx(
             item_key=item_key, title=title, pdf_path=pdf_path, text=text,
@@ -277,31 +282,20 @@ def _review_one(
         digest = PaperDigest.model_validate(digest_dump)
         reporter.phase("note")
         _review_identity.assert_review_source_unchanged(review_identity)
-        note_written, note_error = _mirror_digest_note(item_key, digest)
         reporter.summary()
 
     _review_identity.assert_review_source_unchanged(review_identity)
-    return _digest_audit.bind_cached_audit({
-        "review_contract_version": REVIEW_CONTRACT_VERSION,
-        "review_identity": review_identity,
-        "provenance": provenance or {},
-        "digest": digest_dump,
-        "verification_audit": verification_audit or None,
-        "quality": quality_dump,
-        "goal_summaries": goal_dump,
-        "paper_type": paper_type_dump,
-        "section_overlay": section_overlay,
-        "code_link": code_link_dump,
-        "model_read_decision": model_read_decision,
-        "reading_policy_flags": reading_policy_flags,
-        "needs_pdf": not bool(pdf_path),
-        "needs_login": False,
-        "login_url": "",
-        "gate_relevance": item.get("gate_relevance"),
-        "reviewed_at": now_iso_z(),
-        "zotero_note_written": note_written,
-        "zotero_note_error": note_error,
-    })
+    from zotero_summarizer.services.library._deep_review_context import review_entry
+
+    entry = review_entry(
+        item, review_identity, pdf_path, digest_dump,
+        (quality_dump, goal_dump, paper_type_dump, section_overlay, code_link_dump),
+        (model_read_decision, reading_policy_flags), verification_audit=verification_audit,
+        note_delivery=(note_written, note_error), provenance=provenance, reviewed_at=now_iso_z())
+    if interpretation_out:
+        entry["interpretation"] = interpretation_out
+    entry = _digest_audit.bind_cached_audit(entry, **condition)
+    return _feed_assessment.bind_entry(entry, feed_out) if feed_out is not None else entry
 
 
 def _load_prestige_context() -> tuple[dict[str, Any], float | None]:
@@ -329,42 +323,13 @@ def _build_ctx(reader: Any = None) -> dict[str, Any]:
     library reader — the in-place Today review passes an ``AppLibraryReader`` so feed
     candidates resolve by ``stable_feed_key`` even when a live Zotero reader is present."""
     app = get_state()
-    config = app.app_state.config
-    cfg = config.quality_review
-    extractor = getattr(app, "pdf_extractor", None)
-    # Zotero-optional: live Zotero reader when present, else the app library over
-    # kept feed papers (PDF acquired into the local cache by _pdf_acquire).
-    from zotero_summarizer.services.zotero.zotero import get_library_reader
+    from zotero_summarizer.services.library._deep_review_context import resolve_context
 
-    reader = reader or get_library_reader(app)
-    from zotero_summarizer.models.providers import resolve_stage
-
-    resolved = resolve_stage(config.llm_routing, "deep_review")
-    provider = app.resolve_stage_provider("deep_review")
-    prestige_scores, prestige_floor_value = _load_prestige_context()
-    return {
-        "reader": reader,
-        "config": config,
-        "extractor": extractor,
-        "quality_enabled": bool(cfg.enabled and extractor is not None),
-        "llm": app.resolve_stage_client("deep_review"),
-        "llm_digest": app.resolve_stage_client("deep_review", enable_thinking=provider.thinking_on),  # DIGEST reasons unless provider thinking_effort=off
-        "llm_map": app.resolve_stage_client("feed") if cfg.chunk_strategy == "map_reduce" else None,
-        "prestige_scores": prestige_scores,
-        "prestige_floor_value": prestige_floor_value,
-        "lean_tier": bool(getattr(provider, "lean_deep_review", False)),  # ollama=prefill-bound→lean; keyed on flag, not is_local
-        # Sub-call concurrency within one paper (local→serial, remote→capped); shared with verify-deep-review.
-        "sub_concurrency": deep_review_sub_concurrency(provider),
-        # Decoder-level structured output: JSON Schema for PaperDigest when the provider supports it
-        # (vLLM-style: logit constraint + reasoning survives, measured 2026-06-27); None → prompt-level fallback.
-        "response_format": quality_review.build_response_format(PaperDigest) if getattr(provider, "structured_output", False) else None,
-        "provenance": {
-            "provider": getattr(provider, "name", resolved.provider.name),
-            "model": resolved.model,
-            "prompt_schema_version": REVIEW_CONTRACT_VERSION,
-        },
-        "_provider": provider,
-    }
+    return resolve_context(
+        app, reader=reader, prestige_loader=_load_prestige_context,
+        concurrency_resolver=deep_review_sub_concurrency, quality_review=quality_review,
+        digest_model=PaperDigest, review_contract_version=REVIEW_CONTRACT_VERSION,
+    )
 
 
 def _resolve_items(top_k: int, item_keys: list[str] | None, overrides: dict[str, Any]) -> list[dict[str, Any]]:
@@ -397,8 +362,12 @@ def _review_worker(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str)
     """Review and settle one item without affecting another item's cache or job."""
     item_key = str(item["item_key"])
     kwargs = {k: v for k, v in ctx.items() if not k.startswith("_")}
+    if "_feed_contexts" in ctx:
+        kwargs["feed_context"] = ctx["_feed_contexts"][item_key]
     acquired = None
     try:
+        if kwargs.get("feed_context") is not None and kwargs.get("interpretation_schema") is not None:
+            raise ValueError("feed_context conflicts with interpretation selection")
         if ctx.get("_acquire_missing") and not item.get("pdf_path"):
             from zotero_summarizer.services.library import _pdf_acquire
             _set_job_progress(item_key, {"phase": "acquire", "phase_label": "Fetching full text…"})
@@ -423,8 +392,17 @@ def _review_worker(item: dict[str, Any], ctx: dict[str, Any], focus_prompt: str)
                 if acquired.needs_login:
                     entry["needs_login"] = True
                     entry["login_url"] = acquired.login_url
-            if _review_attempt.publishable_entry(entry, get_current_review(item_key), acquired):
-                _write_one(item_key, entry)
+            interpretation_schema = kwargs.get("interpretation_schema")
+            if interpretation_schema is None:
+                prior = get_current_review(item_key)
+            else:
+                prior = get_current_review(item_key, interpretation_schema=interpretation_schema)
+            if _review_attempt.publishable_entry(entry, prior, acquired):
+                from zotero_summarizer.services.library._review_cache import review_publication_lock
+                with review_publication_lock():
+                    _write_one(item_key, entry)
+                    if interpretation_schema is None and entry.get("digest"):
+                        _mirror_digest_note(item_key, PaperDigest.model_validate(entry["digest"]))
                 _try_rebuild_render(item_key)
         _set_job(item_key, status="ready", completed=1, progress={}, error=None, diagnostic=None)
     except Exception as exc:  # noqa: BLE001 — per-item background boundary
@@ -454,6 +432,7 @@ def start(
     pdf_overrides: dict[str, Any] | None = None,
     acquire_missing: bool = False,
     reader: Any = None,
+    feed_contexts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Kick off deep review(s). With ``item_keys`` set, reviews exactly those papers
     (the per-paper button / the review-fleet); otherwise the top-``top_k`` unread picks.
@@ -477,9 +456,16 @@ def start(
     if item_keys == []:
         return {**status(), "accepted": False}
     overrides = pdf_overrides or {}
+    contexts = None
+    if feed_contexts is not None:
+        from zotero_summarizer.services.library._feed_assessment import validate_contexts
+
+        contexts = validate_contexts(feed_contexts, item_keys)
     try:
         ctx = _build_ctx(reader=reader)
         ctx["_acquire_missing"] = bool(acquire_missing)
+        if contexts is not None:
+            ctx["_feed_contexts"] = contexts
         items = _resolve_items(top_k, item_keys, overrides)
     except Exception as exc:  # noqa: BLE001 — surface setup failure on the targeted jobs
         msg = f"{type(exc).__name__}: {exc}"

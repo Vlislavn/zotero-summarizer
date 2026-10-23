@@ -4,6 +4,8 @@ import { mergeQuestions, questionSubmissionError, sameQuestion } from './questio
 const DB_NAME = 'zotero-summarizer-offline';
 const EVENT = 'zs-sync-status';
 let database;
+let connection = 'unchecked';
+let syncError = '';
 
 function openDb() {
   database ||= new Promise((resolve, reject) => {
@@ -390,14 +392,21 @@ export async function applyPull(payload) {
         const key = `response:review:${row.item_key}`;
         const cached = meta.get(key);
         cached.onsuccess = () => {
-          if (!cached.result?.value) return;
+          const previous = cached.result?.value;
+          const detail = previous && !previous.offline_snapshot ? previous : {
+            item_key: row.item_key, title: row.title, authors: row.authors, year: row.year,
+            venue: row.venue, abstract: row.abstract_preview, has_pdf: row.has_pdf,
+            deep_review: row.review_digest ? { digest: row.review_digest } : null,
+            tags: [], collections: [], offline_snapshot: true,
+          };
           meta.put({ key, value: {
-            ...cached.result.value, verdict: merged.verdict, user_note: merged.review_note,
+            ...detail, verdict: merged.verdict, user_note: merged.review_note,
             questions: merged.questions,
           } });
         };
       }
       meta.put({ key: 'cursor', value: payload.cursor || 0 });
+      meta.put({ key: 'last_synced_at', value: new Date().toISOString() });
     };
     existing.onsuccess = reconcile;
     queued.onsuccess = reconcile;
@@ -436,15 +445,33 @@ export async function resolveConflict(mutationId, keepLocal) {
   await publishStatus();
 }
 
-export async function publishStatus(message = '') {
-  const rows = await request((await store('mutations')).getAll());
+export async function publishStatus(message = '', nextConnection) {
+  if (nextConnection) {
+    connection = nextConnection;
+    if (nextConnection !== 'syncing') syncError = nextConnection === 'unavailable' ? message : '';
+  }
+  let detail;
+  try {
+    const [rows, lastSyncedAt, papers] = await Promise.all([
+      request((await store('mutations')).getAll()), getMeta('last_synced_at'),
+      request((await store('papers')).count()),
+    ]);
+    detail = {
+      pending: rows.filter((row) => row.status === 'pending').length,
+      conflicts: rows.filter((row) => row.status === 'conflict'),
+      rejected: rows.filter((row) => row.status === 'rejected'),
+      last_synced_at: lastSyncedAt, paper_count: papers,
+    };
+  } catch (error) {
+    detail = { pending: null, conflicts: [], rejected: [], local_error: error.message || String(error) };
+  }
   window.dispatchEvent(new CustomEvent(EVENT, { detail: {
-    online: navigator.onLine,
-    pending: rows.filter((row) => row.status === 'pending').length,
-    conflicts: rows.filter((row) => row.status === 'conflict'),
-    rejected: rows.filter((row) => row.status === 'rejected'),
-    message,
+    ...detail, online: navigator.onLine, connection, sync_error: syncError, message,
   } }));
+}
+
+export function isServerAvailable() {
+  return navigator.onLine && !syncError;
 }
 
 export const syncStatusEvent = EVENT;

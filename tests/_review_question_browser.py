@@ -174,17 +174,27 @@ def _seed(settings):
 class LocalServer:
     def __init__(self, settings, receipts):
         self.settings, self.receipts = settings, receipts
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.socket.bind(("127.0.0.1", 0))
+        self.socket = self._reserve(0)
         self.port = self.socket.getsockname()[1]
         self.origin = f"http://127.0.0.1:{self.port}"
         self.server = self.thread = None
         self.errors = []
 
+    def _reserve(self, port):
+        reserved = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            reserved.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            reserved.bind(("127.0.0.1", port))
+        except OSError:
+            reserved.close()
+            raise
+        return reserved
+
     def start(self):
         import uvicorn
 
+        if self.socket is None:
+            self.socket = self._reserve(self.port)
         app = api_app.create_app(self.settings)
 
         @app.middleware("http")
@@ -220,12 +230,16 @@ class LocalServer:
         assert not self.thread.is_alive(), "Owned API did not stop"
         assert not self.errors, self.errors
         self.thread = None
+        self.socket.close()
+        self.socket = None
 
     def close(self):
         try:
             self.stop()
         finally:
-            self.socket.close()
+            if self.socket is not None:
+                self.socket.close()
+                self.socket = None
 
 
 @dataclass

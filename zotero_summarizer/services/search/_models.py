@@ -8,9 +8,10 @@ pipeline), and a status. All are plain dataclasses with explicit ``to_dict`` /
 """
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import asdict, dataclass, field
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -28,6 +29,7 @@ class ScreenRequest(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True, strict=True)
     constraints: ConfirmedConstraints | None = None
+    evidence_policy: Literal["baseline", "question_evidence"] = "baseline"
     query: str = Field(min_length=1, max_length=4000, description="Natural-language research topic")
     questions: list[Annotated[str, Field(min_length=1, max_length=1000)]] = Field(default_factory=list, max_length=10)
 
@@ -85,9 +87,11 @@ class Candidate:
     in_library: bool | None = None
     existing_zotero_key: str | None = None  # the found item's key when in_library is True
     candidate_id: str = ""             # persisted address, independent of later metadata enrichment
-    question_evidence: list[dict[str, Any]] = field(default_factory=list)  # Shadow receipts, never ranking/quality
+    question_evidence: list[dict[str, Any]] = field(default_factory=list)  # Original-source receipts; not scientific quality
+    planned_zotero_key: str = ""       # reserved before native work; not delivery or library coverage
 
     def __post_init__(self) -> None:
+        self._validate_planned_key()
         if type(self.question_evidence) is not list or any(type(row) is not dict for row in self.question_evidence):
             raise ValueError("Question evidence must be a list of receipt objects")
         if not isinstance(self.publication_types, list) or any(
@@ -101,6 +105,11 @@ class Candidate:
             self.candidate_id = next((ident for ident in (self.doi, self.arxiv_id, self.pmid, self.pmcid,
                                                           self.openalex_id) if ident), "") or f"local:{uuid.uuid4().hex}"
 
+    def _validate_planned_key(self) -> None:
+        key = self.planned_zotero_key
+        if not isinstance(key, str) or (key and re.fullmatch(r"[A-Z0-9]{8}", key) is None):
+            raise ValueError("Planned Zotero key must be empty or eight ASCII uppercase letters/digits")
+
     def identifier_keys(self) -> list[str]:
         """Namespaced identifier tokens for the dedup graph (empty ones dropped)."""
         pairs = (
@@ -110,7 +119,10 @@ class Candidate:
         return [f"{ns}:{val}" for ns, val in pairs if val]
 
     def to_dict(self) -> dict[str, Any]:
+        self._validate_planned_key()
         data = asdict(self)
+        if not self.planned_zotero_key:
+            data.pop("planned_zotero_key")
         if not self.question_evidence:
             data.pop("question_evidence")  # Preserve the legacy wire projection for inactive requests.
         return data
@@ -252,8 +264,13 @@ class ResearchSession:
     status: str = "created"
     screened_count: int = 0
     refinements: list[dict[str, Any]] = field(default_factory=list)
+    evidence_policy: str = "baseline"
+    evidence_status: dict[str, Any] = field(default_factory=dict)
+    discovery: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if self.evidence_policy not in {"baseline", "question_evidence"}:
+            raise ValueError("Unknown Search evidence policy")
         _require_unique_addresses(self.candidates)
 
     def to_dict(self) -> dict[str, Any]:
@@ -269,6 +286,9 @@ class ResearchSession:
             "status": self.status,
             "screened_count": self.screened_count,
             "refinements": [dict(r) for r in self.refinements],
+            **({"evidence_policy": self.evidence_policy, "evidence_status": dict(self.evidence_status)}
+               if self.evidence_policy != "baseline" else {}),
+            **({"discovery": dict(self.discovery)} if self.discovery else {}),
         }
 
     @classmethod
@@ -293,4 +313,7 @@ class ResearchSession:
             status=data.get("status", "created"),
             screened_count=int(data.get("screened_count") or 0),
             refinements=[dict(r) for r in data.get("refinements") or []],
+            evidence_policy=data.get("evidence_policy", "baseline"),
+            evidence_status=dict(data.get("evidence_status") or {}),
+            discovery=dict(data.get("discovery") or {}),
         )

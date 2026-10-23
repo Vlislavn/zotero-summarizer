@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.test_deep_review import _StubExtractor, _StubReader, _detail, _run, _wire
+from tests.test_deep_review import _StubExtractor, _StubReader, _detail, _run, _wire, _reset_state
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
 from zotero_summarizer.services.library import _pdf_acquire, _review_cache, deep_review
 
@@ -42,8 +42,12 @@ def test_library_review_still_mirrors_digest(config, monkeypatch):
         note_fn=lambda *args: calls.append(args),
     )
     _run([{"item_key": "LIBR0001", "title": "Library paper"}])
-    assert calls and calls[0][0] == "LIBR0001"
-    assert deep_review.get_cached_review("LIBR0001")["zotero_note_written"] is True
+    assert calls == []
+    assert deep_review.get_cached_review("LIBR0001")["zotero_note_written"] is False
+    from zotero_summarizer.storage import repositories
+    proposal, = repositories.get_pending_changes(item_key="LIBR0001")
+    assert proposal["generated_preview"]["item_key"] == "LIBR0001"
+    assert proposal["status"] == "pending"
 
 
 def test_browser_extra_outcome_reaches_cached_review(config, monkeypatch):

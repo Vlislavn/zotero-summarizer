@@ -13,6 +13,14 @@ from zotero_summarizer.models.providers import STAGES, resolve_stage
 from zotero_summarizer.services._common import read_config
 from zotero_summarizer.settings import Settings
 
+_SETTINGS_RECOVERY = {
+    "local_profile": ("open_ai_settings", "Choose a safe profile"),
+    "runtime_model": ("open_ai_settings", "Review endpoint settings"),
+    "research_goals": ("open_goals_settings", "Edit research goals"),
+    "zotero": ("open_zotero_settings", "Choose Zotero folder"),
+    "rss_source": ("open_sources_settings", "Add a source in Settings"),
+}
+
 
 def _row(
     check_id: str,
@@ -24,6 +32,11 @@ def _row(
     command: str | None = None,
     recovery_action: str = "retry",
 ) -> dict[str, Any]:
+    if (status == "needs_action" and recovery_action == "retry"
+            and command is None and check_id in _SETTINGS_RECOVERY):
+        recovery_action, default_label = _SETTINGS_RECOVERY[check_id]
+        if action == "Retry":
+            action = default_label
     recovery = {"label": action, "action": recovery_action}
     if command:
         recovery["command"] = command
@@ -34,6 +47,10 @@ def _row(
         "detail": detail,
         "recovery": recovery,
     }
+
+
+def _is_ollama_provider(provider: Any) -> bool:
+    return provider.is_local and "localhost:11434" in (provider.base_url or "")
 
 
 def _environment(settings: Settings) -> dict[str, Any]:
@@ -94,7 +111,13 @@ def _local_profile(settings: Settings) -> dict[str, Any]:
         "local_profile",
         "ready" if profile["compatible"] else "needs_action",
         f"{profile['label']} profile is active",
-        profile["compatibility_detail"],
+        "; ".join([
+            profile["compatibility_detail"],
+            "Configured runtime/model: " + ", ".join(sorted({
+                f"{item.provider.name}/{item.model}" for item in resolved
+            })),
+            "Hardware floors are not a load-safety or inference verification.",
+        ]),
         action="Choose a safe profile",
     )
 

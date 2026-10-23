@@ -179,6 +179,9 @@ def _verify_deep_review(args: argparse.Namespace) -> int:
 
 
 def register_app(subparsers) -> None:
+    from zotero_summarizer.cli._mobile_serve import register_mobile_serve
+
+    register_mobile_serve(subparsers)
     serve = subparsers.add_parser("serve", help="Run the local FastAPI server")
     serve.add_argument("--host", default="127.0.0.1", type=_loopback_bind_argument,
                        help="Loopback address only (127.0.0.1, localhost or ::1)")

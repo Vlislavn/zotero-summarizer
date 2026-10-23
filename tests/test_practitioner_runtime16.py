@@ -1,4 +1,4 @@
-"""Generator firewall and real production prompt/schema/scoring IO, no inference."""
+"""Synthetic data inputs, real prompt/schema/scoring IO; pinned transport/formatter, no inference."""
 from __future__ import annotations
 
 import copy
@@ -22,13 +22,16 @@ from zotero_summarizer.services.model import scoring
 from zotero_summarizer.services.triage import summarization
 from zotero_summarizer.services.triage.prompts import DEFAULT_PRACTITIONER_TRIAGE_PROMPT, DEFAULT_TRIAGE_PROMPT
 
-FROZEN = Path('/Users/vladnikulin/code/personal/zotero-summarizer/data/issue-closure')
-COHORT = FROZEN / 'practitioner-acceptance14/generator/cohort.json'
-XML = FROZEN / 'practitioner-live8/main-feed.xml'
+from _practitioner_inputs import practitioner_inputs as practitioner_inputs
+
 SOURCE = Path('/Users/vladnikulin/.pi/agent/skills/biomni-codex-subscription/scripts/pi_codex_transport.py')
 SOURCE_SHA = 'ac33d26ff917d90dcf629e461342f5c9828322cae8b846da2e49320a00f286ed'
-COHORT_SHA = '6a8dc7cedb5617125505bfc50e52ebe706db3a74b4dc38596175655f4a046df9'
-XML_SHA = 'a97a63777d44b7750aad82ed49e5d641df9534405ceca4ea63d3568514dd6531'
+_INPUTS = None
+
+
+@pytest.fixture(autouse=True)
+def isolated_data_inputs(practitioner_inputs, monkeypatch):
+    monkeypatch.setitem(globals(), '_INPUTS', practitioner_inputs)
 
 
 def test_loaded_production_modules_bind_owned_worktree(record_property):
@@ -60,7 +63,8 @@ def contract_data(arm='production', calls=3):
 
 
 def case():
-    return load_generator_case(COHORT, COHORT_SHA, XML, XML_SHA, 'public-03')
+    return load_generator_case(_INPUTS.cohort, _INPUTS.cohort_sha,
+                               _INPUTS.xml, _INPUTS.xml_sha, 'public-03')
 
 
 @pytest.mark.parametrize('field', ['grader_html', 'questions', 'labels', 'reading_aid', 'expected_score'])
@@ -104,16 +108,22 @@ def test_hidden_nested_goals_config_rejected():
 
 
 def test_cohort_projection_rejects_unknown_fields_and_wrong_hash(tmp_path):
-    data = json.loads(COHORT.read_text())
+    data = json.loads(_INPUTS.cohort.read_text())
     data['cases'][0]['grader_html'] = 'FORBIDDEN'
     forged = tmp_path / 'cohort.json'
     forged.write_text(json.dumps(data))
     import hashlib
     digest = hashlib.sha256(forged.read_bytes()).hexdigest()
     with pytest.raises(ValidationError):
-        load_generator_case(forged, digest, XML, XML_SHA, 'public-03')
+        load_generator_case(forged, digest, _INPUTS.xml, _INPUTS.xml_sha, 'public-03')
     with pytest.raises(ValueError, match='SHA'):
-        load_generator_case(COHORT, '0' * 64, XML, XML_SHA, 'public-03')
+        load_generator_case(_INPUTS.cohort, '0' * 64, _INPUTS.xml, _INPUTS.xml_sha, 'public-03')
+
+
+def test_synthetic_input_xml_replacement_is_rejected():
+    _INPUTS.xml.write_bytes(b'<rss>replaced synthetic input</rss>')
+    with pytest.raises(ValueError, match='SHA'):
+        case()
 
 
 @pytest.fixture

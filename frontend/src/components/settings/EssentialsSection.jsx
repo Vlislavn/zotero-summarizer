@@ -11,6 +11,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { updatePaths } from '../../api/setupApi.js';
 import { useSetupStatus } from '../../hooks/useSetupStatus.js';
 import { humanizeError } from '../../utils/humanizeError.js';
+import { invalidateSetupDoctor, invalidateSetupDoctorAfterWriteError } from '../../utils/setupDoctorState.js';
 import { Banner, Field, SectionCard } from '../form/Fields.jsx';
 
 function PathStatus({ label, info }) {
@@ -37,9 +38,11 @@ function ZoteroPaths({ form, onUpdate }) {
 
   const saveMutation = useMutation({
     mutationFn: updatePaths,
+    onError: (error) => invalidateSetupDoctorAfterWriteError(queryClient, error),
     onSuccess: () => {
       setRestartBanner('Restart required to apply new paths.');
       queryClient.invalidateQueries({ queryKey: ['setup-status'] });
+      void invalidateSetupDoctor(queryClient);
     },
   });
 

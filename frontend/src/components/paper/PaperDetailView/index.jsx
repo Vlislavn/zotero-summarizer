@@ -54,8 +54,8 @@ export default function PaperDetailView({
   detail,
   itemKey,
   show = {},
-  // compact (Library row card): drop the per-goal board, demote Ask behind a
-  // disclosure, and lead the Decide zone with "Open full review" — the full
+  // compact (Library row card): drop the per-goal board and lead the Decide
+  // zone with "Open full review" — the full
   // digest/figures/abstract live in the new-tab brief, not duplicated inline.
   compact = false,
   readerOpen = false,
@@ -115,11 +115,7 @@ export default function PaperDetailView({
                 <PaperReaderPane itemKey={itemKey} open={readerOpen} onOpenChange={onReaderOpenChange} hasPdf={hasPdf} />
               )}
               {showAbstract && <AbstractBlock abstract={detail.abstract} variant="details" />}
-              {showAsk && (
-                compact
-                  ? <Disclosure summary="Ask this paper"><AskPaperBox itemKey={itemKey} onSaved={onDeepReviewDone} onMirrorStart={beginNoteDelivery} /></Disclosure>
-                  : <AskPaperBox itemKey={itemKey} onSaved={onDeepReviewDone} onMirrorStart={beginNoteDelivery} />
-              )}
+              {showAsk && <AskPaperBox itemKey={itemKey} onSaved={onDeepReviewDone} onMirrorStart={beginNoteDelivery} />}
             </div>
           </Section>
 

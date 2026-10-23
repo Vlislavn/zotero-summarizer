@@ -109,10 +109,11 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
   of authors + `publication_date`, NOT the ranker's `to_scoring_dict` shape), writes
   atomically via `apply_feed_materialization` (a locked DB after retries → 503, no
   fake success). A coverage hit reuses `existing_zotero_key` instead of creating a
-  duplicate; either path then stamps `materialized_zotero_key` back. The whole
-  check-write-stamp runs under the session lock (`session.materialize_once`), so a
-  concurrent auto-review can't lose the key AND two simultaneous Add clicks on one
-  candidate write exactly once. Idempotent (re-add returns the existing key).
+  duplicate; either path then stamps `materialized_zotero_key` back. The
+  session lock serializes same-process Adds. A planned key is saved before native
+  work and survives review merges; retries reuse it. New-item stamping follows
+  native return; coverage hits reuse saved keys. Separate commits lack distributed or
+  power-loss guarantees.
 
 ## Files
 
@@ -121,7 +122,7 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
 | `_models.py` | `Candidate` / `Provenance` / `SearchIntent` / `QueryPlan` / `ResearchSession` (JSON round-trip) |
 | `intent.py` | topic → `SearchIntent` → per-source `QueryPlan` |
 | `federate.py` | concurrent channel fan-out + quotas + provenance → `to_version_families`. Channels: arXiv, Europe PMC, OpenAlex (lex+sem), Crossref (broad metadata, `mailto` polite pool), Semantic Scholar (relevance-ranked, throttled), OpenReview (peer-review signal, SIGNAL-ONLY — see below). Lexical sources issue a tight+bag variant pair; the new leaves issue one scalar pass each |
-| `dedup.py` | union-find version-family resolution |
+| `dedup.py` | Shared exact identifier grouping, version-family metadata merge and persisted operation-state reconciliation; never title/fuzzy matching. |
 | `rank.py` | cross-encoder `query_score` + the constrained re-rank contract |
 | `_relevance.py` | pool-relative `relevance_band` (strong/on_topic/weak — cohort terciles of `query_score` + an absolute floor so an all-bad pool gets no "strong") + ≤3 `why` chips (relevance, cross-source agreement, quality grade/band, version standing). Mirrors `daily_select/_relevance`; attached in `run_screen` and re-derived after the review re-rank |
 | `review.py` | `light_review` (quality tier) + `select_deep_set` |
@@ -129,10 +130,12 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
 | `_fulltext.py` | OA full-text acquisition for a federated (non-Zotero) candidate: PMC → Europe PMC `fullTextXML` (a PMCID hit), else identifier → OA PDF |
 | `_evidence_pass.py` | Explicit default-absent supplied-original shadow request, bounded callbacks and per-question receipts using the existing session worker |
 | `_source_context.py` | Strict raw source/occurrence, separate private-context, generated locator and verifier-output contracts; no retrieval or semantic grading |
+| `_question_adapter.py` | Explicit experimental OA-text adapter over existing acquisition, BM25 occurrence retrieval and configured Feed/Deep review generator/verifier stages |
+| `_question_policy.py` | Stable sufficient-only promotion inside the experimental topic floor, preserving other candidates' baseline order |
 | `pipeline.py` | `run_screen` (fast) + `run_review` (slow) + dependencies; strict offline rejects before external search |
-| `materialize.py` | the one Search→Zotero write: `materialize_candidate(session_id, candidate_id, collection_key)` — resolve+validate collection (pre-lock 400), reuse a coverage hit or adapt Candidate→feed_payload, then check-write-stamp under the session lock via `session.materialize_once` (concurrent Adds write once) |
+| `materialize.py` | Explicit Add: validate collection, reuse coverage or persist a planned key before native work; stamp materialized after return. |
 | `refine.py` | bounded opt-in agentic PRF before auto-review; no-ops under strict offline |
-| `session.py` | one-JSON-per-session persistence under `settings().search_dir` + per-session lock: `claim` (status CAS, single-flights the worker), `save_merge` (whole-session save that preserves a concurrent Add's `materialized_zotero_key`), `update` (read-modify-write), `materialize_once` (Add's check-write-stamp under the lock, single-write). Malformed id → `APIError(400)` |
+| `session.py` | Existing JSON store/lock: save_merge recovers absorbed/transitive family plans and materialized keys without replacing current selection, order or metadata; conflicting identities fail. |
 
 ## Execution and identity boundaries
 
@@ -172,14 +175,70 @@ on the affected paper and do not stop later candidates. The session list skips
 individual unreadable/corrupt files; deleting a session locks its store entry,
 marks it cancelled, and prevents in-flight review saves from recreating it.
 
+## Opt-in question evidence in Search
+
+Search defaults to `evidence_policy="baseline"`. With questions, explicitly selecting
+**Promote evidence-backed answers (experimental)** persists `question_evidence`
+policy on the session. The existing background worker assesses a bounded candidate
+pool before top-10 light review and top-4 deep selection, including lower-ranked
+candidates. Only verified sufficient answers on nonretracted, topic-eligible papers
+are promoted; partial, unknown and unchecked candidates receive no negative vote.
+Quality grades and query scores are unchanged. After ordinary quality reranking,
+the same stable evidence promotion is reapplied. There are no automatic Adds.
+
+The real adapter reuses `acquire_full_text`, `PaperChunkIndex` ranked occurrences,
+and existing configured **Feed** generator / **Deep review** verifier clients.
+The effective provider endpoint/model identities must differ; inheriting one route
+for both is explicitly unavailable, never two relabelled independent models.
+No new provider, judge, encoder, store or worker is constructed. Only public paper
+text and submitted questions enter these calls; no library comments are collected.
+Configured local/hosted routing remains the user's choice, not automatic fallback.
+
+Each source binds candidate identifiers/URL, raw extraction SHA-256, occurrence
+coordinates, questions and evaluator identities. Fresh passes reacquire and replace
+receipts; changed question/canonical/source identities cannot retain promotion.
+The string acquisition API does **not** attest whole-document completeness.
+Acquired sources therefore stay `complete=false`, never silently clipped. Located
+positive/partial answers may be verified, but a retrieval miss becomes
+`unknown/unchecked_remainder`, not whole-paper absence. The UI shows exact extracted
+character spans (not invented PDF pages), unchecked remainder and folded provenance.
+Supplied originals retain their stricter completeness contract described below.
+
+Work bounds are `ZS_SEARCH_EVIDENCE_CANDIDATES` (default 12, 0–30),
+`ZS_SEARCH_EVIDENCE_CALLS` (default 24, 0–120 generator/verifier attempts in total),
+and `ZS_SEARCH_EVIDENCE_TOPIC_FLOOR` (default 0.35, finite 0–1). Zero candidate/call
+budget explicitly disables the pass; malformed bounds fail, not silently expand.
+Six existing retrieval windows bound each paper's prompt, with round-robin union
+across questions. Raw extraction uses `quality_review.max_text_chars`; over-budget
+sources remain unchecked, without clipping. These bounds/floor are provisional,
+not calibrated answerability or latency measurements. Exhausted calls leave an
+unknown tail, including any lower candidates the budget did not reach.
+Acquired text is reused by ordinary review during this worker invocation.
+Adapter callbacks retain the outer question-index protocol and receipt binding,
+but project only the consumed fields into private prompt functions. Model payloads
+remain unchanged; indices and private context are not added to those prompts.
+
+Baseline/no-question operation adds no evidence acquisition/model work. Global
+prerequisite failure preserves baseline review order. Per-source/provider/schema
+failures remain unknown. Receipts update through existing `save_merge`, preserving
+explicit Add keys; deletion stops between source/generator/verifier/save boundaries.
+Deleting a session does not forcibly interrupt an already executing provider call.
+Search's existing polls show progress and support evidence ordering over the complete
+pool; a promoted weak-band paper is never hidden in the weaker-match disclosure.
+
+Default rollout remains OFF. Held-out human-labelled P@5, nDCG@10, recall, false
+promotions, abstention and cold/warm latency are still unmeasured; synthetic
+routing/regression checks are not scientific quality or whole-issue acceptance.
+
 ## Supplied-original evidence shadow (explicit injection only)
 
 `SearchDeps.evidence_pass` defaults to None and `default_deps` never wires it.
 An explicit `EvidencePassRequest` (or the same structural attributes) supplies
 unique existing candidate IDs, original snapshots, separate private context,
 generator/verifier callbacks and different declared identities, plus caller-owned
-`max_calls`, `max_passages`, `max_chars` and `source-shadow-v1` schema. No HTTP/UI,
-config flag, provider resolver, discovery or default activation is added.
+`max_calls`, `max_passages`, `max_chars` and `source-shadow-v1` schema. These injected handles have no HTTP representation or default activation. The
+separate explicitly selected real adapter above supplies its own acquired originals;
+this supersedes the earlier live-adapter deferral only for that opt-in path.
 
 After existing online/input validation, `run_review` assesses the finite requested
 IDs in supplied order **before** ordinary top-N acquisition/light review and deep
@@ -244,10 +303,48 @@ ignored its context; comments never authorize article evidence.
 
 Deletion is checked between callback boundaries and before existing save_merge;
 no new worker/store/locking protocol is introduced. Concurrent explicit Add keys
-remain protected by save_merge. Broader question/context/version invalidation,
-promotion/UX, authentic owner-labelled accuracy/usefulness and approved live
-provider/source adapters remain separate gates; scripted outcomes establish
+remain protected by save_merge. The opt-in acquired path above adds question/source invalidation and promotion/UX.
+Broader private-context revision invalidation and authentic owner-labelled
+accuracy/usefulness remain separate gates; scripted outcomes establish
 routing/contracts, not scientific sufficiency or issue closure.
+
+## Explicit saved-seed discovery
+
+`discovery.find_new` reuses `pipeline.run_screen` and ordinary persisted
+`ResearchSession` data; it never calls the route's automatic review kickoff,
+refinement, acquisition or materialization. Only allowlisted public seed
+title/abstract fields enter planning, external adapters and relevance scoring.
+Private comments are neither provider queries nor planner context. Their content
+fingerprints invalidate reuse without persisting their bodies in Search sessions.
+
+Known seed/saved aliases and identifier/version families are excluded through
+existing identifiers and membership evidence. Unresolved membership stays unknown,
+not confirmed new; publication date is not a novelty gate. Optional `discovery`
+session metadata records seed, context fingerprint, exclusions and unknown counts;
+legacy session JSON remains unchanged. Existing per-seed session locks single-flight
+repeated clicks and persisted screened results survive reload. Seed/library/comment
+content and configured model/encoder changes invalidate reuse. The discovery
+snapshot reads current native notes, not note counts/timestamps alone.
+
+Discovery alone opts into `SearchDeps.observe_source_outcomes` /
+`federate(observe_outcomes=True)`. The existing executor binds a lower-layer
+`capture_source_outcome(provider)` inside each worker; it never assumes ContextVar
+propagation across threads. Instrumented leaves record bounded empty/nonempty,
+failed, not-attempted or unknown receipts with known counts/fixed error codes,
+without raw queries, URLs or exceptions in the receipts. Uninstrumented adapters
+remain unknown. Available candidates keep ordinary order on provider failure.
+Explicit `refresh=true` retries failed/unknown snapshots and marks the old
+snapshot superseded without deleting it; ordinary repeats share persisted work.
+Discovery reads listed sessions through `session.load_unless_deleted`, under the
+same per-session lock as deletion. Explicit tombstones are skipped, not missing
+or corrupt files in general. After a replacement is persisted, the prior-session
+supersession uses `update(..., skip_deleted=True)` so a concurrently deleted prior
+cannot fail the valid replacement or be resurrected. Default load/update failures
+and existing session storage/locks remain unchanged; this is not thread cancellation.
+
+Whole-library scan latency and owner-labelled comment usefulness remain
+unmeasured. No provider, prompt, model retry/default ranking or automatic
+Zotero-write policy changes are introduced.
 
 ## Deferred (ponytail seams, known ceilings)
 

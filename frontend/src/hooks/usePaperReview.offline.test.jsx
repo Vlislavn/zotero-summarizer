@@ -5,7 +5,7 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { createElement } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import usePaperReview from './usePaperReview.js';
-import { cacheReviewDetail, pendingMutations, queueQuestionSubmission } from '../offlineStore.js';
+import { applyPull, cacheReviewDetail, pendingMutations, queueQuestionSubmission, savePapers } from '../offlineStore.js';
 
 const clients = [];
 function mount(key) {
@@ -64,6 +64,52 @@ it('loads the real IndexedDB union with empty React Query memory after an offlin
   await waitFor(() => expect(questionIDs(second.result.current.detail)).toEqual([payload.submission_id]));
   expect(second.result.current.detail.user_note).toBe('Persisted manual');
   expect(second.result.current.error).toBeNull();
+});
+
+it('commits ordered verdict changes and a retraction before reconnect, not in the paused query scheduler', async () => {
+  const key = 'OFFLINE_VERDICT';
+  await savePapers([{ item_key: key, revisions: { verdict: 4 } }]);
+  await cacheReviewDetail(key, { item_key: key, title: 'Cached paper', user_note: 'Manual', questions: [] });
+  disconnect();
+  const first = mount(key);
+  await waitFor(() => expect(first.result.current.detail?.title).toBe('Cached paper'));
+
+  for (const user_priority of ['should_read', 'could_read', 'dont_read']) {
+    act(() => first.result.current.verdict.onSubmit({ user_priority, comment: `Reason: ${user_priority}` }));
+    await waitFor(() => expect(first.result.current.detail?.verdict?.user_priority).toBe(user_priority));
+    expect(first.result.current.verdict.submitNotice).toMatch(/Saved on this device/);
+    expect(first.result.current.verdict.submitWarning).toBeNull();
+  }
+  act(() => first.result.current.verdict.onDelete());
+  await waitFor(() => expect(first.result.current.detail?.verdict).toBeNull());
+  const rows = (await pendingMutations()).filter(row => row.item_key === key);
+  expect(rows.map(row => [row.operation, row.value])).toEqual([
+    ['set', 'should_read'], ['set', 'could_read'], ['set', 'dont_read'], ['delete', null],
+  ]);
+  expect(new Set(rows.map(row => row.mutation_id)).size).toBe(4);
+  expect(rows.every(row => row.base_revision === 4)).toBe(true);
+  first.unmount();
+  first.client.clear();
+  const reopened = mount(key);
+  await waitFor(() => expect(reopened.result.current.detail?.verdict).toBeNull());
+  expect(reopened.result.current.detail.user_note).toBe('Manual');
+  expect((await pendingMutations()).filter(row => row.item_key === key)).toEqual(rows);
+});
+
+it('opens compact synced context without requiring the paper to have been opened before going offline', async () => {
+  const key = 'OFFLINE_COMPACT_SNAPSHOT';
+  await applyPull({ cursor: 12, papers: [{ item_key: key, title: 'Synced but unopened',
+    abstract_preview: 'Stored abstract excerpt', review_digest: { tldr: 'Stored compact finding' },
+    review_note: 'Saved manual text', questions: [], verdict: { user_priority: 'should_read' },
+  }] });
+  disconnect();
+  const { result } = mount(key);
+  await waitFor(() => expect(result.current.detail?.title).toBe('Synced but unopened'));
+  expect(result.current.detail).toMatchObject({
+    offline_snapshot: true, abstract: 'Stored abstract excerpt', user_note: 'Saved manual text',
+    deep_review: { digest: { tldr: 'Stored compact finding' } },
+    verdict: { user_priority: 'should_read' },
+  });
 });
 
 it('settles the existing transport error offline when no cached detail exists', async () => {

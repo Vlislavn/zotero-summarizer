@@ -13,7 +13,6 @@ from threading import Lock
 from typing import Any, Callable
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.models import SummarizeRequest
 from zotero_summarizer.models.providers import STAGES, resolve_stage
 from zotero_summarizer.services._common import (
     read_config,
@@ -24,14 +23,16 @@ from zotero_summarizer.services.setup.doctor_environment import (
     _database,
     _environment,
     _local_profile,
+    _is_ollama_provider,
     _research_goals,
     _row,
     _zotero,
 )
 from zotero_summarizer.settings import Settings, offline_requested
 from zotero_summarizer.services.setup.load_admission import policy_signature
+from zotero_summarizer.services.setup.doctor_dry_run import _dry_run
 from zotero_summarizer.services.setup.load_attempt import (
-    SetupAttempt, check_setup_stages, run_setup_load, load_check_row, withhold_local_ready, redact_load_receipts,
+    SetupAttempt, check_setup_stages, load_check_row, withhold_local_ready, redact_load_receipts,
 )
 
 _CHECKS = (
@@ -67,11 +68,7 @@ def _runtime_model(settings: Settings) -> dict[str, Any]:
             "ML-only triage remains available.",
         )
     resolved = [resolve_stage(config.llm_routing, stage) for stage in STAGES]
-    local = [item for item in resolved if item.provider.is_local]
-    uses_ollama = local and any(
-        "localhost:11434" in (item.provider.base_url or "") for item in local
-    )
-    if uses_ollama and shutil.which("ollama") is None:
+    if any(_is_ollama_provider(item.provider) for item in resolved) and shutil.which("ollama") is None:
         return _row(
             "runtime_model",
             "needs_action",
@@ -86,7 +83,7 @@ def _runtime_model(settings: Settings) -> dict[str, Any]:
             try:
                 served[item.provider.name] = list_models_for_provider(item.provider)
             except Exception as exc:
-                if item.provider.is_local and uses_ollama:
+                if _is_ollama_provider(item.provider):
                     return _row(
                         "runtime_model",
                         "needs_action",
@@ -103,7 +100,7 @@ def _runtime_model(settings: Settings) -> dict[str, Any]:
         item = missing[0]
         command = (
             f"ollama pull {item.model}"
-            if item.provider.is_local and uses_ollama
+            if _is_ollama_provider(item.provider)
             else None
         )
         return _row(
@@ -139,7 +136,7 @@ def _llm_inference(settings: Settings, *, attempt=None) -> dict[str, Any]:
         (
             row
             for row in failed
-            if providers[row["provider"]].is_local
+            if _is_ollama_provider(providers[row["provider"]])
             and "does not support chat" in row.get("detail", "")
         ),
         None,
@@ -189,37 +186,6 @@ def _rss_source(settings: Settings) -> dict[str, Any]:
         "Today needs at least one source.",
         action="Add a source in Settings",
     )
-
-
-def _dry_run(settings: Settings, *, attempt=None) -> dict[str, Any]:
-    from zotero_summarizer.services.llm.factory import build_client_for_stage
-    from zotero_summarizer.services.triage.summarization import run_abstract_dry
-
-    config = read_config(settings.config_path, settings.calibration_path)
-    if not config.llm_enabled:
-        return _row(
-            "dry_run",
-            "ready",
-            "LLM dry-run skipped by choice",
-            "The classifier-only backlog path does not call an LLM.",
-        )
-    resolved = resolve_stage(config.llm_routing, "feed")
-    request = SummarizeRequest(
-        title="Dry-run paper: reproducible local research triage",
-        abstract=(
-            "We evaluate a reproducible paper-triage method with held-out data, "
-            "ablation studies, confidence intervals, and public code."
-        ),
-    )
-    def load(submit):
-        client = build_client_for_stage(resolved)
-        submit()
-        result = run_abstract_dry(config, request, client)
-        return {"status": "operational", "detail": f"priority={result.reading_priority}; score={result.relevance_score}"}
-    result = run_setup_load(settings, resolved, load, attempt=attempt)
-    return load_check_row("dry_run", [{"provider": resolved.provider.name,
-        "model": resolved.model, "stage": resolved.stage, **result}],
-        "Dry-run triage completed without a Zotero write")
 
 
 def _optional_extras(_: Settings) -> dict[str, Any]:

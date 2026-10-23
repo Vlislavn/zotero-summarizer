@@ -106,21 +106,22 @@ an in-flight creation may have stamped an obsolete label. Revalidation performs
 no tag write when the tag already matches. CSV enrichment retains its
 separate existing post-commit behavior.
 
-Review-note delivery takes only the database path and lookup key, never a submitted
-body. Manual notes, questions and offline retries share `mirror_review_note` and
-`storage.review_note_projection.current_for_mirror`: current manual text plus saved
-questions, a unique storage-resolved target, and a SQLite writer lock through delivery.
+`mirror_review_note(db_path, key)` delegates to `services.zotero.mirror_notes`.
+Manual text/questions retain their alias-aware projection. One process lock and
+explicit connection span durable claim, revalidation, native terminal commit and
+separate domain ACK. Verdict/label effects stay separate.
 The real reader must also find that target. Clears/retractions retain saved questions;
 owned `USER_NOTE_MARKER` rendering/backup-first upsert stay separate from verdict
-labels/rationale. Only an actual successful upsert can explicitly acknowledge the
-unchanged revision/body/target, and only a committed acknowledgement clears pending.
+labels/rationale. Proven native success authorizes acknowledgement of the unchanged
+revision/body/target; only a committed domain acknowledgement clears pending.
 
 The receipt retains `note_written`/`note_error` and adds `projection_revision`,
 `note_pending`, `target_key`. Already-acknowledged intent is a no-op (`note_written=false`,
 `note_pending=false`). Missing/nonunique targets, unconfigured Zotero and expected
 connector/backup/write/ack failures retain pending and expose an error independently
-of the committed local save. Write success followed by ack failure reports written
-but pending; retry reuses the idempotent owned-note writer. If storage cannot even
+of the committed local save. Write success followed by ACK failure reports written
+but pending; a complete matched applied receipt permits ACK-only continuation
+without another native upsert. If storage cannot even
 resolve a snapshot, pending/revision/target are unknown (`null`); the five-field
 receipt shape stays stable. These nulls claim neither delivery nor acknowledgement.
 Only read/write errors explicitly carrying `expected_io=true` become optional

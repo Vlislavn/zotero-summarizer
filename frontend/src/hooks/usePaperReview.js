@@ -20,9 +20,10 @@ export default function usePaperReview(itemKey, { onSaved, onQueueRefresh } = {}
     enabled: Boolean(itemKey),
   });
   const submitMutation = useMutation({
+    networkMode: 'always', // The mutation owns a durable IndexedDB fallback.
     mutationFn: async ({ item_key, user_priority, comment }) => {
       const result = await submitVerdict({ item_key, user_priority, comment });
-      if (user_priority !== 'dont_read') return result;
+      if (user_priority !== 'dont_read' || result.saved_offline) return result;
       try {
         await queueRejectTag(item_key);
         return result;
@@ -31,7 +32,7 @@ export default function usePaperReview(itemKey, { onSaved, onQueueRefresh } = {}
       }
     },
   });
-  const deleteMutation = useMutation({ mutationFn: () => deleteVerdict(itemKey) });
+  const deleteMutation = useMutation({ networkMode: 'always', mutationFn: () => deleteVerdict(itemKey) });
   const detail = detailQuery.data;
 
   useEffect(() => {

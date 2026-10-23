@@ -262,6 +262,13 @@ def test_c_uses_same_selected_schema_on_generation_parse_retry_and_correction(fo
     assert type(result) is PaperDigest and result.model_dump() == _base().model_dump()
     assert out["items"][0]["rationale"] == "Corrected attempt rationale."
     assert out["scientific_verification"] == "unverified"
+    support = out["native_support"]
+    count = len(_claims(result))
+    assert support["base_count"] == count and support["global_indices"] == list(range(count, count + 5))
+    assert support["validated_checks"] == [{"index": index, "supported": True, "evidence": [0]}
+                                           for index in range(count, count + 5)]
+    assert "interpretation[0](/key_findings/0).rationale: Corrected attempt rationale." in support["optional_claims"]
+    assert all("First attempt" not in claim for claim in support["optional_claims"])
 
 
 @pytest.mark.parametrize("card", [None, {"items": []}, _card()])
@@ -278,6 +285,12 @@ def test_optional_content_never_adds_generator_retry(card, typed_client):
     assert result.model_dump() == _base().model_dump()
     assert generator.pydantic_prompt.call_count == verifier.calls == 1
     assert out["scientific_verification"] == "unverified"
+    if card == _card():
+        count = len(_claims(result))
+        assert out["native_support"]["validated_checks"] == [{"index": index, "supported": True, "evidence": [0]}
+                                                            for index in range(count, count + 5)]
+    else:
+        assert out["status"] == "unavailable" and "native_support" not in out
 
 
 def test_base_evidence_and_original_spans_cannot_certify_optional_scientific_content():
@@ -291,9 +304,13 @@ def test_base_evidence_and_original_spans_cannot_certify_optional_scientific_con
                                          verification_audit=audit)
     assert generator.pydantic_prompt.call_count == verifier.calls == 1
     assert all("99999" not in claim for claim in _claims(result))
-    assert out == {"origin": "ai_generated", "scientific_verification": "unverified",
-                   "status": "schema_validated_ai_draft", **card}
+    count = len(_claims(result))
+    diagnostic = {"phase": "numeric", "base_count": count, "rejected_indices": [count + 1, count + 6]}
+    assert out == {"origin": "ai_generated", "scientific_verification": "unverified", "status": "unavailable",
+                   "unavailable_reason": "native_optional_support_not_established", "optional_rejection": diagnostic}
+    assert "items" not in out and "native_support" not in out
     assert audit["status"] == "accepted_verifier_evidence"
+    assert audit["lineage"][0]["optional_rejection"] == diagnostic and audit["lineage"][0]["outcome"] == "accepted"
     assert {claim["field"] for claim in audit["claims"]} == {"tldr", "key_findings"}
     passage = audit["passages"][0]
     assert passage["text"] == PAPER and passage["selected_span"] == {"start": 0, "end": len(PAPER)}

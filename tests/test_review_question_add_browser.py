@@ -28,7 +28,7 @@ from zotero_summarizer.storage import review_note_projection
 
 question_browser = browser.question_browser
 pytestmark = browser.pytestmark
-CURRENT_ROOT = Path("/Users/vladnikulin/code/workspaces/zotero-summarizer/issues-all-20261008/integration")
+CURRENT_ROOT = Path(__file__).resolve().parents[1]
 MANUAL = "Explicit Add manual body <preserve>"
 DIRTY = "Unsaved Today draft <not a submitted question>"
 ADD_PATH = "/api/daily/add-to-library"
@@ -37,6 +37,10 @@ SOURCE_SENTENCES = (
     "The fixture contains one page and no clinical claims.",
     "Question comments and manual notes are distinct records.",
 )
+
+
+def test_source_receipt_uses_current_checkout():
+    assert CURRENT_ROOT == Path(__file__).resolve().parents[1]
 
 
 def _source_receipt(lab, request, record_property):

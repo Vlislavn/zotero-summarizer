@@ -1,5 +1,22 @@
 # services/library — Stage-2 reading + feed review
 
+Default library review now stages a generated digest note only after publication;
+Ops → Pending owns its literal-preview approval and actor/source/backup audit.
+The cache envelope carries fresh publication UUIDs without changing review DTOs.
+`review_publication_lock(require_publication=True)` retains the existing process
+RLock plus publication FileLock for publication, copy, clear, quarantine and
+generated/mixed Pending confirmation. All participating Pending batches hold that
+same process RLock through claim commit, prepared-backup consumption, native work
+and finalization/connection cleanup inside one worker call. Ordinary-only passes
+false before cache path/settings/FileLock access. Order is process lock → optional
+publication file lock → pending queue. This is not general coordination of foreign
+writers, other processes or all backup pruning. Existing default callers and
+nested reentrance remain; readonly reads create no lock or other file. JSON publication and SQL staging are not atomic:
+a crash gap has no proposal authority and cannot cause an unsafe apply. A new review
+is required if no proposal was staged. Private C/feed generation stays non-writing.
+Legacy copies lacking identity can remain readable but cannot authorize a proposal.
+See [the mutation contract](../zotero/README.md#generated-digest-note-confirmation).
+
 Public documentation describes grounding contracts and regression controls;
 private provider-specific evaluation narratives stay outside the shared source.
 Generation identity includes the analysis PDF adapter's source fingerprint, so
@@ -235,12 +252,12 @@ against the extraction even when its passage is absent from generation context;
 source membership alone does not establish answer entailment or citation quality.
 Existing paper-context limits, call/retry policy and output grounding remain unchanged.
 
-Metadata-count shortcuts require affirmative whole-paper wording; localized or
-uncertain count questions fall through to grounded Q&A. The artifact currently
-has `figures_count` but no table count, so table-only and combined figure/table
-questions must not use that shortcut. The current `qa.py` snapshot still admits
-those phrases and returns the figure count as a combined total; A136 remains open
-until that mismatch is corrected.
+Metadata-count shortcuts answer only explicit whole-paper pages, figures,
+references and sections from the artifact. Localized, uncertain, table-only and
+combined figure/table requests fall through to existing grounded Q&A; the
+artifact has no table count. Existing routing controls preserve both the
+unsupported-resource fallback and supported deterministic counts. This bounded
+routing is not evidence of arbitrary language understanding.
 
 Review selection and production/benchmark retrieval share a small chunk-prefix
 clipper in `faithbench._corpus`. The character cap includes separators; an
@@ -269,8 +286,9 @@ asynchronous review may be consumed on a later tick). The gate's scoped hook and
 wrapper are deleted. Corrupt score JSON and cache/DB failures now propagate from
 the gate instead of reporting zero hides, following the required fail-fast hook.
 This is an orchestration fix with real storage regressions, not an OS capability
-sandbox or a claim that review performs no other writes: Zotero digest notes and
-existing brief rebuilds remain separate effects. The gate commits each hide
+sandbox or a claim that review performs no other writes: generated digest-note
+proposals and existing brief rebuilds remain separate effects. Native digest notes
+now require explicit immutable-preview approval in the existing pending queue. The gate commits each hide
 individually and does not yet serialize against concurrent human relabels.
 
 ```
@@ -320,13 +338,15 @@ set. Routing follows task identity and reuses the existing `feed` stage.
 | `_pdf_acquire.py` | Review PDF acquisition: cached/direct arXiv → Unpaywall → PMC → OpenAlex → optional university browser/web render. `ZS_OFFLINE=1` preserves deterministic cache/direct lookup but returns `offline_uncached` before metadata or browser network. A configured browser rung with no optional browser package returns `browser_extra_unavailable` (never `needs_login`); `allow_browser=False` returns `browser_not_attempted`. Interactive calls alone may use a visible browser fallback; background work never pops a window. With `review_web_articles` enabled, only exact equality with `browser_fetch.article_snapshot_path(source_url, pdf_cache_dir)` identifies a text snapshot. Direct conversion and scholarly browser fallback both retain `web_article=True`, `source="web_article"`, `acquired_web_article`, and the original `source_url`. Captured/downloaded PDFs remain `web_article=False` and retain their browser/source outcome; a conversion miss is `fetch_failed`. Navigation/DOM/budget/mutation exceptions propagate to deep review's per-item failure boundary. This path caches the derivative but does not automatically attach it to Zotero; that is not a global read-only promise for deep review, which retains its existing note/brief side effects |
 | `university_access.py` | thin `services` wrapper over `integrations.browser_fetch` for the Settings "University access" panel: `status()` (`{enabled, browser_available, logged_in, login_url, ezproxy_prefix_set}`; `logged_in` is false when automation is unavailable even if a stale profile marker exists) + `start_login()` (launches the one-time HEADED library login in the background; refuses when the `browser` extra is missing or a deep review is running — don't stack a browser launch on a model load) + `profile_dir(ua)` (the one place the profile path resolves; configured relative/absolute overrides are accepted only when their resolved path is a child of `Settings.data_dir`, else rejected) |
 | `deep_review.py` | on-demand full-text deep review of top picks; per item runs `quality_review` (digest) + `quality_eval` (quality verdict) + `_paper_goal_summaries` (per-goal board) as **independently-skippable** layers (a failed layer logs + degrades, never blocks the digest), caching `{digest, quality, goal_summaries, section_overlay, code_link}` (`section_overlay` locating findings onto the paper's own sections — see `_review_section_overlay`; `code_link` the validated GitHub repo — see `_code_link`). Loads the library-wide `prestige_floor` once per job (`_load_prestige_context`) for the asymmetric HIGHLIGHT bar. After each item, auto-rebuilds the paper-brief artifact so the board is baked in. A per-item failure is logged + skipped (partial runs stay `ready` — empty results are valid), but when **every** item raises and nothing is cached (e.g. the resolved `deep_review` LLM endpoint is unreachable), the job finishes with a **job-level `error`** (`_summarize_errors`) instead of a silent `ready`, so the UI surfaces the cause rather than showing an empty brief. The "endpoint … may be unreachable" hint is appended **only** when the per-item error actually looks like a connectivity failure (`_looks_like_connectivity`); a parse/validation error — where the endpoint clearly responded with a bad body — is reported verbatim rather than mislabelled a network outage. A digest that comes back as a raw string instead of a `PaperDigest` (onprem's parse-failure fallback) is salvaged with `extract_json_blob` in `quality_review.assess_digest`, raising cleanly on a truly empty completion rather than crashing on `.model_copy()`. Concurrency is **per-item jobs over one provider-aware pool** (mirrors `paper_render`): each requested paper is its own `_JOBS[item_key]` entry run on a shared `ThreadPoolExecutor` sized by `deep_review_fleet_concurrency` (local→1, so a 2nd paper QUEUES; remote→`max_sub_concurrency` else `_MAX_CONCURRENT`, so papers run concurrently). So you can deep-review a 2nd paper while a 1st runs; re-submitting a paper already running is a no-op (per-item single-flight); cache writes go through a locked `_write_one` merge so concurrent workers never clobber each other. `status(item_key)` reports THAT paper's job (each panel sees its OWN progress); `status()` with no key is an aggregate ("is any review running?") that the `university_access` gate + the review-fleet poll rely on. `start()` returns `accepted=False` for an explicit empty selection without setup or job changes; otherwise it retains the review-fleet poll contract. Explicit duplicates are submitted once in first-seen order. Each review threads a `ReviewReporter` (`_deep_review_progress`) so the polled `status().progress` carries the live phase + sub-step (e.g. `quality_rubric 2/3`, `goals 1/6`) and INFO logs time each phase with a `[dr item=KEY]` prefix — a ~10-LLM-call review is no longer an opaque spinner. Cost is **tier-aware** (keyed on the resolved provider's `lean_deep_review` flag — NOT `is_local`, since MLX is loopback yet fast): a provider flagged `lean_deep_review` (ollama, prefill-bound) uses `quality_review.lean_max_text_chars` + `lean_self_consistency_runs` + batched goal summaries (~4 LLM calls instead of ~11, ~1.5–2 min), while every other provider — incl. MLX — uses the full `max_text_chars` + `self_consistency_runs` + per-goal summaries. The lean→full switch (text cap, rubric runs, AND goal batching) is gated identically in the background job and the `verify-deep-review` CLI. The **N papers** of a batch (the fleet / prewarm pass) fan out via `_common.deep_review_fleet_concurrency`: **serial on a local provider** (one model load at a time, RAM safety), **parallel on a remote one** capped by the provider's `max_sub_concurrency` (else all N) — deliberately NOT the global `TRIAGE_JOB_CONCURRENCY` (a local-RAM triage knob), so a remote 5-pick batch isn't silently throttled to serial when that knob is `1`. Orthogonally, **sub-call concurrency** (the N self-consistency rubric samples + the per-goal summary calls) runs them **in parallel on a remote provider** — capped by the provider's `max_sub_concurrency` (default `TRIAGE_JOB_CONCURRENCY`) — and **serial on a local one** (RAM safety), via the shared `_common.deep_review_sub_concurrency` helper used by BOTH the job and the CLI so they can't drift (peak concurrent calls = papers × sub-calls, both bounded by `max_sub_concurrency`). On a slow remote *reasoning* model (~30–75 s/call of thinking) this is the dominant win: ~11 serial calls collapse toward `extract + digest + max(rubric) + overstate + max(goals)`, with **identical prompts/aggregation** (speed only, no quality change). **Per-phase thinking:** the DIGEST runs with reasoning ON (`resolve_stage_client("deep_review", enable_thinking=True)` → `llm_digest`), while rubric/overstate/goals keep the provider's fast thinking-OFF default — a benchmark vs the pinned 397B judge (`tools/bench_deep_review.py`) showed a thinking-OFF digest goes near-empty or hallucinates numbers, while the trivial calls don't need reasoning (overstate 165 s→4 s). On a remote reasoning model this lands a faithful, complete `--with-goals` review in ~60 s. `_review_one` reviews from `item['pdf_path']` when set (the review-fleet's `pdf_overrides` — an acquired cache download) ELSE the Zotero attachment `detail['pdf_path']`, so a verdict needs no Zotero write. `start(..., acquire_missing=True)` (the **per-paper button**, route-scoped to a single key) makes a worker fetch a PDF via `_pdf_acquire.acquire_for_item` FIRST for a pick with no local Zotero PDF, then review from it — so opening a paper with no attachment fetches the full text instead of showing `needs_pdf`; the acquire runs inside the per-item boundary (a fetch failure is recorded as that item's error, never swallowed) and is left OFF for the fleet (it pre-acquires + passes `pdf_overrides`). When the fetch is DECLARED-but-gated, the worker threads the acquire result's `needs_login` + `login_url` onto the cached entry so the pane shows a click-to-open sign-in link instead of a misleading generic "no full text". The three enrichment layers live in `_deep_review_layers.py` (split out to stay under the 500-LOC cap). `start(..., reader=…)` overrides the resolved library reader — the IN-PLACE Today review (`_tick._auto_review_slate`) passes an `AppLibraryReader` so a feed candidate resolves by `stable_feed_key` even when a live Zotero reader is present (caches the review under the feed key, NO Zotero write). The cache I/O primitives now live in `_review_cache.py` (re-exported here) |
+| `_feed_assessment.py` | Same-call feed response selection, exact original-quote admission and profile/source/digest/producer binding inside the existing review entry; no loader, judge or scientific approval. |
+| `_deep_review_context.py` | `review_entry` assembles unchanged base fields without executing notes; `resolve_context` owns existing per-run dependency resolution, not C logic. The unchanged `_build_ctx(reader=None)` facade reads state once and passes concrete dependencies; reader fallback, client/callback order and conditional schema lookup are preserved. Pre-call facade patches remain supported, not arbitrary callback-time global reassignment. |
 | `_review_cache.py` / `_review_identity.py` | `deep_reviews.json` cache I/O plus v3 content identity. Invalid JSON/envelopes are atomically quarantined beside the cache with unique `.corrupt[-N]` names and logged, preserving bytes while allowing a fresh cache to be written. Policy/prewarm/fleet accept a cache entry only while its PDF bytes, resolved provider/model, full goals/config, focus note, output schema, timeout and generation-source hashes still match. Legacy or unverifiable entries remain stored but recompute before policy use. Keys are Zotero or in-place feed keys; `copy_review` bridges materialization. |
 | `_deep_review_layers.py` | `extra_layers(ExtraLayersCtx)` — the INDEPENDENTLY-SKIPPABLE enrichment layers (section extraction → paper-type detection → reference-free quality eval → goal-conditioned summaries → per-section one-liners → **section overlay**) lifted out of `deep_review` for the LOC cap. Each failure degrades to no panel/board, never blocks the digest (the background-worker boundary). Returns `(quality, goal_summaries, paper_type, section_overlay, code_link)`. Pure, headless-usable, unit-tested via `deep_review._deep_review_layers`. The **code-link layer also sees `content['link_uris']`** (PDF hyperlink-annotation URIs from `_paper_read_pdf.extract_link_uris`, appended to the body) so a GitHub link that exists ONLY as a clickable annotation over "our code" — never in the visible text — is still caught (it carries no availability phrase, so it may render `unverified`/grey, still found) |
 | `_code_link.py` | `find_code_link(text, title)` — extract the paper's **own code repo** from the full text and validate it. `extract_candidates` pulls distinct `github.com/owner/repo` links (excludes site-feature owners, strips `.git`/path/punctuation) and ranks links sitting next to an **availability phrase** ("code available at", "we release", "our implementation") first, so a cited dependency/baseline repo never outranks the project's repo. Then probes the ranked top-K (`_MAX_CHECKS=3`) via the `integrations.github` leaf: **live** > unknown > dead (a renamed/private 404 never wins). `relevance` is `matched` when the link is availability-claimed OR the repo description echoes ≥`_TITLE_OVERLAP_MIN` significant title words, else `unverified`. Offline (`ZS_OFFLINE`/`HF_HUB_OFFLINE`) → `exists=None, checked=False` (no network). Returns `{"found": False}` when the paper mentions no repo. Pure ranking + an injectable `checker` → tested without network (`test_code_link.py`, plus a `__main__` self-check). Surfaced at the top of the brief by `PaperReview`/`_paper_read_brief.code_link_html`. ponytail-noted upgrade path: owner==author / README-cites-paper via the github API |
 | `_paper_section_summaries.py` | `summarize_sections(sections, llm)` — two batched LLM calls: generate one-liners, then check semantic support against only that section's same first 700 original-text characters; at most 24 nonempty sections are included. A summary needs a mapped support verdict and source quote; unsupported output is omitted, and malformed/provider failures fall through the existing optional-enrichment boundary. **Full tier only** (`extra_layers` skips it on the lean local path). Scripted verifier tests cover the contract but do not measure live semantic accuracy. |
 | `_review_section_overlay.py` | `build_section_overlay(sections, quality, goal_summaries, *, section_summaries=None)` — locates the deep-review findings onto the paper's OWN `sections` (the `extract_pdf_content` list the quality/goal layers already grounded against), so a `section_id` is a **stable join key by construction** — never a substring match into a different extractor's text (the unreliable read-time approach the adversarial review rejected). Pure assembly, **no extra LLM call** (the per-section one-liner is the separate `_paper_section_summaries` pass). Returns `{sections:[{id,title,page,summary}], degraded, goals[↔goal_summaries], red_flags[↔quality.red_flags], missing_critical[↔quality.missing_critical]}`, each finding carrying its located `{id,title,page}` (or `None`) **plus a `match` kind**. Locating is **two-tier** (the shipped AI2 CiteRead pattern): a precise grounded span first (verbatim→fuzzy, the SAME `_grounding.quote_is_grounded` bar the review used → `match` `exact`/`fuzzy`), then a coarse best-lexical-overlap SECTION-LEVEL fallback (`match` `approx`) so a finding NEVER silently loses its anchor — it degrades to an approximate section the UI renders conservatively (`≈ §`, muted) rather than asserting it. `localization_stats(overlay)` reports the per-review operating point (`exact/fuzzy/approx/unplaced/located_rate`) — logged by `extra_layers` so the chip-confidence threshold can be calibrated from the real corpus. `degraded=True` (findings carried flat, no anchors) when sections are page-fallback sentinels (`Page N`/`Front matter`) or have no body text (docling). Rides on the cached review as `section_overlay`; surfaced verbatim by `review_detail`. Unit-tested in `test_review_section_overlay.py`. |
 | `deep_review_prewarm.py` | **launch-time prewarm** (so the FIRST open is instant, not just the second): on startup background-computes the top-`quality_review.prewarm_on_startup_k` not-yet-cached deep reviews (env override `ZS_DEEP_REVIEW_PREWARM_K`, validated fail-loud; `0` disables). A thin orchestrator over existing primitives — `reading_queue.build_reading_queue` for the ranked picks, `deep_review.cached_review_keys()` (ONE cache read, not one-per-row) to **skip what's already done** (so re-launches are cheap — the same top-K never recompute), `deep_review.start(item_keys=…)` (single-flight) for the rest; concurrency + RAM-safety are INHERITED from the `deep_review` job (serial on a local provider, parallel on a remote one). Waits (bounded `PREWARM_GATE_WAIT_SECS`) for the relevance gate so "top" reflects real scores rather than the cold-start recency fallback. Daemon-thread + best-effort: a failure is logged and swallowed at the worker boundary, never blocking boot. Scheduled by `lifecycle.startup` (logged as `deep_review_prewarm=…`). |
-| `review_fleet/` | Background proposal orchestration: review missing caches, acquire missing PDFs locally, then fold cached digest/quality/goals into `ProposedVerdict` through the pure `propose_verdict`. `verdict_store` writes suggestions under `Settings.model_dir`; these never enter label-based hiding until confirmed. The shared deep-review path also saves its cache and may update Zotero digest notes/rebuild existing briefs, but no longer writes label verdicts. See the package README for batch/status and prewarm contracts. |
+| `review_fleet/` | Background proposal orchestration: review missing caches, acquire missing PDFs locally, then fold cached digest/quality/goals into `ProposedVerdict` through the pure `propose_verdict`. `verdict_store` writes suggestions under `Settings.model_dir`; these never enter label-based hiding until confirmed. The shared deep-review path also saves its cache and stages digest-note proposals and may rebuild existing briefs, but no longer writes label verdicts. See the package README for batch/status and prewarm contracts. |
 | `_flight.py` | shared library **launch primitives**: the single-slot `FlightLatch` (is-a-background-compute-running latch — `border_cache`/`reading_queue` each keep their OWN instance, shared mechanism), `run_in_background` (daemon thread), and `resolve_prewarm_k(config, *, env_var)` (config `quality_review.prewarm_on_startup_k` + per-module env override, validated fail-loud) — the SAME resolver both `deep_review_prewarm` and `review_fleet/prewarm` delegate to. Companion shared writer: the JSON caches (`deep_review`, `reading_queue`, `review_fleet/verdict_store`) all persist via `_common.write_json_atomic` (tmp+replace, dict→JSON) so the atomic-write idiom lives in one place |
 | `_deep_review_progress.py` | `ReviewReporter` threaded through one deep review: pushes the live phase + sub-progress to THIS paper's job (the `on_update` sink is `deep_review._set_job_progress`, so each panel's `status(item_key)` shows its own paper) and emits INFO timing logs per phase (`extract`/`digest`/`quality_rubric`/`quality_overstate`/`goals`/`note`) + a final `review done in Ns (~N LLM calls)` line. The pushed `progress` dict also carries `phase_label`, `phase_elapsed_seconds`, `total_elapsed_seconds`, and a work-based `eta_seconds` (summed from a running median-per-phase table, no magic wall-clock constant) so the UI shows live elapsed + a counting-down estimate instead of a fixed "~1–2 min". `sub()` is **thread-safe** (lock-guarded, monotonic `done`) since the parallel rubric/goal samples report completion concurrently. Exception-free; the pure `assess_digest`/`evaluate_quality`/`summarize_for_goals` functions take `reporter=None` and guard each call so they stay headless-usable (the `verify-deep-review` CLI, tests) |
 | `_deep_review_errors.py` | pure helper extracted from `deep_review` (LOC budget): `summarize_errors` builds the job-level message for a run where **every** item raised, appending the "endpoint … may be unreachable" hint **only** for connectivity-looking errors (`_looks_like_connectivity`) so a parse/validation failure — where the endpoint clearly responded — isn't mislabelled a network outage. |
@@ -344,6 +364,7 @@ set. Routing follows task identity and reuses the existing `feed` stage.
 | `_paper_read_meta.py` | pure metadata/text helpers split out of `paper_render` to keep it under the 500-LOC cap (no `Settings`/state/filesystem dependency): `apply_metadata_fallbacks` (Zotero authors/keywords/title over garbage TeX) + `qa_body_text`/`artifact_text` (metadata + structured digest/quality/goals + PDF body Q&A context, re-exported by `paper_render`) |
 | `_paper_docling.py` | OPTIONAL high-fidelity PDF parse via IBM Docling (TableFormer **structured** tables + figure captions) — the fix for the fitz path's truncated tables / mis-extracted figures. Lazy + gated: `extract_pdf_content(pdf, use_docling=True)` (driven by `quality_review.use_docling`) delegates here, else fitz. Needs the `docling` optional dep (`uv pip install docling`). Receipt: `tools/eval_docling_vs_fitz.py` (fitz 0 tables → docling 2 structured + figure captions on a real PDF). |
 | `_paper_read_pdf.py` / `_paper_read_tex.py` / `_paper_read_html.py` | implementation pieces for the paper-brief artifact. `_paper_read_pdf`: PDF full text + sections + `extract_link_uris` (distinct hyperlink-annotation URIs, returned as `content['link_uris']` — kept OUT of `full_text` so quality/goal layers stay pure; the code-link layer appends them) + figures cropped to the **actual graphic bbox** (`get_drawings()`/`get_images()` near the caption, not a blind fixed band), captions **deduped by label** (in-prose "Figure 1 shows…" no longer inflates the count). `_paper_read_tex`: parsing + offline-aware, fail-fast arXiv source acquisition with public-IP-pinned HTTPS, raw-byte/member/file-size caps, per-member `extract(filter="data")` into staging, and atomic source publication (details above); referenced figures must resolve inside the extracted source root (absolute/parent/symlink escapes are ignored); `_clean_tex` strips math envs by name + `\(…\)`/newline-spanning `$…$` + iterated brace-balancing so no `$…$`/`\cmd`/table markup leaks into the digest. `_paper_read_html`: writes the single-file English brief and audits in-memory extracted content + generated HTML; blocking results stop publication, and the speculative Markdown exporter is removed. The brief has **no remote deps** (KaTeX CDN dropped), and follows decision order: verdict + ARR spine + **Goal Match Board** → **Quality panel** → collapsed digest → figures → PDF footer. The **full paper body is NOT embedded**; explicit missing-figures/review state; audit catches empty extraction, placeholder authors, figure-map damage, and egregious residual LaTeX without reading Markdown. The standalone `presentation.html` uses the Ease Health design system (forest ink/sage on linen, Fraunces + Inter, no shadows, full dark-mode parity), responsive goal-board/digest layout, evidence-grade gauge, and stain→tether goal summaries; CSS-only in `_css()`/`brief_css()` |
+| `_interpretation_html.py` | Pure explicit whole-packet Finding/Scope/Unproven consumer for `write_outputs`; resolves only the existing closed references against the accompanying digest, escapes data and emits C-only scoped styles. No cache, qualifier, passage copy or public/default activation. See the qualified HTML contract below. |
 | `_paper_read_brief.py` | the at-a-glance decision-aid renderer (sibling of `_paper_read_html`, keeps it < 500 LOC): the read verdict — the **diagnosis** (flag reason inlined; the relevance verdict folded into its reason line), a single **evidence-grade gauge** (`_gauge_html`: the band as a teal needle on a calibrated eosin→hematoxylin track + the N/M self-consistency count — it *owns* the band reading, replacing the two ARR chips; `_GAUGE_POS` maps band→position), the always-6-cell goal board (HIT/MISS/NOT-RETRIEVED; fired cells are the **single home** of per-goal relevance — summary + "Read for you" key sections; a fired+relevant cell is **stained** (eosin wash) and tethers its summary to its supporting quote, surfaced inline, via the hematoxylin rail; miss/not-retrieved stay unstained), and the **self-explaining Quality panel**: a plain-language band gloss + a one-clause method line (reference-free, author-blind, N/M passes) + a legend + the decisive signals (red flags in a loud callout FIRST, then overstatements, then the 2-3 rubric items that moved the band in plain English), with the full rubric (real question text from `_quality_prompts`) behind one disclosure. `code_link_html` renders the validated code-repo banner (`_code_link` result) at the very top of the brief — live/dead/unverified/none. Pure rendering + its own CSS (folded into the renderer-rev so edits bust the cache) |
 | `qa.py` / `qa_context.py` | multi-turn ask-paper in comprehensive/full-text/retrieval modes over one cache-validated artifact. A recent tail stays verbatim; older turns compact to stable `(paper, extraction version, span, input/quote digest)` handles resolved only against the current extraction. Responses separate claimed, quote-verified, and location-verified evidence; a reparse invalidates precise location. Counts stay deterministic; explicit abstentions and ungrounded quotes yield no answer, while parsing failures propagate as errors. |
 | `border_cache.py` | disk cache + job state for active-learning border picks |
@@ -361,6 +382,19 @@ without rewriting their stored source. Unknown goal assessment withholds a skip,
 retaining the raw model decision and policy flags. HTML/native readers display
 REVIEW for an absent decision instead of inferring SKIP from zero matched goals;
 the standalone brief no longer invents a second reading verdict from quality bands.
+The brief and native compact/full review put the reading plan beside this action:
+ordered read targets, useful skip targets, original-only value and estimated
+minutes. The folded digest no longer repeats those fields or the rationale.
+Absent optional fields stay unrecorded (including time, not zero); skip/withheld
+actions do not display stale read targets or original-only value. The shared
+HTML row styles wrap locators on narrow screens. No source-policy, enum, ranking
+or model-call change is introduced by this presentation.
+The existing digest call's writing assessment explicitly checks operational-flow
+reconstruction, necessary terminology and material editorial coherence alongside
+definitions, taxonomy, abstraction shifts and claim/evidence signposting. It still
+excludes technical difficulty and scientific validity; no extra call, field or
+scoring service is added. Prompt coverage is not evidence of measured adherence
+or a substitute for the shared 12–20-paper human evaluation.
 Single and batched model facets share one response schema with a required strict
 boolean `relevant`: missing values and coercible strings/numbers raise instead
 of manufacturing an assessed miss. Explicit false remains a valid assessment.
@@ -490,6 +524,56 @@ Cached empty digests without `needs_pdf` are stale and recomputed; legitimate
 no-PDF entries remain current. Dense goal-encoder inference failures disable only
 that retrieval leg so an available BM25 leg can still produce a result.
 
+## Type-aware quality presentation
+
+React and the standalone brief summarize only actual `QualityEval.rubric` entries
+marked yes/no. Missing and N/A criteria do not become failures; highlight counts
+use supplied applicable entries, not a fixed empirical denominator. Position,
+review and theory papers retain their supplied standards and quality band.
+The shared React recommendation separately explains Idea/Evidence/Writing and
+saved reading-policy flags. This presentation does not add scoring or model calls.
+Full reading also requires explicit `digest.basis="full_text"`; declared abstract
+and unknown/unconfirmed digest bases cap read→skim with distinct flags. The quality
+layer's source cannot establish the digest's source. See the
+[fleet contract](review_fleet/README.md) for the intentional frozen-17 diagnostic
+migration: fixture bytes and human annotations remain unchanged, read precision
+is undefined when no qualified reads remain, and other metrics stay computed.
+
+## Related saved work
+
+`related.related_papers` is a read-only assembly over the existing whole-library
+reader and `_search.hybrid_search`, including already-read papers. It excludes
+seed aliases and known DOI/arXiv families, deduplicates saved aliases, and returns
+at most three results. Each result either exposes a literal shared metadata
+phrase with exact source-field offsets on both papers, or explicitly states that
+only search similarity is known. Neither is a semantic confirms/contradicts
+judgment or original-full-text assessment. No fallback unrelated papers are shown
+when the corpus is unavailable; enabled retrieval/model errors remain errors.
+
+`_related_context` reads current manual/verdict intent through the storage-owned
+alias/revision readers, plus native notes and annotation comments from the
+existing detail adapter. Short/negative RU/EN text is retained without interest
+inference. Owned generated notes and owned manual/verdict mirrors are excluded;
+marker-like prose is not ownership. Unowned native notes/annotations have uncertain
+authorship; highlighted paper text stays separate. App/native unavailable differs
+from a successfully absent context. Full bodies/revisions, not counts/clocks
+alone, enter context fingerprints. Reading never acknowledges delivery or writes
+notes, questions, labels or Zotero data.
+
+Comments remain context-only (`used_for_ranking=false`, no used IDs): positive
+reading-verdict provenance, tokenizer fit and cross-encoder topicality do not
+qualify a mixed/negative comment's semantic preference intent. Existing approved
+interfaces cannot supply that qualification, so unqualified comment reranking,
+its toggle and the unused tokenizer extension are deliberately absent. No sentiment
+regex/classifier or positive keyword extraction replaces it. Semantic comment-aware
+retrieval and the 10–20 owner-labelled comparison/latency gate remain incomplete.
+No private text reaches remote providers. `discovery_context` captures a saved seed, library membership,
+current app/native comment content and configured model/encoder identity for
+explicit Search discovery. Related reads are fresh; only explicitly labelled
+frontend offline snapshots can be stale. Discovery scans native details on the
+explicit click to detect same-clock native edits, so whole-library latency remains
+a real measurement gate. There is no second recommendation store or LLM framework.
+
 ## Accepted verification evidence
 
 `verify_digest` returns its already validated `_Checks`; optional app-owned
@@ -511,18 +595,20 @@ established; no evidence-adjudicated contradiction is invented.
 
 Review identity is captured before extraction, not reconstructed from a later
 replacement PDF. Fresh streamed byte hashes reject known drift before the first
-library digest-note upsert, outside its best-effort I/O handler. A final fresh check
-still runs before cache binding. Persistent drift before publication preserves the
-previous note and cache; unchanged-source reviews retain ordinary note mirroring
-and note-error reporting. `_mirror_digest_note` owns that existing note responsibility.
+library proposal publication. A final fresh check still runs before cache binding.
+Persistent drift before publication preserves the previous note and cache.
+`_mirror_digest_note` is now a compatibility staging name, called only after cache
+publication; it never writes Zotero. A stage failure surfaces as a job error without
+rolling back the already published review.
 Review identity and strict audit export lazily reuse `integrations.pdf._file_fingerprint`
 for source SHA-256, without requiring the Python 3.11+ `hashlib.file_digest` API.
 The existing primitive reads the opening size plus a growth-detection byte and
 checks descriptor/path identities; ordinary changes during hashing may fail loud.
 Empty/missing-source results and source-I/O propagation remain unchanged. No new
 hasher, version fallback or size/mtime memoization shortcut is introduced.
-These checks are not note rollback, an atomic filesystem snapshot or protection against reverted changes;
-a change after the pre-note check can still occur during the separate note write.
+These checks are not note rollback or an atomic filesystem snapshot. Generated
+approval additionally checks current source bytes and publication identity; independent
+external edits during the separate Zotero write are not an atomic source snapshot.
 The owned-file scripted-writer regression proves orchestration order, not native
 Zotero persistence or scientific support. Prefix-audit regression expectations use
 the selected input's rstrip-derived endpoint, not its untrimmed character budget;
@@ -600,33 +686,331 @@ data raises. Presentation links are not exact machine authority. Triage uses the
 unmodified SDK tuple bound to captured original PDF bytes, never this normalized
 list, and never appends raw annotations to generation prompts.
 
-## Experimental interpretation producer preparation
+## Experimental interpretation producer and native verification
 
 An explicit code caller may supply keyword-only `interpretation_out={}` to
-`assess_digest`; `_coerce_digest` exposes the same bounded producer seam. This
-selects `InterpretationDigestResponse` inside the existing initial, parse-retry
-and source-correction calls. Any supplied decoder response format is derived
-from that same selected C class. The instrumented client likewise derives its
-format from the selected class. No extra generator/verifier call, public flag,
-provider/configuration change, cache or consumer activation is added.
+`assess_digest`; `_coerce_digest` retains the bounded producer seam. C selects
+`InterpretationDigestResponse` within the same initial, parse-retry and single
+source-correction calls, deriving decoder constraints from that selected class.
+Without a collector, PaperDigest model/prompt/kwargs, serialized keys and IO stay
+unchanged. There is no public flag, provider/config change or worker activation.
 
-Without a collector, the normal PaperDigest model/prompt/kwargs and serialized
-keys stay unchanged. C captures optional content before projecting to plain
-PaperDigest, preserving explicit base-field presence. Malformed/missing optional
-content records `unavailable_reason`; it does not retry an otherwise valid base.
-Nonexistent/empty/duplicate finding references or absent referenced basis content
-also withhold the draft. References bind current fields, not scientific warrant.
+The same-attempt schema-valid draft contributes only inference strength,
+rationale, scope, uncertainties and unsupported extrapolations, in item/role/list
+order using native sentence parts. Findings remain references, not copied claims;
+origin, references and availability metadata are not scientific leaves. These
+claims append after the unchanged base projection in the existing verifier.
+Malformed/missing content stays explicitly unavailable, not a verified empty card.
 
-The public collector clears at entry and stays empty if generation, source
-admission or base verification fails. Attempt-local content clears before each
-call, and only the final successful base attempt is returned to the collector.
-A valid card has `status=schema_validated_ai_draft`, `origin=ai_generated` and
-`scientific_verification=unverified`. Existing accepted base-audit evidence does
-not certify any interpretation assertion; original finding passage spans remain
-base evidence, not card evidence.
+An optional-only numeric rejection discards the whole card, then verifies the
+base natively (the failed preflight made no model call). Optional-only semantic
+rejection discards the whole card and reuses only complete, valid, supported base
+checks. Invalid evidence, missing/duplicate indices and unavailable verification
+never establish base acceptance. Both clients receive the same projection during
+malformed-response fallback. Base/mixed rejection retains one correction; its
+fresh findings, sentence offset and draft replace the previous attempt.
 
-This is producer **preparation only**: no strategy/worker activation, scientific
-card verifier, persistence/current-text cache binding, Q&A/shared view or Zotero
-write is delivered. `tests/test_interpretation_producer.py` reuses the existing
-factory/verifier fake with scripted Mock call recording; those regressions prove
-machine contracts, not live-model or blinded-human scientific benefit.
+### Experimental C evidence capture and readonly cache binding
+
+The base audit still retains exactly its existing `tldr`/`key_findings` claims
+and passage bodies. Successful same-attempt C verification additionally captures
+`interpretation_evidence` inside that audit: native optional checks at the base
+projection's global index offset, referenced basis claims, and only additional
+passage bodies in the same passage-ID namespace. Extraction fragments reuse
+`chunk_spans` and `_fragments`; no finding text is copied into the optional
+payload. Missing, malformed or rejected optional content cannot retroactively
+acquire accepted support from a base audit. Rejection phase/offset/indices remain
+diagnostic lineage, not retained support; collectors remain empty on base failure.
+
+Private keyword-only `interpretation_schema="interpretation-digest-response-v1"`
+selects C identity, audit binding and `get_current_review`. This is a code-owned
+condition, not a public toggle. Stored markers are comparison evidence only;
+absent, null, unknown or cross-condition markers cannot select a model, schema
+or optional import. `REVIEW_CONTRACT_VERSION` remains 3. Source, generation and
+schema invalidation across releases is legitimate.
+
+Binding uses the existing `canonical_hash` for exact whole finding values,
+whole referenced basis values and the full optional payload, from verification
+to raw cache to current policy projection. False is valid basis content and is
+not interchangeable with zero. Sentence hashes and substring reconstruction do
+not replace whole-value identity.
+
+An explicit C current read takes one `_read_all(readonly=True)` snapshot,
+validates current raw identity and BASE audit before one policy projection,
+then qualifies C against the projected values. Corrupt caches raise without
+quarantine, repair or writes. Optional audit-contract drift is qualified
+separately from extraction/verifier contracts. Only an intact, current,
+validated base survives optional unavailability: the returned view omits both
+`interpretation` and the entire `verification_audit`, while reporting truthful
+`interpretation_qualification`. It does not manufacture a persistable base-only
+audit with an old integrity hash. A qualified card may expose the accepted full
+audit; raw stored bytes remain unchanged.
+
+Origin remains `ai_generated` and `scientific_verification=unverified`.
+Native support is not human/author approval, causal warrant or scientific-benefit
+acceptance. Default consumers, workers, UI, Q&A, Add eligibility, focus notes
+and `mirror_note` do not activate C. Changed-card native writes require a later
+explicitly consented postbind handoff. Deterministic controls reuse existing
+fixtures, Mock and native checks; they are not live-model or scientific evidence.
+
+### Explicit interpretation collectors through chunk strategies
+
+`digest_for_strategy` and `map_reduce_digest` accept private keyword-only
+`interpretation_out: dict[str, Any] | None = None`. Only a provided collector is
+forwarded, as the same object, through the existing module-level `assess_digest`
+seam to native `quality_review.assess_digest`. An explicitly provided empty dict
+selects collection; omitted or `None` leaves the optional keyword absent from
+native calls. Strategies do not import an interpretation schema or select C from
+cached content, focus text or configuration.
+
+Both entry boundaries clear the provided collector before fallible admission or
+mapping, so empty/rejected source and failed/empty map chunks cannot retain an
+older card. No shared collector is created. Native assessment still owns its
+same-attempt/final-attempt optional output, base failures, verifier repair and
+fallback, and single source correction. Existing `verification_audit` forwarding
+and early-clear behavior are unchanged.
+
+Rank/prefix verification retains the selected-original source contract. Map-reduce
+notes remain generation context; native verification and audit capture receive
+the unchanged original full text, not generated notes. No extra model/verifier
+call or binding path is added, and response-format handling, budgets, default
+prompts and plain `PaperDigest` return type remain unchanged.
+
+Map-reduce still changes returned `digest.basis` to `map_reduce` after native
+verification. The audit's `verified_digest` and optional `native_support` base
+hash retain their verification-time `full_text` identity; the relay does not
+retroactively restamp evidence to the returned metadata. Caller persistence,
+worker collectors, cache/eligibility wiring, public Q&A/React/static consumers,
+benchmark arms and consented postbind native writes are separate components.
+There is no public toggle or new config. Scripted controls establish machine
+source plumbing and types, not live-model entailment or scientific usefulness.
+
+### Private one-paper interpretation handoff
+
+Only an explicit code caller of private `deep_review._review_one` may select
+`interpretation_schema="interpretation-digest-response-v1"`. Unknown conditions
+are rejected before item lookup or IO. Omitted or `None` preserves the existing
+native call kwargs, identity and entry shape: no interpretation collector,
+optional schema import or null interpretation key. Stored markers, focus text,
+paper type and public flags do not select C.
+
+An explicit C call allocates one invocation-local collector and forwards that
+same object through the existing `digest_for_strategy`/native producer seam for
+rank, prefix and map-reduce, including the existing lean budget. The result
+remains a plain `PaperDigest`. After the existing reading policy and source
+guards, nonempty optional output is attached separately and the existing
+condition-aware audit binder binds the final entry. Missing, malformed or
+native-rejected optional content is explicitly unavailable; a missing digest
+or failed native assessment does not manufacture a verified card or audit.
+Map notes are generation context only: map-reduce verification, native support
+and verified digest identity still refer to original extracted text and the
+native `full_text` digest, even when the returned digest has `basis=map_reduce`.
+
+C never automatically mirrors a Zotero digest note, including a base-only or
+unavailable-card outcome. OFF retains source-guard order but now stages a default
+note proposal only after publication, without a native write. An explicit current C cache read uses the existing readonly qualification
+path; optional failure exposes only an intact, current validated base, without
+an old audit masquerading as a persistable base-only audit. The optional payload
+remains `ai_generated` and `scientific_verification=unverified`; native machine
+support is not human/author approval or scientific-benefit acceptance. Workers,
+`start`, UI, public Q&A and eligibility do not automatically activate C. Changed-card native writes
+remain a later explicitly consented postbind handoff.
+
+### Private worker prior-condition preservation
+
+The worker uses the same invocation-local `kwargs` condition for generation and
+current-prior lookup, not a later read of the shared context. An explicit CODE C
+request therefore protects a valid same-condition prior from a later no-PDF
+placeholder, including when a callback retargets that shared context. Omitted or
+`None` retains exactly `get_current_review(item_key)` with no optional keyword.
+Stale priors remain ineligible for protection; placeholder publication is unchanged.
+
+Default/public callers remain OFF. No new API, getter default, model call,
+native-write behavior or render guard is introduced. C automatic digest-note
+mirroring remains blocked; changed-card native writes still need an explicitly
+consented postbind handoff. Cross-condition protection and concurrent-cache CAS
+are not promised. Owned-store regressions cover current/stale OFF/C and callback
+retargeting; these machine checks are not live-provider or scientific evidence.
+
+### Private first interpretation consumer
+
+The existing `review_detail.build_feed_detail_by_key` and
+`review_detail.build_library_detail` accept keyword-only
+`interpretation_schema="interpretation-digest-response-v1"` from an explicit CODE
+caller. Public callers remain OFF. Omitted or `None` retains the old getter
+arguments, call position and payload, with no interpretation-view import,
+projection or key. Legacy integer/nonstable feed IDs still do not look up a
+cached review.
+
+On explicit selection, `_interpretation_view.current_review_view` calls the
+existing `deep_review.get_current_review` exactly once. That existing boundary
+owns current identity, base audit, policy and optional qualification; the new
+adapter neither reads raw cache nor repeats those decisions. Getter `None`
+stays `None`, errors propagate, and only an independent returned copy gains the
+transient `interpretation_view` key. No model, writer, cache persistence, schema
+revision or export API is added.
+
+`build_interpretation_view` is a pure JSON projection of that qualified snapshot:
+
+- `availability` and `reason` reuse qualification, never a `complete` alias.
+- Controlled labels always say `ai_generated`, `unverified`, `not_performed`
+  contradiction adjudication and `bound_snapshot` evidence state.
+- `groups.Finding` contains finding references, inference strength and rationale;
+  `groups.Scope` contains finding references, scope and basis references;
+  `groups.Unproven` contains finding references, uncertainties, unsupported
+  extrapolations and basis references. Strings, item/list order, Unicode and
+  multiplicity survive unchanged; no finding or basis text is copied.
+- `passage_support` merges the existing base, referenced basis and optional
+  native rows in global claim-index order. It preserves each native `path` as
+  `scientific_ref` (not the collapsed `field`), sentence `part` and passage IDs.
+  Bodies and extraction coordinates remain solely in the enclosing full audit.
+  No new pointer resolver, invented PDF page or evidence IO is introduced.
+
+A valid base with unavailable optional content has an explicit unavailable view
+with empty groups/support and its machine qualification reason. The getter's
+omission of both raw interpretation and the entire audit remains intact: this
+is not an empty verified card or a persistable base-only audit carrying an old
+integrity hash. Malformed qualification boundaries are errors, not defaults.
+Bound native evidence is not entailment, human/author approval, causal warrant,
+whole-paper coverage or live scientific certification. Raw text remains JSON,
+not HTML; later renderers must apply their existing escaping boundary.
+
+Occam/Tesler subtraction comes first: reuse one getter and native references,
+not a second DAO, qualifier, copied text, independent state or new controls. This
+adds only one derived view and two existing service handoffs. Public QA/React/static
+activation and changed-card native dispatch are deferred. Later consumers must
+preserve the original admitted PDF substring/budget and bound-snapshot honesty;
+Add, `mirror_note=True` and automatic rendering are not native-write consent.
+
+Owned native/cache/detail regressions cover exact wire data, copy isolation,
+failure omission, actual CODE callers and OFF import/shape/IO preservation.
+These are machine-contract checks, not live-model or human scientific acceptance.
+Field presence is not a usefulness oracle.
+
+### Explicit qualified interpretation HTML
+
+`_paper_read_html.write_outputs(directory, content, *, staging, digest=None,
+quality=None, goal_summaries=None, code_link=None, interpretation_review=None)`
+and `_render_presentation(content, digest=None, quality=None, goal_summaries=None,
+code_link=None, *, interpretation_review=None)` accept one optional keyword only.
+Non-None explicitly supplies the WHOLE transient result of the existing
+`current_review_view(item_key, interpretation_schema="interpretation-digest-response-v1")`.
+A loose view or raw cached interpretation is not the packet. Any separately supplied
+non-None legacy projection is rejected before audit/publication, including empty,
+False or zero values; no equality-based normalization or preference is applied.
+The four base projections and view all come from that one snapshot. None/omission
+retains old internal call arguments, HTML, imports and return keys.
+
+The existing publisher lazily calls `_interpretation_html.render_review(packet)`;
+its pure helper consumes the view rather than repeating qualification, model or
+cache work. It uses only the existing `interpretation_references(packet["digest"])`
+closed map for resolution. One section has visible Finding/Scope/Unproven groups:
+finding bodies appear in Finding, basis values in Scope, uncertainty/extrapolation
+lists and basis references in Unproven. Order, repeated entries, Unicode, nested
+values and False/zero survive escaping/JSON display, without invented passages,
+pages, URLs or working anchors. Native support remains inspectable by original
+scientific path, sentence part and passage IDs; passage bodies are not copied.
+The full trace now occupies one closed native `details` with the first `summary`
+labelled `Native support references`. All associations/order/multiplicity remain;
+Finding/Scope/Unproven and both unchanged safety paragraphs remain direct section
+children outside it. Only the support wrapper changes, not escaping, packet
+qualification or scientific authority. No JavaScript, state, new label or mode is added.
+All styling is scoped and emitted only on selection, reusing forest/linen tokens,
+flat borders, 14px radius, 400/500 weights and wrapping/dark-mode variables.
+Scoped native summary/focus styling reuses those tokens. The native
+`::details-content` print-CSS candidate is UNVERIFIED: closed-start print/export
+must retain the full trace, but source/DOM presence proves no browser support or
+printed retention. Keyboard/focus, geometry, wrapping and light/dark pixels remain
+separate runtime gates; no scientific reading-benefit claim follows.
+
+AI-generated, scientifically unverified and bound-snapshot disclosures remain
+visible, with contradiction adjudication explicitly not performed. Native support
+is not scientific/human/author approval, causal warrant or full-paper coverage.
+Optional unavailability shows its reason/warning and preserves the base brief,
+without empty verified cards or resurrection of omitted raw content/audit. Malformed
+packets raise. Shape checking is not authentication or a currentness lease: the
+trusted CODE caller must obtain a fresh packet and not mutate/combine snapshots.
+
+This is the connected existing `write_outputs` publication path, still gated by
+its unchanged blocking audit and staged file writes; success is not bundle-atomic.
+`paper_render` still uses its default getter and no C packet: facade/cache/schema,
+public/React/QA/default builds and native writers are unchanged. Add eligibility
+and consent boundaries stay at their existing owners. See [explicit usage](../../../docs/usage.md#explicit-qualified-interpretation-html).
+Authored native-fixture publication regressions await guarded parent execution;
+scripted semantic verdicts are machine evidence, not scientific benefit. Public,
+full-paper, native/editor and blinded human acceptance remain incomplete.
+
+### Private comprehensive-QA interpretation handoff
+
+An explicit CODE caller may pass keyword-only
+`interpretation_schema="interpretation-digest-response-v1"` to `qa.ask_paper`.
+Only nondeterministic comprehensive Q&A uses it. Omitted/`None`, retrieval,
+full-text and metadata-count paths retain their existing calls and payloads;
+public requests/configuration remain OFF, without optional imports or response
+keys. No renderer facade, history, retry, evidence-handle or native writer changes.
+
+The used C path reuses the existing schema validator and calls
+`current_review_view` once. The existing getter alone owns currentness, base
+audit, policy and optional qualification. Getter errors propagate; no current
+review yields legacy context without a review and separate
+`interpretation_context={availability: unavailable, reason: review_unavailable}`.
+Qualified optional unavailability keeps its existing reason and base-only context,
+without resurrecting a raw card or audit.
+
+When it fits, the prompt moves the whole unchanged plain `digest` into one JSON
+bundle with the unchanged `interpretation_view`, AFTER the exact raw PDF
+substring admitted by same-qualified-base legacy serialization. Metadata,
+quality and goals remain in front. Original indices, full parameter objects,
+False/zero/None, multiplicity and native support paths/parts/IDs survive; no
+reference resolver or passage-body copy is added. The shared serializer preserves
+Unicode, whitespace, `qa_text` precedence and Python slicing. The complete
+candidate must fit the existing pre-escape character cap without final slicing.
+Overflow supplies exact same-base legacy bytes plus separate unavailable
+`context_budget` status; success reports available with an empty reason. Whole
+bundles cost space: saturated raw-body contexts fall back, not force-fit.
+
+Answer acceptance requires the old guard against same-base legacy context L and
+the full original stripped body, AND visibility in actual prompt context A using
+the existing predicates. New labels/rationales cannot add quote/answer authority.
+This is not a P-only policy: existing generated-field quotes matching original
+text beyond admitted PDF P can still pass when visible, including overflow.
+These lexical contracts are not entailment, human approval or causal warrant.
+
+Owned machine regressions exercise the connected caller, exact allocation,
+readonly native binding, OFF behavior and authority/visibility composition.
+They are not a usefulness or scientific-benefit oracle. Public/UI activation,
+consented changed-card native writes and the blinded human study remain separate.
+Editing the metadata helper legitimately changes the existing renderer revision.
+
+## Explicit feed co-production
+
+`assess_digest`, strategy dispatch and map-reduce accept optional paired
+`feed_context` / `feed_out`; only explicit context selects `FeedDigestResponse`.
+`deep_review.start(feed_contexts={item_key: context})` carries a snapshotted profile
+and exact source key through its existing worker to `_review_one(feed_context=...)`.
+The same initial/parse-retry/correction digest calls produce optional typed project
+records; no subsequent model, verifier or summarizer is added. An explicit C/feed
+collision fails before source acquisition or reader/model work. Missing context
+retains default models, prompts, kwargs, plain digest keys and C-OFF imports/IO.
+
+The base `review_identity` describes the normalized PaperDigest subrecord, not a
+false assertion that the augmented transport used only its schema. The separate
+`feed_assessment.producer` records the actual selected response model/schema,
+profile/context, prompt, generation input, decoder-format hashes and configured
+provider/model/timestamp provenance. After existing source guards, policy and base
+audit binding, this optional envelope binds exact base identity/digest, verified
+digest, original extraction and audit. `_review_cache` remains the sole cache owner
+and ordinary current-reader/QA authority is unchanged. No feed fields enter QA or
+native digest notes. Existing note calls and their source-guard order are unchanged;
+`review_entry` only assembles their already-computed receipt fields.
+
+Feed records require exact configured project/source keys, closed use kinds and
+literal original quotes. Applicable records also need a mechanism, component,
+actual change and experiment. Missing, invalid, partial, unknown and assessed no-fit
+remain distinct. An invalid optional result cannot retry a model or manufacture a
+positive, and base failure clears the public collector. Only the final accepted
+base attempt can supply optional output. Source admission, legacy grounding,
+verifier fallback/correction bounds and map-reduce original-source authority stay
+unchanged. Retained offsets are first matching extracted-text occurrences, not
+page mapping or semantic entailment. All proposals remain AI-generated/unverified;
+actual scientific usefulness and human acceptance are separate end-stage gates.

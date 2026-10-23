@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import stat
 import time
+from contextlib import closing, nullcontext
 from http.client import HTTPConnection
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +27,8 @@ from zotero_summarizer.integrations._zotero_write_tags import ZoteroTagMixin
 from zotero_summarizer.integrations._zotero_write_collections import (
     ZoteroCollectionMixin,
 )
+
+from zotero_summarizer.models.zotero_actions import ZoteroTargetIdentity
 
 _T = TypeVar("_T")
 
@@ -53,6 +57,34 @@ class ZoteroWriter(
 
         self.data_dir = data_dir
         self.db_path = db_path
+        self._prepared_backup: tuple[str, tuple[int, int], ZoteroTargetIdentity] | None = None
+
+    def target_identity(self, conn: sqlite3.Connection | None = None) -> ZoteroTargetIdentity:
+        """Read the actual selected native file/user library, never account or content hashes."""
+        path = self.db_path.resolve(strict=True)
+        opening = path.stat(follow_symlinks=False)
+        if not stat.S_ISREG(opening.st_mode) or opening.st_ino <= 0:
+            raise ZoteroWriteError("Native target lacks stable regular-file identity")
+        connection = (nullcontext(conn) if conn is not None else closing(
+            sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=15)))
+        with connection as actual:
+            databases = actual.execute("PRAGMA database_list").fetchall()
+            main = [row[2] for row in databases if row[1] == "main"]
+            libraries = actual.execute("SELECT libraryID FROM libraries WHERE type='user'").fetchall()
+            closing_stat = path.stat(follow_symlinks=False)
+            if (len(main) != 1 or Path(main[0]).resolve(strict=True) != path or
+                    self.db_path.resolve(strict=True) != path or
+                    not stat.S_ISREG(closing_stat.st_mode) or
+                    (opening.st_dev, opening.st_ino) != (closing_stat.st_dev, closing_stat.st_ino) or
+                    len(libraries) != 1):
+                raise ZoteroWriteError("Native target changed or user library is ambiguous")
+            return ZoteroTargetIdentity(database_path=str(path), device=opening.st_dev,
+                                        inode=opening.st_ino, library_id=int(libraries[0][0]))
+
+    def assert_target_identity(self, expected: ZoteroTargetIdentity,
+                               conn: sqlite3.Connection | None = None) -> None:
+        if self.target_identity(conn) != expected:
+            raise ZoteroWriteError("Native write target differs from the approved preview")
 
     def is_connector_running(self) -> bool:
         """Return True when Zotero connector HTTP server responds locally."""
@@ -100,7 +132,7 @@ class ZoteroWriter(
     _BACKUP_GLOB = "zotero.sqlite.backup_*"
     _BACKUP_KEEP = 5
 
-    def backup_database(self) -> str:
+    def backup_database(self, *, expected_target: ZoteroTargetIdentity | None = None) -> str:
         """Create a WAL-consistent, integrity-checked timestamped backup and
         return its path.
 
@@ -110,7 +142,12 @@ class ZoteroWriter(
         right before a destructive rewrite. ``src.backup(dst)`` snapshots
         WAL-resident pages consistently. The copy is then verified with
         ``PRAGMA integrity_check``; a bad backup raises (fail-fast) so it can
-        never silently precede the write. Lock contention is retried."""
+        never silently precede the write. Lock contention is retried.
+        ``expected_target`` additionally prepares one writer-owned, one-use reference
+        for a pre-dispatch audit; ordinary backup callers retain their old behavior.
+        """
+        if expected_target is not None:
+            self.assert_target_identity(expected_target)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
         backup_path = self.data_dir / f"zotero.sqlite.backup_{timestamp}"
 
@@ -136,7 +173,38 @@ class ZoteroWriter(
             raise ZoteroWriteError(
                 f"Backup failed integrity_check ({row}); aborting write."
             )
+        if expected_target is not None:
+            self.assert_target_identity(expected_target)
+            identity = backup_path.stat(follow_symlinks=False)
+            self._prepared_backup = (str(backup_path), (identity.st_dev, identity.st_ino), expected_target)
         return str(backup_path)
+
+    def _take_prepared_backup(self, reference: str, target: ZoteroTargetIdentity) -> None:
+        prepared, self._prepared_backup = self._prepared_backup, None
+        if prepared is None or reference != prepared[0] or target != prepared[2]:
+            raise ZoteroWriteError("Backup reference was not prepared by this writer for this target")
+        path = Path(reference)
+        identity = path.stat(follow_symlinks=False)
+        if (path.resolve(strict=True) != path or path.parent != Path(target.database_path).parent or
+                not path.match(self._BACKUP_GLOB) or not stat.S_ISREG(identity.st_mode) or
+                (identity.st_dev, identity.st_ino) != prepared[1]):
+            raise ZoteroWriteError("Prepared backup reference changed or is outside the native target")
+
+    def _backup_for_changes(self, create_backup: bool, precreated_backup: str | None,
+                            expected_target: ZoteroTargetIdentity | None) -> str | None:
+        if precreated_backup is not None and create_backup:
+            raise ValueError("A precreated backup cannot also request a new backup")
+        if precreated_backup is not None and expected_target is None:
+            raise ValueError("A precreated backup requires its bound native target")
+        if expected_target is not None:
+            self.assert_target_identity(expected_target)
+        if create_backup:
+            if expected_target is None:
+                return self.backup_database()
+            precreated_backup = self.backup_database(expected_target=expected_target)
+        if precreated_backup is not None:
+            self._take_prepared_backup(precreated_backup, expected_target)
+        return precreated_backup
 
     def _prune_backups(self) -> None:
         """Keep only the ``_BACKUP_KEEP`` most-recent app-created backups (our
@@ -149,18 +217,22 @@ class ZoteroWriter(
             stale.unlink(missing_ok=True)
 
     def apply_changes(
-        self, changes: Sequence[dict[str, Any]], create_backup: bool = True
+        self, changes: Sequence[dict[str, Any]], create_backup: bool = True, *,
+        precreated_backup: str | None = None, expected_target: ZoteroTargetIdentity | None = None,
     ) -> dict[str, Any]:
         """Apply queued changes and return applied IDs and per-item failures.
 
         One explicit transaction encloses the row savepoints. Lock errors retry
         the entire transaction, including errors raised during dispatch; invalid
         rows are reported individually, while unexpected errors roll back and raise.
+        A precreated backup requires this writer's prepared reference and native target;
+        it replaces, never supplements, backup creation and still finalizes retention.
+        Expected targets are rechecked on the opened transaction before row dispatch.
         """
         if not changes:
             return {"applied_ids": [], "failed": [], "backup_path": None}
 
-        backup_path = self.backup_database() if create_backup else None
+        backup_path = self._backup_for_changes(create_backup, precreated_backup, expected_target)
 
         def _do() -> dict[str, Any]:
             conn = sqlite3.connect(str(self.db_path), timeout=15)
@@ -169,6 +241,8 @@ class ZoteroWriter(
                 conn.execute("PRAGMA foreign_keys=ON")
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("BEGIN IMMEDIATE")
+                if expected_target is not None:
+                    self.assert_target_identity(expected_target, conn)
 
                 cols = read_write_columns(lambda t: self._table_columns(conn, t))
 
@@ -176,6 +250,8 @@ class ZoteroWriter(
                 failed: list[dict[str, Any]] = []
 
                 for change in changes:
+                    if expected_target is not None:
+                        self.assert_target_identity(expected_target, conn)
                     change_id = int(change.get("id") or 0)
                     conn.execute("SAVEPOINT change_row")
                     try:

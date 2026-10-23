@@ -296,6 +296,7 @@ export default function AnnotationVerdict() {
 
   // ---------- Mutations ----------
   const submitMutation = useMutation({
+    networkMode: 'always',
     mutationFn: submitVerdict,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['provenance-list'] });
@@ -305,6 +306,7 @@ export default function AnnotationVerdict() {
   });
 
   const deleteMutation = useMutation({
+    networkMode: 'always',
     mutationFn: (itemKey) => deleteVerdict(itemKey),
     onSuccess: () => {
       if (selectedKey) {

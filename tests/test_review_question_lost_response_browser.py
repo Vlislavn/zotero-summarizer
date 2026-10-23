@@ -244,7 +244,7 @@ def test_lost_postcommit_push_reply_replays_once_after_offline_browser_api_resta
     journeys._assert_offline_transport(lab, page)
     journeys._submit(page, QUESTION)
     expect(page.get_by_text(
-        "Saved on this device — server comment pending. Zotero note delivery: unknown.", exact=True)).to_be_visible()
+        "Saved on this device — server comment pending.", exact=True)).to_be_visible()
     support.wait_for(lambda: len(support.indexeddb(page)["mutations"]) == 1)
     device = support.indexeddb(page)
     mutation = device["mutations"][0]

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const mocks = vi.hoisted(() => ({ saveReviewNote: vi.fn() }));
 vi.mock('../../../api/goldenApi.js', () => ({ saveReviewNote: mocks.saveReviewNote }));
@@ -47,6 +47,27 @@ it('renders question rows separately and preserves dirty manual text across deta
   expect(screen.getAllByRole('textbox')).toHaveLength(1);
 });
 
+it.each(['target_unavailable', 'zotero_running', 'unclassified_failure'])(
+  'does not infer a native recovery action from %s alone', async (error) => {
+    const response = { saved: true, note_written: false, note_error: error,
+      note_pending: error !== 'unclassified_failure', target_key: null };
+    mocks.saveReviewNote.mockResolvedValueOnce(response);
+    const onSaved = vi.fn();
+    const reportMirror = vi.fn();
+    render(<ReviewNotes itemKey="P1" initialNote="Before" onSaved={onSaved}
+      onMirrorStart={() => reportMirror} />);
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Saved manual body' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('Saved in the app — Zotero delivery is not confirmed.', { exact: true })).toBeTruthy();
+    expect(mocks.saveReviewNote).toHaveBeenCalledOnce();
+    expect(mocks.saveReviewNote).toHaveBeenCalledWith({ item_key: 'P1', note: 'Saved manual body' });
+    expect(reportMirror).toHaveBeenCalledOnce();
+    expect(reportMirror).toHaveBeenCalledWith(response);
+    expect(onSaved).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: 'Save' }).disabled).toBe(true);
+  },
+);
+
 it('shows a rejected local question honestly instead of promising another sync', () => {
   render(<ReviewNotes itemKey="P1" questions={[{ submission_id: 'q1', question: 'Rejected question',
     saved_offline: true, sync_status: 'rejected' }]} />);
@@ -64,6 +85,20 @@ it('refreshes clean manual text and resets the draft only on a new paper', () =>
   expect(screen.getByRole('textbox').value).toBe('Another paper');
 });
 
+it('keeps device-save confirmation factual across refresh without owning live sync progress', async () => {
+  mocks.saveReviewNote.mockResolvedValueOnce({ saved_offline: true });
+  const { rerender } = render(<ReviewNotes itemKey="P1" initialNote="Before" />);
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Device manual body' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+  expect(await screen.findByText('Saved on this device.', { exact: true })).toBeTruthy();
+  expect(mocks.saveReviewNote).toHaveBeenCalledWith({ item_key: 'P1', note: 'Device manual body' });
+  rerender(<ReviewNotes itemKey="P1" initialNote="Device manual body" />);
+  expect(screen.getByText('Saved on this device.', { exact: true })).toBeTruthy();
+  expect(screen.getByRole('textbox').value).toBe('Device manual body');
+  expect(screen.getByRole('button', { name: 'Save' }).disabled).toBe(true);
+});
+
 it('saves only the manual text and remains clean after the saved-detail refresh', async () => {
   const onSaved = vi.fn();
   const onDirtyChange = vi.fn();
@@ -79,6 +114,48 @@ it('saves only the manual text and remains clean after the saved-detail refresh'
   expect(screen.getByRole('textbox').value).toBe('My manual text');
   expect(onDirtyChange).toHaveBeenLastCalledWith(false);
   expect(screen.getByRole('button', { name: 'Save' }).disabled).toBe(true);
+});
+
+it.each(['resolve', 'reject'])('retires an old manual save after navigating away and back (%s)', async (outcome) => {
+  let resolve, reject;
+  mocks.saveReviewNote.mockImplementation(() => new Promise((ok, fail) => { resolve = ok; reject = fail; }));
+  const onSaved = vi.fn();
+  const reportMirror = vi.fn();
+  const onMirrorStart = vi.fn(() => reportMirror);
+  const props = { onSaved, onMirrorStart };
+  const { rerender } = render(<ReviewNotes {...props} itemKey="P1" initialNote="Original" />);
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Old outgoing draft' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  rerender(<ReviewNotes {...props} itemKey="P2" initialNote="Other paper" />);
+  rerender(<ReviewNotes {...props} itemKey="P1" initialNote="Revisited baseline" />);
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Old outgoing draft' } });
+
+  await act(async () => {
+    if (outcome === 'resolve') resolve({ saved: true, note_written: true });
+    else reject(new Error('Late save error'));
+  });
+
+  expect(screen.getByRole('textbox').value).toBe('Old outgoing draft');
+  expect(screen.getByRole('button', { name: 'Save' }).disabled).toBe(false);
+  expect(screen.queryByText(/Saved|Save failed/)).toBeNull();
+  expect(onSaved).not.toHaveBeenCalled();
+  expect(reportMirror).not.toHaveBeenCalled();
+});
+
+it('does not publish a manual-save completion after unmount', async () => {
+  let complete;
+  mocks.saveReviewNote.mockImplementation(() => new Promise((resolve) => { complete = resolve; }));
+  const onSaved = vi.fn();
+  const reportMirror = vi.fn();
+  const { unmount } = render(<ReviewNotes itemKey="P1" onSaved={onSaved} onMirrorStart={() => reportMirror} />);
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Sent draft' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  unmount();
+
+  await act(async () => { complete({ saved: true, note_written: true }); });
+
+  expect(onSaved).not.toHaveBeenCalled();
+  expect(reportMirror).not.toHaveBeenCalled();
 });
 
 it('keeps edits made during an in-flight manual save dirty', async () => {

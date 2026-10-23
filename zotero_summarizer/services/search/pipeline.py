@@ -25,7 +25,9 @@ from zotero_summarizer.models import GoalsConfig
 from zotero_summarizer.services._common import settings, state
 from zotero_summarizer.services.search import session as session_store
 from zotero_summarizer.services.search import require_online
-from zotero_summarizer.services.search._evidence_pass import EvidencePassRequest, run_evidence_pass
+from zotero_summarizer.services.search._evidence_pass import EvidencePassRequest
+from zotero_summarizer.services.search._question_adapter import run_question_evidence
+from zotero_summarizer.services.search._question_policy import apply_question_policy
 from zotero_summarizer.services.search._fulltext import acquire_full_text
 from zotero_summarizer.services.search._models import Candidate, ResearchSession, ScreenRequest, ConfirmedConstraints
 from zotero_summarizer.services.search._relevance import attach_relevance
@@ -62,6 +64,7 @@ class SearchDeps:
     quota: int = 15
     crossref_mailto: str | None = None  # Crossref polite-pool mailto (optional)
     evidence_pass: EvidencePassRequest | None = None  # Explicit supplied-original shadow only; never default-wired
+    observe_source_outcomes: bool = False  # Explicit discovery only; legacy federation projection unchanged.
 
 
 # Process-lazy keyless OpenAlex for Search federation — built once, reused (an
@@ -110,10 +113,11 @@ def default_deps() -> SearchDeps:
     )
 
 
-def run_screen(raw_query: str, questions: list[str], *, deps: SearchDeps, constraints: ConfirmedConstraints | None = None) -> ResearchSession:
+def run_screen(raw_query: str, questions: list[str], *, deps: SearchDeps, constraints: ConfirmedConstraints | None = None,
+               evidence_policy: str = "baseline") -> ResearchSession:
     """Phase 1: intent → plan → federate → score → rank → persist. Returns a saved
     ``ResearchSession`` with candidates ordered by the constrained contract."""
-    request = ScreenRequest(query=raw_query, questions=questions)
+    request = ScreenRequest(query=raw_query, questions=questions, evidence_policy=evidence_policy)
     raw_query, questions = request.query, request.questions
     require_online()
     intent = parse_intent(raw_query, questions, llm=deps.llm)
@@ -129,6 +133,7 @@ def run_screen(raw_query: str, questions: list[str], *, deps: SearchDeps, constr
         openreview_client=deps.openreview_client,
         library_finder=deps.library_finder, quota=deps.quota,
         crossref_mailto=deps.crossref_mailto,
+        **({'observe_outcomes': True} if getattr(deps, 'observe_source_outcomes', False) else {}),
     )
     score_query_relevance(raw_query or intent.canonical_question, candidates, reranker_model=deps.reranker_model)
     rank_candidates(candidates)
@@ -137,6 +142,9 @@ def run_screen(raw_query: str, questions: list[str], *, deps: SearchDeps, constr
 
     sess = session_store.new_session(raw_query=raw_query, intent=intent, plan=plan, questions=questions)
     sess.candidates = candidates
+    sess.evidence_policy = request.evidence_policy
+    if request.evidence_policy == "question_evidence":
+        sess.evidence_status = {"state": "pending" if questions else "unavailable", "reason": "" if questions else "no_questions"}
     sess.status = "screened"
     session_store.save(sess)
     return sess
@@ -183,16 +191,22 @@ def run_review(session_id: str, *, deps: SearchDeps, top_n: int = LIGHT_REVIEW_N
     require_online()
     sess = session_store.load(session_id)
     request = ScreenRequest(query=sess.raw_query, questions=sess.questions)
-    run_evidence_pass(sess, getattr(deps, "evidence_pass", None))
+    fulltext: dict[str, str] = {}
+    if sess.evidence_policy == "question_evidence":
+        rank_candidates(sess.candidates)  # Drop any previous attempt's promotion before reassessment.
+    run_question_evidence(sess, deps, fulltext)
     if session_store.is_deleted(session_id):
         return sess
-    fulltext: dict[str, str] = {}
+    apply_question_policy(sess)
+    if sess.evidence_policy == "question_evidence" and sess.questions:
+        session_store.save_merge(sess)
     for cand in sess.candidates[:top_n]:
         if session_store.is_deleted(session_id):
             return sess
         try:
-            text = acquire_full_text(cand, extractor=deps.extractor, unpaywall=deps.unpaywall_client)
-            fulltext[cand.candidate_id] = text
+            if cand.candidate_id not in fulltext:
+                fulltext[cand.candidate_id] = acquire_full_text(cand, extractor=deps.extractor, unpaywall=deps.unpaywall_client)
+            text = fulltext[cand.candidate_id]
             light_review(cand, full_text=text, sections=[], llm=deps.llm_light, max_chars=_max_chars(deps))
         except Exception as exc:  # noqa: BLE001 — isolate failures to this paper
             cand.review = {"state": "error", "error": str(exc)[:500]}
@@ -200,6 +214,7 @@ def run_review(session_id: str, *, deps: SearchDeps, top_n: int = LIGHT_REVIEW_N
             return sess
 
     rank_candidates(sess.candidates)  # quality now populated → re-rank the band
+    apply_question_policy(sess)
     attach_relevance(sess.candidates)  # re-derive bands/why now that quality chips exist
     # Persist the re-ranked, quality-scored band before the slow deep reads so the UI
     # shows bands immediately (save_merge keeps a concurrent Add's materialized key).

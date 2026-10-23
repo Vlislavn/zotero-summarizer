@@ -209,6 +209,7 @@ def run_saved(
     settings: Settings, *, input_jsonl: Path | None = None, collect_only: bool = False,
     cached_only: bool = False, shortlist_budget: int | None = None,
     card_budget: int | None = None, source_limit: int = 1000,
+    live_collection: dict | None = None,
 ) -> dict:
     started = time.monotonic()
     shortlist_budget, card_budget, source_limit, _ = parse_run_budgets(
@@ -218,9 +219,14 @@ def run_saved(
         raise ValueError("collect-only and cached-only are mutually exclusive")
     if cached_only and input_jsonl is not None:
         raise ValueError("cached-only cannot import new input")
-    if not cached_only and input_jsonl is None:
-        raise ValueError("Telegram live collection is not implemented; provide --input-jsonl")
-    posts = [] if cached_only else read_posts(Path(input_jsonl), limit=source_limit)
+    if live_collection is not None and (cached_only
+            or live_collection.get("status") != "collected"
+            or live_collection.get("cleanup") != "completed"
+            or type(live_collection.get("collection")) is not dict):
+        raise ValueError("live news requires a completed collection receipt")
+    if not cached_only and input_jsonl is None and live_collection is None:
+        raise ValueError("provide saved input or a completed collection receipt")
+    posts = [] if input_jsonl is None else read_posts(Path(input_jsonl), limit=source_limit)
     profile = (
         ResearchProfile.model_validate(
             json.loads(profile_path(settings.data_dir).read_text(encoding="utf-8")),
@@ -236,18 +242,24 @@ def run_saved(
         migrations.run_migrations(settings.triage_db_path, "triage", migrations.TRIAGE_MIGRATIONS)
     connection = connect_sqlite_ro if cached_only else repositories._connect_to
     with closing(connection(settings.triage_db_path)) as conn:
-        if not cached_only:
+        if not cached_only and live_collection is None:
             counts.update(_import(conn, posts))
         rows = store.list_posts(conn, limit=source_limit)
+        if live_collection is not None and input_jsonl is not None and [row["post"] for row in rows] != posts:
+            raise RuntimeError("saved Telegram posts changed after collection; rerun")
         if not collect_only and not cached_only:
             counts.update(_process(conn, rows, config, identity, shortlist))
+    if live_collection is not None:
+        counts.update(live_collection["collection"]["counts"])
     metadata = {
         "schema_version": 1, "source": "telegram", "generated_at": now_iso_z(),
         "mode": "collect" if collect_only else "cached" if cached_only else "process",
         "ml_mode": "shadow", "hard_gate": False, "evaluation_identity": identity,
         "counts": counts, "shortlist_budget": shortlist, "card_budget": cards,
         "source_limit": source_limit, "scope": "newest saved posts; oldest-first within window",
-        "live_cursor": None, "retry_at": None, "usage": None,
+        "live_cursor": (live_collection["collection"]["channels"] if live_collection else None),
+        "retry_at": live_collection["account"]["retry_at"] if live_collection else None,
+        "collection": live_collection, "usage": None,
         "duration_seconds": time.monotonic() - started,
         "attempts_basis": "new admitted LLM work, including failures; not provider usage receipts",
     }

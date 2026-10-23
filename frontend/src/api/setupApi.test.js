@@ -40,6 +40,15 @@ describe('setup API wrappers', () => {
     expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual({ check_ids: ['ml_assets'] });
   });
 
+  it('passes cancellation to the Doctor status transport without starting verification', async () => {
+    mockFetch({ ready: false });
+    const controller = new AbortController();
+    await fetchDoctorStatus({ signal: controller.signal });
+    expect(global.fetch.mock.calls[0][0]).toBe('/api/setup/doctor');
+    expect(global.fetch.mock.calls[0][1].signal).toBe(controller.signal);
+    expect(global.fetch.mock.calls[0][1].method).toBeUndefined();
+  });
+
   it('GETs Zotero candidates from /api/setup/detect-zotero', async () => {
     mockFetch({ candidates: [] });
     await expect(detectZotero()).resolves.toEqual({ candidates: [] });

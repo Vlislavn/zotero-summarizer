@@ -17,11 +17,8 @@ from zotero_summarizer.models import (
 )
 from zotero_summarizer.services._common import settings, state
 from zotero_summarizer.services.corpus import refresh_corpus_items_by_keys
-from zotero_summarizer.services.zotero.pending import (
-    build_label_tag_change,
-    effective_tag_payload,
-    normalize_pending_tag_payload,
-)
+from zotero_summarizer.services.zotero import direct_actions
+from zotero_summarizer.services.zotero.pending import build_label_tag_change
 
 
 def get_zotero_reader_or_raise() -> ZoteroReader:
@@ -136,56 +133,29 @@ async def zotero_item_detail(item_key: str) -> dict[str, Any]:
     return detail
 
 
+async def _finish_direct_edit(result: dict[str, Any], reader: ZoteroReader) -> dict[str, Any]:
+    if "action_ids" not in result:
+        return result  # connector refusal and genuine no-ops retain their existing shape
+    try:
+        await refresh_corpus_items_by_keys([result["item_key"]])
+        detail = await asyncio.to_thread(reader.get_item_detail, result["item_key"])
+        if detail is None:
+            raise ValueError("Item detail unavailable after native delivery")
+    except Exception as exc:
+        raise APIError(error="zotero_refresh_failed", status_code=500,
+                       message="Native changes were recorded; refreshing the item failed", details={
+                           "action_ids": result["action_ids"], "applied_ids": result["action_ids"],
+                           "failed_ids": [], "backup_path": result["backup_path"],
+                           "delivery_status": result["delivery_status"],
+                       }) from exc
+    return {**result, "item": detail}
+
+
 async def zotero_set_item_priority(item_key: str, req: ZoteroItemPriorityUpdateRequest) -> dict[str, Any]:
     reader = get_zotero_reader_or_raise()
     writer = get_zotero_writer_or_raise()
-    safe_item_key = str(item_key or "").strip()
-    if not safe_item_key:
-        raise APIError(error="validation_error", message="item_key is required", status_code=422)
-
-    detail = await asyncio.to_thread(reader.get_item_detail, safe_item_key)
-    if detail is None:
-        raise APIError(error="not_found", message="Item not found", status_code=404)
-
-    if writer.is_connector_running() and not req.force:
-        return {
-            "error": "zotero_running",
-            "message": "Zotero appears to be running; close Zotero or confirm force apply.",
-            "requires_force": True,
-        }
-
-    current_tags = [str(tag or "").strip() for tag in (detail.get("tags") or []) if str(tag or "").strip()]
-    payload = build_label_tag_change(current_tags, req.priority)
-    if not payload["add_tags"] and not payload["remove_tags"]:
-        refreshed_detail = await asyncio.to_thread(reader.get_item_detail, safe_item_key)
-        return {
-            "updated": 0,
-            "item_key": safe_item_key,
-            "priority": req.priority,
-            "message": "Label tag already set",
-            "item": refreshed_detail,
-        }
-
-    result = await asyncio.to_thread(
-        writer.apply_changes,
-        [{"id": 0, "item_key": safe_item_key, "change_type": "tag_changes", "payload_json": payload}],
-        True,
-    )
-    failed = list(result.get("failed") or [])
-    if failed:
-        first_error = str(failed[0].get("error") or "Failed to update item priority")
-        raise APIError(error="zotero_write_failed", message=first_error, status_code=500)
-
-    await refresh_corpus_items_by_keys([safe_item_key])
-    refreshed_detail = await asyncio.to_thread(reader.get_item_detail, safe_item_key)
-    return {
-        "updated": 1,
-        "item_key": safe_item_key,
-        "priority": req.priority,
-        "add_tags": payload["add_tags"],
-        "remove_tags": payload["remove_tags"],
-        "item": refreshed_detail,
-    }
+    result = await asyncio.to_thread(direct_actions.apply_priority_edit, item_key, req, reader, writer)
+    return await _finish_direct_edit(result, reader)
 
 
 async def zotero_attach_figures(item_key: str, req: ZoteroAttachFiguresRequest) -> dict[str, Any]:
@@ -241,54 +211,8 @@ async def zotero_attach_figures(item_key: str, req: ZoteroAttachFiguresRequest) 
 async def zotero_update_item_tags(item_key: str, req: ZoteroItemTagUpdateRequest) -> dict[str, Any]:
     reader = get_zotero_reader_or_raise()
     writer = get_zotero_writer_or_raise()
-    safe_item_key = str(item_key or "").strip()
-    if not safe_item_key:
-        raise APIError(error="validation_error", message="item_key is required", status_code=422)
-
-    detail = await asyncio.to_thread(reader.get_item_detail, safe_item_key)
-    if detail is None:
-        raise APIError(error="not_found", message="Item not found", status_code=404)
-
-    if writer.is_connector_running() and not req.force:
-        return {
-            "error": "zotero_running",
-            "message": "Zotero appears to be running; close Zotero or confirm force apply.",
-            "requires_force": True,
-        }
-
-    current_tags = [str(tag or "").strip() for tag in (detail.get("tags") or []) if str(tag or "").strip()]
-    payload = normalize_pending_tag_payload({"add_tags": list(req.add_tags), "remove_tags": list(req.remove_tags)})
-    effective_payload = effective_tag_payload(current_tags, payload)
-    if not effective_payload["add_tags"] and not effective_payload["remove_tags"]:
-        refreshed_detail = await asyncio.to_thread(reader.get_item_detail, safe_item_key)
-        return {
-            "updated": 0,
-            "item_key": safe_item_key,
-            "message": "Tag update has no net changes",
-            "add_tags": [],
-            "remove_tags": [],
-            "item": refreshed_detail,
-        }
-
-    result = await asyncio.to_thread(
-        writer.apply_changes,
-        [{"id": 0, "item_key": safe_item_key, "change_type": "tag_changes", "payload_json": effective_payload}],
-        True,
-    )
-    failed = list(result.get("failed") or [])
-    if failed:
-        first_error = str(failed[0].get("error") or "Failed to update item tags")
-        raise APIError(error="zotero_write_failed", message=first_error, status_code=500)
-
-    await refresh_corpus_items_by_keys([safe_item_key])
-    refreshed_detail = await asyncio.to_thread(reader.get_item_detail, safe_item_key)
-    return {
-        "updated": 1,
-        "item_key": safe_item_key,
-        "add_tags": effective_payload["add_tags"],
-        "remove_tags": effective_payload["remove_tags"],
-        "item": refreshed_detail,
-    }
+    result = await asyncio.to_thread(direct_actions.apply_tag_edit, item_key, req, reader, writer)
+    return await _finish_direct_edit(result, reader)
 
 
 def _apply_mirror_change(item_key: str, change_type: str, payload: dict[str, Any]) -> None:
@@ -315,16 +239,6 @@ def zotero_upsert_verdict_note(item_key: str, user_priority: str, comment: str) 
     )
 
 
-def zotero_upsert_user_note(item_key: str, note: str) -> None:
-    """Mirror the user's review note through the same backup-first write boundary."""
-    from zotero_summarizer.services.zotero.pending import USER_NOTE_MARKER, build_user_note_html
-
-    _apply_mirror_change(
-        item_key, "upsert_note",
-        {"note_html": build_user_note_html(note), "marker": USER_NOTE_MARKER, "note_title": "My notes"},
-    )
-
-
 def zotero_set_label_tag(item_key: str, priority: str | None) -> None:
     """Mirror a human label (``None`` clears it); preserve unrelated tags."""
     detail = get_zotero_reader_or_raise().get_item_detail(item_key)
@@ -336,72 +250,14 @@ def zotero_set_label_tag(item_key: str, priority: str | None) -> None:
 
 
 def zotero_upsert_digest_note(item_key: str, digest: Any) -> None:
-    """Mirror the digest through the same backup-first write boundary."""
-    from zotero_summarizer.services.zotero.pending import DIGEST_NOTE_MARKER, build_digest_note_html
+    """Compatibility entry: propose the exact published digest; never auto-write."""
+    from zotero_summarizer.services.zotero.generated_notes import stage_current_digest
 
-    _apply_mirror_change(
-        item_key, "upsert_note",
-        {"note_html": build_digest_note_html(digest), "marker": DIGEST_NOTE_MARKER, "note_title": "Deep digest"},
-    )
+    stage_current_digest(item_key, digest)
 
 
 async def zotero_update_item_collections(item_key: str, req: ZoteroItemCollectionUpdateRequest) -> dict[str, Any]:
     reader = get_zotero_reader_or_raise()
     writer = get_zotero_writer_or_raise()
-    safe_item_key = str(item_key or "").strip()
-    if not safe_item_key:
-        raise APIError(error="validation_error", message="item_key is required", status_code=422)
-
-    detail = await asyncio.to_thread(reader.get_item_detail, safe_item_key)
-    if detail is None:
-        raise APIError(error="not_found", message="Item not found", status_code=404)
-
-    if writer.is_connector_running() and not req.force:
-        return {
-            "error": "zotero_running",
-            "message": "Zotero appears to be running; close Zotero or confirm force apply.",
-            "requires_force": True,
-        }
-
-    changes: list[dict[str, Any]] = []
-    added_targets: list[dict[str, str]] = []
-    removed_targets: list[dict[str, str]] = []
-
-    for ref in req.add:
-        payload = ref.to_writer_payload()
-        changes.append(
-            {"id": 0, "item_key": safe_item_key, "change_type": "add_to_collection", "payload_json": payload}
-        )
-        added_targets.append(payload)
-
-    for ref in req.remove:
-        payload = ref.to_writer_payload()
-        changes.append(
-            {"id": 0, "item_key": safe_item_key, "change_type": "remove_from_collection", "payload_json": payload}
-        )
-        removed_targets.append(payload)
-
-    if not changes:
-        refreshed_detail = await asyncio.to_thread(reader.get_item_detail, safe_item_key)
-        return {
-            "updated": 0,
-            "item_key": safe_item_key,
-            "message": "Collection update has no changes",
-            "item": refreshed_detail,
-        }
-
-    result = await asyncio.to_thread(writer.apply_changes, changes, True)
-    failed = list(result.get("failed") or [])
-    if failed:
-        first_error = str(failed[0].get("error") or "Failed to update item collections")
-        raise APIError(error="zotero_write_failed", message=first_error, status_code=500)
-
-    await refresh_corpus_items_by_keys([safe_item_key])
-    refreshed_detail = await asyncio.to_thread(reader.get_item_detail, safe_item_key)
-    return {
-        "updated": len(changes),
-        "item_key": safe_item_key,
-        "added": added_targets,
-        "removed": removed_targets,
-        "item": refreshed_detail,
-    }
+    result = await asyncio.to_thread(direct_actions.apply_collection_edit, item_key, req, reader, writer)
+    return await _finish_direct_edit(result, reader)

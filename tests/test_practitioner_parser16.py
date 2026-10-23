@@ -1,4 +1,4 @@
-"""Frozen public XML characterization, not live feed or semantic acceptance."""
+"""Synthetic parser/reader contract controls; no recovered public-capture claim."""
 from __future__ import annotations
 
 import asyncio
@@ -20,14 +20,11 @@ from zotero_summarizer.integrations import app_rss
 from zotero_summarizer.integrations.app_rss import AppRssReader, _entry_to_item
 from zotero_summarizer.models import SummarizeRequest
 
-FROZEN = Path('/Users/vladnikulin/code/personal/zotero-summarizer/data/issue-closure')
+from _practitioner_inputs import practitioner_inputs as practitioner_inputs
+
 Q = Path(__file__).resolve().parents[1]
-CAPTURE = FROZEN / 'practitioner-live8'
-GENERATOR = FROZEN / 'practitioner-acceptance14/generator'
-GRADER = FROZEN / 'practitioner-acceptance14/grader-only'
 FEEDS = ('https://hackernoon.com/tagged/ai-agents/feed',
          'https://hackernoon.com/tagged/agentic-ai/feed')
-MAIN_SHA = 'a97a63777d44b7750aad82ed49e5d641df9534405ceca4ea63d3568514dd6531'
 
 
 def sha(data):
@@ -44,13 +41,13 @@ def retain(record_property, name, value):
             json.dump(value, handle, ensure_ascii=False, indent=2)
 
 
-def test_frozen_parser_and_actual_reader_request_roles(record_property):
-    body = (CAPTURE / 'main-feed.xml').read_bytes()
-    assert sha(body) == MAIN_SHA
+def test_frozen_parser_and_actual_reader_request_roles(record_property, practitioner_inputs):
+    body = practitioner_inputs.xml.read_bytes()
+    assert sha(body) == practitioner_inputs.xml_sha
     raw_items = ET.fromstring(body).findall('./channel/item')
     parsed = feedparser.parse(body)
-    cohort = json.loads((GENERATOR / 'cohort.json').read_text())['cases']
-    roles = json.loads((GRADER / 'source-roles.json').read_text())['cases']
+    cohort = json.loads(practitioner_inputs.cohort.read_text())['cases']
+    roles = json.loads((practitioner_inputs.grader / 'source-roles.json').read_text())['cases']
     dist = importlib.metadata.distribution('feedparser')
     rows = []
 
@@ -79,6 +76,9 @@ def test_frozen_parser_and_actual_reader_request_roles(record_property):
         req = SummarizeRequest(title=item['title'], doi=item['doi'] or None,
                                abstract=item['abstract'], pdf_path='')
         content = entry.content[0]['value']
+        assert item['title'] == case['title']
+        assert raw_html != content == practitioner_inputs.parsed_html[case['case_id']]
+        assert role['case_id'] == case['case_id']
         edits = [{'tag': tag, 'raw': raw_html[a:b], 'parsed': content[c:d]}
                  for tag, a, b, c, d in difflib.SequenceMatcher(
                      None, raw_html, content, autojunk=False).get_opcodes() if tag != 'equal']
@@ -89,13 +89,14 @@ def test_frozen_parser_and_actual_reader_request_roles(record_property):
                      'raw_html_chars': len(raw_html), 'parsed_html_chars': len(content),
                      'parsed_html_sha256': sha(content.encode()), 'content_type': entry.content[0]['type'],
                      'parser_html_edits': edits, 'later_web_pdf': None})
-    receipt = {'scope': 'installed parser + AppRssReader mapping; diagnostic main capture only',
+    receipt = {'scope': 'synthetic mechanical inputs + installed parser/AppRssReader; NOT historical capture',
                'version': dist.version, 'license': dist.metadata.get('License'),
                'license_classifiers': [v for v in dist.metadata.get_all('Classifier', []) if 'License' in v],
                'parser_file': feedparser.__file__, 'raw_items': 20, 'selected_cases': 6,
                'unselected_items': 14, 'cases': rows}
-    assert [(r['raw_html_chars'], r['parsed_html_chars']) for r in rows[:2]] == [
-        (13368, 13413), (13004, 12960)]
+    assert tuple(row['case_id'] for row in rows) == practitioner_inputs.selected_ids
+    assert practitioner_inputs.selected_ids == ('public-03', 'public-08', 'public-10',
+                                                'public-14', 'public-15', 'public-20')
     retain(record_property, 'parser-roles', receipt)
 
 
@@ -114,7 +115,9 @@ def test_actual_reader_sanitizes_parsed_fields_without_content_promotion():
     assert 'FULL HTML ONLY' not in item['abstract']
 
 
-def test_requested_feed_registration_empty_capture_ingestion_reopen(tmp_path, monkeypatch, record_property):
+def test_requested_feed_registration_empty_capture_ingestion_reopen(
+    tmp_path, monkeypatch, record_property, practitioner_inputs,
+):
     db = tmp_path / 'data/triage.db'
     settings = type('OwnedSettings', (), {'triage_db_path': db,
                     'zotero_data_dir': tmp_path / 'data/no-zotero'})()
@@ -122,9 +125,9 @@ def test_requested_feed_registration_empty_capture_ingestion_reopen(tmp_path, mo
     monkeypatch.setattr(app_rss.socket, 'getaddrinfo', lambda *a, **kw: [
         (socket.AF_INET, socket.SOCK_STREAM, 6, '', ('93.184.216.34', 443))])
     monkeypatch.setattr(app_rss, 'offline_requested', lambda: False)
-    captures = {url: (CAPTURE / f'feed-{i}.xml').read_bytes() for i, url in enumerate(FEEDS)}
-    expected = ('3595e4fce90d08b4b0dcd0cea42165b40a0d5c57c55dd1b1e186483aa419bf20',
-                'e87d36a15cff8a66e31192e49a3a70725fadaa4d0ba4aef79d46ff4339dde191')
+    captures = {url: (practitioner_inputs.capture / f'feed-{i}.xml').read_bytes()
+                for i, url in enumerate(FEEDS)}
+    expected = practitioner_inputs.feed_shas
     for url, digest in zip(FEEDS, expected, strict=True):
         assert sha(captures[url]) == digest
         assert len(feedparser.parse(captures[url]).entries) == 0
@@ -145,5 +148,5 @@ def test_requested_feed_registration_empty_capture_ingestion_reopen(tmp_path, mo
     assert set(fetched) == set(FEEDS)
     assert {f['url'] for f in reopened.get_feed_groups()} == set(FEEDS)
     assert reopened.get_feed_items(limit=None) == []
-    retain(record_property, 'requested-feeds', {'scope': 'mocked HTTP frozen-capture replay, clean SQLite',
+    retain(record_property, 'requested-feeds', {'scope': 'mocked HTTP synthetic empty feeds, clean SQLite',
            'result': result, 'feeds': reopened.get_feed_groups(), 'items': [], 'live_network_calls': 0})

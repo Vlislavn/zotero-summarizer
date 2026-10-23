@@ -95,10 +95,19 @@ def _has_value(value: Any) -> bool:
     return value is not None
 
 
-def _basis_value(digest: PaperDigest, ref: str) -> Any:
-    parts = ref.removeprefix("/").split("/")
-    value = getattr(digest, parts[0])
-    return getattr(value, parts[1]) if len(parts) == 2 and value is not None else value
+def interpretation_references(digest: dict[str, Any]) -> dict[str, Any]:
+    """Closed references over an already validated plain base JSON digest."""
+    references = {"/tldr": digest.get("tldr")}
+    references.update((f"/key_findings/{index}", finding)
+                      for index, finding in enumerate(digest.get("key_findings", [])))
+    references.update((f"/{field}", digest.get(field)) for field in ("methods", "limitations", "key_weakness"))
+    parameters = digest.get("parameters")
+    references["/parameters"] = parameters
+    if parameters is not None:
+        references.update((f"/parameters/{field}", parameters.get(field)) for field in (
+            "dataset", "baselines", "sample_size", "metrics", "architecture", "external_validation",
+        ))
+    return {ref: value for ref, value in references.items() if _has_value(value)}
 
 
 def interpretation_payload(
@@ -107,14 +116,11 @@ def interpretation_payload(
     """Bind pointer shape/current content only, without asserting entailment."""
     state = {"origin": "ai_generated", "scientific_verification": "unverified"}
     if isinstance(content, InterpretationDraft):
-        findings = {"/tldr": digest.tldr}
-        findings.update((f"/key_findings/{index}", finding) for index, finding in enumerate(digest.key_findings))
+        references = interpretation_references(digest.model_dump(mode="json"))
         seen: set[str] = set()
         for item in content.items:
             ref = item.finding_ref
-            if ref in seen or not findings.get(ref, "").strip() or any(
-                not _has_value(_basis_value(digest, basis)) for basis in item.basis_refs
-            ):
+            if ref in seen or ref not in references or any(basis not in references for basis in item.basis_refs):
                 content = InterpretationUnavailable(unavailable_reason="invalid_references")
                 break
             seen.add(ref)

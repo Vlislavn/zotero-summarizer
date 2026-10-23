@@ -28,6 +28,7 @@ import {
 import { isMachineTag } from '../utils/tags.js';
 import { fulltextMessage } from './todayHelpers.js';
 import { readStorage, writeStorage } from '../utils/safeStorage.js';
+import useServerAvailable from '../hooks/useServerAvailable.js';
 
 // Library page — a single "Read next" surface (Stage 2). The former Browse tab
 // and Triage monitor are merged in: the sidebar collection/tag filters + a
@@ -52,8 +53,8 @@ function flattenCollections(nodes, depth = 0) {
 
 export default function LibraryReadNext() {
   const navigate = useNavigate();
-  const { status, isError: setupStatusError } = useSetupStatus();
-  const setupStatusKnown = Boolean(status) || setupStatusError;
+  const { status } = useSetupStatus();
+  const serverAvailable = useServerAvailable();
   const zoteroConnected = status?.zotero?.db_found === true;
   const [searchParams, setSearchParams] = useSearchParams();
   // Client-side smart filters (Phase 1) — hydrated from the URL on mount so a
@@ -273,12 +274,12 @@ export default function LibraryReadNext() {
   }, [queueArgs, applyQueueData]);
 
   useEffect(() => {
-    if (setupStatusKnown) loadQueue();
+    loadQueue();
     return () => {
       if (pollRef.current) { clearTimeout(pollRef.current); pollRef.current = null; }
       if (ftPollRef.current) { clearTimeout(ftPollRef.current); ftPollRef.current = null; }
     };
-  }, [loadQueue, setupStatusKnown]);
+  }, [loadQueue]);
 
   // Persist the CURRENTLY-DISPLAYED ranked order so the full-page review (opened
   // in a new tab via window.open) can offer Prev/Next through the same list.
@@ -540,7 +541,8 @@ export default function LibraryReadNext() {
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyUp={(e) => { if (e.key === 'Enter') applySearch(); }}
-              placeholder="Search by meaning… (e.g. hallucination mitigation)"
+              disabled={!serverAvailable}
+              placeholder={serverAvailable ? 'Search by meaning… (e.g. hallucination mitigation)' : 'Meaning search needs the Mac — use cached filters below'}
               className="flex-1 min-w-0 px-3 py-2 rounded-lg border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
             />
             {/* Search is semantic by default (hybrid); Enter submits — no Meaning/
@@ -665,6 +667,7 @@ export default function LibraryReadNext() {
         {/* Region B — REVIEW QUEUE: the work surface. Predict lives HERE, atop the
             rows whose Confirm/Override cards it produces, with its own feedback. */}
         <Section label="Review queue">
+          <fieldset disabled={!serverAvailable}>
           <PredictionsBar
             fleetStatus={fleetStatus}
             onRun={handleReviewCool}
@@ -675,6 +678,8 @@ export default function LibraryReadNext() {
             proposedCount={proposedCount}
             queueAtLimit={queue.length >= QUEUE_LIMIT}
           />
+          </fieldset>
+          {!serverAvailable && <p role="status" className="mt-2 text-xs text-amber-800">Cached working set — verdicts and notes save on this device. Review, meaning search and Zotero export need the Mac.</p>}
           <div className="mt-3">
             <ReadNextView
           // Remount on a deliberate SERVER filter change so the incremental-reveal
@@ -735,7 +740,7 @@ export default function LibraryReadNext() {
           <Section label="Export to Zotero">
             <div className="flex flex-wrap gap-2 items-center">
               <ZoteroActionsMenu
-                disabled={syncingAll}
+                disabled={syncingAll || !serverAvailable}
                 actions={[
                   {
                     label: 'Sync all → Zotero', busy: syncingAll, busyLabel: 'Syncing…',

@@ -343,3 +343,10 @@ and corpus fast-rejections retain their existing machine-owned responses.
 This compatibility projection does not produce `PaperDigest.read_decision`,
 rewrite stored summaries, or establish rendered reading advice or usefulness.
 The broader selective-reading policy and semantic acceptance remain separate.
+
+Today returns additive `selection_evidence` and assembled `selection_policy`,
+without changing scoring, role allocation or review/Add authority. The existing
+source parse, current-review snapshot and actual rank/picker calculations are
+reused; no new reader, scorer or policy read is added. Empty slates retain their
+resolved policy. Interleave replaces all new paper evidence with common blinded
+metadata while preserving old arm records/logs. See `daily_select/README.md`.

@@ -275,7 +275,7 @@ class PaperChunkIndex:
             LOGGER.warning("rank_bm25 unavailable; chunk retrieval falls back to token overlap")
         self._bm25 = BM25Okapi(self._docs) if (BM25Okapi is not None and self._docs) else None
 
-    def top_chunks(self, query: str, k: int) -> list[str]:
+    def _ranked(self, query: str) -> list[tuple[int, float]]:
         q_tokens = tokenize(query)
         if not q_tokens or not self.chunks:
             return []
@@ -284,8 +284,14 @@ class PaperChunkIndex:
         else:
             q_set = set(q_tokens)
             scores = [float(len(q_set.intersection(doc))) for doc in self._docs]
-        order = sorted(range(len(self.chunks)), key=lambda i: scores[i], reverse=True)
-        return [self.chunks[i] for i in order[: max(1, k)] if scores[i] > 0]
+        return sorted(enumerate(scores), key=lambda row: row[1], reverse=True)
+
+    def top_chunks(self, query: str, k: int) -> list[str]:
+        return [self.chunks[i] for i, score in self._ranked(query)[:max(1, k)] if score > 0]
+
+    def top_spans(self, query: str, k: int) -> list[tuple[int, int]]:
+        """Bounded ranked occurrences, without treating a retrieval score as an answer gate."""
+        return [self.spans[i] for i, _score in self._ranked(query)[:max(0, k)]]
 
 
 # ---------------------------------------------------------------------------

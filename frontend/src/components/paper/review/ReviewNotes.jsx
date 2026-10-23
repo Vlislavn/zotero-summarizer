@@ -13,8 +13,7 @@ import { noteDeliveryText } from '../../../hooks/useNoteDelivery.js';
 export default function ReviewNotes({ itemKey, initialNote = '', questions = [], questionMirror, onMirrorStart, onSaved, onDirtyChange }) {
   const [draft, setDraft] = useState({ itemKey, note: initialNote, baseline: initialNote });
   const { note, baseline } = draft;
-  const keyRef = useRef(itemKey);
-  keyRef.current = itemKey;
+  const pendingSave = useRef(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null); // { tone: 'ok'|'soft'|'err', text }
 
@@ -27,12 +26,19 @@ export default function ReviewNotes({ itemKey, initialNote = '', questions = [],
   }, [itemKey, initialNote]);
   // A genuinely new paper: reset the transient status (nav also remounts this
   // component, so this is belt-and-suspenders for a same-instance key change).
-  useEffect(() => { setStatus(null); setSaving(false); }, [itemKey]);
+  useEffect(() => {
+    setStatus(null); setSaving(false);
+    return () => { pendingSave.current = null; };
+  }, [itemKey]);
 
   const dirty = note !== baseline;
   useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
 
   async function handleSave() {
+    if (pendingSave.current) return;
+    const request = {};
+    pendingSave.current = request;
+    const current = () => pendingSave.current === request;
     const savedKey = itemKey;
     const savedNote = note;
     setSaving(true);
@@ -40,23 +46,23 @@ export default function ReviewNotes({ itemKey, initialNote = '', questions = [],
     const reportMirror = onMirrorStart?.({ note: savedNote });
     try {
       const res = await saveReviewNote({ item_key: savedKey, note: savedNote });
-      if (keyRef.current !== savedKey) return;
+      if (!current()) return;
       setDraft((previous) => ({ ...previous, baseline: savedNote }));
       reportMirror?.(res.saved_offline ? null : res);
       if (res.saved_offline) {
-        setStatus({ tone: 'soft', text: 'Saved on this device — waiting to sync.' });
+        setStatus({ tone: 'soft', text: 'Saved on this device.' });
       } else if (res.note_written) {
         setStatus({ tone: 'ok', text: 'Saved to the app and Zotero.' });
       } else if (res.note_error) {
-        setStatus({ tone: 'soft', text: 'Saved in the app — close Zotero to sync it there.' });
+        setStatus({ tone: 'soft', text: 'Saved in the app — Zotero delivery is not confirmed.' });
       } else {
         setStatus({ tone: 'ok', text: 'Saved in the app.' });
       }
       onSaved?.();
     } catch (err) {
-      if (keyRef.current === savedKey) setStatus({ tone: 'err', text: `Save failed: ${err.message || err}` });
+      if (current()) setStatus({ tone: 'err', text: `Save failed: ${err.message || err}` });
     } finally {
-      if (keyRef.current === savedKey) setSaving(false);
+      if (current()) { pendingSave.current = null; setSaving(false); }
     }
   }
 

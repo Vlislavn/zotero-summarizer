@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from zotero_summarizer.integrations._rate_limiter import RateLimiter
+from zotero_summarizer.integrations.search_outcomes import record_source_outcome
 
 _BASE = "https://api.crossref.org/works"
 _TIMEOUT_SECS = 12.0
@@ -99,6 +100,7 @@ def search_crossref(
     (network, non-200, malformed JSON) — never raises."""
     query = (query or "").strip()
     if not query:
+        record_source_outcome('crossref', 'not_attempted')
         return []
     params: dict[str, str | int] = {"query": query, "rows": max(1, min(rows, 100))}
     if (mailto or "").strip():
@@ -108,16 +110,26 @@ def search_crossref(
     try:
         resp = client.get(_BASE, params=params, headers={"User-Agent": "zotero-summarizer/1.0"})
         if resp.status_code != 200:
+            record_source_outcome('crossref', 'failed', error_code='rate_limited' if resp.status_code == 429 else 'http_error')
             return []
         payload = resp.json()
-    except (httpx.HTTPError, OSError, ValueError):
+    except (httpx.HTTPError, OSError):
+        record_source_outcome('crossref', 'failed', error_code='transport_error')
+        return []
+    except ValueError:
+        record_source_outcome('crossref', 'failed', error_code='invalid_response')
         return []
     finally:
         if http_client is None:
             client.close()
     items = ((payload.get("message") or {}).get("items")) or []
-    hits = [_hit_from_item(it) for it in items if isinstance(it, dict)]
-    return [h for h in hits if h is not None]
+    hits = [h for item in items if isinstance(item, dict) and (h := _hit_from_item(item)) is not None]
+    valid = isinstance((payload.get('message') or {}).get('items'), list)
+    if not valid or (items and not hits):
+        record_source_outcome('crossref', 'failed', error_code='invalid_response')
+    else:
+        record_source_outcome('crossref', 'success_nonempty' if hits else 'success_empty', count=len(hits))
+    return hits
 
 
 __all__ = ["CrossrefHit", "search_crossref"]

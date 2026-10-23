@@ -25,6 +25,7 @@ import httpx
 from zotero_summarizer.domain import normalize_doi
 from zotero_summarizer.integrations._rate_limiter import RateLimiter
 from zotero_summarizer.integrations.openalex_cache import OpenAlexCache
+from zotero_summarizer.integrations.search_outcomes import record_source_outcome
 
 
 LOGGER = logging.getLogger(__name__)
@@ -161,6 +162,7 @@ class OpenAlexClient:
         contract, so federation survives one dead source (spec §7)."""
         query = (query or "").strip()
         if not query:
+            record_source_outcome('openalex', 'not_attempted')
             return []
         param_key = "search.semantic" if semantic else "search"
         params: dict[str, Any] = {
@@ -173,11 +175,13 @@ class OpenAlexClient:
         if not payload:
             return []
         results = payload.get("results") or []
-        return [
-            hit
-            for i, raw in enumerate(results)
-            if (hit := _search_hit_from_payload(raw, source_rank=i)) is not None
-        ]
+        hits = [hit for i, raw in enumerate(results)
+                if (hit := _search_hit_from_payload(raw, source_rank=i)) is not None]
+        if not isinstance(payload.get('results'), list) or (results and not hits):
+            record_source_outcome('openalex', 'failed', error_code='invalid_response')
+        else:
+            record_source_outcome('openalex', 'success_nonempty' if hits else 'success_empty', count=len(hits))
+        return hits
 
     # ----------------------------------------------------------------- private
 
@@ -326,6 +330,7 @@ class OpenAlexClient:
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
         if not self.allow_network:
+            record_source_outcome('openalex', 'not_attempted', error_code='disabled')
             return None  # cache-only client: a miss yields None, never a network call
         _RATE_LIMITER.acquire()
         merged: dict[str, Any] = dict(params or {})
@@ -336,15 +341,19 @@ class OpenAlexClient:
             resp = self._http.get(url, params=merged)
         except (httpx.HTTPError, OSError) as exc:
             LOGGER.debug("openalex GET failed: %s (%s)", url, exc)
+            record_source_outcome('openalex', 'failed', error_code='transport_error')
             return None
         if resp.status_code == 404:
+            record_source_outcome('openalex', 'failed', error_code='http_error')
             return None
         if resp.status_code >= 400:
             LOGGER.debug("openalex GET %s: HTTP %d", url, resp.status_code)
+            record_source_outcome('openalex', 'failed', error_code='rate_limited' if resp.status_code == 429 else 'http_error')
             return None
         try:
             return resp.json()
         except ValueError:
+            record_source_outcome('openalex', 'failed', error_code='invalid_response')
             return None
 
 def _abstract_from_inverted_index(inv: dict[str, list[int]] | None) -> str | None:

@@ -10,7 +10,125 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 
 ## [Unreleased]
 
+- Apply the accumulated baseline to the working branch: 153 updates and 94 additions. Experimental raw-backup/verdict branches stay separate. No service restart, data migration or commit; runtime acceptance remains pending.
+
+- Author two UNRUN real-service verdict/label controls: genuine native note/tag effects precede positive committed action/backup receipt predicates; absent intent traps native access. Tests only; no production, origin, approval or whole-issue acceptance.
+
+- Author two UNRUN real-service feed-read controls: native change requires an actual matching prestate backup observed before the DB attempt; absent writer stays quiet. Conditional backup-only proposed RED; no automation/history/ABI/production change.
+
+- Add five owned-SQLite feed-read adapter characterization cases: identical mixed-input count semantics, actual ABORT-trigger atomicity, unchanged clocks/versions, real prestate backups and active empty-path traps. Preserve six old cases; no service automation, approval, history or ABI change.
+
+- Migrate five review-note fixtures to the frozen real-native observer with actual K1, dispatch IO and active quiet guards. Preserve all18 IDs, requests, receipts and oracles; strengthen backup/claim/native/ACK proof. Tests only; UNRUN.
+
+- Replace the obsolete user-note backup-order parameter with the real composite owner and persisted intent. Preserve sibling cases/all backup assertions; add committed claim, literal native HTML and terminal/ACK checks. One explicit case-ID rename; source-only UNRUN.
+
+- Migrate34 question/mirror fixtures to owned native resources and real constructors, with entry/dispatch/partition/SQL proof and genuine materialization/P1→P2 controls. One settled ACK retry becomes once-native with stronger preservation. Tests only; UNRUN.
+
+- Align six measured composite test classifications with typed validation, invoked-native uncertainty, target resolution and strict metadata. Strengthen no-effect/terminal/ACK/retry proof; add one real adapter marker guard. Existing IDs/transports stay intact. UNRUN.
+
+- Bind empty-projection no-delivery tests to the actual Zotero reader/writer getters, not the removed Golden wrapper. Preserve all26 identities, receipt and alias-resolution assertions. Isolated candidate unexecuted; production unchanged.
+
+- Restore composite test fault transport at the actual formatter, target-bound backup and delegated positive-ID failed partition. Corrupt only expected_io; all existing semantic assertions and IDs stay frozen. UNRUN; no GREEN or assertion migration.
+
+- Wire the existing composite test fixture's real reader/writer into RuntimeState. Phase A only: all test bodies/oracles and production unchanged. UNRUN; parent must measure newly reached outcomes before later migrations.
+
+- Add source-candidate composite My Notes history: durable system claims, native terminal commit before domain ACK, proof-bound ACK-only continuation and Pending isolation. Remove the id0 user-note wrapper. Parent207 RED is retained; candidate runtime/review and full #7 gates remain open.
+
+- Author UNRUN composite guard controls: uncapped three-origin uncertainty, independent item/target delivery, same-intent native-library retarget HOLD and configured-Zotero-free legacy ACK. Four functions/seven intended cases; production and old tests frozen.
+
+- Author three UNRUN My Notes regressions for positive native history, committed pre-dispatch claims and ACK-only retry. Reuse owned SQLite/native fixtures; production and all old oracles unchanged. Parent RED/review remain required.
+
+- Fold native interpretation trace into one closed native disclosure without dropping associations or visible groups/caveats. Reuse scoped focus and candidate print CSS; default/public behavior stays unchanged. Runtime GREEN, print/export and scientific benefit remain unqualified.
+
+- Author UNRUN audited-HTML regressions for one closed native interpretation trace, visible groups/caveats and lossless associations. Preserve the original 34 cases. Test-only; production proposal is unapplied, with print/export and visual/keyboard behavior unverified.
+
+- Add an uncapped direct-history regression with 5,000 newer synthetic applying claims for another owned target. Preserve the old103oracles; only the selected-target row may block. Test-only baseline, not implemented or accepted.
+
+- Correct stale library README metadata-count defect claim: current table-only/mixed requests already use grounded Q&A;38existing QA tests confirm bounded routing. Documentation only; no production behavior or language-understanding claim.
+
+### Added
+- Add candidate durable history for explicit tag/priority/collection writes: target-bound backup, uncertainty guards and non-actionable direct receipts isolated from ordinary dedup. Parent baselines observed; implementation runtime/review and full #7 gates remain open.
+
+### Fixed
+- Update standing manual-control fixture source to real native/queue/prepared-backup evidence and valid ordinary audit metadata; preserve nine test identities and normalization/force/no-op/corpus oracles. Source-only proposal; runtime and independent review pending.
+- Fence late Pending Reject success/failure by the existing list generation, preserving refreshed selection/status and same-generation rollback. No new hook, state, API or navigation restriction; regression checks retain displayed snapshot authority.
+- Pending Apply/retry now carries every displayed payload/revision/Zotero-target snapshot, retires refreshed selections and never optimistically claims Applied. Full Failed previews remain escaped; force preserves identity. Automatic Inbox cleanup is removed; explicit queued removal remains.
+- MCP Pending Apply requires explicit IDs and caller snapshots (max1000), verifies complete backend envelopes before one POST, and refuses stale/old-backend authority. Removes apply-all/chunking and obsolete Inbox receipts; preserves counts, backups and uncertainty without automatic retry.
+- Suppress every ordinary approval preview without a writer, including approved applied/applying history; retain audit/target/backup history and available-writer identity. Strengthen competing-batch tests with exact item-bound payloads in both backups and final native state.
+- Bind Pending Apply/retry to displayed ID/payload/revision/native target; claim mixed batches under existing coordination before dispatch. Preserve generated source checks and uncertain delivery; remove implicit Inbox cleanup. Native/HTTP controls await guarded execution.
+- Preserve targeted corpus refresh's reader/cache-unavailable no-op before configuration access; retain OFF-before-I/O and add uninitialized-runtime availability regressions without changing manual-write assertions.
+- Honor corpus OFF during targeted post-edit refresh before reader/cache/lock/feedback I/O. Preserve enabled reconciliation; add no-model boundary regressions and complete enabled test fixtures.
+- Replace unavailable external practitioner unit-data paths with owned synthetic RSS/admission fixtures; preserve existing test IDs and budget/firewall/IO checks, add XML tamper coverage. Historical public characterization remains unavailable, not recovered or accepted.
+- Isolate note mirroring in the 5001-row approval-loop test after profiling 56.04s of unintended SQLite work. Retain all rows, native-label controls and new per-key mirror assertions; production behavior is unchanged.
+
 ### Changed
+- Private HTML publication consumes a whole qualified interpretation-review packet, resolves same-snapshot Finding/Scope/Unproven values and discloses AI/unverified limits. Mixed projections fail before publication; default/public/native activation stays unchanged. Tests await guarded execution.
+- Reconcile saved Search operation state across absorbed/transitive exact families before stale review replacement. Preserve worker selection/metadata; reject conflicting identities. Reuse existing grouping/lock, with no new store or confirmation. Runtime/review pending.
+- Persist Search Add's native key before dispatch in the existing session. Preserve it through review merges/enrichment and reuse it after failed finalization. No new store or confirmation; native recovery tests await parent execution (#7 partial).
+- Keep other-goal counts neutral when retrieval is unavailable; retain exact per-goal states. Manual-note confirmations no longer prescribe closing Zotero from an unclassified delivery error. Preserve existing saves, receipts and controls.
+- Align three existing regression fakes with publication revision reads and resolved-provider admission. Retain the one-read snapshot, real replacement writer, timeout/fast-work and unsupported-route oracles; production behavior is unchanged.
+- Pass pinned SDK paths explicitly to isolated M3 test children; preserve lifecycle oracles and retain matching parent/child source identities. Add isolated import-path controls without changing production loading or process budgets.
+- Point the frozen v11 Telegram upgrade control at the current schema/alignment after composition. Keep the explicit schema13 assertion and exact saved-original, evaluation, legacy-cursor and corpus no-op assertions; no production data behavior changes.
+- Compose the tested live Telegram prerequisites with feed cards and generated-note review. Migration13 joins complete isolated v12 schemas and rejects partial footprints. Restore the existing Telethon optional extra; lockfile and installed dependencies are unchanged.
+- Await the generated-note reconciliation alert after the Pending status tab finishes its asynchronous reload. Preserve the exact message, blocked retry/apply checks and case ID; no production timing, request or loading behavior changes.
+- Keep legacy generated notes with no native target rejectable but not applicable/retryable in Pending, including keyboard and mixed selections. Show regeneration recovery instead of an action the backend must reject; preserve ordinary and bound-target flows.
+- Keep Doctor on Needs action when a local finality HOLD meets an unsupported feed capability declaration. Execution and saved-status reconciliation now include stage-resolution validation, without clearing HOLD or retrying inference.
+- Gate the configured feed route on declared text capability before credentials/transport; preserve legacy routing and wire options. Report incompatible selections without probing them. Native JSON remains explicit, adapter-enabled and unmeasured (#7).
+- Bind generated-note approval to the actual native database/file/user-library identity. Reuse the existing adapter's bounded backup retention with one audited precreated backup; restore the readonly-corruption singleton-file oracle. Parent runtime verification remains pending (#7).
+- Stage generated digest notes in the existing queue; require exact publication/target/payload approval before native writes. Add cross-process cache locking, actor/source/backup audit and explicit uncertain-delivery recovery. Existing human-consent flows stay unchanged (#7).
+- Release the mobile gateway's owned Unix socket before Uvicorn re-raises graceful shutdown signals. Preserve native signal exits, foreign-path refusal and normal/error cleanup; add isolated real-launcher SIGTERM/SIGINT restart controls.
+- Add opt-in Tailscale Serve HTTPS access through an owner-only Unix socket and exact owner/origin checks. Default loopback access is unchanged; no account, proxy or TLS activation is automatic. Device/revocation acceptance remains separate.
+- Add a pure four-class priority contract reusing #37; native adapters, human labels and study remain open (#38).
+- Add one source-pinned experimental llama.cpp native text-choice HTTP adapter using frozen decision contracts, exact option probabilities and bounded single requests. Mock controls are not native qualification; live/human/matched-study gates remain open (#37/#38/#42).
+- Add an offline collection membership contract with explicit hierarchy/eligibility, canonical-family/time purge, fixed native 3-label readouts and distinct no-match/failure/abstention states (#42). No client, scorer, writes, production policy or study-completion claim.
+- Replace prose-keyword grading of the digest prompt with schema-key and input-format contracts. Independent semantic review covers policy meaning; existing policy behavior tests and human-outcome requirements remain unchanged.
+- Align RSS budget/ranking test fakes with the explicit profile argument and outcomes-mapping contract. Preserve original case IDs, limits, ordering and failure assertions; no production behavior or semantic grading changes.
+- Co-produce typed project uses/experiments in explicit feed deep reviews; bind profile, original quotes, actual schema/prompt provenance and base cache identity. Preserve base/QA/C defaults; stale or invalid assessments cannot supply positives. Human usefulness remains unverified (#12).
+- Show unqualified Weekly candidates with their review links and reasons, distinct from known manual full-text needs. Correct the intended-qualified cursor invalidation fixture to use a valid changed generation SHA; keep its assertions and malformed-identity controls.
+- Qualify RSS cards by current source identity and explicit full-text basis; separate unknown reviews, acquisition failures and source availability. Remove keyword project-fit and generic experiments; uses stay unassessed pending same-call producer wiring (#12).
+- Complete the existing writing-friction prompt with operational reconstruction, terminology explanation and material editorial coherence. Preserve scientific-quality separation, fields and one-call behavior; human outcome validation remains required (#15).
+- Add four opt-in built Search/Related UI controls at mobile/desktop widths, with explicit request, evidence/comment disclosure, safe-link, retry and scoped layout/contrast oracles. Synthetic fixtures reuse the existing ASGI browser sandbox; runtime and human/scientific acceptance remain separate.
+- Correct browser-test observers: use the existing Figures section, require contrast rows per scope and distinguish ASGI index from instrumented HTML. Validate build bytes synchronously before document retirement and fixture completion; markup and service-worker blocking stay unchanged.
+- Search can explicitly promote source-located sufficient answers before review cutoffs, with bounded configured generator/verifier work and visible partial/unchecked evidence. Default ordering stays unchanged; human quality/latency gates remain unmeasured (#30).
+- Discovery opens identifier-only results through shared HTTP(S) links. Explicit session tombstones no longer abort unrelated Find or a persisted retry replacement; untombstoned missing/corrupt sessions still fail loudly.
+- Full reviews show up to three related saved papers, literal metadata evidence and separate current comments. Saved seeds offer explicit discovery-only Search with no auto Add/review; comment ranking and owner-labelled benefit remain unvalidated.
+- Search evidence and discovery retain independent session metadata; combined controls cover policy/observation defaults, concurrent Add preservation and the shared two-question attempt budget without changing ranking defaults.
+- Search's acquired-source adapter projects only consumed callback fields into private generator/verifier functions. Question indices remain in protocol receipts; model prompts, callback budgets and default behavior are unchanged.
+- Align setup path-save tests with TanStack's variables/context callback while keeping exact payload and one call; await the real verification control after async status loading. Production requests, loading states and UNKNOWN readiness are unchanged.
+- Copy the tracked public goals example into the owned SDK test sandbox for cwd-relative fixture reads; retain isolated cwd/HOME, private-input refusal and all native request assertions. No production configuration is copied or changed (#11).
+- Permit only the exact OS null sink in the isolated SDK test write guard, allowing dependency file-type probes while retaining external-state, dotenv and model-weight refusals; add a discriminating regression. Production boundaries are unchanged (#11).
+- Add Weekly saved RSS digests, downloads and explicit cached-only builds through the existing runner. Preserve current offline navigation/status; unavailable reports and unknown evidence remain distinct (#12).
+- Reuse successful RSS triage/cards through the existing bounded state cursor after fresh input/review checks; rank the whole current cohort once before budgets. Keep v2 replay conditional and missing evidence unscorable (#12).
+- Align the Weekly UI test with TanStack Query's variables-plus-context callback: assert the exact submitted body and one invocation without changing production requests.
+- Select the saved Weekly digest by its exact combobox role/name in the built-browser check; implicit label text includes dynamic option contents. Preserve the correct production accessible name and all selection/round-trip assertions.
+- Put ordered read/skip targets, estimated time and original-only value beside the reading action; remove folded duplicates and retain every saved note target. Missing details stay unknown; skip/withheld actions cannot revive stale read advice (#9).
+- Separate Idea/Evidence/Writing in shared reviews; show grounded friction and type-aware supplied checklist gaps. Automatic read requires explicit digest full-text basis; abstract and unconfirmed sources cap to skim without rewriting cached provenance (#15).
+- Keep manual note device-save confirmation factual after sync; the header alone owns live pending progress. Conflict comparison fields show the priority and short comment without clipping; mutation, native-receipt and dirty-draft ownership are unchanged.
+- Close the owned browser fixture's TCP listener on stop; rebind its saved port only on restart. Offline navigation/replay checks distinguish a fully stopped endpoint and join the actual sync response before native receipt assertions; production networking is unchanged.
+- Open synced Library context and save verdicts/notes while the Mac is unavailable. Header sync/conflict/install guidance preserves UUID outbox semantics; cached review links skip PDF preparation, and secondary tag failure never invites duplicate verdicts. Remote iOS deployment remains unverified.
+- Today separates Relevance from AI review evidence and folds existing observations into Why selected. Missing scores stay unscored; interleave stays blinded. Existing darker tokens fix label contrast; ranking/defaults and human-evidence gaps are unchanged.
+- Review-page offline verdict edits/retractions persist immediately through the existing outbox instead of pausing in React Query; a locally saved verdict no longer waits for a server-only reject tag.
+- RSS Settings adds explicit HackerNoon feed shortcuts and truthful unchecked, empty, offline and failed-refresh recovery. Existing drafts/disabled sources and the normal triage/review pipeline are preserved.
+- Correct the Telegram export-tampering test to use matching collection metadata, prove untampered success and isolate changed input bytes. Preserve failed-child IDs and add digest-bypass attribution; production code unchanged. Controls authored, not run.
+- Compose explicit Telegram CLI auth/live collection through the same bounded leased child, verified exports and existing shadow news processing. Retain real collection counts/cursors/retry and offline replay isolation; live/account/eval acceptance remains unverified.
+- Preserve received Telegram errors when timeout cancellation is translated; keep genuine owner timeouts distinct and failure persistence before teardown. Add controller and owned-child regressions without activation.
+- Add an internal dedicated macOS Telegram lifetime owner with process-held lease/native fuse, two explicit construction phases and existing collector/read-only profile reuse. No public CLI/auth or account activation; owned-child tests are authored.
+- Today JSON adds actual selection-policy/evidence metadata without changing ranking defaults. Interleaved cards replace the new evidence with common blinded-unavailable metadata; empty slates retain their resolved policy.
+- Rank weekly RSS across the full valid observed cohort before budgets using the existing blend; retain an unscored tail and separate ranking evidence. Admission stays unchanged; evaluator v2 and human-benefit evidence remain pending.
+- Add an optional injected Telethon page leaf over existing Telegram state, with strict native/UTF-16 validation and explicit incomplete-page handling; no live session/auth activation.
+- Weekly RSS validates consumed numeric history without losing zero, applies the existing 13 native states at admission, and records pre-budget status; the public callback API, source originals, ordering and budgets remain unchanged.
+- Clarify Telegram ingestion uses its selected triage SQLite state, not a fixed two-table claim; saved inputs and internal page-state contracts remain distinct from live SDK/auth readiness.
+- Add an internal async injected-client Telegram collector: one atomic page per numeric channel, immutable bindings, per-request durable retry admission and bounded diagnostics. Reuse M1a storage; no SDK/auth, public CLI or model activation.
+- Add v12 atomic Telegram originals/cursor, immutable username bindings and UTC retry helpers in the existing triage store. Preserve saved imports and direct-only model exports; no collector/auth activation.
+- RSS weekly feeds admit only identity-compatible latest history, recover exact stored abstracts before triage, and retain all-input source metadata with one candidate body; conflicting history is withheld without changing pure triage or ranking.
+- Correct Today documentation: a current-review join miss can retain legacy row quality used by existing ranking. Do not infer currentness, staleness or neutrality; no ranking, score, label or default behavior changes.
+- Add private comprehensive-QA C context from one qualified digest/view snapshot, preserving admitted PDF and exact budget fallback. Keep legacy support authority plus actual visibility; public defaults stay OFF. Native consent and scientific benefit remain separate.
+- Add a CODE-only transient Finding/Scope/Unproven view to existing feed/library detail callers, reusing qualified native paths and passage IDs. Defaults stay OFF; AI content stays unverified and bound-snapshot. No UI, QA or native-write activation.
+- Preserve current private-C worker priors using the same invocation kwargs condition as generation; keep exact default/OFF lookup and stale needs-PDF publication unchanged. No public activation.
+- Experimental private one-paper C wiring reuses native identity/audit binding without automatic notes. Extract per-run context; preserve defaults without public activation or scientific acceptance.
+- Relay explicit interpretation collectors through existing rank, prefix and map-reduce calls; clear prior cards before admission/mapping failures. Preserve plain digests, original-source verification and native audit identities; no worker or consumer activation.
+- Bind explicit experimental C cache reads to canonical whole findings, basis values, payload and native evidence in one readonly raw snapshot. Preserve current validated base on optional failure; default consumers and native writes stay inactive.
+- Experimental C claims reuse native verification with whole-card rejection isolation and base-only audits. Separate attempt-local support remains AI/unverified; default calls and repair/correction budgets are unchanged.
 - Prepare opt-in typed interpretation drafts in existing digest calls; preserve plain base reviews and unchanged defaults. Drafts remain unverified; scientific verification, cache binding and consumers are not activated.
 - Distinguish observed tool exposure from assignment permission: per-call tool wiring does not prove a ceiling or sandbox. Source-only worker mutations remain forbidden; configured read-only profiles are preferred for verified tool surfaces.
 - Verify native roles at each child cwd; retain governed Sol/xhigh profiles and partial recovery evidence. Reuse isolated native lanes and actual output references; read-only proposals no longer imply implementation acceptance.
@@ -42,6 +160,20 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Keep private experiment reports and screenshots outside the public tree; remove internal infrastructure identifiers and personal paths. Benchmark tools now require explicit caller-owned routes/models, and dependency source checkouts require explicit configuration.
 
 ### Fixed
+- Replace the stale `make iphone` LAN launch and premature phone URL with an immediate unsupported-mobile diagnostic, the supported Mac command and deployment requirements. Preserve loopback guards; add executable Make regressions with and without a venv.
+- Retire stale setup health after uncertain config/path/source writes and all credential-save failures; reread RSS rows without retrying writes or verification. Preserve traced prewrite rejections and add actual commit/lost-reply controls (#11).
+- Name the setup SDK test safety-net default/cap at 120 seconds; allow only positive finite overrides up to that cap. Reject invalid configuration before launch/imports, retain all 17 native cases, and add pure budget tests (#11).
+- Isolate the 17 setup SDK transport cases from unit OnPrem stubs behind a required opt-in MockTransport bootstrap. Ordinary-suite skips are not SDK proof; retain request assertions and separate admission UNKNOWN (#11).
+- Distinguish completed observed local setup requests from daemon idleness. Require matched single-attempt receipts; preserve truncation failure and cancellation/HOLD. Scope no-retry/cache/redirect transport to setup only; admission UNKNOWN remains (#11).
+- Retire stale Doctor responses after setup/source changes or newer status reads. RSS add/update/delete/import reread shared health, including last-source removal/recovery; no automatic verification or relaxation of Full-local UNKNOWN/HOLD guards (#11).
+- Wire Full local hardware gating, resumable verification and fail-closed validation into setup. Consolidate health states/offline meanings and scoped Settings recovery; model listing is not inference. Preserve UNKNOWN/HOLD safety and manual-only downloads (#11).
+- Keep reading-plan labels readable on compact cards using the existing local slate-600 token; browser controls cover one visible ordered plan, source-policy caps, wrapping and contrast. Keyboard checks select the exact native evidence disclosure (#9/#15).
+- Scope existing readable foregrounds to the Idea/Evidence/Writing summary and labels on compact/non-flat cards; preserve shared primitives and add computed-contrast browser controls (#15).
+- Retire old My notes saves after navigation; keep one question-delivery receipt and one Ask disclosure. Reader contrast rules now preserve enabled buttons' foregrounds instead of matching disabled-state class names. Browser source receipts follow the active checkout.
+- Resume Doctor status polling after reload while a server check is running, without starting another verification. Block duplicate Verify/retry actions and stop polling on terminal/error; preserve backend readiness and deadlines.
+- Keep weekly reproduction effort unknown instead of inferring a duration or blocked reproduction from repository URLs and scientific checklist gaps; retain artifact URLs and scientific evidence separately.
+- Prefer the independent quality grade in reading proposals, retaining Digest fallback when unavailable. Preserve cached assessments, human priorities and existing policy thresholds.
+- Scope Doctor start/pull/refresh recovery to the failing provider, not another local runtime in mixed routing. Preserve existing Ollama endpoint recognition, hosted/No-LLM behavior and call budgets.
 - Remove the trailing blank line from the feedback-analysis interface document so staged whitespace checks pass; runtime contracts and code remain unchanged.
 - Fixed paper Q&A checkpoints losing complete source handles; preserve original spans and occurrences, with compatible legacy input-digest projection.
 - Keep My notes Save readable beside wrapping feedback; add an opt-in rendered-line regression without changing note or question persistence.

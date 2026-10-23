@@ -15,7 +15,10 @@ from typing import Any
 from zotero_summarizer.models import GoalsConfig, PaperDigest
 from zotero_summarizer.integrations.llm import build_response_format
 from zotero_summarizer.services._common import extract_json_blob, to_text
-from zotero_summarizer.services.library._digest_verification import DigestVerifierUnavailable
+from zotero_summarizer.services.library._digest_verification import (
+    DigestSourceRejected, DigestVerifierUnavailable, _Checks, _claim_parts, _claims,
+    _parse_checks, _unsupported_literals,
+)
 from zotero_summarizer.services.library import _digest_audit
 from zotero_summarizer.services.library._prompt_security import UNTRUSTED_INPUT_RULE, untrusted_input
 from zotero_summarizer.services.library._review_text import select_review_text
@@ -106,23 +109,36 @@ def _digest_response_contract(
 def _generate_digest(
     llm: Any, prompt: str, response_model: type[PaperDigest], *, stage: str,
     extra: dict[str, Any], interpretation_out: dict[str, Any] | None,
+    feed_out: dict[str, Any] | None = None,
 ) -> PaperDigest:
     from zotero_summarizer.services.library._review_attempt import observed_client
 
     if interpretation_out is not None:
         interpretation_out.clear()
+    if feed_out is not None:
+        feed_out.clear()
     raw = observed_client(llm, stage).pydantic_prompt(prompt=prompt, pydantic_model=response_model, **extra)
-    return _coerce_digest(raw, interpretation_out=interpretation_out)
+    if feed_out is not None:
+        from zotero_summarizer.services.library._feed_assessment import coerce_response
+
+        raw = coerce_response(raw, feed_out)
+    digest = _coerce_digest(raw, interpretation_out=interpretation_out)
+    if feed_out is not None:
+        feed_out.update(prompt_sha256=_digest_audit.canonical_hash(prompt),
+                        response_format_sha256=_digest_audit.canonical_hash(extra.get("response_format")))
+    return digest
 
 
 def _verify_generated_digest(
     digest: PaperDigest, text: str, verifier: Any, generator: Any, goals: str, *, attempt: dict | None = None,
+    optional_claims: tuple[str, ...] = (),
 ) -> Any:
     from zotero_summarizer.services.library._digest_verification import verify_digest
     from zotero_summarizer.services.library._review_attempt import record
 
+    extra = {"optional_claims": optional_claims} if optional_claims else {}
     try:
-        return verify_digest(digest, text, verifier, research_goals=goals)
+        return verify_digest(digest, text, verifier, research_goals=goals, **extra)
     except DigestVerifierUnavailable:
         if attempt is not None:
             attempt.setdefault("unavailable_routes", []).append({"route": "primary", "reason": "malformed_verifier_output"})
@@ -131,7 +147,100 @@ def _verify_generated_digest(
         record('verifier_fallback', {'availability': 'generator_fallback'}, kind='identity')
         if attempt is not None:
             attempt["verifier_route"] = "generator_fallback"
-        return verify_digest(digest, text, generator, research_goals=goals)
+        return verify_digest(digest, text, generator, research_goals=goals, **extra)
+
+
+def _interpretation_claims(payload: dict[str, Any] | None) -> tuple[str, ...]:
+    """Project only scientific leaves from the same-attempt validated producer payload."""
+    if payload is None or payload.get("status") != "schema_validated_ai_draft":
+        return ()
+    roles = ("inference_strength", "rationale", "scope", "uncertainties", "unsupported_extrapolations")
+    return tuple(
+        part
+        for index, item in enumerate(payload["items"])
+        for role in roles
+        for part in _claim_parts(f"interpretation[{index}]({item['finding_ref']}).{role}", item[role])
+    )
+
+
+def _checked_attempt(checks: Any, digest: PaperDigest, optional: tuple[str, ...], text: str) -> _Checks:
+    from zotero_summarizer.services.faithbench._corpus import chunk_text
+
+    if not isinstance(checks, _Checks):
+        raise DigestVerifierUnavailable("Native interpretation verification requires complete validated checks")
+    try:
+        return _parse_checks(checks.model_dump(mode="json"), len(_claims(digest)) + len(optional), chunk_text(text), text)
+    except ValueError as exc:
+        raise DigestVerifierUnavailable(f"Invalid native interpretation support contract: {exc}") from exc
+
+
+def _optional_rejection(
+    exc: DigestSourceRejected, digest: PaperDigest, optional: tuple[str, ...], text: str,
+) -> _Checks | None:
+    if exc.phase not in {"numeric", "semantic"}:
+        raise exc
+    base = _claims(digest)
+    combined = base + list(optional)
+    if exc.phase == "semantic":
+        checked = _checked_attempt(exc.checks, digest, optional, text)
+        rejected = tuple(sorted(check.index for check in checked.checks if not check.supported))
+    else:
+        checked = None
+        unsupported = _unsupported_literals(combined, text)
+        rejected = tuple(index for index, claim in enumerate(combined) if claim in unsupported)
+        if exc.checks is not None:
+            raise DigestVerifierUnavailable("Numeric rejection cannot carry semantic checks")
+    if exc.base_count != len(base) or not rejected or exc.rejected_indices != rejected:
+        raise DigestVerifierUnavailable("Invalid native interpretation rejection indices")
+    if rejected[0] < len(base):
+        raise exc
+    return checked
+
+
+def _base_checks(checks: _Checks, base_count: int) -> _Checks:
+    base = sorted((check for check in checks.checks if check.index < base_count), key=lambda check: check.index)
+    if any(not check.supported for check in base):
+        raise DigestVerifierUnavailable("Native interpretation verification did not establish base support")
+    return _Checks(checks=base)
+
+
+def _verify_digest_attempt(
+    digest: PaperDigest, text: str, verifier: Any, generator: Any, goals: str, *,
+    attempt: dict[str, Any], interpretation_out: dict[str, Any] | None = None,
+) -> Any:
+    optional = _interpretation_claims(interpretation_out)
+    extra = {"optional_claims": optional} if optional else {}
+    try:
+        checks = _verify_generated_digest(digest, text, verifier, generator, goals, attempt=attempt, **extra)
+    except DigestSourceRejected as exc:
+        if not optional:
+            raise
+        checked = _optional_rejection(exc, digest, optional, text)
+        diagnostic = {"phase": exc.phase, "base_count": exc.base_count,
+                      "rejected_indices": list(exc.rejected_indices)}
+        attempt["optional_rejection"] = diagnostic
+        interpretation_out.clear()
+        interpretation_out.update({"origin": "ai_generated", "scientific_verification": "unverified",
+                                   "status": "unavailable", "unavailable_reason": "native_optional_support_not_established",
+                                   "optional_rejection": diagnostic})
+        if checked is None:
+            checks = _verify_generated_digest(digest, text, verifier, generator, goals, attempt=attempt)
+            checked = _checked_attempt(checks, digest, (), text)
+        return _base_checks(checked, len(_claims(digest)))
+    if interpretation_out is None:
+        return checks
+    checked = _checked_attempt(checks, digest, optional, text)
+    if any(not check.supported for check in checked.checks):
+        raise DigestVerifierUnavailable("Native interpretation verification returned unsupported checks as acceptance")
+    base_count = len(_claims(digest))
+    if optional:
+        interpretation_out["native_support"] = {
+            "base_count": base_count, "base_digest_sha256": attempt["digest_sha256"],
+            "optional_claims": list(optional), "global_indices": list(range(base_count, base_count + len(optional))),
+            "validated_checks": [check.model_dump(mode="json") for check in sorted(checked.checks, key=lambda c: c.index)
+                                 if check.index >= base_count],
+        }
+    return _base_checks(checked, base_count)
 
 # Fallback when goals.yaml has no `prompts.paper_digest`. A referee-grade digest
 # (NeurIPS/ICLR rubric) condensed into scannable fields, personalised to the
@@ -171,9 +280,15 @@ _DEFAULT_DIGEST_PROMPT = (
     '- "estimated_read_minutes": total minutes for the recommended action (null if unknown).\n'
     '- "original_value": what opening the original adds beyond this digest ("" for skip).\n'
     "Audit writing independently BEFORE choosing the reading action. Actively seek recurring counterexamples to: "
-    "central terms before use; one stated axis per taxonomy; signposted abstraction shifts; explicit claim/evidence "
-    "links. Ignore isolated typos, technical depth, study validity, weak evidence, and sophistication. MUST return both "
-    "writing fields: zero counterexamples = low, one = moderate, two or more or a reconstructed central argument = high.\n"
+    "central terms defined or motivated before use; an expert can reconstruct input/state -> transformation/action "
+    "-> next state/output without guessing missing conceptual links; one stated axis per taxonomy; signposted "
+    "abstraction shifts; essential acronyms, jargon and named architectures explained rather than substituted for "
+    "explanation; no material grammar errors, repetition, malformed sentences or local contradictions that obstruct "
+    "understanding; explicit claim/evidence links and distinctions among definitions, established work, proposals, "
+    "findings and speculation. "
+    "Ignore isolated typos, technical depth, study validity, weak evidence, and sophistication. MUST return both "
+    "writing fields: high if there are two or more counterexamples or the reader must invent or reconstruct missing "
+    "central conceptual links; otherwise one counterexample = moderate and zero = low.\n"
     '- "writing_friction": exactly "low", "moderate", or "high" from the counterexample count.\n'
     '- "writing_reasons": each concrete counterexample (1-3 for moderate/high; [] for low).\n'
     '- "relevance": how it connects to the reader\'s research goals above (one sentence; "" if none).\n'
@@ -226,22 +341,55 @@ def _digest_prompt(template: str, title: str, text: str, goals: str, focus_promp
     return prompt
 
 
+def _source_context(
+    full_text: str, cap: int, *, prefix: bool, verification_text: str | None,
+    verification_audit: dict | None, interpretation_out: dict | None,
+) -> tuple[str, dict]:
+    locations: list[dict[str, Any]] = []
+    selection = {"locations": locations} if verification_audit is not None else {}
+    text = full_text[:cap] if prefix else select_review_text([], full_text, budget=cap, **selection)
+    source_text = text if verification_text is None else verification_text
+    if prefix or verification_text is not None:
+        locations = [{"selected_span": {"start": 0, "end": len(source_text)},
+                      "original_span": {"start": 0, "end": len(source_text)}, "mapping": "exact"}]
+    contract_kwargs = {}
+    if verification_audit is not None and interpretation_out is not None:
+        from zotero_summarizer.services.library._review_identity import INTERPRETATION_SCHEMA_MARKER
+
+        contract_kwargs = {"interpretation_schema": INTERPRETATION_SCHEMA_MARKER}
+    source = {"original_text": full_text if verification_text is None else verification_text,
+              "selected_text": source_text, "locations": locations,
+              "contracts": _digest_audit._contract_hashes(**contract_kwargs) if verification_audit is not None else {}}
+    return text, source
+
+
 def assess_digest(
     *, title: str, full_text: str, config: GoalsConfig, llm: Any, focus_prompt: str = "",
     max_chars: int | None = None, prefix: bool = False, response_format: dict[str, Any] | None = None,
     verifier_llm: Any = None, verification_text: str | None = None,
     verification_audit: dict[str, Any] | None = None, interpretation_out: dict[str, Any] | None = None,
+    feed_context: Any = None, feed_out: dict[str, Any] | None = None,
 ) -> PaperDigest:
     """Grounded digest; prefix selects the A/B baseline and max_chars overrides its cap.
 
     response_format opts into decoder constraints; verification_text supplies original
     evidence for generated map notes. An explicit experimental interpretation_out selects
-    C inside these same calls. It collects only an UNVERIFIED AI draft after successful
-    base verification, never publishes a card or certifies its scientific statements.
+    C inside these same calls. Native optional support stays separate from the UNVERIFIED
+    AI draft; an explicit audit captures its same-attempt source evidence for later binding.
     """
     from zotero_summarizer.services.library._source_admission import admit_source
     from zotero_summarizer.services.library._review_attempt import identity, record
 
+    if feed_out is not None:
+        feed_out.clear()
+    if (feed_context is None) != (feed_out is None):
+        raise ValueError("feed context and collector must be supplied together")
+    feed_attempt = None
+    if feed_context is not None:
+        from zotero_summarizer.services.library import _feed_assessment
+
+        feed_context = _feed_assessment.validate_selection(feed_context, interpretation_out)
+        feed_attempt = {}
     if interpretation_out is not None:
         interpretation_out.clear()
     attempt_out: dict[str, Any] | None = {} if interpretation_out is not None else None
@@ -251,33 +399,31 @@ def assess_digest(
     admit_source(full_text if verification_text is None else verification_text)
     template = config.prompts.paper_digest or _DEFAULT_DIGEST_PROMPT
     cap = int(max_chars if max_chars is not None else config.quality_review.max_text_chars)
-    locations: list[dict[str, Any]] = []
-    selection = {"locations": locations} if verification_audit is not None else {}
-    text = full_text[:cap] if prefix else select_review_text([], full_text, budget=cap, **selection)
-    source_text = text if verification_text is None else verification_text
-    if prefix or verification_text is not None:
-        locations = [{"selected_span": {"start": 0, "end": len(source_text)},
-                      "original_span": {"start": 0, "end": len(source_text)}, "mapping": "exact"}]
-    source = {"original_text": full_text if verification_text is None else verification_text,
-              "selected_text": source_text, "locations": locations,
-              "contracts": _digest_audit._contract_hashes() if verification_audit is not None else {}}
+    text, source = _source_context(full_text, cap, prefix=prefix, verification_text=verification_text,
+                                   verification_audit=verification_audit, interpretation_out=interpretation_out)
+    source_text = source["selected_text"]
     record('generated_notes' if verification_text is not None else 'selected_original', text)
     if not text.strip() or not source_text.strip():
         raise ValueError("Digest assessment requires non-empty source text")
     goals = "; ".join(g for g in (config.research_goals or []) if str(g).strip()) or "(not specified)"
     prompt = _digest_prompt(template, title, text, goals, focus_prompt)
     response_model, prompt, extra = _digest_response_contract(prompt, response_format, interpretation_out)
+    if feed_context is not None:
+        response_model, prompt, extra = _feed_assessment.response_contract(prompt, response_format, feed_context)
+    generation_extra = {"feed_out": feed_attempt} if feed_attempt is not None else {}
     try:
-        digest = _generate_digest(llm, prompt, response_model, stage='generator', extra=extra, interpretation_out=attempt_out)
+        digest = _generate_digest(llm, prompt, response_model, stage='generator', extra=extra,
+                                  interpretation_out=attempt_out, **generation_extra)
     except ValueError:
         digest = _generate_digest(llm, prompt + _STRICT_RETRY_SUFFIX, response_model,
-                                  stage='generator_parse_retry', extra=extra, interpretation_out=attempt_out)
+                                  stage='generator_parse_retry', extra=extra, interpretation_out=attempt_out, **generation_extra)
     digest = digest.model_copy(update={"basis": "full_text"})
     verifier = verifier_llm or llm
     lineage = [{"digest_sha256": _digest_audit.canonical_hash(digest.model_dump(mode="json")),
                 "generator_attempt": 0, "verifier_route": "primary"}]
     try:
-        checks = _verify_generated_digest(digest, source_text, verifier, llm, goals, attempt=lineage[-1])
+        checks = _verify_digest_attempt(digest, source_text, verifier, llm, goals,
+                                        attempt=lineage[-1], interpretation_out=attempt_out)
     except DigestVerifierUnavailable:
         raise
     except ValueError as exc:
@@ -285,13 +431,18 @@ def assess_digest(
         correction_prompt = (prompt + "\n\nThe previous digest failed source verification: "
                              + str(exc) + "\nReturn a corrected, fully source-grounded JSON digest only.")
         digest = _generate_digest(llm, correction_prompt, response_model, stage='correction',
-                                  extra=extra, interpretation_out=attempt_out).model_copy(update={"basis": "full_text"})
+                                  extra=extra, interpretation_out=attempt_out, **generation_extra).model_copy(update={"basis": "full_text"})
         lineage.append({"digest_sha256": _digest_audit.canonical_hash(digest.model_dump(mode="json")),
                         "generator_attempt": 1, "verifier_route": "primary"})
-        checks = _verify_generated_digest(digest, source_text, verifier, llm, goals, attempt=lineage[-1])
+        checks = _verify_digest_attempt(digest, source_text, verifier, llm, goals,
+                                        attempt=lineage[-1], interpretation_out=attempt_out)
     lineage[-1]["outcome"] = "accepted"
     if verification_audit is not None:
-        verification_audit.update(_digest_audit.build_verification_audit(digest, checks, source, lineage))
+        audit_kwargs = {"interpretation_payload": attempt_out} if interpretation_out is not None else {}
+        verification_audit.update(_digest_audit.build_verification_audit(digest, checks, source, lineage, **audit_kwargs))
     if interpretation_out is not None:
         interpretation_out.update(attempt_out)
+    if feed_out is not None:
+        feed_attempt["generation_input_sha256"] = _digest_audit.canonical_hash(text)
+        _feed_assessment.finish_attempt(feed_out, feed_attempt, feed_context, source)
     return digest

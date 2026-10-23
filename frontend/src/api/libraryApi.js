@@ -28,6 +28,26 @@ async function request(path, options = {}) {
   return data;
 }
 
+/** Related context is a snapshot: offline reads are explicitly stale. */
+export async function fetchRelatedPapers(itemKey) {
+  const path = `/api/library/related/${encodeURIComponent(itemKey)}`;
+  try {
+    const data = await request(path, { signal: AbortSignal.timeout(30_000) });
+    await cacheResponse(path, data).catch((error) => console.warn('Related snapshot cache unavailable', error.name));
+    return data;
+  } catch (error) {
+    const cached = !error.status && await cachedResponse(path).catch(() => null);
+    if (cached) return { ...cached, offline: true };
+    throw error;
+  }
+}
+
+export async function discoverRelatedPapers(itemKey, { refresh = false } = {}) {
+  return request(`/api/library/related/${encodeURIComponent(itemKey)}/discover${refresh ? '?refresh=true' : ''}`, {
+    method: 'POST', signal: AbortSignal.timeout(120_000),
+  });
+}
+
 /** GET /api/zotero/collections — collection tree. */
 export async function fetchCollections() {
   return request('/api/zotero/collections');

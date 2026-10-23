@@ -128,6 +128,18 @@ class PaperRenderBuildRequest(BaseModel):
     allow_acquire_missing: bool = Field(default=False)
 
 
+async def get_related_papers(item_key: str) -> dict[str, Any]:
+    from zotero_summarizer.services.library.related import related_papers
+
+    return await asyncio.to_thread(related_papers, item_key)
+
+
+async def discover_related_papers(item_key: str, refresh: bool = False) -> dict[str, Any]:
+    from zotero_summarizer.services.search.discovery import find_new
+
+    return await asyncio.to_thread(find_new, item_key, refresh=refresh)
+
+
 async def get_reading_queue(
     include_read: bool = False, limit: int = 30, refresh: bool = False,
     collection: str = "", tag: str = "", search: str = "", semantic: bool = False,
@@ -421,6 +433,8 @@ async def sync_score_ranks(req: RelTagSyncRequest) -> dict[str, Any]:
     return await asyncio.to_thread(score_tags.sync_score_ranks, force=req.force)
 
 
+router.add_api_route("/api/library/related/{item_key}", get_related_papers, methods=["GET"])
+router.add_api_route("/api/library/related/{item_key}/discover", discover_related_papers, methods=["POST"])
 router.add_api_route("/api/library/reading-queue", get_reading_queue, methods=["GET"])
 router.add_api_route("/api/library/reading-queue/status", get_reading_queue_status, methods=["GET"])
 router.add_api_route("/api/library/pdf/{item_key}", get_item_pdf, methods=["GET"])

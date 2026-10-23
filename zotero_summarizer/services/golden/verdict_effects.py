@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
 from pathlib import Path
 from typing import Any
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.integrations.zotero_read import ZoteroReadError
-from zotero_summarizer.integrations.zotero_write import ZoteroWriteError
 from zotero_summarizer.services._common import settings
 from zotero_summarizer.services.library import review_detail
 from zotero_summarizer.services.zotero._notes import VERDICT_NOTE_MARKER
@@ -17,10 +14,9 @@ from zotero_summarizer.services.zotero.zotero import (
     get_library_reader,
     get_zotero_reader_or_raise,
     zotero_set_label_tag,
-    zotero_upsert_user_note,
     zotero_upsert_verdict_note,
 )
-from zotero_summarizer.storage import feeds as feeds_storage, label_mirrors, repositories, review_note_projection
+from zotero_summarizer.storage import feeds as feeds_storage, label_mirrors, repositories
 from zotero_summarizer.storage.feed_identity import LEGACY_FEED_PREFIX
 
 LOGGER = logging.getLogger(__name__)
@@ -199,49 +195,8 @@ def apply_verdict_effects(db_path: Path, item_key: str, priority: str, comment: 
     }
 
 
-def _retryable_note_storage_error(exc: sqlite3.Error) -> bool:
-    code = getattr(exc, "sqlite_errorcode", None)
-    return code == sqlite3.SQLITE_CONSTRAINT_TRIGGER or (
-        code is not None and code & 255 in {
-            sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED, sqlite3.SQLITE_IOERR,
-            sqlite3.SQLITE_FULL, sqlite3.SQLITE_READONLY, sqlite3.SQLITE_CANTOPEN,
-        }
-    )
-
-
 def mirror_review_note(db_path: Path, item_key: str) -> dict[str, Any]:
-    """Deliver and acknowledge current composite intent after the local save."""
-    receipt = {"note_written": False, "note_error": None, "note_pending": None,
-               "projection_revision": None, "target_key": None}
-    try:
-        with review_note_projection.current_for_mirror(db_path, item_key) as (conn, desired):
-            receipt.update(projection_revision=desired["revision"],
-                           target_key=desired["target_key"], note_pending=desired["pending"])
-            if not desired["pending"]:
-                return receipt
-            key = desired["target_key"]
-            if key is None or get_zotero_reader_or_raise().get_item_detail(key) is None:
-                receipt["note_error"] = "target_unavailable"
-                return receipt
-            zotero_upsert_user_note(key, desired["body"])
-            receipt["note_written"] = True
-            acknowledged = review_note_projection.acknowledge(conn, desired)
-        # Only a committed acknowledgement clears pending, not an external write.
-        receipt["note_pending"] = not acknowledged
-        if not acknowledged:
-            receipt["note_error"] = "projection_changed"
-    except APIError as exc:
-        if not _optional_zotero(exc):
-            raise
-        receipt["note_error"] = exc.error
-    except (ZoteroReadError, ZoteroWriteError) as exc:
-        if exc.expected_io is not True:
-            raise
-        receipt["note_error"] = type(exc).__name__
-    except OSError as exc:
-        receipt["note_error"] = type(exc).__name__
-    except sqlite3.Error as exc:
-        if not _retryable_note_storage_error(exc):
-            raise
-        receipt["note_error"] = type(exc).__name__
-    return receipt
+    """Deliver the current composite through its native receipt owner."""
+    from zotero_summarizer.services.zotero.mirror_notes import mirror_review_note as deliver
+
+    return deliver(db_path, item_key)

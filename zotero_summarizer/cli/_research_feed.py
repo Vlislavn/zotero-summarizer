@@ -38,10 +38,22 @@ def _run_telegram(args: argparse.Namespace) -> int:
     from zotero_summarizer.services._common import settings as current_settings
     from zotero_summarizer.services.research_feed.telegram import run_saved
 
+    settings = current_settings()
+    live = None
+    inputs = Path(args.input_jsonl) if args.input_jsonl else None
+    if not args.cached_only and inputs is None:
+        from zotero_summarizer.cli._telegram import run_child
+
+        receipt = run_child(settings, "collect")
+        if args.collect_only:
+            print(json.dumps(receipt["export"], indent=2))
+            return 0
+        inputs = Path(receipt["export"]["inputs_path"])
+        live = receipt["result"]
     result = run_saved(
-        current_settings(), input_jsonl=Path(args.input_jsonl) if args.input_jsonl else None,
-        collect_only=args.collect_only, cached_only=args.cached_only,
-        shortlist_budget=args.shortlist_budget, card_budget=args.card_budget,
+        settings, input_jsonl=inputs, collect_only=args.collect_only,
+        cached_only=args.cached_only, shortlist_budget=args.shortlist_budget,
+        card_budget=args.card_budget, live_collection=live,
     )
     print(json.dumps(result, indent=2))
     return 0
@@ -55,7 +67,28 @@ def _view(args: argparse.Namespace) -> int:
     return 0
 
 
+def _telegram_auth(args: argparse.Namespace) -> int:
+    from zotero_summarizer.cli._telegram import authenticate
+
+    return authenticate(args)
+
+
+def _telegram_child(args: argparse.Namespace) -> int:
+    from zotero_summarizer.cli._telegram import child
+
+    return child(args)
+
+
 def _validate_research_feed_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    if args.research_feed_command in {"telegram-auth", "_telegram-child"}:
+        if args.research_feed_command == "telegram-auth" or args.purpose == "auth":
+            from zotero_summarizer.cli._telegram import require_terminal
+
+            try:
+                require_terminal()
+            except ValueError as error:
+                parser.error(str(error))
+        return
     if args.research_feed_command == "view":
         return
     from zotero_summarizer.models.research_feed import parse_run_budgets
@@ -72,8 +105,6 @@ def _validate_research_feed_args(args: argparse.Namespace, parser: argparse.Argu
             parser.error("--collect-only and --cached-only are mutually exclusive")
         if args.cached_only and args.input_jsonl:
             parser.error("--cached-only cannot import new input")
-        if not args.cached_only and not args.input_jsonl:
-            parser.error("Telegram live collection is not implemented; provide --input-jsonl")
     try:
         args.shortlist_budget, args.card_budget, _, args.review_timeout = parse_run_budgets(
             args.shortlist_budget, args.card_budget, 1000, args.review_timeout,
@@ -108,6 +139,14 @@ def register_research_feed(subparsers: argparse._SubParsersAction) -> None:
     view.add_argument("--report", required=True)
     view.add_argument("--project-root", default=None)
     view.set_defaults(func=_view)
+    auth = actions.add_parser("telegram-auth", help="One-time interactive Telegram authorization")
+    auth.add_argument("--project-root", default=None)
+    auth.set_defaults(func=_telegram_auth)
+    child = actions.add_parser("_telegram-child", help=argparse.SUPPRESS)
+    child.add_argument("--purpose", choices=("auth", "collect"), required=True)
+    child.add_argument("--receipt", required=True)
+    child.add_argument("--project-root", required=True)
+    child.set_defaults(func=_telegram_child)
 
 
 __all__ = ["register_research_feed"]

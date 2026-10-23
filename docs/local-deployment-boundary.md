@@ -5,6 +5,11 @@ The supported launcher is `zotero-summarizer serve` on this machine. It accepts
 wildcard `--host` fails with an explanation, never silently changes the address.
 This does **not** configure authenticated mobile access.
 
+The legacy `make iphone` shortcut fails immediately with this limitation, a link
+to this document and the supported Mac command: `make api`, then open
+`http://127.0.0.1:8000`. It does not discover a LAN address, print a phone URL,
+invoke the server or silently substitute loopback for mobile access.
+
 The app factory guards every HTTP and WebSocket route, including the SPA, static
 files, docs and sync. Before route work it requires:
 
@@ -35,25 +40,73 @@ may be cached while the server is off, but real iPhone/iPad installation, restar
 days-offline durability and reconciliation still need device evidence. This
 hardening does not satisfy remote mobile access or close #19.
 
-## Concrete next remote gate (NOT approved or implemented)
+## Local verification progress
 
-Proposed topology for owner review:
+The shared setup/Settings Doctor panel observes an already running verification
+after reload using conditional GET status polling. It disables duplicate Verify
+and retry actions while either the local request or server run is active; terminal
+status or a read error stops polling. Mounting the panel never starts inference.
+This display correction grants no remote access, model download or device trust,
+and does not change backend deadlines or readiness criteria.
+
+## Explicit authenticated gateway (source implemented; activation not performed)
 
 ```text
-single authorized iPhone/iPad
-   -> HTTPS with device-trusted certificate
-   -> single-user authenticated proxy
-   -> private loopback app transport
-   -> existing typed sync API / canonical state
+single authorized iPhone/iPad / Tailscale identity
+   -> Tailscale Serve HTTPS on the approved .ts.net origin
+   -> private 0600 Unix socket in Settings.data_dir/mobile (0700)
+   -> exact owner + gateway/origin checks before every route
+   -> existing React PWA / typed sync API / canonical state
 ```
 
-Before implementation the owner must approve the identity provider, authentication
-and session/logout policy, exact HTTPS origin, proxy isolation and header handling,
-who can reach the loopback port, and revocation/recovery. The app would need an
-explicit deployment policy tied to that topology; allowing a Host or trusting a
-header alone is insufficient. Reject anonymous requests before any app work.
-Never expose `/api/sync` separately from the remaining private API. Synthetic ASGI
-or desktop browser evidence is not HTTPS, iOS, personal-data or human acceptance.
+Default `serve` remains loopback-only. The separate opt-in command is:
+
+```bash
+zotero-summarizer serve-mobile \
+  --origin https://reader.example-tailnet.ts.net --owner-login owner@example.net
+# Separately, after approving the tailnet/device policy and actual origin:
+tailscale serve --https=443 unix:/ABSOLUTE/SELECTED/data/mobile/api.sock
+```
+
+Replace the generic origin/login/path with the selected owner's deployment values.
+The app never runs Tailscale commands, queries accounts, changes ACLs, enables
+Funnel or opens a TCP listener. The launcher uses a prebound private socket, not
+Uvicorn's `--uds` socket creation, which otherwise chmods the socket to 0666.
+An existing socket/path is never removed on startup; shut down its owner first.
+Cleanup only unlinks the same socket inode created by this invocation. Its release
+runs inside Uvicorn's signal context before captured SIGTERM/SIGINT is re-raised;
+normal/error cleanup remains in the outer owner. SIGKILL can leave a stale path,
+which is not silently deleted on the next startup.
+
+Tailscale owns device authentication, trusted TLS and tailnet admission. The app
+requires its exact configured owner login, exact external HTTPS origin and actual
+Unix-socket transport/address; incoming identity headers on TCP/unknown transports
+are never trusted. Funnel, anonymous/tagged identities, duplicate security headers
+and cross-site/foreign-origin browser requests are rejected before API, SPA, docs,
+assets or WebSocket work. Uvicorn forwarded-header processing stays disabled.
+Only after validation does the app use its configured HTTPS authority for redirects.
+Same-host same-UID/root processes remain trusted, as for the existing local app;
+this is not a claim that a header authenticates arbitrary local software.
+
+There is no second app session/cookie/login system. Logout/revocation is through
+Tailscale on the device or its existing device-admin controls; future online app
+requests then lack the authorized transport identity. Offline cached bytes cannot
+be remotely erased: already cached cards and unsynced human work remain on that
+trusted device. Do not silently clear pending edits. Recovery requires reauthorizing
+an approved device and returning to the same HTTPS origin. Real logout/revocation,
+TLS reachability, app installation, server-off restart and ordered reconciliation
+still require explicit deployment/device evidence. Source/unit contracts are not
+such evidence; no real tailnet or iPhone/iPad activation has been performed here.
+
+Primary sources: installed Tailscale 1.96.5 `serve --help` explicitly supports Unix
+sockets; published v1.96.5 `ipn/ipnlocal/serve.go` removes caller identity before
+WhoIs-derived user headers, rejects identity for Funnel/tagged traffic, preserves
+external authority in forwarded headers and uses Host `localhost` for Unix proxying.
+Go 1.26.1 `net/http/httputil/reverseproxy.go` removes incoming forwarded headers
+before its Rewrite callback, so a plaintext caller cannot supply a surviving
+`X-Forwarded-Proto: https`. These sources are BSD-licensed; no code is vendored.
+The installed build's reported commit was not available at the upstream raw URL;
+the matching published version tag is reference evidence, not binary qualification.
 
 ## Scoped STRIDE decisions
 
@@ -66,9 +119,10 @@ or desktop browser evidence is not HTTPS, iOS, personal-data or human acceptance
 | DoS: remote caller triggers models or file work | Refuse before handler work. Existing work limits remain; no new rate-limit policy or protection from local resource abuse is claimed. |
 | Elevation: forged identity grants writes using app privileges | No authorization claims are consumed. Remote authentication/authorization and service privilege review are separate unapproved gates. |
 
-Supervisor decision for wave43 authorized loopback hardening only. Product,
-infrastructure and independent security reviewers retain remote-risk acceptance;
-no proxy or TLS configuration has been activated.
+Wave43 authorized loopback hardening only. The later parent-owned gateway source
+chooses Tailscale Serve plus an owner-only Unix transport instead of custom auth.
+Independent security review, actual deployment and final device acceptance remain
+separate gates; no proxy/TLS configuration or account was activated.
 
 ## Surface-simplicity gate
 
@@ -79,7 +133,7 @@ Source consulted: the project's
 |---|---|
 | Hick / recognition | Reuse `serve --host`; name supported loopback examples and the unsupported mobile boundary in one actionable error. No competing login/deployment wizard. |
 | Cognitive load | A bind failure is explicit and nonzero; no silent fallback or success-shaped remote readiness. Detail belongs here, not another Settings health card. |
-| Subtract first / consistency | Keep existing PWA, setup Doctor and sync UI. Defer remote controls until the owner approves their trust model. No visual changes or pixel-acceptance claim. |
+| Subtract first / consistency | Remove the obsolete `make iphone` LAN/Tailscale recipe and premature phone URL; keep a direct failure with the supported Mac command and this document. Keep existing PWA, setup Doctor and sync UI; defer remote controls until the owner approves their trust model. No new bypass or visual changes. |
 
 ## Primary-source grounding and checks
 
@@ -104,6 +158,10 @@ Opened installed sources (read-only; not vendored):
 loopback TestClient transport and no lifespan startup, plus a mocked launcher.
 It asserts successful local calls and rejected remote/unknown peers, forged
 headers, hostile/malformed/duplicate authorities, different origins, cross-site
-requests and socket policy rejection. It does not launch or certify TLS/proxies,
-models or devices. Retained source/RED/GREEN identities and resource receipts
-belong to the wave43 validation artifact, not this design document.
+requests and socket policy rejection. `tests/test_make_launchers.py` executes the
+real Makefile in isolated projects with stub executables, with and without a
+venv. It verifies that `iphone` fails before address discovery or server launch,
+while `api` preserves the loopback command. These checks do not launch or certify
+TLS/proxies, models or devices. The earlier boundary-hardening source/RED/GREEN
+identities and resource receipts belong to the wave43 validation artifact,
+not this design document.

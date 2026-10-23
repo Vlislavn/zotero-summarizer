@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from zotero_summarizer.integrations._rate_limiter import RateLimiter
+from zotero_summarizer.integrations.search_outcomes import record_source_outcome
 
 _BASE = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 _REST = "https://www.ebi.ac.uk/europepmc/webservices/rest"
@@ -86,6 +87,7 @@ def search_europepmc(
     (network, non-200, malformed JSON) — never raises."""
     query = (query or "").strip()
     if not query:
+        record_source_outcome('europepmc', 'not_attempted')
         return []
     params = {
         "query": query,
@@ -98,16 +100,26 @@ def search_europepmc(
     try:
         resp = client.get(_BASE, params=params, headers={"User-Agent": "zotero-summarizer/1.0"})
         if resp.status_code != 200:
+            record_source_outcome('europepmc', 'failed', error_code='rate_limited' if resp.status_code == 429 else 'http_error')
             return []
         payload = resp.json()
-    except (httpx.HTTPError, OSError, ValueError):
+    except (httpx.HTTPError, OSError):
+        record_source_outcome('europepmc', 'failed', error_code='transport_error')
+        return []
+    except ValueError:
+        record_source_outcome('europepmc', 'failed', error_code='invalid_response')
         return []
     finally:
         if http_client is None:
             client.close()
     results = ((payload.get("resultList") or {}).get("result")) or []
-    hits = [_hit_from_result(r) for r in results if isinstance(r, dict)]
-    return [h for h in hits if h is not None]
+    hits = [h for row in results if isinstance(row, dict) and (h := _hit_from_result(row)) is not None]
+    valid = isinstance((payload.get('resultList') or {}).get('result'), list)
+    if not valid or (results and not hits):
+        record_source_outcome('europepmc', 'failed', error_code='invalid_response')
+    else:
+        record_source_outcome('europepmc', 'success_nonempty' if hits else 'success_empty', count=len(hits))
+    return hits
 
 
 def _xml_to_text(xml: str) -> str:

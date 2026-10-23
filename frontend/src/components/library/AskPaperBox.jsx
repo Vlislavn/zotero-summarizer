@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { askPaper, saveReviewQuestion } from '../../api/libraryApi.js';
 import { queueQuestionSubmission } from '../../offlineStore.js';
 import { questionSubmissionError, sameQuestion } from '../../questionSubmission.js';
-import { noteDeliveryText } from '../../hooks/useNoteDelivery.js';
 import Spinner from '../ui/Spinner.jsx';
 import { Disclosure } from '../paper/review/primitives.jsx';
 
@@ -79,7 +78,7 @@ export default function AskPaperBox({ itemKey, variant = 'disclosure', allowRawP
       committed = true;
       if (!current()) return;
       setRetryIntent(intent);
-      setCommentStatus(`Saved on this device — server comment pending. ${noteDeliveryText(null)}`);
+      setCommentStatus('Saved on this device — server comment pending.');
       onSaved?.();
       if (!navigator.onLine) { setQuestion(''); return; }
       stage = 'Server comment not confirmed';
@@ -89,7 +88,7 @@ export default function AskPaperBox({ itemKey, variant = 'disclosure', allowRawP
         throw new Error('Invalid question save acknowledgement');
       }
       if (!current()) return;
-      setCommentStatus(`Question saved in the app. ${noteDeliveryText(saved.question_mirror)}`);
+      setCommentStatus('Question saved in the app — see My notes for Zotero delivery.');
       reportMirror?.(saved.question_mirror);
       onSaved?.();
       stage = 'Ask failed';

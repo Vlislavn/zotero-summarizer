@@ -22,5 +22,15 @@ export function priorityClass(priority) {
 
 export function reviewPaperUrl(item) {
   if (!item) return '';
-  return item.link || item.url || (item.doi ? `https://doi.org/${item.doi}` : '');
+  // Search Candidate owns DOI/arXiv normalization; provider-only IDs use fixed hosts.
+  const openalexId = String(item.openalex_id || '').replace(/^https?:\/\/openalex\.org\//i, '');
+  const urls = [
+    item.link,
+    item.url,
+    item.doi ? `https://doi.org/${item.doi}` : '',
+    item.arxiv_id ? `https://arxiv.org/abs/${item.arxiv_id}` : '',
+    /^\d+$/.test(item.pmid || '') ? `https://pubmed.ncbi.nlm.nih.gov/${item.pmid}/` : '',
+    /^W\d+$/i.test(openalexId) ? `https://openalex.org/${openalexId.toUpperCase()}` : '',
+  ];
+  return urls.find((url) => /^https?:\/\//i.test(url || '')) || '';
 }

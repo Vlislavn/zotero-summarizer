@@ -51,7 +51,7 @@ export const METHOD_CLAUSE =
 export const LEGEND = [
   { term: 'FLAG', gloss: 'a rigor red-flag fired' },
   { term: 'NEUTRAL', gloss: 'sound, unremarkable' },
-  { term: 'HIGHLIGHT', gloss: '≥6 grounded checks, zero flags' },
+  { term: 'HIGHLIGHT', gloss: 'strong coverage of applicable type-aware checks' },
 ];
 
 // Plain-English labels for rubric keys (mirrors _paper_read_brief._RUBRIC_LABEL).
@@ -67,6 +67,10 @@ const RUBRIC_LABEL = {
   clinical_calibration: 'Calibration / multi-site validation',
   determinism: 'Reports run-to-run determinism',
   eval_contamination: 'Addresses eval contamination',
+  thesis: 'States a clear thesis / position',
+  evidence_cited: 'Supports premises with cited evidence',
+  counterarguments: 'Addresses counterarguments / limitations',
+  scope_match: 'Matches claim scope to the evidence offered',
 };
 export const rubricLabel = (k) => RUBRIC_LABEL[k] || String(k || '').replace(/_/g, ' ');
 
@@ -83,50 +87,33 @@ export const PAPER_TYPE_LABEL = {
 };
 export const paperTypeLabel = (t) => PAPER_TYPE_LABEL[t] || String(t || '').replace(/_/g, ' ');
 
-// Core rubric keys, prompt order (mirrors _quality_prompts.RUBRIC_ITEMS), plus
-// the domain keys appended for the full checklist.
+// Legacy empirical keys retain their display order; only supplied rubric entries render.
 const CORE_KEYS = [
   'external_validation', 'uncertainty', 'ablation', 'baselines',
   'dataset_provenance', 'repro_detail', 'code_data_released',
 ];
 const DOMAIN_KEYS = ['patient_level_split', 'clinical_calibration', 'determinism', 'eval_contamination'];
-const TRIAD = ['external_validation', 'uncertainty', 'ablation']; // the rigor floor
+const TRIAD = ['external_validation', 'uncertainty', 'ablation']; // legacy display order only
 
 function shortGoal(goal, words = 4) {  // matches server _short_goal (words=4)
   const parts = String(goal || '').match(/[A-Za-z0-9/&-]+/g) || [];
   return parts.slice(0, words).join(' ') + (parts.length > words ? '…' : '');
 }
 
-// The 2-3 rubric items that moved the band, in plain English (ported from
-// _decisive_rows). Returns { heading, rows:[{ok,label}], caption }.
+// Mirror _decisive_rows: summarize supplied applicable criteria, not inferred causes of the band.
 export function decisiveRows(rubric = {}, band = '') {
-  const val = {};
-  for (const k of new Set([...CORE_KEYS, ...TRIAD, ...Object.keys(rubric)])) {
-    val[k] = String(rubric[k] || 'na').toLowerCase();
-  }
-  const yesCount = CORE_KEYS.filter((k) => val[k] === 'yes').length;
-  if (band === 'highlight') {
-    const ordered = [...TRIAD, ...CORE_KEYS.filter((k) => !TRIAD.includes(k))];
-    const earned = ordered.filter((k) => val[k] === 'yes').slice(0, 3);
-    return {
-      heading: 'What earned it',
-      rows: earned.map((k) => ({ ok: true, label: rubricLabel(k) })),
-      caption: `${yesCount}/${CORE_KEYS.length} rigor checks met`,
-    };
-  }
-  if (band === 'flag') {
-    const failed = TRIAD.filter((k) => val[k] !== 'yes').slice(0, 3);
-    return { heading: 'Why it sank', rows: failed.map((k) => ({ ok: false, label: rubricLabel(k) })), caption: '' };
-  }
-  if (band === 'uncertain') {
-    return {
-      heading: 'Split decision',
-      rows: TRIAD.map((k) => ({ ok: val[k] === 'yes', label: rubricLabel(k) })),
-      caption: '',
-    };
-  }
-  const gaps = CORE_KEYS.filter((k) => val[k] === 'no').slice(0, 3);
-  return { heading: "What's missing", rows: gaps.map((k) => ({ ok: false, label: rubricLabel(k) })), caption: '' };
+  const val = Object.fromEntries(Object.entries(rubric).map(([key, value]) => [key, String(value || 'na').toLowerCase()]));
+  const ordered = [...new Set([...TRIAD, ...Object.keys(rubric)])];
+  const applicable = ordered.filter(key => ['yes', 'no'].includes(val[key]));
+  const met = applicable.filter(key => val[key] === 'yes');
+  const selected = band === 'highlight' ? met : band === 'uncertain' ? applicable
+    : applicable.filter(key => val[key] === 'no');
+  return {
+    heading: band === 'highlight' ? 'What earned it' : band === 'uncertain' ? 'Split decision'
+      : band === 'flag' ? 'Reported checklist gaps' : "What's missing",
+    rows: selected.slice(0, 3).map(key => ({ ok: val[key] === 'yes', label: rubricLabel(key) })),
+    caption: band === 'highlight' && applicable.length ? `${met.length}/${applicable.length} applicable checks met` : '',
+  };
 }
 
 // Full rubric rows for the "show all checks" disclosure: core first, then domain,

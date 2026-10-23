@@ -6,7 +6,9 @@ import asyncio
 import logging
 from typing import Any
 
-from zotero_summarizer.models.providers import STAGES, ProviderConfig, resolve_stage
+from zotero_summarizer.models.providers import (
+    STAGES, CapabilityMismatchError, ProviderConfig, ResolvedStage, resolve_stage,
+)
 from zotero_summarizer.services._common import state
 from zotero_summarizer.services.llm.factory import build_client_for_provider
 
@@ -17,9 +19,15 @@ _PROBE_TIMEOUT_SECS = 30.0
 _LOCAL_PROBE_TIMEOUT_SECS = 60.0
 
 
-def _stage_skeleton(routing: Any, stage: str) -> tuple[Any, dict[str, Any]]:
-    """Resolved identity shared by success and timeout rows."""
-    resolved = resolve_stage(routing, stage)
+def _stage_skeleton(routing: Any, stage: str) -> tuple[ResolvedStage | None, dict[str, Any]]:
+    """Resolved identity or a known unsupported-selection failure, without IO."""
+    try:
+        resolved = resolve_stage(routing, stage)
+    except CapabilityMismatchError as exc:
+        return None, {**exc.route, "status": "fail", "reachable": False,
+                      "reason_code": "unsupported_capabilities", "detail": str(exc),
+                      "required_capabilities": exc.required_capabilities,
+                      "declared_capabilities": exc.declared_capabilities}
     return resolved, {
         "stage": stage,
         "provider": resolved.provider.name,
@@ -28,14 +36,22 @@ def _stage_skeleton(routing: Any, stage: str) -> tuple[Any, dict[str, Any]]:
     }
 
 
-def probe_provider(provider: ProviderConfig, model: str, *, before_prompt=None) -> dict[str, Any]:
+def probe_provider(provider: ProviderConfig, model: str, *, before_prompt=None,
+                   request_observer=None) -> dict[str, Any]:
     """Probe one provider/model; failures are data so sibling stages still run."""
     try:
-        client = build_client_for_provider(provider, model)
-        if before_prompt is not None:
-            before_prompt()
-        client.prompt(_PROBE_PROMPT)
-        return {"status": "operational", "detail": ""}
+        client = build_client_for_provider(provider, model,
+            **({"request_observer": request_observer} if request_observer is not None else {}))
+        try:
+            if before_prompt is not None:
+                before_prompt()
+            output = client.prompt(_PROBE_PROMPT)
+            if request_observer is not None and (not isinstance(output, str) or not output.strip()):
+                raise ValueError("Setup inference returned no response text")
+            return {"status": "operational", "detail": ""}
+        finally:
+            if request_observer is not None:
+                client.close()
     except Exception as exc:  # noqa: BLE001 — probe status boundary (see docstring)
         LOGGER.warning(
             "LLM probe failed for provider=%s model=%s: %s", provider.name, model, exc
@@ -45,6 +61,8 @@ def probe_provider(provider: ProviderConfig, model: str, *, before_prompt=None) 
 
 def _probe_stage(routing: Any, stage: str) -> dict[str, Any]:
     resolved, row = _stage_skeleton(routing, stage)
+    if resolved is None:
+        return row
     row.update(probe_provider(resolved.provider, resolved.model))
     return row
 
@@ -52,6 +70,8 @@ def _probe_stage(routing: Any, stage: str) -> dict[str, Any]:
 async def _probe_stage_bounded(routing: Any, stage: str, *, probe=None, on_abandon=None) -> dict[str, Any]:
     """Bound the waiter only; an abandoned synchronous callback may still run."""
     resolved, skeleton = _stage_skeleton(routing, stage)
+    if resolved is None:
+        return skeleton
     timeout = (
         _LOCAL_PROBE_TIMEOUT_SECS
         if getattr(resolved, "provider", None) and resolved.provider.is_local
@@ -87,6 +107,9 @@ async def check_routing_stages(routing: Any, *, stages=STAGES, probe=None, on_ab
     aborted = False
     for stage in stages:
         resolved, skeleton = _stage_skeleton(routing, stage)
+        if resolved is None:
+            rows.append(skeleton)
+            continue
         key = (resolved.provider.name, resolved.model)
         if key not in cached:
             if aborted:
@@ -117,10 +140,15 @@ def _disabled_stages(routing: Any, *, inference: bool) -> dict[str, Any]:
     rows = []
     for stage in STAGES:
         resolved, row = _stage_skeleton(routing, stage)
+        if resolved is None:
+            row.pop("status")
+            row.pop("reachable")
+            row["reason_code"] = "llm_disabled"
+        else:
+            row["base_url"] = resolved.provider.base_url or ""
         row.update(
             {
                 "enabled": False,
-                "base_url": resolved.provider.base_url or "",
                 "detail": "AI features are disabled by choice",
             }
         )
@@ -133,6 +161,8 @@ def _reach_stage(routing: Any, stage: str) -> dict[str, Any]:
     from zotero_summarizer.services.llm import model_list
 
     resolved, row = _stage_skeleton(routing, stage)
+    if resolved is None:
+        return row
     row["base_url"] = resolved.provider.base_url or ""
     try:
         model_list.list_models_for_provider(resolved.provider)
@@ -153,6 +183,8 @@ async def _reach_stage_bounded(routing: Any, stage: str) -> dict[str, Any]:
         )
     except asyncio.TimeoutError:
         _resolved, row = _stage_skeleton(routing, stage)
+        if _resolved is None:
+            return row
         row["base_url"] = _resolved.provider.base_url or ""
         row["reachable"] = False
         row["detail"] = (

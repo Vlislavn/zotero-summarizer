@@ -40,17 +40,21 @@ describe('AskPaperBox durable question submission', () => {
   it.each([
     [false, true, 'target_unavailable', null, 'Zotero note delivery: pending (revision 7) — target_unavailable.'],
     [true, false, null, 'P1', 'Zotero note delivery: acknowledged (revision 7).'],
-  ])('reports the supplied composite mirror receipt (%s)', async (written, pending, error, target, text) => {
+  ])('forwards the composite mirror receipt to My notes instead of retaining another delivery status (%s)', async (written, pending, error, target, text) => {
     mocks.saveReviewQuestion.mockImplementation(async (submission) => ({
       question_saved: true, question_submission: submission,
       question_mirror: { note_written: written, note_pending: pending, note_error: error,
         target_key: target, projection_revision: 7 },
     }));
     mocks.askPaper.mockRejectedValue(new Error('model unavailable'));
-    render(<AskPaperBox itemKey="P1" variant="rail" />);
+    const reportMirror = vi.fn();
+    render(<AskPaperBox itemKey="P1" variant="rail" onMirrorStart={() => reportMirror} />);
     submit('A durable question');
     await screen.findByRole('alert');
-    expect(screen.getByText(`Question saved in the app. ${text}`)).toBeTruthy();
+    expect(screen.getByText('Question saved in the app — see My notes for Zotero delivery.')).toBeTruthy();
+    expect(reportMirror).toHaveBeenCalledWith({ note_written: written, note_pending: pending,
+      note_error: error, target_key: target, projection_revision: 7 });
+    expect(screen.queryByText(text)).toBeNull();
   });
 
   it('commits the typed question before comment-save or QA requests and sends its UUID', async () => {
@@ -133,7 +137,7 @@ describe('AskPaperBox durable question submission', () => {
     expect(await screen.findByText(/Server comment not confirmed: server unavailable/)).toBeTruthy();
     expect(mocks.queueQuestionSubmission).toHaveBeenCalledOnce();
     expect(mocks.askPaper).not.toHaveBeenCalled();
-    expect(screen.getByText(/Zotero note delivery: unknown/)).toBeTruthy();
+    expect(screen.getByText('Saved on this device — server comment pending.')).toBeTruthy();
   });
 
   it.each([{ question_saved: false }, { question_saved: true }])('does not start QA for a malformed comment acknowledgement: %j', async (receipt) => {
@@ -190,7 +194,7 @@ describe('AskPaperBox durable question submission', () => {
     submit('Keep this question');
     await screen.findByText(/Ask failed: model unavailable/);
     expect(onSaved).toHaveBeenCalled();
-    expect(screen.getByText('Question saved in the app. Zotero note delivery: unknown.')).toBeTruthy();
+    expect(screen.getByText('Question saved in the app — see My notes for Zotero delivery.')).toBeTruthy();
   });
 
   it('keeps abstention distinct from comment success', async () => {
@@ -198,7 +202,7 @@ describe('AskPaperBox durable question submission', () => {
     render(<AskPaperBox itemKey="P1" variant="rail" />);
     submit('An unanswered question');
     expect(await screen.findByText(/the model abstained rather than guessing/)).toBeTruthy();
-    expect(screen.getByText('Question saved in the app. Zotero note delivery: unknown.')).toBeTruthy();
+    expect(screen.getByText('Question saved in the app — see My notes for Zotero delivery.')).toBeTruthy();
   });
 
   it('does not put a late answer into another paper after navigation', async () => {

@@ -54,3 +54,28 @@ it('keeps My notes available without PDF, review or Add while preserving the Ask
   expect(screen.getByText('A question saved before a failed review')).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Ask' })).toBeNull();
 });
+
+it('exposes compact Ask in one disclosure and refreshes questions without replacing manual text', async () => {
+  mocks.askPaper.mockRejectedValueOnce(new Error('model unavailable'));
+  const onDeepReviewDone = vi.fn();
+  const detail = { has_pdf: true, user_note: 'Saved manual note', questions: [] };
+  const props = { itemKey: 'P1', mode: 'editable', compact: true, onDeepReviewDone,
+    show: { reader: false, abstract: false, links: false, tags: false, collection: false, verdict: false } };
+  const { container, rerender } = render(<PaperDetailView {...props} detail={detail} />);
+  const question = container.querySelector('[aria-label="Question about this paper"]');
+  const disclosure = question.closest('details');
+  expect(disclosure.parentElement.closest('details')).toBeNull();
+  fireEvent.click(disclosure.querySelector('summary'));
+  fireEvent.change(screen.getByRole('textbox', { name: 'Manual notes' }), { target: { value: 'Dirty manual note' } });
+  fireEvent.change(question, { target: { value: 'Question preserved despite QA failure' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
+  await screen.findByText('Ask failed: model unavailable');
+  await waitFor(() => expect(onDeepReviewDone).toHaveBeenCalled());
+  const submission = mocks.queueQuestionSubmission.mock.calls[0][0];
+
+  rerender(<PaperDetailView {...props} detail={{ ...detail, questions: [submission] }} />);
+
+  expect(screen.getByRole('list', { name: 'Saved review questions' }).textContent).toContain(submission.question);
+  expect(screen.getByRole('textbox', { name: 'Manual notes' }).value).toBe('Dirty manual note');
+  expect(mocks.askPaper).toHaveBeenCalledOnce();
+});

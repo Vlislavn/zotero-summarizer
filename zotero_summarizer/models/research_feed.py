@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
+from pydantic import (
+    BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator, model_validator,
+)
+
+from zotero_summarizer.models.triage import PaperDigest
 
 
 TOPIC_TAXONOMY = frozenset({
@@ -18,6 +22,29 @@ TOPIC_TAXONOMY = frozenset({
 
 _ShortlistBudget = Annotated[int, Field(strict=True, ge=1, le=100)]
 _CardBudget = Annotated[int, Field(strict=True, ge=1, le=20)]
+LiveTelegramChannelId = Annotated[
+    int, Field(strict=True, ge=-(2**63), lt=-1000000000000),
+]
+
+
+def validate_live_telegram_channel_id(value: int) -> int:
+    """Validate a marked live channel ID without converting saved identities."""
+    try:
+        return TypeAdapter(LiveTelegramChannelId).validate_python(value)
+    except ValueError:
+        raise ValueError("invalid live Telegram channel ID") from None
+
+
+def normalize_telegram_username(value: str) -> str:
+    """Application binding key, not proof of Telegram API/public-channel validity."""
+    if not isinstance(value, str):
+        raise ValueError("invalid Telegram username")
+    bare = value.strip().removeprefix("@")
+    if (not 1 <= len(bare) <= 32 or not bare.isascii()
+            or not all(char.isalnum() or char == "_" for char in bare)
+            or not any(char.isalpha() for char in bare)):
+        raise ValueError("invalid Telegram username")
+    return bare.lower()
 
 
 def parse_run_budgets(shortlist, cards, source_limit, timeout) -> tuple[int | None, int | None, int, int]:
@@ -97,6 +124,41 @@ class TelegramPost(BaseModel):
         return f"telegram:{self.channel_id}:{self.message_id}"
 
 
+class TelegramPage(BaseModel):
+    """One requested page, not a claim of complete channel history."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    posts: tuple[TelegramPost, ...] = Field(max_length=100)
+    complete: bool
+
+
+class ResolvedTelegramChannel(BaseModel):
+    """Application resolution result, without SDK or session metadata."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    channel_id: LiveTelegramChannelId
+    public_broadcast: bool
+
+
+class TelegramTransportError(Exception):
+    """Bounded injected-transport failure; never carries an upstream message."""
+
+    def __init__(self, code: str, *, retry_seconds: int | None = None):
+        if type(code) is not str or code not in {
+            "missing_session", "session_unauthorized", "revoked_session",
+            "network_error", "channel_unavailable", "flood_wait",
+        }:
+            raise ValueError("invalid Telegram transport error code")
+        if code == "flood_wait":
+            if type(retry_seconds) is not int or retry_seconds <= 0:
+                raise ValueError("invalid Telegram retry seconds")
+        elif retry_seconds is not None:
+            raise ValueError("retry seconds require Telegram flood_wait")
+        self.code = code
+        self.retry_seconds = retry_seconds
+        super().__init__(code)
+
+
 class TelegramNewsVerdict(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     decision: Literal["keep", "drop", "uncertain"]
@@ -157,6 +219,143 @@ ProjectUse = Literal[
 ]
 
 
+class FeedReviewContext(BaseModel):
+    """Explicit same-call input; stored data cannot select a response schema."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    source_id: str = Field(min_length=1)
+    profile: ResearchProfile
+
+    @model_validator(mode="after")
+    def _project_keys(self) -> FeedReviewContext:
+        if not self.source_id.strip() or any(not key.strip() for key in self.profile.projects):
+            raise ValueError("feed context requires nonblank source/project keys")
+        if len(set(self.profile.projects)) != len(self.profile.projects):
+            raise ValueError("feed context requires unique project keys")
+        return self
+
+
+class FeedProjectAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    source_id: str = Field(min_length=1)
+    target_project: str = Field(min_length=1)
+    assessment: Literal["applicable", "not_applicable", "unknown"]
+    use_kind: ProjectUse | None
+    rationale: str = Field(min_length=1)
+    mechanism: str
+    target_component: str
+    proposed_change: str
+    minimal_validation_experiment: str
+    evidence_quote: str
+
+    @model_validator(mode="after")
+    def _use_contract(self) -> FeedProjectAssessment:
+        if not self.rationale.strip():
+            raise ValueError("assessment requires rationale")
+        if self.assessment == "applicable":
+            if self.use_kind in (None, "not_applicable") or not all(value.strip() for value in (
+                self.mechanism, self.target_component, self.proposed_change,
+                self.minimal_validation_experiment, self.evidence_quote,
+            )):
+                raise ValueError("positive use requires mechanism, component, change, experiment and quote")
+        elif self.assessment == "not_applicable":
+            if self.use_kind != "not_applicable" or not self.evidence_quote.strip():
+                raise ValueError("no-fit requires explicit kind and source quote")
+        elif self.use_kind is not None:
+            raise ValueError("unknown cannot supply a use kind")
+        if self.assessment != "applicable" and any((self.mechanism, self.target_component,
+                self.proposed_change, self.minimal_validation_experiment)):
+            raise ValueError("nonpositive assessments cannot supply a proposed use")
+        return self
+
+
+class FeedEvidenceSpan(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    quote: str = Field(min_length=1)
+    start: int = Field(ge=0)
+    end: int = Field(gt=0)
+    pdf_page: None = None
+
+    @model_validator(mode="after")
+    def _exact_length(self) -> FeedEvidenceSpan:
+        if not self.quote.strip() or self.end - self.start != len(self.quote):
+            raise ValueError("evidence span must match the exact quote length")
+        return self
+
+
+class FeedProjectRecord(FeedProjectAssessment):
+    original_evidence: FeedEvidenceSpan | None
+
+    @model_validator(mode="after")
+    def _bound_quote(self) -> FeedProjectRecord:
+        if self.evidence_quote:
+            if self.original_evidence is None or self.original_evidence.quote != self.evidence_quote:
+                raise ValueError("project record requires its exact original evidence")
+        elif self.original_evidence is not None:
+            raise ValueError("unknown quote cannot carry evidence")
+        return self
+
+
+class _FeedWarrant(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    rationale: str = Field(min_length=1)
+    evidence_quote: str = Field(min_length=1)
+
+    @field_validator("rationale", "evidence_quote")
+    @classmethod
+    def _nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("assessment rationale and quote must be nonblank")
+        return value
+
+
+class FeedReproduction(_FeedWarrant):
+    tier: Literal["one_day", "one_week", "multi_week", "blocked", "unknown"]
+    missing_inputs: list[str]
+
+
+class FeedImpact(_FeedWarrant):
+    research: int = Field(ge=0, le=5)
+    production: int = Field(ge=0, le=5)
+    personal_novelty: int = Field(ge=0, le=5)
+
+
+class FeedAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    projects: list[FeedProjectAssessment]
+    reproduction: FeedReproduction | None
+    impact: FeedImpact | None
+
+
+class FeedAssessmentUnavailable(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    reason: Literal["missing_assessment", "invalid_assessment"]
+
+
+class FeedDigestResponse(PaperDigest):
+    """Selected only by explicit feed input; bad optional data cannot spoil a valid base."""
+
+    feed_assessment: FeedAssessment | FeedAssessmentUnavailable | None = Field(default=None, validate_default=True)
+
+    @field_validator("feed_assessment", mode="wrap")
+    @classmethod
+    def _optional_content(cls, value: Any, handler: Any) -> FeedAssessment | FeedAssessmentUnavailable:
+        if value is None:
+            return FeedAssessmentUnavailable(reason="missing_assessment")
+        try:
+            return handler(value)
+        except ValidationError:
+            return FeedAssessmentUnavailable(reason="invalid_assessment")
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _preserve_presence(cls, value: Any, handler: Any) -> FeedDigestResponse:
+        response = handler(value)
+        if isinstance(value, dict):
+            response.model_fields_set.intersection_update(value)
+        return response
+
+
 class ResearchEngineeringCard(BaseModel):
     source_id: str
     problem: str
@@ -173,6 +372,14 @@ class ResearchEngineeringCard(BaseModel):
     missing_reproduction_inputs: list[str] = Field(default_factory=list)
     project_uses: list[ProjectUse] = Field(default_factory=list)
     project_use_notes: list[str] = Field(default_factory=list)
+    project_assessment_status: Literal["not_assessed", "assessed", "partial", "invalid"] = "not_assessed"
+    project_assessment_reason: str = ""
+    project_assessments: list[FeedProjectRecord] = Field(default_factory=list)
+    impact_assessment: FeedImpact | None = None
+    reproduction_assessment: FeedReproduction | None = None
+    assessment_evidence: dict[str, FeedEvidenceSpan | None] = Field(default_factory=dict)
+    assessment_origin: Literal["ai_generated"] | None = None
+    scientific_verification: Literal["unverified"] | None = None
     research_impact: int = Field(ge=0, le=5)
     production_impact: int = Field(ge=0, le=5)
     personal_novelty: int = Field(ge=0, le=5)

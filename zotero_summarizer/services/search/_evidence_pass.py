@@ -1,4 +1,4 @@
-"""Default-absent supplied-original shadow pass, using the existing session worker."""
+"""Bounded original-source assessment shared by explicit shadow and opt-in OA passes."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -81,8 +81,10 @@ def _inputs(session_id: str, candidate_id: str, request: EvidencePassRequest) ->
         source = validate_source(raw, candidate_id, max_chars=request.max_chars, max_passages=request.max_passages)
     except ValueError as exc:
         return None, context, str(exc), ""
-    if not source["complete"] or source["truncated"]:
-        return source, context, "source_partial" if not source["complete"] else "source_truncated", ""
+    if source["truncated"] or (not source["complete"] and source["source_kind"] != "acquired_original"):
+        return source, context, "source_truncated" if source["truncated"] else "source_partial", ""
+    if source["source_kind"] == "acquired_original" and not source["passages"]:
+        return source, context, "no_passages_retrieved", ""
     raw, error = _call(session_id, request.load_context, candidate_id)
     if error:
         return source, context, "", "context_" + error
@@ -142,6 +144,9 @@ def _assess(request: EvidencePassRequest, receipt: dict, source: dict, context: 
     except ValueError as exc:
         receipt["reason"] = str(exc)
         return remaining
+    if source["source_kind"] == "acquired_original" and verdict["state"] == "not_found_in_checked_text":
+        receipt["reason"] = "unchecked_remainder"
+        return remaining
     receipt.update(state=verdict["state"], reason="verifier_unknown" if verdict["state"] == "unknown" else "verified",
                    supported=verdict["supported"], uncovered=verdict["uncovered"],
                    evidence=[row for row in proposal["evidence"] if row["passage_id"] in verdict["evidence_ids"]])
@@ -173,6 +178,9 @@ def run_evidence_pass(sess: ResearchSession, request: Any) -> None:
                 receipt.update({key: deepcopy(source[key]) for key in (
                     "source_id", "source_version_id", "source_sha256", "source_kind", "retrieval_mode", "checked_scope",
                     "complete", "truncated")})
+                if source["source_kind"] == "acquired_original":
+                    receipt["checked_passages"] = [{key: row[key] for key in ("passage_id", "start", "end")}
+                                                   for row in source["passages"]]
             receipt.update(context_availability=context["availability"], context_reason=context_reason)
             if reason:
                 receipt["reason"] = reason

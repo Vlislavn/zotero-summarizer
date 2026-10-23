@@ -354,6 +354,7 @@ def test_storage_question_bound_matches_http_code_points_before_sql(path, length
                          ids=["unrelated-library", "feed-family"])
 def test_empty_mirror_resolves_alias_family_once_per_snapshot(path, monkeypatch, lookup, target):
     from zotero_summarizer.services.golden import verdict_effects
+    from zotero_summarizer.services.zotero import zotero
 
     _feed(path)
     calls = []
@@ -372,8 +373,8 @@ def test_empty_mirror_resolves_alias_family_once_per_snapshot(path, monkeypatch,
                         observe("review_notes", review_notes.resolve_item_key_aliases))
     monkeypatch.setattr(review_questions, "resolve_item_key_aliases",
                         observe("review_questions", review_questions.resolve_item_key_aliases))
-    monkeypatch.setattr(verdict_effects, "get_zotero_reader_or_raise", no_delivery)
-    monkeypatch.setattr(verdict_effects, "zotero_upsert_user_note", no_delivery)
+    monkeypatch.setattr(zotero, "get_zotero_reader_or_raise", no_delivery)
+    monkeypatch.setattr(zotero, "get_zotero_writer_or_raise", no_delivery)
 
     receipt = verdict_effects.mirror_review_note(path, lookup)
 

@@ -6,12 +6,16 @@ from enum import Enum
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import (
+    BaseModel, Field, SerializerFunctionWrapHandler, model_serializer, model_validator,
+)
 
 __all__ = [
     "STAGES",
+    "CapabilityMismatchError",
     "DefaultModelConfig",
     "LLMRoutingConfig",
+    "LLMCapability",
     "ProviderConfig",
     "ProviderType",
     "ResolvedStage",
@@ -29,6 +33,11 @@ _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1"})
 class ProviderType(str, Enum):
     openai = "openai"  # OpenAI-compatible chat (reuses build_llm / OnPrem)
     anthropic = "anthropic"  # native Anthropic messages API
+
+
+class LLMCapability(str, Enum):
+    text = "text"
+    native_json_schema = "native_json_schema"
 
 
 class ProviderConfig(BaseModel):
@@ -49,6 +58,24 @@ class ProviderConfig(BaseModel):
     num_ctx: int | None = Field(default=None, ge=512)
     keep_alive: int | None = Field(default=None)
     structured_output: bool = Field(default=False)
+    capabilities: frozenset[LLMCapability] | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize_declared_capabilities(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        payload = handler(self)
+        if self.capabilities is None:
+            payload.pop("capabilities", None)
+        return payload
+
+    @property
+    def available_capabilities(self) -> frozenset[LLMCapability]:
+        """Intersect declarations with enabled adapter paths, not measured support."""
+        enabled = {LLMCapability.text}
+        if self.capabilities is None:
+            return frozenset(enabled)  # legacy adapters promise text, nothing optional
+        if self.type == ProviderType.anthropic or self.structured_output:
+            enabled.add(LLMCapability.native_json_schema)
+        return self.capabilities & enabled
 
     @model_validator(mode="after")
     def _require_base_url_for_openai(self) -> ProviderConfig:
@@ -137,16 +164,46 @@ class ResolvedStage(BaseModel):
     stage: str
     provider: ProviderConfig
     model: str
+    # Code-owned admission requirements are not persisted config/cache identity.
+    required_capabilities: frozenset[LLMCapability] = Field(
+        default_factory=frozenset, exclude=True,
+    )
+
+    def require_capabilities(self) -> None:
+        missing = self.required_capabilities - self.provider.available_capabilities
+        if missing:
+            raise CapabilityMismatchError(self, missing)
+
+
+class CapabilityMismatchError(ValueError):
+    """Unsupported selection with diagnostic identity, never resolved secrets."""
+
+    def __init__(self, resolved: ResolvedStage, missing: frozenset[LLMCapability]) -> None:
+        provider = resolved.provider
+        self.route = {"stage": resolved.stage, "provider": provider.name,
+                      "type": provider.type.value, "model": resolved.model,
+                      "base_url": provider.base_url or ""}
+        self.required_capabilities = sorted(cap.value for cap in resolved.required_capabilities)
+        self.declared_capabilities = (None if provider.capabilities is None else
+                                      sorted(cap.value for cap in provider.capabilities))
+        names = ", ".join(sorted(cap.value for cap in missing))
+        super().__init__(f"provider {provider.name!r} lacks required capabilities: {names}")
 
 
 def resolve_stage(routing: LLMRoutingConfig, stage: str) -> ResolvedStage:
-    """Resolve ``stage`` (one of :data:`STAGES`) to its effective provider+model,
-    inheriting any unset field from ``routing.default``."""
+    """Resolve inherited provider/model and admit the feed's text workflow.
+
+    An incompatible explicit selection fails; no other provider/model is tried.
+    """
     if stage not in STAGES:
         raise ValueError(f"unknown stage {stage!r}; expected one of {STAGES}")
     selection: StageModelConfig = getattr(routing, stage)
     provider_name = selection.provider or routing.default.provider
     model = selection.model or routing.default.model
-    return ResolvedStage(
-        stage=stage, provider=routing.provider_by_name(provider_name), model=model
+    provider = routing.provider_by_name(provider_name)
+    required = frozenset({LLMCapability.text}) if stage == "feed" else frozenset()
+    resolved = ResolvedStage(
+        stage=stage, provider=provider, model=model, required_capabilities=required,
     )
+    resolved.require_capabilities()
+    return resolved

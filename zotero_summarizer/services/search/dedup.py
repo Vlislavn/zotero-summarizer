@@ -51,8 +51,23 @@ def _richness(cand: Candidate) -> tuple[int, int, int, int]:
     return (bool(cand.abstract), bool(cand.doi), bool(cand.venue), len(cand.abstract))
 
 
+def _operation_keys(members: list[Candidate]) -> tuple[str, str]:
+    plans = {m.planned_zotero_key for m in members if m.planned_zotero_key}
+    materialized = {m.materialized_zotero_key for m in members if m.materialized_zotero_key}
+    if len(plans) > 1:
+        raise ValueError("Conflicting planned Zotero keys")
+    if len(materialized) > 1:
+        raise ValueError("Conflicting materialized Zotero keys")
+    if plans and materialized and plans != materialized:
+        raise ValueError("Conflicting Zotero operation identities")
+    return next(iter(plans), ""), next(iter(materialized), "")
+
+
 def _merge_family(members: list[Candidate]) -> Candidate:
+    plan, materialized = _operation_keys(members)
     preferred = max(members, key=_richness)
+    preferred.planned_zotero_key = plan
+    preferred.materialized_zotero_key = materialized
     preferred.candidate_id = members[0].candidate_id  # Metadata enrichment must not change a displayed address.
     # Fill missing identifiers + flags from the other members (one work, many ids).
     for m in members:
@@ -85,7 +100,6 @@ def _merge_family(members: list[Candidate]) -> Candidate:
         preferred.verdict = preferred.verdict or m.verdict
         preferred.relevance_band = preferred.relevance_band or m.relevance_band
         preferred.why = preferred.why or m.why
-        preferred.materialized_zotero_key = preferred.materialized_zotero_key or m.materialized_zotero_key
         if preferred.in_library is None or m.in_library is True:
             preferred.in_library = m.in_library
         preferred.existing_zotero_key = preferred.existing_zotero_key or m.existing_zotero_key
@@ -95,27 +109,43 @@ def _merge_family(members: list[Candidate]) -> Candidate:
     return preferred
 
 
-def to_version_families(candidates: list[Candidate]) -> list[Candidate]:
-    """Collapse candidates sharing any identifier into version families. Returns
-    one merged Candidate per family, order-preserving on first appearance. Members
-    with NO identifiers are kept as-is (never title-merged)."""
+def _candidate_groups(
+    candidates: list[Candidate], *, include_addresses: bool = False,
+) -> list[list[Candidate]]:
+    """Group exact identifiers without merging metadata; persistence also joins addresses."""
+    identifiers = [cand.identifier_keys() for cand in candidates]
+    if include_addresses:
+        for cand, keys in zip(candidates, identifiers):
+            keys.append(f"candidate:{cand.candidate_id}")
     uf = _Union()
-    for cand in candidates:
-        keys = cand.identifier_keys()
-        for k in keys[1:]:
-            uf.union(keys[0], k)
-
+    for keys in identifiers:
+        for key in keys[1:]:
+            uf.union(keys[0], key)
     groups: dict[str, list[Candidate]] = {}
-    order: list[str] = []
-    for cand in candidates:
-        keys = cand.identifier_keys()
+    for cand, keys in zip(candidates, identifiers):
         group_key = uf.find(keys[0]) if keys else f"solo:{id(cand)}"
-        if group_key not in groups:
-            groups[group_key] = []
-            order.append(group_key)
-        groups[group_key].append(cand)
+        groups.setdefault(group_key, []).append(cand)
+    return list(groups.values())
 
-    return [_merge_family(groups[k]) for k in order]
+
+def to_version_families(candidates: list[Candidate]) -> list[Candidate]:
+    """Collapse exact identifier families, preserving first appearance; never title-merge."""
+    return [_merge_family(members) for members in _candidate_groups(candidates)]
+
+
+def reconcile_operation_state(candidates: list[Candidate], persisted: list[Candidate]) -> None:
+    """Recover saved family operation state without replacing the worker's selection/metadata."""
+    selected = {id(cand) for cand in candidates}
+    updates: list[tuple[Candidate, str, str]] = []
+    for members in _candidate_groups([*candidates, *persisted], include_addresses=True):
+        targets = [member for member in members if id(member) in selected]
+        if targets:
+            plan, materialized = _operation_keys(members)
+            updates.extend((target, plan, materialized) for target in targets)
+    # Validate every selected family before changing even its in-memory state.
+    for target, plan, materialized in updates:
+        target.planned_zotero_key = plan
+        target.materialized_zotero_key = materialized
 
 
 __all__ = ["to_version_families"]

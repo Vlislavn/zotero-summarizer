@@ -196,6 +196,10 @@ those spans, preserving text/order. `PaperChunkIndex.spans` stays aligned with i
 existing chunks and ranking. Library audit retention uses these occurrence indices
 through clipping and document-order assembly, never global first-match lookup.
 This adds no benchmark/judge calls or semantic grading and does not infer PDF pages.
+`PaperChunkIndex.top_spans` additionally exposes bounded ranked occurrences for the
+explicit Search evidence pass, without imposing the legacy positive-score gate:
+retrieval scores are not answerability. `top_chunks` retains its exact positive-score
+filter/order for existing QA and benchmark callers. Neither method judges meaning.
 
 ## Module map
 

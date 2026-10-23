@@ -63,9 +63,9 @@ def validate_source(raw: Any, candidate_id: str, *, max_chars: int, max_passages
         raise ValueError("invalid_source")
     if type(raw["complete"]) is not bool or type(raw["truncated"]) is not bool:
         raise ValueError("invalid_source")
-    if raw["source_kind"] not in ("synthetic_original", "supplied_original"):
-        raise ValueError("invalid_source")
-    if raw["retrieval_mode"] != "supplied_occurrence_spans":
+    modes = {"synthetic_original": "supplied_occurrence_spans", "supplied_original": "supplied_occurrence_spans",
+             "acquired_original": "retrieved_occurrence_spans"}
+    if modes.get(raw["source_kind"]) != raw["retrieval_mode"]:
         raise ValueError("invalid_source")
     scope_start, scope_end = _span(raw["checked_scope"], raw["text"], "invalid_source")
     passages = raw["passages"]

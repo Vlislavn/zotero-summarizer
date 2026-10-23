@@ -9,68 +9,91 @@ import {
   updateRssFeed,
 } from '../../api/settingsApi.js';
 import { humanizeError } from '../../utils/humanizeError.js';
+import { invalidateSetupDoctor, invalidateSetupDoctorAfterWriteError } from '../../utils/setupDoctorState.js';
 import { Banner, CheckboxField, Field, SectionCard } from '../form/Fields.jsx';
 import Button from '../ui/Button.jsx';
+
+const HACKERNOON_FEEDS = [
+  { name: 'HackerNoon AI Agents', url: 'https://hackernoon.com/tagged/ai-agents/feed' },
+  { name: 'HackerNoon Agentic AI', url: 'https://hackernoon.com/tagged/agentic-ai/feed' },
+];
 
 export default function RssFeedsSection() {
   const queryClient = useQueryClient();
   const feedsQuery = useQuery({ queryKey: ['rss-feeds'], queryFn: fetchRssFeeds });
   const [draft, setDraft] = useState({ name: '', url: '', enabled: true });
   const [editing, setEditing] = useState({});
-  const [message, setMessage] = useState('');
+  const [notice, setNotice] = useState(null);
 
   function invalidate() {
-    queryClient.invalidateQueries({ queryKey: ['rss-feeds'] });
+    return queryClient.invalidateQueries({ queryKey: ['rss-feeds'] });
+  }
+
+  function sourceSettingsChanged() {
+    return Promise.all([invalidateSetupDoctor(queryClient), invalidate()]);
+  }
+
+  function showError(error) {
+    setNotice({ kind: 'error', text: humanizeError(error) });
+  }
+
+  function sourceWriteFailed(error) {
+    showError(error);
+    if (invalidateSetupDoctorAfterWriteError(queryClient, error)) return invalidate();
   }
 
   const addMutation = useMutation({
     mutationFn: addRssFeed,
+    onError: sourceWriteFailed,
     onSuccess: () => {
-      setDraft({ name: '', url: '', enabled: true });
-      setMessage('Feed saved');
-      invalidate();
+      setNotice({ kind: 'success', text: 'Feed saved. Refresh RSS now to fetch items.' });
+      return sourceSettingsChanged();
     },
   });
 
   const updateMutation = useMutation({
     mutationFn: ({ id, payload }) => updateRssFeed(id, payload),
+    onError: sourceWriteFailed,
     onSuccess: () => {
-      setMessage('Feed updated');
-      invalidate();
+      setNotice({ kind: 'success', text: 'Feed updated' });
+      return sourceSettingsChanged();
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: deleteRssFeed,
+    onError: sourceWriteFailed,
     onSuccess: () => {
-      setMessage('Feed deleted');
-      invalidate();
+      setNotice({ kind: 'success', text: 'Feed deleted' });
+      return sourceSettingsChanged();
     },
   });
 
   const importMutation = useMutation({
     mutationFn: importRssFeedsFromZotero,
+    onError: sourceWriteFailed,
     onSuccess: (res) => {
-      setMessage(`Imported ${res.imported || 0} feed${res.imported === 1 ? '' : 's'}`);
-      invalidate();
+      setNotice({ kind: 'success', text: `Imported ${res.imported || 0} feed${res.imported === 1 ? '' : 's'}` });
+      return sourceSettingsChanged();
     },
   });
 
   const refreshMutation = useMutation({
     mutationFn: () => refreshRssFeeds({ max_feeds: 10, max_new_items_per_feed: 25 }),
+    onError: showError,
     onSuccess: (res) => {
-      setMessage(`Refresh stored ${res.inserted || 0} new item${res.inserted === 1 ? '' : 's'}${res.errors?.length ? `; ${res.errors.length} feed(s) failed — see their errors below` : ''}`);
-      invalidate();
+      if (res.offline) {
+        setNotice({ kind: 'error', text: 'RSS refresh skipped: the app is offline. Sources were not checked.' });
+        return;
+      }
+      const counts = `Checked ${res.feeds || 0} feed${res.feeds === 1 ? '' : 's'}: ${res.inserted || 0} new, ${res.updated || 0} updated.`;
+      const detail = res.errors?.length
+        ? ` ${res.errors.length} feed(s) failed — see their errors below.`
+        : !res.inserted && !res.updated ? ' No items stored in this pass.' : '';
+      setNotice({ kind: res.errors?.length ? 'error' : 'success', text: counts + detail });
     },
+    onSettled: invalidate,
   });
-
-  const error =
-    addMutation.error ||
-    updateMutation.error ||
-    deleteMutation.error ||
-    importMutation.error ||
-    refreshMutation.error ||
-    feedsQuery.error;
 
   const feeds = feedsQuery.data?.feeds || [];
 
@@ -99,9 +122,42 @@ export default function RssFeedsSection() {
           </Button>
         </div>
 
-        <Banner kind={error ? 'error' : 'success'}>
-          {error ? humanizeError(error) : message}
-        </Banner>
+        <Banner kind={notice?.kind}>{notice?.text}</Banner>
+        {feedsQuery.isError && (
+          <div className="space-y-2">
+            <Banner kind="error">{humanizeError(feedsQuery.error)} Saved source state is unavailable; any displayed rows may be outdated.</Banner>
+            <Button size="sm" variant="secondary" onClick={() => feedsQuery.refetch()} disabled={feedsQuery.isFetching}>
+              Retry loading feeds
+            </Button>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          <p className="text-sm text-slate-700">HackerNoon engineering sources (optional)</p>
+          <p className="text-xs text-slate-500">Add either tag feed explicitly. Upstream feeds can be empty or unavailable; saving is not a fetch or review.</p>
+          <div className="flex flex-wrap gap-2">
+            {HACKERNOON_FEEDS.map((preset) => {
+              const saved = feeds.find((feed) => feed.url === preset.url);
+              const adding = addMutation.isPending && addMutation.variables?.url === preset.url;
+              return (
+                <Button
+                  key={preset.url}
+                  variant="secondary"
+                  size="sm"
+                  disabled={Boolean(saved) || feedsQuery.isPending || feedsQuery.isFetching || feedsQuery.isError || addMutation.isPending || importMutation.isPending || updateMutation.isPending || deleteMutation.isPending}
+                  onClick={() => addMutation.mutate({ ...preset, enabled: true })}
+                >
+                  {saved ? `${preset.name} saved${saved.enabled ? '' : ' (disabled)'}` : adding ? `Adding ${preset.name}…` : `Add ${preset.name}`}
+                </Button>
+              );
+            })}
+          </div>
+          <p className="text-xs text-slate-500">
+            Refresh only fetches RSS (up to 10 enabled feeds per pass). Then use{' '}
+            <a className="text-teal-700 underline" href="/today">Today → Triage backlog</a>{' '}
+            for the shared ranking and review path. Empty feeds provide no candidates.
+          </p>
+        </div>
 
         <div className="grid gap-3 md:grid-cols-[1fr_2fr_auto] md:items-end">
           <Field
@@ -115,7 +171,9 @@ export default function RssFeedsSection() {
             onChange={(url) => setDraft((prev) => ({ ...prev, url }))}
           />
           <Button
-            onClick={() => addMutation.mutate(draft)}
+            onClick={() => addMutation.mutate(draft, {
+              onSuccess: () => setDraft({ name: '', url: '', enabled: true }),
+            })}
             disabled={addMutation.isPending || !draft.name.trim() || !draft.url.trim()}
             className="md:mb-0.5"
           >
@@ -124,8 +182,10 @@ export default function RssFeedsSection() {
         </div>
 
         <div className="divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden">
-          {feedsQuery.isLoading ? (
+          {feedsQuery.isPending ? (
             <div className="p-3 text-sm text-slate-500">Loading feeds...</div>
+          ) : feedsQuery.isError && feeds.length === 0 ? (
+            <div className="p-3 text-sm text-slate-500">Source list unavailable.</div>
           ) : feeds.length === 0 ? (
             <div className="p-3 text-sm text-slate-500">No RSS feeds saved.</div>
           ) : (
@@ -183,11 +243,10 @@ export default function RssFeedsSection() {
                       }))}
                     />
                     <span>Source: {feed.source || 'app'}</span>
-                    {feed.last_error ? (
-                      <span className="text-rose-700">Last error: {feed.last_error}</span>
-                    ) : feed.last_fetched_at ? (
-                      <span>Last fetched: {feed.last_fetched_at}</span>
-                    ) : null}
+                    {feed.last_error && (
+                      <span className="text-rose-700 min-w-0 max-w-full [overflow-wrap:anywhere]">Last error: {feed.last_error}</span>
+                    )}
+                    <span>{feed.last_fetched_at ? `Last checked: ${feed.last_fetched_at}` : 'Not refreshed yet'}</span>
                   </div>
                 </div>
               );

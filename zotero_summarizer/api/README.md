@@ -14,16 +14,20 @@ errors.py  ── APIError -> uniform JSON error body + handlers
 | file | responsibility |
 |---|---|
 | `app.py` | `create_app()` factory — wiring, SPA/assets/PWA-public-file mount, exception handlers, lifespan (no import-time app; uvicorn uses `app:create_app` with `factory=True`). The lifespan runs `setup.bootstrap.bootstrap_phase0` (idempotent first-run seed of `goals.yaml` etc., never overwrites) **before** `lifecycle.startup`, which fails fast on a missing config. |
-| `local_access.py` | Factory-wide HTTP/socket loopback peer, local Host and same-origin boundary; fixed 403/policy-close errors before API/SPA/static work. No remote authentication or forwarded identity trust. |
+| `local_access.py` | Default factory-wide HTTP/socket loopback peer, local Host and same-origin boundary; fixed 403/policy-close errors before API/SPA/static work. No forwarded identity trust. |
+| `mobile_access.py` | Explicit `serve-mobile` policy only: exact private Unix socket transport, configured Tailscale owner and HTTPS origin, no Funnel, duplicate/header/origin rejection before all handlers. Default factory retains the local-only gate. |
 | `errors.py` | `APIError` + the canonical error schema and FastAPI handlers |
-| `routes/` | one module per resource (see routes/README.md) |
+| `routes/` | one module per resource (see routes/README.md), including retained RSS Weekly reports and explicitly requested cached-only projection |
 
 The supported CLI disables proxy-header rewriting and rejects remote binds.
 Ordinary local CLI/MCP calls need no Origin; browser Origins must match the local
 scheme/authority. Other ASGI runners must preserve real peer/scheme facts. No
 `testclient` or remote-proxy exception exists. See the
 [deployment trust model](../../docs/local-deployment-boundary.md) for limitations
-and the unapproved authenticated-HTTPS mobile gate.
+and the separately selected Tailscale HTTPS/Unix-socket gateway. The optional
+policy is constructor-owned, not inferred from incoming headers or config text;
+only its dedicated launcher binds the required private socket. Gateway code is
+not evidence that a real tailnet, iPhone/iPad or revocation flow was exercised.
 
 **Boundaries:** may import `services/`, `models`, `errors`. Routes should hold
 no business logic — push it into `services/`.

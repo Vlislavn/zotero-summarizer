@@ -1,18 +1,23 @@
 """Synthetic real producer/wrapper regressions: IO is optional, defects are not."""
 from contextlib import closing
+import json
 import sqlite3
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
+from tests._direct_write_fixtures import native, sql_rows
 from tests._zotero_fixtures import add_library_item, build_zotero_db
 from tests.test_review_questions import _app, _database
 from zotero_summarizer.integrations.zotero_read import ZoteroReader, ZoteroReadError
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter, ZoteroWriteError
+from zotero_summarizer.runtime import get_context
 from zotero_summarizer.services.golden import verdict_effects
 from zotero_summarizer.services.library import review_questions
-from zotero_summarizer.services.zotero import pending, zotero
+from zotero_summarizer.services.zotero import mirror_notes, pending, zotero
 from zotero_summarizer.storage import repositories, review_note_projection
 
 
@@ -31,8 +36,9 @@ def real_boundary(tmp_path, monkeypatch, request):
     db = build_zotero_db(tmp_path / "synthetic-zotero")
     add_library_item(db, item_key="ITEM0001", title="Synthetic paper")
     reader, writer = ZoteroReader(db.parent), ZoteroWriter(db.parent)
-    monkeypatch.setattr(verdict_effects, "get_zotero_reader_or_raise", lambda: reader)
-    monkeypatch.setattr(zotero, "get_zotero_writer_or_raise", lambda: writer)
+    state = get_context().state
+    monkeypatch.setattr(state, "zotero_reader", reader)
+    monkeypatch.setattr(state, "zotero_writer", writer)
     monkeypatch.setattr(writer, "is_connector_running", lambda: False)
     payload = {"submission_id": str(uuid4()), "item_key": "ITEM0001", "question": "Question <one>?", "origin": "typed"}
     repositories.upsert_review_note(config.triage_db_path, "ITEM0001", "Manual & note")
@@ -131,16 +137,28 @@ def test_real_writer_defect_after_http_save_prevents_qa(real_boundary, monkeypat
 
 
 def test_malformed_generated_note_is_terminal_not_optional(real_boundary, monkeypatch):
-    path, db, _, _, _ = real_boundary
-    monkeypatch.setattr(pending, "build_user_note_html", lambda _: "<p>missing ownership footer</p>")
+    path, db, _, writer, _ = real_boundary
+    before = native(db)
+    backup_probe = Mock(wraps=writer.backup_database)
+    apply_probe = Mock(wraps=writer.apply_changes)
+    monkeypatch.setattr(writer, "backup_database", backup_probe)
+    monkeypatch.setattr(writer, "apply_changes", apply_probe)
+    monkeypatch.setattr(mirror_notes, "build_user_note_html", lambda _: "<p>missing ownership footer</p>")
     try:
-        with pytest.raises(ZoteroWriteError) as raised:
+        with pytest.raises(ValidationError) as raised:
             verdict_effects.mirror_review_note(path, "ITEM0001")
     finally:
         _assert_durable_pending(real_boundary)
-    assert raised.value.expected_io is False
+    assert type(raised.value) is ValidationError
+    error, = raised.value.errors()
+    assert error["loc"] == ("note_html",) and error["type"] == "value_error"
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM itemNotes").fetchone() == (0,)
+    backup_probe.assert_not_called()
+    apply_probe.assert_not_called()
+    assert list(db.parent.glob(writer._BACKUP_GLOB)) == []
+    assert sql_rows(path, "SELECT * FROM pending_changes") == []
+    assert native(db) == before
 
 
 def test_healthy_actual_backup_owned_upsert_ack_and_noop(real_boundary):
@@ -172,6 +190,11 @@ def test_expected_real_external_io_remains_optional(real_boundary, monkeypatch, 
     path, db, _, writer, _ = real_boundary
     connect = sqlite3.connect
     revision = _staged_revision(path)
+    before, target = native(db), writer.target_identity()
+    backup_probe = Mock(wraps=writer.backup_database)
+    apply_probe = Mock(wraps=writer.apply_changes)
+    monkeypatch.setattr(writer, "backup_database", backup_probe)
+    monkeypatch.setattr(writer, "apply_changes", apply_probe)
     with closing(connect(db, timeout=0)) as locked:
         if kind == "connector":
             monkeypatch.setattr(writer, "is_connector_running", lambda: True)
@@ -188,43 +211,153 @@ def test_expected_real_external_io_remains_optional(real_boundary, monkeypatch, 
             if kind == "busy":
                 backup = writer.backup_database
 
-                def backup_then_lock():
-                    result = backup()
+                def backup_then_lock(*, expected_target=None):
+                    result = backup(expected_target=expected_target)
                     locked.execute("BEGIN IMMEDIATE")
                     return result
                 monkeypatch.setattr(writer, "backup_database", backup_then_lock)
         receipt = verdict_effects.mirror_review_note(path, "ITEM0001")
-    assert receipt == {"note_written": False, "note_error": "ZoteroWriteError", "note_pending": True,
+    expected_error = "ZoteroWriteError" if kind == "connector" else "zotero_write_uncertain"
+    assert receipt == {"note_written": False, "note_error": expected_error, "note_pending": True,
                        "projection_revision": revision, "target_key": "ITEM0001"}
     _assert_durable_pending(real_boundary)
     with connect(db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM itemNotes").fetchone() == (0,)
+    assert native(db) == before
+    history = sql_rows(path, "SELECT * FROM pending_changes ORDER BY id")
+    backups = list(db.parent.glob(writer._BACKUP_GLOB))
+    if kind == "connector":
+        assert history == [] and backups == []
+        backup_probe.assert_not_called()
+        apply_probe.assert_not_called()
+        return
+    row, = sql_rows(path, "SELECT id,status,backup_path,audit_json,applied_at FROM pending_changes")
+    change_id, status, backup_ref, audit_json, applied_at = row
+    assert type(change_id) is int and change_id > 0
+    assert status == "applying" and applied_at is None
+    audit = json.loads(audit_json)
+    assert [event["event"] for event in audit] == ["mirror_requested"]
+    assert audit[0]["target"] == target.model_dump()
+    assert (audit[0]["actor"], audit[0]["source"]) == ("system", "mirror_user_note")
+    assert audit[0]["backup_path"] == backup_ref and audit[0]["recovery"] == "backup_only"
+    assert len(backups) == 1 and str(backups[0]) == backup_ref
+    assert native(backups[0]) == before
+    assert sql_rows(backups[0], "PRAGMA integrity_check") == [("ok",)]
+    backup_probe.assert_called_once_with(expected_target=target)
+    apply_probe.assert_called_once()
+    assert apply_probe.call_args.args[0][0]["id"] == change_id and apply_probe.call_args.args[1] is False
+    assert apply_probe.call_args.kwargs == {"precreated_backup": backup_ref, "expected_target": target}
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    monkeypatch.setattr(writer, "backup_database", backup_probe)
+    files = {file.name: file.read_bytes() for file in db.parent.iterdir() if file.is_file()}
+    assert verdict_effects.mirror_review_note(path, "ITEM0001") == receipt
+    backup_probe.assert_called_once_with(expected_target=target)
+    apply_probe.assert_called_once()
+    assert sql_rows(path, "SELECT * FROM pending_changes ORDER BY id") == history
+    assert native(db) == before
+    assert {file.name: file.read_bytes() for file in db.parent.iterdir() if file.is_file()} == files
+    _assert_durable_pending(real_boundary)
 
 
 def test_real_reader_cannot_open_io_remains_optional(real_boundary):
-    path, db, _, writer, _ = real_boundary
+    path, db, reader, writer, _ = real_boundary
     revision = _staged_revision(path)
+    before = native(db)
     db.rename(db.with_suffix(".unavailable"))
+    files = {file.name: file.read_bytes() for file in db.parent.iterdir() if file.is_file()}
+    no_delivery = Mock(side_effect=AssertionError("target resolution reached downstream IO"))
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(reader, "get_item_detail", no_delivery)
+        patcher.setattr(writer, "backup_database", no_delivery)
+        patcher.setattr(writer, "apply_changes", no_delivery)
+        receipt = verdict_effects.mirror_review_note(path, "ITEM0001")
 
-    receipt = verdict_effects.mirror_review_note(path, "ITEM0001")
-
-    assert receipt == {"note_written": False, "note_error": "ZoteroReadError", "note_pending": True,
+    assert receipt == {"note_written": False, "note_error": "FileNotFoundError", "note_pending": True,
                        "projection_revision": revision, "target_key": "ITEM0001"}
     _assert_durable_pending(real_boundary)
     assert list(db.parent.glob(writer._BACKUP_GLOB)) == []
+    no_delivery.assert_not_called()
+    assert sql_rows(path, "SELECT * FROM pending_changes") == []
+    assert not db.exists() and native(db.with_suffix(".unavailable")) == before
+    assert {file.name: file.read_bytes() for file in db.parent.iterdir() if file.is_file()} == files
 
 
 @pytest.mark.parametrize("metadata", [None, False, "true"])
 def test_unknown_or_malformed_failure_record_fails_closed(real_boundary, monkeypatch, metadata):
-    path, _, _, writer, _ = real_boundary
-    failure = {"id": 0, "error": "unclassified producer failure"}
-    if metadata is not None:
-        failure["expected_io"] = metadata
-    monkeypatch.setattr(writer, "apply_changes", lambda *_a: {"failed": [failure]})
-    with pytest.raises(ZoteroWriteError) as raised:
+    path, db, _, writer, _ = real_boundary
+    apply = writer.apply_changes
+    before, revision = native(db), _staged_revision(path)
+
+    def unclassified_dispatch(*args):
+        raise ZoteroWriteError("unclassified producer failure")
+
+    def apply_with_metadata(changes, create_backup=True, *, precreated_backup=None, expected_target=None):
+        change, = changes
+        assert type(change["id"]) is int and change["id"] > 0
+        assert create_backup is False
+        prepared = writer._prepared_backup
+        assert prepared is not None
+        assert prepared[0] == precreated_backup == change["backup_path"]
+        assert prepared[2] == expected_target == writer.target_identity()
+        with closing(sqlite3.connect(path)) as conn:
+            assert conn.execute(
+                "SELECT id, status, backup_path FROM pending_changes"
+            ).fetchall() == [(change["id"], "applying", precreated_backup)]
+        result = apply(changes, create_backup, precreated_backup=precreated_backup, expected_target=expected_target)
+        assert writer._prepared_backup is None
+        assert result["backup_path"] == precreated_backup
+        assert result["applied_ids"] == []
+        failure, = result["failed"]
+        assert type(failure["id"]) is int and failure["id"] == change["id"]
+        assert failure["error"] == "unclassified producer failure"
+        assert failure["expected_io"] is False
+        if metadata is None:
+            del failure["expected_io"]
+        elif metadata is not False:
+            failure["expected_io"] = metadata
+        return result
+
+    monkeypatch.setattr(writer, "_dispatch_change", unclassified_dispatch)
+    monkeypatch.setattr(writer, "apply_changes", apply_with_metadata)
+    backup_probe = Mock(wraps=writer.backup_database)
+    apply_probe = Mock(wraps=writer.apply_changes)
+    monkeypatch.setattr(writer, "backup_database", backup_probe)
+    monkeypatch.setattr(writer, "apply_changes", apply_probe)
+    with pytest.raises(ZoteroWriteError if metadata is False else ValueError) as raised:
         verdict_effects.mirror_review_note(path, "ITEM0001")
-    assert raised.value.expected_io is False
+    assert type(raised.value) is (ZoteroWriteError if metadata is False else ValueError)
+    if metadata is False:
+        assert raised.value.expected_io is False
     _assert_durable_pending(real_boundary)
+    assert native(db) == before and before["notes"] == []
+    row, = sql_rows(path, "SELECT id,status,backup_path,audit_json,applied_at FROM pending_changes")
+    change_id, status, backup_ref, audit_json, applied_at = row
+    assert type(change_id) is int and change_id > 0
+    assert status == ("failed" if metadata is False else "applying") and applied_at is None
+    audit = json.loads(audit_json)
+    assert [event["event"] for event in audit] == (
+        ["mirror_requested", "mirror_failed"] if metadata is False else ["mirror_requested"])
+    assert audit[0]["target"] == writer.target_identity().model_dump()
+    if metadata is False:
+        assert audit[-1]["expected_io"] is False
+        assert (audit[-1]["actor"], audit[-1]["source"]) == ("system", "mirror_user_note")
+    backup, = db.parent.glob(writer._BACKUP_GLOB)
+    assert str(backup) == backup_ref and native(backup) == before
+    assert sql_rows(backup, "PRAGMA integrity_check") == [("ok",)]
+    backup_probe.assert_called_once_with(expected_target=writer.target_identity())
+    apply_probe.assert_called_once()
+    if metadata is not False:
+        history = sql_rows(path, "SELECT * FROM pending_changes ORDER BY id")
+        files = {file.name: file.read_bytes() for file in db.parent.iterdir() if file.is_file()}
+        assert verdict_effects.mirror_review_note(path, "ITEM0001") == {
+            "note_written": False, "note_error": "zotero_write_uncertain", "note_pending": True,
+            "projection_revision": revision, "target_key": "ITEM0001"}
+        backup_probe.assert_called_once_with(expected_target=writer.target_identity())
+        apply_probe.assert_called_once()
+        assert sql_rows(path, "SELECT * FROM pending_changes ORDER BY id") == history
+        assert native(db) == before
+        assert {file.name: file.read_bytes() for file in db.parent.iterdir() if file.is_file()} == files
+        _assert_durable_pending(real_boundary)
 
 
 def test_explicit_io_row_classification_survives_both_real_wrappers(real_boundary, monkeypatch):
@@ -253,3 +386,29 @@ def test_invalid_queue_row_still_isolates_and_reports_without_undoing_healthy_ro
     assert len(result["failed"]) == 1 and result["failed"][0]["id"] == 2
     assert len(reader.get_item_notes("ITEM0001")) == 2
     assert result["failed"][0]["expected_io"] is False
+
+
+def test_native_user_note_missing_marker_fails_before_effects(real_boundary):
+    path, db, _, writer, _ = real_boundary
+    before, target = native(db), writer.target_identity()
+    assert before["notes"] == [] and sql_rows(path, "SELECT * FROM pending_changes") == []
+    backup = writer.backup_database(expected_target=target)
+    assert writer._prepared_backup[0] == backup and writer._prepared_backup[2] == target
+    # Raw adapter input ID only; no admitted application receipt is seeded.
+    result = writer.apply_changes([{
+        "id": 213, "item_key": "ITEM0001", "change_type": "upsert_note", "payload_json": {
+            "marker": pending.USER_NOTE_MARKER, "note_title": "My notes",
+            "note_html": "<p>missing ownership footer</p>",
+        },
+    }], False, precreated_backup=backup, expected_target=target)
+    assert result["applied_ids"] == [] and result["backup_path"] == backup
+    failure, = result["failed"]
+    assert type(failure["id"]) is int and failure["id"] == 213
+    assert failure["expected_io"] is False
+    assert failure["error"] == "Upsert note requires a marker present in its HTML"
+    assert writer._prepared_backup is None
+    assert native(db) == before and native(backup) == before
+    assert sql_rows(backup, "PRAGMA integrity_check") == [("ok",)]
+    assert [str(file) for file in db.parent.glob(writer._BACKUP_GLOB)] == [backup]
+    assert sql_rows(path, "SELECT * FROM pending_changes") == []
+    _assert_durable_pending(real_boundary)

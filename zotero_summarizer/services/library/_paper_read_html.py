@@ -26,9 +26,11 @@ def write_outputs(
     quality: dict[str, Any] | None = None,
     goal_summaries: list[dict[str, Any]] | None = None,
     code_link: dict[str, Any] | None = None,
+    interpretation_review: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Publish staged outputs only after all blocking checks pass."""
-    html_text = _render_presentation(content, digest, quality, goal_summaries, code_link)
+    """Publish audited HTML; explicit interpretation uses one whole current-view packet."""
+    extra = {"interpretation_review": interpretation_review} if interpretation_review is not None else {}
+    html_text = _render_presentation(content, digest, quality, goal_summaries, code_link, **extra)
     audit = _audit_presentation(html_text, content, staging / "figures")
     if not _audit_passed(audit):
         raise APIError(error="paper_audit_failed", message="Paper audit failed; rebuild after fixing extraction",
@@ -57,7 +59,21 @@ def _render_presentation(
     quality: dict[str, Any] | None = None,
     goal_summaries: list[dict[str, Any]] | None = None,
     code_link: dict[str, Any] | None = None,
+    *,
+    interpretation_review: dict[str, Any] | None = None,
 ) -> str:
+    interpretation_block = interpretation_style = ""
+    if interpretation_review is not None:
+        if any(value is not None for value in (digest, quality, goal_summaries, code_link)):
+            raise ValueError("interpretation_review cannot be mixed with legacy review projections")
+        from zotero_summarizer.services.library import _interpretation_html
+
+        interpretation_block = _interpretation_html.render_review(interpretation_review)
+        interpretation_style = _interpretation_html.review_css()
+        digest = interpretation_review["digest"]
+        quality = interpretation_review.get("quality")
+        goal_summaries = interpretation_review.get("goal_summaries")
+        code_link = interpretation_review.get("code_link")
     from zotero_summarizer.services.library import _paper_read_brief as brief
 
     title = str(content.get("title") or "Untitled")
@@ -86,7 +102,7 @@ def _render_presentation(
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{_h(title)} — Paper Brief</title>
-<style>{_css()}{brief.brief_css()}</style>
+<style>{_css()}{brief.brief_css()}{interpretation_style}</style>
 </head>
 <body>
 <div id="progress"></div>
@@ -99,7 +115,7 @@ def _render_presentation(
   </header>
   {code_link_block}
   {brief_block}
-  {quality_block}
+  {quality_block}{interpretation_block}
   {empty_state}
   {_digest_section_html(digest) if digest else ''}
   {_figures_section_html(figures)}
@@ -111,6 +127,30 @@ def _render_presentation(
 </body>
 </html>
 """
+
+
+def _reading_plan_html(digest: dict[str, Any], decision: str) -> str:
+    """Present the existing effective action without inferring locators or policy."""
+    if decision not in {"read", "skim", "skip"}:
+        return ""
+    rows = []
+    if decision != "skip":
+        targets = [str(part) for part in (digest.get("read_parts") or []) if part]
+        parts = ('<ol aria-label="Read parts" class="dbullets">' +
+                 "".join(f"<li>{_h(part)}</li>" for part in targets) + "</ol>" if targets else
+                 "<span>Exact reading targets not recorded in this saved review.</span>")
+        rows.append(f'<div class="drow"><dt class="dlbl">Read parts</dt><dd>{parts}</dd></div>')
+    skips = [str(part) for part in (digest.get("skip_parts") or []) if part]
+    if skips:
+        parts = "".join(f"<li>{_h(part)}</li>" for part in skips)
+        rows.append(f'<div class="drow"><dt class="dlbl">Skip parts</dt><dd><ul class="dbullets">{parts}</ul></dd></div>')
+    if decision != "skip":
+        value = digest.get("original_value") or "Additional value not recorded in this saved review."
+        rows.append(f'<div class="drow"><dt class="dlbl">What the original adds</dt><dd>{_h(value)}</dd></div>')
+    if not rows:
+        return ""
+    return ('<div role="region" aria-label="Reading plan" class="reading-plan"><dl>' +
+            "".join(rows) + "</dl></div>")
 
 
 def _digest_section_html(digest: dict[str, Any]) -> str:
@@ -140,7 +180,7 @@ def _digest_section_html(digest: dict[str, Any]) -> str:
     ]))
     strength = str(digest.get("key_strength") or "")
     weakness = str(digest.get("key_weakness") or "")
-    assess = [_row("Why read", "read_why"), _row("Controversies", "controversies")]
+    assess = [_row("Controversies", "controversies")]
     assess += [_row("Writing friction", "writing_friction"), _bullets("Writing reasons", "writing_reasons")]
     if strength:
         assess.append(f'<div class="drow"><span class="dlbl">Strength</span><span class="dpos">{_h(strength)}</span></div>')
@@ -156,8 +196,7 @@ def _digest_section_html(digest: dict[str, Any]) -> str:
     ]))
     impact_body = "".join(filter(None, [
         _row("Industry", "industry_impact"), _row("Academia", "academy_impact"),
-        _row("Unknown unknowns", "unknown_unknowns"), _row("Original adds", "original_value"),
-        _bullets("Read parts", "read_parts"), _bullets("Skip parts", "skip_parts"),
+        _row("Unknown unknowns", "unknown_unknowns"),
         _bullets("Implementation", "implementation"),
     ]))
     blocks = "".join(filter(None, [
@@ -280,6 +319,7 @@ body.dark{--bg:#0e140f;--card:#16201a;--text:#eef3ee;--muted:#9baf9f;--accent:#7
 .drow{display:grid;grid-template-columns:128px 1fr;gap:6px 16px;align-items:start;line-height:1.55}
 .dlbl{font-family:var(--font-mono);font-size:11px;letter-spacing:.02em;text-transform:uppercase;color:var(--muted);padding-top:1px}
 .drow span:not(.dlbl){font-size:15px}.dbullets{margin:0;padding-left:18px;font-size:15px;line-height:1.55}
+.reading-plan{margin-top:16px;overflow-wrap:anywhere}.reading-plan dl{margin:0;display:grid;gap:12px}.reading-plan dd{margin:0;font-size:15px}
 .dpos{color:var(--readout);font-size:15px}.dneg{color:var(--alert);font-size:15px}
 .dgroup{border:none;padding:0;margin:0;border-top:1px solid var(--hair);padding-top:12px}
 .dgroup:first-child{border-top:none;padding-top:0}

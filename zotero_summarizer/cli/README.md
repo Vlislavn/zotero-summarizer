@@ -18,7 +18,7 @@ __init__.build_parser()
           ├─ register_goldenset_migrate(gs_sub)   # _goldenset_migrate.py:  migrate-verdicts-to-zotero
           └─ register_goldenset_setup_tag_colors(gs_sub)  # _goldenset_setup_colors.py: setup-tag-colors
    ├─ register_faithbench(subparsers)  # _faithbench.py: faithbench build/run/judge/report
-   └─ register_research_feed(...)      # _research_feed.py: research-feed run · view
+   └─ register_research_feed(...)      # _research_feed.py: research-feed run · view · telegram-auth
 main() = parse args → validate command budgets → install Settings → dispatch
 ```
 
@@ -27,6 +27,7 @@ main() = parse args → validate command budgets → install Settings → dispat
 | `__init__.py` | `build_parser()` + `main()` (the entry point `zotero-summarizer`) |
 | `__main__.py` | enables `python -m zotero_summarizer.cli` |
 | `_helpers.py` | shared CLI helpers: feed-id resolution, run-log writing, slugs |
+| `_mobile_serve.py` | Explicit `serve-mobile --origin https://node.tailnet.ts.net --owner-login owner@example.net`: private prebound 0600 Unix socket in a 0700 Settings-managed directory, one Uvicorn worker with proxy rewriting disabled. Does not configure Tailscale, expose TCP, query accounts or remove an existing socket. |
 | `_app.py` | `serve` (uvicorn `api.app:create_app`, `factory=True`; leaves existing listeners intact and reports a bind error on an occupied port; the process-killing helper and `--no-kill` option are removed) / `mcp` / `migrate` / `smoke-test` / `prefetch-models` (download the ML models for offline use; `--check` reports cache status; includes the MiniCheck claim-checker only when `quality_review.shadow_claim_check` is on). `__init__.apply_offline_env()` (called at CLI import, before any transformers import) turns `ZS_OFFLINE`/`HF_HUB_OFFLINE` into cache-only model loading. `verify-deep-review` runs the real digest + quality path headlessly against the live `deep_review` model on ONE already-built paper's cached `qa_text` (`--item-key`, default `4NIMLFMV`; `--with-goals` adds the heavier goal board) — prints per-phase timing + the digest JSON; the end-to-end "does a review actually produce a digest" check without Zotero or the server. It computes `sub_concurrency` via the SAME `_common.deep_review_sub_concurrency` helper the background job uses (and prints it in the tier line), so its wall-clock is a faithful production receipt — a remote provider's rubric/goal sub-calls run in parallel here exactly as they would in the app. `--provider`/`--model` override the deep_review stage for THIS run only (e.g. `--provider default --model qwen3.5:4b` to drive the pipeline against a local ollama model when the configured provider is unreachable/over-budget) |
 | `_setup.py` | `setup` reuses bootstrap/path/goals services; `--mode local --profile light\|balanced\|existing` resolves the same hardware-gated profile definitions as web and prints (never runs) an explicit model pull command. Hosted and skip/no-LLM paths remain. `doctor [--json|--fix|--check id]` runs the shared persisted real-pipeline checklist; `calibrate` retains measured hardware/endpoint tuning. |
 | `_feeds.py` | the `feeds` subcommands (drive the RSS daemon) |
@@ -40,9 +41,16 @@ main() = parse args → validate command budgets → install Settings → dispat
 `serve --host` accepts only localhost or literal loopback addresses, refuses
 wildcard/remote binds with a nonzero error, and disables Uvicorn proxy-header
 rewriting. Programmatic serve dispatch repeats the bind check before launch.
-No listener is terminated, and no address is silently substituted. The app
+No listener is terminated, and no address is silently substituted.
+The mobile launcher releases only its own Unix-socket inode inside Uvicorn's
+signal-capture lifetime, before the vendor restores and re-raises SIGTERM/SIGINT.
+Its outer context still owns normal/error cleanup; it never deletes an existing
+path to make restart appear successful. SIGKILL cleanup is not guaranteed. The app
 factory separately guards transport peer, Host and browser Origin. This is not
-remote mobile authentication; see the [deployment boundary](../../docs/local-deployment-boundary.md).
+remote mobile authentication. `serve-mobile` is a separate explicit gateway
+selection using existing Tailscale Serve authentication, not a relaxed `serve
+--host` or a new app login/session system. It never runs Tailscale commands or
+activates network access itself; see the [deployment boundary](../../docs/local-deployment-boundary.md).
 
 Handlers use lazy imports inside the function bodies to keep CLI startup fast.
 
@@ -53,8 +61,8 @@ Obtain permitted-content/provider consent before processing originals. Add
 `--collect-only` for import/export with no model/provider/config requirement;
 `--cached-only` projects the existing store/profile/current configured identity
 without new input, external calls, migrations or store writes. `research-feed view
---report SAVED.md` prints the retained Markdown only. Live collection/auth is not
-implemented; missing input in process/collect modes errors before Settings.
+--report SAVED.md` prints the retained Markdown only. Omitting saved input in
+explicit Telegram process/collect mode selects the dedicated live child below.
 Conflicting modes, Telegram venue/Zotero queue and RSS-only use of input/collect
 flags also fail there. RSS remains the default and still requires both dates before
 Settings/startup. Optional dates/review wait do not filter/time Telegram inference.
@@ -63,6 +71,48 @@ the OpenAI factory forwards it while native Anthropic retains its adapter defaul
 Evaluation identity records the configured wait input, not an effective deadline
 receipt. Shared shortlist/card defaults remain 20/10; strict admission is unchanged. See the
 [news contract](../services/research_feed/README.md#offline-saved-telegram-news).
+
+## Explicit Telegram auth and live collection
+
+```text
+telegram-auth -> TTY child -> SAME M3 fuse/lease -> own app identity -> connect/code/2FA
+run --source telegram -> DEVNULL-stdin child -> M3 -> M1b SQLite -> collect-only export
+                       -> child EXIT0 + hash/receipt verification -> existing run_saved ML/LLM
+```
+
+Use `research-feed telegram-auth --project-root ROOT` once, interactively, with your
+own Telegram application api_id/api_hash. Only the api_id and an uppercase
+OS-keyring credential NAME enter `data/telegram-account/application.json` (0600);
+the hash goes to the existing app keyring namespace, never argv/export/logs or
+environment fallback. Existing credential names are not overwritten. Phone, login
+code and optional 2FA are hidden prompts confined to auth. Auth requires a TTY
+before Settings/child work; its session/credential writes happen only under the
+existing M3 fuse and exclusive lease. Partial failures do not clobber existing
+session/identity files; a failed identity publication can leave an unused keyring
+entry, requiring explicit operator recovery with a new name.
+
+Declare `telegram_channels` in the existing ResearchProfile, then run
+`research-feed run --source telegram --project-root ROOT`. `--collect-only` stops
+at the durable collect/export bundle, without config/model/Zotero work. Normal
+collection never calls start/sign_in, prompts for secrets, joins or follows a
+channel; it has DEVNULL stdin. Missing/revoked sessions require explicit auth.
+Only allowlisted public broadcasts are read; rebinding or partial channel failures
+remain loud and preserve committed pages without proceeding to models. Missing
+optional Telethon reports that the `telegram` extra is required; nothing installs.
+
+Live/auth children require macOS CPython with asyncio.Runner. Both use the SAME
+existing configurable M3 wall/reserve/max cap and process-held fuse/lease through
+interpreter exit. The parent waits with the wall+reserve outer startup/exit cap;
+it never disarms/reuses the armed child. Isolated reentry pins this CLI's source
+root rather than importing code from the selected data project's working directory.
+Successful termination and matching JSON/Markdown/input hashes are required before
+model work. The verified live snapshot is compared against current stored originals
+before processing; changed originals fail rather than being overwritten by replay.
+Reports retain actual collection counts, channel cursors and durable retry_at.
+Saved-input replay/cached/view never launch Telegram. RSS has no new import/session
+or Telegram-config/schema requirement. ML stays shadow, never a qualified hard gate.
+This is source/test authoring, not performed authentication, live-content consent,
+three-channel/manual/restart acceptance or the 400-post RU/EN holdout study.
 
 `goldenset analyze-feedback --project-root ROOT [--cutoff AWARE_ISO]` publishes one
 private JSON/Markdown feedback report and prints one compact versioned receipt

@@ -12,6 +12,21 @@ from zotero_summarizer.models import PaperDigest
 from zotero_summarizer.models.providers import resolve_stage
 from zotero_summarizer.services._common import settings, state
 
+INTERPRETATION_SCHEMA_MARKER = "interpretation-digest-response-v1"
+
+
+def _validate_interpretation_schema(interpretation_schema: str | None) -> None:
+    if interpretation_schema not in (None, INTERPRETATION_SCHEMA_MARKER):
+        raise ValueError("review_condition_mismatch")
+
+
+def _condition_matches(stored: dict[str, Any], interpretation_schema: str | None) -> bool:
+    if interpretation_schema not in (None, INTERPRETATION_SCHEMA_MARKER):
+        return False
+    if interpretation_schema is None:
+        return "interpretation_schema" not in stored
+    return stored.get("interpretation_schema") == INTERPRETATION_SCHEMA_MARKER
+
 
 def _source_sha(path: str) -> str:
     if not path:
@@ -30,8 +45,9 @@ def assert_review_source_unchanged(identity: dict[str, str]) -> None:
         raise ValueError("PDF source changed during deep review")
 
 
-@lru_cache(maxsize=1)
-def _generation_sources() -> dict[str, str]:
+@lru_cache(maxsize=2)
+def _generation_sources(*, interpretation_schema: str | None = None) -> dict[str, str]:
+    _validate_interpretation_schema(interpretation_schema)
     from zotero_summarizer.integrations import pdf as analysis_extractor
     from zotero_summarizer.services.library import (
         _deep_review_layers, _map_reduce, _paper_goal_summaries,
@@ -44,20 +60,33 @@ def _generation_sources() -> dict[str, str]:
         _paper_section_summaries, _source_admission, _auth_envelope, paper_type, quality_eval, quality_review, propose,
     )
     paths = [Path(inspect.getfile(PaperDigest)), *(Path(module.__file__) for module in modules)]
+    if interpretation_schema is not None:
+        from zotero_summarizer.models.interpretation import InterpretationDigestResponse
+
+        paths.append(Path(inspect.getfile(InterpretationDigestResponse)))
     return {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
 
 
 def build_review_identity(
     *, config: Any, pdf_path: str, source_kind: str, focus_prompt: str,
+    interpretation_schema: str | None = None,
 ) -> dict[str, str]:
+    _validate_interpretation_schema(interpretation_schema)
+    schema = PaperDigest.model_json_schema()
+    extra = {}
+    if interpretation_schema is not None:
+        from zotero_summarizer.models.interpretation import InterpretationDigestResponse
+
+        schema = InterpretationDigestResponse.model_json_schema()
+        extra = {"interpretation_schema": INTERPRETATION_SCHEMA_MARKER}
     resolved = resolve_stage(config.llm_routing, "deep_review")
     payload = {
         "config": config.model_dump(mode="json"),
         "resolved_stage": resolved.model_dump(mode="json"),
         "focus_prompt": focus_prompt,
         "timeout_seconds": settings().summary_timeout_seconds,
-        "schema": PaperDigest.model_json_schema(),
-        "sources": _generation_sources(),
+        "schema": schema,
+        "sources": _generation_sources(**extra),
     }
     generation = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
     return {
@@ -66,10 +95,15 @@ def build_review_identity(
         "source_kind": source_kind,
         "source_path": pdf_path,
         "focus_prompt": focus_prompt,
+        **extra,
     }
 
 
-def current_review_identity(item_key: str, stored: dict[str, Any]) -> dict[str, str]:
+def current_review_identity(
+    item_key: str, stored: dict[str, Any], *, interpretation_schema: str | None = None,
+) -> dict[str, str]:
+    if not _condition_matches(stored, interpretation_schema):
+        raise ValueError("review_condition_mismatch")
     app = state()
     config = app.app_state.config
     source_kind = str(stored.get("source_kind") or "")
@@ -80,7 +114,8 @@ def current_review_identity(item_key: str, stored: dict[str, Any]) -> dict[str, 
         detail = get_library_reader(app).get_item_detail(item_key) or {}
         pdf_path = str(detail.get("pdf_path") or "")
         source_kind = "library" if pdf_path else "none"
+    extra = {"interpretation_schema": interpretation_schema} if interpretation_schema is not None else {}
     return build_review_identity(
         config=config, pdf_path=pdf_path, source_kind=source_kind,
-        focus_prompt=str(stored.get("focus_prompt") or ""),
+        focus_prompt=str(stored.get("focus_prompt") or ""), **extra,
     )

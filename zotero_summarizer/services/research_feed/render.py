@@ -28,6 +28,14 @@ def markdown(payload: dict[str, Any]) -> str:
             f"**Project use:** {'; '.join(card['project_use_notes'])}", "",
             f"**Artifacts:** {', '.join(card['code_urls'] + card['dataset_urls'] + card['model_urls']) or 'none verified'}", "",
         ]
+        for label, value in (
+            ("Reproducibility tier", card.get("reproducibility_tier")),
+            ("Reproducibility rationale", card.get("reproducibility_rationale")),
+            ("Missing reproduction inputs",
+             "; ".join(card.get("missing_reproduction_inputs") or [])),
+            ("Evidence gaps", "; ".join(card.get("evidence_gaps") or [])),
+        ):
+            lines += [f"**{label}:** {value or 'not recorded (not assessed)'}", ""]
     rejected = payload.get("rejected_near_threshold") or []
     if rejected:
         lines += ["## Near-threshold rejects", ""]
@@ -36,6 +44,12 @@ def markdown(payload: dict[str, Any]) -> str:
     missing = payload.get("manual_full_text_required") or []
     if missing:
         lines += ["## Needs full text", ""] + [f"- {row['title']}" for row in missing] + [""]
+    unqualified = payload.get("unqualified_reviews") or []
+    if unqualified:
+        lines += ["## Review qualification pending", ""]
+        lines += [f"- {row['candidate']['title']} — {row['reason']} (not evidence of unavailable full text)"
+                  for row in unqualified]
+        lines.append("")
     return "\n".join(lines)
 
 

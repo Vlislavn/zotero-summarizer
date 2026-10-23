@@ -238,7 +238,7 @@ def test_api_cancellation_retains_dry_callback_ownership_and_hold(tmp_path, monk
     monkeypatch.setattr(api, "get_settings", lambda: settings)
     monkeypatch.setattr(la, "assess_setup_load", lambda s, r, **kw: {
         "status": "admitted", "identity": load_identity(r)})
-    monkeypatch.setattr(factory, "build_client_for_stage", lambda r: constructions.append(r) or object())
+    monkeypatch.setattr(factory, "build_client_for_stage", lambda r, **_kwargs: constructions.append(r) or object())
 
     def dry(*_args):
         entered.set()

@@ -20,6 +20,7 @@ import httpx
 
 from zotero_summarizer.domain import normalize_arxiv_id
 from zotero_summarizer.integrations._rate_limiter import RateLimiter
+from zotero_summarizer.integrations.search_outcomes import record_source_outcome
 
 _BASE = "https://export.arxiv.org/api/query"
 _TIMEOUT_SECS = 12.0
@@ -93,6 +94,7 @@ def search_arxiv(
     (network, non-200, malformed XML) — never raises."""
     query = (query or "").strip()
     if not query:
+        record_source_outcome('arxiv', 'not_attempted')
         return []
     params = {
         "search_query": f"all:{query}",
@@ -105,15 +107,25 @@ def search_arxiv(
     try:
         resp = client.get(_BASE, params=params, headers={"User-Agent": "zotero-summarizer/1.0"})
         if resp.status_code != 200:
+            record_source_outcome('arxiv', 'failed', error_code='rate_limited' if resp.status_code == 429 else 'http_error')
             return []
         root = ET.fromstring(resp.text)
-    except (httpx.HTTPError, OSError, ET.ParseError):
+    except (httpx.HTTPError, OSError):
+        record_source_outcome('arxiv', 'failed', error_code='transport_error')
+        return []
+    except ET.ParseError:
+        record_source_outcome('arxiv', 'failed', error_code='invalid_response')
         return []
     finally:
         if http_client is None:
             client.close()
-    hits = [_hit_from_entry(e) for e in root.findall("a:entry", _NS)]
-    return [h for h in hits if h is not None]
+    entries = root.findall("a:entry", _NS)
+    hits = [h for entry in entries if (h := _hit_from_entry(entry)) is not None]
+    if root.tag != f"{{{_NS['a']}}}feed" or (entries and not hits):
+        record_source_outcome('arxiv', 'failed', error_code='invalid_response')
+    else:
+        record_source_outcome('arxiv', 'success_nonempty' if hits else 'success_empty', count=len(hits))
+    return hits
 
 
 __all__ = ["ArxivHit", "search_arxiv"]

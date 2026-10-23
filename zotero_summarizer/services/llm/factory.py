@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from zotero_summarizer.api.errors import APIError
-from zotero_summarizer.integrations.llm import LLMClient
+from zotero_summarizer.integrations.llm import LLMClient, LLMRequestObserver
 from zotero_summarizer.models.providers import (
     ProviderConfig,
     ProviderType,
@@ -43,9 +43,12 @@ def _override_thinking(extra_body: dict | None, enable: bool) -> dict | None:
 
 
 def build_client_for_provider(
-    provider: ProviderConfig, model: str, *, enable_thinking: bool | None = None
+    provider: ProviderConfig, model: str, *, enable_thinking: bool | None = None,
+    request_observer: LLMRequestObserver | None = None,
 ) -> LLMClient:
     """Construct the live client for one provider/model pair."""
+    if request_observer is not None and not provider.is_local:
+        raise ValueError("Request observation is limited to explicit local setup clients")
     api_key = resolve_api_key(provider)
 
     if provider.type == ProviderType.openai:
@@ -65,6 +68,7 @@ def build_client_for_provider(
             extra_body=extra_body,
             request_timeout_seconds=settings().summary_timeout_seconds,
             structured_output=provider.structured_output,
+            **({"request_observer": request_observer} if request_observer is not None else {}),
         )
 
     if provider.type == ProviderType.anthropic:
@@ -86,6 +90,9 @@ def build_client_for_provider(
     )
 
 
-def build_client_for_stage(resolved: ResolvedStage) -> LLMClient:
-    """Build the client for a stage already resolved to provider+model."""
-    return build_client_for_provider(resolved.provider, resolved.model)
+def build_client_for_stage(resolved: ResolvedStage, *,
+                           request_observer: LLMRequestObserver | None = None) -> LLMClient:
+    """Recheck a resolved stage's requirements before credentials or transport."""
+    resolved.require_capabilities()
+    return build_client_for_provider(resolved.provider, resolved.model,
+                                    **({"request_observer": request_observer} if request_observer is not None else {}))

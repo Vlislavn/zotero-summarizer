@@ -7,6 +7,8 @@ import {
   decisiveRows, fullChecklist, shortGoal, isSupportedGoal,
 } from './briefModel.js';
 import { formatShortDate, timeAgo } from '../../library/shared.jsx';
+import ReadingPlan from './ReadingPlan.jsx';
+import OrthogonalSignals from './OrthogonalSignals.jsx';
 
 const STATE_LABEL = {
   hit: '● addressed', miss: '○ not addressed', not_retrieved: '⚠ not retrieved',
@@ -89,8 +91,6 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
   // caches. None for non-papers.
   const grade = isNonPaper ? '' : (quality?.grade || digest?.grade || '');
   const tldr = digest?.tldr || '';
-  const ideaScore = Math.max(Number(digest?.novelty) || 0, Number(digest?.significance) || 0);
-  const ideaLabel = ideaScore >= 4 ? 'high' : ideaScore >= 3 ? 'moderate' : ideaScore > 0 ? 'low' : 'not assessed';
 
   // Located findings (the story page passes the section overlay; the compact card
   // does not → unchanged). Keyed by VALUE (goal/flag text, critical item) so the
@@ -135,7 +135,11 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
     <div className={`rounded-lg border-l-[3px] px-3.5 py-3 ${VERDICT_ACCENT[verdict.key] || VERDICT_ACCENT.skip}`}>
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-display text-[22px] font-light tracking-tight text-slate-900">{verdict.label}</span>
-          {digest?.estimated_read_minutes != null && <Chip tone="slate">{digest.estimated_read_minutes} min</Chip>}
+          {['read', 'skim', 'skip'].includes(digestDecision) && (
+            digest.estimated_read_minutes != null
+              ? <Chip tone="slate" title="Estimated time for the recommended action">{digest.estimated_read_minutes} min</Chip>
+              : <span className="text-[12px] text-slate-500">Time not estimated</span>
+          )}
           {grade && (
             <Chip tone={gradeTone(grade)} title="Reference-free full-text quality grade">
               {compact ? grade : `Quality ${grade}`}
@@ -157,11 +161,8 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
         {verdict.reason && (
           <p className="mt-1.5 text-[13px] leading-relaxed text-slate-700 max-w-[66ch]">{verdict.reason}</p>
         )}
-        {digest && (
-          <p className="mt-1 text-[11px] text-slate-500">
-            Idea: {ideaLabel} · Evidence: {BAND_LABEL[band] || 'not assessed'} · Writing: {digest.writing_friction || 'not assessed'}
-          </p>
-        )}
+        {digest && <ReadingPlan digest={digest} decision={digestDecision} />}
+        {digest && <OrthogonalSignals deep={deep} />}
       </div>
   );
 
@@ -453,7 +454,7 @@ function GoalBoard({ goals, goalLoc, foldReasons = false }) {
       {addressed.length > 0 && rest.length > 0 && (
         <details className="group">
           <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden text-[11px] font-semibold text-slate-400 hover:text-slate-600">
-            {rest.length} other goal{rest.length > 1 ? 's' : ''} not addressed ▾
+            {rest.length} other goal{rest.length > 1 ? 's' : ''} ▾
           </summary>
           <div className="mt-2 opacity-75">{grid(rest)}</div>
         </details>
@@ -710,17 +711,6 @@ function DigestRows({ digest, exclude = [] }) {
       <KeyVal label="Summary">{d.executive_summary}</KeyVal>
       {(d.key_findings || []).filter(Boolean).length > 0 && (
         <KeyVal label="Key findings"><Bullets items={d.key_findings} /></KeyVal>
-      )}
-      <KeyVal label="Why read">{d.read_why}</KeyVal>
-      {(d.read_parts || []).filter(Boolean).length > 0 && (
-        <KeyVal label="Read parts"><Bullets items={d.read_parts} /></KeyVal>
-      )}
-      {(d.skip_parts || []).filter(Boolean).length > 0 && (
-        <KeyVal label="Skip parts"><Bullets items={d.skip_parts} /></KeyVal>
-      )}
-      <KeyVal label="What the original adds">{d.original_value}</KeyVal>
-      {(d.writing_reasons || []).filter(Boolean).length > 0 && (
-        <KeyVal label={`Writing friction · ${d.writing_friction}`}><Bullets items={d.writing_reasons} /></KeyVal>
       )}
       <KeyVal label="Relevance">{d.relevance}</KeyVal>
       <KeyVal label="Methods">{d.methods}</KeyVal>

@@ -12,6 +12,11 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from time import perf_counter
 
+if __package__:
+    from . import _research_feed_replay as replay
+else:
+    import _research_feed_replay as replay
+
 from zotero_summarizer.models import ResearchCandidate, ResearchProfile
 from zotero_summarizer.services.research_feed.profile import DEFAULT_PROJECTS, DEFAULT_THEMES
 from zotero_summarizer.services.research_feed.runner import triage_candidate
@@ -56,15 +61,7 @@ def _case(row, profile):
                   "frozen_input_ok": machine is not None, "missing_frozen_fields": missing}
 
 
-def evaluate(payload):
-    started = perf_counter()
-    profile = ResearchProfile(themes=DEFAULT_THEMES, projects=DEFAULT_PROJECTS)
-    rows = [_case(row, profile) for row in payload["papers"]]
-    scorable = all(row["frozen_input_ok"] for row in rows)
-    ranked = sorted((row for row in rows if row["predicted_include"]),
-                    key=lambda row: (row["predicted_score"], row["predicted_confidence"],
-                                     row["title"], row["id"]), reverse=True)[:10] if scorable else []
-    must = [row for row in rows if row["must_not_miss"]]
+def _reading_policy_agreement():
     reading_rows = json.loads(READING_FIXTURE.read_text())["papers"]
     reading_matches = 0
     for row in reading_rows:
@@ -74,6 +71,19 @@ def evaluate(payload):
             goal_summaries=signals.get("goal_summaries"),
         )
         reading_matches += action == row["expected_read_decision"]
+    return round(reading_matches / len(reading_rows), 3)
+
+
+def _legacy_evaluate(payload):
+    started = perf_counter()
+    profile = ResearchProfile(themes=DEFAULT_THEMES, projects=DEFAULT_PROJECTS)
+    rows = [_case(row, profile) for row in payload["papers"]]
+    scorable = all(row["frozen_input_ok"] for row in rows)
+    ranked = sorted((row for row in rows if row["predicted_include"]),
+                    key=lambda row: (row["predicted_score"], row["predicted_confidence"],
+                                     row["title"], row["id"]), reverse=True)[:10] if scorable else []
+    must = [row for row in rows if row["must_not_miss"]]
+    reading_agreement = _reading_policy_agreement()
     metrics = {
         "papers": len(rows),
         "inclusion_basis": "frozen_machine" if scorable else "unscorable_missing_frozen_machine",
@@ -85,7 +95,7 @@ def evaluate(payload):
         "must_not_miss_recall": (sum(row["predicted_include"] for row in must) / len(must)
                                  if must else 0.0) if scorable else None,
         "read_skim_skip_agreement": None,  # no frozen reviews for these 30 feed candidates
-        "reading_policy_fixture_agreement": round(reading_matches / len(reading_rows), 3),
+        "reading_policy_fixture_agreement": reading_agreement,
         "artifact_basis": "unscorable_missing_frozen_review",
         "artifact_availability_accuracy": None,
         "reported_code_link_precision": None,
@@ -107,6 +117,33 @@ def evaluate(payload):
         and metrics["estimated_review_minutes"] <= 30
     )
     return metrics
+
+
+def evaluate(payload):
+    """Versioned conditional replay; legacy calculations remain diagnostic only."""
+    started = perf_counter()
+    legacy = None
+    if replay.declares_v2(payload):
+        result = replay.evaluate_replay(payload)
+        reading_agreement = _reading_policy_agreement()
+    else:
+        legacy = _legacy_evaluate(payload)
+        basis = "requires_v2_snapshot" if legacy["inclusion_basis"] == "frozen_machine" else "missing_frozen_machine"
+        missing = {row["id"]: ["frozen_cohort", *legacy["unscorable_fields"].get(row["id"], [])]
+                   for row in payload["papers"]}
+        result = replay.unscorable_result(basis, missing)
+        reading_agreement = legacy["reading_policy_fixture_agreement"]
+    return {
+        "evaluation_contract_version": 2, "papers": len(payload["papers"]), **result,
+        "must_not_miss_recall": None, "legacy_v1_diagnostic": legacy,
+        "read_skim_skip_agreement": None,
+        "reading_policy_fixture_agreement": reading_agreement,
+        "artifact_basis": "unscorable_missing_frozen_review",
+        "artifact_availability_accuracy": None, "reported_code_link_precision": None,
+        "fabricated_urls": None, "project_use_coverage": None, "estimated_review_minutes": None,
+        "runtime_seconds": None, "evaluator_runtime_seconds": round(perf_counter() - started, 4),
+        "llm_tokens": None, "llm_cost": None, "passes": False,
+    }
 
 
 def main() -> int:

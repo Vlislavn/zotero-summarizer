@@ -1,5 +1,6 @@
 """Zotero read/write regressions on isolated databases (A014–A023)."""
 import asyncio
+import json
 import sqlite3
 
 import pytest
@@ -8,6 +9,10 @@ from tests._zotero_fixtures import add_feed_item, add_library_item, add_tag_to_i
 from zotero_summarizer.integrations.zotero_read import ZoteroReader
 from zotero_summarizer.integrations.zotero_write import ZoteroWriter, ZoteroWriteError
 from zotero_summarizer.models import PaperDigest
+from tests.test_generated_write_review import boundary
+from tests.test_interpretation_binding import config
+from tests.test_interpretation_review_one import paper_io
+from tests.test_review_cache import _isolate_cache
 
 
 def _change(kind, payload, change_id=1):
@@ -170,9 +175,10 @@ def test_dispatch_lock_retries_the_whole_batch_without_partial_commits(tmp_path,
 
 
 def test_pending_note_retry_after_status_failure_does_not_duplicate(tmp_path, monkeypatch):
-    from zotero_summarizer.models import PendingChangeMutationRequest
+    from zotero_summarizer.api.errors import APIError
+    from zotero_summarizer.models import PendingChangeApplyRequest
     from zotero_summarizer.services import corpus
-    from zotero_summarizer.services.zotero import pending, zotero
+    from zotero_summarizer.services.zotero import pending, pending_confirmation, zotero
     from zotero_summarizer.storage import repositories
 
     db = build_zotero_db(tmp_path / "zotero")
@@ -191,27 +197,43 @@ def test_pending_note_retry_after_status_failure_does_not_duplicate(tmp_path, mo
     with repositories.with_db_path(tmp_path / "triage.db"):
         repositories.init_db()
         repositories.insert_pending_changes("PARENT", "Parent", [{"change_type": "add_note", "payload": {"note_html": "<p>Deliver once</p>"}}])
-        row = repositories.get_pending_changes()[0]
-        req = PendingChangeMutationRequest(change_ids=[row["id"]])
+        row, = asyncio.run(pending.list_pending_changes()).items
+        req = PendingChangeApplyRequest(change_ids=[row["id"]], previews={
+            row["id"]: row["approval_preview"]["preview_sha256"],
+        })
+        dispatched = []
+        dispatch = writer._dispatch_change
+
+        def record(conn, change, cols):
+            dispatched.append(change["id"])
+            dispatch(conn, change, cols)
+
+        monkeypatch.setattr(writer, "_dispatch_change", record)
         with monkeypatch.context() as patch:
-            patch.setattr(repositories, "set_pending_changes_status", fail_status)
+            patch.setattr(pending_confirmation, "_finalize", fail_status)
             with pytest.raises(sqlite3.OperationalError, match="status write failed"):
                 asyncio.run(pending.apply_pending_changes(req))
-        assert repositories.get_pending_changes()[0]["status"] == "pending"
-        assert asyncio.run(pending.apply_pending_changes(req))["applied"] == 1
-        assert repositories.get_pending_changes("applied")[0]["id"] == row["id"]
+        assert repositories.get_pending_changes_by_ids([row["id"]])[0]["status"] == "applying"
+        with pytest.raises(APIError) as error:
+            asyncio.run(pending.apply_pending_changes(req))
+        assert error.value.status_code == 409
+        assert dispatched == [row["id"]]
+        assert len(list(db.parent.glob(writer._BACKUP_GLOB))) == 1
     assert len(ZoteroReader(db.parent).get_item_notes("PARENT")) == 1
 
 
 @pytest.mark.parametrize("operation,args", [
     ("zotero_upsert_verdict_note", ("must_read", "Comment")),
-    ("zotero_upsert_user_note", ("My note",)),
+    ("mirror_review_note", ("My note",)),
     ("zotero_set_label_tag", ("must_read",)),
     ("zotero_upsert_digest_note", (PaperDigest(tldr="Digest"),)),
 ])
-def test_every_direct_mirror_requires_a_backup_before_dispatch(tmp_path, monkeypatch, operation, args):
-    from zotero_summarizer.services.zotero import zotero
+def test_every_direct_mirror_requires_a_backup_before_dispatch(tmp_path, monkeypatch, operation, args, request):
+    from zotero_summarizer.services.zotero import mirror_notes, zotero
+    from zotero_summarizer.storage import repositories
 
+    digest_stage = zotero.zotero_upsert_digest_note
+    published = request.getfixturevalue("boundary") if operation == "zotero_upsert_digest_note" else None
     db = build_zotero_db(tmp_path / "Zotero #1")
     add_library_item(db, item_key="PARENT", title="Parent")
     writer = ZoteroWriter(db.parent)
@@ -219,17 +241,99 @@ def test_every_direct_mirror_requires_a_backup_before_dispatch(tmp_path, monkeyp
     monkeypatch.setattr(zotero, "get_zotero_writer_or_raise", lambda: writer)
     monkeypatch.setattr(zotero, "get_zotero_reader_or_raise", lambda: ZoteroReader(db.parent))
     dispatch = writer._dispatch_change
+    dispatched = []
+    app_path = tmp_path / "triage.db"
 
     def assert_backup(conn, change, cols):
+        dispatched.append(change["item_key"])
         backups = list(db.parent.glob(writer._BACKUP_GLOB))
         assert len(backups) == 1
         with sqlite3.connect(backups[0]) as backup:
             assert backup.execute("SELECT COUNT(*) FROM itemNotes").fetchone()[0] == 0
             assert backup.execute("SELECT COUNT(*) FROM itemTags").fetchone()[0] == 0
+        if operation == "mirror_review_note":
+            with sqlite3.connect(app_path) as app:
+                claim, = app.execute("SELECT id,status,audit_json FROM pending_changes").fetchall()
+            assert type(claim[0]) is int and claim[0] > 0 and claim[0] == change["id"]
+            assert claim[1] == "applying"
+            assert [event["event"] for event in json.loads(claim[2])] == ["mirror_requested"]
         dispatch(conn, change, cols)
 
     monkeypatch.setattr(writer, "_dispatch_change", assert_backup)
-    getattr(zotero, operation)("PARENT", *args)
+    if operation == "mirror_review_note":
+        with repositories.with_db_path(app_path):
+            repositories.init_db()
+            repositories.upsert_review_note(app_path, "PARENT", args[0])
+            result = mirror_notes.mirror_review_note(app_path, "PARENT")
+        assert result["note_written"] is True and result["note_pending"] is False
+        assert result["note_error"] is None and result["target_key"] == "PARENT"
+        assert dispatched == ["PARENT"]
+        with sqlite3.connect(db) as native:
+            assert native.execute("SELECT note FROM itemNotes").fetchall() == [(
+                '<div class="zotero-note znv1"><!-- zs:note_type=user_note;version=1 -->'
+                "<h2>📝 My notes</h2><p>My note</p>"
+                "<p><em>zs:note_type=user_note;version=1</em></p></div>",
+            )]
+        with sqlite3.connect(app_path) as app:
+            status, audit = app.execute("SELECT status,audit_json FROM pending_changes").fetchone()
+        assert status == "applied"
+        assert [event["event"] for event in json.loads(audit)] == [
+            "mirror_requested", "mirror_applied", "mirror_acknowledged",
+        ]
+    elif published is None:
+        getattr(zotero, operation)("PARENT", *args)
+    else:
+        from zotero_summarizer.services.library import _review_cache
+        from zotero_summarizer.services.zotero import pending
+        from zotero_summarizer.models import PendingChangeApplyRequest
+
+        _review_cache._write_one("PARENT", published.entry)
+        digest_stage("PARENT", PaperDigest.model_validate(published.entry["digest"]))
+        assert dispatched == [] and not list(db.parent.glob(writer._BACKUP_GLOB))
+        proposal, = asyncio.run(pending.list_pending_changes(item_key="PARENT")).items
+        result = asyncio.run(pending.apply_pending_changes(PendingChangeApplyRequest(
+            change_ids=[proposal["id"]], previews={proposal["id"]: proposal["approval_preview"]["preview_sha256"]},
+        )))
+        assert result["applied"] == 1 and dispatched == ["PARENT"]
+
+
+def test_partial_local_finalization_rolls_back_all_claims_without_native_redelivery(boundary, monkeypatch):
+    from zotero_summarizer.api.errors import APIError
+    from zotero_summarizer.models import PendingChangeApplyRequest
+    from zotero_summarizer.services.zotero import pending
+    from zotero_summarizer.storage import pending_actions, repositories
+
+    b = boundary
+    repositories.insert_pending_changes(b.key, "Owned paper", [{
+        "change_type": "tag_changes", "payload": {"add_tags": ["finalize-once"]},
+    }])
+    rows = sorted(asyncio.run(pending.list_pending_changes()).items, key=lambda row: row["id"])
+    req = PendingChangeApplyRequest(change_ids=[row["id"] for row in rows], previews={
+        row["id"]: row["approval_preview"]["preview_sha256"] for row in rows})
+    original, completed = pending_actions.record, []
+
+    def fail_second(conn, change_id, event, **kwargs):
+        if event["event"] == "applied":
+            completed.append(change_id)
+            if len(completed) == 2:
+                assert conn.execute("SELECT status FROM pending_changes WHERE id=?", (completed[0],)).fetchone()[0] == "applied"
+                raise sqlite3.OperationalError("Owned second finalization failure")
+        original(conn, change_id, event, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(pending_actions, "record", fail_second)
+        with pytest.raises(sqlite3.OperationalError, match="second finalization"):
+            asyncio.run(pending.apply_pending_changes(req))
+    assert completed == req.change_ids
+    saved = repositories.get_pending_changes_by_ids(req.change_ids)
+    assert all(row["status"] == "applying" and row["audit"][-1]["event"] == "approved" for row in saved)
+    with pytest.raises(APIError) as error:
+        asyncio.run(pending.apply_pending_changes(req))
+    assert error.value.status_code == 409
+    assert len(ZoteroReader(b.db.parent).get_item_notes(b.key)) == 1
+    assert len(list(b.db.parent.glob(b.writer._BACKUP_GLOB))) == 1
+    with sqlite3.connect(b.db) as conn:
+        assert conn.execute("SELECT name FROM tags").fetchall() == [("finalize-once",)]
 
 
 def test_unexpected_dispatch_error_rolls_back_and_propagates(tmp_path, monkeypatch):

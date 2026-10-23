@@ -24,6 +24,7 @@ from zotero_summarizer.services.search._models import (
     ScreenRequest,
     SearchIntent,
 )
+from zotero_summarizer.services.search.dedup import reconcile_operation_state
 
 # Per-session-id locks so the background review worker (whole-session saves) and a
 # concurrent "Add to library" (stamps one candidate's materialized key) never
@@ -80,32 +81,32 @@ def save(session: ResearchSession) -> None:
 
 
 def save_merge(session: ResearchSession) -> ResearchSession:
-    """Persist under the session lock, preserving any ``materialized_zotero_key`` that
-    a concurrent "Add to library" stamped since this in-memory copy was loaded. The
-    key is add-only/monotonic, so the review worker's whole-session saves must never
-    drop it. Everything else (order, quality, reviews) is owned by the worker."""
+    """Preserve operation state across persisted/current exact families under the lock.
+
+    Include absorbed and transitive members, or the same saved address without IDs.
+    Candidate selection, order, metadata, quality and reviews remain worker-owned.
+    """
     with _lock_for(session.id):
         with _locks_guard:
             if session.id in _deleted:
                 return session
         persisted = load(session.id)
-        keyed = {
-            c.candidate_id: c.materialized_zotero_key
-            for c in persisted.candidates
-            if c.materialized_zotero_key
-        }
-        for cand in session.candidates:
-            if not cand.materialized_zotero_key and keyed.get(cand.candidate_id):
-                cand.materialized_zotero_key = keyed[cand.candidate_id]
+        reconcile_operation_state(session.candidates, persisted.candidates)
         save(session)
     return session
 
 
-def update(session_id: str, mutate: Callable[[ResearchSession], None]) -> ResearchSession:
-    """Load → ``mutate`` in place → save, all under the session lock (read-modify-write
-    safe against the concurrent review worker). Used by the "Add to library" path to
-    stamp one candidate's materialized key without clobbering in-flight reviews."""
+def update(
+    session_id: str, mutate: Callable[[ResearchSession], None], *, skip_deleted: bool = False,
+) -> ResearchSession | None:
+    """Locked read-modify-write; opt-in skip returns None only for an explicit tombstone.
+
+    Ordinary missing/corrupt sessions still raise. Default callers retain their
+    existing failure behavior and concurrent materialization protection.
+    """
     with _lock_for(session_id):
+        if skip_deleted and is_deleted(session_id):
+            return None
         sess = load(session_id)
         mutate(sess)
         save(sess)
@@ -117,17 +118,14 @@ def materialize_once(
     candidate_id: str,
     do_write: Callable[[Candidate, ResearchSession], str],
 ) -> tuple[bool, str] | None:
-    """File one candidate into Zotero exactly once, under the session lock.
+    """Serialize explicit Adds in one app process, not a distributed transaction.
 
-    Closes the check-then-write race: two concurrent "Add to library" clicks on the
-    same candidate must not both write to Zotero. Returns ``None`` if the candidate id
-    is unknown, ``(False, key)`` if it was already materialized (no write), or
-    ``(True, key)`` after calling ``do_write(cand, session)`` to create the Zotero item
-    and stamping the returned key. The lock is held across ``do_write`` — materialize is
-    a rare explicit action, so serializing it per session is simpler than a reservation
-    marker. ponytail: whole-session lock; only split if Add ever gets hot.
-    Do NOT call the locked helpers (``update``/``save_merge``/``claim``) from
-    ``do_write`` — the lock is a plain (non-reentrant) ``threading.Lock``."""
+    Return None for an unknown candidate, (False, key) for an already-materialized
+    one, or (True, key) after the callback returns and its result is saved. The
+    native Add callback reserves identity with ``save`` before external effects.
+    Do NOT call ``update``/``save_merge``/``claim`` from that callback: they acquire
+    this same non-reentrant lock. Failed new-item finalization leaves its saved plan.
+    """
     with _lock_for(session_id):
         sess = load(session_id)
         cand = next((c for c in sess.candidates if c.candidate_id == candidate_id), None)
@@ -160,6 +158,12 @@ def load(session_id: str) -> ResearchSession:
     """Load one session. Raises ``FileNotFoundError`` when it does not exist (the
     route maps that to a 404 — an unknown id is a client error, not a silent None)."""
     return ResearchSession.from_dict(json.loads(_path(session_id).read_text(encoding="utf-8")))
+
+
+def load_unless_deleted(session_id: str) -> ResearchSession | None:
+    """Read under the delete lock; absent files without a tombstone remain errors."""
+    with _lock_for(session_id):
+        return None if is_deleted(session_id) else load(session_id)
 
 
 def list_sessions() -> list[dict[str, object]]:
@@ -195,4 +199,4 @@ def is_deleted(session_id: str) -> bool:
         return session_id in _deleted
 
 
-__all__ = ["new_session", "save", "save_merge", "update", "materialize_once", "claim", "load", "list_sessions", "delete", "is_deleted"]
+__all__ = ["new_session", "save", "save_merge", "update", "materialize_once", "claim", "load", "load_unless_deleted", "list_sessions", "delete", "is_deleted"]
