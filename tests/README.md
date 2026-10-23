@@ -1,3 +1,10 @@
+# Current part 2 coverage
+
+This checkout includes retained history/analysis tests plus incremental CSV,
+UTC-overflow, journal-source and SQL-identity regressions. The part-1 paragraph
+below is the prerequisite #162 coverage record, not this checkout's suite limit.
+Operation/weekly suites remain later-stack work.
+
 # Tests
 
 Run focused cases with `pytest -q tests/<test_file>.py`. Tests use the existing

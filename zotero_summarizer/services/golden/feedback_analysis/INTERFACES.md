@@ -19,6 +19,21 @@ verified retained SQLite + CSV + JSONL
  analyze_inputs -> local dictionary (no publication or live writes)
 ```
 
+## Current checkout — part 2 implementation status
+
+The opening **reference-only-in-part-1** notice describes prerequisite #162.
+On this part-2 head, the input/history/analysis/metrics and report-library contracts
+are implemented; manual/weekly operation, worker, CLI and scheduling contracts
+remain reference-only and unavailable. `analyze_inputs` returns a dictionary,
+not an integrated operation or issue #47 acceptance.
+
+CSV physical byte lines are consumed lazily before record-budget expansion;
+there is no whole-file line/offset list. SQL item/alias identities must be nonblank
+text and journal `source` is required; incompatible rows/schemas fail admission.
+Aware offsets outside UTC's representable datetime range remain located
+invalid/unknown times. The other frozen envelope, CSV-isolation and provenance
+limits below are unchanged. Reference and implementation status are separate.
+
 ## Entry and failures
 
 `analyze_inputs(destination: Path, *, budgets=None) -> dict`

@@ -33,6 +33,30 @@ retained bytes --verify_inputs--> analyze_inputs --> local result dictionary
 manual / opt-in weekly --clean child(capture + analyze)--> immutable report + receipt
 ```
 
+## Current checkout — stack part 2/4
+
+The **part-1 availability block above is the prerequisite #162 reference**, not
+this head's scope. This checkout additionally implements and exports
+`analyze_inputs(destination, *, budgets=None)`; `history.py` and `analysis.py`
+are present. `freeze_inputs`/`verify_inputs` and the report primitives remain
+available with their safety contract above. Manual/weekly dispatchers and the
+`goldenset analyze-feedback` command remain absent; do not run those later-stack
+reference commands. No overall #47 completion is claimed.
+
+Analysis must run in a dedicated externally bounded process because its temporary
+CSV parser ceiling is process-global. Physical byte lines/positions are consumed
+lazily, so the record cap stops short-row inputs without a full line/offset list.
+SQL observation/alias keys must be nonblank text and a present journal must have
+`source`. UTC-conversion overflow remains located invalid/unknown time, not a
+whole-analysis failure. Snapshot duplicate-namespace refusal and literal report
+Markdown remain intact.
+
+Current coverage also includes `tests/test_feedback_analysis_{history,metrics,analysis,
+conflicting_cohorts,sync_sources}.py` and the eight analyzer boundary regressions.
+The later text's absent-history/analysis-suite statements describe part 1 only.
+These library tests and synthetic smoke are not operation/weekly, production,
+scientific or private installed-host acceptance.
+
 `freeze_inputs(settings, destination: Path, *, cutoff: datetime, provenance: dict,
 budgets=None) -> dict` creates a new directory beneath
 `settings.feedback_analysis_dir` (`data/feedback-analysis`). It refuses existing

@@ -81,6 +81,9 @@ is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
 - Generate source-bound RSS project proposals in existing review calls; reuse successful stages, recompute cards and retain errors/v1 reports. Cached qualification reads existing goals without startup. Keep effort unknown or explicitly unverified; preserve blockers and artifact links.
 - A124: verify section one-liners in a second batch against the same first 700 source characters (up to 24 sections); omit unsupported summaries. Scripted checks do not establish live semantic accuracy.
 - A136: use figure metadata only for affirmative whole-paper figure-count wording; route scoped, uncertain, table-only, combined, and unmatched counts to grounded Q&A. Live scope accuracy is unmeasured.
+- Reconcile retained analysis with the current capture/report foundation; preserve admitted CLI roots, literal Markdown, duplicate-namespace refusal and analyzer bounds/identity checks.
+- Bound retained CSV line indexing incrementally; reject missing journal source and invalid SQL paper keys; retain unrepresentable UTC timestamps as unknown. Clarify later-stack CLI/weekly docs.
+- Package existing retained history and descriptive analysis from the working changes for dependent review; no behavior redesign.
 - A142: validate persisted and injected review-fleet proposals; skip malformed rows, retain valid neighbors, and calibrate only valid human/proposal pairs.
 - A176: cover admitted Faithbench text with contiguous 6,000-character windows; default 32, maximum 256, with preflight rejection above budget and the effective limit recorded in metadata.
 - FaithBench build resolves window budgets as CLI > shell environment > selected-project `.env` > default before provider setup; warning-call assertions are isolated from root-logger propagation.
