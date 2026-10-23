@@ -376,3 +376,5 @@ renamed/re-DOIed saved seed by DOI or versioned arXiv location while retaining a
 same-title distinct-ID paper. Receipt-on/off and lookalike-host cases are covered.
 Candidate identity regressions also distinguish public metadata changes from later
 derived operation/question-evidence enrichment; source inheritance is not identity.
+
+Original discovery regression oracles are retained without changing assertions. Source-only retention does not establish current-contract compatibility.
