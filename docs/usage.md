@@ -49,6 +49,23 @@ through to grounded Q&A. The paper artifact stores `figures_count`, not a table
 count; focused Q&A and freshness routing tests passed (39), but live natural-language
 scope accuracy is not measured.
 
+## RSS subscriptions
+
+In Settings → Sources, explicitly add HackerNoon AI Agents or Agentic AI, or keep
+using the custom-feed form. Existing disabled subscriptions stay disabled and
+preset clicks do not erase an unfinished custom draft. Presets also preserve a
+subscription saved by another tab, including imported URL host/default-port
+variants. Source writes wait for the current write to finish. Saving is not fetching:
+use **Refresh RSS now**, then **Today → Triage backlog** for the existing pipeline.
+No second ingestion system or automatic source subscription is introduced.
+
+Refresh reports zero/new/updated items separately from offline skips and partial
+or total source failures. A failed source-list read is not an empty subscription
+list; retry loading it. Per-feed errors and last-check time remain visible.
+Uncertain source writes reread saved rows without silently retrying their write.
+These UI/transport contracts do not establish live feed availability, scientific
+quality or human usefulness of a source.
+
 ## First-run setup
 
 There's nothing to copy and nothing to migrate by hand. On the first `serve` (or `setup`),

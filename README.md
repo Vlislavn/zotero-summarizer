@@ -16,6 +16,10 @@ keep/trash decisions train the model, so tomorrow's slate is sharper.
 the model learns from how you triage). The app owns current decisions and their history;
 Zotero remains the PDF/citation surface and a synced representation of approved tags/notes.
 
+Optional HackerNoon tag feeds can be added explicitly in Settings → Sources through
+ordinary RSS subscriptions. Saving does not fetch or triage; see
+[RSS subscriptions](docs/usage.md#rss-subscriptions).
+
 ## Review recovery and search constraints
 
 Deep review rejects demonstrated access/error/login templates before model calls.

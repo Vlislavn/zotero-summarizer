@@ -18,7 +18,7 @@ Vite proxies `/api/*` to `http://localhost:8000`; `npm run build` writes
 - **Library** — Read next, labels, reviews, figures, paper Q&A, and acquisition.
 - **Search** — query-driven discovery and review.
 - **Today** — feed triage and Zotero filing. Author h-index badges render only for positive OpenAlex evidence; unresolved author metadata is not shown as `h=0`.
-- **Settings** — AI, research profile, Zotero, sources, and advanced controls.
+- **Settings** — AI, research profile, Zotero, sources, and advanced controls. Sources offers explicit HackerNoon tag-feed subscriptions through the existing RSS API; saving, fetching and Today triage remain separate actions.
 - **Ops** — feeds, jobs, pending writes, diagnostics, and retraining.
 
 Legacy `/annotate`, `/review`, `/triage`, and `/pending` links redirect without
@@ -269,7 +269,7 @@ when citations are absent/zero throughout, it reduces to relevance. Counts are a
 limited prestige proxy (field/age bias), disclosed beside the selector. Explicit
 sorts show the whole pool in that order; only Recommended collapses weak matches.
 Retracted and unscored candidates stay last. This display preference does not
-change server review selection. RSS refresh messages include partial failures.
+change server review selection. RSS refresh distinguishes partial failures, offline skips, zero returned items and an unavailable saved-source list. Persisted per-feed errors reload even when refresh fails. Preset saves retain custom drafts; uncertain writes reread rows without automatically repeating the write. Preset adds are create-only, including stale lists and imported host/default-port variants; existing subscription settings stay unchanged. Source writes are single-flight in the section. Deploy frontend and backend together for the create-only contract.
 
 ```text
 src/

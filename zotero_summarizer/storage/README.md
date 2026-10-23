@@ -87,6 +87,12 @@ Already-resolved/missing/unmaterialized rows return false without writing a sign
 Outcome type and relevance come from the known outcome taxonomy/weight mapping;
 the independent weight override and service mapping-wrapper exports are gone.
 
+RSS subscription upserts accept opt-in `create_only`: URL lookup and creation
+share SQLite's writer transaction, preserving any existing row without changing
+its name or enabled state. Identity uses HTTPX URL normalization (including host
+case and default ports) without fetching; invalid legacy URLs remain literal.
+Ordinary upserts/imports keep their existing update behavior.
+
 RSS item reads accept `limit=None` for an uncapped whole-feed pass (`LIMIT -1`);
 finite callers keep their bounded result contract. Feed-tick exclusion uses a
 separate empty SQLite lock file beside the Settings-provided triage store, not

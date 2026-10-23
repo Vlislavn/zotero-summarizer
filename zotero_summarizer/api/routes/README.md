@@ -77,7 +77,9 @@ Failure does not roll back a model already saved or installed before rescoring;
 the UI's existing failed-job view displays the error and stops polling.
 
 RSS add/update rejects malformed URLs with 422; a duplicate URL update returns
-409 without changing either subscription. Refresh network/document failures
+409 without changing either subscription. RSS POST accepts optional `create_only`
+(default false): an existing normalized subscription is returned unchanged, even
+when disabled. Preset adds use this mode; custom upsert semantics stay unchanged. Refresh network/document failures
 return 502 after the reader records last_error, never a successful empty refresh.
 
 Feed-review `sort=recent|border` is passed through to storage, where ordering
