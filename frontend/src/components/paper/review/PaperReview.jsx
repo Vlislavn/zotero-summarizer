@@ -7,6 +7,7 @@ import {
   decisiveRows, fullChecklist, shortGoal, isSupportedGoal,
 } from './briefModel.js';
 import { formatShortDate, timeAgo } from '../../library/shared.jsx';
+import ReadingPlan from './ReadingPlan.jsx';
 
 const STATE_LABEL = {
   hit: '● addressed', miss: '○ not addressed', not_retrieved: '⚠ not retrieved',
@@ -71,7 +72,8 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
   const weakEvidence = band === 'flag' || (quality?.overstatements || []).some(Boolean);
   const capped = rawDigestDecision === 'read' && (weakEvidence || digest?.writing_friction === 'high');
   const digestDecision = capped ? 'skim' : rawDigestDecision;
-  if (['read', 'skim', 'skip'].includes(digestDecision)) {
+  const hasReadingDecision = ['read', 'skim', 'skip'].includes(digestDecision);
+  if (hasReadingDecision) {
     verdict = {
       key: digestDecision === 'read' ? 'deep' : digestDecision,
       label: { read: 'READ', skim: 'SKIM', skip: 'DIGEST IS ENOUGH' }[digestDecision],
@@ -80,7 +82,7 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
         : digest.read_why || '',
     };
   } else {
-    verdict = { key: 'skip', label: 'REVIEW', reason: digest?.read_why || 'Reading decision unavailable; review the evidence.' };
+    verdict = { key: 'skip', label: 'REVIEW', reason: 'Reading decision unavailable; review the evidence.' };
   }
   // Deterministic checklist grade FIRST: quality.grade comes from grounded
   // coverage (stable run-to-run); digest.grade is the LLM's holistic guess and can
@@ -135,7 +137,11 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
     <div className={`rounded-lg border-l-[3px] px-3.5 py-3 ${VERDICT_ACCENT[verdict.key] || VERDICT_ACCENT.skip}`}>
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-display text-[22px] font-light tracking-tight text-slate-900">{verdict.label}</span>
-          {digest?.estimated_read_minutes != null && <Chip tone="slate">{digest.estimated_read_minutes} min</Chip>}
+          {hasReadingDecision && (
+            digest.estimated_read_minutes != null
+              ? <Chip tone="slate" title="Saved reading-time estimate">{digest.estimated_read_minutes} min</Chip>
+              : <span className="text-[12px] text-slate-500">Time not estimated</span>
+          )}
           {grade && (
             <Chip tone={gradeTone(grade)} title="Reference-free full-text quality grade">
               {compact ? grade : `Quality ${grade}`}
@@ -157,6 +163,7 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
         {verdict.reason && (
           <p className="mt-1.5 text-[13px] leading-relaxed text-slate-700 max-w-[66ch]">{verdict.reason}</p>
         )}
+        {hasReadingDecision && <ReadingPlan digest={digest} decision={digestDecision} />}
         {digest && (
           <p className="mt-1 text-[11px] text-slate-500">
             Idea: {ideaLabel} · Evidence: {BAND_LABEL[band] || 'not assessed'} · Writing: {digest.writing_friction || 'not assessed'}
@@ -711,14 +718,6 @@ function DigestRows({ digest, exclude = [] }) {
       {(d.key_findings || []).filter(Boolean).length > 0 && (
         <KeyVal label="Key findings"><Bullets items={d.key_findings} /></KeyVal>
       )}
-      <KeyVal label="Why read">{d.read_why}</KeyVal>
-      {(d.read_parts || []).filter(Boolean).length > 0 && (
-        <KeyVal label="Read parts"><Bullets items={d.read_parts} /></KeyVal>
-      )}
-      {(d.skip_parts || []).filter(Boolean).length > 0 && (
-        <KeyVal label="Skip parts"><Bullets items={d.skip_parts} /></KeyVal>
-      )}
-      <KeyVal label="What the original adds">{d.original_value}</KeyVal>
       {(d.writing_reasons || []).filter(Boolean).length > 0 && (
         <KeyVal label={`Writing friction · ${d.writing_friction}`}><Bullets items={d.writing_reasons} /></KeyVal>
       )}

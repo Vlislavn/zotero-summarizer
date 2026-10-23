@@ -93,6 +93,17 @@ protocol's legacy `changes` field is empty because the PWA does not consume hist
 
 ## Paper review
 
+The card and full-page verdict show the saved reading plan without opening Details:
+ordered read targets, optional skip targets and the original's added value. These
+fields have one displayed home. Unknown decisions show neutral unavailable copy,
+not an old action rationale, targets or time; evidence panels remain unchanged.
+Missing targets/value/time remain explicit unknowns. Existing policy, scores, cache,
+API and native HTML briefs are unchanged; this is only the React presentation.
+PaperReview admits the projected action once for its verdict, time and reading plan;
+the plan presenter has no separate action-validity policy. Whitespace-only plan
+entries are omitted; other text and order stay unchanged. The time chip identifies
+the saved estimate, which is not recalculated when policy caps the action.
+
 Library keeps Rescore available after a queue-read error, including when the
 display retains a previously scored list. Rescore can rebuild a corrupt score
 cache; the existing status poll reloads the new snapshot after completion.

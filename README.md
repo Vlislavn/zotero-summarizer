@@ -127,6 +127,7 @@ zotero-summarizer prefetch-models` once while online — see [docs/usage.md](doc
 - **Library — read.** Your unread papers, ranked by relevance. For each you get:
   - a **paper brief** — at-a-glance read verdict, goal-match board (which of your goals it
     serves), a reference-free **quality grade** (FLAG / NEUTRAL / HIGHLIGHT), and figures;
+  - a visible **reading plan** — ordered targets, parts to skip and the original's added value beside the saved reading verdict; missing estimates stay unknown;
   - **ask the paper** — grounded Q&A that quotes the text and abstains when the answer isn't there;
   - **deep review** — an on-demand full-text digest + quality assessment for your top picks;
     map-reduce verifies claims against the original paper, not its generated notes.
