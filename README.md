@@ -120,6 +120,10 @@ Saving seed notes/verdicts hides prior related context and fences old reads unti
 an explicit fresh load. See [related saved papers](docs/related-saved-papers.md)
 for privacy, budgets, durable results and outstanding owner evaluation.
 
+With corpus disabled, post-edit corpus refresh skips library/cache reads and
+inferred-feedback writes even if resources remain initialized. The explicit edit
+itself is unchanged; see [service boundaries](zotero_summarizer/services/README.md).
+
 ## Requirements
 
 - **Python 3.10+** and **[uv](https://docs.astral.sh/uv/getting-started/installation/)**

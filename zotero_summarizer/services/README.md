@@ -157,7 +157,10 @@ counterfactual cohort, model-version attribution or sampling weights are claimed
 
 An enabled corpus requires a working encoder: startup and config updates propagate
 load/encode failures, without fallback vectors. A disabled corpus does not load
-the encoder or rewrite goals. Background corpus import logs and rethrows failures
+the encoder or rewrite goals. Targeted post-edit refresh also skips reader/cache,
+lock and inferred-feedback I/O while corpus is OFF; it does not undo the preceding
+native edit. Missing reader/cache still returns before configuration access.
+Background corpus import logs and rethrows failures
 to the task owner/event loop instead of reporting a successful partial import.
 
 Background corpus import reads the existing whole-library listing once, unions
