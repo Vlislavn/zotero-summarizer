@@ -5,7 +5,7 @@ The concrete strict JSON schemas are generated from `priority.Config`, `Inputs`,
 `Truth`, `BaselineArtifact`, `BaselineReadout`, `Readout` and `Result`; changes to
 those source/schema identities invalidate artifacts rather than silently adapting
 an older attempt. Full usage and field meanings:
-[decision-priority-comparison.md](../../docs/decision-priority-comparison.md).
+[priority feature overview](../../docs/features.md#priority-comparison).
 
 ## Entry and ownership
 

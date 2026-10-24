@@ -49,7 +49,7 @@ def test_make_launchers_respect_deployment_boundary(launcher_project, target):
         assert result.stderr.startswith(
             "make iphone does not configure authenticated HTTPS mobile access.\n"
             "For this Mac, run make api and open http://127.0.0.1:8000.\n"
-            "See docs/local-deployment-boundary.md for the mobile deployment requirements.\n"
+            "See docs/features.md#remote-access for the mobile deployment requirements.\n"
         )
     else:
         assert result.returncode == 0, result.stdout + result.stderr

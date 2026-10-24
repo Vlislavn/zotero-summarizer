@@ -1,9 +1,5 @@
 # api — FastAPI app + HTTP layer
 
-Library's explicit local digest-audit export is GET-only, loopback/same-origin
-restricted and `no-store`; it exports existing evidence, never starts generation.
-See [verification audit contract](../../docs/verification-audit.md).
-
 Builds the FastAPI app, mounts the React SPA at `/`, and exposes the JSON API
 under `/api/*`. Routes stay *thin*: they validate input and call `services/`.
 
@@ -25,7 +21,7 @@ errors.py  ── APIError -> uniform JSON error body + handlers
 
 The gateway authorizes an owner, not a unique device. Same-UID/root software is
 trusted; active-stream revocation and installed proxy/TLS/device acceptance remain
-separate. See [deployment boundary](../../docs/local-deployment-boundary.md).
+separate. See [remote-access boundary](../../docs/features.md#remote-access).
 
 **Boundaries:** may import `services/`, `models`, `errors`. Routes should hold
 no business logic — push it into `services/`.

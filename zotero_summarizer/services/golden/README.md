@@ -135,12 +135,5 @@ missing/invalid originals raise. The existing short-circuit trace exposes
 The shared short-circuit constructor also handles trash/veto; unlabeled scoring
 and final-label manual-override detection retain their existing semantics.
 
-Feedback review stack part 1: Feedback: retained input capture and report primitives. See `zotero_summarizer/services/golden/feedback_analysis/README.md`; later parts supply the remaining existing workflow.
-
-Feedback review stack part 2: Feedback: retained history and descriptive analysis. See `zotero_summarizer/services/golden/feedback_analysis/README.md`; later parts supply the remaining existing workflow.
-
-Feedback review stack part 3: Feedback: existing manual report command and publication. See `zotero_summarizer/services/golden/feedback_analysis/README.md`; later parts supply the remaining existing workflow.
-
-Feedback review stack part 4 (final): opt-in weekly daemon scheduling and recovery. See `zotero_summarizer/services/golden/feedback_analysis/README.md` for bounded catch-up, confirmed-failure retry and publication limits.
-
-Existing native/question source stack: original metadata editors, Pending confirmation and mirror activation; corresponding UI/MCP source follows. No new feature or issue-completion work; merge the related parts before using their new workflow.
+[Feedback analysis](feedback_analysis/README.md) owns retained input capture,
+descriptive reports, the manual command and opt-in weekly scheduling/recovery.

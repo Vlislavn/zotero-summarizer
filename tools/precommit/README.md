@@ -4,7 +4,8 @@ Guardrail scripts wired by `.pre-commit-config.yaml` (stdlib-only, except
 `check_dead_code.py` which also shells to Vulture, a dev dependency).
 
 **Two ways to use them.** Enforcement (only *new*, un-grandfathered findings fail) runs
-automatically on commit and in CI via `pre-commit run --all-files` — or `make lint`. To
+explicitly via `make lint` / `pre-commit run --all-files`; `make check` and optional
+manual CI reuse it. Commit-hook installation is not required. To
 *see* findings (every detector, advisory, never blocks), there are exactly **two commands**,
 differing only in scope:
 
@@ -226,4 +227,5 @@ python3 tools/precommit/check_overlaps.py audit --model sentence-transformers/al
 python3 tools/precommit/check_overlaps.py audit --threshold 0.7 --top 0 --json
 ```
 
-See [docs/architecture.md](../../docs/architecture.md) for the rules in context.
+See [CONTRIBUTING.md](../../CONTRIBUTING.md) for the change/check workflow and
+[architecture](../../docs/architecture.md#dependency-rules) for dependency direction.

@@ -55,7 +55,7 @@ review claim. The shared session directory is owner-only (0700), including exist
 directories; temporary files become 0600 before private bytes are written, and
 atomic replacement retains that mode. Existing files are protected by the directory. Related sessions are omitted from the Search sidebar. No federation,
 Search review or materialization is started by that flow. See
-[related saved papers](../../../docs/related-saved-papers.md) for consent,
+[related saved papers](../../../docs/features.md#related-saved-papers) for consent,
 work ceilings, invalidation and unqualified semantic judgments.
 
 `discovery.py` reuses public Search and consent-bound seed context. Raw session
@@ -74,7 +74,7 @@ first-client construction cannot stale its own request.
 Only explicit Review may claim discovery; new Add preflights before effects.
 Stale retained plans require an explicit existing-only native ACK (exact key,
 empty steps, no backup) before app finalization, never exception-time readback.
-See [server contract](../../../docs/discovery.md).
+See [feature boundary](../../../docs/features.md#saved-paper-discovery).
 
 ## Why this shape
 
@@ -198,7 +198,7 @@ separate question store, classifier/index/worker or native writer is added.
 
 The Search checkbox is explicit per page visit. Recommended shows server order and
 promoted weak-band cards; user-selected relevance/prestige sorts remain independent.
-Evidence and provenance live in native disclosures. See [usage](../../../docs/usage.md#experimental-search-question-evidence).
+Evidence and provenance live in native disclosures. See [feature overview](../../../docs/features.md#search-question-evidence).
 Human-held-out answerability and latency remain unmeasured; issue #30 remains open.
 
 ## Files
@@ -374,7 +374,7 @@ Accounting snapshots observations before mutable family merging. Every scheduled
 variant records its query, allocation, observations and state, including zero hits.
 Ordinary calls keep best-effort empty states `unknown`. Opt-in
 `observe_outcomes=True` retains distinct per-request OpenAlex channel/outcome receipts;
-see [provider receipts](../../../docs/discovery-provider-receipts.md).
+see [discovery boundary](../../../docs/features.md#saved-paper-discovery).
 Source family counts are
 cross-source attributed (not globally additive); type-unknown and other rejection
 counts survive persistence. Refinement stores its round's accounting separately.

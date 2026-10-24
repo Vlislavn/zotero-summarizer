@@ -99,10 +99,4 @@ Digest strength and weakness paragraphs precede the unchanged version-1 quality
 metadata footer. The footer is always the last meaningful paragraph, preserving
 structural ownership after native editors discard HTML comments.
 
-Existing native/question source stack: typed action history, original writer boundaries and dormant editor/proposal code; activation follows. No new feature or issue-completion work; merge the related parts before using their new workflow.
-
-Existing native/question source stack: original confirmation, mirror/recovery and publication-revision helpers; existing endpoint activation follows. No new feature or issue-completion work; merge the related parts before using their new workflow.
-
-Existing native/question source stack: original metadata editors, Pending confirmation and mirror activation; corresponding UI/MCP source follows. No new feature or issue-completion work; merge the related parts before using their new workflow.
-
 Pending Reject commits generated audit and ordinary status changes together after validating the entire selection; a stale row or direct/mirror history refuses all selected changes.

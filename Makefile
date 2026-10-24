@@ -29,7 +29,7 @@ iphone:
 	@printf '%s\n' \
 	  'make iphone does not configure authenticated HTTPS mobile access.' \
 	  'For this Mac, run make api and open http://127.0.0.1:8000.' \
-	  'See docs/local-deployment-boundary.md for the mobile deployment requirements.' >&2
+	  'See docs/features.md#remote-access for the mobile deployment requirements.' >&2
 	@exit 2
 
 # Run backend + frontend together (Ctrl+C stops both). This is what you want

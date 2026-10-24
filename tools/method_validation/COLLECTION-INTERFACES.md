@@ -11,7 +11,7 @@ Public task grammar: `collections --config FILE [--run]` OR
 prints JSON `{mode:inspect-inputs,papers,questions,synthetic,model_calls:0,writes:0}`.
 Run prints `Private artifacts: DIRECTORY` then report JSON. Reports never promote
 models or alter existing collections/memberships. This is one complete offline tool,
-not full#42 empirical acceptance. See [usage](../../docs/decision-collection-comparison.md).
+not full#42 empirical acceptance. See [feature overview](../../docs/features.md#collection-comparison).
 
 ## Code-owned API
 

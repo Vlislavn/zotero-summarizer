@@ -103,7 +103,7 @@ dropped. *Known caveat:* PubMed RSS abstracts are often truncated to the
 conclusion, so the gate/goal_sim see a partial abstract for PubMed picks.
 Deferred upgrade if this hurts ranking: a PMID→efetch abstract backfill in
 `integrations/` called before the gate. See
-[docs/usage.md](../../../docs/usage.md) "Adding sources".
+[RSS subscriptions](../../../docs/features.md#rss-subscriptions).
 
 Today Add reuses a copied deep-review PDF when present, otherwise runs the non-interactive OA acquisition chain; its response separates item materialization from typed per-paper attachment outcomes.
 

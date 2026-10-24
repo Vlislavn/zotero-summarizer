@@ -1,15 +1,5 @@
 # api/routes — HTTP endpoints (thin)
 
-`GET /api/library/deep-review/{item_key}/audit` exports exact cached digest and
-accepted verification evidence for a local same-origin request. It never runs a
-model, acquires a source, initializes a reader, writes native Zotero or repairs
-the cache. It invokes no native reader or SQLite connection. Library current-item
-binding stays unavailable; `retained_evidence` exposes separately labelled,
-validated retained-source receipts, never current-attachment proof. Explicit
-source overrides retain their own contract. Failed/stale/legacy validation gives
-no retained payload; malformed stores fail.
-See [private export usage and response contract](../../../docs/verification-audit.md).
-
 Search replies use each session domain's own projection: Discovery applies its
 context/privacy view; ordinary Search retains its existing serialization boundary.
 No private Discovery snapshot is exposed through screen or session GET.
@@ -84,12 +74,12 @@ failed/interrupted attempt. It persists/coalesces contextual assessments through
 the existing session store, never Search auto-review or Add. Full private seed
 and candidate notes stay out of provider search queries. Unknown, failed,
 interrupted, stale and over-budget assessments are distinct from genuine empty.
-See [contract](../../../docs/related-saved-papers.md).
+See [feature boundary](../../../docs/features.md#related-saved-papers).
 
 Discovery GET/strict POST: `/api/library/related/{item_key}/discover`.
 All session responses use controlled views; raw snapshots are storage-only.
 Discovery cannot auto-review; explicit Review/new Add preflight freshness.
-See [Discovery](../../../docs/discovery.md).
+See [Discovery](../../../docs/features.md#saved-paper-discovery).
 
 Ask Paper additionally accepts up to 20 typed prior turns. The library service
 keeps a recent tail, compacts older evidence to extraction-versioned handles,
@@ -206,7 +196,3 @@ description above; the explicit unconfigured-Zotero boundary remains local-first
 `GET /api/pending?item_key=...` passes the item filter through to the indexed
 storage query. `GET /api/triage/jobs?active_only=true` returns persisted running
 and cancelling jobs without limiting the lookup to newest terminal jobs.
-
-Existing native/question source stack: original metadata editors, Pending confirmation and mirror activation; corresponding UI/MCP source follows. No new feature or issue-completion work; merge the related parts before using their new workflow.
-
-Original question API/sync source is retained: immutable save/replay before Q&A, separate receipts and existing composite-note delivery. Related/discovery endpoint additions are not mixed into this question slice. No new requirements or acceptance are implemented.

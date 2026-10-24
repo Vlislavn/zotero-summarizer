@@ -17,12 +17,12 @@ Vite proxies `/api/*` to `http://localhost:8000`; `npm run build` writes
 local admission checks; do not expose Vite as an unauthenticated remote proxy.
 The deployed SPA keeps relative API/sync URLs at the explicitly approved gateway
 origin, without frontend credentials or a second mode selector. See
-[deployment boundary](../docs/local-deployment-boundary.md).
+[remote-access boundary](../docs/features.md#remote-access).
 
 Root `make check` reuses lint, test and build serially,
 with build output in a disposable directory so existing `dist/` stays intact.
 The dependency ignore also permits a shared `node_modules` symlink in worktrees.
-See the [checked PR workflow](../docs/architecture.md#verify-a-change).
+See the [checked PR workflow](../CONTRIBUTING.md#check-and-publish).
 
 ## Product surfaces
 
@@ -90,7 +90,7 @@ scoped states, original-character locators and evaluator/capability provenance.
 Recommended preserves server promotions (including weak-band cards); explicit sorts
 still show the whole pool. Late restore/Add responses cannot overwrite a new session.
 No automatic Add or measured quality/latency claim accompanies evidence. See
-[usage](../docs/usage.md#experimental-search-question-evidence).
+[feature overview](../docs/features.md#search-question-evidence).
 
 Search coverage hits reuse their existing Zotero key: the card says In library
 and the server command cannot create a duplicate even if called directly.
@@ -310,7 +310,7 @@ bodies; an old cached or pending GET cannot publish into the replacement owner.
 GETs consume React Query's cancellation signal, including unmount cancellation.
 An explicit fresh load/refresh/retry is still available, without an automatic
 semantic POST. No second client store is introduced.
-[Saved-paper usage/privacy/qualification](../docs/related-saved-papers.md).
+[Saved-paper feature boundary](../docs/features.md#related-saved-papers).
 
 ### Saved-seed discovery
 
@@ -338,7 +338,7 @@ consent; URL retry intent alone never starts work.
 This source seam requires the matching discovery backend/provider changes in the same
 feature; it is not a standalone UI release. Controlled DOM/API/polling tests, build,
 browser and independent review are required; their scope is not live-provider,
-private-user usefulness or scientific acceptance. See [UI contract](../docs/discovery-ui.md).
+private-user usefulness or scientific acceptance. See [feature boundary](../docs/features.md#saved-paper-discovery).
 
 ## Offline boundary
 
@@ -382,7 +382,7 @@ intent survives another conflict but is stripped from the wire. A no-op app rece
 never changes a field/transition/native mirror or acknowledges past native work.
 The UI reuses those states to disable Mac/model-only controls, without granting
 backend authorization. PDFs, AI, annotations, acquisition and native Zotero work
-remain server-only. See [offline-review.md](../docs/offline-review.md). Fake-indexeddb,
+remain server-only. See [offline review](../docs/features.md#offline-review). Fake-indexeddb,
 owned Chrome/TCP/SQLite, physical iOS and authenticated remote acceptance are distinct.
 
 After reconnect, the server gives queued verdicts and notes the same training,
@@ -396,7 +396,7 @@ widths instead of pushing the viewport beyond its edge. An offline or unchecked 
 activate Generate or auto-review; a status transport error is not called a failed
 review job. This is a
 same-machine loopback PWA boundary by default. The separate explicit authenticated
-HTTPS gateway is described in [deployment boundary](../docs/local-deployment-boundary.md);
+HTTPS gateway is described in [remote access](../docs/features.md#remote-access);
 physical device/offline/revocation acceptance remains separate. Never expose
 `/api/sync` directly as unauthenticated LAN HTTP.
 

@@ -76,6 +76,4 @@ device/item/field's acknowledged revision, without rewriting immutable request
 bodies or rerunning predecessor effects. Intervening writes still conflict.
 Unknown or conflict receipts reject the request before writes. IndexedDB commits
 these receipt IDs with acknowledgement retirement, so continuation survives a
-restart or the existing 15-second whole-sync deadline. No schema or worker is added.
-
-Original question API/sync source is retained: immutable save/replay before Q&A, separate receipts and existing composite-note delivery. Related/discovery endpoint additions are not mixed into this question slice. No new requirements or acceptance are implemented.
+restart or the existing 15-second whole-sync deadline.

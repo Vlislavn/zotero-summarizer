@@ -1,6 +1,8 @@
 # tools/ — developer scripts (run via `uv run`, not shipped)
 
 One-off eval / ops scripts. Not imported by the app; Python scripts have module docstrings with usage.
+The app's grounding-benchmark CLI is documented with its
+[faithbench owner](../zotero_summarizer/services/faithbench/README.md), not in the user feature map.
 
 `tools/create-pr.sh 'Title' /path/to/body.md` is the checked PR publisher: from a
 clean committed branch it runs `make check`, non-force pushes the checked commit
@@ -9,7 +11,7 @@ It forwards the two input values literally and returns failures without publishi
 past a failed check/push. It never stages, stashes or reverts source. It requires
 existing Python/frontend development dependencies, `make`, `git`, and authenticated
 `gh`; it does not repair hosted billing. See the canonical
-[verification contract](../docs/architecture.md#verify-a-change).
+[verification workflow](../CONTRIBUTING.md#check-and-publish).
 
 Prestige validation and quality-promotion evaluation read model artifacts and
 library caches through `Settings.model_dir` (`data/models/`), not a HOME constant.
@@ -17,8 +19,8 @@ Prestige validation uses the shared ZIP/legacy-joblib artifact resolver.
 
 | script | what it does |
 |---|---|
-| `method_validation/` | Explicit offline [support](../docs/decision-support-comparison.md), [reading-priority](../docs/decision-priority-comparison.md) and [existing-collection](../docs/decision-collection-comparison.md) comparisons: native/retained readouts, matched baseline artifacts, private reports. No model loads or default execution. |
-| `bench_deep_review.py` | benchmark a deep-review DIGEST model (candidate) vs a strong reference on quality + time + memory, judged blinded/pairwise by a pinned independent LLM judge. `--run-name` persists a versioned, resumable run under `data/deep_review_sweep/`. See **`docs/benchmarking.md`** (local-only, gitignored). |
+| `method_validation/` | Explicit offline [support](../docs/features.md#support-comparison), [reading-priority](../docs/features.md#priority-comparison) and [existing-collection](../docs/features.md#collection-comparison) comparisons: native/retained readouts, matched baseline artifacts, private reports. No model loads or default execution. |
+| `bench_deep_review.py` | benchmark a deep-review DIGEST model (candidate) vs a strong reference on quality + time + memory, judged blinded/pairwise by a pinned independent LLM judge. `--run-name` persists a versioned, resumable run under `data/deep_review_sweep/`. Run artifacts remain private under `data/`; no benchmark result is implied by this script inventory. |
 | `sweep_deep_review.sh` | memory-SAFE driver that runs the bench config matrix one config at a time (Phase 1 cloud budget sweep, Phase 2 local models lightest-first behind a free-phys-%/swap-growth gate). Foreground, single-instance — mirrors `mlx-deep-review.sh`. |
 | `mlx-deep-review.sh` | launch the local MLX server (Qwen3.6-35B) foreground with a RAM gate before pointing `deep_review` at it. **Never** run on a loaded box (22 GB weights). |
 | `bench_gliner2.py` | **Phase-0 go/no-go for GLiNER2** (Fastino zero-shot encoder, `--extra entities`) BEFORE any product wiring: `--probes` selects `type` (0a: paper-type classification vs `gold_v1`, baseline = LLM type accuracy from `bench_paper_quality.py`), `ner` (0b: disease NER; `--ner-dataset bc5cdr` streams the real BC5CDR test set, the inline fixture is a wiring floor only), `params` (0c: `extract_json` of the 6 `PaperParameters` fields on the gold abstracts + an abstention check — persists `params_encoder.jsonl` for the agreement join). Leaf tool (no product import). `--selfcheck` validates the logic with no model download. |
@@ -34,7 +36,10 @@ Prestige validation uses the shared ZIP/legacy-joblib artifact resolver.
 | `validate_prestige_upgrade.py` | sanity-check the OpenAlex prestige enrichment. |
 | `precommit/` | the repo's custom pre-commit checks (LOC cap, layering, README freshness, dead-code, AI-slop). |
 
-**Benchmarking discipline + the memory-safety protocol live in `docs/benchmarking.md` (local-only, gitignored — not in the repo)** — read it before running any local sweep (this box has been thrashed by unsupervised local benchmarking).
+Run model-loading benchmarks foreground, single-instance and explicitly supervised,
+with memory headroom and bounded work. Keep input identities, exact model/environment,
+raw receipts and rejected alternatives under `data/`; static or synthetic checks are
+not evidence of a real-data win. The script's current `--help` owns its arguments.
 
 Reading-policy v1 remains unchanged as historical data and a negative regression:
 its bare `relevant=true` cells do not establish assessed goal evidence. V2 captures

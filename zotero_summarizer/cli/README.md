@@ -4,7 +4,7 @@
 construction or output effects. Explicit `--run --capture-local` records a private
 A/B/C attempt; `--run-id` exports blinded human packets, and `--labels` scores an
 existing run. Inconsistent/unconsented flags refuse at the existing pre-Settings
-validator, including the real dispatcher. See [experiment contract](../../docs/interpretation-experiment.md).
+validator, including the real dispatcher. See [experiment overview](../../docs/features.md#interpretation-experiment).
 
 Each command group lives in its own module and owns both its handlers and its
 argparse registration. `__init__.build_parser()` just wires the groups together,
@@ -14,16 +14,18 @@ is a read-only diagnostic preview; reviewed user Adds use Today/Review.
 
 ```
 __init__.build_parser()
-   ├─ register_app(subparsers)        # _app.py:     serve · mcp · migrate · smoke-test · prefetch-models · verify-deep-review
+   ├─ register_app(subparsers)        # _app.py:     serve · serve-mobile · mcp · migrate · smoke-test · prefetch-models · verify-deep-review
    ├─ register_setup(subparsers)      # _setup.py:   setup · doctor · calibrate
    ├─ register_feeds(subparsers)      # _feeds.py:   feeds run/list/serve/tick/preview/select-daily
-   ├─ register_goldenset(subparsers)  # _goldenset.py: export · train · eval-baseline · tune · suggest
+   ├─ register_goldenset(subparsers)  # _goldenset.py: export · train-classifier · eval-baseline · tune · suggest-labels
+          ├─ register_goldenset_backup(gs_sub)    # _goldenset_backup.py: model-history · restore-model
           ├─ register_goldenset_classify(gs_sub)  # _goldenset_classify.py: classify · classify-llm
           ├─ register_goldenset_predict(gs_sub)   # _goldenset_predict.py:  predict-feed · analyze-notes · compare
           ├─ register_goldenset_migrate(gs_sub)   # _goldenset_migrate.py:  migrate-verdicts-to-zotero
-          └─ register_goldenset_setup_tag_colors(gs_sub)  # _goldenset_setup_colors.py: setup-tag-colors
-   ├─ register_faithbench(subparsers)  # _faithbench.py: faithbench build/run/judge/report
-   └─ register_research_feed(...)      # _research_feed.py: research-feed run
+          ├─ register_goldenset_setup_tag_colors(gs_sub)  # _goldenset_setup_colors.py: setup-tag-colors
+          └─ register_goldenset_feedback(gs_sub)  # _goldenset_feedback.py: analyze-feedback
+   ├─ register_faithbench(subparsers)  # _faithbench.py: faithbench build/run/judge/report/interpretation
+   └─ register_research_feed(...)      # _research_feed.py: research-feed run/view/telegram-auth
 main() = parse args → validate command budgets → selected Settings/.env → offline flags → dispatch
 ```
 
@@ -41,7 +43,7 @@ main() = parse args → validate command budgets → selected Settings/.env → 
 | `_goldenset_migrate.py` | `migrate-verdicts-to-zotero` — one-time transfer of in-app verdicts (`label_verdicts`) into Zotero `label:<priority>` tags (`--dry-run`, idempotent, library items only, single batch backup) |
 | `_goldenset_setup_colors.py` | `setup-tag-colors` — prints the one-time Zotero setup (colors + number keys 1-4 for the four `label:<priority>` tags) for native keypress labeling. Non-destructive (prints the plan; writes nothing into your synced Zotero settings); `--json` for machine output |
 | `_faithbench.py` | `faithbench build/run/judge/report` — faithfulness mini-benchmark of the deep_review-stage model (span-verified QA + traps + review-claim grounding). Build stages the review CSV before publishing the immutable benchmark file as its version marker; QA runs require explicit approval of every generated review-CSV row and bind that CSV hash into the manifest. `build --max-builder-windows` bounds contiguous 6,000-character source windows per paper; its CLI/env/default precedence, preflight behavior and cost are documented below. `run` is resumable via `--run-id` and takes `--provider/--model` to sweep a model for THIS run only (no goals.yaml edit; recorded in the manifest); `judge` uses the pinned remote judge (`CUSTOM_BASE_URL`/`CUSTOM_API_KEY`). See `services/faithbench/README.md` |
-| `_research_feed.py` | `research-feed run --from … --to … [--venue …]`: bounded weekly JSON+Markdown; generates missing cards through existing deep review unless `--cached-only`; Zotero stays dry-run unless `--queue-zotero` is explicit. |
+| `_research_feed.py` / `_telegram.py` | `research-feed run` produces RSS or explicitly selected Telegram reports; `view` prints retained Markdown without processing; `telegram-auth` owns explicit interactive authorization. RSS generation reuses deep review unless `--cached-only`; queuing Zotero changes requires `--queue-zotero`. |
 
 Handlers use lazy imports inside the function bodies to keep CLI startup fast.
 
@@ -53,7 +55,7 @@ whole socket lifetime, including bind and pre-server startup, and replays the
 interruption only after owned cleanup. `make iphone` only refuses
 with guidance; it does not inspect deployed state. Gateway origin/owner, trust,
 manual activation, shutdown and unperformed device checks are described in
-[deployment boundary](../../docs/local-deployment-boundary.md).
+[remote-access boundary](../../docs/features.md#remote-access).
 
 Faithbench run IDs are single ASCII alphanumeric/underscore/hyphen names, not
 paths. The common run/judge/report path resolver rejects traversal and symlink
@@ -201,12 +203,11 @@ these traces; stage counts are instrumentation, not review-success scores.
 
 Diagnostic CLI source reads reuse the single-component/no-symlink paper-state guard. Admission happens before provider construction. Legacy full_text is explicitly labelled unverified legacy scope; empty sources retain local failure diagnostics. Diagnostic calls disable thinking without changing app routing.
 
-Feedback review stack part 3: `goldenset analyze-feedback` publishes a local report through the clean child. Admitted-root pinning from #159 remains intact; see `services/golden/feedback_analysis/README.md`.
+`goldenset analyze-feedback` publishes a local report through the dedicated child;
+see [feedback analysis](../services/golden/feedback_analysis/README.md).
 
 Retain original explicit default-no inference consent; use the existing canonical provider verification boundary.
 
-Telegram source-review part: original transport/session/credential and runtime code is retained unchanged. This part registers no Telegram CLI commands; its collection/store/worker dependencies are supplied by following original-source parts. No account/session, network collection or live model is exercised by packaging.
-
-Existing saved-news CLI options are retained for explicit `--source telegram --input-jsonl ...` and replay. Authentication/private worker command registration follows with the original worker source; no new CLI modes are invented.
-
-The original Telegram private worker/auth command registration and combined schema13 are retained here. Only fake-child command composition is exercised by packaging; armed lifecycle/platform/account tests remain unchanged and deferred.
+Telegram account/session activation and collection are explicit operations; retained
+report viewing does not activate them. See [Telegram news](../../docs/features.md#telegram-news).
+Source and synthetic lifecycle tests are not live-account acceptance.

@@ -1,11 +1,9 @@
-# feedback_analysis — retained inputs and report primitives
+# feedback_analysis — retained inputs and descriptive reports
 
-## Available in this PR (stack part 1/4)
-
-The callable input boundary is `freeze_inputs` / `verify_inputs`, exported by this
-package. `metrics.py` and `report.py` retain supporting primitives for dependent
-parts; there is no integrated analysis, report operation, CLI command or weekly
-scheduler in this checkout. No overall issue #47 completion is claimed.
+This package provides input capture/replay, retained-data analysis, the manual
+`goldenset analyze-feedback` command and opt-in weekly scheduling through
+`feeds serve`. Reports do not change labels or install models. Machine-contract
+tests are not private installed-host or scientific-usefulness acceptance.
 
 `report.__all__` explicitly declares the existing low-level library boundary:
 `hash_file`, `inventory`, `make_immutable`, `markdown`, `read_protocol`,
@@ -18,14 +16,6 @@ raw retained inputs/results local and do not point these helpers at live sources
 Report evidence uses code-span delimiters longer than any recorded backtick run,
 so recorded surfaces/locators remain literal text rather than active Markdown.
 
-**Downstream reference only:** the analysis/manual/weekly flow, contracts and
-sections below describe later stack parts, not functionality available here.
-`history.py`, `analysis.py`, operation/worker/scheduler modules and
-`goldenset analyze-feedback` are absent. Do not run those reference commands or
-bypass the future clean-child isolation requirement. For this part, exercise the
-real Python `freeze_inputs(settings, new_destination, cutoff=..., provenance=...)`
-and `verify_inputs(destination)` boundary described below.
-
 ```
 Settings sources --ro/WAL-aware backup + bounded EOF reads--> NEW private staging
                                                           inputs/ + input-manifest.json
@@ -33,15 +23,11 @@ retained bytes --verify_inputs--> analyze_inputs --> local result dictionary
 manual / opt-in weekly --clean child(capture + analyze)--> immutable report + receipt
 ```
 
-## Current checkout — stack part 2/4
+## Retained-data analysis
 
-The **part-1 availability block above is the prerequisite #162 reference**, not
-this head's scope. This checkout additionally implements and exports
-`analyze_inputs(destination, *, budgets=None)`; `history.py` and `analysis.py`
-are present. `freeze_inputs`/`verify_inputs` and the report primitives remain
-available with their safety contract above. Manual/weekly dispatchers and the
-`goldenset analyze-feedback` command remain absent; do not run those later-stack
-reference commands. No overall #47 completion is claimed.
+`analyze_inputs(destination, *, budgets=None)` consumes verified captured inputs;
+`freeze_inputs` and `verify_inputs` own capture and replay integrity. Manual and
+weekly operations use the dedicated child boundary described below.
 
 Analysis must run in a dedicated externally bounded process because its temporary
 CSV parser ceiling is process-global. Physical byte lines/positions are consumed
@@ -51,11 +37,9 @@ SQL observation/alias keys must be nonblank text and a present journal must have
 whole-analysis failure. Snapshot duplicate-namespace refusal and literal report
 Markdown remain intact.
 
-Current coverage also includes `tests/test_feedback_analysis_{history,metrics,analysis,
-conflicting_cohorts,sync_sources}.py` and the eight analyzer boundary regressions.
-The later text's absent-history/analysis-suite statements describe part 1 only.
-These library tests and synthetic smoke are not operation/weekly, production,
-scientific or private installed-host acceptance.
+Representative checks are `tests/test_feedback_analysis_history.py`,
+`tests/test_feedback_analysis_analysis.py` and `tests/test_feedback_analysis_metrics.py`.
+Their synthetic inputs are not production or scientific acceptance.
 
 `freeze_inputs(settings, destination: Path, *, cutoff: datetime, provenance: dict,
 budgets=None) -> dict` creates a new directory beneath
@@ -74,15 +58,10 @@ SQLite metadata. It never reads source locators. It refuses incomplete, changed,
 extra or symlinked artifacts. This is integrity checking, not authentication
 against an attacker who can replace the bytes **and** recompute the manifest.
 
-## Current checkout — stack part 3/4 (manual CLI)
+## Manual execution provenance
 
-The part-1/part-2 availability blocks above are prerequisite #162/#163 references,
-not this head's scope. This checkout also provides `goldenset analyze-feedback`
-and the dedicated operation/worker that freezes inputs, analyzes them, validates
-hashes, then atomically publishes an immutable private report and receipt. The
-manual-operation section below is available here despite its inherited
-later-stack heading; weekly scheduler activation remains unavailable. No overall
-#47 completion, installed private-data acceptance or production claim is made.
+`goldenset analyze-feedback` uses the dedicated operation/worker to freeze inputs,
+analyze them, validate hashes and publish an immutable private report and receipt.
 
 The source-checkout command requires Git HEAD, `pyproject.toml` and `uv.lock`;
 a standalone wheel without that provenance fails before capture. Its worker
@@ -94,7 +73,7 @@ in addition to live tree sampling; this is not instantaneous OS RSS enforcement.
 The operation I/O bound counts provenance/protocol/report artifacts per guard,
 not whole-process or shared parent/child cumulative I/O. Independent capture and
 analysis source/page/record/byte/work caps are unchanged. These current controls
-supersede the older operation wording retained below as prerequisite reference.
+apply to both manual and scheduled operations.
 
 Parent lazy CSV, UTC-overflow, journal-source/SQL-identity, literal Markdown and
 duplicate-namespace protections are preserved in the actual manual CLI path.
@@ -136,17 +115,10 @@ same-user namespace races. SQLite may use its normal WAL shared-memory read
 coordination; this layer performs no explicit live-file writes or mode changes.
 It requires ordinary read-only WAL access, never live `immutable=1`.
 
-## Current checkout — stack part 4/4 (weekly daemon)
+## Scheduler recovery
 
-The part-1/2/3 availability notices and later-stack/unavailable headings above
-are preserved prerequisite #162/#163/#164 review-stage references. This head
-provides both the manual CLI and opt-in weekly scheduler through the existing
-`feeds serve` daemon, with selected Settings and a dedicated clean child.
-The callable library/report boundaries, parser/source admission, launch/receipt
-ownership and completed-worker peak controls above remain in force.
-No overall #47 completion, private installed-host or scientific acceptance follows.
-
-Current weekly behavior supplements the inherited reference contract:
+The opt-in weekly scheduler uses selected Settings and the same dedicated child
+through `feeds serve`. Its recovery rules are:
 
 - The aggregate schedule wall cap must exceed the resolved fixed operation cap
   before output; incompatible settings fail rather than staying pending forever.
@@ -160,10 +132,8 @@ Current weekly behavior supplements the inherited reference contract:
   cleanly after drain, without a feed tick or cursor advancement. Other faults
   propagate. Cursor links are refused before child launch.
 
-All source paths, bounds, immutable publication and authoritative cursor rules
-remain unchanged. No timer, dashboard, command family or new runner is added.
-See the existing weekly reference section for Settings/env names and artifact
-layout; this current section supersedes its older activation/retry wording.
+See [Weekly operation](#weekly-operation) for Settings/environment names and
+artifact layout. Missing or ambiguous publication evidence never advances a cursor.
 
 ## Budgets and permissions
 
@@ -192,8 +162,8 @@ unverified. No model/label change or issue closure follows from these functions.
 - `inputs.py`: boundary/path admission, work/safety guard, file capture, replay verification.
 - `sqlite_snapshot.py`: WAL online backup and retained schema/revision metadata.
 - `provenance.py`: JSON wire validation and deterministic identity.
-- Later parts only — `history.py`: retained readers and ambiguity-safe current alias graph (absent here).
-- Later parts only — `analysis.py`: bounded retained-only `analyze_inputs` result (absent here).
+- `history.py`: retained readers and ambiguity-safe current alias graph.
+- `analysis.py`: bounded retained-only `analyze_inputs` result.
 - `metrics.py`: separate unique-paper descriptive channels, Wilson intervals and eligibility metadata.
 - `__init__.py`: exported boundary functions and budget/error types.
 
@@ -255,13 +225,13 @@ stores, committed WAL preservation, unavailable old history, missing versus brok
 optional reads, replay after source removal, capture races, tamper/escape, budgets
 and failed publication. Existing golden CSV snapshot/hash checks remain separate.
 `tests/test_feedback_analysis_report_primitives.py` covers safe Markdown evidence
-encoding. History/analysis/metrics suites described by later parts are absent here;
-this checkout does not establish their integrated behavior or coverage.
+encoding. Operation and scheduler regressions exercise the dedicated-child
+publication/recovery boundaries; they are not private-data or scientific acceptance.
 Further subtraction: no parsing framework, inferred model identity, live-store
 alignment lock, scored training evaluation, export knobs or UI. Weekly automation
 below reuses the operation boundary without changing these frozen analytics.
 
-## Manual operation — later-stack reference, unavailable here
+## Manual operation
 
 ```
 goldenset analyze-feedback --project-root ROOT [--cutoff AWARE_ISO]
@@ -361,7 +331,7 @@ Chronological eligibility and null ranking remain unscored. Weekly confirmation
 and cursor behavior are documented below; daemon training provenance is described
 in `services/model`. First private run, scored usefulness and overall #47 remain open.
 
-## Weekly operation — later-stack reference, unavailable here
+## Weekly operation
 
 ```
 feeds serve -- selected Settings / explicit main-thread capability

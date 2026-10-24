@@ -69,9 +69,9 @@ but lacks frozen pre-human abstracts/scores/summaries and review outputs. The
 checker exits nonzero and reports unavailable (`null`) production metrics,
 not fallback-path zero precision or by-construction code-link precision. The
 separate 17-paper fixture supplies a clearly labelled reading-policy diagnostic.
-See `docs/issue-evidence-research-feed.md` for the required source snapshot;
-ARE's deterministic hard-check principle is used, but event-trajectory judging
-is deferred because this is a fixed paper projection, not an agent trace.
+The evaluator requires frozen pre-human machine inputs independently of labels;
+inspect its current fixture and tests rather than interpreting missing inputs as
+measured inclusion quality.
 
 Engineering cards preserve a withheld reading action as `worth_reading="unknown"`
 and include current/stored reading-policy flags in `evidence_gaps`; absence is not
@@ -117,8 +117,7 @@ reading valid JSON. There is no browser run/build endpoint or cached-card replay
 **Boundary:** may compose library services and storage reads. Zotero writes are
 optional pending actions only; default runs are dry-run.
 
-Original frozen weekly replay/source is retained with its original three-argument cohort ordering contract. Existing source helpers use their canonical number/summary names and the production caller supplies its existing cohort IDs. No new grader, labels, ranking formula or real-data claim is designed.
-
-Telegram source-review part: original transport/session/credential and runtime code is retained unchanged. This part registers no Telegram CLI commands; its collection/store/worker dependencies are supplied by following original-source parts. No account/session, network collection or live model is exercised by packaging.
-
-Existing Telegram source-review part: saved posts, collector/composer/rendering, model selection and migration11 are retained from the original working source. Saved-input CLI wiring is included; private worker/auth command registration and combined live-schema/native dependencies follow separately; no live collection, model loading or issue completion is inferred.
+The [Telegram source](../../../docs/features.md#telegram-news) has explicit CLI
+authorization, collection and saved-report paths. Transport/session state remains
+private; report reads do not activate an account or model. Live account/network
+acceptance is separate from the synthetic contracts.

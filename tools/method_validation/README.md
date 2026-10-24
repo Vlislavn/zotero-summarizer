@@ -20,7 +20,7 @@ consent/guard/declared work on direct calls too, with HTTPS off-host and explici
 loopback HTTP retained. Snapshot reads use the smaller per-file/remaining-total cap;
 canonical duplicates refuse even within one family. Collection gold already excludes
 absent human provenance from paired inference; no second filter is needed.
-See [usage](../../docs/decision-collection-comparison.md) and the frozen
+See [feature overview](../../docs/features.md#collection-comparison) and the frozen
 [collection API](COLLECTION-INTERFACES.md). Synthetic/recorded controls cannot
 establish a model winner, live smoke, resource qualification or full#42 completion.
 
@@ -36,7 +36,7 @@ canonical reading priorities, preserving native choices/vectors and imported
 regressor/LLM baseline capabilities. It shares the existing raw-terminal/transport
 and artifact primitives, not a second client or model loader. Default admission
 and artifact inspection perform zero calls/writes; only explicit `--run` writes a
-new selected-root attempt. See [priority usage](../../docs/decision-priority-comparison.md)
+new selected-root attempt. See [priority overview](../../docs/features.md#priority-comparison)
 and [its frozen API](PRIORITY-INTERFACES.md). Missing/invalid/blocked/abstained
 outcomes stay unscored; synthetic controls and unknown resources cannot establish
 a winner, promotion or full #38 completion. Reports keep per-gold-class failure
@@ -69,7 +69,7 @@ explicit frozen configuration + exact original sources/pairs
 The frozen public API and all input/output ownership live in
 [INTERFACES.md](INTERFACES.md). Full configuration, baseline limitations, protocol
 source binding, resource caveats and study status are in
-[the usage contract](../../docs/decision-support-comparison.md). These are ordinary
+[the feature overview](../../docs/features.md#support-comparison). These are ordinary
 API/usage documentation, not executable prompts, configuration assets or datasets.
 
 The CLI deliberately bypasses app bootstrap. Only write-consented execution imports

@@ -272,13 +272,3 @@ resolution reference to count unresolved conflicts, not every historical receipt
 Migration v8 adds `idx_sync_mutations_resolution` for upgrades from databases
 that already recorded the v2 offline-sync schema; new databases also create it
 with the baseline sync schema.
-
-Existing-question review stack: original immutable question storage, revision/sync storage, composite note intents and migrations9/10 are retained here. Original HTTP/UI and native delivery wiring follow separately; this part does not claim complete question submission or native delivery.
-
-Existing Telegram source-review part: saved posts, collector/composer/rendering, model selection and migration11 are retained from the original working source. CLI worker/wiring and combined live-schema/native dependencies follow separately; no live collection, model loading or issue completion is inferred.
-
-Existing native/question source stack: typed action history, original writer boundaries and dormant editor/proposal code; activation follows. No new feature or issue-completion work; merge the related parts before using their new workflow.
-
-Existing native/question source stack: original confirmation, mirror/recovery and publication-revision helpers; existing endpoint activation follows. No new feature or issue-completion work; merge the related parts before using their new workflow.
-
-The original Telegram private worker/auth command registration and combined schema13 are retained here. Only fake-child command composition is exercised by packaging; armed lifecycle/platform/account tests remain unchanged and deferred.

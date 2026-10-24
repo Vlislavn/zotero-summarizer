@@ -5,10 +5,15 @@ All notable changes to this project are documented here. Format follows
 yet publish versioned releases, so everything currently lives under
 `[Unreleased]`.
 
-Deep technical detail (benchmark numbers, parameter sweeps, measurement rationale)
-is in `docs/internal/changelog_deep_detail.md` (gitignored, local-only).
+Current behavior lives in [features](docs/features.md); development checks live in
+[CONTRIBUTING.md](CONTRIBUTING.md). Historical entries below are not current setup
+or feature instructions.
 
 ## [Unreleased]
+
+- Cut CONTRIBUTING to a short setup/change/check guide and group feature paragraphs by user task. Remove internal helpers and benchmark details from the feature map; preserve owner/test links and validate grouped headings.
+
+- Consolidate docs into architecture, one-paragraph feature contracts with code/test links, and generated overrides. Move development/testing instructions to their owners; archive old local evidence, repair links, and test the three-file/link contract.
 
 - Retain original pdf source regression oracles for review. No assertions/skips are changed; source retention is not behavioral acceptance of the current API variant.
 - Retain original presentation URI normalization through the canonical raw PDF annotation reader.

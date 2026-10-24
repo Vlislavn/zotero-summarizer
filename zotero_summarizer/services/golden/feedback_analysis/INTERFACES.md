@@ -1,11 +1,9 @@
-# Feedback downstream contract — version 1 (reference only in part 1)
+# Feedback contract — version 1
 
-This primitive-only checkout implements `freeze_inputs` and `verify_inputs`, plus
-supporting metrics/report helpers. Their version-1 input identity is unchanged.
-Everything below specifies dependent stack parts: `analyze_inputs`, manual and
-weekly dispatchers, workers, CLI and scheduling are **not implemented or runnable
-here**. The future contracts and historical decisions are retained as reference,
-not claims of current functionality, test coverage or issue #47 acceptance.
+This contract covers input capture/replay, retained-data analysis, manual report
+operations and opt-in weekly scheduling. Version-1 identities and wire fields are
+unchanged. The [README](README.md) describes current execution and recovery;
+source/contract tests are not installed-host or scientific acceptance.
 
 ```
 verified retained SQLite + CSV + JSONL
@@ -19,20 +17,17 @@ verified retained SQLite + CSV + JSONL
  analyze_inputs -> local dictionary (no publication or live writes)
 ```
 
-## Current checkout — part 2 implementation status
+## Analysis boundary
 
-The opening **reference-only-in-part-1** notice describes prerequisite #162.
-On this part-2 head, the input/history/analysis/metrics and report-library contracts
-are implemented; manual/weekly operation, worker, CLI and scheduling contracts
-remain reference-only and unavailable. `analyze_inputs` returns a dictionary,
-not an integrated operation or issue #47 acceptance.
+`analyze_inputs` returns a dictionary without publishing a report. Manual and
+weekly dispatchers own the dedicated worker and publication boundaries below.
 
 CSV physical byte lines are consumed lazily before record-budget expansion;
 there is no whole-file line/offset list. SQL item/alias identities must be nonblank
 text and journal `source` is required; incompatible rows/schemas fail admission.
 Aware offsets outside UTC's representable datetime range remain located
 invalid/unknown times. The other frozen envelope, CSV-isolation and provenance
-limits below are unchanged. Reference and implementation status are separate.
+limits below are unchanged.
 
 ## Entry and failures
 
@@ -91,13 +86,10 @@ or prove that isolation. No broader reader/scheduler/CLI changes are authorized.
 Verbatim P2 approval and race clarification are retained in
 `data/issue-validation/feedback-analysis/p2/parent-decision.txt`.
 
-## Current checkout — part 3 manual operation
+## Manual operation
 
-The part-1 and part-2 implementation notices above are prerequisite #162/#163
-references. This head also provides the manual `goldenset analyze-feedback`
-command and its dedicated worker/publication dispatcher. Weekly scheduler
-activation remains a later-stack contract; no overall #47 completion is claimed.
-The input/analysis/report contracts and all prerequisite boundary fixes remain.
+`goldenset analyze-feedback` uses the dedicated worker/publication dispatcher.
+Weekly scheduling reuses this operation; neither path changes the analytic envelope.
 
 ## Exact envelope
 
@@ -233,7 +225,7 @@ judgments: P@10/NDCG@10 are null with those exact reasons. Triage rank/batch fie
 alone are not exposure. No unbiased improvement claim, scheduler, CLI, Markdown,
 publication, cursor, model fit, label mutation or overall #47 acceptance.
 
-## Current checkout — part 4 weekly amendments
+## Weekly operation
 
 The part-1/2/3 implementation notices above are prerequisite review records.
 This head implements manual and opt-in weekly entrypoints; all input, analysis,
@@ -334,7 +326,7 @@ permission. Identity is private cooperating-namespace observation, not hostile-u
 or inode-reuse authentication. Frozen analytic/input contracts are unchanged.
 Parent loss/SIGKILL/power-loss may leave only partial attempt
 evidence. Unsupported publication platforms fail rather than overwrite. See
-[README](README.md#manual-operation-additive-frozen-analytic-boundary-above-is-unchanged)
+[README](README.md#manual-operation)
 for named caps, environment precedence, signal and safety measurement scope.
 
 ## Additive weekly sidecars — version 1
