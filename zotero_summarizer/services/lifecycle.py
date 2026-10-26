@@ -52,7 +52,7 @@ def _init_models(
     """Wire the PDF extractor + embedding cache singletons.
 
     LLM clients are NOT built here: each pipeline stage resolves its own client
-    lazily on first use via ``RuntimeState.resolve_stage_client`` (so a missing
+    lazily on first use via ``services.llm.factory.resolve_stage_client`` (so a missing
     key/unreachable endpoint never blocks startup)."""
     app_state.app_state = AppState(config=config)
     app_state.invalidate_stage_clients()
@@ -73,14 +73,12 @@ def _init_metadata_clients(app_state: RuntimeState, config: GoalsConfig, current
     """OpenAlex prestige + Unpaywall full-text + OpenReview peer-review clients (all optional)."""
     app_state.openalex_client = None
     app_state.unpaywall_client = None
-    app_state.openalex_cache = None
     app_state.openreview_client = None
-    if config.prestige.enabled or config.full_text_refine.enabled or config.openreview.enabled:
-        ttl_days = max(config.prestige.cache_ttl_days, 1)
-        app_state.openalex_cache = OpenAlexCache(
-            current_settings.corpus_db_path,
-            ttl_seconds=ttl_days * 86400,
-        )
+    ttl_days = max(config.prestige.cache_ttl_days, 1)
+    app_state.openalex_cache = OpenAlexCache(
+        current_settings.corpus_db_path,
+        ttl_seconds=ttl_days * 86400,
+    )
     if config.prestige.enabled:
         app_state.openalex_client = OpenAlexClient(
             app_state.openalex_cache, mailto=config.prestige.user_agent_email or None

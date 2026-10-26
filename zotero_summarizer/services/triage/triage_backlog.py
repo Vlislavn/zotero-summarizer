@@ -23,6 +23,7 @@ import threading
 from typing import Any
 
 from zotero_summarizer.services._common import now_iso_z
+from zotero_summarizer.services.llm import factory
 
 LOGGER = logging.getLogger(__name__)
 
@@ -190,7 +191,7 @@ def _drain_worker() -> None:
             detail = readiness.check_classifier_gate().detail
             _finish(error=f"classifier gate unavailable — {detail}", done=False)
             return
-        triage_llm = None if gate_only else state().resolve_stage_client("backlog")
+        triage_llm = None if gate_only else factory.resolve_stage_client(state(), "backlog")
         drained = False
         for _ in range(_MAX_TICKS):
             report = feeds.run_daemon_tick(

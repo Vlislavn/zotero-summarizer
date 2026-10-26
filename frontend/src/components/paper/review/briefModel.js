@@ -11,20 +11,20 @@ export const isSupportedGoal = (goal) => goal?.retrieval_state === 'hit'
 
 export const BAND_GLOSS = {
   highlight: {
-    lead: 'Rigorous enough to act on.',
-    body: 'Passed our independent checks for evidence and reporting — read with confidence.',
+    lead: 'Strong checklist coverage.',
+    body: 'Applicable evidence/reporting checks were met; this is not scientific certification.',
   },
   flag: {
     lead: 'Read critically.',
-    body: 'We found rigor problems that could make the headline result unreliable — see below.',
+    body: 'Applicable checks or material concerns warrant checking the claims below.',
   },
   neutral: {
-    lead: 'Sound but unremarkable.',
-    body: "No red flags, but it doesn't clear the bar for a confident highlight — judge it on relevance.",
+    lead: 'Mixed checklist coverage.',
+    body: 'Judge the applicable evidence and remaining gaps on relevance, not writing polish.',
   },
   uncertain: {
     lead: 'Needs your eyes.',
-    body: "Our independent passes disagreed on the verdict — don't trust the band alone.",
+    body: 'Assessment is unavailable or model passes disagreed; this is not a scientific failure.',
   },
 };
 
@@ -34,8 +34,8 @@ export const BAND_GLOSS = {
 export function bandGloss(band, hasRedFlags = false) {
   if (hasRedFlags && (band === 'neutral' || band === 'highlight')) {
     return {
-      lead: 'Mostly sound, with caveats.',
-      body: 'It clears the bar overall, but our independent checks flagged the issues below — weigh them before relying on it.',
+      lead: 'Checklist coverage with caveats.',
+      body: 'Model-generated concerns below need checking before relying on the claims.',
     };
   }
   return BAND_GLOSS[band] || { lead: '', body: '' };
@@ -49,13 +49,16 @@ export const METHOD_CLAUSE =
 
 // Legend terms (rendered as <b>term</b> gloss, joined by ·).
 export const LEGEND = [
-  { term: 'FLAG', gloss: 'a rigor red-flag fired' },
-  { term: 'NEUTRAL', gloss: 'sound, unremarkable' },
-  { term: 'HIGHLIGHT', gloss: '≥6 grounded checks, zero flags' },
+  { term: 'FLAG', gloss: 'material concerns / checklist gaps' },
+  { term: 'NEUTRAL', gloss: 'mixed coverage' },
+  { term: 'HIGHLIGHT', gloss: 'strong coverage of applicable type-aware checks' },
 ];
 
 // Plain-English labels for rubric keys (mirrors _paper_read_brief._RUBRIC_LABEL).
 const RUBRIC_LABEL = {
+  thesis: 'States a clear thesis / position',
+  evidence_cited: 'Supports premises with cited evidence',
+  scope_match: 'Matches claim scope to the evidence offered',
   external_validation: 'Validated on independent / held-out data',
   uncertainty: 'Reports uncertainty (CIs, error bars, seeds)',
   ablation: 'Ablations isolate what drives the result',
@@ -90,7 +93,6 @@ const CORE_KEYS = [
   'dataset_provenance', 'repro_detail', 'code_data_released',
 ];
 const DOMAIN_KEYS = ['patient_level_split', 'clinical_calibration', 'determinism', 'eval_contamination'];
-const TRIAD = ['external_validation', 'uncertainty', 'ablation']; // the rigor floor
 
 function shortGoal(goal, words = 4) {  // matches server _short_goal (words=4)
   const parts = String(goal || '').match(/[A-Za-z0-9/&-]+/g) || [];
@@ -100,33 +102,16 @@ function shortGoal(goal, words = 4) {  // matches server _short_goal (words=4)
 // The 2-3 rubric items that moved the band, in plain English (ported from
 // _decisive_rows). Returns { heading, rows:[{ok,label}], caption }.
 export function decisiveRows(rubric = {}, band = '') {
-  const val = {};
-  for (const k of new Set([...CORE_KEYS, ...TRIAD, ...Object.keys(rubric)])) {
-    val[k] = String(rubric[k] || 'na').toLowerCase();
-  }
-  const yesCount = CORE_KEYS.filter((k) => val[k] === 'yes').length;
-  if (band === 'highlight') {
-    const ordered = [...TRIAD, ...CORE_KEYS.filter((k) => !TRIAD.includes(k))];
-    const earned = ordered.filter((k) => val[k] === 'yes').slice(0, 3);
-    return {
-      heading: 'What earned it',
-      rows: earned.map((k) => ({ ok: true, label: rubricLabel(k) })),
-      caption: `${yesCount}/${CORE_KEYS.length} rigor checks met`,
-    };
-  }
-  if (band === 'flag') {
-    const failed = TRIAD.filter((k) => val[k] !== 'yes').slice(0, 3);
-    return { heading: 'Why it sank', rows: failed.map((k) => ({ ok: false, label: rubricLabel(k) })), caption: '' };
-  }
-  if (band === 'uncertain') {
-    return {
-      heading: 'Split decision',
-      rows: TRIAD.map((k) => ({ ok: val[k] === 'yes', label: rubricLabel(k) })),
-      caption: '',
-    };
-  }
-  const gaps = CORE_KEYS.filter((k) => val[k] === 'no').slice(0, 3);
-  return { heading: "What's missing", rows: gaps.map((k) => ({ ok: false, label: rubricLabel(k) })), caption: '' };
+  const val = Object.fromEntries(Object.entries(rubric).map(([key, value]) => [key, String(value || 'na').toLowerCase()]));
+  const applicable = Object.keys(val).filter(key => ['yes', 'no'].includes(val[key]));
+  const met = applicable.filter(key => val[key] === 'yes');
+  const selected = band === 'highlight' ? met : band === 'uncertain' ? applicable
+    : applicable.filter(key => val[key] === 'no');
+  return {
+    heading: { highlight: 'What earned it', uncertain: 'Assessment uncertain', flag: 'Checks to inspect' }[band] || "What's missing",
+    rows: selected.slice(0, 3).map(key => ({ ok: val[key] === 'yes', label: rubricLabel(key) })),
+    caption: applicable.length ? `${met.length}/${applicable.length} applicable checks met` : '',
+  };
 }
 
 // Full rubric rows for the "show all checks" disclosure: core first, then domain,

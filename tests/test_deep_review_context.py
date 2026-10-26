@@ -15,8 +15,8 @@ def test_feed_client_is_resolved_only_for_map_reduce(monkeypatch):
         app_state=SimpleNamespace(config=config),
         pdf_extractor=object(),
         resolve_stage_provider=lambda stage: provider,
-        resolve_stage_client=lambda stage, **kwargs: calls.append(stage) or object(),
     )
+    monkeypatch.setattr(deep_review.factory, "resolve_stage_client", lambda app, stage, **kwargs: calls.append(stage) or object())
     monkeypatch.setattr(deep_review, "get_state", lambda: app)
     monkeypatch.setattr(deep_review, "_load_prestige_context", lambda: ({}, None))
     monkeypatch.setattr(quality_review, "build_response_format", lambda model: None)

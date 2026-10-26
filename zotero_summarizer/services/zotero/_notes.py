@@ -1,4 +1,4 @@
-"""Zotero-renderable note HTML builders (triage / verdict / digest).
+"""Zotero-renderable triage, digest and user-note HTML builders.
 
 Builders use simple headings, paragraphs, lists and inline emphasis.
 Each note carries a writer-ownership marker. Native editors may canonicalize
@@ -13,20 +13,13 @@ from typing import Any
 from urllib.parse import quote
 
 from zotero_summarizer.models import SummarizeResponse
+from zotero_summarizer.models.zotero_actions import READING_PRIORITY_GLYPHS
 
 # Provenance constants: how the user (and future agents) tell agent-written
 # notes from hand-written ones.
 NOTE_VERSION = 3
 NOTE_PROVENANCE_NAMESPACE = "zs"
 NOTE_PROVENANCE_SOURCE = "feed-batch"
-
-_PRIORITY_GLYPH = {
-    "must_read": "🔥",
-    "should_read": "👀",
-    "could_read": "📎",
-    "dont_read": "—",
-}
-
 
 def build_provenance_comment(
     *,
@@ -79,7 +72,7 @@ def build_triage_note_html(
     """Render the persisted triage artifact as a self-sufficient Zotero note."""
     if any(budget is not None and budget < 1 for budget in (text_word_budget, list_word_budget)):
         raise ValueError("note word budgets must be positive")
-    glyph = _PRIORITY_GLYPH.get(summary.reading_priority, "•")
+    glyph = READING_PRIORITY_GLYPHS.get(summary.reading_priority, "•")
     priority_label = summary.reading_priority.replace("_", " ").title()
     verdict = _triage_verdict(summary)
     if not verdict:
@@ -150,23 +143,6 @@ def triage_note_metrics(note_html: str, summary: SummarizeResponse) -> dict[str,
     }
 
 
-# Marker for the single "your verdict" note on an item (upsert, no duplicates).
-VERDICT_NOTE_MARKER = f"{NOTE_PROVENANCE_NAMESPACE}:note_type=verdict"
-
-
-def build_verdict_note_html(user_priority: str, comment: str) -> str:
-    """Render the short Zotero note for a user's reading verdict + comment."""
-    glyph = _PRIORITY_GLYPH.get(user_priority, "•")
-    label = (user_priority or "").replace("_", " ").title() or "Verdict"
-    body = html.escape((comment or "").strip())
-    return (
-        f"<!-- {VERDICT_NOTE_MARKER};version=1 -->"
-        f"<h2>{html.escape(glyph)} {html.escape(label)}</h2>"
-        f"<p>{body}</p>"
-        f"<p><em>{VERDICT_NOTE_MARKER};version=1</em></p>"
-    )
-
-
 # Marker for the single free-text "my notes" note the user jots during a review
 # (upsert, no duplicates). Distinct from the verdict note (a decision) — this is
 # the user's own thinking, mirrored from the app's review_notes table.
@@ -189,9 +165,9 @@ def build_user_note_html(note: str) -> str:
 DIGEST_NOTE_MARKER = f"{NOTE_PROVENANCE_NAMESPACE}:note_type=digest"
 
 
-def build_digest_note_html(digest: Any) -> str:
-    """Render the condensed deep-review digest as one short Zotero note. Empty
-    sections are skipped so it stays tight. Led by ``DIGEST_NOTE_MARKER``."""
+def build_digest_note_html(digest: Any, *, interpretation: dict[str, Any] | None = None) -> str:
+    """Render a digest and optional shared qualified projection before the final
+    ownership footer. Default HTML is unchanged; this builder performs no writes."""
     e = html.escape
     decision = (getattr(digest, "read_decision", "") or "—")
     minutes = getattr(digest, "estimated_read_minutes", None)
@@ -215,11 +191,11 @@ def build_digest_note_html(digest: Any) -> str:
         values = [parameters.dataset, parameters.sample_size, parameters.architecture,
                   *parameters.baselines, *parameters.metrics]
         parts.append(f"<p><strong>Technical parameters:</strong> {e('; '.join(x for x in values if x))}</p>")
-    read_parts = list(getattr(digest, "read_parts", []) or [])[:3]
+    read_parts = list(getattr(digest, "read_parts", []) or [])
     if read_parts:
         parts.append("<p><strong>Read parts</strong></p><ul>"
                      + "".join(f"<li>{e(str(x))}</li>" for x in read_parts) + "</ul>")
-    skip_parts = list(getattr(digest, "skip_parts", []) or [])[:3]
+    skip_parts = list(getattr(digest, "skip_parts", []) or [])
     if skip_parts:
         parts.append("<p><strong>Skip parts</strong></p><ul>"
                      + "".join(f"<li>{e(str(x))}</li>" for x in skip_parts) + "</ul>")
@@ -244,5 +220,8 @@ def build_digest_note_html(digest: Any) -> str:
         parts.append(f"<p><em>+ {e(digest.key_strength)}</em></p>")
     if getattr(digest, "key_weakness", ""):
         parts.append(f"<p><em>− {e(digest.key_weakness)}</em></p>")
+    if interpretation is not None:
+        from zotero_summarizer.services.library._interpretation_html import section
+        parts.append(section(interpretation, digest))
     parts.append(f"<p><em>{qline} · {DIGEST_NOTE_MARKER};version=1</em></p>")
     return "".join(parts)

@@ -1,0 +1,13 @@
+{
+  "packages": [
+    { "source": "npm:@piex-dev/subagent", "extensions": [] },
+    { "source": "npm:pi-subagents@0.76.1", "prompts": [] }
+  ],
+  "subagents": {
+    "defaultModel": "openai-codex/gpt-6.1-sol",
+    "defaultThinking": "xhigh",
+    "projectRootResolution": "git-root",
+    "agentExcludeDirs": ["../.agents/skills"],
+    "disableBuiltins": true
+  }
+}

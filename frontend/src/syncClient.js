@@ -1,30 +1,33 @@
 import { request } from './api/client.js';
+import { offlineRequestBudget } from './api/offlineTransport.js';
 import {
-  applyPull, applyPushResults, getMeta, mutationError, pendingMutations, publishStatus, pushPredecessors,
+  applyPull, applyPushResults, beginPull, getMeta, mutationError, pendingMutations, publishStatus, pushPredecessors,
 } from './offlineStore.js';
 
 let running = null;
+let requestedAgain = false;
 let activeQueryClient = null;
-const SYNC_TIMEOUT_MS = 15_000;
-
-function failureMessage(error) {
-  if (error?.message?.startsWith('Sync protocol changed')) return error.message;
-  if (error?.name === 'AbortError') return 'Sync timed out';
+function failureMessage(error, timedOut, transport) {
   if (error?.status) return `Sync request failed (HTTP ${error.status}): ${error.message}`;
-  if (error?.message?.startsWith('Invalid sync')) return error.message;
-  return 'Server unavailable';
+  if (timedOut) return 'Sync timed out';
+  if (error?.message?.startsWith('Sync protocol changed') || error?.message?.startsWith('Invalid sync')) return error.message;
+  return transport ? 'Server unavailable' : `Sync unavailable: ${error?.message || String(error)}`;
 }
 
 export function syncNow(client = activeQueryClient) {
-  if (running) return running;
+  if (running) { requestedAgain = true; return running; }
   running = (async () => {
     if (!navigator.onLine) {
       await publishStatus();
+      await client?.invalidateQueries({ queryKey: ['review-detail'] });
       return;
     }
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), SYNC_TIMEOUT_MS);
+    let timeout;
+    let boundary = 'local';
     try {
+      timeout = setTimeout(() => controller.abort(), offlineRequestBudget());
+      await publishStatus('', 'syncing');
       const pending = await pendingMutations();
       const invalid = pending.map((row) => ({ mutation_id: row.mutation_id, status: 'rejected', error: mutationError(row) }))
         .filter((row) => row.error);
@@ -35,29 +38,48 @@ export function syncNow(client = activeQueryClient) {
         if (controller.signal.aborted) throw new DOMException('Sync deadline reached', 'AbortError');
         const mutations = valid.slice(offset, offset + 100);
         const predecessors = await pushPredecessors(mutations);
-        const pushed = await request('/api/sync/push', {
-          method: 'POST', body: JSON.stringify({ protocol: 1, mutations, predecessors }),
-          signal: controller.signal,
+        const wire = mutations.map((row) => {
+          const payload = { ...row };
+          delete payload.original_intent;
+          return payload;
         });
-        if (pushed.protocol !== 1) throw new Error('Sync protocol changed; refresh the app');
-        const ids = new Set(pushed.results?.map((row) => row.mutation_id));
-        if (pushed.results?.length !== mutations.length || ids.size !== mutations.length
+        boundary = 'request';
+        const pushed = await request('/api/sync/push', {
+          method: 'POST', body: JSON.stringify({ protocol: 1, mutations: wire, predecessors }), signal: controller.signal,
+        });
+        boundary = 'local';
+        if (pushed?.protocol !== 1) throw new Error('Sync protocol changed; refresh the app');
+        const ids = new Set(pushed.results?.map?.((row) => row?.mutation_id));
+        if (!Array.isArray(pushed.results) || pushed.results.length !== mutations.length || ids.size !== mutations.length
             || mutations.some((row) => !ids.has(row.mutation_id))) {
           throw new Error('Invalid sync acknowledgement IDs; device changes preserved');
         }
         await applyPushResults(pushed.results);
       }
       const since = await getMeta('cursor', 0);
-      const pulled = await request(`/api/sync/pull?protocol=1&since=${since}`, {
-        signal: controller.signal,
-      });
-      if (pulled.protocol !== 1) throw new Error('Sync protocol changed; refresh the app');
-      await applyPull(pulled);
+      const sequence = await beginPull();
+      boundary = 'request';
+      const pulled = await request(`/api/sync/pull?protocol=1&since=${since}`, { signal: controller.signal });
+      boundary = 'local';
+      if (pulled?.protocol !== 1) throw new Error('Sync protocol changed; refresh the app');
+      await applyPull(pulled, sequence);
+      await publishStatus('', 'connected');
       await client?.invalidateQueries({ queryKey: ['review-detail'] });
+    } catch (error) {
+      const received = Boolean(error.status || error.responseReceived);
+      const transport = boundary === 'request' && error.transportFailure === true && !received;
+      const unavailable = boundary === 'request' && !received && (controller.signal.aborted || transport);
+      await publishStatus(failureMessage(error, unavailable && controller.signal.aborted, transport), unavailable ? 'unavailable' : 'blocked');
     } finally {
       clearTimeout(timeout);
     }
-  })().catch((error) => publishStatus(failureMessage(error))).finally(() => { running = null; });
+  })().finally(async () => {
+    running = null;
+    if (requestedAgain) {
+      requestedAgain = false;
+      await syncNow(client);
+    }
+  });
   return running;
 }
 

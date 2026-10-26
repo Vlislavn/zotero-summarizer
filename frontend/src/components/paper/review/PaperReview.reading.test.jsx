@@ -209,6 +209,28 @@ it('does not factor a non-rubric term and never produces an empty prefix continu
   expect([...container.querySelectorAll('.border-rose-200 > ul > li')].map(row => row.textContent)).toEqual(flags);
 });
 
+it.each([
+  { states: ['miss'] },
+  { states: ['not_retrieved'] },
+  { states: ['miss', 'not_retrieved'] },
+  { states: ['not_retrieved', 'miss'] },
+  { states: ['miss', 'miss', 'not_retrieved'] },
+])('keeps the remainder disclosure neutral for $states', ({ states }) => {
+  const { container } = render(<PaperReview flat deep={{ goal_summaries: [
+    { goal: 'Located', retrieval_state: 'hit', relevant: true, summary: 'Located evidence.' },
+    ...states.map((state, i) => ({ goal: `Remaining ${i}`, retrieval_state: state })),
+  ] }} />);
+  const label = `${states.length} other goal${states.length > 1 ? 's' : ''} ▾`;
+  const summary = [...container.querySelectorAll('summary')].find(node => node.textContent.trim() === label);
+  expect(summary).toBeTruthy();
+  const disclosure = summary.closest('details');
+  expect(disclosure.open).toBe(false);
+  expect(disclosure.querySelectorAll('[role="meter"]')).toHaveLength(states.length);
+  for (const state of states) {
+    expect(disclosure.textContent).toContain(state === 'miss' ? '○ not addressed' : '⚠ not retrieved');
+  }
+});
+
 it('reports saved basis literally and never substitutes checklist counts for reviewed extent', () => {
   const { container } = render(<PaperReview flat deep={{ digest: { basis: 'full_text' },
     quality: { basis: 'abstract', coverage_met: 4, coverage_applicable: 7 } }} />);

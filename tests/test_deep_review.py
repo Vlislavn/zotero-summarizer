@@ -6,11 +6,12 @@ import types
 import pytest
 
 from zotero_summarizer.services.library import _digest_verification, _map_reduce, _review_cache, deep_review
-from zotero_summarizer.services.zotero import zotero as zotero_svc
 from zotero_summarizer.services.setup.bootstrap import _default_goals_config
+from test_digest_verification import _accepted_checks
 @pytest.fixture(autouse=True)
 def _isolate_digest_generation(monkeypatch):
-    monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
+    monkeypatch.setattr(_digest_verification, "verify_digest", _accepted_checks)
+    monkeypatch.setattr(deep_review.factory, "resolve_stage_client", lambda app, stage, **kwargs: _StubLLM())
 @pytest.fixture(scope="module")
 def config():
     return _default_goals_config()
@@ -75,8 +76,7 @@ def _fake_state(config, *, extractor, reader):
         pdf_extractor=extractor,
         unpaywall_client=None,
         zotero_reader=reader,
-    resolve_stage_client=lambda stage, **_k: _StubLLM(),
-    # Local+lean keeps the job serial and deterministic on the cheap tier.
+        # Local+lean keeps the job serial and deterministic on the cheap tier.
         resolve_stage_provider=lambda stage: types.SimpleNamespace(is_local=True, lean_deep_review=True, thinking_on=True),
     )
 
@@ -89,10 +89,10 @@ def _detail(*, title="T", pdf_path="/x/p.pdf", doi="10.1/x", url="", abstract="a
     }
 
 
-def _wire(monkeypatch, config, *, reader, extractor, note_fn=None):
-    monkeypatch.setattr(_digest_verification, "verify_digest", lambda *args, **kwargs: None)
+def _wire(monkeypatch, config, *, reader, extractor):
+    monkeypatch.setattr(_digest_verification, "verify_digest", _accepted_checks)
+    monkeypatch.setattr(deep_review.factory, "resolve_stage_client", lambda app, stage, **kwargs: _StubLLM())
     monkeypatch.setattr(deep_review, "get_state", lambda: _fake_state(config, extractor=extractor, reader=reader))
-    monkeypatch.setattr(zotero_svc, "zotero_upsert_digest_note", note_fn or (lambda _ik, _d: None))
     # Keep ORCHESTRATION tests hermetic: stub the heavy enrichment layers (real
     # quality-eval + goal-summaries pull a local LLM + a 1.3GB embedder and have
     # their own unit tests). This test asserts the orchestrator ATTACHES them.
@@ -125,17 +125,14 @@ def test_run_job_writes_digest_entry(config, monkeypatch):
     from zotero_summarizer.services.zotero._notes import build_digest_note_html
 
     reader = _StubReader({"K1": _detail()})
-    def render_note(_key, digest):
-        assert digest.parameters.dataset == "DATASET"
-        assert "DATASET" in build_digest_note_html(digest)
-
-    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"), note_fn=render_note)
+    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"))
 
     _run([{"item_key": "K1", "title": "T", "gate_relevance": 3.0}])
 
     entry = deep_review.get_cached_review("K1")
     assert entry is not None
-    assert entry["digest"]["grade"] == "A" and entry["digest"]["basis"] == "full_text"
+    # The stubbed quality layer is neutral, not independent evidence for an A.
+    assert entry["digest"]["grade"] == "" and entry["digest"]["basis"] == "full_text"
     assert entry["model_read_decision"] == "read"
     assert entry["digest"]["read_decision"] == "skim"
     assert "strong_evidence_not_confirmed" in entry["reading_policy_flags"]
@@ -143,7 +140,11 @@ def test_run_job_writes_digest_entry(config, monkeypatch):
     assert entry["review_contract_version"] == deep_review.REVIEW_CONTRACT_VERSION
     assert entry["gate_relevance"] == 3.0
     assert entry["needs_pdf"] is False
-    assert entry["zotero_note_written"] is True and entry["zotero_note_error"] is None
+    assert entry["zotero_note_written"] is False and entry["zotero_note_error"] is None
+    from zotero_summarizer.models import PaperDigest
+    rendered = PaperDigest.model_validate(entry["digest"])
+    assert rendered.parameters.dataset == "DATASET"
+    assert "DATASET" in build_digest_note_html(rendered)
     assert entry["reviewed_at"]
     # The confusing relevance re-score is gone; the goal-aligned layers are attached
     # (quality verdict + per-goal board), each independently-skippable.
@@ -160,11 +161,13 @@ def test_run_job_marks_needs_pdf_without_local_pdf_and_never_fetches(config, mon
     def _boom_extract(pdf_path):
         raise AssertionError("extract_text must not run without a local PDF")
 
-    def _boom_note(_ik, _d):
-        raise AssertionError("no note write without a digest")
+    def _boom_stage(*_args, **_kwargs):
+        raise AssertionError("no note proposal without a digest")
 
     _wire(monkeypatch, config, reader=reader,
-          extractor=types.SimpleNamespace(extract_text=_boom_extract), note_fn=_boom_note)
+          extractor=types.SimpleNamespace(extract_text=_boom_extract))
+    from zotero_summarizer.services.zotero import generated_notes
+    monkeypatch.setattr(generated_notes, "stage_current_digest", _boom_stage)
 
     _run([{"item_key": "K1", "title": "T", "gate_relevance": None}])
 
@@ -201,7 +204,7 @@ def test_acquire_missing_fetches_pdf_then_reviews(config, monkeypatch):
 
     extractor = types.SimpleNamespace(extract_text=_capture)
     entry = _run_acquiring(monkeypatch, config, extractor=extractor, acquired_path=Path("/cache/acquired.pdf"))
-    assert entry["needs_pdf"] is False and entry["digest"]["grade"] == "A"
+    assert entry["needs_pdf"] is False and entry["digest"]["grade"] == ""
     assert seen["p"] == entry["acquired_pdf"]["path"] == "/cache/acquired.pdf"  # durable handoff
 
 
@@ -219,16 +222,20 @@ def test_acquire_missing_unfetchable_surfaces_needs_login(config, monkeypatch):
 def test_run_job_records_note_failure_without_dropping_digest(config, monkeypatch):
     reader = _StubReader({"K1": _detail()})
 
-    def _failing_note(_ik, _d):
-        raise RuntimeError("Zotero is open")
+    def _failing_stage(_ik):
+        raise RuntimeError("owned stage failure")
 
-    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"), note_fn=_failing_note)
+    _wire(monkeypatch, config, reader=reader, extractor=_StubExtractor("BODY"))
+    from zotero_summarizer.services.zotero import generated_notes
+    monkeypatch.setattr(generated_notes, "stage_current_digest", _failing_stage)
     _run([{"item_key": "K1", "title": "T"}])
 
     entry = deep_review.get_cached_review("K1")
-    assert entry["digest"]["grade"] == "A"  # digest still produced
+    assert entry["digest"]["grade"] == ""  # digest still produced, but quality is unassessed
     assert entry["zotero_note_written"] is False
-    assert "Zotero is open" in entry["zotero_note_error"]
+    assert entry["zotero_note_error"] is None
+    assert deep_review.status("K1")["status"] == "error"
+    assert "owned stage failure" in deep_review.status("K1")["error"]
 
 
 def test_run_job_isolates_per_item_failure(config, monkeypatch):
@@ -249,12 +256,12 @@ def test_run_job_isolates_per_item_failure(config, monkeypatch):
 
 def _wire_provider_endpoint(monkeypatch, config, reader, llm, base_url):
     """get_state stub whose resolved deep_review provider advertises ``base_url``."""
+    monkeypatch.setattr(deep_review.factory, "resolve_stage_client", lambda app, stage, **kwargs: llm)
     monkeypatch.setattr(
         deep_review, "get_state",
         lambda: types.SimpleNamespace(
             app_state=types.SimpleNamespace(config=config),
             pdf_extractor=_StubExtractor("BODY"), unpaywall_client=None, zotero_reader=reader,
-            resolve_stage_client=lambda stage, **_k: llm,
             resolve_stage_provider=lambda stage: types.SimpleNamespace(
                 is_local=True, base_url=base_url, thinking_on=True
             ),
@@ -328,7 +335,6 @@ def test_lean_tier_uses_lean_max_text_chars(config, monkeypatch):
     monkeypatch.setattr(deep_review, "get_state", lambda: types.SimpleNamespace(
         app_state=types.SimpleNamespace(config=config), pdf_extractor=_StubExtractor("BODY TEXT"),
         unpaywall_client=None, zotero_reader=reader,
-        resolve_stage_client=lambda s, **_k: _StubLLM(),
         resolve_stage_provider=lambda s: types.SimpleNamespace(is_local=False, lean_deep_review=False, thinking_on=True),
     ))
     _run([{"item_key": "K1", "title": "T"}])
@@ -349,10 +355,8 @@ def test_mlx_shape_loopback_but_not_lean_uses_full_tier(config, monkeypatch):
     monkeypatch.setattr(deep_review, "get_state", lambda: types.SimpleNamespace(
         app_state=types.SimpleNamespace(config=config), pdf_extractor=_StubExtractor("BODY TEXT"),
         unpaywall_client=None, zotero_reader=reader,
-        resolve_stage_client=lambda s, **_k: _StubLLM(),
         resolve_stage_provider=lambda s: types.SimpleNamespace(is_local=True, lean_deep_review=False, thinking_on=True),
     ))
-    monkeypatch.setattr(zotero_svc, "zotero_upsert_digest_note", lambda _ik, _d: None)
 
     seen_digest: list[int | None] = []
     real = _map_reduce.assess_digest

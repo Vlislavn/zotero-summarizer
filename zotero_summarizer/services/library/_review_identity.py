@@ -11,12 +11,7 @@ from typing import Any
 from zotero_summarizer.models import PaperDigest
 from zotero_summarizer.models.providers import resolve_stage
 from zotero_summarizer.services._common import settings, state
-
-
-@lru_cache(maxsize=256)
-def _file_sha(path: str, mtime_ns: int, size: int) -> str:
-    del mtime_ns, size
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+from zotero_summarizer.services.library._review_attempt import file_identity
 
 
 def _source_sha(path: str) -> str:
@@ -25,22 +20,23 @@ def _source_sha(path: str) -> str:
     source = Path(path)
     if not source.is_file():
         return "missing"
-    stat = source.stat()
-    return _file_sha(str(source.resolve()), stat.st_mtime_ns, stat.st_size)
+    return file_identity(source)['sha256']
 
 
 @lru_cache(maxsize=1)
 def _generation_sources() -> dict[str, str]:
     from zotero_summarizer.integrations import pdf as analysis_extractor
     from zotero_summarizer.services.library import (
-        _deep_review_layers, _map_reduce, _paper_goal_summaries,
-        _paper_section_summaries, _source_admission, _auth_envelope, paper_type, quality_eval, quality_review,
+        _deep_review_layers, _feed_assessment, _map_reduce, _paper_goal_summaries,
+        _paper_section_summaries, _paper_type_checklists, _quality_prompts,
+        _source_admission, _auth_envelope, paper_type, quality_eval, quality_review,
     )
     from zotero_summarizer.services.library.review_fleet import propose
 
     modules = (
-        analysis_extractor, _deep_review_layers, _map_reduce, _paper_goal_summaries,
-        _paper_section_summaries, _source_admission, _auth_envelope, paper_type, quality_eval, quality_review, propose,
+        analysis_extractor, _deep_review_layers, _feed_assessment, _map_reduce, _paper_goal_summaries,
+        _paper_section_summaries, _paper_type_checklists, _quality_prompts,
+        _source_admission, _auth_envelope, paper_type, quality_eval, quality_review, propose,
     )
     paths = [Path(inspect.getfile(PaperDigest)), *(Path(module.__file__) for module in modules)]
     return {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
@@ -68,12 +64,14 @@ def build_review_identity(
     }
 
 
-def current_review_identity(item_key: str, stored: dict[str, Any]) -> dict[str, str]:
-    app = state()
-    config = app.app_state.config
+def current_review_identity(item_key: str, stored: dict[str, Any], *, config: Any = None) -> dict[str, str]:
+    app = state() if config is None else None
+    config = app.app_state.config if config is None else config
     source_kind = str(stored.get("source_kind") or "")
     pdf_path = str(stored.get("source_path") or "")
     if source_kind != "override":
+        if app is None:
+            raise ValueError("cached feed review requires an acquired original PDF binding")
         from zotero_summarizer.services.zotero.zotero import get_library_reader
 
         detail = get_library_reader(app).get_item_detail(item_key) or {}
@@ -83,3 +81,14 @@ def current_review_identity(item_key: str, stored: dict[str, Any]) -> dict[str, 
         config=config, pdf_path=pdf_path, source_kind=source_kind,
         focus_prompt=str(stored.get("focus_prompt") or ""),
     )
+
+
+INTERPRETATION_SCHEMA_MARKER = "interpretation-digest-response-v1"
+
+
+def _condition_matches(stored: dict[str, Any], interpretation_schema: str | None) -> bool:
+    if interpretation_schema not in (None, INTERPRETATION_SCHEMA_MARKER):
+        return False
+    if interpretation_schema is None:
+        return "interpretation_schema" not in stored
+    return stored.get("interpretation_schema") == INTERPRETATION_SCHEMA_MARKER

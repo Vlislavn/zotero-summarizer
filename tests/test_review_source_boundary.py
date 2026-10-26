@@ -291,3 +291,62 @@ def test_map_reduce_malformed_verifier_fallback_keeps_original_source(corrected)
         assert PAPER in evidence and NO_ACCESS not in evidence
     if corrected:
         assert "failed source verification" in generator.prompts[1]
+
+
+@pytest.mark.parametrize('corrected', [False, True])
+def test_retained_map_fallback_receipt_uses_actual_original_and_lineage(corrected):
+    from zotero_summarizer.models import PaperDigest
+    from zotero_summarizer.services.library._digest_verification import _Checks
+
+    class UnavailableMapper(_Mapper):
+        def pydantic_prompt(self, **kwargs):
+            self.calls += 1
+            return {'checks': []}
+
+    class Generator(_Generator):
+        verifier_calls = 0
+
+        def pydantic_prompt(self, *, pydantic_model, prompt, **kwargs):
+            if pydantic_model is PaperDigest:
+                return super().pydantic_prompt(pydantic_model=pydantic_model, prompt=prompt, **kwargs)
+            self.verifier_calls += 1
+            assert pydantic_model is _Checks and PAPER in prompt
+            assert NO_ACCESS not in prompt.split('Paper text (numbered verbatim passages):')[1]
+            return _Checks(checks=_AccessVerifier()._checks(prompt))
+
+    good = _digest()
+    bad = good.model_copy(update={'read_why': NO_ACCESS})
+    generator = Generator(bad, good) if corrected else Generator(good)
+    mapper, audit = UnavailableMapper(NO_ACCESS), {}
+
+    result = map_reduce_digest('Paper', PAPER, _default_goals_config(),
+                               map_llm=mapper, reduce_llm=generator, verification_audit=audit)
+
+    assert result.basis == 'map_reduce' and audit['verified_digest']['basis'] == 'full_text'
+    assert len(audit['lineage']) == (2 if corrected else 1)
+    assert generator.verifier_calls == len(audit['lineage'])
+    assert mapper.calls == 2 * len(audit['lineage'])
+    assert all(row['verifier_route'] == 'generator_fallback' and row['unavailable_routes'] == ['primary']
+               for row in audit['lineage'])
+    if corrected:
+        assert audit['lineage'][0]['outcome'] == 'support_not_established'
+        assert audit['lineage'][0]['failure_kind'] == 'verifier_support_not_established'
+    assert audit['passages'][0]['text'] == PAPER
+    assert audit['passages'][0]['original_fragments'][0]['text'] == PAPER
+    assert NO_ACCESS not in str(audit['passages'])
+    assert audit['source']['paper_completeness'] == 'not_established'
+
+
+def test_failed_verifier_cannot_leave_a_previous_accepted_receipt():
+    from zotero_summarizer.services.library._digest_verification import DigestVerifierUnavailable
+
+    class Unavailable(_Verifier):
+        def pydantic_prompt(self, *, pydantic_model, **kwargs):
+            from zotero_summarizer.models import PaperDigest
+            return _digest() if pydantic_model is PaperDigest else {'checks': []}
+
+    audit = {'previous': 'must not survive'}
+    with pytest.raises(DigestVerifierUnavailable):
+        assess_digest(title='Paper', full_text=PAPER, config=_default_goals_config(),
+                      llm=Unavailable(), verification_audit=audit)
+    assert audit == {}

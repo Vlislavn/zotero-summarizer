@@ -40,8 +40,8 @@ def _stamp(cands: list[Candidate], *, source: str, variant: str, at: str) -> lis
     return cands
 
 
-def _arxiv_channel(query: str, quota: int, at: str) -> list[Candidate]:
-    hits = search_arxiv(query, max_results=quota)
+def _arxiv_channel(query: str, quota: int, at: str, *, outcome: dict | None = None) -> list[Candidate]:
+    hits = search_arxiv(query, max_results=quota, **({"outcome": outcome} if outcome is not None else {}))
     cands = [
         Candidate(
             title=h.title, abstract=h.abstract, arxiv_id=h.arxiv_id, doi=h.doi,
@@ -52,8 +52,8 @@ def _arxiv_channel(query: str, quota: int, at: str) -> list[Candidate]:
     return _stamp(cands, source="arxiv", variant=query, at=at)
 
 
-def _europepmc_channel(query: str, quota: int, at: str) -> list[Candidate]:
-    hits = search_europepmc(query, page_size=quota)
+def _europepmc_channel(query: str, quota: int, at: str, *, outcome: dict | None = None) -> list[Candidate]:
+    hits = search_europepmc(query, page_size=quota, **({"outcome": outcome} if outcome is not None else {}))
     cands = [
         Candidate(
             title=h.title, abstract=h.abstract, doi=h.doi, pmid=h.pmid, pmcid=h.pmcid,
@@ -65,16 +65,20 @@ def _europepmc_channel(query: str, quota: int, at: str) -> list[Candidate]:
     return _stamp(cands, source="europepmc", variant=query, at=at)
 
 
-def _openalex_channel(client: Any, query: str, quota: int, at: str, *, semantic: bool) -> list[Candidate]:
+def _openalex_channel(client: Any, query: str, quota: int, at: str, *, semantic: bool, outcome: dict | None = None) -> list[Candidate]:
     if client is None or not query:
+        if outcome is not None and client is None:
+            outcome.update(status="not_attempted", count=None, error_code="client_unavailable")
         return []
-    hits = client.search_works(query, per_page=quota, semantic=semantic)
+    hits = client.search_works(query, per_page=quota, semantic=semantic,
+                               **({"outcome": outcome} if outcome is not None else {}))
     cands = [
         Candidate(
             title=h.title, abstract=h.abstract, doi=h.doi, openalex_id=h.openalex_id,
             authors=h.authors, year=h.year, venue=h.venue, is_open_access=h.is_oa,
             is_retracted=h.is_retracted, cited_by_count=h.cited_by_count,
             publication_types=list(h.publication_types),
+            family_identifier_keys=getattr(h, "family_identifier_keys", []),
         )
         for h in hits
     ]
@@ -82,8 +86,8 @@ def _openalex_channel(client: Any, query: str, quota: int, at: str, *, semantic:
     return _stamp(cands, source="openalex", variant=variant, at=at)
 
 
-def _crossref_channel(query: str, quota: int, at: str, mailto: str | None) -> list[Candidate]:
-    hits = search_crossref(query, rows=quota, mailto=mailto)
+def _crossref_channel(query: str, quota: int, at: str, mailto: str | None, *, outcome: dict | None = None) -> list[Candidate]:
+    hits = search_crossref(query, rows=quota, mailto=mailto, **({"outcome": outcome} if outcome is not None else {}))
     cands = [
         Candidate(
             title=h.title, abstract=h.abstract, doi=h.doi,
@@ -94,8 +98,8 @@ def _crossref_channel(query: str, quota: int, at: str, mailto: str | None) -> li
     return _stamp(cands, source="crossref", variant=query, at=at)
 
 
-def _semantic_scholar_channel(query: str, quota: int, at: str) -> list[Candidate]:
-    hits = search_semantic_scholar(query, limit=quota)
+def _semantic_scholar_channel(query: str, quota: int, at: str, *, outcome: dict | None = None) -> list[Candidate]:
+    hits = search_semantic_scholar(query, limit=quota, **({"outcome": outcome} if outcome is not None else {}))
     cands = [
         Candidate(
             title=h.title, abstract=h.abstract, doi=h.doi, arxiv_id=h.arxiv_id, pmid=h.pmid,
@@ -171,6 +175,7 @@ def federate(
     library_finder: LibraryFinder | None = None,
     quota: int = 15,
     crossref_mailto: str | None = None,
+    observe_outcomes: bool = False,
 ) -> list[Candidate]:
     """Run every channel concurrently, quota each PASS, union into version families.
 
@@ -182,7 +187,7 @@ def federate(
     at = now_iso_z()
     tasks: list[Callable[[], list[Candidate]]] = []
     requests: list[dict[str, Any]] = []
-    def add_variant_tasks(source: str, queries: list[str], run: Callable[[str, int], list[Candidate]]) -> None:
+    def add_variant_tasks(source: str, queries: list[str], run: Callable[..., list[Candidate]], *, channel: str | None = None) -> None:
         if not queries:
             return
         allocations = [quota // len(queries)] * len(queries)
@@ -190,28 +195,34 @@ def federate(
             allocations[index] += 1
         for query, limit in zip(queries, allocations):
             if limit:
-                tasks.append(lambda q=query, n=limit: run(q, n))
-                requests.append({"source": source, "query": query, "allocation": limit})
+                request = {"source": source, "query": query, "allocation": limit}
+                receipt = {"status": "unknown", "count": None, "error_code": None} if observe_outcomes and channel else None
+                if receipt is not None:
+                    request.update(channel=channel, outcome=receipt)
+                tasks.append(lambda q=query, n=limit, o=receipt: run(q, n, **({"outcome": o} if o is not None else {})))
+                requests.append(request)
 
     add_variant_tasks(
         "arxiv", _variant_queries(plan.arxiv_variants, plan.arxiv),
-        lambda q, n: _arxiv_channel(q, n, at),
+        lambda q, n, **kw: _arxiv_channel(q, n, at, **kw), channel="arxiv",
     )
     add_variant_tasks(
         "europepmc", _variant_queries(plan.europepmc_variants, plan.europepmc),
-        lambda q, n: _europepmc_channel(q, n, at),
+        lambda q, n, **kw: _europepmc_channel(q, n, at, **kw), channel="europepmc",
     )
     add_variant_tasks(
         "openalex", _variant_queries(plan.openalex_lexical_variants, plan.openalex_lexical, cap=2),
-        lambda q, n: _openalex_channel(openalex_client, q, n, at, semantic=False),
+        lambda q, n, **kw: _openalex_channel(openalex_client, q, n, at, semantic=False, **kw), channel="openalex_lexical",
     )
     add_variant_tasks("openalex", [plan.openalex_semantic] if plan.openalex_semantic else [],
-                      lambda q, n: _openalex_channel(openalex_client, q, n, at, semantic=True))
+                      lambda q, n, **kw: _openalex_channel(openalex_client, q, n, at, semantic=True, **kw),
+                      channel="openalex_semantic")
     if plan.crossref:
-        add_variant_tasks("crossref", [plan.crossref], lambda q, n: _crossref_channel(q, n, at, crossref_mailto))
+        add_variant_tasks("crossref", [plan.crossref],
+                          lambda q, n, **kw: _crossref_channel(q, n, at, crossref_mailto, **kw), channel="crossref")
     if plan.semantic_scholar:
         add_variant_tasks("semantic_scholar", [plan.semantic_scholar],
-                          lambda q, n: _semantic_scholar_channel(q, n, at))
+                          lambda q, n, **kw: _semantic_scholar_channel(q, n, at, **kw), channel="semantic_scholar")
     if plan.openreview and openreview_client is not None:
         add_variant_tasks("openreview", [plan.openreview], lambda q, n: _openreview_channel(
             q, or_client=openreview_client, openalex_client=openalex_client, quota=n, at=at))

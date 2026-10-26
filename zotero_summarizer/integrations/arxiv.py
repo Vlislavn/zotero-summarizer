@@ -20,6 +20,7 @@ import httpx
 
 from zotero_summarizer.domain import normalize_arxiv_id
 from zotero_summarizer.integrations._rate_limiter import RateLimiter
+from zotero_summarizer.integrations._search_http import search_hits
 
 _BASE = "https://export.arxiv.org/api/query"
 _TIMEOUT_SECS = 12.0
@@ -83,37 +84,31 @@ def _hit_from_entry(entry: ET.Element) -> ArxivHit | None:
     )
 
 
+def _search_hits(response: httpx.Response, strict: bool) -> list[ArxivHit | None]:
+    root = ET.fromstring(response.text)
+    if strict and root.tag != f"{{{_NS['a']}}}feed":
+        raise ValueError("arXiv response must be an Atom feed")
+    return [_hit_from_entry(entry) for entry in root.findall("a:entry", _NS)]
+
+
 def search_arxiv(
     query: str,
     *,
     max_results: int = 20,
     http_client: httpx.Client | None = None,
+    outcome: dict | None = None,
 ) -> list[ArxivHit]:
     """Topic search arXiv, best relevance first. Returns ``[]`` on any error
     (network, non-200, malformed XML) — never raises."""
     query = (query or "").strip()
-    if not query:
-        return []
     params = {
         "search_query": f"all:{query}",
         "max_results": max(1, min(max_results, 50)),
         "sortBy": "relevance",
         "sortOrder": "descending",
     }
-    _RATE_LIMITER.acquire()
-    client = http_client or httpx.Client(timeout=_TIMEOUT_SECS)
-    try:
-        resp = client.get(_BASE, params=params, headers={"User-Agent": "zotero-summarizer/1.0"})
-        if resp.status_code != 200:
-            return []
-        root = ET.fromstring(resp.text)
-    except (httpx.HTTPError, OSError, ET.ParseError):
-        return []
-    finally:
-        if http_client is None:
-            client.close()
-    hits = [_hit_from_entry(e) for e in root.findall("a:entry", _NS)]
-    return [h for h in hits if h is not None]
+    return search_hits(query, _BASE, params, _search_hits, _RATE_LIMITER,
+                       timeout=_TIMEOUT_SECS, http_client=http_client, outcome=outcome)
 
 
 __all__ = ["ArxivHit", "search_arxiv"]

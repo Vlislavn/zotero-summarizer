@@ -1,9 +1,20 @@
 # api/routes — HTTP endpoints (thin)
 
+Search replies use each session domain's own projection: Discovery applies its
+context/privacy view; ordinary Search retains its existing serialization boundary.
+No private Discovery snapshot is exposed through screen or session GET.
+
 Search screen optionally accepts confirmed `constraints` (required/excluded phrases
 and publication types). Missing constraints never authorize model-imposed filters;
 legacy sessions disclose unknown origin. Review status adds typed stage/recovery
 and metadata-only attempt diagnostics without exposing sensitive capture through HTTP.
+
+`GET /api/daily` adds the resolved `selection_policy` (also for empty slates)
+and each card's `selection_evidence`: stored-score presence/priority, current
+review join, cohort key and actual picker/bonus observations. Interleave exposes
+only a blinded evidence marker, never new per-arm diagnostics. These observations
+neither authorize Add nor change ranking, labels or scores; absent/stale/failed
+reviews remain unknown on a current join miss.
 
 `POST /api/golden/verdict` checks a new positive feed verdict for a current,
 usable full-text review **before** writing its label. Missing/empty/failed
@@ -13,6 +24,15 @@ label before it can hide a paper from Today. Today Add reports the same code
 per blocked item while processing eligible batch members. The server, not the frontend badge, enforces this invariant.
 Replacing a hosted credential through `/api/setup/ai-credential` invalidates
 prior Doctor inference success without returning the key to the browser.
+`POST /api/setup/doctor/cancel` requires the current `run_id`; stale IDs return
+409. API task cancellation abandons that same attempt. Neither response claims
+remote termination; callback exclusion and unresolved receipts remain service-owned.
+
+Search screen also accepts `evidence_policy: baseline|question_evidence` (default
+baseline). The explicit experimental choice persists through the existing review
+worker/session API. Responses include session `evidence_status` and per-candidate
+`question_evidence` with original ranges, fingerprints, capability flags and failures.
+No evidence endpoint or native-write authority is added; Add remains explicit.
 
 One module per resource. Each registers its paths on a router; `__init__.py`
 collects them via `include_routes(app)`. Handlers parse/validate and delegate
@@ -21,7 +41,8 @@ to `services/`; they raise `APIError` for failures.
 ```
 __init__.include_routes(app)
    └─ for module in (health, corpus, results, zotero, triage, pending,
-                     review, relabel_audit, daily, golden, admin, config, library, llm, setup, sync):
+                     review, relabel_audit, daily, golden, admin, config, library, llm, setup, sync,
+                     research_feed):
           app.include_router(module.router)
 ```
 
@@ -31,6 +52,7 @@ __init__.include_routes(app)
 | `llm.py` | `POST /api/admin/llm-check` — manual operational probe of each pipeline stage's provider (returns per-stage operational\|fail); `GET /api/admin/llm-reachability` — cheap proactive reachability of each stage (`GET /models`, no tokens; returns per-stage `reachable` + `base_url`), polled by the deep-review surface to warn before a run; `POST /api/admin/llm-models` — list a provider's available model ids for the Settings model-picker. Remote discovery accepts only a built-in preset or an already-saved provider identity; loopback listing never receives a stored secret |
 | `golden.py` | `/api/golden*` — labels, verdicts, review-detail, review-note, effective labels. `POST /verdict` resolves one real Zotero mirror target before side effects: a positive Today-feed verdict auto-materializes into Inbox and returns its new key; any already-materialized feed verdict (including `dont_read`) reuses the existing key; an unmaterialized negative stays local and never creates a rejected item. Label and comment mirror to that real key, never the synthetic `feed:` key. Newly-created items revalidate current label intent after materialization; an already-correct tag requires no physical write. `POST /review-note` `{item_key, note}` saves the user's free-text "My notes" jot to the `review_notes` table (always durable) then best-effort mirrors it to the Zotero item under `USER_NOTE_MARKER` (`note_written`/`note_error` in the reply; unmaterialized feed/note keys skip the mirror, refuses while Zotero is open) — decoupled from the verdict; `review-detail` returns the saved note as `user_note`. The local `label_verdicts` row is always the durable write, and `zotero_unavailable` mirror failures are swallowed (other write failures are reported in `label_error`/`note_error`). `GET /verdicts` takes an optional `source` provenance filter (e.g. `source=auto_quality` to list the auto quality-gate's hides for one-tap restore, without paging every `dont_read`). Submitting/deleting a verdict retains the backward-compatible `human_feedback` event and also records an idempotent `label_transition` assignment/change/retraction through the golden command seam |
 | `library.py` | `/api/library*` — whole-library reading queue (+ score `distribution`; `limit`≤10000; `semantic=true` + `search` → HYBRID search ranking: BM25 + dense embeddings + local cross-encoder rerank, response adds `semantic`/`reranked`/`reranker_loading`/`semantic_unavailable`), `reading-queue/status` (cheap in-memory job state, no Zotero read — polled while a Rescore computes), `review-fleet/run` + `review-fleet/status` — kick off / poll the background fleet that PRE-DECIDES a `proposed_verdict` for the chosen Read-next picks (explicit `item_keys` when the client pins its cool must/should-read set, else the top-`top_k` undecided picks — so the fleet reviews the SAME rows the UI counts, not a band-agnostic slice; reuses cached deep reviews; suggestions the user Confirms/Overrides, never auto-applied; status distinguishes `no_fetchable_source`, attempted `needs_library_login`, and setup-only `browser_extra_unavailable`; only login failures populate `needs_login_items` links), `university-access/status` + `university-login` — readiness + the one-time HEADED library login for the fleet's browser PDF fetch (non-arXiv/paywalled, via the optional `browser` extra), `fetch-fulltext` (+ `/status`) — acquire arXiv/Unpaywall/PMC/OpenAlex/direct OA PDFs and attach them natively to Zotero (background job; non-interactive, typed per-item outcomes, backup-first + connector-guarded), deep-review (the **per-paper** `item_key` run passes `acquire_missing=True` — a pick with no Zotero PDF gets one fetched first via `_pdf_acquire` (OA/PMC/library session) and reviewed from it, instead of being flagged `needs_pdf`; the top-`top_k` run doesn't, since the fleet pre-acquires), PDF stream, `render/{item_key}` status (flags `stale` when the renderer revision changed) + `render/{item_key}/build` (can acquire a missing PDF via the OA/browser chain when the item has no Zotero attachment) + `/presentation` (served **inline** so the reader pane embeds it in an iframe) + `render/{item_key}/pdf` (serves the source PDF the brief was built from — acquired-cache or Zotero-attached — `inline`) + `/figures/{name}` — paper-brief artifacts written next to the PDF (single-file HTML brief + figures + audit; no automatic Markdown; arXiv source download only with explicit consent), `ask` (POST) — grounded per-paper Q&A in three `Literal`-validated modes (`comprehensive` uses structured review + PDF body; `full_text`; `retrieval`) with whole-document count answers and quote-grounded abstention (`answer=null` = honest abstain), `sync-rel-tags` (write `zs:rel/<band>` relevance tags → filter in Zotero), `sync-score-ranks` (stamp a whole-library goal-blended rank into every paper's Zotero Call Number → sort the entire library in Zotero; preserves users' own Call Numbers); both whole-library + backup-first |
+| `research_feed.py` | Read-only `GET /api/research-feed/runs` (latest 50 by name; `limit` 1–100), `/runs/{run_id}`, and `/runs/{run_id}/download?format=json\|md`. Reuses published v1 RSS bundles. Missing files are 404; malformed/unsupported JSON is 422; list entries mark unavailable reports. No generation endpoint, model work or Zotero writes. Downloads are attachments of the saved bytes. |
 | `search.py` | `/api/search*` — Targeted Search (query-driven pull). `POST /screen` `{query, questions}` runs intent→plan→federate→rank, saves a `ResearchSession`, then **auto-starts** the review and returns the session reloaded (status already `reviewing`; the client just polls GET). The background worker runs the agentic PRF refinement rounds first when enabled (`services.search.refine`), then the light+deep review (a failure is recorded on the session, not swallowed); `POST /{id}/review` is kept as an explicit re-trigger — both paths single-flight through an atomic `screened`→`reviewing` claim so they can't stack workers; `GET /{id}` polls it (status `screened`→`reviewing`→`reviewed`/`error`); `GET /` lists sessions; `DELETE /{id}`; `POST /{id}/materialize` `{candidate_id, collection_key}` files one candidate into the chosen Zotero collection (None → Inbox) — the domain's ONLY Zotero write, always an explicit user action. Thin over `services.search.pipeline`; sessions persist one-JSON-each under `data/search/` |
 | `review.py` | `/api/feeds/review*` — Phase 1.14 feed-review workflow; bulk-confirm requires the exact displayed `processed_ids` (max 500) and cannot label an unseen backend superset |
 | `pending.py` | `/api/pending*` — review + apply queued Zotero changes. `POST /api/pending/apply` takes `retry` (default False): when True it re-applies FAILED rows (instead of PENDING) via the same writer path, and success transitions those rows to APPLIED. HTTP success can still contain per-row failures; the UI surfaces that as an error with the Failed-tab recovery path |
@@ -43,6 +65,21 @@ __init__.include_routes(app)
 | `results.py` · `corpus.py` · `config.py` · `health.py` | dashboard/corpus/config/health |
 | `_golden_helpers.py` | pure (non-HTTP) helpers for `golden.py` |
 | `_golden_border.py` | the `/api/golden/border-suggestions` active-learning endpoint, split out of `golden.py` to keep it under the 500-LOC cap; mounted on `golden.router` via `include_router` |
+
+`GET /api/library/related/{item_key}?collection=&tag=` returns metadata-hybrid
+saved-paper connections, comment availability and the configured processing
+boundary, without a semantic call. `POST /api/library/related/{item_key}/assess`
+requires that boundary's `consent_token`; optional `retry` explicitly recovers a
+failed/interrupted attempt. It persists/coalesces contextual assessments through
+the existing session store, never Search auto-review or Add. Full private seed
+and candidate notes stay out of provider search queries. Unknown, failed,
+interrupted, stale and over-budget assessments are distinct from genuine empty.
+See [feature boundary](../../../docs/features.md#related-saved-papers).
+
+Discovery GET/strict POST: `/api/library/related/{item_key}/discover`.
+All session responses use controlled views; raw snapshots are storage-only.
+Discovery cannot auto-review; explicit Review/new Add preflight freshness.
+See [Discovery](../../../docs/features.md#saved-paper-discovery).
 
 Ask Paper additionally accepts up to 20 typed prior turns. The library service
 keeps a recent tail, compacts older evidence to extraction-versioned handles,
@@ -77,7 +114,9 @@ Failure does not roll back a model already saved or installed before rescoring;
 the UI's existing failed-job view displays the error and stops polling.
 
 RSS add/update rejects malformed URLs with 422; a duplicate URL update returns
-409 without changing either subscription. Refresh network/document failures
+409 without changing either subscription. RSS POST accepts optional `create_only`
+(default false): an existing normalized subscription is returned unchanged, even
+when disabled. Preset adds use this mode; custom upsert semantics stay unchanged. Refresh network/document failures
 return 502 after the reader records last_error, never a successful empty refresh.
 
 Feed-review `sort=recent|border` is passed through to storage, where ordering
@@ -137,6 +176,14 @@ errors propagate as HTTP failures after the local save; retry is safe. Successfu
 replies keep `saved/note_written/note_error` (the latter is null); unconfigured
 Zotero and feed/note keys keep their local-only success. This supersedes the
 review-note best-effort failure behavior above, not verdict-comment enrichment.
+
+Sync v1 additionally admits explicit `keep_server`: a conflict UUID and compared
+field revision, with null value/comment rather than an echoed canonical body.
+Missing/wrong references refuse; a changed field conflicts again. This records a
+no-op app receipt without a field/history/native effect, not authorization to
+write or acknowledge old native work. Set/delete DTO caps remain unchanged;
+canonical conflict readouts may contain longer valid server text. Older servers
+must reject an unsupported operation rather than reinterpret it.
 
 Sync push accepts at most 100 mutations and 100 optional `predecessors` UUIDs.
 These reference applied receipts for cross-batch causality; they never alter a

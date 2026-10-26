@@ -136,10 +136,12 @@ def run_full_calibration(
     from zotero_summarizer.services.library import quality_review
     from zotero_summarizer.services.llm.factory import build_client_for_provider
 
+    config = read_config(settings.config_path, settings.calibration_path)
+    if not config.llm_enabled:
+        raise APIError("llm_disabled", "AI features are disabled", status_code=409)
     papers = load_review_papers(settings, item_keys=item_keys, limit=papers_limit)
     if not papers:
         raise RuntimeError("No built paper briefs to calibrate on; build a paper brief first")
-    config = read_config(settings.config_path, settings.calibration_path)
     resolved = resolve_stage(config.llm_routing, "deep_review")
     provider, model = resolved.provider, resolved.model
     LOGGER.info("Calibration: deep_review endpoint %s/%s @ %s (local=%s)",
@@ -148,18 +150,28 @@ def run_full_calibration(
     if progress is not None:
         progress({"phase": "measuring endpoint", "completed": 0, "total": 0})
     # Remote endpoints are always 'full' (no probe); only a local provider is measured.
-    probe_llm = build_client_for_provider(provider, model, enable_thinking=False) if provider.is_local else None
-    tier1 = tier1_env_calibrate(config, settings.calibration_path, llm=probe_llm, is_local=provider.is_local)
+    probe_llm = (build_client_for_provider(provider, model, enable_thinking=False, verification=True)
+                 if provider.is_local else None)
+    try:
+        tier1 = tier1_env_calibrate(config, settings.calibration_path, llm=probe_llm, is_local=provider.is_local)
+    finally:
+        if probe_llm is not None:
+            probe_llm.close()
     if provider.is_local:
         memory_preflight()  # remote endpoints skip this — they load no local model
-    digest_llm = build_client_for_provider(provider, model, enable_thinking=provider.thinking_on)
+    digest_llm = build_client_for_provider(provider, model, enable_thinking=provider.thinking_on,
+                                           verification=provider.is_local)
 
     def run_digest(title: str, text: str, budget: int) -> tuple[Any, float]:
         start = perf_counter()
         digest = quality_review.assess_digest(title=title, full_text=text, config=config, llm=digest_llm, max_chars=budget)
         return digest, perf_counter() - start
 
-    tier2 = tier2_calibrate(config, settings.calibration_path, papers, run_digest=run_digest, progress=progress)
+    try:
+        tier2 = tier2_calibrate(config, settings.calibration_path, papers, run_digest=run_digest, progress=progress)
+    finally:
+        if provider.is_local:
+            digest_llm.close()
     return {"tier1": tier1, "tier2": tier2, "provider": provider.name, "model": model, "papers": len(papers)}
 
 

@@ -1,5 +1,12 @@
 # models — Pydantic contract (config + API shapes)
 
+`interpretation.py` defines the opt-in experiment's strict scientific item and
+typed response schema. Pydantic `SkipValidation` delays only optional transport
+validation until independent base acceptance; malformed sidecars are retained,
+then explicitly rejected, not defaulted away. Base fields remain validated.
+Ordinary `PaperDigest` fields/defaults are unchanged. Origin, source associations
+and verification state are caller-owned, never model claims.
+
 Every request/response body and the `goals.yaml` schema. Split by group; the
 package `__init__` re-exports everything, so `from zotero_summarizer.models
 import X` works unchanged.
@@ -15,12 +22,39 @@ triage.py ──(domain)        all three ──*──> __init__.py  ──>  f
 | `enrichment_config.py` | `PrestigeConfig` (OpenAlex author/venue prestige — cold-start author-reputation prior `cold_start_author_lift`/`cold_start_max_lift`/`cold_start_gamma`; `enabled` defaults **on**, `ZS_OFFLINE` forces off, `ZS_PRESTIGE_ENABLED=0` opts out) + `OpenReviewConfig` (authenticated OpenReview peer-review SEARCH source: `venues`/`year_min`; creds are `OPENREVIEW_USERNAME`/`OPENREVIEW_PASSWORD` env, read at point-of-use by `integrations/openreview.py`, never this config; SIGNAL-ONLY — surfaces a `services/search` display chip, never a rank input; `ZS_OFFLINE` also forces it off). Split from `config.py` for the 500-LOC limit; re-exported via `models.config` |
 | `access_config.py` | `UniversityAccessConfig`: optional persistent-browser/EZproxy settings, imported and re-exported by `config.py` |
 | `feeds_config.py` | `FeedsConfig` — the `feeds.*` daemon section (tick cadence `daemon_tick_seconds`/`daemon_batch_size`, RSS refresh rotation `max_feeds_per_pass`/`max_new_items_per_feed`/`per_feed_timeout_secs`, read-marking `mark_processed_as_read` + `zotero_read_sync` (the Zotero unread-badge reconciler, default on), dedup toggles (`dedup_against_processed=None` follows `dedup_against_library`), outcome cadence, daily-selection scheduling, `inbox_collection_name`, `exclude_feeds`). System-owned, so every scalar auto-derives a `ZS_FEEDS_*` override — before this section, `feeds.*` was raw-dict passthrough that `GoalsConfig` silently dropped from goals.yaml, making the knobs unsettable. Split from `config.py` for the 500-LOC limit; re-exported via `models.config` |
-| `providers.py` | per-stage LLM routing: `ProviderConfig`/`ProviderType`, `StageModelConfig`, `LLMRoutingConfig`, `resolve_stage()` (stage → effective provider+model, inheriting `default`). `ProviderConfig.is_local` flags loopback endpoints (→ serial triage concurrency); `ProviderConfig.lean_deep_review` opts a provider into the cheaper deep-review tier (independent of `is_local` — set on ollama, left False on MLX); `ProviderConfig.max_sub_concurrency` caps how many deep-review SUB-calls (rubric samples / per-goal summaries) fan out in parallel on a remote provider (`None` → fall back to `TRIAGE_JOB_CONCURRENCY`; ignored for local providers, which stay serial). `ProviderConfig.temperature` (default `0.0`, the previously-hardcoded deterministic-triage value) is threaded into the openai-path `build_llm`; the native Anthropic adapter ignores it (Opus rejects the param). `ProviderConfig.thinking_effort` (`off`/`low`/`medium`/`high`, default `None` = leave untouched) is translated per backend dialect by `services/llm/thinking.py` (anthropic → thinking budget; plain OpenAI → `reasoning_effort`; vLLM/qwen `chat_template_kwargs` → `enable_thinking` on/off — graded collapses there). `ProviderConfig.thinking_on` (computed: `thinking_effort != "off"`) is what the deep-review DIGEST reads to decide `enable_thinking` — the digest reasons by default (measured NEEDED) and a provider set to `thinking_effort: off` opts it out, with no separate toggle. `ProviderConfig.num_ctx` (default `None`) auto-derives for LOCAL providers in `services/_common._derive_local_num_ctx` (`max_text_chars/4 + max_tokens` ×1.25 headroom — ollama's own ~2–4k default silently truncates a long deep-review prompt) and is forwarded as `extra_body.num_ctx`; remote providers stay `None` (they size their own window). `ProviderConfig.keep_alive` (default `None` = off) is the ollama warm-hold (seconds a LOCAL model stays loaded after a call); a LATENCY knob, not correctness, so it is OFF by default and NOT auto-derived (pinning a model resident grows steady-state RAM — unsafe on a memory-constrained Mac), forwarded as `extra_body.keep_alive` only when set explicitly (PROVISIONAL, GAP §G6). `ProviderConfig.structured_output` (default `False`) opts a provider into decoder-level JSON (`response_format json_schema strict`) for the digest — MEASURED trade-off (forces enum/range + reasoning survives, but completeness drops 1.00→0.62 and needs a roomy `max_tokens`); enable only for models prone to invalid JSON (see `docs/internal/knowledge_map.md` §D). Pure data + lookups — no env reads, no client building. |
-| `triage.py` | `SummarizeRequest/Response`, `TriageResult/Dimensions`, `QualityReview`, `PaperParameters` (verbatim full-text dataset/baseline/sample/metric/architecture/validation extraction), `PaperDigest` (the single `read|skim|skip` action plus targets, time, original value, optional parameters, and grounded low/moderate/high writing friction; high friction caps read to skim; old rows load through defaults), `GoalSummary` (grounded per-goal evidence), `QualityEval` (reference-free checklist/band, evidence, flags, agreement and optional MiniCheck shadow), `ProposedVerdict` (deterministic display-only priority suggestion with optional per-review freshness metadata), batch/corpus/calibration models |
+| `providers.py` | per-stage LLM routing: `ProviderConfig`/`ProviderType`, `StageModelConfig`, `LLMRoutingConfig`, `resolve_stage()` (stage → effective provider+model, inheriting `default`). `ProviderConfig.is_local` flags loopback endpoints (→ serial triage concurrency); `ProviderConfig.lean_deep_review` opts a provider into the cheaper deep-review tier (independent of `is_local` — set on ollama, left False on MLX); `ProviderConfig.max_sub_concurrency` caps how many deep-review SUB-calls (rubric samples / per-goal summaries) fan out in parallel on a remote provider (`None` → fall back to `TRIAGE_JOB_CONCURRENCY`; ignored for local providers, which stay serial). `ProviderConfig.temperature` (default `0.0`, the previously-hardcoded deterministic-triage value) is threaded into the openai-path `build_llm`; the native Anthropic adapter ignores it (Opus rejects the param). `ProviderConfig.thinking_effort` (`off`/`low`/`medium`/`high`, default `None` = leave untouched) is translated per backend dialect by `services/llm/thinking.py` (anthropic → thinking budget; plain OpenAI → `reasoning_effort`; vLLM/qwen `chat_template_kwargs` → `enable_thinking` on/off — graded collapses there). `ProviderConfig.thinking_on` (computed: `thinking_effort != "off"`) is what the deep-review DIGEST reads to decide `enable_thinking` — the digest reasons by default (measured NEEDED) and a provider set to `thinking_effort: off` opts it out, with no separate toggle. `ProviderConfig.num_ctx` (default `None`) auto-derives for LOCAL providers in `services/_common._derive_local_num_ctx` (`max_text_chars/4 + max_tokens` ×1.25 headroom — ollama's own ~2–4k default silently truncates a long deep-review prompt) and is forwarded as `extra_body.num_ctx`; remote providers stay `None` (they size their own window). `ProviderConfig.keep_alive` (default `None` = off) is the ollama warm-hold (seconds a LOCAL model stays loaded after a call); a LATENCY knob, not correctness, so it is OFF by default and NOT auto-derived (pinning a model resident grows steady-state RAM — unsafe on a memory-constrained Mac), forwarded as `extra_body.keep_alive` only when set explicitly (PROVISIONAL, GAP §G6). `ProviderConfig.structured_output` (default `False`) opts a provider into decoder-level JSON (`response_format json_schema strict`) for the digest — MEASURED trade-off (forces enum/range + reasoning survives, but completeness drops 1.00→0.62 and needs a roomy `max_tokens`); enable only after checking the actual model's output contract and completeness. Pure data + lookups — no env reads, no client building. |
+| `triage.py` | `SummarizeRequest/Response`, `TriageResult/Dimensions`, `QualityReview`, `PaperParameters` (verbatim full-text dataset/baseline/sample/metric/architecture/validation extraction), `PaperDigest` (the single `read|skim|skip` action plus targets, time, original value, optional parameters, and grounded low/moderate/high writing friction; raw model actions remain unchanged and the service policy owns caps; old rows retain unknown friction), `GoalSummary` (grounded per-goal evidence), `QualityEval` (reference-free checklist/band, nullable coverage fraction when unassessed/inapplicable, evidence, flags, agreement and optional MiniCheck shadow), `ProposedVerdict` (deterministic display-only priority suggestion with optional per-review freshness metadata), batch/corpus/calibration models |
 | `research_feed.py` | Source-neutral candidate/triage/profile/engineering-card contracts, controlled topic/project-use literals, and absolute HTTP(S) artifact validation. `triage.MethodAndCode` is the optional exact-source-URL method/artifact block carried by summaries. |
 | `api.py` | HTTP request/response + write-path models (`*Request/*Response`, `AppState`, Zotero/pending shapes) |
 | `setup.py` | the FROZEN `/api/setup/*` contract: `SetupStatusResponse` separates saved `configured` state from operational `ready` health (+ nested `ConfigStatus`/`LlmStatus`/`PathStatus`/`PathEntry`/`ZoteroStatus`/`ClassifierStatus` + a `subsystems: list[SubsystemStatus]` runtime-readiness array, additive — a not-ready entry names the down subsystem + reason without affecting the top-level `ready`), `DetectedZoteroDir`/`DetectZoteroResponse`, `UpdatePathsRequest`/`UpdatePathsResponse`, `ValidateConfigRequest`/`ValidateConfigResponse` (+ `FieldError`/`ConnectionResult`). SECURITY: `api_key_env` is only ever an env-var NAME; key presence is the BOOL `api_key_present` — no model here carries a secret value |
 | `__init__.py` | re-exports all of the above (the public `models` surface) |
+
+`PaperDigest` skip normalization clears targets/original-only value without adding
+omitted keys to `model_fields_set`. Explicit empty inputs retain their presence;
+new-generation admission remains separate from legacy-compatible defaults.
+Intentional later assignment still has ordinary Pydantic tracking; this metadata
+is not authentication of an original raw response.
+
+`ProviderConfig.capabilities` is an optional declared set (`text`,
+`native_json_schema`), intersected with enabled adapter paths; omission preserves
+legacy text support without asserting optional support. Loopback detection is
+central and DNS-free: localhost and its reserved subdomains, numeric IPv4
+shorthand, all IPv4 127/8, IPv6 loopback and IPv4-mapped IPv6 loopbacks use the
+same rule for both adapters. Unspecified addresses remain
+local; remote/private non-loopback literals remain unchanged. No DNS is consulted. `ConnectionResult` distinguishes `listed`, declared
+`capable`, `observed_operational`, `hardware_safe` and `reason_code`; unknown is
+not false or Ready. No ResourceEnvelope is fabricated from these declarations.
+
+`ResolvedStage.fingerprint()` is the shared opaque identity of effective stage,
+provider settings and model. It reads no environment/keyring credential values.
+The derived stage schema accepts only stage/provider/model; arbitrary extra fields
+(including removed per-stage requirement inputs) raise validation errors instead
+of disappearing before credential/transport admission. No legacy requirement
+property/method or second capability policy is restored. Known-field serialized
+bytes and fingerprint inputs are unchanged.
+Consent and runtime cache admission use the same definition; callers can bind
+`resolve_stage_client(expected_identity=...)` to their expected processing
+snapshot instead of treating current metadata as proof about an opaque client.
 
 `GoalsConfig.llm_enabled` is user-owned. `LlmStatus.enabled=false` is the
 deliberate ML-only state, not an unreachable-provider error.
@@ -41,4 +75,35 @@ types are also used by `research_feed.parse_run_budgets` at CLI/service entry:
 shortlist 1–100, cards 1–20, source rows 1–5,000 and wait timeout 1–86,400 seconds.
 Only omitted shortlist/card overrides use profile defaults; zero is not omission.
 
+`FeedReviewContext` selects same-response `FeedDigestResponse` explicitly. Typed
+project proposals require mechanism/component/change/experiment and original
+quotes; reproduction/impact remain nullable. Cards add assessment/evidence and
+unverified-origin fields without changing saved v1 report keys or rewriting old
+JSON. Unknown/absent assessment evidence spans remain null in cards as in the
+producer/qualifier; they do not discard a paper or valid neighboring proposals.
+Legacy numeric impact zero is not evidence of measured zero benefit. The feed
+context/assessment/response types are also exported through the package facade.
+Blank unknown quotes normalize to empty evidence, retaining valid neighbors.
+
 `MIN_MAP_CHUNK_CHARS` is the shared 1000-character validation/recovery floor; the 8000-character default is unchanged.
+
+Live refinement passes `preserve_method_artifact_literals` through Pydantic validation
+context so source admission sees the original nonempty artifact strings, including
+surrounding whitespace. Normal decoding without that context retains legacy whitespace
+cleanup; saved summaries are not revalidated against source membership.
+
+The private corpus-prefilter provenance marker supports the optional practitioner diagnostic; it is not an LLM/public JSON field.
+
+`SystemMirrorRequest` is the closed system-history origin for composite notes and
+verdict mirrors. Its frozen source-specific intent binds the lookup key, current
+revision/content and native target; verdicts retain both the invocation lookup
+and selected source-row identity plus stored provenance. The canonical verdict
+HTML/marker/glyph definition lives beside these payload models so generation and
+storage admission share identical bytes without a storage-to-service dependency.
+Nullable historical/tombstone comments remain null in that intent, while the
+native clear-note presentation is empty; normalization does not rewrite provenance.
+Verdict effects admit only owned verdict-note payloads or normalized reading-label
+deltas. These are delivery receipts, never Pending approval or observed scientific
+truth. The former internal note-only request name is removed without an alias.
+
+`setup.py` also owns the closed internal `SetupLoadApprovalPolicy`, `LoadPolicyIdentity` and `EffectiveLoadEnvelope` file contracts. Strict integers exclude booleans/coercions; exact runtime identity/envelope matching remains service-owned. These add no public setup request fields.

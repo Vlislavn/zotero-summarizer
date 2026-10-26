@@ -41,9 +41,28 @@ def build_llm(
     extra_body: dict[str, Any] | None = None,
     request_timeout_seconds: float | None = None,
     structured_output: bool = False,
+    verification: bool = False,
+    before_request: Any = None,
+    request_owner: Any = None,
 ) -> InstrumentedLLMClient:
     from zotero_summarizer.integrations.llm_callbacks import CompletionGuard
 
+    if verification:
+        from urllib.parse import urlsplit
+
+        endpoint = urlsplit(model_url)
+        if (endpoint.scheme not in {"http", "https"} or not endpoint.hostname
+                or endpoint.path.lower().endswith((".gguf", ".bin"))):
+            raise ValueError("Verification requires an HTTP API, not model weights")
+    if verification and request_owner is None:
+        from functools import partial
+        from uuid import uuid4
+        from zotero_summarizer.integrations.llm_requests import RequestInventory, _generation_endpoint
+
+        inventory = RequestInventory(uuid4().hex, before_start=before_request)
+        request_owner = partial(inventory.expect, "direct-verification", model_name,
+                                _generation_endpoint(model_url, "/chat/completions"), local=False)
+    guard = CompletionGuard(expected_model=model_name if verification else None, request_owner=request_owner)
     llm_cls, _ = _load_onprem()
     kwargs: dict[str, Any] = dict(
         model_url=model_url,
@@ -53,13 +72,27 @@ def build_llm(
         max_tokens=max_tokens,
         mute_stream=True,
         verbose=False,
-        callbacks=[CompletionGuard()],
+        callbacks=[guard],
     )
     if extra_body:
         kwargs["extra_body"] = extra_body
     if request_timeout_seconds is not None:
         kwargs["timeout"] = request_timeout_seconds
-    return InstrumentedLLMClient(llm_cls(**kwargs), structured_output=structured_output)
+    transport = None
+    if verification:
+        from zotero_summarizer.integrations.llm_requests import verification_http_client
+
+        transport = verification_http_client(guard.transport_started)
+        kwargs.update(max_retries=0, cache=False, http_client=transport)
+    try:
+        inner = llm_cls(**kwargs)
+    except BaseException:
+        if transport is not None:
+            transport.close()
+        raise
+    return InstrumentedLLMClient(inner, structured_output=structured_output,
+                                 verification_guard=guard if verification else None,
+                                 owned_transport=transport, before_request=before_request)
 
 
 def build_pdf_extractor() -> OnPremPdfExtractor:

@@ -41,8 +41,14 @@ export async function saveAiCredential(name, apiKey) {
   });
 }
 
-export async function fetchDoctorStatus() {
-  return request(`${SETUP_BASE}/doctor`);
+export async function fetchDoctorStatus({ signal } = {}) {
+  return request(`${SETUP_BASE}/doctor`, { signal });
+}
+
+export async function cancelDoctor(runId) {
+  return request(`${SETUP_BASE}/doctor/cancel`, {
+    method: 'POST', body: JSON.stringify({ run_id: runId }),
+  });
 }
 
 export async function runDoctor(checkIds = null) {

@@ -1,14 +1,78 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, expect, it, vi } from 'vitest';
 import NavBar from './NavBar.jsx';
+import { resolveConflict } from '../offlineStore.js';
+import { syncNow } from '../syncClient.js';
 
 vi.mock('../offlineStore.js', () => ({
   publishStatus: vi.fn(), resolveConflict: vi.fn(), syncStatusEvent: 'zs-sync-status',
 }));
 vi.mock('../syncClient.js', () => ({ syncNow: vi.fn() }));
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+it('makes the weekly digest reachable from primary navigation', () => {
+  render(<MemoryRouter><NavBar /></MemoryRouter>);
+  expect(screen.getByRole('link', { name: 'Weekly' }).getAttribute('href')).toBe('/weekly');
+});
+
+it('does not claim a confirmed sync before evidence and offers an explicit retry', () => {
+  render(<MemoryRouter><NavBar /></MemoryRouter>);
+  expect(screen.getByRole('status').textContent).toMatch(/Connection not confirmed/);
+  expect(screen.queryByText('Synced')).toBeNull();
+  act(() => window.dispatchEvent(new CustomEvent('zs-sync-status', { detail: {
+    online: true, connection: 'unavailable', pending: 2, conflicts: [], rejected: [],
+    sync_error: 'Server unavailable', paper_count: 3,
+  } })));
+  expect(screen.getByText(/2 pending/)).toBeTruthy();
+  expect(screen.getByText(/Server unavailable/)).toBeTruthy();
+  expect(screen.getByText('Server unavailable. Device changes are retained. Check the app at this same address, then retry Sync now.')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Sync now' }));
+  expect(syncNow).toHaveBeenCalledOnce();
+});
+
+it('shows both conflict values and comments, and persists the explicit chosen resolution', async () => {
+  render(<MemoryRouter><NavBar /></MemoryRouter>);
+  act(() => window.dispatchEvent(new CustomEvent('zs-sync-status', { detail: {
+    online: false, pending: 0, rejected: [], conflicts: [{
+      mutation_id: 'conflict-uuid', item_key: 'P1', field: 'verdict', operation: 'set',
+      value: 'dont_read', comment: 'Weak validation',
+      canonical: { value: 'must_read', comment: 'Strong method' },
+    }],
+  } })));
+  expect(screen.getByLabelText('Server').value).toBe('Must read\n\nComment:\nStrong method');
+  expect(screen.getByLabelText('This device').value).toBe('Remove ❌\n\nComment:\nWeak validation');
+  expect(screen.getByLabelText('Server').rows).toBe(4);
+  expect(screen.getByLabelText('This device').rows).toBe(4);
+  expect(screen.getByRole('button', { name: 'Sync now' }).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Keep mine' }));
+  await waitFor(() => expect(resolveConflict).toHaveBeenCalledWith('conflict-uuid', true));
+  await waitFor(() => expect(syncNow).toHaveBeenCalledOnce());
+});
+
+it('surfaces a failed conflict save without claiming resolution', async () => {
+  resolveConflict.mockRejectedValueOnce(new Error('Storage denied'));
+  render(<MemoryRouter><NavBar /></MemoryRouter>);
+  act(() => window.dispatchEvent(new CustomEvent('zs-sync-status', { detail: {
+    online: true, pending: 0, rejected: [], conflicts: [{
+      mutation_id: 'note-uuid', item_key: 'P2', field: 'review_note',
+      value: 'My exact note', canonical: { value: 'Remote exact note' },
+    }],
+  } })));
+  fireEvent.click(screen.getByRole('button', { name: 'Use server' }));
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Resolution not saved: Storage denied'));
+  expect(screen.getByLabelText('This device').value).toBe('My exact note');
+  expect(syncNow).not.toHaveBeenCalled();
+});
+
+it('makes deployment limits and installation prerequisites visible without exposing a LAN setup', () => {
+  render(<MemoryRouter><NavBar /></MemoryRouter>);
+  fireEvent.click(screen.getByText('Offline use & installation'));
+  expect(screen.getByText(/iPhone\/iPad Safari/)).toBeTruthy();
+  expect(screen.getByText('The local app is loopback-only by default. Another device needs a separately supported authenticated HTTPS gateway; exposing a LAN port or bypassing origin/TLS guards is not a setup step.')).toBeTruthy();
+  expect(screen.getByText('PDFs, figures, AI answers, acquisition and rescoring are not synced. An app acknowledgement does not prove Zotero or another device received your changes.')).toBeTruthy();
+});
 
 it('wraps long stable keys in both rejected drafts and conflicts on mobile', () => {
   const key = `feed:g:${'b'.repeat(64)}`;

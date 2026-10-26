@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 from pathlib import Path
 import shutil
@@ -33,6 +34,28 @@ def _row(
         "detail": detail,
         "recovery": recovery,
     }
+
+
+def redact_diagnostics(value, secrets: list[str]):
+    if isinstance(value, dict):
+        return {key: redact_diagnostics(item, secrets) for key, item in value.items()}
+    if isinstance(value, list):
+        return [redact_diagnostics(item, secrets) for item in value]
+    if isinstance(value, str):
+        for secret in secrets:
+            value = value.replace(secret, "[redacted]")
+    return value
+
+
+def _optional_extras(_: Settings) -> dict[str, Any]:
+    browsers = importlib.util.find_spec("patchright") is not None
+    return _row(
+        "optional_extras", "ready" if browsers else "unavailable",
+        "Browser/PDF extras are available" if browsers else "Browser automation is optional and unavailable",
+        "Core local triage does not require browser automation.",
+        action="Install browser extras",
+        command=None if browsers else "uv sync --extra browser",
+    )
 
 
 def _environment(settings: Settings) -> dict[str, Any]:
@@ -152,6 +175,22 @@ def _database(settings: Settings) -> dict[str, Any]:
         f"installed={versions}; target={SCHEMA_VERSION}",
         action="Run migrations",
         command="uv run zotero-summarizer doctor --fix",
+    )
+
+
+def _saved_paths(settings: Settings) -> dict[str, str | None]:
+    from dotenv import dotenv_values
+
+    values = dotenv_values(settings.env_path) if settings.env_path.is_file() else {}
+    return {key: values.get(key) for key in ("ZOTERO_DATA_DIR", "PDF_ROOT")}
+
+
+def _restart_required(settings: Settings) -> bool:
+    saved = _saved_paths(settings)
+    return any(
+        raw and Path(raw).expanduser().resolve() != getattr(settings, attr).resolve()
+        for key, attr in (("ZOTERO_DATA_DIR", "zotero_data_dir"), ("PDF_ROOT", "pdf_root"))
+        if (raw := saved.get(key))
     )
 
 

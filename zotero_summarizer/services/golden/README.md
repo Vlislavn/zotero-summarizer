@@ -114,12 +114,19 @@ retryable; only unconfigured Zotero retains the optional local-first result.
 The previous review-note error-as-success fallback is removed. Other verdict
 enrichments retain their separately documented behavior.
 
-Verdict label and comment delivery now share the current alias-aware snapshot
-and writer lock. Set, clear, delete and old UUID replay cannot restore an older
-rationale. Empty/deleted comments clear an existing app-owned verdict note, but
+Verdict label and comment delivery share the current alias-aware snapshot and
+the existing system-mirror delivery owner. Closed positive-ID applying claims bind
+source/revision/target and backup before native dispatch; after that commit gap the
+owner reacquires the writer lock and rechecks intent, native plan and all claims.
+Known native outcomes commit as history before explicit deletion ACK. Uncertain
+completion blocks replay instead of fabricating success. Set, clear, delete and
+old UUID replay cannot restore an older rationale. Empty/deleted comments clear an existing app-owned verdict note, but
 do not create an empty child where none exists. Mirror failures propagate after
 the local commit, so offline retry retains its UUID. Only unconfigured Zotero is
 optional; the success response keeps its existing label/note result fields.
+Reconciliation no longer acknowledges tag absence by merely leaving a label
+context: the configured matching mirror must confirm both current native components.
+Read-only export without that writer leaves delivery pending, not falsely complete.
 
 When a verdict command receives no explicit original priority, it inherits only
 a recognized prior reading priority, otherwise storing `unknown`. A prior
@@ -134,3 +141,6 @@ missing/invalid originals raise. The existing short-circuit trace exposes
 `explicit_label`, so the UI explains the label instead of showing additive math.
 The shared short-circuit constructor also handles trash/veto; unlabeled scoring
 and final-label manual-override detection retain their existing semantics.
+
+[Feedback analysis](feedback_analysis/README.md) owns retained input capture,
+descriptive reports, the manual command and opt-in weekly scheduling/recovery.

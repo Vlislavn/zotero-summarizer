@@ -10,6 +10,7 @@ from zotero_summarizer.models import (
 from zotero_summarizer.services.library import _review_cache
 from zotero_summarizer.services.library.review_fleet import propose
 from zotero_summarizer.services.research_feed.card import build_card
+from tests.test_research_feed import _review
 
 
 MISS = GoalSummary(goal="Evaluation", retrieval_state="miss").model_dump()
@@ -33,7 +34,7 @@ def test_unknown_board_withholds_negative_action_in_proposal_and_weekly_card(boa
     card = build_card(
         ResearchCandidate(source_id="paper", source="fixture", title="Agent evaluation"),
         ResearchFeedTriage(include=True, score=3, confidence=0.5, rationale="Fixture"),
-        {"digest": DIGEST, "quality": QUALITY, "goal_summaries": board},
+        _review('paper', digest={**DIGEST, 'basis': 'full_text'}, quality=QUALITY, goal_summaries=board),
         ResearchProfile(themes=["Evaluation"], projects=["Harness"]),
     )
 

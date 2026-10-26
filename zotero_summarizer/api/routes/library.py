@@ -4,22 +4,27 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import Any, Literal
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from zotero_summarizer.api.errors import APIError
+from zotero_summarizer.models.paper_keys import validate_paper_item_key
 from zotero_summarizer.services.library import (
     deep_review,
     fulltext,
     paper_render,
     qa,
     reading_queue,
+    related,
+    review_questions,
     score_tags,
     university_access,
 )
 from zotero_summarizer.services.library.review_fleet import fleet as review_fleet
+from zotero_summarizer.services.search import discovery
 from zotero_summarizer.services.zotero.zotero import (
     get_library_reader,
     get_zotero_reader_or_raise,
@@ -54,6 +59,20 @@ class ReviewFleetRunRequest(BaseModel):
     item_keys: list[str] | None = Field(default=None, max_length=20)
 
 
+class RelatedAssessmentRequest(BaseModel):
+    consent_token: str = Field(min_length=64, max_length=64)
+    collection: str = Field(default="", max_length=100)
+    tag: str = Field(default="", max_length=200)
+    retry: bool = False
+
+
+class DiscoveryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    context_fingerprint: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    consent_token: str | None = Field(default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    retry: bool = False
+
+
 class RejectTagRequest(BaseModel):
     item_key: str = Field(..., min_length=1)
 
@@ -70,12 +89,47 @@ class AskPaperHistoryTurn(BaseModel):
     evidence_handle: dict[str, Any] | None = None
 
 
-class AskPaperRequest(BaseModel):
+class QuestionSubmissionRequest(BaseModel):
     item_key: str = Field(..., min_length=1)
     question: str = Field(..., min_length=1, max_length=2000)
+    origin: Literal["typed", "preset"] = "typed"
+    preset_id: str | None = Field(default=None, min_length=1)
+
+    @field_validator("item_key")
+    @classmethod
+    def valid_item_key(cls, value: str) -> str:
+        return validate_paper_item_key(value)
+
+    @field_validator("question")
+    @classmethod
+    def nonblank_question(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("question must not be blank")
+        return value
+
+    @field_validator("preset_id")
+    @classmethod
+    def nonblank_preset_id(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("preset_id must not be blank")
+        return value
+
+    @model_validator(mode="after")
+    def require_preset_id(self):
+        if self.origin == "preset" and self.preset_id is None:
+            raise ValueError("preset_id is required for preset questions")
+        return self
+
+
+class AskPaperRequest(QuestionSubmissionRequest):
+    submission_id: UUID | None = None
     # comprehensive (default; metadata+notes+body) | retrieval (top-k chunks) | full_text (raw body)
     mode: Literal["comprehensive", "retrieval", "full_text"] = Field(default="comprehensive")
     history: list[AskPaperHistoryTurn] = Field(default_factory=list, max_length=20)
+
+
+class SavePaperQuestionRequest(QuestionSubmissionRequest):
+    submission_id: UUID
 
 
 class PaperRenderBuildRequest(BaseModel):
@@ -88,6 +142,10 @@ class PaperRenderBuildRequest(BaseModel):
     # university/Chrome browser session. The acquired file is rendered from cache;
     # this route does not write an attachment back into Zotero.
     allow_acquire_missing: bool = Field(default=False)
+
+
+
+
 
 
 async def get_reading_queue(
@@ -116,6 +174,23 @@ async def get_reading_queue(
         include_read=include_read, limit=limit, refresh=refresh,
         collection=collection, tag=tag, search=search, semantic=semantic,
     )
+
+
+async def get_related_papers(item_key: str, collection: str = "", tag: str = "") -> dict[str, Any]:
+    return await asyncio.to_thread(related.related_papers, item_key, collection=collection, tag=tag)
+
+
+async def assess_related_papers(item_key: str, req: RelatedAssessmentRequest) -> dict[str, Any]:
+    return await asyncio.to_thread(related.assess_related, item_key, **req.model_dump())
+
+
+async def get_discovery(item_key: str) -> dict[str, Any]:
+    return await asyncio.to_thread(discovery.discovery_metadata, item_key)
+
+
+async def find_new_relevant(item_key: str, req: DiscoveryRequest) -> dict[str, Any]:
+    sess = await asyncio.to_thread(discovery.find_new, item_key, **req.model_dump())
+    return await asyncio.to_thread(discovery.discovery_view, sess)
 
 
 async def get_reading_queue_status() -> dict[str, Any]:
@@ -186,14 +261,72 @@ async def get_paper_render_pdf(item_key: str) -> FileResponse:
     return await _inline_file(paper_render.source_pdf_path, item_key, "application/pdf")
 
 
+def _question_payload(
+    req: QuestionSubmissionRequest, submission_id: UUID
+) -> dict[str, object]:
+    return {
+        "submission_id": str(submission_id),
+        "item_key": req.item_key,
+        "question": req.question,
+        "origin": req.origin,
+        "preset_id": req.preset_id,
+    }
+
+
+async def _question_receipt(row: dict[str, Any]) -> dict[str, Any]:
+    mirror = await asyncio.to_thread(review_questions.mirror_question, row["item_key"])
+    return {"question_saved": True, "question_submission": row, "question_mirror": mirror}
+
+
 async def ask_paper(req: AskPaperRequest) -> dict[str, Any]:
-    """Grounded Q&A about one paper using the local deep_review-stage model and
-    the benchmark-validated abstention prompt. ``answer`` is null when the model
-    abstains (the paper doesn't contain the answer)."""
-    return await asyncio.to_thread(
-        qa.ask_paper, req.item_key, req.question, mode=req.mode,
-        history=[turn.model_dump(mode="json") for turn in req.history],
+    """Save a durable question receipt before grounded paper Q&A."""
+    submission_id = req.submission_id or uuid4()
+    row = await asyncio.to_thread(
+        review_questions.save_question, _question_payload(req, submission_id)
     )
+    receipt = await _question_receipt(row)
+    try:
+        result = await asyncio.to_thread(
+            qa.ask_paper, req.item_key, req.question, mode=req.mode,
+            history=[turn.model_dump(mode="json") for turn in req.history],
+        )
+    except APIError as exc:
+        raise APIError(
+            error=exc.error,
+            message=exc.message,
+            status_code=exc.status_code,
+            details={**exc.details, **receipt},
+        ) from exc
+    except Exception as exc:
+        raise APIError(
+            error="qa_failed",
+            message="Question saved, but paper Q&A failed",
+            status_code=502,
+            details=receipt,
+        ) from exc
+    if not isinstance(result, dict) or "answer" not in result:
+        raise APIError(
+            error="qa_failed",
+            message="Question saved, but paper Q&A returned no answer result",
+            status_code=502,
+            details=receipt,
+        )
+    return result | receipt
+
+
+async def save_paper_question(req: SavePaperQuestionRequest) -> dict[str, Any]:
+    """Save a question without running paper Q&A."""
+    row = await asyncio.to_thread(
+        review_questions.save_question,
+        _question_payload(req, req.submission_id),
+    )
+    return await _question_receipt(row)
+
+
+async def get_paper_questions(item_key: str = Query(..., min_length=1)) -> dict[str, Any]:
+    """Read saved questions for one paper and its resolved key aliases."""
+    rows = await asyncio.to_thread(review_questions.list_questions, item_key)
+    return {"item_key": item_key, "questions": rows}
 
 
 async def run_deep_review(req: DeepReviewRunRequest) -> dict[str, Any]:
@@ -325,6 +458,10 @@ async def sync_score_ranks(req: RelTagSyncRequest) -> dict[str, Any]:
     return await asyncio.to_thread(score_tags.sync_score_ranks, force=req.force)
 
 
+router.add_api_route("/api/library/related/{item_key}/discover", get_discovery, methods=["GET"])
+router.add_api_route("/api/library/related/{item_key}/discover", find_new_relevant, methods=["POST"])
+router.add_api_route("/api/library/related/{item_key}", get_related_papers, methods=["GET"])
+router.add_api_route("/api/library/related/{item_key}/assess", assess_related_papers, methods=["POST"])
 router.add_api_route("/api/library/reading-queue", get_reading_queue, methods=["GET"])
 router.add_api_route("/api/library/reading-queue/status", get_reading_queue_status, methods=["GET"])
 router.add_api_route("/api/library/pdf/{item_key}", get_item_pdf, methods=["GET"])
@@ -334,6 +471,8 @@ router.add_api_route("/api/library/render/{item_key}/presentation", get_paper_pr
 router.add_api_route("/api/library/render/{item_key}/pdf", get_paper_render_pdf, methods=["GET"])
 router.add_api_route("/api/library/render/{item_key}/figures/{name}", get_paper_figure, methods=["GET"])
 router.add_api_route("/api/library/ask", ask_paper, methods=["POST"])
+router.add_api_route("/api/library/questions", save_paper_question, methods=["POST"])
+router.add_api_route("/api/library/questions", get_paper_questions, methods=["GET"])
 router.add_api_route("/api/library/deep-review/run", run_deep_review, methods=["POST"])
 router.add_api_route("/api/library/deep-review/status", get_deep_review_status, methods=["GET"])
 router.add_api_route("/api/library/review-fleet/run", run_review_fleet, methods=["POST"])

@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Triage from './Triage.jsx';
-import { fetchJobs, fetchJob, fetchCalibrationMetrics, fetchLatestResultFeedback } from '../api/triageApi.js';
+import { fetchJobs, fetchJob, cancelJob, fetchCalibrationMetrics, fetchLatestResultFeedback } from '../api/triageApi.js';
+import { triggerTriageBacklog, getTriageStatus } from '../api/dailyApi.js';
 
 vi.mock('../api/triageApi.js', () => ({
   fetchJobs: vi.fn(), fetchJob: vi.fn(), fetchCalibrationMetrics: vi.fn(), cancelJob: vi.fn(), submitResultFeedback: vi.fn(), fetchLatestResultFeedback: vi.fn(),
 }));
+vi.mock('../api/dailyApi.js', () => ({ triggerTriageBacklog: vi.fn(), getTriageStatus: vi.fn() }));
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); });
 
 it('labels observed triage feedback without claiming an unbiased gate audit', async () => {
@@ -62,6 +64,59 @@ it('lists active papers and keeps polling during cancellation until the threads 
   const calls = fetchJob.mock.calls.length;
   await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
   expect(fetchJob).toHaveBeenCalledTimes(calls);
+  client.clear();
+});
+
+it.each(['running', 'failed', 'completed'])(
+  'routes backlog to Today without confusing the %s selected-item job', async (status) => {
+    const job = { job_id: 'SELECTED-1', status, completed: status === 'completed' ? 1 : 0, total: 1,
+      active_items: [], results: [], errors: status === 'failed' ? [{ item_key: 'A', error: 'Selected-item failure' }] : [] };
+    fetchJobs.mockResolvedValue({ items: [job] });
+    fetchJob.mockResolvedValue(job);
+    fetchCalibrationMetrics.mockResolvedValue(null);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><Triage /></QueryClientProvider>);
+    await waitFor(() => expect(screen.getAllByText(status)).toHaveLength(2));
+
+    expect(screen.queryByRole('button', { name: 'Run triage now' })).toBeNull();
+    expect(screen.queryByText(/Triage started — check job list/)).toBeNull();
+    expect(screen.getByRole('link', { name: 'Today' }).getAttribute('href')).toBe('/today');
+    expect(screen.getByText(/Feed backlog triage/).textContent).toContain('separate from these jobs');
+    expect(screen.queryByText('Selected-item failure') !== null).toBe(status === 'failed');
+    expect(screen.queryByRole('button', { name: 'Cancel' }) !== null).toBe(status === 'running');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    await waitFor(() => expect(fetchJobs).toHaveBeenCalledTimes(2));
+    expect(fetchJob).toHaveBeenLastCalledWith('SELECTED-1');
+    expect(triggerTriageBacklog).not.toHaveBeenCalled();
+    expect(getTriageStatus).not.toHaveBeenCalled();
+    expect(cancelJob).not.toHaveBeenCalled();
+    client.clear();
+  },
+);
+
+it('cancels only the selected-item job through its existing API without claiming completion', async () => {
+  let job = { job_id: 'SELECTED-CANCEL', status: 'running', completed: 0, total: 1,
+    active_items: [], results: [], errors: [] };
+  fetchJobs.mockImplementation(async () => ({ items: [job] }));
+  fetchJob.mockImplementation(async () => job);
+  fetchCalibrationMetrics.mockResolvedValue(null);
+  cancelJob.mockImplementation(async (jobId) => {
+    job = { ...job, status: 'cancelling' };
+    return { job_id: jobId, status: 'cancelling', cancelled: false };
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><Triage /></QueryClientProvider>);
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+
+  await waitFor(() => expect(cancelJob).toHaveBeenCalledWith('SELECTED-CANCEL'));
+  expect(cancelJob).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(screen.getAllByText('cancelling')).toHaveLength(2));
+  expect(screen.queryByText('cancelled')).toBeNull();
+  expect(screen.queryByText('completed')).toBeNull();
+  expect(triggerTriageBacklog).not.toHaveBeenCalled();
   client.clear();
 });
 

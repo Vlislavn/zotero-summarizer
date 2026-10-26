@@ -106,7 +106,7 @@ def test_provider_is_local_detects_loopback():
     assert not mk("https://remote.example/v1").is_local
     assert not mk("https://openrouter.ai/api/v1").is_local
     assert not mk("https://api.openai.com/v1").is_local
-    # anthropic is always cloud, even with no base_url
+    # Native Anthropic without a custom endpoint uses its hosted default.
     assert not ProviderConfig(name="c", type=ProviderType.anthropic, api_key_env="K").is_local
 
 
@@ -423,7 +423,7 @@ def test_factory_missing_key_raises_apierror(monkeypatch):
     from zotero_summarizer.services.llm import factory
 
     monkeypatch.delenv("LOCAL_KEY", raising=False)
-    provider = ProviderConfig(name="local", base_url="http://localhost/v1", api_key_env="LOCAL_KEY")
+    provider = ProviderConfig(name="hosted", base_url="https://example.test/v1", api_key_env="LOCAL_KEY")
     with pytest.raises(APIError) as ei:
         factory.build_client_for_provider(provider, "m")
     assert ei.value.error == "missing_api_key" and ei.value.status_code == 400
@@ -435,23 +435,19 @@ def test_operational_check_reports_per_stage_status(monkeypatch):
     from zotero_summarizer.services.llm import operational_check
 
     routing = _routing(deep_review=StageModelConfig(provider="claude", model="claude-opus-4-8"))
+    routing.providers[0].base_url = "https://example.test/v1"  # local inference now requires envelope evidence
     fake_state = types.SimpleNamespace(app_state=types.SimpleNamespace(config=types.SimpleNamespace(llm_routing=routing)))
     monkeypatch.setattr(operational_check, "state", lambda: fake_state)
 
-    class _OkClient:
-        def prompt(self, _p):
-            return "ok"
-
+    from tests._setup_request_events import observed_client
     calls = []
 
-    def _fake_build(provider, model):
+    def _fake_build(provider, model, *, verification):
+        assert verification
         calls.append((provider.name, model))
-        # The deep_review stage routes to the anthropic ("claude") provider —
-        # simulate that endpoint being unreachable (the shared probe_provider now
-        # builds per provider+model, not per resolved-stage object).
         if provider.type == ProviderType.anthropic:
             raise RuntimeError("connection refused")
-        return _OkClient()
+        return observed_client(provider, model)
 
     monkeypatch.setattr(operational_check, "build_client_for_provider", _fake_build)
 
@@ -461,7 +457,8 @@ def test_operational_check_reports_per_stage_status(monkeypatch):
     assert by_stage["feed"]["status"] == "operational"
     assert by_stage["backlog"]["status"] == "operational"
     assert by_stage["deep_review"]["status"] == "fail"
-    assert "connection refused" in by_stage["deep_review"]["detail"]
+    assert by_stage["deep_review"]["reason_code"] == "inference_failed"
+    assert by_stage["deep_review"]["ownership"] == "not_submitted"
     assert calls.count(("local", "base-model")) == 1
 
 

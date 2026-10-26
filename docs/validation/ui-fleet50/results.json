@@ -1,0 +1,218 @@
+{
+  "schema_version": 1,
+  "task": "UI fleet50 and verified workflow hardening",
+  "verification_base_commit": "cbb59e3dc1eb23a3f31b1302772c2084126c4b7f",
+  "verified_code_binding": {
+    "algorithm": "SHA256 of compact sorted JSON mapping in source-manifest.json; verify each repository-relative file byte digest, null means absent",
+    "sha256": "e51e61810245c0a3dcc44fdb32219011d57d5e944e0982bfe4410fd5ca14d9e8",
+    "paths": 1345,
+    "deleted_paths": [
+      "frontend/src/components/paper/RelatedLibrary.test.jsx"
+    ],
+    "scope": "Runtime/tests/build/config source unchanged on publication; only README/CHANGELOG/audit documentation added after verification.",
+    "full_map": "source-manifest.json"
+  },
+  "counts": {
+    "wholePython": {
+      "cases": 10875,
+      "passed": 10709,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 166
+    },
+    "frontend": {
+      "passed": 973,
+      "selectors": 110
+    },
+    "originalAuditorsRunningSimultaneously": 50,
+    "canonicalNativeManagedReportsByteExact": 100,
+    "canonicalFeaturesWithCurrentLinkedExecution": 25,
+    "passedMainSkipIdsSeparately": 154,
+    "remainingOptionalIds": 12,
+    "builtApplication": {
+      "coreCases": 98,
+      "extraAnchorRepeated": 1,
+      "additionalNativeDOMJourney": 1,
+      "widths": [
+        390,
+        1440
+      ]
+    },
+    "SDKNative": {
+      "cases": 26,
+      "ownedTCPSubset": 6
+    },
+    "optional": {
+      "browserPDF": 18,
+      "viteAST_ASGI": 4,
+      "explicitHTML": 8
+    },
+    "build": true,
+    "precommitAll": true,
+    "precommitUntrackedInputs": 20,
+    "lint": {
+      "errors": 0,
+      "warnings": 13
+    }
+  },
+  "remaining_optional": [
+    {
+      "identity": [
+        "",
+        "tests.test_telegram_adapter"
+      ],
+      "reason": "collection skipped"
+    },
+    {
+      "identity": [
+        "",
+        "tests.test_telegram_adapter_collect"
+      ],
+      "reason": "collection skipped"
+    },
+    {
+      "identity": [
+        "tests.test_review_real_contract",
+        "test_frozen_real_review_retention[1024-0]"
+      ],
+      "reason": "private frozen real-input manifest required"
+    },
+    {
+      "identity": [
+        "tests.test_review_real_contract",
+        "test_frozen_real_review_retention[1024-1]"
+      ],
+      "reason": "private frozen real-input manifest required"
+    },
+    {
+      "identity": [
+        "tests.test_review_real_contract",
+        "test_frozen_real_review_retention[1024-2]"
+      ],
+      "reason": "private frozen real-input manifest required"
+    },
+    {
+      "identity": [
+        "tests.test_review_real_contract",
+        "test_frozen_real_review_retention[1440-0]"
+      ],
+      "reason": "private frozen real-input manifest required"
+    },
+    {
+      "identity": [
+        "tests.test_review_real_contract",
+        "test_frozen_real_review_retention[1440-1]"
+      ],
+      "reason": "private frozen real-input manifest required"
+    },
+    {
+      "identity": [
+        "tests.test_review_real_contract",
+        "test_frozen_real_review_retention[1440-2]"
+      ],
+      "reason": "private frozen real-input manifest required"
+    },
+    {
+      "identity": [
+        "tests.test_review_real_contract",
+        "test_frozen_real_review_retention[390-0]"
+      ],
+      "reason": "private frozen real-input manifest required"
+    },
+    {
+      "identity": [
+        "tests.test_review_real_contract",
+        "test_frozen_real_review_retention[390-1]"
+      ],
+      "reason": "private frozen real-input manifest required"
+    },
+    {
+      "identity": [
+        "tests.test_review_real_contract",
+        "test_frozen_real_review_retention[390-2]"
+      ],
+      "reason": "private frozen real-input manifest required"
+    },
+    {
+      "identity": [
+        "tests.test_telegram_runtime",
+        "test_optional_actual_m2a_leaf_through_m3_and_sqlite"
+      ],
+      "reason": "could not import 'telethon': No module named 'telethon'"
+    }
+  ],
+  "receipts": [
+    {
+      "artifact": "validation-290-final-regression/lab/lanes/audit-50-full-regression/attempt-01-pytest-1d5d8be6/junit.xml",
+      "sha256": "4975d7a76ebfc491616296239c0ec44f9a5fab8670e83b21293cb0c3405a5b1d",
+      "cases": 10875
+    },
+    {
+      "artifact": "validation-290-final-regression/lab/lanes/preparation/attempt-01-vitest-8c5a3a81/vitest.json",
+      "sha256": "dde61280ad65ef2948c988d9cc229f67edd1e14d7132bb905f59ed36e911e9e5",
+      "cases": 973
+    },
+    {
+      "artifact": "validation-292-final-application-browser/lab/lanes/preparation/attempt-02-browser-ef381d71/junit.xml",
+      "sha256": "ace025e0934c6f07b2a117134dfaaeb7654c7c9d0fd78b8ab8324a7b91fba6e4",
+      "cases": 98
+    },
+    {
+      "artifact": "validation-292-final-application-browser/lab/lanes/preparation/attempt-03-browser-4a405af5/junit.xml",
+      "sha256": "85f27f8bf19ce433880ed002ca93e95dbb71ef0f2bc8912a656c62571336a39b",
+      "cases": 2
+    },
+    {
+      "artifact": "validation-293-final-optional/lab/lanes/preparation/attempt-01-browser-249fa918/junit.xml",
+      "sha256": "46f19db8cc998c851eeaf1ec4fbbb8f04ca25e6f9d4e542543374cdca9721ce0",
+      "cases": 18
+    },
+    {
+      "artifact": "validation-293-final-optional/lab/lanes/preparation/attempt-02-pytest-6658530c/junit.xml",
+      "sha256": "22c4624a221ab208c2249c49e21fbd5df643dd1973f06b25cd234530d875ce2d",
+      "cases": 4
+    },
+    {
+      "artifact": "validation-293-final-optional/lab/lanes/preparation/attempt-03-browser-2524da37/junit.xml",
+      "sha256": "c98b2cdc14e6ef8359d5e97840f918240906a756970c7e12a64bec55c96a6e05",
+      "cases": 8
+    },
+    {
+      "artifact": "validation-294-final-native-sdk/source/data/issue129-validation/native-294/sandbox/junit.xml",
+      "sha256": "b523bbd3f4fc10d56f84075a6a95a89e10077c48b29e981822a6d9b6bc978715",
+      "cases": 26
+    }
+  ],
+  "provenance": {
+    "original_50_overlap_witness_sha256": "188f8726657d6f0e67d80f3ed851ce72edece341d43bab5ebca4e1b18880b58a",
+    "parent_final_proof_sha256": "d099d1bf7b5681b1b9dc9c5db7a258f040789267dbdc2d7081230a5aa631dc9c",
+    "raw_artifacts": "Retained locally, not uploaded: may include machine paths. Logical paths/hashes above identify original receipts, not downloadable attachments."
+  },
+  "readiness": {
+    "ready_for": "Initial manual UAT on a separate project and disposable/copied Zotero library",
+    "human_uat_performed": false,
+    "production_approved": false,
+    "not_verified": [
+      "Live app credentials/accounts and native Zotero GUI",
+      "Local LLM effective executing-runtime envelope/hardware safety and model quality",
+      "Private frozen real-input corpus and optional Telethon-dependent scenarios",
+      "Owner-authenticated HTTPS deployment and scientific correctness"
+    ]
+  },
+  "publication_checks": {
+    "staged_make_lint": {
+      "returncode": 0,
+      "gates": 9,
+      "log_sha256": "a7290c7541f0d6603c043b66ca45ae8e4cd557bfedab48ea40002de58dc621f0"
+    },
+    "owned_cli_app_construction": {
+      "returncode": 0,
+      "ok": true,
+      "route_count": 133,
+      "entrypoint": "zotero-summarizer smoke-test --project-root <disposable-project>",
+      "log_sha256": "38972e82e86441cdca6bf53e7b3d43d5de8d8d72a9d8df73b8a77514ce0dc08d",
+      "scope": "App construction only; no lifespan/server startup or model inference",
+      "initial_invocation_refusal": "python -m zotero_summarizer: no __main__; refused before work, corrected to installed CLI without source changes"
+    }
+  }
+}

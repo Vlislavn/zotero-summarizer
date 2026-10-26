@@ -22,7 +22,7 @@ function formatDuration(seconds) {
 // unreachable model, and an already-running review. Shared by Library + Annotate.
 export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true, compact = false }) {
   const [focusPrompt, setFocusPrompt] = useState('');
-  const { status, error, llm, llmAvailable, online, running, run } = useDeepReviewRunner(itemKey, { deep, onDone });
+  const { status, error, llm, llmAvailable, online, running, run, retryStatus, checkingStatus } = useDeepReviewRunner(itemKey, { deep, onDone });
   const reviewed = deep && !deep.needs_pdf && (deep.digest || deep.quality || (deep.goal_summaries || []).length);
   return (
     <div className="space-y-3">
@@ -80,7 +80,7 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
           <button
             type="button"
             onClick={() => run({ focusPrompt })}
-            disabled={running || !llmAvailable}
+            disabled={running || !llmAvailable || status.status === 'unavailable' || checkingStatus}
             className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-teal-700 text-white text-[13px] font-semibold hover:bg-teal-800 disabled:opacity-50"
             title="Run a condensed full-text digest (what it's about + how to use it + quality)"
           >
@@ -116,7 +116,13 @@ export default function DeepReviewSection({ itemKey, deep, onDone, hasPdf = true
       )}
       <ReviewFailure status={status} label="Deep review failed" />
       {online && status.status === 'unavailable' && status.error && (
-        <div className="text-[12px] text-amber-800" role="status">Review status unavailable: {status.error}</div>
+        <div className="space-y-1 text-[12px] text-amber-800" role="status">
+          <div>Review status unavailable: {status.error}. The server job may still be running.</div>
+          <button type="button" onClick={retryStatus} disabled={checkingStatus}
+            className="font-semibold underline disabled:opacity-50">
+            Retry status
+          </button>
+        </div>
       )}
       {error && <div className="text-[12px] text-rose-700">{error}</div>}
     </div>

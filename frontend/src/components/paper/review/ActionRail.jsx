@@ -4,6 +4,7 @@ import CollectionEditor from '../CollectionEditor.jsx';
 import TagOfInterestEditor from '../TagOfInterestEditor.jsx';
 import AskPaperBox from '../../library/AskPaperBox.jsx';
 import { Disclosure } from './primitives.jsx';
+import useNoteDelivery from '../../../hooks/useNoteDelivery.js';
 
 // The persistent decision rail for the story page: the verdict editor (the day's
 // primary action), one-tap filing into Read Next, tags behind a fold, and the
@@ -12,9 +13,11 @@ import { Disclosure } from './primitives.jsx';
 // editors verbatim; the chat reuses AskPaperBox in its always-open "rail" variant
 // (same grounded/abstaining logic, no re-generation).
 export default function ActionRail({
-  itemKey, detail, collections, verdict, onTagsChanged, onCollectionsChanged, hasPdf, canAsk = hasPdf,
-  onNoteSaved = () => {}, onNotesDirtyChange = () => {},
+  itemKey, detail, collections, verdict, onTagsChanged, onCollectionsChanged, hasPdf,
+  onNoteSaved = () => {}, onNotesDirtyChange = () => {}, serverAvailable = false,
 }) {
+  const remoteAllowed = serverAvailable && !detail.offline_snapshot;
+  const { questionMirror, beginNoteDelivery } = useNoteDelivery(itemKey, detail.user_note || '', detail.questions || []);
   return (
     <div className="space-y-5">
       <VerdictPanel
@@ -33,10 +36,15 @@ export default function ActionRail({
         <ReviewNotes
           itemKey={itemKey}
           initialNote={detail.user_note || ''}
+          questions={detail.questions || []}
+          questionMirror={questionMirror}
+          onMirrorStart={beginNoteDelivery}
           onSaved={onNoteSaved}
           onDirtyChange={onNotesDirtyChange}
         />
       </div>
+      {detail.offline_snapshot && <p className="text-xs text-slate-500">Compact synced context; collection and tag state needs the Mac.</p>}
+      {!detail.offline_snapshot && <fieldset disabled={!remoteAllowed} className="space-y-5 min-w-0">
       <div className="border-t border-slate-200/60 pt-4">
         <CollectionEditor
           itemKey={itemKey}
@@ -50,11 +58,10 @@ export default function ActionRail({
           <TagOfInterestEditor itemKey={itemKey} tags={detail.tags} onChanged={onTagsChanged} />
         </Disclosure>
       </div>
-      {canAsk && (
-        <div className="border-t border-slate-200/60 pt-4">
-          <AskPaperBox itemKey={itemKey} variant="rail" allowRawPdfModes={hasPdf} />
-        </div>
-      )}
+      </fieldset>}
+      <div className="border-t border-slate-200/60 pt-4">
+        <AskPaperBox itemKey={itemKey} variant="rail" allowRawPdfModes={hasPdf} onSaved={onNoteSaved} onMirrorStart={beginNoteDelivery} />
+      </div>
     </div>
   );
 }

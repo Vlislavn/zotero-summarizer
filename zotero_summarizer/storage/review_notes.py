@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 from zotero_summarizer.storage import repositories
 
 
-def _keys(conn, item_key):
+def resolve_item_key_aliases(conn, item_key):
+    """Return the unambiguous feed/library identity family for a paper."""
     rows = conn.execute(
         """WITH RECURSIVE
         legacy(a, b) AS (
@@ -45,12 +46,12 @@ def _current(conn, keys):
               SELECT 1 FROM sync_changes s WHERE s.item_key = n.item_key AND s.field = 'review_note')
             ORDER BY revision DESC, changed_at DESC, item_key LIMIT 1""", (*keys, *keys),
     ).fetchone()
-    return dict(row) if row else None
+    return dict(zip(("item_key", "value", "revision", "changed_at"), row)) if row else None
 
 
 def current(conn, item_key):
     """Current value/revision; a deletion remains authoritative across aliases."""
-    row = _current(conn, _keys(conn, item_key))
+    row = _current(conn, resolve_item_key_aliases(conn, item_key))
     return row if row is not None else {"item_key": item_key, "value": None, "revision": 0}
 
 
@@ -75,6 +76,9 @@ def write(conn, item_key, note):
                ON CONFLICT(item_key) DO UPDATE SET note=excluded.note, updated_at=excluded.updated_at""",
             (key, note, datetime.now(timezone.utc).isoformat()),
         )
+    from zotero_summarizer.storage import review_note_projection
+
+    review_note_projection.stage(conn, item_key)
 
 
 def snapshots(conn):
@@ -87,7 +91,7 @@ def snapshots(conn):
     for seed in seeds:
         if (seed[0], "review_note") in fields:
             continue
-        keys = _keys(conn, seed[0])
+        keys = resolve_item_key_aliases(conn, seed[0])
         row = _current(conn, keys)
         for key in keys:
             fields[(key, "review_note")] = {

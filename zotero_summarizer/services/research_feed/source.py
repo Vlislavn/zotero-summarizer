@@ -2,11 +2,151 @@
 from __future__ import annotations
 
 import sqlite3
+import json
+import math
 from collections.abc import Iterable, Iterator
 from datetime import datetime
 from itertools import islice
 
 from zotero_summarizer.models import ResearchCandidate
+from zotero_summarizer.domain import normalize_doi
+from zotero_summarizer.services.library.app_library_reader import AppLibraryReader
+from zotero_summarizer.storage import feeds as fs
+
+
+_NATIVE_RULES = {
+    fs.DECISION_SELECTED: ("eligible", "selected"),
+    fs.DECISION_USER_REJECTED: ("excluded", "native_veto"),
+    fs.DECISION_GATE_REJECTED: ("excluded", "native_veto"),
+    fs.DECISION_REJECTED_LOW_SCORE: ("excluded", "native_veto"),
+    fs.DECISION_REJECTED_DEDUP_LIBRARY: ("excluded", "duplicate"),
+    fs.DECISION_REJECTED_DEDUP_PROCESSED: ("excluded", "duplicate"),
+    fs.DECISION_SKIPPED_ERROR: ("failed", "skipped_error"),
+    fs.DECISION_TRIAGED_PENDING: ("rule", "triage_rule"),
+    fs.DECISION_AWAITING_REVIEW: ("rule", "triage_rule"),
+    fs.DECISION_REJECTED_DAILY_CUTOFF: ("rule", "triage_rule"),
+    fs.DECISION_REJECTED_ELBOW: ("rule", "triage_rule"),
+    fs.DECISION_USER_APPROVED: ("rule", "triage_rule"),
+    fs.DECISION_BLACK_SWAN: ("rule", "triage_rule"),
+}
+
+
+def native_decision(value):
+    return value if isinstance(value, str) and value in _NATIVE_RULES else None
+
+
+def native_admission(triage, decision, *, native):
+    if native and decision is None:
+        return {"status": "failed", "reason": "invalid_native_decision", "native_decision": None}
+    status, reason = _NATIVE_RULES[decision] if native else ("rule", "triage_rule")
+    if status == "rule":
+        status = "eligible" if triage.include else "excluded"
+    return {"status": status, "reason": reason, "native_decision": decision}
+
+
+class CandidateReader(AppLibraryReader):
+    """Explicit weekly selection, including RSS papers without processed history."""
+    def __init__(self, db_path, candidates):
+        super().__init__(db_path)
+        self.candidates = {candidate.source_id: candidate for candidate in candidates}
+
+    def get_item_detail(self, item_key):
+        candidate = self.candidates[item_key]
+        return {**(super().get_item_detail(item_key) or {}), "item_key": item_key,
+                "title": candidate.title, "abstract": candidate.abstract, "doi": candidate.doi or "",
+                "url": candidate.url, "authors": candidate.authors, "pdf_path": None, "has_pdf": False}
+
+
+def number(value, default=0.0, minimum=0.0, maximum=5.0):
+    if value is None:
+        return default
+    try:
+        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+            raise ValueError()
+        result = float(value)
+        if not math.isfinite(result) or not minimum <= result <= maximum:
+            raise ValueError()
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise ValueError("stored triage number is invalid") from exc
+    return result
+
+
+def summary(row, field="summary"):
+    raw = (row or {}).get("shap_contribs_json")
+    if raw is None:
+        return {}
+    try:
+        if not isinstance(raw, str):
+            raise ValueError()
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise ValueError()
+        value = payload.get(field)
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError()
+    except (ValueError, TypeError) as exc:
+        raise ValueError("stored triage summary is invalid JSON") from exc
+    return value
+
+
+def admit_history(candidate, row):
+    entry = {"history": "missing", "reason": "no_prior_history",
+             "text_basis": "rss" if candidate.abstract.strip() else "not_available",
+             "currentness": "not_attested", "content_version": "not_attested"}
+    if row is None:
+        return candidate, entry
+    stored_doi, abstract = row.get("doi"), row.get("abstract")
+    reason = None
+    if row.get("stable_feed_key") != candidate.source_id:
+        reason = "history_source_key_mismatch"
+    elif row.get("source_type") != "app_rss":
+        reason = "history_source_type_unverifiable"
+    elif not candidate.title.strip() or row.get("title") != candidate.title:
+        reason = "history_title_mismatch"
+    elif stored_doi is not None and not isinstance(stored_doi, str):
+        reason = "history_doi_mismatch"
+    elif stored_doi and candidate.doi and normalize_doi(stored_doi) != normalize_doi(candidate.doi):
+        reason = "history_doi_mismatch"
+    elif abstract is not None and not isinstance(abstract, str):
+        reason = "history_abstract_unverifiable"
+    elif abstract and abstract.strip() and candidate.abstract.strip() and abstract != candidate.abstract:
+        reason = "history_abstract_conflict"
+    if reason:
+        return candidate, {**entry, "history": "withheld", "reason": reason}
+    entry.update(history="accepted", reason="identity_compatible")
+    if type(row.get("id")) is int:
+        entry["row_id"] = row["id"]
+    for field in ("run_id", "model_version", "created_at", "updated_at"):
+        value = row.get(field)
+        entry[field] = value if isinstance(value, str) else None
+    if not candidate.abstract.strip() and abstract and abstract.strip():
+        entry.update(text_basis="stored", original_rss_abstract=candidate.abstract)
+        candidate = candidate.model_copy(update={"abstract": abstract})
+    return candidate, entry
+
+
+def source_history_metadata(candidates, entries, records, missing, rejected, unqualified=()):
+    homes = [(f"/cards/{index}/candidate", row["candidate"]) for index, row in enumerate(records)]
+    homes += [(f"/manual_full_text_required/{index}", row) for index, row in enumerate(missing)]
+    homes += [(f"/rejected_near_threshold/{index}/candidate", row["candidate"])
+              for index, row in enumerate(rejected)]
+    homes += [(f"/unqualified_reviews/{index}/candidate", row["candidate"])
+              for index, row in enumerate(unqualified)]
+    history = {}
+    for candidate in candidates:
+        body = candidate.model_dump(mode="json")
+        references = [pointer for pointer, value in homes if value == body]
+        if len(references) > 1:
+            raise ValueError("source candidate has multiple publication homes")
+        entry = dict(entries[candidate.source_id])
+        if references:
+            entry["candidate_ref"] = references[0]
+        else:
+            entry["candidate"] = body
+        history[candidate.source_id] = entry
+    return history
 
 
 def _parse_date(value: object) -> datetime | None:

@@ -1,7 +1,13 @@
 # services — business logic, grouped by domain
 
-All the real work lives here. Modules are grouped into five domains plus a
-small set of shared/infra files at the top level.
+Verification adapters pass explicit per-invocation request ownership to the native
+client boundary. Setup owns safety-state persistence; integration callbacks do not
+import services. Ordinary LLM construction, cache and user-facing consent owners
+remain separate from verification and its cleanup.
+
+Domain workflows live here alongside shared infrastructure at the top level.
+The canonical package map is [docs/architecture.md](../../docs/architecture.md#code-map);
+each package README owns its detailed contract.
 
 Startup RSS limits are read when scheduling, after the project `.env` loads;
 partial feed failures are returned by the reader and logged with the result.
@@ -20,7 +26,9 @@ changes cannot expose the trainer to a half-migrated embedding table.
 
 `lifecycle.startup(background=False)` initializes dry-run clients/caches but
 does not resume persisted jobs, refresh RSS, train/rescore the gate, import the
-corpus or launch prewarm workers. The feed dry-run CLI uses this mode; an absent
+corpus or launch prewarm workers. Startup prepares the existing OpenAlex cache
+schema even when optional metadata clients are disabled, so first Discovery client
+construction cannot mutate the corpus DB after its context fingerprint was read. The feed dry-run CLI uses this mode; an absent
 or incompatible required cached gate fails explicitly instead of training.
 
 ```
@@ -36,19 +44,11 @@ or incompatible required cached gate fails explicitly instead of training.
    research_feed/ ──projects existing RSS + deep reviews──> weekly digest
 ```
 
-| domain | what it owns |
-|---|---|
-| `model/` | the relevance gate: classifier, scoring blend, eval, tuning, active-learning |
-| `golden/` | labels & ground truth: golden dataset, provenance, hybrid GT, relabel audit |
-| `triage/` | the RSS daemon pipeline: feeds, summarization, selection, daily slate |
-| `library/` | Stage-2 reading: reading queue, deep/quality review, paper-read artifacts, feed review |
-| `search/` | Targeted Search — the query-driven *pull* surface (vs triage/library's *push*): topic → per-source query plan → concurrent federation (arXiv/EuropePMC/OpenAlex) → version-family dedup → cross-encoder query score under a constrained re-rank contract → light-review tier (quality before deep-set selection) → query-lensed deep read. Composes `library`'s read-only review layers; the only Zotero write is the explicit *Add to library* action (`materialize.py`). See `search/README.md`. |
-| `sync/` | same-machine local-first PWA boundary: compact paper snapshots + durable cursor pull; ordered UUID verdict/note mutations with per-field conflicts and explicit auditable resolution; applied writes share online training/materialization/Zotero effects. Remote mobile remains disabled-by-deployment until auth + HTTPS exist |
-| `research_feed/` | bounded weekly Research Intelligence: profile/taxonomy, RSS adapter, existing deep-review reuse, engineering cards, JSON/Markdown, and opt-in idempotent tag queue |
-| `zotero/` | write path: pending changes, note rendering, Zotero read helpers |
-| `llm/` | provider presets, OS-keyring/env credential resolution, per-stage clients, model discovery and operational checks. See `llm/README.md`. |
-| `faithbench/` | faithfulness mini-benchmark for the deep-review / paper-Q&A pipeline: span-verified QA + trap questions + review-claim grounding, hard-before-soft judging with a pinned remote judge. CLI-driven (`faithbench build/run/judge/report`); artifacts under `data/faithbench/`. See `faithbench/README.md`. |
-| `setup/` | first-run setup + onboarding: readiness `status`, read-only Zotero-dir `detect`, allowlisted `.env` path `env_writer` (byte-preserving; only `PDF_ROOT`/`ZOTERO_DATA_DIR`), dry-run config `validate`, and the Phase-0 `bootstrap` (creates absent `goals.yaml`/`.env`, runs the DB migration). Backs BOTH `/api/setup/*` and `zotero-summarizer setup`. Secrets never read as a value. See `setup/README.md`. |
+Setup-only `_adapters.build_llm(verification=True)` owns an HTTP transport with
+retries, cache, environment proxies and redirects disabled. It installs the
+observed model/terminal guard before OnPrem discards metadata and closes the
+transport on construction failure or callback completion. Ordinary clients keep
+their prior options; all setup local-LLM requests must first pass admission.
 
 Shared files: `_common` (helpers: settings/logging/sqlite-ro/now_iso_z/html_to_text/
 `load_golden_rows` (delegates to `golden.csv_store.read_snapshot`), `atomic_write` (callback) + `write_json_atomic`
@@ -76,7 +76,10 @@ configured request timeout and per-provider `temperature` (default 0, determinis
 registers the completion guard before OnPrem discards finish reason/token usage;
 `build_pdf_extractor`.
 All LLM clients are constructed through `services/llm/factory`, which calls
-`build_llm` for `openai`-type providers), `lifecycle` (startup composition root — small `_init_*`
+`build_llm` for `openai`-type providers. Its `resolve_stage_client(runtime_state,
+stage, ...)` owns snapshot/identity checks and lazy cache admission; `RuntimeState`
+retains cache/lock/generation/invalidation and models-only provider metadata,
+without importing services or API code), `lifecycle` (startup composition root — small `_init_*`
 builders wire each singleton onto `RuntimeState`; LLM clients are NOT built here,
 they resolve lazily per stage so startup never depends on a provider being reachable;
 `_init_metadata_clients` builds the THREE optional network clients — OpenAlex prestige,
@@ -151,7 +154,10 @@ counterfactual cohort, model-version attribution or sampling weights are claimed
 
 An enabled corpus requires a working encoder: startup and config updates propagate
 load/encode failures, without fallback vectors. A disabled corpus does not load
-the encoder or rewrite goals. Background corpus import logs and rethrows failures
+the encoder or rewrite goals. Targeted post-edit refresh also skips reader/cache,
+lock and inferred-feedback I/O while corpus is OFF; it does not undo the preceding
+native edit. Missing reader/cache still returns before configuration access.
+Background corpus import logs and rethrows failures
 to the task owner/event loop instead of reporting a successful partial import.
 
 Background corpus import reads the existing whole-library listing once, unions

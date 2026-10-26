@@ -3,8 +3,8 @@ module under the 500-LOC cap.
 
 ``extra_layers`` runs the three INDEPENDENTLY-SKIPPABLE layers that sit on top of
 the core digest: section extraction, paper-type detection, reference-free quality
-eval, and goal-conditioned summaries. Each failure degrades to no panel / no board
-rather than blocking the digest — the broad excepts are the background-worker
+eval, and goal-conditioned summaries. Quality failure remains explicitly unassessed;
+other optional failures omit panels/boards — the broad excepts are the background-worker
 boundary ``deep_review`` already uses.
 """
 from __future__ import annotations
@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import Any
+
+from zotero_summarizer.models import QualityEval
 
 LOGGER = logging.getLogger(__name__)
 
@@ -39,13 +41,13 @@ class ExtraLayersCtx:
 
 def extra_layers(
     ctx: ExtraLayersCtx,
-) -> tuple[dict[str, Any] | None, list[dict[str, Any]] | None, dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
+) -> tuple[dict[str, Any], list[dict[str, Any]] | None, dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
     """Paper-type detection + reference-free quality eval + goal-conditioned summaries
     + the section overlay (findings located onto the paper's own sections) + the
     validated code-repository link.
 
-    Each is an INDEPENDENTLY-SKIPPABLE layer (per the design): a failure degrades
-    to no panel / no board rather than blocking the digest. The broad excepts are
+    Each is optional: quality failure returns an explicit unassessed result;
+    other failures omit panels/boards without blocking the digest. The broad excepts are
     the background-worker boundary the rest of this module already uses."""
     from pathlib import Path
 
@@ -70,13 +72,13 @@ def extra_layers(
     # The rubric yes/no checks, overstatement, and self-verify are known-cheap by
     # identity — ride the light (feed) model, not the digest's reasoning model.
     llm_light = ctx.llm_light or ctx.llm
-    quality_dump: dict[str, Any] | None = None
     try:
         from zotero_summarizer.services.library import quality_eval
         ps = ctx.prestige or {}
         quality = quality_eval.evaluate_quality(
             title=ctx.title, full_text=body, sections=sections, digest=ctx.digest_dump,
-            llm=llm_light, max_chars=max_chars, paper_type=paper_type_dump.get("type"),
+            llm=llm_light, max_chars=max_chars,
+            paper_type=None if paper_type_dump.get("uncertain") else paper_type_dump.get("type"),
             prestige_score=ps.get("prestige"), prestige_known=bool(ps.get("prestige_known")),
             prestige_floor=ctx.prestige_floor_value, self_consistency_runs=runs,
             shadow_claim_check=bool(getattr(qr, "shadow_claim_check", False)),
@@ -86,6 +88,7 @@ def extra_layers(
         quality_dump = quality.model_dump()
     except Exception as exc:  # noqa: BLE001 — independently-skippable layer (design)
         LOGGER.warning("quality eval for %s failed: %s", ctx.item_key, exc)
+        quality_dump = QualityEval(quality_band="uncertain", basis="not_assessed").model_dump()
 
     goal_dump: list[dict[str, Any]] | None = None
     try:

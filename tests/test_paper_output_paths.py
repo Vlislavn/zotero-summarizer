@@ -24,12 +24,17 @@ def outputs(tmp_path, monkeypatch):
     config.pdf_root.mkdir()
     config.pdf_cache_dir.mkdir()
     monkeypatch.setattr(paper_render, "settings", lambda: config)
+    source = config.pdf_root / "source.pdf"
+    source.write_bytes(b"OWNED_SOURCE_BYTES")
+    monkeypatch.setattr(paper_render, "_item_detail", lambda _: {"pdf_path": str(source)})
+    monkeypatch.setattr(paper_render, "_JOBS", {})
     return config
 
 
 def _publish(folder):
     paper_render._write_state("KEY", {
         "status": "completed", "pdf_path": str(folder / _NAMES[1]),
+        "pdf_key": paper_render._pdf_key(paper_render.settings().pdf_root / "source.pdf"),
         "audit": {"status": "passed", "blocking": []}, "figures": [{"name": _NAMES[2]}],
         "outputs": {"presentation": str(folder / _NAMES[0]), "figures_dir": str(folder)},
     })
@@ -99,6 +104,7 @@ def test_configured_roots_remain_usable(outputs, route, root_name):
 def test_figure_link_cannot_leave_its_own_directory(outputs, route):
     folder = outputs.pdf_root / "figures"
     folder.mkdir()
+    (folder / _NAMES[0]).write_bytes(b"OWNED_BRIEF_BYTES")
     other = outputs.pdf_root / "other.png"
     other.write_bytes(b"OTHER_PAPER")
     (folder / _NAMES[2]).symlink_to(other)

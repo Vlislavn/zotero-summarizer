@@ -289,6 +289,9 @@ async def find_similar_papers(
             title = str(seed.get("title") or "").strip()
             safe_query = " ".join(title.split()[:SEED_QUERY_TITLE_WORD_LIMIT])
 
+    if not safe_query:
+        return _error("validation_error", "A nonblank query or seed title is required for similarity search")
+
     corpus_result = await _api_request(
         "GET",
         "/api/library/reading-queue",
@@ -300,7 +303,7 @@ async def find_similar_papers(
     corpus_data, corpus_error = _extract_data_or_error(corpus_result)
     if corpus_error is not None:
         return corpus_error
-    if (corpus_data or {}).get("semantic_unavailable"):
+    if (corpus_data or {}).get("semantic") is not True or (corpus_data or {}).get("semantic_unavailable"):
         return _error("semantic_search_unavailable", "Hybrid similarity search is unavailable")
     rows = list((corpus_data or {}).get("items") or [])
 

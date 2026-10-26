@@ -29,7 +29,7 @@ export default function StepProgress({ current, validity, maxReached = 0, labels
               {done && !active ? '✓' : i + 1}
             </span>
             <span
-              className={`text-xs font-medium truncate ${
+              className={`relative text-xs font-medium truncate ${
                 active ? 'text-slate-900' : done ? 'text-emerald-700' : 'text-slate-400'
               }`}
             >

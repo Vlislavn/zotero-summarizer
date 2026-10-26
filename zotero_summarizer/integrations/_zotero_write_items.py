@@ -383,10 +383,16 @@ class ZoteroItemWriteMixin:
         matched_collections: list[str] | None = None,
         provenance_tag: str | None = None,
         backup_path: str | None = None,
+        existing_only: bool = False,
     ) -> dict[str, Any]:
-        conn = sqlite3.connect(str(self.db_path), timeout=15)
+        path = self.db_path.resolve().as_uri() + "?mode=ro" if existing_only else str(self.db_path)
+        conn = sqlite3.connect(path, timeout=15, uri=existing_only)
         conn.row_factory = sqlite3.Row
         try:
+            if existing_only:
+                conn.execute("PRAGMA query_only=ON")
+                present = resolve_user_library_item_id(conn, new_item_key, required=False) is not None
+                return {"item_key": new_item_key if present else None, "applied_steps": [], "backup_path": None}
             conn.execute("PRAGMA foreign_keys=ON")
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA busy_timeout=15000")
@@ -428,14 +434,9 @@ class ZoteroItemWriteMixin:
         matched_collections: list[str] | None = None,
         provenance_tag: str | None = None,
         create_backup: bool = True,
+        existing_only: bool = False,
     ) -> dict[str, Any]:
         """Apply ALL pieces of a feed materialization atomically.
-
-        Phase 1.5 daemon-direct-write path: skips the pending-changes queue
-        because feed items create NEW Zotero items in the Inbox collection
-        (low blast radius — user can delete them later). The pending queue
-        remains for library-centric tag/note/collection changes on existing
-        items, which is the original safety case.
 
         Order:
           1. INSERT items + itemData + creators (top-level Zotero item)
@@ -447,14 +448,17 @@ class ZoteroItemWriteMixin:
 
         Wrapped in a single transaction; rolled back on any failure.
         Returns {"item_key": ..., "applied_steps": [...]}.
+
+        Existing-only instead acknowledges the user key through a read-only
+        lookup, without backup/materialization. Missing keys return item_key=None.
         """
-        if self.is_connector_running():
+        if not existing_only and self.is_connector_running():
             raise ZoteroWriteError(
                 "Zotero is running; close it before adding items to protect its live state"
             )
 
         backup_path: str | None = None
-        if create_backup:
+        if create_backup and not existing_only:
             backup_path = self.backup_database()
 
         try:
@@ -469,6 +473,7 @@ class ZoteroItemWriteMixin:
                     matched_collections,
                     provenance_tag,
                     backup_path,
+                    existing_only,
                 ),
                 ctx="apply_feed_materialization",
             )

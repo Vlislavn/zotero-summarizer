@@ -4,7 +4,8 @@ Guardrail scripts wired by `.pre-commit-config.yaml` (stdlib-only, except
 `check_dead_code.py` which also shells to Vulture, a dev dependency).
 
 **Two ways to use them.** Enforcement (only *new*, un-grandfathered findings fail) runs
-automatically on commit and in CI via `pre-commit run --all-files` — or `make lint`. To
+explicitly via `make lint` / `pre-commit run --all-files`; `make check` and optional
+manual CI reuse it. Commit-hook installation is not required. To
 *see* findings (every detector, advisory, never blocks), there are exactly **two commands**,
 differing only in scope:
 
@@ -17,7 +18,7 @@ make scan-diff    # the same, scoped to the .py you changed vs the base branch (
 | script | enforces |
 |---|---|
 | `check_file_loc.py` | hard `.py` ≤ 500 LOC with no allowlist |
-| `check_import_policy.py` | AST-based static import rules (relative, aliased, multi-name and nested imports included); services may import only `api.errors` from the API layer; new service modules go in a domain subpackage |
+| `check_import_policy.py` | AST-based static import rules (relative, aliased, multi-name and nested imports included); `runtime.py` cannot import `services/` or `api/` (including `api.errors`); services may import only `api.errors`; new service modules go in a domain subpackage |
 | `check_module_readme.py` | every package has a README; editing a package's code re-stages its README |
 | `check_dead_code.py` | dead-code identification (two tiers, below); existing findings grandfathered |
 | `check_redundancy.py` | redundant-transform + near-duplicate identification (Tier 6, below); existing findings grandfathered |
@@ -29,6 +30,11 @@ make scan-diff    # the same, scoped to the .py you changed vs the base branch (
 | `redundancy_allowlist.txt` | grandfathered redundancy findings (transforms + clone pairs) — shrink to empty |
 | `slop_allowlist.txt` | grandfathered slop findings (`<path>:<line>:<rule>`) — shrink to empty |
 | `slop_severity.txt` | optional per-rule severity overrides (`rule=off\|advise\|block`) — empty by default |
+
+The import gate also forbids `runtime.py` from importing `services/` or `api/`,
+including `api.errors`, at any AST scope. Leaf imports such as
+`models.providers` and `TYPE_CHECKING`-only integration/storage annotations remain
+permitted.
 
 The import gate parses Python with stdlib AST and resolves relative imports from
 the importing package without executing it. Syntax/relative-resolution errors
@@ -226,4 +232,5 @@ python3 tools/precommit/check_overlaps.py audit --model sentence-transformers/al
 python3 tools/precommit/check_overlaps.py audit --threshold 0.7 --top 0 --json
 ```
 
-See [docs/architecture.md](../../docs/architecture.md) for the rules in context.
+See [CONTRIBUTING.md](../../CONTRIBUTING.md) for the change/check workflow and
+[architecture](../../docs/architecture.md#dependency-rules) for dependency direction.

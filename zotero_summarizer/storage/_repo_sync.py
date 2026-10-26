@@ -8,22 +8,25 @@ from pathlib import Path
 from typing import Any
 
 from zotero_summarizer.domain import READING_PRIORITY_SORT_RANK, VERDICT_SOURCE_USER
-from zotero_summarizer.storage import review_notes
+from zotero_summarizer.storage import question_sync, review_notes
 from zotero_summarizer.storage.repositories import _connect_to
 
-SYNC_SCHEMA = """
+SYNC_CHANGES_TABLE = """
 CREATE TABLE IF NOT EXISTS sync_changes (
     revision    INTEGER PRIMARY KEY AUTOINCREMENT,
     item_key   TEXT NOT NULL,
-    field      TEXT NOT NULL CHECK (field IN ('verdict', 'review_note')),
+    field      TEXT NOT NULL CHECK (field IN ('verdict', 'review_note', 'review_question')),
     value      TEXT,
     comment    TEXT,
     source     TEXT,
     changed_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_sync_changes_item_field
-    ON sync_changes(item_key, field, revision);
-CREATE TABLE IF NOT EXISTS sync_mutations (
+"""
+_SYNC_STATEMENTS = (
+    SYNC_CHANGES_TABLE,
+    """CREATE INDEX IF NOT EXISTS idx_sync_changes_item_field
+    ON sync_changes(item_key, field, revision);""",
+    """CREATE TABLE IF NOT EXISTS sync_mutations (
     mutation_id TEXT PRIMARY KEY,
     device_id   TEXT NOT NULL,
     item_key    TEXT NOT NULL,
@@ -35,41 +38,43 @@ CREATE TABLE IF NOT EXISTS sync_mutations (
     result_json  TEXT NOT NULL,
     created_at   TEXT NOT NULL,
     processed_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_sync_mutations_resolution
-    ON sync_mutations(resolves_mutation_id);
-CREATE TRIGGER IF NOT EXISTS sync_label_insert AFTER INSERT ON label_verdicts BEGIN
+);""",
+    """CREATE INDEX IF NOT EXISTS idx_sync_mutations_resolution
+    ON sync_mutations(resolves_mutation_id);""",
+    """CREATE TRIGGER IF NOT EXISTS sync_label_insert AFTER INSERT ON label_verdicts BEGIN
   INSERT INTO sync_changes(item_key, field, value, comment, source)
   VALUES (NEW.item_key, 'verdict', NEW.user_priority, NEW.comment, NEW.source);
-END;
-CREATE TRIGGER IF NOT EXISTS sync_label_update AFTER UPDATE ON label_verdicts
+END;""",
+    """CREATE TRIGGER IF NOT EXISTS sync_label_update AFTER UPDATE ON label_verdicts
 WHEN OLD.user_priority IS NOT NEW.user_priority
   OR OLD.comment IS NOT NEW.comment OR OLD.source IS NOT NEW.source BEGIN
   INSERT INTO sync_changes(item_key, field, value, comment, source)
   VALUES (NEW.item_key, 'verdict', NEW.user_priority, NEW.comment, NEW.source);
-END;
-CREATE TRIGGER IF NOT EXISTS sync_label_delete AFTER DELETE ON label_verdicts BEGIN
+END;""",
+    """CREATE TRIGGER IF NOT EXISTS sync_label_delete AFTER DELETE ON label_verdicts BEGIN
   INSERT INTO sync_changes(item_key, field, value, comment, source)
   VALUES (OLD.item_key, 'verdict', NULL, NULL, OLD.source);
-END;
-CREATE TRIGGER IF NOT EXISTS sync_note_insert AFTER INSERT ON review_notes BEGIN
+END;""",
+    """CREATE TRIGGER IF NOT EXISTS sync_note_insert AFTER INSERT ON review_notes BEGIN
   INSERT INTO sync_changes(item_key, field, value)
   VALUES (NEW.item_key, 'review_note', NEW.note);
-END;
-CREATE TRIGGER IF NOT EXISTS sync_note_update AFTER UPDATE ON review_notes
+END;""",
+    """CREATE TRIGGER IF NOT EXISTS sync_note_update AFTER UPDATE ON review_notes
 WHEN OLD.note IS NOT NEW.note BEGIN
   INSERT INTO sync_changes(item_key, field, value)
   VALUES (NEW.item_key, 'review_note', NEW.note);
-END;
-CREATE TRIGGER IF NOT EXISTS sync_note_delete AFTER DELETE ON review_notes BEGIN
+END;""",
+    """CREATE TRIGGER IF NOT EXISTS sync_note_delete AFTER DELETE ON review_notes BEGIN
   INSERT INTO sync_changes(item_key, field, value)
   VALUES (OLD.item_key, 'review_note', NULL);
-END;
-"""
+END;""",
+)
 
 
 def apply_sync_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(SYNC_SCHEMA)
+    # executescript would implicitly commit the caller's migration transaction.
+    for statement in _SYNC_STATEMENTS:
+        conn.execute(statement)
 
 
 def _canonical(conn: sqlite3.Connection, item_key: str, field: str) -> dict[str, Any]:
@@ -96,6 +101,8 @@ def _latest_revision(conn: sqlite3.Connection, item_key: str, field: str) -> int
 
 
 def _write_value(conn: sqlite3.Connection, request: dict[str, Any]) -> None:
+    if request["operation"] == "keep_server":
+        return
     item_key, field = request["item_key"], request["field"]
     if field == "review_note":
         review_notes.write(conn, item_key, None if request["operation"] == "delete" else request["value"])
@@ -132,11 +139,17 @@ def sync_mutation_exists(db_path: Path, mutation_id: str) -> bool:
 def apply_sync_mutation(db_path: Path, request: dict[str, Any]) -> dict[str, Any]:
     """Idempotently compare-and-write one field under ``BEGIN IMMEDIATE``."""
     request = dict(request)
+    if request.get("field") == "review_question":
+        request = question_sync.validate_mutation(request)
     for field in ("device_id", "item_key"):
         value = request.get(field)
         if not isinstance(value, str) or not value.strip():
             raise ValueError(f"{field} must contain non-whitespace characters")
-        request[field] = value.strip()
+        if field != "item_key" or request["field"] != "review_question":
+            request[field] = value.strip()
+    keep_server = request["operation"] == "keep_server"
+    if keep_server and (not request.get("resolves_mutation_id") or request.get("value") is not None or request.get("comment") is not None):
+        raise ValueError("keep_server requires a conflict reference and no new content")
     public_request = {key: value for key, value in request.items() if not key.startswith("_")}
     request_json = json.dumps(public_request, sort_keys=True, separators=(",", ":"))
     conn = _connect_to(db_path)
@@ -162,20 +175,28 @@ def apply_sync_mutation(db_path: Path, request: dict[str, Any]) -> dict[str, Any
                 "SELECT item_key, field, result_json FROM sync_mutations WHERE mutation_id = ?",
                 (resolves,),
             ).fetchone()
+            prior_result = json.loads(prior["result_json"]) if prior else {}
             if (prior is None or prior["item_key"] != item_key or prior["field"] != field
-                    or json.loads(prior["result_json"]).get("status") != "conflict"):
+                    or prior_result.get("status") != "conflict"):
                 raise ValueError("resolves_mutation_id must name a conflict for the same field")
-        latest = _latest_revision(conn, item_key, field)
-        previous = _canonical(conn, item_key, field)
-        if latest > request.get("_effective_base_revision", request["base_revision"]):
-            result = {"mutation_id": request["mutation_id"], "status": "conflict",
-                      "conflict_revision": latest, "canonical": previous}
+        if field == "review_question":
+            result = question_sync.apply(conn, request)
         else:
-            _write_value(conn, request)
-            applied = _latest_revision(conn, item_key, field)
-            result = {"mutation_id": request["mutation_id"], "status": "applied",
-                      "applied_revision": applied, "previous": previous,
-                      "canonical": _canonical(conn, item_key, field)}
+            if keep_server and request["base_revision"] != prior_result["conflict_revision"]:
+                raise ValueError("keep_server must name the compared field revision")
+            latest = _latest_revision(conn, item_key, field)
+            previous = _canonical(conn, item_key, field)
+            base = request["base_revision"] if keep_server else request.get("_effective_base_revision", request["base_revision"])
+            conflicted = latest != base if keep_server else latest > base
+            if conflicted:
+                result = {"mutation_id": request["mutation_id"], "status": "conflict",
+                          "conflict_revision": latest, "canonical": previous}
+            else:
+                _write_value(conn, request)
+                applied = _latest_revision(conn, item_key, field)
+                result = {"mutation_id": request["mutation_id"], "status": "applied",
+                          "applied_revision": applied, "previous": previous,
+                          "canonical": _canonical(conn, item_key, field)}
         result_json = json.dumps(result, sort_keys=True, separators=(",", ":"))
         conn.execute(
             """INSERT INTO sync_mutations
@@ -253,6 +274,7 @@ def sync_current_fields(db_path: Path) -> dict[tuple[str, str], dict[str, Any]]:
                FROM sync_changes WHERE field = 'verdict' GROUP BY item_key, field"""
         ).fetchall()
         note_fields = review_notes.snapshots(conn)
+        question_fields = question_sync.snapshots(conn)
     finally:
         conn.close()
     fields = {(row["item_key"], row["field"]): dict(row) for row in rows}
@@ -266,6 +288,7 @@ def sync_current_fields(db_path: Path) -> dict[tuple[str, str], dict[str, Any]]:
     for row in fields.values():
         row.setdefault("revision", 0)
     fields.update(note_fields)
+    fields.update(question_fields)
     return fields
 
 

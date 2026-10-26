@@ -4,7 +4,8 @@ Builds the FastAPI app, mounts the React SPA at `/`, and exposes the JSON API
 under `/api/*`. Routes stay *thin*: they validate input and call `services/`.
 
 ```
-create_app()
+create_app(settings, mobile_access=None)
+   ├─ local admission by default / explicit owner + private Unix gateway policy
    ├─ include_routes(app)        # routes/__init__.py registers every router
    ├─ mount SPA  (/ + PWA public files -> frontend/dist)
    └─ lifespan: services.lifecycle.startup()  on boot
@@ -15,7 +16,12 @@ errors.py  ── APIError -> uniform JSON error body + handlers
 |---|---|
 | `app.py` | `create_app()` factory — wiring, SPA/assets/PWA-public-file mount, exception handlers, lifespan (no import-time app; uvicorn uses `app:create_app` with `factory=True`). The lifespan runs `setup.bootstrap.bootstrap_phase0` (idempotent first-run seed of `goals.yaml` etc., never overwrites) **before** `lifecycle.startup`, which fails fast on a missing config. |
 | `errors.py` | `APIError` + the canonical error schema and FastAPI handlers |
+| `local_access.py` / `mobile_access.py` | Whole-app local peer/authority/origin admission or explicit exact-owner/TLS-metadata/private-socket policy; fixed errors and canonical redirects. Headers alone never authorize TCP/unknown transports. |
 | `routes/` | one module per resource (see routes/README.md) |
+
+The gateway authorizes an owner, not a unique device. Same-UID/root software is
+trusted; active-stream revocation and installed proxy/TLS/device acceptance remain
+separate. See [remote-access boundary](../../docs/features.md#remote-access).
 
 **Boundaries:** may import `services/`, `models`, `errors`. Routes should hold
 no business logic — push it into `services/`.

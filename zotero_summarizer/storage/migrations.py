@@ -80,6 +80,63 @@ def _migration_sync_resolution_index(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_review_questions(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """CREATE TABLE review_questions (
+            submission_id TEXT NOT NULL PRIMARY KEY,
+            item_key TEXT NOT NULL,
+            question TEXT NOT NULL,
+            origin TEXT NOT NULL CHECK(origin IN ('typed', 'preset')),
+            preset_id TEXT,
+            submitted_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )"""
+    )
+    conn.execute(
+        "CREATE INDEX idx_review_questions_paper_time "
+        "ON review_questions(item_key, submitted_at, submission_id)"
+    )
+    conn.execute(
+        """CREATE TRIGGER review_questions_immutable
+           BEFORE UPDATE ON review_questions
+           BEGIN SELECT RAISE(ABORT, 'review questions are immutable'); END"""
+    )
+
+def _migration_review_note_projection(conn: sqlite3.Connection) -> None:
+    from zotero_summarizer.storage.review_note_projection_schema import apply
+
+    apply(conn)
+
+
+def _migration_saved_telegram_news(conn: sqlite3.Connection) -> None:
+    from zotero_summarizer.storage.research_feed_telegram import apply_schema
+
+    apply_schema(conn)
+
+
+def _migration_generated_write_review(conn: sqlite3.Connection) -> None:
+    from zotero_summarizer.storage.pending_actions import apply_schema
+
+    apply_schema(conn)
+
+
+def _migration_combined_live_review(conn: sqlite3.Connection) -> None:
+    from zotero_summarizer.storage import pending_actions, research_feed_telegram
+
+    columns = repositories.table_columns(conn, "pending_changes")
+    triggers = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
+    pending = [name in columns for name in ("proposal_json", "audit_json", "backup_path")]
+    pending += [name in triggers for name in ("pending_generated_immutable", "pending_generated_no_delete")]
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    live = ["initial_window_committed" in repositories.table_columns(conn, "research_feed_telegram_channels")]
+    live += [name in tables for name in ("research_feed_telegram_bindings", "research_feed_telegram_account")]
+    if (any(pending) and not all(pending)) or (any(live) and not all(live)):
+        raise ValueError("incomplete experimental version-12 schema footprint")
+    if not all(pending):
+        pending_actions.apply_schema(conn)
+    if not all(live):
+        research_feed_telegram.apply_live_schema(conn)
+
+
 # Append-only, version-ordered. To change the schema, add a new Migration with
 # the next version number — never edit a shipped one or add inline ALTERs.
 TRIAGE_MIGRATIONS: list[Migration] = [
@@ -91,6 +148,11 @@ TRIAGE_MIGRATIONS: list[Migration] = [
     Migration(6, "corpus_paper_identity_alignment", _migration_baseline_corpus),
     Migration(7, "review_training_sample", _migration_review_training_sample),
     Migration(8, "sync_resolution_index", _migration_sync_resolution_index),
+    Migration(9, "review_questions", _migration_review_questions),
+    Migration(10, "review_note_projection", _migration_review_note_projection),
+    Migration(11, "saved_telegram_news", _migration_saved_telegram_news),
+    Migration(12, "generated_write_review", _migration_generated_write_review),
+    Migration(13, "combined_live_telegram_review", _migration_combined_live_review),
 ]
 CORPUS_MIGRATIONS: list[Migration] = [
     Migration(1, "baseline_embedding_cache", _migration_baseline_corpus),
@@ -101,6 +163,11 @@ CORPUS_MIGRATIONS: list[Migration] = [
     Migration(6, "corpus_paper_identity", _migration_corpus_paper_identity),
     Migration(7, "review_training_alignment", _migration_baseline_corpus),
     Migration(8, "sync_resolution_index_alignment", _migration_baseline_corpus),
+    Migration(9, "review_questions_alignment", _migration_baseline_corpus),
+    Migration(10, "review_note_projection_alignment", _migration_baseline_corpus),
+    Migration(11, "saved_telegram_news_alignment", _migration_baseline_corpus),
+    Migration(12, "generated_write_review_alignment", _migration_baseline_corpus),
+    Migration(13, "combined_live_telegram_review_alignment", _migration_baseline_corpus),
 ]
 
 # Both namespaces advance in lockstep so one reported target stays meaningful;

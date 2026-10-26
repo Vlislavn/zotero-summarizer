@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 
+from test_verification_audit_export import KEY, audit_env, publish  # noqa: F401
 from zotero_summarizer.services.library import _review_cache
 
 
@@ -53,28 +54,47 @@ def test_corrupt_cache_is_quarantined_without_overwriting_prior_recovery(tmp_pat
     assert (tmp_path / "deep_reviews.json.corrupt-1").read_text(encoding="utf-8") == "not json"
 
 
-def test_current_review_requires_matching_source_and_generation_identity(monkeypatch):
-    from zotero_summarizer.services.library import _review_identity
+def test_current_review_requires_matching_source_and_generation_identity(audit_env):
+    raw, client, source = publish(audit_env)
+    current = _review_cache.get_cached_review(KEY)
+    _review_cache._write_one('LEGACY', {'digest': {}})
+    before = _review_cache._cache_path().read_bytes()
 
-    identity = {
-        "generation_sha256": "a" * 64, "source_sha256": "b" * 64,
-        "source_kind": "library", "source_path": "/paper.pdf", "focus_prompt": "",
-    }
-    current = {
-        "review_contract_version": _review_cache.REVIEW_CONTRACT_VERSION,
-        "review_identity": identity, "digest": {},
-    }
-    _review_cache._write_one("CURRENT", current)
-    _review_cache._write_one("LEGACY", {"digest": {}})
-    monkeypatch.setattr(_review_identity, "current_review_identity", lambda key, stored: identity)
+    assert _review_cache.get_current_review(KEY) == current
+    assert _review_cache.get_current_review('LEGACY') is None
+    assert _review_cache.current_review_keys() == {KEY}
+    assert raw['verification_audit'] is not None
 
-    assert _review_cache.get_current_review("CURRENT") == current
-    assert _review_cache.get_current_review("LEGACY") is None
-    assert _review_cache.current_review_keys() == {"CURRENT"}
-
-    monkeypatch.setattr(
-        _review_identity, "current_review_identity",
-        lambda key, stored: {**identity, "source_sha256": "c" * 64},
-    )
-    assert _review_cache.get_current_review("CURRENT") is None
+    original = source.read_bytes()
+    source.write_bytes(b'A different owned source')
+    assert _review_cache.get_current_review(KEY) is None
     assert _review_cache.current_review_keys() == set()
+    source.write_bytes(original)
+    assert _review_cache.get_current_review(KEY) == current
+
+    goals = list(audit_env.config.research_goals)
+    audit_env.config.research_goals = [*goals, 'Changed generation goal']
+    assert _review_cache.get_current_review(KEY) is None
+    assert _review_cache.current_review_keys() == set()
+    audit_env.config.research_goals = goals
+    assert _review_cache.get_current_review(KEY) == current
+    assert _review_cache._cache_path().read_bytes() == before
+    assert (client.generated, client.calls) == (1, 1)
+
+
+@pytest.mark.parametrize('raw', [b'{', b'{"reviews": []}', b'\xff'])
+def test_readonly_cache_reader_preserves_malformed_original(raw, tmp_path):
+    path = _review_cache._cache_path()
+    path.write_bytes(raw)
+    with pytest.raises(ValueError, match='Invalid deep-review cache'):
+        _review_cache._read_all(readonly=True)
+    assert path.read_bytes() == raw
+    assert sorted(p.name for p in tmp_path.iterdir()) == ['deep_reviews.json']
+
+
+def test_explicit_audit_export_missing_review_never_creates_a_store(tmp_path):
+    from zotero_summarizer.api.errors import APIError
+    with pytest.raises(APIError) as error:
+        _review_cache.export_review_audit('ABCDEFGH')
+    assert error.value.status_code == 404
+    assert not _review_cache._cache_path().exists()

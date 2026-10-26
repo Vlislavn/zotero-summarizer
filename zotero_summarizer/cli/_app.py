@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 
+from zotero_summarizer.services.setup.deployment import require_loopback_bind
 from zotero_summarizer.settings import Settings
 from zotero_summarizer.storage.migrations import migrate_existing
 
 
 def _serve(args: argparse.Namespace) -> int:
+    require_loopback_bind(args.host)
+    # The string factory (including reload workers) must use the admitted root.
+    os.environ["ZOTERO_SUMMARIZER_HOME"] = args.project_root
     import uvicorn
 
     # factory=True so the app is built when uvicorn starts (and on each reload),
@@ -18,6 +23,7 @@ def _serve(args: argparse.Namespace) -> int:
         host=args.host,
         port=args.port,
         reload=args.reload,
+        proxy_headers=False,
     )
     return 0
 
@@ -168,9 +174,19 @@ def _verify_deep_review(args: argparse.Namespace) -> int:
         return 0
 
 
+def _loopback_bind(value: str) -> str:
+    try:
+        return require_loopback_bind(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def register_app(subparsers) -> None:
+    from zotero_summarizer.cli._mobile_serve import register_mobile_serve
+
+    register_mobile_serve(subparsers)
     serve = subparsers.add_parser("serve", help="Run the local FastAPI server")
-    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--host", default="127.0.0.1", type=_loopback_bind)
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--reload", action="store_true")
     serve.set_defaults(func=_serve)

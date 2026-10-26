@@ -55,10 +55,11 @@ def _compute_renderer_rev() -> str:
     invalidates cached artifacts automatically (the cache key folds this in)."""
     digest = hashlib.sha256()
     digest.update(Path(__file__).read_bytes())
-    from zotero_summarizer.services.library import _source_admission, _auth_envelope
+    from zotero_summarizer.services.library import _source_admission, _auth_envelope, _paper_type_checklists
+    from zotero_summarizer.services.library.review_fleet import propose
 
     for module in (_paper_read_brief, _paper_docling, _paper_read_html, _paper_read_meta, _paper_read_pdf,
-                   _paper_read_tex, _source_admission, _auth_envelope):
+                   _paper_read_tex, _source_admission, _auth_envelope, _paper_type_checklists, propose):
         digest.update(Path(module.__file__).read_bytes())
     return digest.hexdigest()[:8]
 
@@ -197,8 +198,10 @@ def _completed_outputs_missing(state: dict[str, Any]) -> bool:
     if state.get("status") != "completed":
         return False
     outputs = state.get("outputs") or {}
-    presentation = Path(str(outputs.get("presentation") or ""))
-    return not str(presentation) or not presentation.is_file()
+    return not Path(str(outputs.get("presentation") or "")).is_file() or any(
+        not _allowed_paper_path(_allowed_paper_path(outputs.get("figures_dir")) / f["name"]).is_file()
+        for f in state.get("figures") or [] if f.get("name")
+    )
 
 
 def _get_item_lock(item_key: str) -> threading.Lock:
@@ -222,10 +225,8 @@ def render_paper(item_key: str) -> dict[str, Any]:
         if state.get("status") == "completed":
             if _completed_outputs_missing(state):
                 return {
-                    **state,
-                    "status": "missing",
-                    "stale": True,
-                    "message": "Generated HTML brief is missing; rebuild the paper-read artifact.",
+                    **state, "status": "missing", "stale": True,
+                    "message": "Generated HTML brief is missing or a listed figure is missing; rebuild the artifact.",
                 }
             pdf_path, _detail = _pdf_for_item_or_acquire(item_key, allow_acquire_missing=False)
             if state.get("pdf_key") != _pdf_key(pdf_path):
@@ -425,6 +426,7 @@ def build_paper_read_for_pdf(
         outputs = _paper_read_html.write_outputs(
             directory, content, staging=Path(staging), digest=digest, quality=quality,
             goal_summaries=goal_summaries, code_link=code_link,
+            model_read_decision=cached.get("model_read_decision") if cached else None,
         )
         content.update(
             {
@@ -454,9 +456,9 @@ def _allowed_paper_path(path: str | Path | None) -> Path:
 
 
 def presentation_path(item_key: str) -> Path:
-    state = _read_state(item_key)
-    if state is None or state.get("status") != "completed":
-        raise APIError(error="not_ready", message="Paper-read artifact has not been built", status_code=404)
+    state = render_paper(item_key)
+    if state.get("status") != "completed" or state.get("stale"):
+        raise APIError(error="not_ready", message="Paper-read artifact is not current; rebuild it", status_code=404)
     path = _allowed_paper_path((state.get("outputs") or {}).get("presentation"))
     if not path.is_file():
         raise APIError(error="not_found", message="Generated presentation is missing", status_code=404)
@@ -484,9 +486,9 @@ def figure_path(item_key: str, name: str) -> Path:
     """Validated path for a generated figure next to the paper PDF."""
     if not _paper_read_html._FIGURE_NAME_RE.fullmatch(name or ""):
         raise APIError(error="validation_error", message=f"bad figure name {name!r}", status_code=422)
-    state = _read_state(item_key)
-    if state is None or state.get("status") != "completed":
-        raise APIError(error="not_ready", message="Paper-read artifact has not been built", status_code=404)
+    state = render_paper(item_key)
+    if state.get("status") != "completed" or state.get("stale"):
+        raise APIError(error="not_ready", message="Paper-read artifact is not current; rebuild it", status_code=404)
     if name not in {f.get("name") for f in state.get("figures") or []}:
         raise APIError(error="not_found", message=f"figure {name} not in audited artifact", status_code=404)
     figures_dir = _allowed_paper_path((state.get("outputs") or {}).get("figures_dir"))

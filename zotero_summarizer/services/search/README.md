@@ -1,5 +1,12 @@
 # services/search — Targeted Search (the query-driven pull surface)
 
+Discovery reuses identifier union-find for seed families across native and
+unmaterialized app rows, including alternating app-alias and DOI/arXiv links until closure. Only that family's complete comments own
+freshness; unrelated notes do not. Candidate identity selects declared public
+metadata, not later operation/question-evidence fields. Ordinary HTTP sessions
+omit an empty Discovery key; private storage retains `{}`. Real Discovery state
+remains distinct from ordinary results in the UI.
+
 The library/triage domains are *push*: papers arrive from feeds and you cull them.
 This domain is *pull*: you give a research topic, and it federates the open
 literature + (later) your library, ranks by real relevance, and deep-reads a few —
@@ -7,6 +14,8 @@ a query-scoped research session, not a standing feed.
 
 Intent parsing and agentic refinement wrap user queries, questions and retrieved
 metadata with the shared escaped untrusted-input boundary before any LLM call.
+`pipeline.default_deps` resolves deep-review/feed clients through
+`services.llm.factory` using the existing `RuntimeState` cache and consent fences.
 
 ```
 topic + questions
@@ -40,6 +49,40 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
         assess_digest (focus=query)  +  summarize_for_goals (goals=[query]+questions)
         → brief + grounded query-lens + one grounded answer per question
 ```
+
+The library's optional related-comment experiment also reuses `ResearchSession`,
+`claim`, per-process ownership locks and atomic `save` under `Settings.search_dir`.
+Its `related` field holds full private context identity, snapshot, prior attempts
+and terminal result; `related_*` statuses never qualify for Search's screened
+review claim. The shared session directory is owner-only (0700), including existing
+directories; temporary files become 0600 before private bytes are written, and
+atomic replacement retains that mode. Existing files are protected by the directory.
+Related sessions are omitted from the Search sidebar. Default/wire serialization,
+including generic Search GET, exposes an empty `related` object, not private
+snapshots, results or prior attempts; only explicit storage retains that field.
+This neither rewrites history nor probes freshness or starts context/model work.
+The consent-bound Related action still owns its current result. No federation,
+Search review or materialization is started by that flow. See
+[related saved papers](../../../docs/features.md#related-saved-papers) for consent,
+work ceilings, invalidation and unqualified semantic judgments.
+
+`discovery.py` reuses public Search and consent-bound seed context. Raw session
+snapshots serialize only for storage; HTTP uses freshness-qualified views.
+Find V1 schedules only OpenAlex semantic/lexical; ordinary all-source Search remains
+unchanged. Discovery honors `ZS_CORPUS_RERANKER_ENABLED=0`: existing lexical
+relevance scoring runs without constructing/loading the local cross-encoder.
+Without a native reader, app-known saved identifiers are excluded, but remaining
+membership stays unknown and cannot become a default new-paper recommendation.
+Running/failed Discovery projections hide seed comments, assessment items/IDs and
+recommendations until a successful result; public retained metadata stays visible.
+The Search OpenAlex client obtains its optional cache from RuntimeState, not the
+config-only AppState, so disabling prestige does not prevent real retrieval.
+Startup prepares that existing cache schema before Discovery fingerprints inputs;
+first-client construction cannot stale its own request.
+Only explicit Review may claim discovery; new Add preflights before effects.
+Stale retained plans require an explicit existing-only native ACK (exact key,
+empty steps, no backup) before app finalization, never exception-time readback.
+See [feature boundary](../../../docs/features.md#saved-paper-discovery).
 
 ## Why this shape
 
@@ -77,6 +120,11 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
   on the session (`refinements`) and render in the plan panel.
 - **Targeted review reuses read-only layers, not `deep_review.start`**: no Zotero
   note write to suppress, no corpus-membership requirement, and the query is the lens.
+  New session `review.brief` actions/grades use the shared reading projection with
+  the existing light quality result and query summaries. High-friction reads become
+  skims; absent quality cannot restore a self-grade. `review.model_digest` retains
+  raw validated output and `reading_policy_flags` explains the cap. No extra model
+  calls, classifier, ranking change or migration of saved sessions is introduced.
 - **Library coverage is annotated, not filtered** (`_annotate_library_coverage`):
   each candidate gets `in_library` (tri-state) + `existing_zotero_key` + OpenAlex
   `cited_by_count`. It's advisory — a paper already in Zotero still ranks; the
@@ -108,6 +156,59 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
   concurrent auto-review can't lose the key AND two simultaneous Add clicks on one
   candidate write exactly once. Idempotent (re-add returns the existing key).
 
+## Opt-in original-source question evidence (#30, experimental)
+
+`ScreenRequest.evidence_policy` accepts `baseline` (default) or `question_evidence`.
+HTTP → `run_screen` persists the explicit choice; the existing claimed review worker
+runs `_question_evidence` before top-ten light review and top-four selection, then
+`_question_policy` reapplies stable sufficient-answer promotion after quality ranking.
+No questions, disabled budgets or unavailable prerequisites preserve baseline order.
+
+The pass reuses `_fulltext.acquire_full_text`, Library's shared hybrid retrieval
+context and faithbench's answer prompt/parser plus existing strict quote/answer
+support guards. An independent configured Deep review route verifies Feed answers;
+exactly located, unambiguous original quotes are required. No generated summary
+supplies offsets. Up to eight chunks per question, 12 topic-eligible candidates and
+24 attempted model-client invocations by default; `ZS_SEARCH_EVIDENCE_{CANDIDATES,CALLS,TOPIC_FLOOR}`
+override within 0–30 / 0–120 / finite 0–1. Floor default 0.35 is provisional. Calls
+are reserved in generation/verifier pairs and failures count. Identical question lines
+reuse one assessment per candidate and count once for promotion. Internal provider
+transport retries are outside this invocation cap. Source length uses the existing
+quality-review cap; over-budget originals are unknown, not truncated, while admitted
+acquired text remains reusable by ordinary review.
+
+Per-question receipts preserve unknown/partial/sufficient/not-found-in-checked-text,
+checked original ranges, exact extraction/question/input fingerprints, configured
+route/protocol identity, capability breakdown and typed failures. Only sufficient
+answers promote; not-found never asserts whole-document absence. Missing or partial
+capability never penalizes. Sessions remain the sole store; `save_merge` preserves
+concurrent explicit Adds and deletion stops work between boundaries. Family merges
+carry receipts. `_question_policy.current_receipt` is the single validity authority
+for display, invalidation and promotion: source/input, generator/verifier provider and
+model IDs, relevant provider settings and local prompt/schema/protocol must match the
+available loaded runtime configuration. `_evaluators` computes those identities without
+clients, credentials, inference or requests. Absent/disabled/invalid metadata is unknown,
+not permission to trust stored IDs. New evidence work requires the same current binding.
+
+`ResearchSession.evidence_baseline_order` retains the observed candidate sequence before
+promotion. Restoration seeds the existing stable constrained ranker with that sequence;
+current quality/relevance keys still win, missing/new candidate IDs retain observed order,
+and family/Add ownership is unchanged. Promotion refills only topic-eligible, nonretracted
+slots; candidates outside that set keep their constrained baseline positions.
+The corrected distinct-question/eligible-slot policy revises the evaluator protocol:
+older bindings become unchecked without losing historical receipts.
+Legacy receipts without recorded order/binding cannot certify current evidence or invent lost ties. No automatic rerun repairs them.
+Invalidation changes only the in-memory snapshot, not files on read. Raw serialization
+keeps exact historical receipts/answers through ordinary saves; only HTTP projection
+suppresses stale answers. Stored extraction identity is historical, not a freshness
+probe; unchanged metadata cannot detect remotely mutable weights. No private comments,
+separate question store, classifier/index/worker or native writer is added.
+
+The Search checkbox is explicit per page visit. Recommended shows server order and
+promoted weak-band cards; user-selected relevance/prestige sorts remain independent.
+Evidence and provenance live in native disclosures. See [feature overview](../../../docs/features.md#search-question-evidence).
+Human-held-out answerability and latency remain unmeasured; issue #30 remains open.
+
 ## Files
 
 | file | role |
@@ -125,6 +226,57 @@ run_screen ──persist──> ResearchSession (status=screened)         [FAST:
 | `materialize.py` | the one Search→Zotero write: `materialize_candidate(session_id, candidate_id, collection_key)` — resolve+validate collection (pre-lock 400), reuse a coverage hit or adapt Candidate→feed_payload, then check-write-stamp under the session lock via `session.materialize_once` (concurrent Adds write once) |
 | `refine.py` | bounded opt-in agentic PRF before auto-review; no-ops under strict offline |
 | `session.py` | one-JSON-per-session persistence under `settings().search_dir` + per-session lock: `claim` (status CAS, single-flights the worker), `save_merge` (whole-session save that preserves a concurrent Add's `materialized_zotero_key`), `update` (read-modify-write), `materialize_once` (Add's check-write-stamp under the lock, single-write). Malformed id → `APIError(400)` |
+
+OpenAlex location DOI/arXiv aliases flow into the same persisted family keys as
+other source identifiers. A changed primary DOI cannot resurface a saved seed when
+the provider declares its existing identifier; equal titles alone never merge.
+
+Refinement annotates newly fetched DOI/arXiv observations before merging.
+`Candidate.family_identifier_keys` retains the complete normalized identifier
+union independently of the preferred bibliography and survives session JSON.
+`identifier_keys()` reuses that union in later transitive merges. Coverage checks
+all retained DOI/arXiv alternatives: any actual hit supplies its returned key,
+only complete misses establish False, and partial failures stay unknown. ArXiv
+values containing SQL-LIKE wildcards are withheld from the native reader and keep
+coverage unknown unless another safe identifier confirms a hit; a paired DOI is
+still checked. Family
+merging also preserves unknown members instead of borrowing another version's
+older miss; a genuine positive still dominates. A genuine positive key is captured before preferred-member mutation; stale miss keys cannot
+replace it. No title-only merge or candidate-address-as-identifier inference.
+Legacy sessions default to no extra observed identities; discarded aliases are not
+reconstructed. Existing reviews, addresses and scores survive; explicit Add reuses
+a confirmed saved key. The refinement/family-identifier tests use controlled
+readers and JSON round trips, not live sources, native writes or scientific truth.
+
+## Explicit Add recovery
+
+An explicit new-item Add saves `planned_zotero_key` in the existing session JSON
+before backup/native work. A failed prewrite save dispatches nothing. Native
+failure or failed session finalization retains the plan; an explicit retry reuses
+the writer's existing-key transaction no-op instead of generating another key.
+Delivery is stamped only after native return; a planned key is not library coverage
+or a success receipt. Native no-op retries return `already_added` without claiming
+that the retry's requested collection is the item's destination. Existing coverage
+hits still reuse their saved key without constructing a writer or inventing a new plan.
+
+Exact-identifier families and same persisted candidate addresses preserve planned
+and materialized operation keys across metadata enrichment, absorption, transitive
+merges and stale background saves. Family union validates operation identities for
+every group before mutating any candidate. Conflicting selected-family identities
+fail before updates; unrelated/unselected families do not hijack the worker's selection,
+metadata, order or review. Empty plans preserve the legacy wire shape. Nonempty
+plans must be eight ASCII uppercase letters/digits; invalid persisted values fail.
+If confirmed coverage disagrees with a retained plan, Add returns 409 before any
+native write or delivery stamp, including when the candidate is already materialized. Both observations remain available for explicit
+library reconciliation; a later background save must not inherit contradictory
+planned/materialized identities.
+
+The existing per-session lock serializes one app process. Session JSON and native
+SQLite are not one transaction; no distributed exactly-once, historical receipt
+repair or cross-library replay guarantee is claimed. Retrying a committed item
+never repairs later user edits. Tests use real temporary native SQLite to cover
+commit/final-save gaps, prewrite refusal, rollback, backup, repeat, concurrency and
+family/session preservation; no live user library is needed.
 
 ## Execution and identity boundaries
 
@@ -228,10 +380,22 @@ existing two-lexical-pass cap remains. No additional provider framework.
 
 Accounting snapshots observations before mutable family merging. Every scheduled
 variant records its query, allocation, observations and state, including zero hits.
-Best-effort leaves do not distinguish transport failure from a genuine empty
-result: those states stay `unknown`, never successful. Source family counts are
+Ordinary calls keep best-effort empty states `unknown`. Opt-in
+`observe_outcomes=True` retains explicit per-request outcomes from arXiv, Crossref,
+Europe PMC, Semantic Scholar and the two OpenAlex modes. Each scheduled request
+owns its own dictionary; concurrent/nested work has no ambient capture scope.
+A silent adapter stays unknown even if candidates were returned; ordinary false
+mode still passes no receipt keywords. OpenReview/library remain uninstrumented,
+and saved-paper Discovery still plans only its declared OpenAlex modes.
+See [discovery boundary](../../../docs/features.md#saved-paper-discovery).
+Source family counts are
 cross-source attributed (not globally additive); type-unknown and other rejection
 counts survive persistence. Refinement stores its round's accounting separately.
+
+Ordinary public Search sessions omit the empty Discovery marker in both default
+and display projections. Populated Discovery projections keep their existing
+qualification; storage retains its current empty/nonempty dictionaries, with no
+migration or rewritten old file.
 
 Simplification check: reuse provider search leaves, identifier dedup, session
 serialization and existing plan display; no competing retrieval/ranking loop.

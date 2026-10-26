@@ -342,6 +342,13 @@ def register_goldenset(subparsers) -> None:
     gs_train.add_argument("--project-root", default=None)
     gs_train.set_defaults(func=_goldenset_train_classifier)
 
+
+    _register_evaluation(gs_sub)
+    _register_tuning(gs_sub)
+    _register_suggestions(gs_sub)
+
+
+def _register_evaluation(gs_sub):
     gs_eval_baseline = gs_sub.add_parser(
         "eval-baseline",
         help=(
@@ -407,6 +414,9 @@ def register_goldenset(subparsers) -> None:
     gs_eval_baseline.add_argument("--project-root", default=None)
     gs_eval_baseline.set_defaults(func=_goldenset_eval_baseline)
 
+
+
+def _register_tuning(gs_sub):
     gs_tune = gs_sub.add_parser(
         "tune",
         help=(
@@ -440,6 +450,9 @@ def register_goldenset(subparsers) -> None:
     gs_tune.add_argument("--project-root", default=None)
     gs_tune.set_defaults(func=_goldenset_tune)
 
+
+
+def _register_suggestions(gs_sub):
     gs_suggest = gs_sub.add_parser(
         "suggest-labels",
         help=(
@@ -465,6 +478,8 @@ def register_goldenset(subparsers) -> None:
     gs_suggest.add_argument("--project-root", default=None)
     gs_suggest.set_defaults(func=_goldenset_suggest_labels)
 
+    from ._goldenset_feedback import register_goldenset_feedback
+    register_goldenset_feedback(gs_sub)
     register_goldenset_backup(gs_sub)
     register_goldenset_classify(gs_sub)
     register_goldenset_predict(gs_sub)

@@ -3,9 +3,15 @@ from __future__ import annotations
 
 import re
 
+from zotero_summarizer.integrations._zotero_write_common import is_expected_sqlite_io
+
 
 class ZoteroReadError(RuntimeError):
-    """Raised when reading from the local Zotero database fails."""
+    """Read failure; only explicitly classified environmental IO is optional."""
+
+    def __init__(self, *args, expected_io: bool = False):
+        super().__init__(*args)
+        self.expected_io = expected_io is True
 
 
 # Item types that are NOT bibliographic references — PDF attachments, standalone

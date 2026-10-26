@@ -1,5 +1,20 @@
 # integrations — external-system adapters
 
+Opt-in OpenAlex search receipts reject nonfinite decoded JSON as parse failure
+before publishing hits. Ordinary/no-receipt payload policy remains unchanged;
+malformed variants do not invalidate independently usable neighboring requests.
+
+Verification uses one explicit `llm_requests.py` inventory through native callbacks
+and the owned HTTPX pre-send hook. Exact model/run/terminal observations stay
+separate from callback return, cache/text and client close. Ordinary client options
+are unchanged; verification disables cache/retries/redirects. Pre-send entry is
+conservative ownership evidence, not remote acceptance, process termination or
+hardware safety. Persisted receipt policy remains service-owned; lower adapters
+import no services. Verification normalizes configured base prefixes with the
+native operation path: Anthropic uses `/v1/messages`, not an assumed OpenAI-style
+versioned base. Its unspecified verification base is explicitly the official
+native target, not an ambient SDK override. Ordinary client defaults stay intact.
+
 Thin, low-level clients for everything outside the app: the local Zotero
 SQLite DB, PDFs, the LLM, OpenAlex (prestige), Unpaywall (OA PDFs), and the
 Targeted Search sources (arXiv/EuropePMC/Crossref/Semantic Scholar + the
@@ -10,8 +25,22 @@ clear types.
 services/ ─calls→ integrations/ ─talks to→  Zotero DB | PDFs | LLM API | OpenAlex | Unpaywall
 ```
 
+Raw `mark_feed_items_read(list[int]) -> int` reuses `backup_database()` before
+its native retry, then `_prune_backups()` only after commit. A nonblocking
+per-library file lock serializes raw admission through commit/pruning. Admission
+allows the existing five retained app backups plus one attempt slot; six existing
+app-pattern artifacts refuse before backup/native effects. Failure never prunes
+snapshots: review/export enough to leave at most five before retrying. Normal
+success applies shared retention to five, including older failed-attempt copies,
+so successive successful calls continue.
+Empty input has no probe/lock/backup/write. Backup refusal prevents effects; SQL
+failure rolls back and preserves the completed backup. Postcommit retention errors
+propagate outside replay. This is not backup-to-write isolation against other native
+writers, typed approval or rollback-on-every-error. Other native ABIs are unchanged.
+
 | file | responsibility |
 |---|---|
+| `_search_http.py` | Shared request/owned-client lifecycle for arXiv, Crossref, Europe PMC and Semantic Scholar; optional request-local transport/parser receipts, with no ambient capture state or retry. Provider parsing and locked endpoint parameters remain in each adapter. |
 | `zotero_read.py` | `ZoteroReader`: read-only WAL-aware connections, bounded lock retries and user-library collection helpers. Persistent locks raise; no raw snapshot copy or immutable WAL-skipping mode. Statistics scope collections/tags to the user library and exclude trashed items/attachments. `get_collections` scopes its collection and item counts; `collection_name_for_key` validates picker keys. Collection sorting pins Inbox and read-next, then alphabetical, recursively. |
 | `_zotero_read_items.py` · `_zotero_read_lookup.py` · `_zotero_read_feeds.py` | reader query mixins (items/detail — now also selects Zotero `typeName` as `item_type`, a weak paper-type prior for deep-review type detection, and `publicationTitle` as `venue` so the Library can filter by journal · `get_items` (paged, 500/call) + `get_all_items` (whole-library passes) share one SQL builder (`_build_list_query`) + row mapper (`_row_to_item`); `get_all_items` runs that query UN-paged in a SINGLE `_execute_read`, so a whole-library read uses one connection/query rather than repeated 500-item pages · find/membership/tags — DOI dedup matches all `domain.normalize_doi` variants · feeds — incl. `get_unread_feed_guid_map` (guid → unread `feedItems.itemID`; the read-sync reconciler's join key, see `services/triage/feeds/_zotero_readsync.py`)) |
 | `app_rss.py` | `AppRssReader`: app-owned RSS items and rotating bounded refresh; offline returns before network/DB writes. Each feed commits independently; HTTP/DNS/document failures are recorded and the remaining feeds continue. Partial success returns `errors` with feed IDs and URLs; when every feed fails, the last exception propagates. Storage/programming failures still abort immediately with rollback. Counts include committed items only. Text is sanitized before DOI/key derivation and storage. `stream_public_url` is shared with PDF fetching: validated numeric destination + original Host/TLS identity on every hop. |
@@ -19,8 +48,8 @@ services/ ─calls→ integrations/ ─talks to→  Zotero DB | PDFs | LLM API |
 | `zotero_write.py` | `ZoteroWriter`: WAL-consistent backup and apply dispatcher. An explicit transaction encloses per-row savepoints; lock errors roll back the entire batch before retry, invalid rows return individual failures, and unexpected errors propagate. WAL setup failures are not swallowed. Backup pruning follows a successful write. |
 | `_zotero_write_items.py` · `_zotero_write_feed.py` · `_zotero_write_fields.py` · `_zotero_write_attachments.py` · `_zotero_write_tags.py` · `_zotero_write_collections.py` | writer mixins (item creation/materialization · idempotent feed-read bookkeeping · `set_field` single-field upsert e.g. Call Number · native imported_url attachment · tag/note helpers · collections) |
 | `_zotero_write_common.py` | `ZoteroWriteError` + LOGGER + `resolve_user_library_item_id` — the single guard every write that targets an item by key routes through, scoping resolution to `type='user'` so a feed item's key can never be mutated/parented into the user library (`required=False` for the best-effort batch remove). Mirrors `_USER_LIBRARY_ID_SELECT` on the read side (leaf) |
-| `pdf.py` · `pdf_fetch.py` | extract local PDFs as plain analysis text using OnPrem's existing `pdf_markdown=False` backend; fetch OA PDFs with size/timeout/magic caps. Automatic destinations/redirects use the shared public-IP pinning boundary; proxy env is ignored. Cached paths remain usable offline. |
-| `browser_fetch.py` | Institutional-access PDF acquisition with optional Patchright/Playwright Chromium and a persistent login profile. Bounded decoded CDP streams preserve HTML/JS/cookies and follow citation metadata plus Download PDF links; PDF bytes are identified by magic even with a wrong MIME type. A declared-but-unavailable scholarly PDF does not become a rendered paywall stub. HTML-only article review uses bounded text-only snapshots, not Chromium printing. The canonical `article_snapshot_path(url, cache_dir)` identifies only those derivatives: they use `cache_dir/article-snapshots/<full SHA-256(raw URL)>.pdf`; captured publisher PDFs from either browser entrypoint use the unchanged root-level `cache_dir/<first 16 hex SHA-256(raw URL)>.pdf` key. Persistent snapshots are reused only with `render_fallback=True`, after the source-PDF cache check. Legacy prefixed root-level snapshot files remain untouched; there is no alias, migration, or deletion. See the [browser article memory boundary](../../docs/browser-article-memory-boundary.md). Browser sessions share the public-only proxy and one lock; `channel` selects Chrome/bundled Chromium. Optional cookie-store import and headed login readiness remain here. Missing dependency/non-PDF returns `None`; oversized bodies and unexpected acquisition errors propagate. |
+| `pdf.py` · `pdf_fetch.py` | extract local PDFs as plain analysis text using OnPrem's existing `pdf_markdown=False` backend; triage captures immutable selected text, verbatim SDK annotation URI tuples and full-document SHA-256 together; fetch OA PDFs with size/timeout/magic caps. Automatic destinations/redirects use the shared public-IP pinning boundary; proxy env is ignored. Cached paths remain usable offline. |
+| `browser_fetch.py` | Institutional-access PDF acquisition with optional Patchright/Playwright Chromium and a persistent login profile. Bounded decoded CDP streams preserve HTML/JS/cookies and follow citation metadata plus Download PDF links; PDF bytes are identified by magic even with a wrong MIME type. A declared-but-unavailable scholarly PDF does not become a rendered paywall stub. HTML-only article review uses bounded text-only snapshots, not Chromium printing. The canonical `article_snapshot_path(url, cache_dir)` identifies only those derivatives: they use `cache_dir/article-snapshots/<full SHA-256(raw URL)>.pdf`; captured publisher PDFs from either browser entrypoint use the unchanged root-level `cache_dir/<first 16 hex SHA-256(raw URL)>.pdf` key. Persistent snapshots are reused only with `render_fallback=True`, after the source-PDF cache check. Legacy prefixed root-level snapshot files remain untouched; there is no alias, migration, or deletion. See the [reading source boundary](../../docs/features.md#reading-reviews). Browser sessions share the public-only proxy and one lock; `channel` selects Chrome/bundled Chromium. Optional cookie-store import and headed login readiness remain here. Missing dependency/non-PDF returns `None`; oversized bodies and unexpected acquisition errors propagate. |
 | [`_browser_response.py`](./_browser_response.py) | Bounded decoded Fetch/CDP response capture and proxy authentication. A captured PDF requires actual `%PDF-` bytes within `max_bytes`, independent of MIME; a typed missing-PDF status is recorded only when the main-frame response declares `application/pdf` and returns HTTP 400+ (except 407). |
 | [`_browser_article.py`](./_browser_article.py) | Complete admitted-scope `document.body` text-node collection in a CDP isolated world, in ≤8 KiB UTF-8 chunks with text-byte, DOM-node and deadline limits. It does not collect images, layout, CSS-generated content, embedded frames, or shadow trees. Mutation, partial traversal, invalid/empty text, or exhausted limits fail closed rather than returning a prefix. |
 | [`_article_pdf.py`](./_article_pdf.py) | Bounded fixed-layout text-only PDF writer with source/page/output caps and a text round-trip check. Uses PyMuPDF's built-in Helvetica and `cjk` fallback, subset by PyMuPDF itself; no `fontTools` import or dependency. PDF Subject is `Text-only conversion; original visual layout is not preserved.` |
@@ -95,7 +124,7 @@ return a clipped prefix or collect visual/generated/embedded content. A fixed
 PyMuPDF text layout writes to a bounded PDF sink; `Page.printToPDF` is not used.
 Main-document and text/output caps do not limit subresource traffic, all browser
 network activity, or Chromium's DOM, JavaScript, image-decoding, or rendering
-memory. See the [article memory boundary](../../docs/browser-article-memory-boundary.md).
+memory. See the [reading source boundary](../../docs/features.md#reading-reviews).
 Both Fetch request and response stages are enabled: the request stage is needed
 for authenticated-proxy challenges. Only the exact session proxy receives its
 ephemeral credentials, once per request; origin/foreign/repeated challenges are
@@ -112,6 +141,13 @@ RSS requests negotiate identity/gzip and cap both wire and decoded bodies at
 8 MiB; gzip output is bounded during decompression. Invalid/trailing gzip and
 unnegotiated encodings are errors. Original XML bytes preserve declared encodings.
 
+`_read_item_annotations` projects native annotation key, parent attachment key and
+`dateModified` alongside complete comment/highlight text in item detail. Related
+saved-paper context can therefore retain original source identity and observe
+same-count edits; it never invents IDs from positions or treats a highlight as a
+user comment. Existing ordering and deleted annotation/attachment exclusions are
+preserved. `tests/test_zotero_read_items.py` covers this read-only contract.
+
 Item lists, details, notes and annotations exclude trashed children (including
 annotations on trashed PDFs); note lists/detail share one query. Collection lookup
 belongs to the collection mixin and scopes key/name/every path segment to the user
@@ -121,6 +157,13 @@ Feed materialization acquires `BEGIN IMMEDIATE` before its existing-key probe
 and writes all item/collection/tag/note steps in that transaction. Replaying a
 committed user-library key is a no-op for the whole operation, preserving later
 user edits; callers must reuse a reserved key only for the same creation intent.
+Explicit `existing_only=True` instead opens SQLite URI `mode=ro` with `query_only`
+and acknowledges only that user-library key (missing→None), bypassing backup,
+pruning, mutating PRAGMAs and materialization. This read-only lookup remains
+available while Zotero is running; the close-Zotero guard still protects ordinary
+materialization. This current no-op ACK does not
+certify an earlier raised attempt, live/untrashed membership or physical DB identity.
+Ordinary WAL-read filesystem effects remain possible.
 Queued feed-read writes verify both item and feed-library IDs and preserve an
 existing read timestamp. Note insertion deduplicates identical visible HTML;
 upsert requires a marker in its HTML and matches it literally among live notes.
@@ -134,6 +177,23 @@ shared tag records or links belonging to other items. A one-row lookup is still
 appropriate for tag creation/reuse, but cannot implement complete removal.
 Adapters are leaves — they depend only on stdlib, third-party clients, and
 `models`/`domain`.
+
+OpenAlex search retains declared DOI/arXiv aliases from work `locations` in
+`OpenAlexSearchHit.family_identifier_keys`, including versioned arXiv URLs. URLs
+are parsed for identity only, never followed; no title-based identity inference or
+extra lookup request is introduced. Missing locations preserve legacy empty aliases.
+
+OpenAlex, arXiv, Crossref, Europe PMC and Semantic Scholar search accept optional
+request-local `outcome` receipts: status, returned count and bounded error code,
+never query, URL, response body or exception text. Observed empty results have
+count zero; failed/unknown requests have no count. Blank input does no HTTP and
+stays unknown. The four non-OpenAlex adapters reuse `_search_http` for request and
+owned-client cleanup; receipt parsing refuses malformed result containers/rows.
+Caller-owned clients remain open. Unexpected runtime failures propagate. Ordinary
+calls retain their list-returning best-effort interface, without a receipt or new
+work. Saved-paper Discovery still admits only its declared OpenAlex variants;
+this does not imply all-provider coverage, relevance or scientific correctness.
+See [discovery boundary](../../docs/features.md#saved-paper-discovery).
 
 Stored-attachment names strip separators and non-printable Unicode characters.
 Known PDF/PNG extensions are normalized and reserved before the 120-character
@@ -162,7 +222,19 @@ Ownership, replay and manual-note isolation are covered by
 `tests/test_note_ownership.py`, `tests/test_zotero_audit_boundaries.py` and
 `tests/test_zotero_note_envelope.py`. Native acceptance receipts remain private.
 
-CompletionGuard raises typed `LLMOutputTruncated(RuntimeError)` only for observed `length`; metadata-only logs and its diagnostic message remain unchanged.
+CompletionGuard raises typed `LLMOutputTruncated(RuntimeError)` for ordinary observed `length`.
+Setup verification additionally requires observed exact model identity and a successful
+terminal reason before accepting text/typed output. Missing observations, truncation,
+model mismatch and cached text cannot establish verification. Verification wrappers
+support cancellation checks before every request and close their owned transport;
+native Anthropic checks its actual response model/stop reason. Ordinary inference
+keeps its existing behavior; no paper text controls these verification options.
+`observe_completions` is an explicit invocation-scoped observer before parsing or
+truncation rejection. The interpretation experiment attaches it inside each
+client call, including parallel map workers; aggregate provider usage is one event,
+not multiplied by generation count. No observer means no decoded/raw retention.
+Missing provider usage/model metadata stays unknown; observed model names do not
+pin mutable remote weights. Ordinary logging remains metadata-only.
 
 Analysis-source serialization correction (CAPA: proven for the checked PDF):
 
@@ -181,6 +253,18 @@ guarantee is implied; primary evidence still needs checking.
 Callers consume strings: deep review, triage summarization, search full text,
 and the faithbench corpus; QA consumes the extracted raw body. No Markdown
 schema is required at this boundary. Presentation retains its own PDF parser.
+Triage's `capture_pdf_source` hashes in finite 64 KiB reads (opening size plus
+one growth-detection byte) before and after extraction/annotation reading. Changed
+identity/content, malformed SDK data and read/hash/extraction failures raise before
+corpus/model work. This detects ordinary file changes, not a hostile concurrent
+writer restoring identical bytes between checks. SDK annotation strings retain
+order and duplicates without trimming, unwrapping or URI normalization; their
+HTTP(S) admission belongs to triage, not presentation's sanitized link list.
+Abstract-only calls do not import the PDF reader or probe a path. Other existing
+text-only consumers retain `extract_text`; no adapter/backend setting changes.
+`tests/test_pdf_source_authority.py` and `tests/test_method_pdf_authority.py`
+cover capture identity, annotation authority and failure sequencing on owned PDFs.
+
 Prevention: `tests/test_pdf_analysis_text.py` checks the exact loader flag,
 page joining, and the real OnPrem backend on an original generated PDF with
 signed superscript/subscript uncertainty, title/Methods text and a URL.

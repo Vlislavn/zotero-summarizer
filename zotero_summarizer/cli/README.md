@@ -1,5 +1,12 @@
 # cli — the `zotero-summarizer` command-line interface
 
+`faithbench interpretation` inspects a frozen recipe by default, without provider
+construction or output effects. Explicit `--run --capture-local` records a private
+A/B/C attempt; its stage clients resolve through `services.llm.factory` using
+invocation-local `RuntimeState` cache state. `--run-id` exports blinded human
+packets, and `--labels` scores an existing run. Inconsistent/unconsented flags refuse at the existing pre-Settings
+validator, including the real dispatcher. See [experiment overview](../../docs/features.md#interpretation-experiment).
+
 Each command group lives in its own module and owns both its handlers and its
 argparse registration. `__init__.build_parser()` just wires the groups together,
 so no single file holds the whole parser. `feeds tick --force-daily` was removed:
@@ -8,17 +15,19 @@ is a read-only diagnostic preview; reviewed user Adds use Today/Review.
 
 ```
 __init__.build_parser()
-   ├─ register_app(subparsers)        # _app.py:     serve · mcp · migrate · smoke-test · prefetch-models · verify-deep-review
+   ├─ register_app(subparsers)        # _app.py:     serve · serve-mobile · mcp · migrate · smoke-test · prefetch-models · verify-deep-review
    ├─ register_setup(subparsers)      # _setup.py:   setup · doctor · calibrate
    ├─ register_feeds(subparsers)      # _feeds.py:   feeds run/list/serve/tick/preview/select-daily
-   ├─ register_goldenset(subparsers)  # _goldenset.py: export · train · eval-baseline · tune · suggest
+   ├─ register_goldenset(subparsers)  # _goldenset.py: export · train-classifier · eval-baseline · tune · suggest-labels
+          ├─ register_goldenset_backup(gs_sub)    # _goldenset_backup.py: model-history · restore-model
           ├─ register_goldenset_classify(gs_sub)  # _goldenset_classify.py: classify · classify-llm
           ├─ register_goldenset_predict(gs_sub)   # _goldenset_predict.py:  predict-feed · analyze-notes · compare
           ├─ register_goldenset_migrate(gs_sub)   # _goldenset_migrate.py:  migrate-verdicts-to-zotero
-          └─ register_goldenset_setup_tag_colors(gs_sub)  # _goldenset_setup_colors.py: setup-tag-colors
-   ├─ register_faithbench(subparsers)  # _faithbench.py: faithbench build/run/judge/report
-   └─ register_research_feed(...)      # _research_feed.py: research-feed run
-main() = parse args → validate command budgets → install Settings → dispatch
+          ├─ register_goldenset_setup_tag_colors(gs_sub)  # _goldenset_setup_colors.py: setup-tag-colors
+          └─ register_goldenset_feedback(gs_sub)  # _goldenset_feedback.py: analyze-feedback
+   ├─ register_faithbench(subparsers)  # _faithbench.py: faithbench build/run/judge/report/interpretation
+   └─ register_research_feed(...)      # _research_feed.py: research-feed run/view/telegram-auth
+main() = parse args → validate command budgets → selected Settings/.env → offline flags → dispatch
 ```
 
 | file | responsibility |
@@ -26,7 +35,8 @@ main() = parse args → validate command budgets → install Settings → dispat
 | `__init__.py` | `build_parser()` + `main()` (the entry point `zotero-summarizer`) |
 | `__main__.py` | enables `python -m zotero_summarizer.cli` |
 | `_helpers.py` | shared CLI helpers: feed-id resolution, run-log writing, slugs |
-| `_app.py` | `serve` (uvicorn `api.app:create_app`, `factory=True`; leaves existing listeners intact and reports a bind error on an occupied port; the process-killing helper and `--no-kill` option are removed) / `mcp` / `migrate` / `smoke-test` / `prefetch-models` (download the ML models for offline use; `--check` reports cache status; includes the MiniCheck claim-checker only when `quality_review.shadow_claim_check` is on). `__init__.apply_offline_env()` (called at CLI import, before any transformers import) turns `ZS_OFFLINE`/`HF_HUB_OFFLINE` into cache-only model loading. `verify-deep-review` runs the real digest + quality path headlessly against the live `deep_review` model on ONE already-built paper's cached `qa_text` (`--item-key`, default `4NIMLFMV`; `--with-goals` adds the heavier goal board) — prints per-phase timing + the digest JSON; the end-to-end "does a review actually produce a digest" check without Zotero or the server. It computes `sub_concurrency` via the SAME `_common.deep_review_sub_concurrency` helper the background job uses (and prints it in the tier line), so its wall-clock is a faithful production receipt — a remote provider's rubric/goal sub-calls run in parallel here exactly as they would in the app. `--provider`/`--model` override the deep_review stage for THIS run only (e.g. `--provider default --model qwen3.5:4b` to drive the pipeline against a local ollama model when the configured provider is unreachable/over-budget) |
+| `_app.py` | `serve` (uvicorn `api.app:create_app`, `factory=True`; leaves existing listeners intact and reports a bind error on an occupied port; the process-killing helper and `--no-kill` option are removed) / `mcp` / `migrate` / `smoke-test` / `prefetch-models` (download the ML models for offline use; `--check` reports cache status; includes the MiniCheck claim-checker only when `quality_review.shadow_claim_check` is on). `__init__.apply_offline_env()` projects the selected Settings environment before handler model imports; importing CLI or building its parser reads no default `.env` or model SDK. `ZS_OFFLINE`/`HF_HUB_OFFLINE` still select cache-only model loading. `verify-deep-review` runs the real digest + quality path headlessly against the live `deep_review` model on ONE already-built paper's cached `qa_text` (`--item-key`, default `4NIMLFMV`; `--with-goals` adds the heavier goal board) — prints per-phase timing + the digest JSON; the end-to-end "does a review actually produce a digest" check without Zotero or the server. It computes `sub_concurrency` via the SAME `_common.deep_review_sub_concurrency` helper the background job uses (and prints it in the tier line), so its wall-clock is a faithful production receipt — a remote provider's rubric/goal sub-calls run in parallel here exactly as they would in the app. `--provider`/`--model` override the deep_review stage for THIS run only (e.g. `--provider default --model qwen3.5:4b` to drive the pipeline against a local ollama model when the configured provider is unreachable/over-budget) |
+| `_mobile_serve.py` | Explicit `serve-mobile --origin HTTPS_TS_ORIGIN --owner-login EXACT_LOGIN`: existing app through an owned private Unix listener, never a TCP fallback or automatic Tailscale configuration. Bound directory/socket ownership and signal cleanup; configurable graceful wait, not downstream cancellation proof. |
 | `_setup.py` | `setup` reuses bootstrap/path/goals services; `--mode local --profile light\|balanced\|existing` resolves the same hardware-gated profile definitions as web and prints (never runs) an explicit model pull command. Hosted and skip/no-LLM paths remain. `doctor [--json|--fix|--check id]` runs the shared persisted real-pipeline checklist; `calibrate` retains measured hardware/endpoint tuning. |
 | `_feeds.py` | the `feeds` subcommands (drive the RSS daemon) |
 | `_goldenset.py` | golden-set export + ML lifecycle (train/eval/tune/suggest) + group wiring |
@@ -34,9 +44,19 @@ main() = parse args → validate command budgets → install Settings → dispat
 | `_goldenset_migrate.py` | `migrate-verdicts-to-zotero` — one-time transfer of in-app verdicts (`label_verdicts`) into Zotero `label:<priority>` tags (`--dry-run`, idempotent, library items only, single batch backup) |
 | `_goldenset_setup_colors.py` | `setup-tag-colors` — prints the one-time Zotero setup (colors + number keys 1-4 for the four `label:<priority>` tags) for native keypress labeling. Non-destructive (prints the plan; writes nothing into your synced Zotero settings); `--json` for machine output |
 | `_faithbench.py` | `faithbench build/run/judge/report` — faithfulness mini-benchmark of the deep_review-stage model (span-verified QA + traps + review-claim grounding). Build stages the review CSV before publishing the immutable benchmark file as its version marker; QA runs require explicit approval of every generated review-CSV row and bind that CSV hash into the manifest. `build --max-builder-windows` bounds contiguous 6,000-character source windows per paper; its CLI/env/default precedence, preflight behavior and cost are documented below. `run` is resumable via `--run-id` and takes `--provider/--model` to sweep a model for THIS run only (no goals.yaml edit; recorded in the manifest); `judge` uses the pinned remote judge (`CUSTOM_BASE_URL`/`CUSTOM_API_KEY`). See `services/faithbench/README.md` |
-| `_research_feed.py` | `research-feed run --from … --to … [--venue …]`: bounded weekly JSON+Markdown; generates missing cards through existing deep review unless `--cached-only`; Zotero stays dry-run unless `--queue-zotero` is explicit. |
+| `_research_feed.py` / `_telegram.py` | `research-feed run` produces RSS or explicitly selected Telegram reports; `view` prints retained Markdown without processing; `telegram-auth` owns explicit interactive authorization. RSS generation reuses deep review unless `--cached-only`; queuing Zotero changes requires `--queue-zotero`. |
 
 Handlers use lazy imports inside the function bodies to keep CLI startup fast.
+
+`serve` refuses non-loopback binds at parser and handler boundaries and disables
+proxy-header rewriting. `serve-mobile` is a separate explicit POSIX command;
+project/data ancestry must be owner-controlled, private socket paths are never
+silently replaced, and no foreign process is stopped. Signal capture covers the
+whole socket lifetime, including bind and pre-server startup, and replays the
+interruption only after owned cleanup. `make iphone` only refuses
+with guidance; it does not inspect deployed state. Gateway origin/owner, trust,
+manual activation, shutdown and unperformed device checks are described in
+[remote-access boundary](../../docs/features.md#remote-access).
 
 Faithbench run IDs are single ASCII alphanumeric/underscore/hyphen names, not
 paths. The common run/judge/report path resolver rejects traversal and symlink
@@ -106,12 +126,24 @@ Research-feed uses the same pre-Settings validation point: shortlist 1–100,
 cards 1–20 and review timeout 1–86,400 seconds, sharing the model's budget types
 with direct service calls. Zero/negative/oversized overrides exit 2 before startup.
 The handler reuses the dispatcher's Settings instead of loading it a second time.
-`research-feed --cached-only` skips app startup: existing RSS/review data can be
-projected without a goals file, classifier, provider setup or background work.
+`research-feed --cached-only` skips app startup and client/classifier setup.
+Current cache qualification reads the existing goals config in invocation-local
+context, without config creation, dotenv/keyring discovery or background work.
+Absent/invalid config and stale source/config are explicit qualification failures;
+config-free viewing of already published reports is a separate outcome.
 Generation uses existing `startup(background=False)`, so it does not prewarm,
 recover server jobs, retrain or rescore unrelated papers. Normal configured model
 prerequisites still apply to generation: an enabled classifier with an existing
 golden dataset needs a compatible cached artifact, prepared explicitly beforehand.
+
+Research-feed generation co-produces source-bound project proposals in the
+existing review response; cached-only projects qualified current reviews without
+model work. Each run publishes a new schema-v1 bundle, never rewrites/replays an
+old card. Partial failures stay in JSON/Markdown and return CLI status 1, including
+failed assessment attempts with a reusable base review. Default dry-run and
+explicit idempotent `--queue-zotero` pending-tag consent are unchanged. Runtime
+and dependency diagnostics go to stderr; stdout remains one JSON result even
+when a model callback prints a warning during a failed partial run.
 
 `predict-feed` no longer accepts unused `--calibration`/`--threshold-strategy`;
 its regressor has no such tuning step. `classify` retains its used options.
@@ -123,8 +155,11 @@ CSV predictions, benchmark reports or run logs are written, including when earli
 rows succeeded. Successful summaries use `rows_skipped` (missing title/abstract),
 not the former `rows_failed`; provider failures are no longer successful summaries.
 
-`main()` installs the selected project's Settings before dispatch, so nested
-provider construction uses the same timeout and model/tuning paths as the command.
+`main()` installs the selected project's Settings and pins its resolved root in
+handler arguments before dispatch. A `.env` value for `ZOTERO_SUMMARIZER_HOME`
+cannot redirect a later handler reload; `serve` passes that same root to its
+factory/reload workers through the environment. Nested provider construction
+uses the same timeout and model/tuning paths as the command.
 Default model/history outputs are `data/models/`; tuning uses
 `data/optuna-best-params.json`. Training publishes `<classifier>.zip` with model
 and metadata together; run logs report the resolved artifact path (legacy joblib
@@ -144,6 +179,13 @@ persists a valid ML-only choice that can later be changed in Settings.
 5000-row cutoff. Dry-run and apply use the same list; library-only checks, connector
 guard, idempotent tag comparison and the single batch backup remain unchanged.
 
+Feedback review stack part 4: weekly local reports are off by default. Enable with
+`ZS_FEEDBACK_SCHEDULE_ENABLED=true python -m zotero_summarizer.cli feeds serve --project-root ROOT`.
+Reports precede feed ticks. Owned SIGINT/SIGTERM during reporting stop cleanly
+after child drain, with no cursor advancement; unrelated interruptions propagate.
+The prerequisite admitted-root handler/factory pin remains intact. See the
+Feedback package README for cap compatibility and conservative recovery rules.
+
 ### Local review attempt capture
 
 `verify-deep-review --item-key KEY` uses the production strategy dispatcher,
@@ -161,3 +203,12 @@ Default events contain hashes/counts only. No online accuracy claim follows from
 these traces; stage counts are instrumentation, not review-success scores.
 
 Diagnostic CLI source reads reuse the single-component/no-symlink paper-state guard. Admission happens before provider construction. Legacy full_text is explicitly labelled unverified legacy scope; empty sources retain local failure diagnostics. Diagnostic calls disable thinking without changing app routing.
+
+`goldenset analyze-feedback` publishes a local report through the dedicated child;
+see [feedback analysis](../services/golden/feedback_analysis/README.md).
+
+Retain original explicit default-no inference consent; use the existing canonical provider verification boundary.
+
+Telegram account/session activation and collection are explicit operations; retained
+report viewing does not activate them. See [Telegram news](../../docs/features.md#telegram-news).
+Source and synthetic lifecycle tests are not live-account acceptance.

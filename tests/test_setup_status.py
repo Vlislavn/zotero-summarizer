@@ -10,6 +10,7 @@ import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import yaml
 
@@ -36,14 +37,15 @@ class _Reader:
 def _write_valid_goals(config_path: Path) -> None:
     with open("goals.example.yaml", "r", encoding="utf-8") as fh:
         raw = yaml.safe_load(fh)
-    raw["llm"]["api_base"] = "http://localhost:11434/v1"
+    raw["llm"]["api_base"] = "https://example.test/v1"  # credential gating belongs to hosted mode
     raw["llm"]["api_key_env"] = "ZS_TEST_KEY"
     raw["research_goals"] = ["Reliable multimodal evidence synthesis"]
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
 
 def _fake_verified_doctor(settings: Settings) -> None:
-    payload = {"status": "ready", "ready": True, "config_signature": doctor._config_signature(settings),
+    payload = {"status": "ready", "ready": True, "verification_revision": doctor.ADMISSION_REVISION,
+               "config_signature": doctor._config_signature(settings),
                "checks": [doctor._row(check_id, "ready", "ok") for check_id in doctor._CHECKS]}
     (settings.data_dir / "setup_doctor.json").write_text(json.dumps(payload))
 
@@ -56,7 +58,8 @@ def _seed(
     settings = Settings.load(project_root=tmp_path)
     _write_valid_goals(settings.config_path)
     settings.data_dir.mkdir()
-    _fake_verified_doctor(settings)
+    with patch.dict("os.environ", {"ZS_TEST_KEY": key_value or ""}):
+        _fake_verified_doctor(settings)
 
     state = RuntimeState()
     state.app_state = AppState(config=read_config(settings.config_path))

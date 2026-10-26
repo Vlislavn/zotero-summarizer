@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 from typing import Any, Protocol
 
 LOGGER = logging.getLogger("zotero_summarizer.llm")
@@ -27,9 +28,34 @@ class LLMClient(Protocol):
 class InstrumentedLLMClient:
     """Provider-neutral logging wrapper for OpenAI-compatible LLM clients."""
 
-    def __init__(self, inner: LLMClient, *, structured_output: bool = False) -> None:
+    def __init__(self, inner: LLMClient, *, structured_output: bool = False,
+                 verification_guard: Any = None, owned_transport: Any = None,
+                 before_request: Any = None) -> None:
         self._inner = inner
         self._structured_output = structured_output
+        self._verification_guard = verification_guard
+        self._owned_transport = owned_transport
+        self._before_request = before_request
+
+    def close(self) -> None:
+        if self._owned_transport is not None:
+            self._owned_transport.close()
+            self._owned_transport = None
+
+    @contextmanager
+    def _verification(self, prompt, kwargs):
+        if self._before_request is not None:
+            self._before_request()
+        if self._verification_guard is None:
+            yield
+            return
+        if (not isinstance(prompt, str) or kwargs.get("attempt_fix") or "fix_llm" in kwargs
+                or ("response_format" in kwargs and not isinstance(kwargs["response_format"], dict))):
+            raise ValueError("Verification requires an explicit string invocation without implicit repair clients")
+        from .llm_requests import owned_request
+
+        with owned_request(self._verification_guard):
+            yield
 
     @staticmethod
     def _to_text(value: Any) -> str:
@@ -55,13 +81,15 @@ class InstrumentedLLMClient:
         )
 
     def prompt(self, prompt: str, **kwargs: Any) -> Any:
-        result = self._inner.prompt(prompt, **kwargs)
+        with self._verification(prompt, kwargs):
+            result = self._inner.prompt(prompt, **kwargs)
         self._log_call("prompt", prompt, result)
         return result
 
     def pydantic_prompt(self, prompt: str, pydantic_model: Any, **kwargs: Any) -> Any:
         if self._structured_output and "response_format" not in kwargs:
             kwargs["response_format"] = build_response_format(pydantic_model)
-        result = self._inner.pydantic_prompt(prompt=prompt, pydantic_model=pydantic_model, **kwargs)
+        with self._verification(prompt, kwargs):
+            result = self._inner.pydantic_prompt(prompt=prompt, pydantic_model=pydantic_model, **kwargs)
         self._log_call("pydantic_prompt", prompt, result)
         return result

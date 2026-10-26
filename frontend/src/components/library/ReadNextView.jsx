@@ -50,7 +50,7 @@ function useMediaQuery(query) {
 }
 
 function ExpandedPaperPanel({
-  item, collections, onClose, onSaved, onQueueRefresh, panelRef, variant = 'mobile',
+  item, collections, onClose, onSaved, onQueueRefresh, onNotesDirtyChange, panelRef, variant = 'mobile',
 }) {
   const desktop = variant === 'desktop';
   return (
@@ -84,6 +84,7 @@ function ExpandedPaperPanel({
           collections={collections}
           onSaved={onSaved}
           onQueueRefresh={onQueueRefresh}
+          onNotesDirtyChange={onNotesDirtyChange}
         />
       </div>
     </aside>
@@ -97,7 +98,7 @@ export default function ReadNextView({
   // Bulk "Add to collection" (the Meaning-search → Zotero collection shortcut):
   // flat collection list + handler from Library; last target remembered so the
   // common "send to my reading collection" case is one click (Working Memory).
-  collections = [], onAddToCollection, addingToCollection = false,
+  collections = [], onAddToCollection, addingToCollection = false, serverAvailable = true, offline = false,
   // Client-side smart filters (Library owns the state; `items` arrives already
   // filtered). rawCount = pre-filter size, so we can tell "nothing fetched" apart
   // from "filtered to zero". filterSig = serialized filters, to reset the reveal.
@@ -117,6 +118,7 @@ export default function ReadNextView({
     computing || errored || err != null || scoresStale || !computedAt
     || items.some((it) => typeof it.relevance_score !== 'number');
   const [expandedKey, setExpandedKey] = useState(null);
+  const [notesDirty, setNotesDirty] = useState(false);
   const expandedPanelRef = useRef(null);
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   // Target for the bulk "Add to collection" action. Defaults to the last-used
@@ -149,11 +151,22 @@ export default function ReadNextView({
     }
   }, [expandedKey, isDesktop]);
 
+  function chooseExpanded(key) {
+    if (notesDirty && !window.confirm('You have unsaved notes on this paper. Leave without saving them?')) return;
+    setNotesDirty(false);
+    setExpandedKey(key);
+  }
+
   function closeExpanded() {
-    setExpandedKey(null);
+    chooseExpanded(null);
+  }
+
+  function refreshExpanded() {
+    if (!notesDirty) onSaved?.();
   }
 
   function saveExpanded() {
+    if (notesDirty) return;
     setExpandedKey(null);
     onSaved?.();
   }
@@ -196,7 +209,7 @@ export default function ReadNextView({
             </span>
           )}
           {sort.field === 'best' && (
-            semantic
+            offline ? <span>· cached working set order</span> : semantic
               ? <span>· ranked by similarity to “{searchQuery}”</span>
               : (modelReady
                 ? (
@@ -220,7 +233,7 @@ export default function ReadNextView({
             <button
               type="button"
               onClick={onRescore}
-              disabled={computing}
+              disabled={computing || !serverAvailable}
               title={`Recompute relevance scores for your whole library against the current model${computedAt ? ` · scores as of ${formatShortDate(computedAt)}` : ''}. First full scan (~2,400 papers) can take a few minutes; re-scans are fast.`}
               className={`px-2 py-0.5 rounded-md border text-[11px] disabled:opacity-50 disabled:cursor-not-allowed ${
                 scoresStale
@@ -245,7 +258,7 @@ export default function ReadNextView({
             <button
               type="button"
               onClick={onRunTriage}
-              disabled={!selected || selected.size === 0 || starting}
+              disabled={!serverAvailable || !selected || selected.size === 0 || starting}
               className="px-3 py-0.5 rounded-md bg-teal-700 text-[11px] font-semibold text-white hover:bg-teal-800 disabled:bg-slate-300 disabled:text-slate-500"
             >
               {starting ? 'Starting…' : `Run triage (${selected?.size || 0})`}
@@ -269,7 +282,7 @@ export default function ReadNextView({
               <button
                 type="button"
                 onClick={() => onAddToCollection(targetCollection)}
-                disabled={!selected?.size || !targetValid || addingToCollection}
+                disabled={!serverAvailable || !selected?.size || !targetValid || addingToCollection}
                 className="px-3 py-0.5 rounded-md bg-slate-700 text-[11px] font-semibold text-white hover:bg-slate-800 disabled:bg-slate-300 disabled:text-slate-500"
                 title="Add the selected papers to this Zotero collection (backup-first; no more memorizing titles and re-finding them in Zotero)"
               >
@@ -278,7 +291,7 @@ export default function ReadNextView({
             </span>
           )}
           <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
-            <input type="checkbox" checked={includeRead} onChange={onToggleIncludeRead}
+            <input type="checkbox" disabled={!serverAvailable} checked={includeRead} onChange={onToggleIncludeRead}
               className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500" />
             Show already-read
           </label>
@@ -379,7 +392,7 @@ export default function ReadNextView({
               )}
               <button
                 type="button"
-                onClick={() => setExpandedKey(expandedKey === it.item_key ? null : it.item_key)}
+                onClick={() => chooseExpanded(expandedKey === it.item_key ? null : it.item_key)}
                 aria-expanded={expandedKey === it.item_key}
                 className="min-w-0 flex-1 text-left flex items-start gap-2 sm:gap-3"
               >
@@ -491,7 +504,7 @@ export default function ReadNextView({
                 itemKey={it.item_key}
                 proposal={it.proposed_verdict}
                 onSaved={saveExpanded}
-                onOverride={() => setExpandedKey(it.item_key)}
+                onOverride={() => chooseExpanded(it.item_key)}
               />
             )}
             {expandedKey === it.item_key && !isDesktop && (
@@ -501,7 +514,8 @@ export default function ReadNextView({
                 panelRef={expandedPanelRef}
                 onClose={closeExpanded}
                 onSaved={saveExpanded}
-                onQueueRefresh={() => onSaved?.()}
+                onNotesDirtyChange={setNotesDirty}
+                onQueueRefresh={refreshExpanded}
               />
             )}
           </li>
@@ -515,7 +529,8 @@ export default function ReadNextView({
           collections={collections}
           onClose={closeExpanded}
           onSaved={saveExpanded}
-          onQueueRefresh={() => onSaved?.()}
+          onNotesDirtyChange={setNotesDirty}
+          onQueueRefresh={refreshExpanded}
           variant="desktop"
         />
       )}

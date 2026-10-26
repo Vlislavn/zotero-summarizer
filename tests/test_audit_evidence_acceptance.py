@@ -97,8 +97,8 @@ def _install_qa(
     )
     app = SimpleNamespace(
         app_state=SimpleNamespace(config=config),
-        resolve_stage_client=lambda stage: llm,
     )
+    monkeypatch.setattr(qa.factory, "resolve_stage_client", lambda app, stage: llm)
     monkeypatch.setattr(qa, "state", lambda: app)
     monkeypatch.setattr(
         qa, "resolve_stage", lambda routing, stage: SimpleNamespace(model="scripted-model")

@@ -30,7 +30,8 @@ def sync_zotero_read_state(
     Returns the number of ``feedItems`` rows marked. A Zotero write failure
     (e.g. DB locked while Zotero is open) is logged and reported as 0 — the
     same rows are still unread next tick, so the sweep self-heals; this
-    lock-tolerant posture mirrors ``mark_processed_read``.
+    lock-tolerant posture mirrors ``mark_processed_read``. Filesystem failures
+    are also logged, but can follow a committed write; do not replay the batch.
     """
     if zotero_reader is None or writer is None:
         return 0
@@ -52,6 +53,12 @@ def sync_zotero_read_state(
         marked = writer.mark_feed_items_read(batch)
     except ZoteroWriteError as exc:
         LOGGER.warning("[%s] zotero read-sync failed (retries next tick): %s", tick_id, exc)
+        return 0
+    except OSError as exc:
+        LOGGER.warning(
+            "[%s] zotero read-sync backup/retention failed; read markers may already be committed; "
+            "not replaying this batch: %s", tick_id, exc,
+        )
         return 0
     LOGGER.info(
         "[%s] zotero read-sync: marked %d/%d matched (zotero unread=%d)",

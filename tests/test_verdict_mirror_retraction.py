@@ -91,7 +91,7 @@ def test_replayed_offline_delete_does_not_clear_a_newer_verdict(tmp_path, monkey
     retract()
     db.insert_or_update_label_verdict(path, item_key="PARENT", original_derived_priority="unknown",
                                      user_priority="could_read", comment="")
-    zotero.zotero_set_label_tag("PARENT", "could_read")
+    verdict_effects.mirror_current_verdict(path, "PARENT")
 
     assert retract()["results"][0]["status"] == "already_applied"
 
@@ -140,7 +140,7 @@ def test_materialized_feed_retraction_and_newer_library_label(tmp_path, monkeypa
 
     db.insert_or_update_label_verdict(path, item_key="PARENT", original_derived_priority="unknown",
                                      user_priority="could_read", comment="")
-    zotero.zotero_set_label_tag("PARENT", "could_read")
+    verdict_effects.mirror_current_verdict(path, "PARENT")
     verdict_effects.mirror_current_verdict(path, key)
     assert user_labels.reconcile_label_verdicts([_sample()], zdb, path).synced == 0
     assert set(reader.get_item_detail("PARENT")["tags"]) == {"topic:x", "label:could_read"}
@@ -191,7 +191,7 @@ def test_old_set_effect_does_not_restore_a_deleted_label(tmp_path, monkeypatch, 
     })
     if created:
         # An in-flight materialization may stamp its old label after retraction.
-        zotero.zotero_set_label_tag("PARENT", "must_read")
+        add_tag_to_item(zdb, item_id=item, tag_name="label:must_read")
 
     verdict_effects.apply_verdict_effects(path, "PARENT", "must_read", "")
 
@@ -244,7 +244,9 @@ def test_tag_removal_reconciliation_cannot_delete_a_concurrent_user_label(tmp_pa
     path, zdb, item, reader, writer, _ = _setup(tmp_path, monkeypatch, "online")
     db.insert_or_update_label_verdict(path, item_key="PARENT", original_derived_priority="zotero_label",
                                      user_priority="must_read", comment="")
-    zotero.zotero_set_label_tag("PARENT", None)
+    with sqlite3.connect(zdb) as conn:
+        conn.execute("DELETE FROM itemTags WHERE itemID=? AND tagID IN "
+                     "(SELECT tagID FROM tags WHERE name='label:must_read')", (item,))
     delete = db.delete_label_verdict
 
     def relabel_before_delete(*args, **kwargs):
@@ -314,7 +316,8 @@ def test_offline_mirror_value_error_is_not_reported_as_a_rejected_mutation(tmp_p
     def invalid_mirror(*args):
         raise ValueError("invalid mirror state")
 
-    monkeypatch.setattr(verdict_effects, "zotero_set_label_tag", invalid_mirror)
+    from zotero_summarizer.services.zotero.mirror_notes import _VerdictDelivery
+    monkeypatch.setattr(_VerdictDelivery, "_actions", invalid_mirror)
     with pytest.raises(ValueError, match="invalid mirror state"):
         retract()
     assert db.get_label_verdict(path, "PARENT") is None

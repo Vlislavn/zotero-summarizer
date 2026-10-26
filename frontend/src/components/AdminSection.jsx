@@ -13,7 +13,7 @@ import { Banner } from './form/Fields.jsx';
 // Admin section for the Settings page. ONE long-running model-lifecycle action:
 //
 //   Retrain model — async POST /api/admin/retrain, then poll
-//   GET /api/admin/jobs/{job_id} every 2s until status leaves "running".
+//   GET /api/admin/jobs/{job_id} every 2s until terminal status or a read error.
 //
 // Retrain ALWAYS pulls fresh labels from Zotero first (the standalone "Refresh
 // labels" button was removed — it was a strict subset of this), and trains
@@ -36,7 +36,8 @@ export default function AdminSection() {
   // The gate's configured classifier is the single source of truth — retrain
   // trains THAT model, not a locally-picked one (Settings → Advanced owns the choice).
   const configQuery = useQuery({ queryKey: ['runtime-config'], queryFn: fetchConfig });
-  const classifierName = configQuery.data?.classifier_gate?.model_name || 'logreg';
+  const classifierName = configQuery.data?.classifier_gate?.model_name;
+  const configReady = configQuery.isSuccess && typeof classifierName === 'string' && classifierName.trim().length > 0;
 
   const [jobId, setJobId] = useState(null);
   const [lastFinishedAt, setLastFinishedAt] = useState(null);
@@ -49,6 +50,7 @@ export default function AdminSection() {
     // label→train sequence) so a `label:must_read` tag typed in Zotero minutes
     // ago reaches the golden CSV + label_verdicts before training.
     mutationFn: async () => {
+      if (!configReady) throw new Error('Classifier configuration is unavailable. Reload before retraining.');
       setStartPhase('refreshing');
       await refreshLabels();
       setStartPhase('starting');
@@ -69,12 +71,16 @@ export default function AdminSection() {
     queryKey: ['admin-job', jobId],
     queryFn: () => getJob(jobId),
     enabled: Boolean(jobId),
-    refetchInterval: (query) => (query.state.data?.status === 'running' ? 2000 : false),
+    retry: false,
+    retryOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchInterval: (query) => (query.state.status !== 'error' && query.state.data?.status === 'running' ? 2000 : false),
     refetchIntervalInBackground: false,
   });
 
   const job = jobQuery.data;
-  const jobErr = jobQuery.error?.message;
+  const jobErr = jobQuery.isError ? (jobQuery.error?.message || String(jobQuery.error)) : null;
 
   // When the job leaves "running", capture finished_at and refresh the read-only
   // ModelCard so its metadata replaces the stale. useEffect, not bare setState.
@@ -90,14 +96,23 @@ export default function AdminSection() {
   const running = Boolean(job && job.status === 'running');
   const succeeded = Boolean(job && job.status === 'succeeded');
   const failed = Boolean(job && job.status === 'failed');
-  const buttonDisabled = starting || running;
+  const buttonDisabled = !configReady || starting || running || Boolean(jobId && (!job || jobErr));
 
   const progress = job?.progress || { done: 0, total: 0 };
   const pct = progress.total > 0 ? Math.min(100, Math.round((progress.done / progress.total) * 100)) : null;
 
-  // ONE status slot: progress while running, else the latest terminal outcome.
+  // ONE status slot: unavailable status, running progress or the terminal outcome.
   let statusNode = null;
-  if (running) {
+  if (jobErr) {
+    statusNode = (
+      <div className="space-y-2">
+        <Banner kind="error">Status unavailable — the server job may still be running. {jobErr}</Banner>
+        <Button variant="secondary" size="sm" onClick={() => jobQuery.refetch()} disabled={jobQuery.isFetching}>
+          {jobQuery.isFetching ? 'Checking status…' : 'Retry status'}
+        </Button>
+      </div>
+    );
+  } else if (running) {
     statusNode = (
       <div className="space-y-2">
         <div className="flex items-center gap-2 text-sm text-slate-600">
@@ -128,10 +143,11 @@ export default function AdminSection() {
     statusNode = <Banner kind="error">{job.error}</Banner>;
   } else if (startError) {
     statusNode = <Banner kind="error">{startError}</Banner>;
-  } else if (jobErr && !job) {
-    statusNode = <Banner kind="error">{jobErr}</Banner>;
   } else if (lastFinishedAt) {
     statusNode = <p className="text-xs text-slate-500 font-mono">Last run: {lastFinishedAt}</p>;
+  } else if (!configReady) {
+    statusNode = <Banner kind={configQuery.isPending ? 'info' : 'error'}>{configQuery.isPending
+      ? 'Loading classifier configuration…' : 'Classifier configuration is unavailable. Reload before retraining.'}</Banner>;
   }
 
   return (
@@ -141,14 +157,14 @@ export default function AdminSection() {
       </h3>
       <p className="text-xs text-slate-500 mt-1 mb-4">
         Pulls your latest labels from Zotero (label:* tags, emojis, notes) and re-trains
-        the feed gate (<span className="font-mono">{classifierName}</span>) on them — one
+        the feed gate (<span className="font-mono">{configReady ? classifierName : 'configuration unavailable'}</span>) on them — one
         click, nothing to refresh first. Takes 1-5 minutes.
       </p>
       <div className="space-y-2">
         <Button onClick={() => startMutation.mutate()} disabled={buttonDisabled}>
           {starting
             ? (startPhase === 'refreshing' ? 'Refreshing labels…' : 'Starting…')
-            : running ? 'Training…' : 'Retrain model'}
+            : running && !jobErr ? 'Training…' : 'Retrain model'}
         </Button>
         {statusNode}
       </div>

@@ -6,7 +6,7 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Query
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.services._common import settings
@@ -18,23 +18,42 @@ router = APIRouter(prefix="/api/sync", tags=["sync"])
 class _Mutation(BaseModel):
     mutation_id: UUID
     device_id: str = Field(min_length=1, max_length=100)
-    item_key: str = Field(min_length=1, max_length=500)
-    field: Literal["verdict", "review_note"]
-    operation: Literal["set", "delete"]
-    value: str | None = Field(default=None, max_length=50_000)
+    item_key: str = Field(min_length=1)
+    field: Literal["verdict", "review_note", "review_question"]
+    operation: Literal["set", "delete", "keep_server", "create"]
+    value: str | dict | None = None
     comment: str | None = Field(default=None, max_length=10_000)
     model_priority: str | None = Field(default=None, max_length=50)
     base_revision: int = Field(ge=0)
     resolves_mutation_id: UUID | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-    @field_validator("device_id", "item_key")
+    @field_validator("device_id")
     @classmethod
     def require_nonblank_identity(cls, value: str) -> str:
         value = value.strip()
         if not value:
             raise ValueError("must contain non-whitespace characters")
         return value
+
+    @model_validator(mode="after")
+    def validate_field_payload(self):
+        if self.field == "review_question":
+            parsed = service.validate_question_mutation(self.model_dump(mode="json"))
+            self.value = parsed["value"]
+        else:
+            if self.operation not in {"set", "delete", "keep_server"}:
+                raise ValueError("manual field operation must be set, delete or keep_server")
+            if self.operation == "keep_server" and (
+                self.resolves_mutation_id is None or self.value is not None or self.comment is not None
+            ):
+                raise ValueError("keep_server requires a conflict reference and no new content")
+            if len(self.item_key) > 500:
+                raise ValueError("item_key must not exceed 500 characters")
+            self.item_key = self.require_nonblank_identity(self.item_key)
+            if self.value is not None and (not isinstance(self.value, str) or len(self.value) > 50_000):
+                raise ValueError("manual field value must be text of at most 50000 characters")
+        return self
 
 
 class _PushRequest(BaseModel):

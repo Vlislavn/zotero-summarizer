@@ -159,8 +159,7 @@ def _set_progress(progress: dict[str, Any]) -> None:
 
 
 def _current_cache(item_key: str) -> dict[str, Any] | None:
-    cached = deep_review.get_cached_review(item_key)
-    return cached if deep_review.review_is_current(cached, item_key) else None
+    return deep_review.get_current_review(item_key)
 
 
 def _usable_cache(item_key: str) -> dict[str, Any] | None:
@@ -300,7 +299,7 @@ def _propose_for_item(item_key: str, *, login: dict[str, dict[str, str]]) -> str
             return "failed"
         return "no_fetchable_source"
     proposal = propose.propose_verdict(
-        review.get("digest"),
+        review.get("model_digest") or review.get("digest"),
         review.get("quality"),
         goal_summaries=review.get("goal_summaries"),
     )

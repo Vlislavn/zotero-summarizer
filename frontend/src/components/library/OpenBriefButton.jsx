@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { fetchPaperRender, buildPaperRender } from '../../api/libraryApi.js';
 import Spinner from '../ui/Spinner.jsx';
+import useServerAvailable from '../../hooks/useServerAvailable.js';
+import { isServerAvailable } from '../../offlineStore.js';
 
 // One-click access to the full review from a Read-next row. The paper-read render
 // artifact (notes/figures/HTML next to the Zotero PDF) used to be reached only
@@ -8,7 +10,9 @@ import Spinner from '../ui/Spinner.jsx';
 // the artifact is built (build-on-demand + spinner), then open the review route
 // (/paper/:key) in a new tab — which carries the verdict/collection/tag controls
 // the static HTML brief never had. Reuses the existing render helpers — no
-// backend change. A sibling of the row's expand <button> (never nested inside it
+// backend change. Without a confirmed app connection, open the cache-aware route
+// directly rather than requiring server artifact preparation. A sibling of the
+// row's expand <button> (never nested inside it
 // — nested interactive elements are invalid).
 
 const POLL_MS = 1500;
@@ -33,6 +37,7 @@ function briefErrorMessage(error) {
 }
 
 export default function OpenBriefButton({ itemKey, hasPdf = true, label = null }) {
+  const serverAvailable = useServerAvailable();
   const [working, setWorking] = useState(false);
   const [error, setError] = useState(null);
   // Drop the in-flight result if the row unmounts mid-build (don't navigate a
@@ -43,6 +48,11 @@ export default function OpenBriefButton({ itemKey, hasPdf = true, label = null }
   async function handleClick() {
     if (working) return;
     setError(null);
+    const url = `/paper/${encodeURIComponent(itemKey)}`;
+    if (!isServerAvailable()) {
+      window.open(url, '_blank', 'noopener');
+      return;
+    }
     // Open the tab synchronously, BEFORE any await, so the popup-blocker treats
     // it as user-initiated. Don't pass the 'noopener' feature — it makes open()
     // return null and we'd lose the handle; null `opener` afterwards instead.
@@ -90,7 +100,6 @@ export default function OpenBriefButton({ itemKey, hasPdf = true, label = null }
       // Open the INTERACTIVE full review (React route) — not the static HTML
       // artifact — so the new tab carries the verdict / collection / tag controls.
       // The build above still runs so the route's reader pane has a built brief.
-      const url = `/paper/${encodeURIComponent(itemKey)}`;
       if (tab) tab.location.href = url;
       else window.open(url, '_blank', 'noopener');  // popup blocked → best-effort
     } catch (e) {
@@ -114,7 +123,7 @@ export default function OpenBriefButton({ itemKey, hasPdf = true, label = null }
           disabled={working}
           aria-busy={working}
           aria-describedby={error ? `${itemKey}-brief-error` : undefined}
-          title={hasPdf ? 'Open the full review (builds it first if needed)' : NO_PDF_MESSAGE}
+          title={!serverAvailable ? 'Open cached review; PDF preparation needs the Mac' : hasPdf ? 'Open the full review (builds it first if needed)' : NO_PDF_MESSAGE}
           className="w-full inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg bg-teal-700 text-white text-[13px] font-semibold hover:bg-teal-800 disabled:opacity-60"
         >
           {working && <Spinner size="sm" color="teal-on-fill" />}
@@ -139,13 +148,15 @@ export default function OpenBriefButton({ itemKey, hasPdf = true, label = null }
         type="button"
         onClick={handleClick}
         disabled={working}
-        aria-label={hasPdf ? 'Open full review' : 'Fetch and open full review'}
+        aria-label={!serverAvailable ? 'Open cached review' : hasPdf ? 'Open full review' : 'Fetch and open full review'}
         aria-busy={working}
         aria-describedby={error ? `${itemKey}-brief-error` : undefined}
         title={
           error
             ? `Couldn't open the review: ${error}`
-            : hasPdf
+            : !serverAvailable
+              ? 'Open cached review; PDF preparation needs the Mac'
+              : hasPdf
               ? 'Open the full review (builds the paper artifact first if needed)'
               : NO_PDF_MESSAGE
         }

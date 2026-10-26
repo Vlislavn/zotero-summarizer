@@ -12,6 +12,7 @@ from zotero_summarizer.domain import (
     label_tag_for_priority,
 )
 from zotero_summarizer.models import (
+    PendingChangeApplyRequest,
     PendingChangeMutationRequest,
     PendingChangeUpdateRequest,
     PendingChangesResponse,
@@ -26,12 +27,10 @@ from zotero_summarizer.services.zotero._notes import (  # noqa: F401
     NOTE_PROVENANCE_SOURCE,
     NOTE_VERSION,
     USER_NOTE_MARKER,
-    VERDICT_NOTE_MARKER,
     build_digest_note_html,
     build_provenance_comment,
     build_triage_note_html,
     build_user_note_html,
-    build_verdict_note_html,
 )
 from zotero_summarizer.storage import repositories as triage_db
 
@@ -261,8 +260,17 @@ async def list_pending_changes(
         safe_status = ChangeStatus.PENDING.value
     elif safe_status == "all":
         safe_status = None
+    from zotero_summarizer.services.zotero.pending_confirmation import present_changes
+    from zotero_summarizer.services.zotero.zotero import get_zotero_writer_or_raise
+
     items = await asyncio.to_thread(triage_db.get_pending_changes, safe_status, limit, item_key=item_key)
-    return PendingChangesResponse(items=items)
+    try:
+        writer = get_zotero_writer_or_raise()
+    except APIError as exc:
+        if exc.error != "zotero_unavailable":
+            raise
+        writer = None
+    return PendingChangesResponse(items=await asyncio.to_thread(present_changes, items, writer))
 
 
 async def update_pending_change(
@@ -286,6 +294,9 @@ async def update_pending_change(
             error="not_found", message="Pending change not found", status_code=404
         )
 
+    from zotero_summarizer.services.zotero.pending_confirmation import require_pending_actions
+
+    require_pending_actions(rows)
     change_type = str(rows[0].get("change_type") or "").strip()
     try:
         if change_type == "tag_changes":
@@ -336,111 +347,31 @@ async def pending_change_count(
 
 
 async def reject_pending_changes(req: PendingChangeMutationRequest) -> dict[str, int]:
-    updated = await asyncio.to_thread(
-        triage_db.set_pending_changes_status,
-        req.change_ids,
-        ChangeStatus.REJECTED.value,
-        "",
-    )
+    from zotero_summarizer.storage.pending_actions import reject_pending_selection
+
+    try:
+        updated = await asyncio.to_thread(reject_pending_selection, req.change_ids)
+    except (ValueError, TypeError, KeyError) as exc:
+        raise APIError(error="pending_write_conflict", message=str(exc), status_code=409) from exc
     return {"updated": updated}
 
 
-async def apply_pending_changes(req: PendingChangeMutationRequest) -> dict[str, Any]:
-    from zotero_summarizer.services.corpus import refresh_corpus_items_by_keys
+async def apply_pending_changes(req: PendingChangeApplyRequest) -> dict[str, Any]:
+    from zotero_summarizer.services.zotero.pending_confirmation import apply_confirmed_changes
     from zotero_summarizer.services.zotero.zotero import get_zotero_writer_or_raise
 
     writer = get_zotero_writer_or_raise()
-    if writer.is_connector_running() and not req.force:
-        return {
-            "error": "zotero_running",
-            "message": "Zotero appears to be running; close Zotero or confirm force apply.",
-            "requires_force": True,
-        }
-
-    # retry re-applies FAILED rows via the SAME writer path (success → APPLIED,
-    # failure → FAILED again); the default applies PENDING rows.
-    source_status = (
-        ChangeStatus.FAILED.value if req.retry else ChangeStatus.PENDING.value
+    source_status = ChangeStatus.FAILED.value if req.retry else ChangeStatus.PENDING.value
+    result = await asyncio.to_thread(
+        apply_confirmed_changes, req.change_ids, req.previews, writer, source_status, req.force,
     )
-    changes = await asyncio.to_thread(
-        triage_db.get_pending_changes_by_ids, req.change_ids, source_status
-    )
-    if not changes:
-        return {"applied": 0, "failed": 0, "backup_path": None, "failed_items": []}
+    if result.get("requires_force"):
+        return result
+    if result["ordinary_applied_item_keys"]:
+        from zotero_summarizer.services.corpus import refresh_corpus_items_by_keys
 
-    result = await asyncio.to_thread(writer.apply_changes, changes, True)
-    applied_ids = [
-        int(change_id)
-        for change_id in result.get("applied_ids", [])
-        if int(change_id) > 0
-    ]
-    failed_items = list(result.get("failed", []))
-    applied_id_set = set(applied_ids)
-
-    if applied_ids:
-        await asyncio.to_thread(
-            triage_db.set_pending_changes_status,
-            applied_ids,
-            ChangeStatus.APPLIED.value,
-            "",
-            source_status,
-        )
-
-    for failed in failed_items:
-        failed_id = int(failed.get("id") or 0)
-        if failed_id > 0:
-            await asyncio.to_thread(
-                triage_db.set_pending_changes_status,
-                [failed_id],
-                ChangeStatus.FAILED.value,
-                str(failed.get("error") or ""),
-                source_status,
-            )
-
-    refreshed_item_keys = [
-        str(change.get("item_key") or "").strip()
-        for change in changes
-        if int(change.get("id") or 0) in applied_id_set
-        and str(change.get("item_key") or "").strip()
-    ]
-
-    inbox_removed = 0
-    inbox_removed_error: str | None = None
-    if refreshed_item_keys:
-        completed_item_keys = await asyncio.to_thread(
-            triage_db.item_keys_without_open_changes,
-            refreshed_item_keys,
-        )
-        try:
-            inbox_removed = (
-                await asyncio.to_thread(
-                    writer.remove_items_from_collection,
-                    completed_item_keys,
-                    "Inbox",
-                    True,
-                )
-                if completed_item_keys
-                else 0
-            )
-        except Exception as exc:
-            inbox_removed_error = str(exc)
-            LOGGER.warning(
-                "Failed removing applied items from Inbox collection", exc_info=True
-            )
-        await refresh_corpus_items_by_keys(refreshed_item_keys)
-
-    LOGGER.info(
-        "Pending apply completed requested=%s applied=%s failed=%s inbox_removed=%s",
-        len(req.change_ids),
-        len(applied_ids),
-        len(failed_items),
-        inbox_removed,
-    )
-    return {
-        "applied": len(applied_ids),
-        "failed": len(failed_items),
-        "backup_path": result.get("backup_path"),
-        "failed_items": failed_items,
-        "inbox_removed": inbox_removed,
-        "inbox_removed_error": inbox_removed_error,
-    }
+        await refresh_corpus_items_by_keys(result["ordinary_applied_item_keys"])
+    LOGGER.info("Pending apply completed requested=%s applied=%s failed=%s",
+                len(req.change_ids), len(result["applied_ids"]), len(result["failed"]))
+    return {"applied": len(result["applied_ids"]), "failed": len(result["failed"]),
+            "backup_path": result["backup_path"], "failed_items": result["failed"]}

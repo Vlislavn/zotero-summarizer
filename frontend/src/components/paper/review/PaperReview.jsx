@@ -7,6 +7,8 @@ import {
   decisiveRows, fullChecklist, shortGoal, isSupportedGoal,
 } from './briefModel.js';
 import { formatShortDate, timeAgo } from '../../library/shared.jsx';
+import ReadingPlan from './ReadingPlan.jsx';
+import OrthogonalSignals from './OrthogonalSignals.jsx';
 
 const STATE_LABEL = {
   hit: '● addressed', miss: '○ not addressed', not_retrieved: '⚠ not retrieved',
@@ -46,7 +48,7 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
   const goals = deep.goal_summaries || [];
 
   // Legacy cache (pre-digest): show the old grade, nudge a re-run.
-  if (!digest && quality && quality.grade && !goals.length) {
+  if (!digest && quality && quality.grade && quality.basis !== 'non_paper' && !goals.length) {
     return (
       <div className={`text-[13px] text-slate-600 ${flat ? 'review-reading' : ''}`}>
         <Chip tone={gradeTone(quality.grade)}>Quality {quality.grade}</Chip>
@@ -67,30 +69,21 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
 
   // The API projects cached decisions through the current policy; absence stays unknown.
   let verdict;
-  const rawDigestDecision = String(digest?.read_decision || '').toLowerCase();
-  const weakEvidence = band === 'flag' || (quality?.overstatements || []).some(Boolean);
-  const capped = rawDigestDecision === 'read' && (weakEvidence || digest?.writing_friction === 'high');
-  const digestDecision = capped ? 'skim' : rawDigestDecision;
-  if (['read', 'skim', 'skip'].includes(digestDecision)) {
+  const digestDecision = String(digest?.read_decision || '').toLowerCase();
+  const hasReadingDecision = ['read', 'skim', 'skip'].includes(digestDecision);
+  if (hasReadingDecision) {
     verdict = {
       key: digestDecision === 'read' ? 'deep' : digestDecision,
       label: { read: 'READ', skim: 'SKIM', skip: 'DIGEST IS ENOUGH' }[digestDecision],
-      reason: capped
-        ? `${weakEvidence ? `Concept interesting; evidence weak${redFlags[0] ? ` — ${redFlags[0]}` : ''}.` : 'Idea preserved; writing friction is high.'} ${digest.read_why || ''}`
-        : digest.read_why || '',
+      reason: digest.read_why || '',
     };
   } else {
-    verdict = { key: 'skip', label: 'REVIEW', reason: digest?.read_why || 'Reading decision unavailable; review the evidence.' };
+    verdict = { key: 'skip', label: 'REVIEW', reason: 'Reading decision unavailable; review the evidence.' };
   }
-  // Deterministic checklist grade FIRST: quality.grade comes from grounded
-  // coverage (stable run-to-run); digest.grade is the LLM's holistic guess and can
-  // flip A↔B between reviews. The chip's tooltip says "reference-free", which is
-  // quality.grade — so show that, and only fall back to the digest for legacy
-  // caches. None for non-papers.
-  const grade = isNonPaper ? '' : (quality?.grade || digest?.grade || '');
+  // The server projects scientific grade with the reading action. A separate
+  // legacy quality-only review has no digest; raw model_digest never supplies a grade.
+  const grade = isNonPaper ? '' : (digest ? digest.grade || '' : quality?.grade || '');
   const tldr = digest?.tldr || '';
-  const ideaScore = Math.max(Number(digest?.novelty) || 0, Number(digest?.significance) || 0);
-  const ideaLabel = ideaScore >= 4 ? 'high' : ideaScore >= 3 ? 'moderate' : ideaScore > 0 ? 'low' : 'not assessed';
 
   // Located findings (the story page passes the section overlay; the compact card
   // does not → unchanged). Keyed by VALUE (goal/flag text, critical item) so the
@@ -122,10 +115,9 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
           <div className="mt-1.5"><DigestRows digest={digest} /></div>
         </div>
       )}
-      {compact && (deep.reviewed_at || deep.zotero_note_written) && (
+      {compact && deep.reviewed_at && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
-          {deep.reviewed_at && <span title={formatShortDate(deep.reviewed_at)}>reviewed {timeAgo(deep.reviewed_at)}</span>}
-          {deep.zotero_note_written && <span className="text-emerald-600">saved to Zotero ✓</span>}
+          <span title={formatShortDate(deep.reviewed_at)}>reviewed {timeAgo(deep.reviewed_at)}</span>
         </div>
       )}
     </div>
@@ -135,9 +127,13 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
     <div className={`rounded-lg border-l-[3px] px-3.5 py-3 ${VERDICT_ACCENT[verdict.key] || VERDICT_ACCENT.skip}`}>
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-display text-[22px] font-light tracking-tight text-slate-900">{verdict.label}</span>
-          {digest?.estimated_read_minutes != null && <Chip tone="slate">{digest.estimated_read_minutes} min</Chip>}
+          {hasReadingDecision && (
+            digest.estimated_read_minutes != null
+              ? <Chip tone="slate" title="Saved reading-time estimate">{digest.estimated_read_minutes} min</Chip>
+              : <span className="text-[12px] text-slate-500">Time not estimated</span>
+          )}
           {grade && (
-            <Chip tone={gradeTone(grade)} title="Reference-free full-text quality grade">
+            <Chip tone={gradeTone(grade)} title="Saved quality grade">
               {compact ? grade : `Quality ${grade}`}
             </Chip>
           )}
@@ -157,11 +153,8 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
         {verdict.reason && (
           <p className="mt-1.5 text-[13px] leading-relaxed text-slate-700 max-w-[66ch]">{verdict.reason}</p>
         )}
-        {digest && (
-          <p className="mt-1 text-[11px] text-slate-500">
-            Idea: {ideaLabel} · Evidence: {BAND_LABEL[band] || 'not assessed'} · Writing: {digest.writing_friction || 'not assessed'}
-          </p>
-        )}
+        {hasReadingDecision && <ReadingPlan digest={digest} decision={digestDecision} />}
+        {digest && <OrthogonalSignals deep={deep} />}
       </div>
   );
 
@@ -226,7 +219,7 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
         {/* Full quality headline on the full surfaces; in compact the band +
             red-flag count already live as chips in the banner row above, so the
             standalone section is dropped (gloss/coverage move into Details). */}
-        {quality && !compact && (
+        {quality && !isNonPaper && !compact && (
           <Section label={`Quality — ${BAND_LABEL[band] || '—'}`}>
             <QualityHeadline quality={quality} band={band} flagLoc={flagLoc} missLoc={missLoc} />
           </Section>
@@ -244,10 +237,9 @@ export default function PaperReview({ deep, compact = false, flat: requestedFlat
         </>}
       </div>
 
-      {!compact && (deep.reviewed_at || deep.zotero_note_written || deep.zotero_note_error) && (
+      {!compact && (deep.reviewed_at || deep.zotero_note_error) && (
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
           {deep.reviewed_at && <span title={formatShortDate(deep.reviewed_at)}>reviewed {timeAgo(deep.reviewed_at)}</span>}
-          {deep.zotero_note_written && <span className="text-emerald-600">saved to Zotero ✓</span>}
           {deep.zotero_note_error && <span className="text-amber-600">note not written: {deep.zotero_note_error}</span>}
         </div>
       )}
@@ -453,7 +445,7 @@ function GoalBoard({ goals, goalLoc, foldReasons = false }) {
       {addressed.length > 0 && rest.length > 0 && (
         <details className="group">
           <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden text-[11px] font-semibold text-slate-400 hover:text-slate-600">
-            {rest.length} other goal{rest.length > 1 ? 's' : ''} not addressed ▾
+            {rest.length} other goal{rest.length > 1 ? 's' : ''} ▾
           </summary>
           <div className="mt-2 opacity-75">{grid(rest)}</div>
         </details>
@@ -711,18 +703,6 @@ function DigestRows({ digest, exclude = [] }) {
       {(d.key_findings || []).filter(Boolean).length > 0 && (
         <KeyVal label="Key findings"><Bullets items={d.key_findings} /></KeyVal>
       )}
-      <KeyVal label="Why read">{d.read_why}</KeyVal>
-      {(d.read_parts || []).filter(Boolean).length > 0 && (
-        <KeyVal label="Read parts"><Bullets items={d.read_parts} /></KeyVal>
-      )}
-      {(d.skip_parts || []).filter(Boolean).length > 0 && (
-        <KeyVal label="Skip parts"><Bullets items={d.skip_parts} /></KeyVal>
-      )}
-      <KeyVal label="What the original adds">{d.original_value}</KeyVal>
-      {(d.writing_reasons || []).filter(Boolean).length > 0 && (
-        <KeyVal label={`Writing friction · ${d.writing_friction}`}><Bullets items={d.writing_reasons} /></KeyVal>
-      )}
-      <KeyVal label="Relevance">{d.relevance}</KeyVal>
       <KeyVal label="Methods">{d.methods}</KeyVal>
       <KeyVal label="Dataset / sample">{[p.dataset, p.sample_size].filter(Boolean).join(' · ')}</KeyVal>
       <KeyVal label="Architecture">{p.architecture}</KeyVal>

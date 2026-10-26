@@ -6,11 +6,12 @@ Layering (lower layers must not import higher ones):
     api  ->  services  ->  storage / integrations  ->  models/contracts/domain
     mcp  is a standalone HTTP client (talks to the API over the wire only)
 
-Rules, keyed by the directory a file lives in:
+Rules, keyed by source directory (plus the foundational runtime module):
   - integrations/  must not import services or api      (low-level adapters)
   - mcp/           must not import services, api, storage (HTTP client only)
   - storage/       must not import services or api        (persistence only)
   - services/      may import api.errors only within the API layer
+  - runtime.py     must not import services or api
 
 Structure:
   - A new module directly under services/ must be one of the shared modules;
@@ -31,6 +32,7 @@ LAYER_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("zotero_summarizer/storage/", ("zotero_summarizer.services", "zotero_summarizer.api")),
     ("zotero_summarizer/services/", ("zotero_summarizer.api",)),
 ]
+RUNTIME_FORBIDDEN = ("zotero_summarizer.services", "zotero_summarizer.api")
 
 SHARED_SERVICE_MODULES = {
     "_common", "_adapters", "lifecycle", "run_log", "interaction_log",
@@ -83,6 +85,15 @@ def main(paths: list[str]) -> int:
                         failures.append(
                             f"{posix}: '{imp}' breaks layering "
                             f"({prefix.rstrip('/').split('/')[-1]} must not import {bad})"
+                        )
+
+        if posix == "zotero_summarizer/runtime.py":
+            for imp in imports:
+                for bad in RUNTIME_FORBIDDEN:
+                    if imp == bad or imp.startswith(bad + "."):
+                        failures.append(
+                            f"{posix}: '{imp}' breaks layering "
+                            f"(runtime must not import {bad})"
                         )
 
         # Services structure

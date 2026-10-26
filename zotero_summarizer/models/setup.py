@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
 __all__ = [
     "ClassifierStatus",
@@ -23,6 +23,33 @@ __all__ = [
     "ValidateConfigResponse",
     "ZoteroStatus",
 ]
+
+
+class EffectiveLoadEnvelope(BaseModel):
+    """Exact runtime values, not a declaration inferred from provider settings."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    context_tokens: StrictInt = Field(gt=0)
+    placement: StrictStr = Field(min_length=1, max_length=256)
+    memory_domain: StrictStr = Field(min_length=1, max_length=256)
+
+
+class LoadPolicyIdentity(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    provider: dict
+    model: StrictStr = Field(min_length=1, max_length=1024)
+
+
+class SetupLoadApprovalPolicy(BaseModel):
+    """Internal file schema; never a public load authorization endpoint."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    schema_version: StrictInt = Field(ge=1, le=1)
+    approval_reference: StrictStr = Field(min_length=1, max_length=256)
+    identity: LoadPolicyIdentity
+    effective_envelope: EffectiveLoadEnvelope
+    peak_working_set_bytes: StrictInt = Field(gt=0)
+    reserved_system_bytes: StrictInt = Field(ge=0)
 
 
 class ConfigStatus(BaseModel):
@@ -124,6 +151,11 @@ class ConnectionResult(BaseModel):
     status: str
     detail: str = ""
     models_discovered: int = Field(default=0, ge=0)
+    listed: bool | None = None
+    capable: bool | None = None
+    observed_operational: bool = False
+    hardware_safe: str = "unknown"
+    reason_code: str | None = None
 
 
 class ValidateConfigRequest(BaseModel):

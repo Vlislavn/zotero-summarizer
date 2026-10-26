@@ -19,6 +19,7 @@ from typing import Any
 from zotero_summarizer.api.errors import APIError
 from zotero_summarizer.models.providers import resolve_stage
 from zotero_summarizer.services._common import state
+from zotero_summarizer.services.llm import factory
 from zotero_summarizer.services.library._prompt_security import untrusted_input
 from zotero_summarizer.services.faithbench import (
     ANSWER_PROMPT,
@@ -109,7 +110,7 @@ def ask_paper(
     )
     prompt = ANSWER_PROMPT.format(
         context=untrusted_input(context), question=untrusted_input(contextual_question))
-    llm = app.resolve_stage_client("deep_review")
+    llm = factory.resolve_stage_client(app, "deep_review")
     t0 = perf_counter()
     parsed, _raw = answer_with_retry(llm, prompt)
     latency = round(perf_counter() - t0, 2)

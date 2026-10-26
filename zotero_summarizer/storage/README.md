@@ -46,6 +46,21 @@ services/ ─call→ storage/
 | `interleave.py` | `interleave_log` sidecar for the P3 quality-first online experiment: per-day, per-slot arm attribution (`team` ∈ `a0`/`a2`/`both` + competitive `pair_id`) written by the Today slate when `ZS_RANK_INTERLEAVE` is on. `record_interleave_slate` is DAY-level write-once (`BEGIN IMMEDIATE` existence check → first recorded slate of a day is the ONLY write; later same-day assemblies are complete no-ops) — row-level `INSERT OR IGNORE` alone would let intra-day pool drift mix two merges' per-merge `pair_id`s into one corrupt `(day, pair_id)` group and crash the scorer (adversarial review 2026-07-08). Attribution therefore never changes after the user may have seen the slate. `fetch_interleave_log` opens read-only and returns `[]` only when the table doesn't exist yet (experiment never ran — explicit `sqlite_master` check, not a swallowed error). Table is self-creating (sidecar, additive; no `migrations.py` step needed). Sole consumer: `tools/eval_interleave.py` |
 | `migrations.py` | `migrate_existing()` + `run_migrations()` — ordered, version-gated steps recorded in `schema_migrations`. Add a schema change as a new numbered `Migration`, never an inline ALTER. v3 reconciles databases whose old v1 marker predates later baseline/feed columns; routine feed connections skip those O(N) legacy backfills. |
 
+The v2 sync schema executes complete SQL statements, including intact trigger
+bodies, on the runner's connection without committing. Schema, data changes and
+the version marker therefore share the runner's transaction; a failed callback
+or marker write restores the populated v1 state. Successful upgrades and replays
+retain the existing verdict/note revision and tombstone behavior.
+
+`set_pending_changes_status(..., require_all=True)` validates all selected IDs and
+source statuses under BEGIN IMMEDIATE, then verifies the complete affected count
+before commit. A stale/missing row or trigger-shortened update raises and rolls
+back everything. Pending Reject now uses `pending_actions.reject_pending_selection`:
+one transaction validates the complete selection and direct/mirror history, audits
+generated rejection and updates ordinary rows; failures roll back both families.
+Other status callers retain their existing default behavior. No new queue/schema
+or native write is involved.
+
 **Boundaries:** must NOT import `services/` or `api/` (enforced). Connection
 hardening (WAL once per process/path + busy_timeout=10s + 0600) is shared by
 `_get_conn` and `_connect_to`, avoiding concurrent WAL-mode lock races.
@@ -86,6 +101,12 @@ path cannot accidentally use another project's repository default connection.
 Already-resolved/missing/unmaterialized rows return false without writing a signal.
 Outcome type and relevance come from the known outcome taxonomy/weight mapping;
 the independent weight override and service mapping-wrapper exports are gone.
+
+RSS subscription upserts accept opt-in `create_only`: URL lookup and creation
+share SQLite's writer transaction, preserving any existing row without changing
+its name or enabled state. Identity uses HTTPX URL normalization (including host
+case and default ports) without fetching; invalid legacy URLs remain literal.
+Ordinary upserts/imports keep their existing update behavior.
 
 RSS item reads accept `limit=None` for an uncapped whole-feed pass (`LIMIT -1`);
 finite callers keep their bounded result contract. Feed-tick exclusion uses a
@@ -174,9 +195,14 @@ routine sync; goals, model-input embeddings and historical feedback are untouche
 
 `label_mirrors.py` reuses `sync_changes` as label intent. Migration v5 adds only
 `label_mirror_receipts`, keyed by the acknowledged deletion revision. `current_label`
-holds `BEGIN IMMEDIATE` over mirror delivery and records a receipt only after a
-successful exit with a resolved target; failures and unmaterialized feed keys leave
-the already-committed deletion retryable. Feed,
+yields its caller-owned transaction and current snapshot without acknowledging
+on normal exit. `snapshot` includes stored provenance; `acknowledge` accepts only
+an unchanged target-bearing current intent and records deletion revisions only.
+Original invocation lookup and selected source identity remain distinct, so alias
+remapping is re-resolved at admission and ACK. Closed mirror history validates
+lifecycle metadata before display or any Pending decision; verdict HTML must equal
+its canonical declared intent, and removal labels use native case-folded semantics.
+Failures and unmaterialized feed keys leave the already-committed deletion retryable. Feed,
 legacy and materialized library identities resolve to their newest shared revision.
 `states` supplies an uncapped snapshot per Zotero target, including pending deletion.
 Reconciliation UPSERTs and deletes pass `expected_revision`; the existing label
@@ -192,8 +218,12 @@ No new queue/worker or reviewed-pending-change behavior is involved.
 
 The same current-label snapshot includes the rationale. `current_label` yields
 the target and a separate `label_pending` flag: an acknowledged label deletion
-does not suppress clearing its old verdict note. Both mirrors run under the
-existing writer lock before the deletion receipt commits; no new receipt exists.
+does not suppress clearing its old verdict note. Both effects share the existing system-mirror claim owner. Positive action IDs,
+closed source/target/backup history commit before native dispatch; the caller then
+reacquires the writer lock and revalidates current intent and every unchanged claim.
+Native terminal history and explicit deletion ACK are separate commits. Unknown
+completion remains applying and blocks replay. The existing Pending table is reused;
+no new queue, migration or approval capability is introduced.
 
 `list_all_label_verdicts` is the sole full-row verdict-list reader: newest first,
 uncapped, shared by HTTP, training and the one-time Zotero transfer. The duplicate
@@ -208,6 +238,17 @@ current winning row under the caller's writer transaction; materialization needs
 no body copy or migration, and reads do not rewrite historical data. Ambiguous
 legacy IDs are not guessed. This changes local note identity, not Zotero mirror
 delivery. Snapshot identity resolution is per note family, not one batched join.
+
+`library_context.read_discovery_membership` reads uncapped latest rows per durable
+key before retention filtering, with timestamp/ID ties. It exposes decisions and
+existing identifiers for saved admission/exclusion; browsing policy is unchanged.
+
+`library_context.read_context` obtains one read-only SQLite transaction for the
+related-paper surface. It reuses `review_notes.resolve_item_key_aliases/current` and the label mirror's
+current-change query, retaining original keys, revisions and deletion authority.
+It never creates a database, writes a note or acknowledges a mirror. Services
+separately label expected I/O failures; schema/corruption errors remain errors.
+No new table, migration, comment index or secondary note owner is introduced.
 
 `review_notes.current_for_mirror` holds SQLite's writer lock over delivery of the
 current note body, reusing the same alias/revision reader. Closing the connection
@@ -231,6 +272,14 @@ make an idempotent queue decision, `insert_pending_change_if_absent(item_key,
 item_title, change_type, payload)` performs that check and insert under one
 `BEGIN IMMEDIATE` transaction, so concurrent callers cannot both queue the same
 change. The read-only existence helper is for reporting, not check-then-insert.
+
+`keep_server` is a reference-only sync resolution, not a disguised set/delete.
+The existing writer transaction requires a stored conflict for the same item/field
+and exactly its compared revision. It records/replays the actual invocation's UUID
+without changing value, origin or field history; a changed current version returns
+a new conflict. It cannot acknowledge a missing reference or carry new content.
+The existing TEXT operation column suffices; no migration/table/worker is added.
+This app-field receipt does not confirm any past native delivery.
 
 Sync snapshot pulls read only the maximum `sync_changes.revision` as their cursor;
 the legacy `changes` response field stays empty. Conflict status uses the indexed

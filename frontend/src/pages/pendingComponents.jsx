@@ -4,6 +4,10 @@ import {
   changeBadgeTone,
   changeTypeLabel,
   collectionOptionLabel,
+  hasUnboundGeneratedTarget,
+  hasApprovalPreview,
+  MISSING_APPROVAL_MESSAGE,
+  UNBOUND_GENERATED_TARGET_MESSAGE,
 } from './pendingHelpers.js';
 import { ActionBadge } from '../components/ui/Badge.jsx';
 
@@ -19,7 +23,8 @@ export { StatusBanner } from '../components/library/shared.jsx';
 // tag_changes (add/remove tag inputs), add/remove_from_collection (a collection
 // <select>), and add_note (title + HTML body). Drafts are lazily seeded from
 // the change payload so controlled inputs always have a value.
-export function ChangeEditor({ change, drafts, setDrafts, flatCollections, saving, onSave }) {
+export function ChangeEditor({ change, drafts, setDrafts, flatCollections, saving, onSave, busy }) {
+  if (change.generated_preview) return null;
   const getField = (field) => {
     const existing = drafts[change.id];
     if (existing && Object.prototype.hasOwnProperty.call(existing, field)) {
@@ -50,7 +55,7 @@ export function ChangeEditor({ change, drafts, setDrafts, flatCollections, savin
     <button
       type="button"
       onClick={onSave}
-      disabled={Boolean(saving[change.id])}
+      disabled={busy || Boolean(saving[change.id])}
       className="px-3 py-1.5 rounded bg-slate-900 text-white hover:bg-slate-700 disabled:bg-slate-300 disabled:text-slate-500"
     >
       {saving[change.id] ? 'Saving...' : 'Save edit'}
@@ -61,8 +66,9 @@ export function ChangeEditor({ change, drafts, setDrafts, flatCollections, savin
     return (
       <div className="ml-6 mt-2 grid md:grid-cols-2 gap-2 text-xs">
         <div>
-          <label className="text-slate-500">Add tags (comma-separated)</label>
+          <label htmlFor={`pending-${change.id}-add-tags`} className="text-slate-500">Add tags (comma-separated)</label>
           <input
+            id={`pending-${change.id}-add-tags`}
             type="text"
             value={getField('add_tags_text')}
             onChange={(e) => setField('add_tags_text', e.target.value)}
@@ -70,8 +76,9 @@ export function ChangeEditor({ change, drafts, setDrafts, flatCollections, savin
           />
         </div>
         <div>
-          <label className="text-slate-500">Remove tags (comma-separated)</label>
+          <label htmlFor={`pending-${change.id}-remove-tags`} className="text-slate-500">Remove tags (comma-separated)</label>
           <input
+            id={`pending-${change.id}-remove-tags`}
             type="text"
             value={getField('remove_tags_text')}
             onChange={(e) => setField('remove_tags_text', e.target.value)}
@@ -93,8 +100,9 @@ export function ChangeEditor({ change, drafts, setDrafts, flatCollections, savin
     return (
       <div className="ml-6 mt-2 grid gap-2 text-xs">
         <div>
-          <label className="text-slate-500">Target collection</label>
+          <label htmlFor={`pending-${change.id}-collection`} className="text-slate-500">Target collection</label>
           <select
+            id={`pending-${change.id}-collection`}
             value={getField('collection_key')}
             onChange={(e) => setField('collection_key', e.target.value)}
             className="mt-1 w-full px-2 py-1.5 border border-slate-300 rounded"
@@ -121,8 +129,9 @@ export function ChangeEditor({ change, drafts, setDrafts, flatCollections, savin
     return (
       <div className="ml-6 mt-2 grid gap-2 text-xs">
         <div>
-          <label className="text-slate-500">Note title</label>
+          <label htmlFor={`pending-${change.id}-note-title`} className="text-slate-500">Note title</label>
           <input
+            id={`pending-${change.id}-note-title`}
             type="text"
             value={getField('note_title')}
             onChange={(e) => setField('note_title', e.target.value)}
@@ -130,8 +139,9 @@ export function ChangeEditor({ change, drafts, setDrafts, flatCollections, savin
           />
         </div>
         <div>
-          <label className="text-slate-500">Note HTML</label>
+          <label htmlFor={`pending-${change.id}-note-html`} className="text-slate-500">Note HTML</label>
           <textarea
+            id={`pending-${change.id}-note-html`}
             rows={5}
             value={getField('note_html')}
             onChange={(e) => setField('note_html', e.target.value)}
@@ -164,6 +174,7 @@ export function ChangeGroup({
   saving,
   onSaveEdit,
   onRetry,
+  busy,
 }) {
   return (
     <div
@@ -186,7 +197,7 @@ export function ChangeGroup({
               <input
                 type="checkbox"
                 className="mt-0.5"
-                disabled={!isPending}
+                disabled={!isPending || change.status !== 'pending' || busy}
                 checked={selected.has(change.id)}
                 onChange={() => toggleOne(change.id)}
               />
@@ -200,7 +211,7 @@ export function ChangeGroup({
                   </ActionBadge>
                 </div>
                 <div className="text-xs text-slate-600 mt-1 break-words">
-                  {previewChange(change)}
+                  {change.generated_preview ? 'Generated note — immutable preview below' : previewChange(change)}
                 </div>
                 {change.applied_at && (
                   <div className="text-[11px] text-slate-500 mt-1">
@@ -212,10 +223,11 @@ export function ChangeGroup({
                 )}
                 {/* Retry is the one affordance for a FAILED row — re-apply via the
                     same writer path without re-queuing (Hick's Law: one button). */}
-                {change.status === 'failed' && onRetry && (
+                {change.status === 'failed' && onRetry && hasApprovalPreview(change) && (
                   <button
                     type="button"
                     onClick={() => onRetry(change)}
+                    disabled={busy}
                     className="mt-1.5 px-2 py-1 rounded text-[11px] font-semibold bg-rose-600 text-white hover:bg-rose-700"
                   >
                     Retry
@@ -224,7 +236,35 @@ export function ChangeGroup({
               </div>
             </label>
 
-            {isPending && (
+            {change.generated_preview && (
+              <div className="mt-2 text-xs text-slate-700">
+                <p>{hasUnboundGeneratedTarget(change)
+                  ? UNBOUND_GENERATED_TARGET_MESSAGE
+                  : 'Apply selected approves this exact generated payload and target. Recovery is backup-only, not undo.'}</p>
+                <pre aria-label="Generated mutation preview" className="whitespace-pre-wrap break-words">
+                  {JSON.stringify(change.generated_preview, null, 2)}
+                </pre>
+              </div>
+            )}
+            <div className="mt-2 text-xs text-slate-700">
+              {hasApprovalPreview(change) && (
+                <p>Apply or Retry approves this saved payload and Zotero target, not unsaved edits. Save edits and reselect before applying. Recovery is backup-only, not undo.</p>
+              )}
+              {['pending', 'failed'].includes(change.status) && !hasApprovalPreview(change) && !hasUnboundGeneratedTarget(change) && (
+                <p>{MISSING_APPROVAL_MESSAGE}</p>
+              )}
+              <pre aria-label="Approval mutation preview" className="whitespace-pre-wrap break-words">
+                {JSON.stringify(change.approval_preview || { payload: change.payload_json, target: null }, null, 2)}
+              </pre>
+              {change.status === 'applying' && (
+                <p role="alert">Delivery outcome is uncertain. Reconcile Zotero against the backup before any new action; retry is blocked.</p>
+              )}
+              {change.backup_path && <p>Backup: {change.backup_path}</p>}
+              <details><summary>Mutation audit</summary>
+                <pre className="whitespace-pre-wrap break-words">{JSON.stringify(change.audit || [], null, 2)}</pre>
+              </details>
+            </div>
+            {isPending && change.status === 'pending' && (
               <ChangeEditor
                 change={change}
                 drafts={drafts}
@@ -232,6 +272,7 @@ export function ChangeGroup({
                 flatCollections={flatCollections}
                 saving={saving}
                 onSave={() => onSaveEdit(change)}
+                busy={busy}
               />
             )}
           </div>

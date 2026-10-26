@@ -1,5 +1,5 @@
-# Project guardrails. Install once: `pre-commit install` (see docs/developer-guide.md).
-# Run on demand: `pre-commit run --all-files`.
+# Project guardrails; run explicitly via `make lint` (see CONTRIBUTING.md).
+# Commit-hook installation is optional; no automatic stashing is required.
 repos:
   - repo: local
     hooks:

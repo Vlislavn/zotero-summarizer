@@ -1,209 +1,149 @@
 # Architecture
 
-The whole app in one mental model, plus the rules the pre-commit hooks enforce.
-Read this before editing; every package also has its own `README.md`.
+This page explains the product loop, runtime boundaries and data ownership.
+For changing and checking code use [CONTRIBUTING.md](../CONTRIBUTING.md);
+for observable behavior use the [feature map](features.md).
 
-## Product loop — what does the system do?
+## Product loop
 
-Read this first when onboarding or changing triage, ranking, review, or feedback
-semantics. It is for users, researchers, product owners, and new contributors.
-
-```mermaid
-flowchart LR
-    RSS[RSS sources] --> Triage[Triage]
-    Triage --> Gate[ML gate]
-    Gate --> LLM[LLM summary]
-    LLM --> Slate[Ranked slate]
-    Slate --> Human[Human decision]
-    Human --> Golden[Golden labels]
-    Golden --> Gate
-    LLM --> Review[Full-text review]
-    Review --> Weekly[Weekly research engineering digest]
-    Human --> Zotero[Zotero]
-    Review --> Zotero
+```text
+RSS → triage → ML gate → LLM review → daily slate → human decision
+                            │                           │
+                            └→ paper brief / Q&A        ├→ labels → retrain gate
+                                                       └→ approved Zotero changes
 ```
 
-1. **triage** fetches RSS itself into an app-owned pool and scores it (gate
-   first, LLM for survivors) into SQLite.
-2. **model** is the relevance gate — trained on your labels, it ranks everything.
-3. **api** serves the React UI and the JSON API; routes are thin.
-4. **you** cull on *Today*, read on *Library*, fine-label on *Annotate*.
-5. **golden** is your label dataset; **model** retrains on it — the loop closes.
-6. **zotero** writes reviewed papers into the *Inbox* only after an explicit
-   Add/positive verdict, approved label tags/notes (queued + reviewed, backup
-   first), and read-state sync for Zotero feed cards triaged by the app.
+The app fetches RSS into its own pool. The relevance gate scores candidates
+before optional LLM work; Today presents papers for culling, Library supports
+reading, and labels supply the training data. Search is the separate query-driven
+entry point. Weekly browses saved research-feed reports, not a second ingestion
+system.
 
-## Runtime view — which subsystem owns this?
+Zotero remains the citation/PDF library. Adding papers and applying proposed
+notes/tags require explicit user actions; generated text is not write consent.
+Native writes use the backup boundary. RSS read-state synchronization is a
+separate maintenance path, also backed up before mutation. See
+[write and recovery rules](features.md#rss-read-state-backups).
 
-Read this when implementing a feature, adding an integration, or debugging a
-cross-boundary workflow. It is the main view for developers and reviewers.
+## Runtime boundaries
 
-```mermaid
-flowchart LR
-    UI[React UI] --> API[FastAPI]
-    API --> Services[Domain services]
-    Services --> Storage[SQLite storage]
-    Services --> Integrations[Integrations]
-    Integrations --> Zotero[Zotero]
-    Integrations --> Models[LLM / ML models]
-    Integrations --> Sources[PDFs / RSS / OpenAlex]
-    MCP[MCP client] -->|HTTP| API
+```text
+React UI ────────────────→ FastAPI → domain services → storage → SQLite
+HTTP MCP client ────────────┘              │
+CLI / feed daemon ────────────────────────┘
+                                         └→ integrations → Zotero / sources / models
 ```
 
-## Code layering — what may import what?
+The UI and MCP client call the HTTP API. Routes translate requests and responses;
+domain services own workflows. CLI commands and the optional feed daemon reuse
+those services rather than running a second triage engine.
 
-Read this before creating or moving modules, or while reviewing architecture
-changes. It mirrors the rules enforced by `check_import_policy.py`.
+Triage can be requested by **Today → Triage backlog**, CLI `feeds run` /
+`feeds tick`, or the optional `feeds serve` daemon. The daemon can score feeds
+and review the slate; it does not automatically Add a pick to Zotero.
 
-```mermaid
-flowchart LR
-    API[api] --> Services[services]
-    Services --> Storage[storage]
-    Services --> Integrations[integrations]
-    Storage --> Core[models · contracts · domain · settings · runtime]
-    Integrations --> Core
-    MCP[mcp] -. HTTP only .-> API
+Ordinary `serve` is loopback-only. Remote access requires explicit authenticated
+HTTPS/private-Unix configuration; see the
+[remote access](features.md#remote-access). Browser/device storage and
+server/native acknowledgements remain distinct; see
+[offline review](features.md#offline-review).
+
+## Dependency rules
+
+```text
+api → services → storage / integrations → models · contracts · domain · settings
+mcp ──HTTP──→ api
+runtime.py → settings / models
+    TYPE_CHECKING-only annotations → integrations / storage
 ```
 
-Start with the product loop, then drill into the runtime and layering views only
-as needed. Add a focused data-ownership, sequence, deployment, or component view
-only when multiple writers, non-obvious orchestration, multiple processes, or an
-oversized domain makes that deeper view necessary.
+- `integrations/` and `storage/` never import `services/` or `api/`.
+- `services/` may import only `api.errors` from the API layer, not `api.app` or
+  `api.routes`. New service modules belong in a domain subpackage.
+- `runtime.py` is foundational process state and must not import `services/` or
+  any `api/` module, including `api.errors`. Leaf imports such as
+  `models.providers` are allowed; integration/storage type annotations remain
+  under `TYPE_CHECKING`.
+- `mcp/` imports none of those application layers; it is an HTTP client.
 
-## Why it's built this way (decisions + evidence)
+The [static import checker](../tools/precommit/check_import_policy.py) enforces
+these import rules, including relative and nested static imports. It does not
+prove the absence of indirect effects through callbacks or dynamic imports.
 
-The loop above is the *what*; the *why* — every technical choice with its measured number and the
-rejected alternatives (with the numbers that killed them) — lives in three companion docs kept
-locally under `docs/internal/` (untracked rationale notes, not part of the shared repo):
+## Code map
 
-```
- docs/internal/decisions.md          ADRs: decision → evidence → reproduce command → rejected alt
- docs/internal/validated_defaults.md Tier-0 provenance ledger for each shipped knob default
- docs/internal/knowledge_map.md      parameters × models × status (M measured / P provisional / G guess)
-```
+Paths below are relative to [`zotero_summarizer/`](../zotero_summarizer/README.md).
+This is the canonical ownership map; each linked package README owns its detailed
+implementation contract.
 
-Status legend (used across all three): **✅ MEASURED** (real data + reproduce), **⚠️ PROVISIONAL**
-(operational baseline; harness built, head-to-head deferred — the open measurement is in
-`decisions.md` §GAP), **❓ GUESS** (labelled in code), **❌ REJECTED** (measured-worse; do not
-re-propose without new evidence). **Before re-proposing a ❌ or flipping a ⚠️ default, rerun the
-cited eval on the same real data and beat the recorded number.** No new evidence → no re-litigation.
-
-## Triage trigger: daemon vs UI
-
-Triage (the pipeline above) runs identically whether it is triggered by:
-
-- the **UI** — the *Today* tab's "Triage backlog" button (`POST /api/daily/triage-backlog`),
-  on demand; or
-- the **daemon** — `zotero-summarizer feeds serve`, a separate long-running process
-  that ticks on a timer, scores feeds and optionally reviews the Today slate in place,
-  but never adds a pick to Zotero without an explicit user Add after review; or
-- the **CLI** — `feeds run` / `feeds tick` one-shots.
-
-The daemon is optional automation, not a separate engine. The `feeds.*` block in
-`goals.yaml` only applies when the daemon runs.
-
-## Where things live
-
-| You want to… | Go to |
+| Responsibility | Owner |
 |---|---|
-| add/change an HTTP endpoint | `api/routes/` (logic → `services/`) |
-| change scoring / the ML gate | `services/model/` |
-| change labels / training data | `services/golden/` |
-| change the feed daemon / Today slate | `services/triage/` |
-| change reading / review surfaces | `services/library/` |
-| change the weekly project-specific research digest | `services/research_feed/` |
-| change what gets written to Zotero | `services/zotero/` |
-| touch the DB / SQL | `storage/` |
-| talk to Zotero / PDFs / LLM / OpenAlex | `integrations/` |
-| change the agent (MCP) surface | `mcp/` (HTTP client only) |
-| wire process-wide singletons at startup | `services/lifecycle.py` → `runtime.RuntimeState` |
+| HTTP routes and request/response wiring | [`api/`](../zotero_summarizer/api/README.md) and [`api/routes/`](../zotero_summarizer/api/routes/README.md) |
+| Command parsing and selected-project dispatch | [`cli/`](../zotero_summarizer/cli/README.md) |
+| Relevance gate, scoring and training | [`services/model/`](../zotero_summarizer/services/model/README.md) |
+| Human labels, feedback and golden data | [`services/golden/`](../zotero_summarizer/services/golden/README.md) |
+| RSS, summarization and daily selection | [`services/triage/`](../zotero_summarizer/services/triage/README.md) |
+| Reading, full-text review, paper brief and Q&A | [`services/library/`](../zotero_summarizer/services/library/README.md) |
+| Query-driven Search and explicit Add recovery | [`services/search/`](../zotero_summarizer/services/search/README.md) |
+| Weekly research-feed reports | [`services/research_feed/`](../zotero_summarizer/services/research_feed/README.md) |
+| Proposed/native Zotero changes | [`services/zotero/`](../zotero_summarizer/services/zotero/README.md) |
+| Device snapshots, mutation receipts and conflicts | [`services/sync/`](../zotero_summarizer/services/sync/README.md) |
+| Onboarding and readiness | [`services/setup/`](../zotero_summarizer/services/setup/README.md) |
+| Provider routing and credentials | [`services/llm/`](../zotero_summarizer/services/llm/README.md) |
+| Grounding benchmark reused by paper Q&A | [`services/faithbench/`](../zotero_summarizer/services/faithbench/README.md) |
+| SQLite persistence and migrations | [`storage/`](../zotero_summarizer/storage/README.md) |
+| Zotero/PDF/source/model adapters | [`integrations/`](../zotero_summarizer/integrations/README.md) |
+| HTTP tool client | [`mcp/`](../zotero_summarizer/mcp/README.md) |
 
-The live JSON API is self-documenting: run `serve` and open `/docs` (OpenAPI).
+[`services/lifecycle.py`](../zotero_summarizer/services/lifecycle.py) is the
+startup composition root; process-wide resources live on
+[`RuntimeState`](../zotero_summarizer/runtime.py). The
+[services overview](../zotero_summarizer/services/README.md) describes shared
+infrastructure and domain connections. The running API exposes OpenAPI at `/docs`.
 
-Deep-review source ownership stays explicit: map-reduce notes feed generation,
-while the original paper feeds verification, including correction and fallback.
-Rank/prefix verification uses its selected original spans. Empty sources or map
-summaries fail before review publication, not as scientific-quality judgments.
-See `services/library/README.md` for the contract and remaining context-limit caveat.
+## Data and configuration
 
-## Layering rules (lower never imports higher)
-
-- `integrations/`, `storage/` never import `services/` or `api/`.
-- `mcp/` never imports `services/`, `api/`, or `storage/`.
-- `services/` may import `api.errors` only (never `api.app` / `api.routes`).
-
-## Data & config
-
-- All app state lives under `data/` (gitignored): the two SQLite DBs
-  (`triage_history.db`, `corpus_cache.db`), your golden dataset, logs, the
-  append-only **agentic interaction log** (`interaction-events.jsonl` — the
-  immutable human-decision + model-prediction trajectory for offline improvement;
-  see `services/interaction_log.py`), and ML artifacts. Every path comes from
-  `Settings` — never hardcode `project_root / "..."`.
-- Config: `.env` (secrets/paths) + `goals.yaml` (**intent only** — research goals,
-  triage criteria, rubric, language + the LLM connection; the `USER_OWNED_KEYS`
-  allowlist in `models/config.py`). Technical knobs (corpus, prestige,
-  quality_review, classifier_gate, prompts) are validated code defaults, overridable
-  via `ZS_*` env (`services/config_overrides.py`, `docs/overrides.md`) and refined
-  per-user by calibration (planned). Both files are gitignored; copy the `*.example`
-  templates to bootstrap. See the README.
-- Schema changes are version-gated migrations (`storage/migrations.py`): add a new
-  numbered `Migration` step, never an inline `ALTER`.
-
-## Guardrails (enforced by `pre-commit` and CI)
-
-Install once: `pre-commit install`. CI runs the same checks plus the test suites.
-
-1. **≤500 LOC per `.py`, no exceptions** (`tools/precommit/check_file_loc.py`).
-   There is no grandfather list; split by responsibility.
-2. **Layering / structure policy** (`check_import_policy.py`) — the rules above; new
-   service modules must live in a domain subpackage, not at `services/` top level.
-   AST checks include relative, aliased, multi-name and nested static imports;
-   this gate does not analyze dynamic imports or indirect runtime effects.
-3. **Module READMEs** (`check_module_readme.py`) — every package has one, and editing
-   a package's code requires staging its `README.md` in the same commit.
-4. **Redundancy** (`check_redundancy.py`) — new *provably* redundant transforms
-   (idempotent `f(f(x))`, faithful round-trips, identity comprehensions, involutions)
-   BLOCK; conditionally-redundant transforms and near-duplicate functions are advisory.
-   Existing findings frozen in `redundancy_allowlist.txt`.
-5. **AI-slop** (`check_slop.py`) — adopts [aislop](https://github.com/scanaislop/aislop)'s
-   deterministic slop/dead-code detectors (swallowed exceptions, debug leftovers, mutable
-   defaults, untracked TODOs, narrative/trivial comments, generic names, Long-Method
-   complexity). Debug leftovers BLOCK, as do touched functions above 88 body lines,
-   6 required parameters, or 5 control-flow levels; other heuristics stay advisory.
-   Existing findings are frozen in `slop_allowlist.txt`.
-
-**Seeing findings (advisory, not enforced):** two commands, differing only in scope —
-`make scan` (every detector across the whole tree) and `make scan-diff` (the same, scoped to
-the `.py` changed vs the base branch). Both always exit 0 and never block; `EMBED=1` adds the
-semantic code-model overlap pass, `BASE=<branch>` retargets the diff. The all-pairs **function-
-overlap audit** (`tools/precommit/check_overlaps.py`) runs inside them — every function against
-every function, ranked by a hybrid of a local code-embedding cosine + graded structural
-similarity + API-Jaccard — surfacing consolidation candidates whose intent overlaps even across
-different shapes; it degrades to deterministic-only when no embedding model is available.
-
-## Verify a change
-
-Backend tests isolate runtime state and the default project root per test, hide
-inherited provider credentials/keyring entries, and block TCP connections. Mock
-integrations explicitly; a unit test must never use a live model or Zotero service.
-Before collection/fork, `tests/conftest.py` sets `no_proxy=*` for the test session.
-This avoids macOS SystemConfiguration proxy discovery from HTTP client constructors
-in forked children, as [documented by Python](https://docs.python.org/3.13/library/urllib.request.html).
-It does not change application proxy configuration or fix native ML-library crashes.
-The same session-owned `TemporaryDirectory` is also `PYTEST_DEBUG_TEMPROOT`:
-forked tests never scan the global `pytest-of-*` backlog, parallel runs get separate
-roots, and the parent removes its own temporary tree at session cleanup. Existing
-global temporary files are untouched; an explicit `--basetemp` still takes precedence.
-
-```bash
-zotero-summarizer smoke-test                       # app constructs
-pre-commit run --all-files                         # guardrails
-KMP_DUPLICATE_LIB_OK=TRUE make test                # backend suite *
-cd frontend && npm run lint && npm test && npm run build
+```text
+selected project root
+├─ goals.yaml   user intent and configured model routes
+├─ .env         paths and environment configuration; secrets may use OS keyring
+└─ data/        app databases, labels, models, caches, reports and logs
 ```
 
-\* On macOS this repo hits a known LightGBM/torch native fork crash; `--forked`
-isolates it so one segfaulting test can't sink the run. A handful of those tests
-fail for environment reasons, not code — diff against a clean baseline rather than
-expecting zero failures.
+[`Settings`](../zotero_summarizer/settings.py) resolves paths from the selected
+project. App state defaults to `data/`, including `triage_history.db`,
+`corpus_cache.db`, golden CSV/JSONL, model artifacts, search sessions and the
+append-only interaction log. These files and private configuration are gitignored.
+Use Settings paths rather than inventing a second storage root.
+
+Paper-read HTML, its audit, figures and explicitly consented source artifacts
+are a documented exception: they live beside the Zotero PDF; their state record
+lives under `data/paper_render/`. See the
+[library contract](../zotero_summarizer/services/library/README.md).
+Explicit path overrides, such as an absolute `APP_LOG_FILE`, can also select an
+external location; `data/` is the default, not a filesystem sandbox.
+
+First `serve` or `setup` creates missing `goals.yaml` and `.env` files and runs
+versioned database migrations without overwriting existing configuration. No
+manual template copying is needed. Edit intent/routing through Setup or Settings;
+technical defaults and environment overrides are documented in
+[setup](features.md#setup-and-configuration) and [overrides](overrides.md).
+Schema changes belong in the numbered
+[migration owner](../zotero_summarizer/storage/migrations.py).
+
+## Review evidence boundary
+
+Deep-review generation may use map-reduce notes, but claim verification uses
+the original paper, including correction and fallback. Empty sources or chunk
+summaries fail publication rather than becoming scientific-quality judgments.
+Retained literal-source checks are not proof of scientific truth or human
+usefulness. The [library README](../zotero_summarizer/services/library/README.md)
+owns the implementation contract, including the internal read-only verification
+audit helper; it has no public HTTP/CLI entry.
+
+## Further reading
+
+[Features](features.md) describes current behavior; [overrides](overrides.md) is
+generated from configuration code. Developer checks and PR publication live in
+[CONTRIBUTING.md](../CONTRIBUTING.md); fixture isolation and native-library
+troubleshooting live in [tests/README.md](../tests/README.md).

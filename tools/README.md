@@ -1,6 +1,17 @@
 # tools/ — developer scripts (run via `uv run`, not shipped)
 
-One-off eval / ops scripts. Not imported by the app; each has a module docstring with usage.
+One-off eval / ops scripts. Not imported by the app; Python scripts have module docstrings with usage.
+The app's grounding-benchmark CLI is documented with its
+[faithbench owner](../zotero_summarizer/services/faithbench/README.md), not in the user feature map.
+
+`tools/create-pr.sh 'Title' /path/to/body.md` is the checked PR publisher: from a
+clean committed branch it runs `make check`, non-force pushes the checked commit
+to the same branch on `origin`, then invokes `gh pr create` against `main`.
+It forwards the two input values literally and returns failures without publishing
+past a failed check/push. It never stages, stashes or reverts source. It requires
+existing Python/frontend development dependencies, `make`, `git`, and authenticated
+`gh`; it does not repair hosted billing. See the canonical
+[verification workflow](../CONTRIBUTING.md#check-and-publish).
 
 Prestige validation and quality-promotion evaluation read model artifacts and
 library caches through `Settings.model_dir` (`data/models/`), not a HOME constant.
@@ -8,7 +19,8 @@ Prestige validation uses the shared ZIP/legacy-joblib artifact resolver.
 
 | script | what it does |
 |---|---|
-| `bench_deep_review.py` | benchmark a deep-review DIGEST model (candidate) vs a strong reference on quality + time + memory, judged blinded/pairwise by a pinned independent LLM judge. `--run-name` persists a versioned, resumable run under `data/deep_review_sweep/`. See **`docs/benchmarking.md`** (local-only, gitignored). |
+| `method_validation/` | Explicit offline [support](../docs/features.md#support-comparison), [reading-priority](../docs/features.md#priority-comparison) and [existing-collection](../docs/features.md#collection-comparison) comparisons: native/retained readouts, matched baseline artifacts, private reports. No model loads or default execution. |
+| `bench_deep_review.py` | benchmark a deep-review DIGEST model (candidate) vs a strong reference on quality + time + memory, judged blinded/pairwise by a pinned independent LLM judge. `--run-name` persists a versioned, resumable run under `data/deep_review_sweep/`. Run artifacts remain private under `data/`; no benchmark result is implied by this script inventory. |
 | `sweep_deep_review.sh` | memory-SAFE driver that runs the bench config matrix one config at a time (Phase 1 cloud budget sweep, Phase 2 local models lightest-first behind a free-phys-%/swap-growth gate). Foreground, single-instance — mirrors `mlx-deep-review.sh`. |
 | `mlx-deep-review.sh` | launch the local MLX server (Qwen3.6-35B) foreground with a RAM gate before pointing `deep_review` at it. **Never** run on a loaded box (22 GB weights). |
 | `bench_gliner2.py` | **Phase-0 go/no-go for GLiNER2** (Fastino zero-shot encoder, `--extra entities`) BEFORE any product wiring: `--probes` selects `type` (0a: paper-type classification vs `gold_v1`, baseline = LLM type accuracy from `bench_paper_quality.py`), `ner` (0b: disease NER; `--ner-dataset bc5cdr` streams the real BC5CDR test set, the inline fixture is a wiring floor only), `params` (0c: `extract_json` of the 6 `PaperParameters` fields on the gold abstracts + an abstention check — persists `params_encoder.jsonl` for the agreement join). Leaf tool (no product import). `--selfcheck` validates the logic with no model download. |
@@ -19,19 +31,27 @@ Prestige validation uses the shared ZIP/legacy-joblib artifact resolver.
 | `eval_slate_blend.py` | offline eval of the Today-slate ranking blend. |
 | `eval_temporal_objective.py` | offline eval of the temporal-split training objective; reuses production's aligned training matrix and train-only engagement-column rebuild for shuffled folds and both temporal objectives. |
 | `eval_quality_promote.py` | offline eval of the quality→must_read promotion (`rank_blend.promote_band`) against firewalled user verdicts — precision + flooding per (goal, relevance) floor. Gates the `quality_promote` flip. |
-| `eval_reading_policy.py` | offline 17-paper, user-labelled gate for the conservative reading cap: before/after read rate, full-read precision, idea rescue, and zero high-friction/weak-evidence full reads. Uses `reading_policy_fixture_v2.json`, captured from matching real cache entries with unchanged human annotations; `--check` retains the original thresholds. This is not a full recommendation-accuracy gate. |
+| `eval_reading_policy.py` | offline 17-paper, user-labelled gate for the conservative reading cap: before/after read rate, full-read precision, idea rescue, and zero high-friction/weak-evidence full reads. Uses `reading_policy_fixture_v2.json`, captured from matching real cache entries with unchanged human annotations; `--check` retains the original thresholds. The legacy capture lacks full-text basis/targets and therefore cannot certify the current full-read gate; human scientific acceptance is unclaimed. |
 | `eval_research_feed.py` | honest Research Intelligence acceptance gate: 30-paper fixture currently lacks frozen pre-human machine/review inputs, so production inclusion, artifact, project-use and review-time metrics are `null`/unscorable (nonzero exit), not invented 0/100% scores. Frozen machine projections, when supplied, rank by score/confidence/title; separate 17-paper reading-policy agreement is labelled diagnostic only. |
 | `validate_prestige_upgrade.py` | sanity-check the OpenAlex prestige enrichment. |
 | `precommit/` | the repo's custom pre-commit checks (LOC cap, layering, README freshness, dead-code, AI-slop). |
 
-**Benchmarking discipline + the memory-safety protocol live in `docs/benchmarking.md` (local-only, gitignored — not in the repo)** — read it before running any local sweep (this box has been thrashed by unsupervised local benchmarking).
+Run model-loading benchmarks foreground, single-instance and explicitly supervised,
+with memory headroom and bounded work. Keep input identities, exact model/environment,
+raw receipts and rejected alternatives under `data/`; static or synthetic checks are
+not evidence of a real-data win. The script's current `--help` owns its arguments.
 
 Reading-policy v1 remains unchanged as historical data and a negative regression:
 its bare `relevant=true` cells do not establish assessed goal evidence. V2 captures
 all policy-consumed inputs from all 17 matching legacy reviews, including unknowns,
 with source timestamps and cache/annotation SHA-256 hashes. It uses no new model
 calls and never derives input signals from expected labels. The compact projection
-was checked against full cache entries for identical actions, flags and metrics.
+was historically checked against full cache entries for identical actions, flags and metrics.
+Paper-quality benchmark reports keep nullable coverage unscored, with explicit
+scored/unknown counts; unknown is not coerced into numeric error zero.
+The reading fixture lacks recorded digest source basis and exact targets; missing provenance now
+withholds full reads, so its `--check` cannot certify the current policy. This is
+not a new measured read-precision/idea-rescue result.
 Research-feed action agreement reads the same v2 snapshot; its separate inclusion
 oracle leakage and incomplete acceptance criteria remain tracked as A163.
 
@@ -51,3 +71,7 @@ The sweep requires `PAPERS`, `REF_PROVIDER`, and `REF_MODEL`. Its default is the
 remote budget phase only. Local phases (`PHASES=2` or `both`) additionally require
 explicit `CANDIDATES` and `CANDIDATE_PROVIDER`; no local model is selected implicitly.
 Provider names refer to caller-owned saved configuration; this does not rename it.
+
+Original frozen weekly replay/source is retained with its original three-argument cohort ordering contract. Existing source helpers use their canonical number/summary names and the production caller supplies its existing cohort IDs. No new grader, labels, ranking formula or real-data claim is designed.
+
+Packaging retains the original non-shipped `tools.method_validation.client` transport and `practitioner.run_diagnostic` RSS driver with unchanged source and synthetic tests. These require explicit invocation; no app defaults, live inference, data collection, portable-path fixes or scientific acceptance are added. Existing pinned local test dependencies remain for review.

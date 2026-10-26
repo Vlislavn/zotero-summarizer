@@ -1,0 +1,91 @@
+{
+  "id": "ordinary-wire",
+  "created_at": "2026-10-19T00:00:00Z",
+  "raw_query": "Public ordinary query",
+  "intent": {
+    "raw_query": "Public ordinary query",
+    "canonical_question": "",
+    "concepts": [],
+    "synonyms": [],
+    "related_terms": [],
+    "domain": "",
+    "constraint_origin": "legacy_unknown",
+    "pending_constraints": {},
+    "must_include": [],
+    "must_not_include": [],
+    "study_types": [],
+    "questions": [],
+    "parse_ok": true
+  },
+  "plan": {
+    "retrieval_accounting": {},
+    "library_raw": "",
+    "library_expanded": "",
+    "openalex_lexical": "",
+    "openalex_semantic": "",
+    "europepmc": "",
+    "arxiv": "",
+    "crossref": "",
+    "semantic_scholar": "",
+    "openreview": "",
+    "openalex_lexical_variants": [],
+    "europepmc_variants": [],
+    "arxiv_variants": [],
+    "constraint_origin": "legacy_unknown",
+    "pending_constraints": {},
+    "domain_note": "",
+    "must_include": [],
+    "must_not_include": [],
+    "study_types": [],
+    "display": [
+      {
+        "source": "constraint authority",
+        "query": "legacy_unknown"
+      },
+      {
+        "source": "coverage",
+        "query": "Scholarly sources only; handbooks and official guidance may be missing. Search the relevant official publisher separately. Missing publication-type metadata is unknown."
+      }
+    ]
+  },
+  "questions": [],
+  "candidates": [
+    {
+      "title": "Public ordinary candidate",
+      "abstract": "",
+      "doi": "",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "openalex_id": "",
+      "authors": [],
+      "year": null,
+      "venue": "",
+      "url": "",
+      "is_open_access": false,
+      "is_retracted": false,
+      "publication_types": [],
+      "version_type": "unknown",
+      "provenance": [],
+      "family_identifier_keys": [],
+      "query_score": null,
+      "goal_sim": null,
+      "relevance_band": "",
+      "why": [],
+      "quality": {},
+      "coverage": {},
+      "peer_review": {},
+      "verdict": "",
+      "review": {},
+      "materialized_zotero_key": "",
+      "cited_by_count": null,
+      "in_library": null,
+      "existing_zotero_key": null,
+      "candidate_id": "ordinary-candidate"
+    }
+  ],
+  "status": "reviewing",
+  "screened_count": 0,
+  "refinements": [],
+  "related": {}
+}

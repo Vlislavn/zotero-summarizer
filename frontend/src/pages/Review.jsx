@@ -177,13 +177,18 @@ export default function Review() {
 
   const handleAction = useCallback(async (id, action, label = null) => {
     try {
-      await reviewAction(id, action, label);
+      const result = await reviewAction(id, action, label);
       const wentApproved = action === 'approve' || (action === 'relabel' && label !== 'dont_read');
+      const expectedState = wentApproved ? 'user_approved' : 'user_rejected';
+      if (result?.processed_id !== id || result?.state !== expectedState) {
+        throw new Error('The server did not acknowledge this item and decision.');
+      }
       setItemState((prev) => ({ ...prev, [id]: wentApproved ? 'approved' : 'rejected' }));
       setMessage(`Item ${id}: ${action}${label ? ` (${pretty(label)})` : ''} OK`);
       setIsError(false);
     } catch (err) {
-      setMessage(`Item ${id}: ${action} failed — ${humanizeError(err)}`);
+      const rejected = err?.status === 404 || err?.status === 422;
+      setMessage(`Item ${id}: ${action} ${rejected ? 'failed' : 'unconfirmed'} — ${humanizeError(err)}${rejected ? '' : ' Refresh the queue before another action.'}`);
       setIsError(true);
     }
   }, []);

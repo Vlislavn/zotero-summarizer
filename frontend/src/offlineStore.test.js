@@ -56,6 +56,43 @@ it('survives an app restart offline and preserves ordered verdicts until acknowl
   expect(await reopened.pendingMutations()).toEqual([]);
 });
 
+it('retains connection failure across device saves and persists the actual last pull time', async () => {
+  const offline = await import('./offlineStore.js');
+  const listener = vi.fn();
+  window.addEventListener('zs-sync-status', listener);
+  try {
+    await offline.publishStatus();
+    expect(listener.mock.lastCall[0].detail).toMatchObject({ connection: 'unchecked', last_synced_at: null });
+    await offline.publishStatus('Server unavailable', 'unavailable');
+    await offline.queueMutation({ item_key: 'P1', field: 'review_note', value: 'Saved locally' });
+    expect(listener.mock.lastCall[0].detail).toMatchObject({
+      pending: 1, connection: 'unavailable', sync_error: 'Server unavailable', paper_count: 1,
+    });
+    expect(offline.isServerAvailable()).toBe(false);
+    await offline.applyPull({ cursor: 8, papers: [] });
+    await offline.publishStatus('', 'connected');
+    expect(listener.mock.lastCall[0].detail).toMatchObject({
+      connection: 'connected', sync_error: '', last_synced_at: '2026-08-29T00:00:00.000Z',
+    });
+    vi.resetModules();
+    const reopened = await import('./offlineStore.js');
+    expect(await reopened.getMeta('last_synced_at')).toBe('2026-08-29T00:00:00.000Z');
+  } finally {
+    window.removeEventListener('zs-sync-status', listener);
+  }
+});
+
+it('reports storage denial rather than claiming zero pending or synced', async () => {
+  vi.stubGlobal('indexedDB', { open: () => { throw new Error('Synthetic storage denied'); } });
+  const offline = await import('./offlineStore.js');
+  const listener = vi.fn();
+  window.addEventListener('zs-sync-status', listener, { once: true });
+  await offline.publishStatus();
+  expect(listener.mock.lastCall[0].detail).toMatchObject({
+    pending: null, connection: 'unchecked', local_error: 'Synthetic storage denied',
+  });
+});
+
 it('allocates concurrent mutations atomically and refreshes cached detail on pull', async () => {
   const offline = await import('./offlineStore.js');
   await offline.savePapers([{ item_key: 'P1', title: 'Paper', revisions: { verdict: 1, review_note: 1 } }]);

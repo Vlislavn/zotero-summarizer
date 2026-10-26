@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import sqlite3
 from datetime import datetime, timezone
@@ -21,13 +22,26 @@ from zotero_summarizer.storage import repositories
 def _settings(tmp_path) -> Settings:
     settings = Settings.load(project_root=tmp_path)
     settings.data_dir.mkdir(parents=True, exist_ok=True)
+    with repositories.with_db_path(settings.triage_db_path):
+        repositories.init_db()
     conn = sqlite3.connect(settings.triage_db_path)
-    conn.row_factory = sqlite3.Row
-    repositories.apply_schema(conn)
     conn.execute("INSERT INTO rss_feeds (id, name, url) VALUES (1, 'AI Conference', 'https://example.test/feed')")
     conn.commit()
     conn.close()
     return settings
+
+
+def test_weekly_fixture_uses_the_current_application_schema(tmp_path):
+    from zotero_summarizer.storage.migrations import TRIAGE_MIGRATIONS
+
+    settings = _settings(tmp_path)
+    with sqlite3.connect(settings.triage_db_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(pending_changes)")}
+        assert {"proposal_json", "audit_json", "backup_path"} <= columns
+        versions = [row[0] for row in conn.execute(
+            "SELECT version FROM schema_migrations WHERE namespace='triage' ORDER BY version",
+        )]
+    assert versions == [max(migration.version for migration in TRIAGE_MIGRATIONS)]
 
 
 def _seed(settings: Settings, key: str, title: str, *, materialized: str = "") -> None:
@@ -54,15 +68,15 @@ def _seed(settings: Settings, key: str, title: str, *, materialized: str = "") -
     conn.close()
 
 
-def _review(key: str) -> dict:
-    return {
-        "review_contract_version": 3, "reviewed_at": "2026-08-26T00:00:00Z",
-        "review_identity": {"fixture": key},
+def _review(key: str, *, source_text=None, source_path=None, config=None, **signals) -> dict:
+    entry = {
+        "reviewed_at": "2026-08-26T00:00:00Z",
         "provenance": {"provider": "local", "model": "model", "prompt_schema_version": 2},
         "digest": {
             "tldr": f"Review {key}", "key_strength": "Reliable benchmark",
             "methods": "agent evaluation", "implementation": ["Add the benchmark"],
-            "relevance": "Use in agent harness", "read_decision": "skim",
+            "relevance": "Use in agent harness", "read_decision": "skim", "read_parts": ["§2"],
+            "original_value": "The method details in §2.", "estimated_read_minutes": 5,
             "basis": "full_text", "significance": 4, "novelty": 4,
         },
         "quality": {"missing_critical": [], "red_flags": []},
@@ -72,6 +86,96 @@ def _review(key: str) -> dict:
             "url": f"https://github.com/example/{key}",
         },
     }
+    if signals.keys() - entry.keys():
+        raise ValueError('Unknown review fixture signals')
+    entry.update(deepcopy(signals))
+    return _computed_review(key, entry, source_text=source_text, source_path=source_path, config=config)
+
+
+def _computed_review(key, entry, *, source_text=None, source_path=None, config=None):
+    import hashlib
+    import os
+    from types import SimpleNamespace
+
+    from tests.test_digest_verification import PAPER, _Verifier, _digest
+    from tests.test_review_source_boundary import _Mapper
+    from zotero_summarizer.models import PaperDigest
+    from zotero_summarizer.services._common import read_config
+    from zotero_summarizer.services.setup.bootstrap import _default_goals_config
+
+    if not os.environ.get('PYTEST_CURRENT_TEST'):
+        raise RuntimeError('Review fixtures require the owned pytest context')
+    root = Path(os.environ['ZOTERO_SUMMARIZER_HOME']).resolve()
+    settings = Settings.load(project_root=root)
+    if not settings.data_dir.resolve().is_relative_to(root) or not settings.config_path.resolve().is_relative_to(root):
+        raise ValueError('Review fixture paths must remain in the owned test root')
+    if config is None:
+        config = (read_config(settings.config_path, settings.calibration_path)
+                  if settings.config_path.exists() else _default_goals_config())
+    if source_path is not None:
+        import fitz
+
+        source = Path(source_path).resolve()
+        if not source.is_relative_to(root):
+            raise ValueError('Review fixture PDF must remain in the owned test root')
+        def extract_pdf(path):
+            with fitz.open(path) as document:
+                return ' '.join(' '.join(page.get_text() for page in document).split())
+
+        text = extract_pdf(source)
+        if source_text is not None:
+            assert ' '.join(source_text.split()) == text
+    else:
+        text = (source_text if source_text is not None else
+                f'Review {key}. Reliable benchmark. Agent evaluation. Add the benchmark. Use in agent harness.\n'
+                f'{PAPER}\n§2: Synthetic methods.\n§4.2 Held-out evaluation. Figure 3: failure cases.\nAppendix A.')
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError('Review fixture source must be nonempty text')
+    if source_path is None:
+        identity = key if source_text is None else key + '\0' + text
+        source = settings.data_dir / 'review-fixtures' / (hashlib.sha256(identity.encode('utf-8')).hexdigest() + '.pdf')
+        source.parent.mkdir(parents=True, exist_ok=True)
+        if not source.exists():
+            source.write_text(text, encoding='utf-8')
+        assert source.read_text(encoding='utf-8') == text
+    defaults = {} if source_path is not None else _digest().model_dump(exclude_unset=True)
+    digest = PaperDigest.model_validate({**defaults, **entry['digest']})
+
+    class FixtureClient(_Verifier):
+        def pydantic_prompt(self, *, pydantic_model, **kwargs):
+            if pydantic_model is PaperDigest:
+                return digest.model_copy(deep=True)
+            return super().pydantic_prompt(pydantic_model=pydantic_model, **kwargs)
+
+    reader = SimpleNamespace(get_item_detail=lambda _key: {'title': f'Review {key}', 'pdf_path': str(source)})
+    extractor = SimpleNamespace(extract_text=extract_pdf if source_path is not None else
+                                lambda path: Path(path).read_text(encoding='utf-8'))
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(deep_review, 'now_iso_z', lambda: entry['reviewed_at'])
+        patch.setattr(deep_review._deep_review_layers, 'extra_layers', lambda _ctx: (
+            entry['quality'], entry['goal_summaries'], None, None, entry['code_link']))
+        return deep_review._review_one(
+            {'item_key': key, 'pdf_path': str(source)}, reader=reader, extractor=extractor,
+            config=config, llm=FixtureClient(), llm_map=_Mapper('Fixture generation notes.'),
+            quality_enabled=True, provenance=entry['provenance'])
+
+
+def test_owned_review_fixture_preserves_source_binding_and_independent_inputs(tmp_path):
+    import hashlib
+    from zotero_summarizer.services.library._digest_audit_export import retained_audit_status
+
+    goals = [{'goal': 'Owned goal', 'retrieval_state': 'not_retrieved'}]
+    first = _review('owned-fixture', goal_summaries=goals)
+    second = _review('owned-fixture', goal_summaries=goals)
+    assert first == second and first is not second
+    source = Path(first['review_identity']['source_path'])
+    assert source.resolve().is_relative_to(tmp_path.resolve())
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == first['review_identity']['source_sha256']
+    assert retained_audit_status(first, current_identity=first['review_identity'])[0] == 'available'
+    original = deepcopy(first)
+    second['goal_summaries'][0]['summary'] = 'Changed after binding'
+    assert retained_audit_status(second, current_identity=second['review_identity'])[0] != 'available'
+    assert first == original and goals == [{'goal': 'Owned goal', 'retrieval_state': 'not_retrieved'}]
 
 
 def test_schema_and_dedupe_reject_unknown_or_fabricated_values() -> None:

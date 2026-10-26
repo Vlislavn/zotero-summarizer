@@ -27,6 +27,11 @@ from typing import Any
 from zotero_summarizer.services._common import LOGGER
 from zotero_summarizer.services.model.rank_blend import blend_scores
 from zotero_summarizer.services.model.rank_blend_quality import quality_first_key, unified_quality
+from zotero_summarizer.services.triage.daily_select._selection_evidence import (
+    rank_observations,
+    review_observations,
+    source_observations,
+)
 
 
 def parse_payload(row: dict[str, Any]) -> dict[str, Any]:
@@ -299,7 +304,7 @@ def make_candidate(row: dict[str, Any]) -> dict[str, Any]:
     surprise_f = 0.0 if surprise is None else float(surprise)
     corpus_affinity = row_corpus_affinity(row, payload)
     h_index = row_top_author_h_index(payload)
-    return {
+    cand = {
         "id": int(row_id),
         "item_key": _row_item_key(row),
         # Durable feed identity — the key the IN-PLACE Today deep review caches under
@@ -350,6 +355,11 @@ def make_candidate(row: dict[str, Any]) -> dict[str, Any]:
         # assembly attaches them after the cohort exists (_relevance.attach_why).
         "why": [],
     }
+    cand["selection_evidence"] = source_observations(row)
+    cand["selection_evidence"]["review"]["quality_origin"] = (
+        "legacy_row" if cand["quality"] else "none"
+    )
+    return cand
 
 
 def dedup_keep_newest(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -391,18 +401,23 @@ def attach_quality_from_reviews(candidates: list[dict[str, Any]]) -> int:
         # then the feed key.
         mkey = (cand.get("materialized_zotero_key") or "").strip()
         skey = (cand.get("stable_feed_key") or "").strip()
-        if not mkey and not skey:
-            continue
-        joinable += 1
-        entry = (reviews.get(mkey) if mkey else None) or (reviews.get(skey) if skey else None)
-        if entry is None:
-            continue
-        cand["review_ready"] = usable_review(entry)
-        # The QualityEval carries the coverage-based signal the card + brief render
-        # (grade, band, coverage_met/applicable, red_flags) — the honest replacement
-        # for the digest's unvalidated 1-5 self-scores. No digest merge needed.
-        cand["quality"] = entry.get("quality") or {}
-        matched += 1
+        entry = None
+        join_basis = None
+        if mkey or skey:
+            joinable += 1
+            entry = reviews.get(mkey) if mkey else None
+            join_basis = "materialized"
+            if not entry:
+                entry = reviews.get(skey) if skey else None
+                join_basis = "stable_feed"
+        if entry is not None:
+            cand["review_ready"] = usable_review(entry)
+            cand["quality"] = entry.get("quality") or {}
+            matched += 1
+        cand["selection_evidence"] = review_observations(
+            cand.get("selection_evidence", {}), join_basis=join_basis, entry=entry,
+            digest_usable=cand["review_ready"] if entry is not None else None,
+        )
     if reviews and joinable and not matched:
         LOGGER.warning(
             "deep-review quality bridge matched 0/%d joinable candidates against "
@@ -452,6 +467,9 @@ def attach_rank_scores(candidates: list[dict[str, Any]], *, quality_first: bool 
         )
     for cand, key in zip(candidates, keys):
         cand["rank_score"] = key
+        cand["selection_evidence"] = rank_observations(
+            cand.get("selection_evidence", {}), quality_first=quality_first, key=key,
+        )
 
 
 __all__ = [
